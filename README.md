@@ -64,16 +64,22 @@ tab), and assign cameras to children.
 ## Running on Unraid
 
 An Unraid Community Applications template is included (`unraid-template.xml`). Until this
-is submitted to the official CA feed, add it manually:
+is submitted to the official CA feed (at which point it'll be searchable directly from the
+Apps tab), install it locally by placing the file where Unraid looks for user templates:
 
-1. Docker tab → **Add Container** → scroll to the bottom → **Template repositories** →
-   paste this repo's raw template URL:
-   `https://raw.githubusercontent.com/sauso/nightlight/main/unraid-template.xml`
-2. It should now appear as a template you can select — set the **Data Directory** field
-   (defaults to `/mnt/user/appdata/nightlight`) and start it.
+1. Open the Unraid **Terminal** (or SSH in), then run:
+   ```bash
+   mkdir -p /boot/config/plugins/dockerMan/templates-user
+   wget -O /boot/config/plugins/dockerMan/templates-user/my-nightlight.xml \
+     https://raw.githubusercontent.com/sauso/nightlight/main/unraid-template.xml
+   ```
+2. Docker tab → **Add Container** → **Template** dropdown → select **nightlight**. Every
+   field (network mode, data path, optional variables) is pre-filled from the template —
+   double check the **Data Directory** path if you want something other than the default
+   (`/mnt/user/appdata/nightlight`), then **Apply**.
 
-No Docker Compose plugin needed — this is a single container, so Unraid's normal Docker UI
-handles it directly.
+This is a single container — no extra plugins needed, Unraid's normal Docker UI handles it
+directly.
 
 ## Adding caregivers
 
