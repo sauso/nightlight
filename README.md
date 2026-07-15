@@ -63,22 +63,14 @@ tab), and assign cameras to children.
 
 ## Running on Unraid
 
-An Unraid Community Applications template is included (`unraid-template.xml`) for once
-this is submitted to the official CA feed, at which point it'll be searchable directly
-from the Apps tab.
+An Unraid Community Applications template is included (`unraid-template.xml`). Until this
+is submitted to the official CA feed, add it manually:
 
-Until then (and this is simply how it works on **Unraid 7** — the old "Template
-Repositories" field for pointing at a custom repo yourself was removed there, this isn't a
-workaround), add it manually via Docker tab → **Add Container**:
-
-1. **Name**: `nightlight`
-2. **Repository**: `sauso/nightlight`
-3. **Network Type**: `Host` (needed for WebRTC to work correctly)
-4. Add a **Path**: Container Path `/app/data`, Host Path `/mnt/user/appdata/nightlight`,
-   Read/Write
-5. Optionally add **Variables** `JWT_SECRET` and `PUBLIC_HOST` (both fine left blank — see
-   `.env.example` for what they do)
-6. **Apply**
+1. Docker tab → **Add Container** → scroll to the bottom → **Template repositories** →
+   paste this repo's raw template URL:
+   `https://raw.githubusercontent.com/sauso/nightlight/main/unraid-template.xml`
+2. It should now appear as a template you can select — set the **Data Directory** field
+   (defaults to `/mnt/user/appdata/nightlight`) and start it.
 
 No Docker Compose plugin needed — this is a single container, so Unraid's normal Docker UI
 handles it directly.
