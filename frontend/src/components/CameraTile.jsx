@@ -1,0 +1,170 @@
+import { useEffect, useRef, useState } from 'react';
+import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX } from 'lucide-react';
+import WhepPlayer from './WhepPlayer.jsx';
+import HlsPlayer from './HlsPlayer.jsx';
+import BreathingDot from './BreathingDot.jsx';
+
+export default function CameraTile({ camera, childName }) {
+  const [muted, setMuted] = useState(false);
+  const [mode, setMode] = useState('live'); // 'live' (WebRTC) | 'compat' (HLS)
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
+  const manualModeRef = useRef(false);
+  const videoWrapRef = useRef(null);
+
+  // Track fullscreen state for this specific tile, and release the landscape lock on
+  // exit so the rest of the app goes back to normal portrait behavior rather than
+  // staying stuck sideways.
+  useEffect(() => {
+    function handleFullscreenChange() {
+      setIsFullscreen(document.fullscreenElement === videoWrapRef.current);
+      if (!document.fullscreenElement) {
+        screen.orientation?.unlock?.();
+      }
+    }
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  function handleFirstConnectFailed() {
+    // Only auto-switch if the person hasn't already made their own choice - e.g. if
+    // they deliberately picked Low Latency mode again after an earlier auto-switch,
+    // don't immediately override that choice too.
+    if (!manualModeRef.current) setMode('compat');
+  }
+
+  function selectMode(newMode) {
+    manualModeRef.current = true;
+    setMode(newMode);
+    setModeMenuOpen(false);
+  }
+
+  async function toggleFullscreen() {
+    const wrap = videoWrapRef.current;
+    if (!wrap) return;
+
+    // Already fullscreen - this tap means "shrink back down."
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.().catch(() => {});
+      return;
+    }
+
+    // Can't be in PiP and fullscreen at once - cleanly exit PiP first rather than
+    // letting the browser handle both transitions at the same time, which is what
+    // was causing a blank/white result.
+    if (document.pictureInPictureElement) {
+      await document.exitPictureInPicture().catch(() => {});
+    }
+
+    // iOS Safari: no standard Fullscreen API for arbitrary elements, but video
+    // elements have their own native fullscreen mode which rotates to landscape
+    // automatically for video content - no separate orientation lock needed or possible.
+    const videoEl = wrap.querySelector('video');
+    if (videoEl?.webkitEnterFullscreen) {
+      videoEl.webkitEnterFullscreen();
+      return;
+    }
+
+    if (wrap.requestFullscreen) {
+      wrap.requestFullscreen()
+        .then(() => screen.orientation?.lock?.('landscape').catch(() => {}))
+        .catch(() => {});
+    }
+  }
+
+  async function enterPip() {
+    const wrap = videoWrapRef.current;
+    const videoEl = wrap?.querySelector('video');
+    if (!videoEl || !document.pictureInPictureEnabled || videoEl.disablePictureInPicture) return;
+
+    // Can't be fullscreen and in PiP at once - cleanly exit fullscreen first and give
+    // the browser a brief moment to settle before requesting PiP. Requesting both at
+    // once left the page on a blank/white screen instead of a clean transition.
+    if (document.fullscreenElement) {
+      await document.exitFullscreen().catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+
+    videoEl.requestPictureInPicture().catch(() => {});
+  }
+
+  return (
+    <div className="camera-tile">
+      <div className="camera-tile__video-wrap" ref={videoWrapRef}>
+        {mode === 'live' ? (
+          <WhepPlayer
+            mediamtxPath={camera.mediamtx_path}
+            active
+            muted={muted}
+            onFirstConnectFailed={handleFirstConnectFailed}
+            cameraName={camera.name}
+          />
+        ) : (
+          <HlsPlayer mediamtxPath={camera.mediamtx_path} active muted={muted} />
+        )}
+
+        <button
+          className="pip-btn"
+          onClick={enterPip}
+          aria-label={`Pop out ${camera.name} as a floating window`}
+        >
+          <PictureInPicture2 size={16} />
+        </button>
+
+        <button
+          className="settings-btn"
+          onClick={() => setModeMenuOpen((o) => !o)}
+          aria-label="Stream quality settings"
+          aria-expanded={modeMenuOpen}
+        >
+          <Settings size={16} />
+        </button>
+
+        {modeMenuOpen && (
+          <>
+            <div className="tile-menu-backdrop" onClick={() => setModeMenuOpen(false)} />
+            <div className="tile-menu">
+              <button
+                className={`tile-menu__item${mode === 'live' ? ' tile-menu__item--active' : ''}`}
+                onClick={() => selectMode('live')}
+              >
+                Low latency
+              </button>
+              <button
+                className={`tile-menu__item${mode === 'compat' ? ' tile-menu__item--active' : ''}`}
+                onClick={() => selectMode('compat')}
+              >
+                Compatibility
+              </button>
+            </div>
+          </>
+        )}
+
+        <button
+          className="mute-btn"
+          onClick={() => setMuted((m) => !m)}
+          aria-label={muted ? `Unmute ${camera.name}` : `Mute ${camera.name}`}
+          aria-pressed={muted}
+        >
+          {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+        </button>
+        <button
+          className="fullscreen-btn"
+          onClick={toggleFullscreen}
+          aria-label={isFullscreen ? `Exit fullscreen` : `View ${camera.name} fullscreen`}
+        >
+          {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+        </button>
+      </div>
+      <div className="camera-tile__meta">
+        <div>
+          <div className="camera-tile__name">{camera.name}</div>
+          <div className="camera-tile__sub">{childName || 'Unassigned'}</div>
+        </div>
+        <div className="status-row">
+          <BreathingDot status={camera.status?.ready ? 'live' : 'connecting'} />
+        </div>
+      </div>
+    </div>
+  );
+}

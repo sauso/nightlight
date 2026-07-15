@@ -1,0 +1,27 @@
+services:
+  nightlight:
+    image: sauso/nightlight:latest
+    # Uncomment to build from source instead of pulling from Docker Hub:
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    container_name: nightlight
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      # Optional. A random, persistent secret is auto-generated and stored in the
+      # data volume on first run if this is left unset - only set this yourself if
+      # you specifically want a fixed value (e.g. shared across a migration).
+      - JWT_SECRET=${JWT_SECRET:-}
+      # Your public IP or DDNS hostname - only needed for Low Latency (WebRTC) mode
+      # to work from outside your home network. Leave unset for LAN-only use.
+      - PUBLIC_HOST=${PUBLIC_HOST:-}
+    volumes:
+      # Defaults to ./data next to this file. On Unraid, set APPDATA_DIR in .env to
+      # something like /mnt/user/appdata/nightlight so it shows up in the Unraid UI/backups.
+      - ${APPDATA_DIR:-./data}:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

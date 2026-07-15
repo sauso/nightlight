@@ -1,0 +1,62 @@
+# MediaMTX configuration for the baby monitor stack.
+# Paths (cameras) are added/removed dynamically by the backend via the API below —
+# you should not need to edit this file when adding cameras.
+
+logLevel: info
+# Write logs to a file in the mounted data directory instead of stdout. MediaMTX is
+# fairly chatty (status polling, connection events, etc.), and Docker's default
+# logging driver captures everything printed to stdout into its own log storage —
+# left unbounded, this is what fills up disk over time. Writing to a real file here
+# means Docker has nothing to capture, and the file lives in your data volume instead.
+logDestinations: [file]
+logFile: /data/mediamtx.log
+
+# --- API (used by the backend to register/remove RTSP camera sources) ---
+api: yes
+apiAddress: 127.0.0.1:9997
+
+# --- WebRTC output (used by the browser to watch low-latency live video) ---
+webrtc: yes
+# Loopback only: the Node backend proxies this under /live (with login required),
+# so browsers never need to reach this port directly. The actual audio/video (ICE/UDP)
+# is a separate mechanism and is unaffected by this — it still reaches the browser directly.
+webrtcAddress: 127.0.0.1:8889
+
+# Static UDP port that carries the actual audio/video. For LAN-only use this needs no
+# extra setup. For internet access, forward THIS port (UDP) on your router to this
+# machine's LAN IP — see the README's "Remote / internet access" section.
+webrtcLocalUDPAddress: :8189
+
+# Your public IP or DDNS hostname, so remote viewers get a candidate address that
+# actually reaches your router. Set PUBLIC_HOST in .env — see docker-compose.yml.
+# Safe to leave empty for LAN-only use.
+webrtcAdditionalHosts: []
+
+# Public STUN server, so both sides of the connection can discover their public-facing
+# address when connecting over the internet. Harmless and unused for LAN-only viewing.
+webrtcICEServers2:
+  - url: stun:stun.l.google.com:19302
+
+# --- HLS output (pure HTTP/TCP - for remote viewing through the reverse proxy on
+# port 443 only, trading some latency for not needing any UDP port forwarded at all) ---
+hls: yes
+hlsAddress: 127.0.0.1:8888
+# mpegts, not lowLatency: this is MediaMTX's own "maximum compatibility" variant.
+# lowLatency (LL-HLS) has known player compatibility issues, including Safari
+# specifically requiring HTTPS to play it at all — the opposite of what
+# "Compatibility mode" is supposed to guarantee.
+hlsVariant: mpegts
+# Starts remuxing as soon as the camera source connects, rather than waiting for the
+# first viewer request — avoids a startup race where an early request finds no
+# segments ready yet.
+hlsAlwaysRemux: yes
+hlsSegmentDuration: 1500ms
+hlsSegmentCount: 3
+hlsAllowOrigins: ["*"]
+
+# --- RTMP/SRT outputs not needed for this project ---
+rtmp: no
+srt: no
+
+# No static paths — everything is created dynamically by the backend.
+paths: {}
