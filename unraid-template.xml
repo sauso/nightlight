@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>nightlight</Name>
+  <Repository>sauso/nightlight</Repository>
+  <Registry>https://hub.docker.com/r/sauso/nightlight/</Registry>
+  <Network>host</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/sauso/nightlight/issues</Support>
+  <Project>https://github.com/sauso/nightlight</Project>
+  <Overview>Nightlight is a self-hosted baby monitor with low-latency multi-camera streaming from RTSP cameras, installable as a web app (PWA) on your phone. No cloud, no subscription - runs entirely on your own network.&#13;&#10;&#13;&#10;One container includes the app, MediaMTX (RTSP to WebRTC/HLS bridge), and FFmpeg (audio transcoding) together.&#13;&#10;&#13;&#10;IMPORTANT: this container requires Host networking - WebRTC (the low-latency viewing mode) needs it to work correctly on your LAN. Set the data path below to somewhere under your appdata share before starting.&#13;&#10;&#13;&#10;After starting, open the WebUI and you'll be prompted to create the first admin account.</Overview>
+  <Category>HomeAutomation: Network:Other</Category>
+  <WebUI>http://[IP]:[PORT:4000]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/sauso/nightlight/main/unraid-template.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/sauso/nightlight/main/frontend/public/icons/icon-512.png</Icon>
+  <ExtraParams></ExtraParams>
+  <Date></Date>
+  <Description>Self-hosted baby monitor with low-latency multi-camera streaming (WebRTC + HLS) from RTSP cameras. No cloud, no subscription.</Description>
+  <Requires></Requires>
+  <Config Name="WebUI Port" Target="4000" Default="4000" Mode="tcp" Description="Port for the web app. With Host networking this binds directly - it's listed here so Unraid can build the WebUI link above." Type="Port" Display="always" Required="true" Mask="false">4000</Config>
+  <Config Name="Data Directory" Target="/app/data" Default="/mnt/user/appdata/nightlight" Mode="rw" Description="Stores the database, logs, and MediaMTX's config (including your added cameras)" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/nightlight</Config>
+  <Config Name="JWT Secret" Target="JWT_SECRET" Default="" Mode="" Description="Optional - leave blank and a secure random secret is generated and persisted in the data directory automatically on first run" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Public Host" Target="PUBLIC_HOST" Default="" Mode="" Description="Your public IP or DDNS hostname - only needed if you want Low Latency (WebRTC) mode to work from outside your home network (also requires forwarding UDP port 8189 on your router). Leave blank for LAN-only use." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+</Container>
