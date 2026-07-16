@@ -169,7 +169,7 @@ export default function CameraTile({ camera, childName, dragHandleProps }) {
           </div>
         </div>
         <div className="status-row">
-          <BreathingDot status={camera.status?.ready ? 'live' : 'connecting'} />
+          <BreathingDot status={camera.statusLevel || 'connecting'} />
         </div>
       </div>
     </div>

@@ -40,7 +40,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS settings (
     id TEXT PRIMARY KEY DEFAULT 'app',
-    app_name TEXT NOT NULL DEFAULT 'The Nursery',
+    app_name TEXT NOT NULL DEFAULT 'Nightlight',
     accent_color TEXT NOT NULL DEFAULT '#F5D9A8',
     live_color TEXT NOT NULL DEFAULT '#7FBFA3',
     offline_color TEXT NOT NULL DEFAULT '#E08585',
@@ -77,7 +77,7 @@ if (!settingsColumns.includes('font_choice')) {
 // Ensure the single settings row always exists.
 db.prepare(
   `INSERT OR IGNORE INTO settings (id, app_name, accent_color, live_color, offline_color, timezone, font_choice)
-   VALUES ('app', 'The Nursery', '#F5D9A8', '#7FBFA3', '#E08585', 'UTC', 'warm-serif')`
+   VALUES ('app', 'Nightlight', '#F5D9A8', '#7FBFA3', '#E08585', 'UTC', 'warm-serif')`
 ).run();
 
 export default db;

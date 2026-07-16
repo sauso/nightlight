@@ -7,18 +7,36 @@ const CamerasContext = createContext(null);
 // outage rather than a one-off network blip - roughly 45s of being unreachable.
 const OUTAGE_THRESHOLD = 3;
 
+// How many consecutive not-ready polls (15s apart) before a camera's status dot
+// switches from yellow ("down, but still retrying") to red ("down for a while") -
+// roughly 30s, giving a normal quick reconnect a couple of chances first.
+const NOT_READY_RED_THRESHOLD = 2;
+
 export function CamerasProvider({ children }) {
   const [kids, setKids] = useState([]);
   const [cameras, setCameras] = useState([]);
   const [error, setError] = useState('');
   const failureCountRef = useRef(0);
   const wasDownRef = useRef(false);
+  const notReadyCountsRef = useRef(new Map()); // camera_id -> consecutive not-ready polls
 
   async function load() {
     try {
       const [k, cams] = await Promise.all([api.get('/children'), api.get('/cameras')]);
       setKids(k);
-      setCameras(cams);
+
+      const counts = notReadyCountsRef.current;
+      const camsWithLevel = cams.map((cam) => {
+        if (cam.status?.ready) {
+          counts.delete(cam.id);
+          return { ...cam, statusLevel: 'live' };
+        }
+        const count = (counts.get(cam.id) || 0) + 1;
+        counts.set(cam.id, count);
+        return { ...cam, statusLevel: count > NOT_READY_RED_THRESHOLD ? 'offline' : 'connecting' };
+      });
+      setCameras(camsWithLevel);
+
       setError('');
       if (wasDownRef.current) {
         // The backend was unreachable for an extended stretch (e.g. a power outage)
