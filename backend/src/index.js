@@ -1,6 +1,5 @@
 import express from 'express';
 import cors from 'cors';
-import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createProxyMiddleware } from 'http-proxy-middleware';
@@ -19,17 +18,14 @@ import { logger } from './lib/logger.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || '/app/data';
 
-// MediaMTX persists API-added camera paths by writing them back to its own config
-// file, so that file needs to live in the persistent data volume, not baked
-// read-only into the image. Seed it from the image's default on first run only -
-// once it exists in the data volume, that copy (with whatever paths/edits have
-// accumulated) is always used from then on.
-const mediamtxConfigPath = path.join(DATA_DIR, 'mediamtx.yml');
-const defaultMediamtxConfigPath = path.join(__dirname, '..', 'mediamtx.default.yml');
-if (!fs.existsSync(mediamtxConfigPath)) {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.copyFileSync(defaultMediamtxConfigPath, mediamtxConfigPath);
-}
+// This lives in the image, not the data volume - MediaMTX doesn't need to persist
+// camera paths itself, since the app's own reconciliation (see reconcileCameraPaths
+// below) already re-establishes every camera from the database on every startup
+// regardless of what state MediaMTX comes up in. Keeping this out of the data volume
+// means there's no persisted copy that could ever end up stale or corrupted (this is
+// exactly the class of bug that caused MediaMTX to fail to start after the single-image
+// migration - an old path baked into a data-volume copy that never got updated).
+const mediamtxConfigPath = path.join(__dirname, '..', 'mediamtx.yml');
 startMediaMTX(mediamtxConfigPath);
 
 const app = express();
