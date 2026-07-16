@@ -33,6 +33,7 @@ db.exec(`
     rtsp_url TEXT NOT NULL,
     child_id TEXT,
     mediamtx_path TEXT UNIQUE NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (child_id) REFERENCES children(id) ON DELETE SET NULL
   );
@@ -55,6 +56,14 @@ if (!usersColumns.includes('first_name')) {
 }
 if (!usersColumns.includes('last_name')) {
   db.exec('ALTER TABLE users ADD COLUMN last_name TEXT');
+}
+
+const camerasColumns = db.prepare('PRAGMA table_info(cameras)').all().map((c) => c.name);
+if (!camerasColumns.includes('sort_order')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0');
+  const existing = db.prepare('SELECT id FROM cameras ORDER BY created_at').all();
+  const setOrder = db.prepare('UPDATE cameras SET sort_order = ? WHERE id = ?');
+  existing.forEach((cam, index) => setOrder.run(index, cam.id));
 }
 
 const settingsColumns = db.prepare('PRAGMA table_info(settings)').all().map((c) => c.name);

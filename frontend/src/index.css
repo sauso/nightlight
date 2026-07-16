@@ -339,7 +339,7 @@ button {
   justify-items: center;
 }
 
-.card-grid .camera-tile {
+.card-grid .sortable-camera-tile {
   width: 100%;
 }
 
@@ -349,7 +349,7 @@ button {
     justify-content: center;
   }
 
-  .card-grid .camera-tile {
+  .card-grid .sortable-camera-tile {
     max-width: 320px;
   }
 }
@@ -360,7 +360,7 @@ button {
     grid-template-columns: repeat(auto-fit, minmax(340px, 420px));
   }
 
-  .card-grid .camera-tile {
+  .card-grid .sortable-camera-tile {
     max-width: 420px;
   }
 }
@@ -375,25 +375,6 @@ button {
 }
 
 .section-title:first-child { margin-top: 0; }
-
-.child-section {
-  margin-top: 4px;
-  padding-top: 12px;
-}
-
-.child-section:first-of-type {
-  margin-top: 0;
-  padding-top: 0;
-}
-
-.child-heading {
-  font-family: var(--font-display);
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--accent);
-  text-align: center;
-  margin: 0 0 16px;
-}
 
 
 /* --- Camera tile --- */
@@ -576,6 +557,29 @@ button {
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px 9px;
+}
+
+.camera-tile__meta-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: grab;
+  padding: 4px;
+  touch-action: none;
+  flex-shrink: 0;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
 }
 
 .camera-tile__name {
