@@ -36,9 +36,16 @@ docker run -d \
   --name nightlight \
   --network host \
   --restart unless-stopped \
+  -e PUID=99 \
+  -e PGID=100 \
   -v /path/to/your/data:/app/data \
   sauso/nightlight:latest
 ```
+
+PUID/PGID control which user/group owns files this container creates in your data
+directory - the defaults above (99/100) match Unraid's own "nobody"/"users" convention,
+so they're usually already correct there. On another system, find your own with
+`id your_username`.
 
 Or with Docker Compose:
 
@@ -173,7 +180,7 @@ Since `docker logs` will show little to nothing during normal operation, use the
 git clone https://github.com/sauso/nightlight.git
 cd nightlight
 docker build -t nightlight .
-docker run -d --name nightlight --network host -v ./data:/app/data nightlight
+docker run -d --name nightlight --network host -e PUID=99 -e PGID=100 -v ./data:/app/data nightlight
 ```
 
 ## Project layout
@@ -181,7 +188,7 @@ docker run -d --name nightlight --network host -v ./data:/app/data nightlight
 ```
 backend/          Express API + SQLite storage + process supervision for MediaMTX/FFmpeg
 frontend/          React mobile-first UI (built into the image at build time)
-mediamtx/          Default MediaMTX config (seeded into the data volume on first run)
+mediamtx/          Default MediaMTX config (baked into the image - see src/index.js for why)
 reverse-proxy/     Example SWAG config for running behind HTTPS
 Dockerfile         Single combined image (app + MediaMTX + FFmpeg)
 unraid-template.xml   Unraid Community Applications template

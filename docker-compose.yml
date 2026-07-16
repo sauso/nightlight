@@ -9,6 +9,13 @@ services:
     restart: unless-stopped
     network_mode: host
     environment:
+      # Which host user/group owns files this container creates in the data volume
+      # (database, logs, MediaMTX config) - matters because Docker otherwise runs the
+      # app as root, leaving everything root-owned and awkward to manage from outside
+      # the container. Defaults to 99/100 - Unraid's own "nobody"/"users" convention.
+      # Find your own with `id your_username` if you want something else.
+      - PUID=${PUID:-99}
+      - PGID=${PGID:-100}
       # Optional. A random, persistent secret is auto-generated and stored in the
       # data volume on first run if this is left unset - only set this yourself if
       # you specifically want a fixed value (e.g. shared across a migration).

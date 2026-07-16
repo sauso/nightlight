@@ -23,7 +23,15 @@ WORKDIR /app
 # tini: proper PID 1 - reaps zombie child processes (MediaMTX + one FFmpeg process
 #   per camera) and forwards signals correctly, which a plain `node` process won't do
 #   on its own, especially with multiple levels of child processes involved.
-RUN apk add --no-cache python3 make g++ ffmpeg tini
+# shadow: provides usermod/groupmod, used by entrypoint.sh to remap the app user's
+#   UID/GID to match PUID/PGID at runtime (BusyBox's built-in tools can't do this).
+# su-exec: tiny privilege-drop helper - entrypoint.sh execs into the real app through
+#   this once it's finished its (root-only) setup, so the app itself never runs as root.
+RUN apk add --no-cache python3 make g++ ffmpeg tini shadow su-exec
+
+# Placeholder UID/GID - entrypoint.sh remaps this to PUID/PGID (default 99/100) on
+# every container start, so the exact values baked in here don't matter.
+RUN addgroup -g 1000 nightlight && adduser -D -u 1000 -G nightlight -h /app nightlight
 
 COPY --from=mediamtx-binary /mediamtx /usr/local/bin/mediamtx
 RUN chmod +x /usr/local/bin/mediamtx
@@ -39,9 +47,12 @@ COPY --from=frontend-build /frontend/dist ./public
 # startup regardless, so MediaMTX doesn't need to persist anything here itself.
 COPY mediamtx/mediamtx.yml ./mediamtx.yml
 
+COPY backend/entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
+
 ENV DATA_DIR=/app/data
 VOLUME ["/app/data"]
 
 EXPOSE 4000
-ENTRYPOINT ["tini", "--"]
+ENTRYPOINT ["tini", "--", "/app/entrypoint.sh"]
 CMD ["node", "src/index.js"]
