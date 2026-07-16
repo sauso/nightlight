@@ -76,7 +76,7 @@ export default function Cameras() {
           <div className="card" key={cam.id}>
             <div className="list-row" style={{ border: 'none', padding: '0 0 10px' }}>
               <div className="status-row">
-                <BreathingDot status={cam.status?.ready ? 'live' : 'connecting'} />
+                <BreathingDot status={cam.statusLevel || 'connecting'} />
                 <div>
                   <div style={{ fontWeight: 600 }}>{cam.name}</div>
                   <div className="camera-tile__sub" style={{ wordBreak: 'break-all' }}>{cam.rtsp_url}</div>
