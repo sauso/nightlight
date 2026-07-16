@@ -49,6 +49,27 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false }) {
     return () => clearTimeout(timer);
   }, [state]);
 
+  // hls.js only reports an error (which triggers the retry above) when it classifies
+  // something as fatal - a stream that just quietly stalls (segments stop updating,
+  // but hls.js doesn't consider that fatal on its own) can leave the video frozen on
+  // its last frame indefinitely with no error ever surfacing. This checks actual
+  // playback progress directly, independent of hls.js's own classification, and
+  // forces a reconnect if the video hasn't actually advanced in a while despite
+  // supposedly being "live".
+  useEffect(() => {
+    if (state !== 'live') return;
+    let lastTime = videoRef.current?.currentTime ?? 0;
+    const interval = setInterval(() => {
+      const video = videoRef.current;
+      if (!video) return;
+      if (video.currentTime === lastTime) {
+        setReconnectKey((k) => k + 1);
+      }
+      lastTime = video.currentTime;
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [state]);
+
   useEffect(() => {
     if (!active || !videoRef.current) return;
     const video = videoRef.current;

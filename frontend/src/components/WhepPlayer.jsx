@@ -131,9 +131,19 @@ export default function WhepPlayer({
               .catch(() => setNeedsGesture(true));
           }
         };
+        // 'disconnected' is a deliberately transient WebRTC state (brief ICE
+        // connectivity check failures - a WiFi hiccup, a NAT rebind, etc.) that often
+        // self-recovers within a second or two on its own; it's distinct from 'failed',
+        // which means ICE has actually given up. Treating them the same (tearing down
+        // and rebuilding the whole connection immediately) was very likely the cause of
+        // frequent drop-and-reconnect cycling - give 'disconnected' a grace period to
+        // recover on its own before treating it as a real failure.
+        let disconnectedGraceTimeoutId = null;
         pc.onconnectionstatechange = () => {
           if (cancelled) return;
           if (pc.connectionState === 'connected') {
+            clearTimeout(disconnectedGraceTimeoutId);
+            disconnectedGraceTimeoutId = null;
             setState('live');
             everConnectedRef.current = true;
             clearTimeout(firstConnectTimeoutId);
@@ -159,14 +169,28 @@ export default function WhepPlayer({
               });
             }
           }
-          if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) {
+          if (['failed', 'closed'].includes(pc.connectionState)) {
+            clearTimeout(disconnectedGraceTimeoutId);
+            disconnectedGraceTimeoutId = null;
             setState('error');
             setErrorMsg('Connection lost');
-            // Only treat this as "WebRTC doesn't work here" (triggering an automatic
-            // mode switch upstream) the first time - a later disconnect on a
-            // previously-working stream is more likely a transient blip, and will
-            // simply retry as WebRTC rather than abandoning it.
             if (!everConnectedRef.current) onFirstConnectFailed?.();
+          }
+          if (pc.connectionState === 'disconnected' && !disconnectedGraceTimeoutId) {
+            disconnectedGraceTimeoutId = setTimeout(() => {
+              if (cancelled) return;
+              disconnectedGraceTimeoutId = null;
+              // Still disconnected 4s later - this one isn't self-recovering, treat it
+              // as a real failure now. Only treat this as "WebRTC doesn't work here"
+              // (triggering an automatic mode switch upstream) the first time - a later
+              // disconnect on a previously-working stream is more likely a transient
+              // blip, and will simply retry as WebRTC rather than abandoning it.
+              if (pc.connectionState === 'disconnected') {
+                setState('error');
+                setErrorMsg('Connection lost');
+                if (!everConnectedRef.current) onFirstConnectFailed?.();
+              }
+            }, 4000);
           }
         };
 

@@ -34,11 +34,10 @@ RUN npm install --omit=dev
 COPY backend/src ./src
 COPY --from=frontend-build /frontend/dist ./public
 
-# Default MediaMTX config, seeded into the data volume on first run (see
-# src/index.js) rather than used directly from here - MediaMTX needs to persist
-# API-added camera paths back to this file, which isn't possible against a
-# read-only path baked into the image.
-COPY mediamtx/mediamtx.yml ./mediamtx.default.yml
+# MediaMTX's config - lives in the image itself, not the data volume. See src/index.js
+# for why: the app's own reconciliation re-establishes every camera path on every
+# startup regardless, so MediaMTX doesn't need to persist anything here itself.
+COPY mediamtx/mediamtx.yml ./mediamtx.yml
 
 ENV DATA_DIR=/app/data
 VOLUME ["/app/data"]
