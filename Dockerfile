@@ -30,8 +30,10 @@ WORKDIR /app
 RUN apk add --no-cache python3 make g++ ffmpeg tini shadow su-exec
 
 # Placeholder UID/GID - entrypoint.sh remaps this to PUID/PGID (default 99/100) on
-# every container start, so the exact values baked in here don't matter.
-RUN addgroup -g 1000 nightlight && adduser -D -u 1000 -G nightlight -h /app nightlight
+# every container start, so the exact values baked in here don't matter, as long as
+# they don't collide with anything already in the base image. (node:20-alpine ships
+# with its own pre-existing "node" user/group at 1000/1000, which is what this avoided.)
+RUN addgroup -g 1500 nightlight && adduser -D -u 1500 -G nightlight -h /app nightlight
 
 COPY --from=mediamtx-binary /mediamtx /usr/local/bin/mediamtx
 RUN chmod +x /usr/local/bin/mediamtx
