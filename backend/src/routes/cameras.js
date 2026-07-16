@@ -14,11 +14,26 @@ function isValidRtsp(url) {
 }
 
 router.get('/', async (req, res) => {
-  const cameras = db.prepare('SELECT * FROM cameras ORDER BY created_at').all();
+  const cameras = db.prepare('SELECT * FROM cameras ORDER BY sort_order, created_at').all();
   const withStatus = await Promise.all(
     cameras.map(async (cam) => ({ ...cam, status: await getPathStatus(cam.mediamtx_path) }))
   );
   res.json(withStatus);
+});
+
+// Persists a custom drag-and-drop order for the Nursery page. Mounted before /:id so
+// Express matches this literal path first, rather than treating "reorder" as an :id.
+router.put('/reorder', (req, res) => {
+  const { order } = req.body || {};
+  if (!Array.isArray(order) || order.some((id) => typeof id !== 'string')) {
+    return res.status(400).json({ error: 'order must be an array of camera ids' });
+  }
+  const setOrder = db.prepare('UPDATE cameras SET sort_order = ? WHERE id = ?');
+  const applyOrder = db.transaction((ids) => {
+    ids.forEach((id, index) => setOrder.run(index, id));
+  });
+  applyOrder(order);
+  res.json({ ok: true });
 });
 
 router.post('/', requireAdmin, async (req, res) => {
@@ -34,9 +49,10 @@ router.post('/', requireAdmin, async (req, res) => {
   } catch (e) {
     return res.status(502).json({ error: `Could not register stream with MediaMTX: ${e.message}` });
   }
+  const { maxOrder } = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS maxOrder FROM cameras').get();
   db.prepare(
-    'INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path) VALUES (?, ?, ?, ?, ?)'
-  ).run(id, name.trim(), rtsp_url.trim(), child_id || null, mediamtx_path);
+    'INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(id, name.trim(), rtsp_url.trim(), child_id || null, mediamtx_path, maxOrder + 1);
   startTranscoder(id, rtsp_url.trim(), mediamtx_path);
   res.status(201).json(db.prepare('SELECT * FROM cameras WHERE id = ?').get(id));
 });

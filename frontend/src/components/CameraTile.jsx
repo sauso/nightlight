@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX } from 'lucide-react';
+import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, GripVertical } from 'lucide-react';
 import WhepPlayer from './WhepPlayer.jsx';
 import HlsPlayer from './HlsPlayer.jsx';
 import BreathingDot from './BreathingDot.jsx';
 
-export default function CameraTile({ camera, childName }) {
+export default function CameraTile({ camera, childName, dragHandleProps }) {
   const [muted, setMuted] = useState(false);
   const [mode, setMode] = useState('live'); // 'live' (WebRTC) | 'compat' (HLS)
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -157,9 +157,16 @@ export default function CameraTile({ camera, childName }) {
         </button>
       </div>
       <div className="camera-tile__meta">
-        <div>
-          <div className="camera-tile__name">{camera.name}</div>
-          <div className="camera-tile__sub">{childName || 'Unassigned'}</div>
+        <div className="camera-tile__meta-left">
+          {dragHandleProps && (
+            <button className="drag-handle" {...dragHandleProps} aria-label={`Reorder ${camera.name}`}>
+              <GripVertical size={16} />
+            </button>
+          )}
+          <div>
+            <div className="camera-tile__name">{camera.name}</div>
+            <div className="camera-tile__sub">{childName || 'Unassigned'}</div>
+          </div>
         </div>
         <div className="status-row">
           <BreathingDot status={camera.status?.ready ? 'live' : 'connecting'} />

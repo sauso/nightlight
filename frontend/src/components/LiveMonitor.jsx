@@ -1,9 +1,18 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
+import {
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+} from '@dnd-kit/core';
+import { SortableContext, rectSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
+import { api } from '../lib/api.js';
 import AppHeader from './AppHeader.jsx';
-import CameraTile from './CameraTile.jsx';
+import SortableCameraTile from './SortableCameraTile.jsx';
 
 // This component is mounted once for the entire logged-in session (see App.jsx) so that
 // switching to Settings/Children/Cameras/Account never tears down the WebRTC connections
@@ -14,6 +23,32 @@ export default function LiveMonitor() {
   const isActive = location.pathname === '/';
   const { kids, cameras, error } = useCameras();
   const { settings } = useSettings();
+
+  // A single flat, freely-reorderable list rather than grouped-by-child sections -
+  // grouping doesn't mix well with free drag-reordering across children, and each
+  // tile already shows its own assigned child underneath its name regardless.
+  const [orderedCameras, setOrderedCameras] = useState(cameras);
+  useEffect(() => setOrderedCameras(cameras), [cameras]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  );
+
+  function childNameFor(cam) {
+    return kids.find((k) => k.id === cam.child_id)?.name;
+  }
+
+  function handleDragEnd(event) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setOrderedCameras((current) => {
+      const oldIndex = current.findIndex((c) => c.id === active.id);
+      const newIndex = current.findIndex((c) => c.id === over.id);
+      const next = arrayMove(current, oldIndex, newIndex);
+      api.put('/cameras/reorder', { order: next.map((c) => c.id) }).catch(() => {});
+      return next;
+    });
+  }
 
   // Keep the screen awake for as long as the monitor is open. Wake Lock is released
   // automatically whenever the tab is hidden, so it's re-requested on visibility change.
@@ -48,8 +83,6 @@ export default function LiveMonitor() {
     };
   }, []);
 
-  const unassigned = cameras.filter((cam) => !cam.child_id);
-
   return (
     <div
       className={`live-monitor ${isActive ? 'live-monitor--active' : 'live-monitor--hidden'}`}
@@ -59,36 +92,22 @@ export default function LiveMonitor() {
       <main className="app-main app-main--wide">
         {error && <div className="error-banner">{error}</div>}
 
-        {cameras.length === 0 && (
+        {orderedCameras.length === 0 && (
           <div className="empty-state">
             No cameras yet. Add one from the Cameras tab to start watching.
           </div>
         )}
 
-        {kids.map((child) => {
-          const cams = cameras.filter((cam) => cam.child_id === child.id);
-          if (cams.length === 0) return null;
-          return (
-            <section key={child.id} className="child-section">
-              <div className="child-heading">{child.name}</div>
+        {orderedCameras.length > 0 && (
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={orderedCameras.map((c) => c.id)} strategy={rectSortingStrategy}>
               <div className="card-grid">
-                {cams.map((cam) => (
-                  <CameraTile key={cam.id} camera={cam} childName={child.name} />
+                {orderedCameras.map((cam) => (
+                  <SortableCameraTile key={cam.id} camera={cam} childName={childNameFor(cam)} />
                 ))}
               </div>
-            </section>
-          );
-        })}
-
-        {unassigned.length > 0 && (
-          <section className="child-section">
-            <div className="section-title">Unassigned cameras</div>
-            <div className="card-grid">
-              {unassigned.map((cam) => (
-                <CameraTile key={cam.id} camera={cam} />
-              ))}
-            </div>
-          </section>
+            </SortableContext>
+          </DndContext>
         )}
       </main>
     </div>
