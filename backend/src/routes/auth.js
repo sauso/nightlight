@@ -1,11 +1,24 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
 import { requireAuth, requireAdmin, JWT_SECRET } from '../middleware/auth.js';
 
 const router = Router();
+
+// Login has no other protection against repeated guessing (no account lockout, no
+// CAPTCHA) - this is the actual backstop against brute-forcing a password. Keyed by
+// IP, not username, so it can't be used to lock a legitimate user out by deliberately
+// failing their login from elsewhere.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many attempts - please wait a few minutes and try again.' },
+});
 
 function userCount() {
   return db.prepare('SELECT COUNT(*) as c FROM users').get().c;
@@ -24,6 +37,7 @@ function toPublicUser(u) {
 
 function sign(user) {
   return jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, {
+    algorithm: 'HS256',
     expiresIn: '30d',
   });
 }
@@ -34,7 +48,7 @@ router.get('/status', (req, res) => {
 });
 
 // One-time: create the first admin account. Locked once any user exists.
-router.post('/setup', (req, res) => {
+router.post('/setup', loginLimiter, (req, res) => {
   if (userCount() > 0) {
     return res.status(400).json({ error: 'Setup already completed' });
   }
@@ -54,7 +68,7 @@ router.post('/setup', (req, res) => {
   });
 });
 
-router.post('/login', (req, res) => {
+router.post('/login', loginLimiter, (req, res) => {
   const { username, password } = req.body || {};
   const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
   if (!user || !bcrypt.compareSync(password || '', user.password_hash)) {
@@ -130,7 +144,7 @@ router.put('/users/:id', requireAuth, requireAdmin, (req, res) => {
 
 // Self-service: any logged-in user can change their own password, given their
 // current one - unlike the admin reset above, this doesn't skip verification.
-router.put('/me/password', requireAuth, (req, res) => {
+router.put('/me/password', requireAuth, loginLimiter, (req, res) => {
   const { current_password, new_password } = req.body || {};
   if (!new_password || new_password.length < 8) {
     return res.status(400).json({ error: 'New password must be at least 8 characters' });

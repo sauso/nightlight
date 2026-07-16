@@ -11,6 +11,15 @@ logLevel: info
 logDestinations: [file]
 logFile: /app/data/mediamtx.log
 
+# --- RTSP input (FFmpeg publishes each camera's transcoded stream here) ---
+# Loopback only, like every other MediaMTX port - nothing external ever needs to reach
+# this. Without an explicit bind address, MediaMTX defaults to listening on all network
+# interfaces, and RTSP has no authentication of its own - left at the default, anyone on
+# the LAN could watch (or potentially publish to) a camera directly, bypassing the app's
+# login entirely.
+rtsp: yes
+rtspAddress: 127.0.0.1:8554
+
 # --- API (used by the backend to register/remove RTSP camera sources) ---
 api: yes
 apiAddress: 127.0.0.1:9997
