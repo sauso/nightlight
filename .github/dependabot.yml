@@ -4,3 +4,16 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+
+  # Watches for known vulnerabilities and available updates in the actual app
+  # dependencies - the ongoing, automatic equivalent of periodically running
+  # `npm audit` yourself.
+  - package-ecosystem: "npm"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
