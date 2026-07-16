@@ -9,7 +9,7 @@ logLevel: info
 # left unbounded, this is what fills up disk over time. Writing to a real file here
 # means Docker has nothing to capture, and the file lives in your data volume instead.
 logDestinations: [file]
-logFile: /data/mediamtx.log
+logFile: /app/data/mediamtx.log
 
 # --- API (used by the backend to register/remove RTSP camera sources) ---
 api: yes
