@@ -1,5 +1,5 @@
 import express from 'express';
-import cors from 'cors';
+import helmet from 'helmet';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createProxyMiddleware } from 'http-proxy-middleware';
@@ -30,7 +30,13 @@ startMediaMTX(mediamtxConfigPath);
 
 const app = express();
 
-app.use(cors());
+// CSP is deliberately disabled here rather than misconfigured: the custom theming
+// feature applies colors via inline styles (document.documentElement.style...), and
+// WebRTC connects out to a STUN server - both need careful, tested CSP directives to
+// allow without weakening the policy generally, and that's not something to get right
+// blind. Every other protection helmet provides (clickjacking, MIME-sniffing, etc.)
+// stays on.
+app.use(helmet({ contentSecurityPolicy: false }));
 
 // MediaMTX doesn't know it's being reverse-proxied under a prefix (e.g. /live or /hls),
 // so any redirect or resource-location it issues (WHEP's session Location header, HLS's
