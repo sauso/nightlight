@@ -47,12 +47,3 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Update Docker Hub description
-        uses: peter-evans/dockerhub-description@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: sauso/nightlight
-          short-description: "Self-hosted baby monitor with low-latency multi-camera streaming (WebRTC + HLS) from RTSP cameras. No cloud, no subscription."
-          readme-filepath: ./README.md
