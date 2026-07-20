@@ -27,7 +27,10 @@ WORKDIR /app
 #   UID/GID to match PUID/PGID at runtime (BusyBox's built-in tools can't do this).
 # su-exec: tiny privilege-drop helper - entrypoint.sh execs into the real app through
 #   this once it's finished its (root-only) setup, so the app itself never runs as root.
-RUN apk add --no-cache python3 make g++ ffmpeg tini shadow su-exec
+# tzdata: Alpine doesn't ship timezone data by default - without it, setting TZ has no
+#   effect at all (both MediaMTX and Node silently fall back to UTC instead of erroring),
+#   since there's no zone database for either to actually look up "Australia/Melbourne" in.
+RUN apk add --no-cache python3 make g++ ffmpeg tini shadow su-exec tzdata
 
 # Placeholder UID/GID - entrypoint.sh remaps this to PUID/PGID (default 99/100) on
 # every container start, so the exact values baked in here don't matter, as long as
