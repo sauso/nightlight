@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, GripVertical } from 'lucide-react';
+import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Headphones, GripVertical } from 'lucide-react';
 import { useSettings } from '../lib/SettingsContext.jsx';
+import { isNativeApp, setBackgroundListening, onBackgroundStopped } from '../lib/nativeBridge.js';
 import WhepPlayer from './WhepPlayer.jsx';
 import HlsPlayer from './HlsPlayer.jsx';
 import BreathingDot from './BreathingDot.jsx';
@@ -24,13 +25,30 @@ export default function CameraTile({ camera, childName, dragHandleProps }) {
   // to you can stay muted while a tablet mounted in the nursery stays unmuted, rather
   // than muting on one device silently muting it everywhere.
   const muteKey = `nightlight_muted_${camera.id}`;
-  const [muted, setMuted] = useState(() => {
+
+  // Audio is a three-way state in the native Android app, two-way on the web:
+  //   'on'  - audio plays while the app is open (the old unmuted state)
+  //   'off' - muted (the old muted state)
+  //   'bg'  - audio plays AND a native foreground service keeps it alive with the
+  //           screen off / app minimised (native app only)
+  // Tapping the speaker cycles On -> Off -> Background -> On in the app, and just
+  // On <-> Off in a browser where background mode doesn't exist.
+  const [audioState, setAudioState] = useState(() => {
     try {
-      return localStorage.getItem(muteKey) === 'true';
+      const stored = localStorage.getItem(muteKey);
+      if (stored === 'true') return 'off'; // legacy boolean values from the old
+      if (stored === 'false') return 'on'; // two-state mute
+      if (stored === 'on' || stored === 'off') return stored;
+      // A stored 'bg' deliberately restores as 'on': starting a foreground
+      // service silently on app launch would be surprising - background mode is
+      // something you switch on for tonight, not a persistent default.
+      return 'on';
     } catch {
-      return false;
+      return 'on';
     }
   });
+  const muted = audioState === 'off';
+
   const [mode, setMode] = useState('live'); // 'live' (WebRTC) | 'compat' (HLS)
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
@@ -68,6 +86,29 @@ export default function CameraTile({ camera, childName, dragHandleProps }) {
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
+
+  // Keep the native foreground service in sync with this tile's state. The bridge
+  // reference-counts across tiles, so several cameras can share one service and the
+  // notification retitles itself as cameras join and leave.
+  useEffect(() => {
+    if (!isNativeApp()) return undefined;
+    setBackgroundListening(camera.id, camera.name, audioState === 'bg');
+    return undefined;
+  }, [audioState, camera.id, camera.name]);
+
+  // If the person taps "Stop" on the Android notification, every tile in background
+  // mode drops back to plain On. Also make sure an unmounting tile releases its
+  // claim on the service rather than leaving it running forever.
+  useEffect(() => {
+    if (!isNativeApp()) return undefined;
+    const unsubscribe = onBackgroundStopped(() => {
+      setAudioState((s) => (s === 'bg' ? 'on' : s));
+    });
+    return () => {
+      unsubscribe();
+      setBackgroundListening(camera.id, camera.name, false);
+    };
+  }, [camera.id, camera.name]);
 
   function handleFirstConnectFailed() {
     // Only auto-switch if the person hasn't already made their own choice - e.g. if
@@ -131,18 +172,32 @@ export default function CameraTile({ camera, childName, dragHandleProps }) {
     videoEl.requestPictureInPicture().catch(() => {});
   }
 
-  function toggleMute() {
-    setMuted((m) => {
-      const next = !m;
+  function cycleAudio() {
+    setAudioState((current) => {
+      let next;
+      if (isNativeApp()) {
+        next = current === 'on' ? 'off' : current === 'off' ? 'bg' : 'on';
+      } else {
+        next = current === 'off' ? 'on' : 'off';
+      }
       try {
-        localStorage.setItem(muteKey, String(next));
+        localStorage.setItem(muteKey, next);
       } catch {
-        // Private browsing / storage disabled - mute still works for this session,
-        // it just won't be remembered next time.
+        // Private browsing / storage disabled - the state still works for this
+        // session, it just won't be remembered next time.
       }
       return next;
     });
   }
+
+  const audioLabel =
+    audioState === 'off'
+      ? `${camera.name} muted - tap to unmute`
+      : audioState === 'bg'
+        ? `${camera.name} listening in background - tap to return to normal audio`
+        : isNativeApp()
+          ? `${camera.name} audio on - tap to mute, tap twice for background listening`
+          : `Mute ${camera.name}`;
 
   // Clean up any pending single-tap timer if the tile unmounts mid-wait.
   useEffect(() => () => clearTimeout(singleTapTimeoutRef.current), []);
@@ -244,12 +299,17 @@ export default function CameraTile({ camera, childName, dragHandleProps }) {
         )}
 
         <button
-          className="mute-btn"
-          onClick={toggleMute}
-          aria-label={muted ? `Unmute ${camera.name}` : `Mute ${camera.name}`}
-          aria-pressed={muted}
+          className={`mute-btn${audioState === 'bg' ? ' mute-btn--bg' : ''}`}
+          onClick={cycleAudio}
+          aria-label={audioLabel}
         >
-          {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+          {audioState === 'off' ? (
+            <VolumeX size={16} />
+          ) : audioState === 'bg' ? (
+            <Headphones size={16} />
+          ) : (
+            <Volume2 size={16} />
+          )}
         </button>
         <button
           className="fullscreen-btn"
