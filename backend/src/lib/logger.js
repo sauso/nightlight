@@ -39,14 +39,19 @@ function write(stream, level, args) {
   pushToBuffer(line);
 }
 
+// MediaMTX embeds its own leading timestamp ("2026/07/20 04:54:39 INF ...") - stripped
+// here so every line gets exactly one timestamp, in our own consistent format, rather
+// than showing MediaMTX's for some lines and none at all for FFmpeg's (which embeds
+// no timestamp of its own).
+const LEADING_TIMESTAMP = /^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}\s*/;
+
 export const logger = {
   info: (...args) => write(console.log, 'INFO', args),
   error: (...args) => write(console.error, 'ERROR', args),
-  // For forwarding already-formatted output from child processes (MediaMTX, FFmpeg) -
-  // these come with their own embedded timestamp/level, so pass through as-is with
-  // just a source tag rather than re-wrapping in our own format.
+  // For forwarding output from child processes (MediaMTX, FFmpeg) - normalized to the
+  // same "timestamp [source] message" shape as our own lines above.
   raw: (source, line) => {
-    const tagged = `[${source}] ${line}`;
+    const tagged = `${timestamp()} [${source}] ${line.replace(LEADING_TIMESTAMP, '')}`;
     console.log(tagged);
     pushToBuffer(tagged);
   },
