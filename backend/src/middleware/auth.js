@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import db from '../db.js';
 
 const DATA_DIR = process.env.DATA_DIR || '/app/data';
 const SECRET_FILE = path.join(DATA_DIR, '.jwt_secret');
@@ -33,12 +34,22 @@ function loadOrCreateSecret() {
 
 const JWT_SECRET = loadOrCreateSecret();
 
+// A JWT being cryptographically valid only proves it was issued by us and hasn't
+// expired - it says nothing about whether the account it names still exists. Without
+// this check, deleting a caregiver wouldn't actually revoke their access until
+// whatever session they already had naturally expired (up to 30 days later).
+function userStillExists(id) {
+  return !!db.prepare('SELECT id FROM users WHERE id = ?').get(id);
+}
+
 export function requireAuth(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) return res.status(401).json({ error: 'Not authenticated' });
   try {
-    req.user = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+    const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+    if (!userStillExists(payload.id)) return res.status(401).json({ error: 'Invalid or expired session' });
+    req.user = payload;
     next();
   } catch {
     return res.status(401).json({ error: 'Invalid or expired session' });
@@ -53,7 +64,9 @@ export function requireAuthQueryOrHeader(req, res, next) {
   const token = (header.startsWith('Bearer ') ? header.slice(7) : null) || req.query.token;
   if (!token) return res.status(401).json({ error: 'Not authenticated' });
   try {
-    req.user = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+    const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+    if (!userStillExists(payload.id)) return res.status(401).json({ error: 'Invalid or expired session' });
+    req.user = payload;
     next();
   } catch {
     return res.status(401).json({ error: 'Invalid or expired session' });

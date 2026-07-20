@@ -5,6 +5,10 @@ import { logger } from './logger.js';
 const processes = new Map();
 
 const RESTART_DELAY_MS = 5000;
+// If SIGTERM hasn't actually stopped the process within this long, escalate to
+// SIGKILL rather than wait indefinitely - a stuck FFmpeg process should never be
+// able to block a restart forever.
+const FORCE_KILL_TIMEOUT_MS = 3000;
 
 function buildArgs(rtspUrl, mediamtxPath) {
   return [
@@ -32,8 +36,14 @@ export function isRunning(cameraId) {
   return processes.has(cameraId);
 }
 
-export function startTranscoder(cameraId, rtspUrl, mediamtxPath) {
-  stopTranscoder(cameraId); // clean up any previous process for this camera first
+export async function startTranscoder(cameraId, rtspUrl, mediamtxPath) {
+  // Wait for any previous process for this camera to actually be gone before
+  // starting a new one - previously this fired stop and start back-to-back, which
+  // left a real window where the old FFmpeg process was still holding the MediaMTX
+  // publish connection when the new one tried to claim the same path. That collision
+  // could leave MediaMTX's own state for the path confused well beyond just this one
+  // restart, causing repeated "broken pipe" failures rather than a single clean blip.
+  await stopTranscoder(cameraId);
 
   function launch() {
     const proc = spawn('ffmpeg', buildArgs(rtspUrl, mediamtxPath), { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -64,13 +74,29 @@ export function startTranscoder(cameraId, rtspUrl, mediamtxPath) {
 
 export function stopTranscoder(cameraId) {
   const entry = processes.get(cameraId);
-  if (entry) {
-    entry.stopped = true;
+  if (!entry) return Promise.resolve();
+
+  entry.stopped = true;
+  processes.delete(cameraId);
+
+  return new Promise((resolve) => {
+    let resolved = false;
+    function done() {
+      if (resolved) return;
+      resolved = true;
+      resolve();
+    }
+    entry.proc.once('exit', done);
     entry.proc.kill('SIGTERM');
-    processes.delete(cameraId);
-  }
+    // Belt-and-suspenders: don't let a stuck process block a restart indefinitely.
+    setTimeout(() => {
+      if (resolved) return;
+      entry.proc.kill('SIGKILL');
+      done();
+    }, FORCE_KILL_TIMEOUT_MS);
+  });
 }
 
-export function stopAllTranscoders() {
-  for (const cameraId of [...processes.keys()]) stopTranscoder(cameraId);
+export async function stopAllTranscoders() {
+  await Promise.all([...processes.keys()].map(stopTranscoder));
 }

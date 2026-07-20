@@ -3,13 +3,9 @@
 # you should not need to edit this file when adding cameras.
 
 logLevel: info
-# Write logs to a file in the mounted data directory instead of stdout. MediaMTX is
-# fairly chatty (status polling, connection events, etc.), and Docker's default
-# logging driver captures everything printed to stdout into its own log storage —
-# left unbounded, this is what fills up disk over time. Writing to a real file here
-# means Docker has nothing to capture, and the file lives in your data volume instead.
-logDestinations: [file]
-logFile: /app/data/mediamtx.log
+# Logs to stdout (the default), captured by `docker logs`. Docker's own log rotation
+# (configured at the container level - see docker-compose.yml / the Unraid template's
+# extra parameters) keeps this from growing unbounded.
 
 # --- RTSP input (FFmpeg publishes each camera's transcoded stream here) ---
 # Loopback only, like every other MediaMTX port - nothing external ever needs to reach
