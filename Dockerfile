@@ -1,5 +1,5 @@
 # --- Stage 1: build the React frontend ---
-FROM node:20-alpine AS frontend-build
+FROM node:24-alpine AS frontend-build
 WORKDIR /frontend
 COPY frontend/package.json ./
 RUN npm install
@@ -15,7 +15,7 @@ RUN npm run build
 FROM bluenviron/mediamtx:1 AS mediamtx-binary
 
 # --- Stage 3: combined runtime (app + MediaMTX + FFmpeg) ---
-FROM node:20-alpine
+FROM node:24-alpine
 WORKDIR /app
 
 # python3/make/g++: needed to compile better-sqlite3's native addon.
@@ -34,8 +34,8 @@ RUN apk add --no-cache python3 make g++ ffmpeg tini shadow su-exec tzdata
 
 # Placeholder UID/GID - entrypoint.sh remaps this to PUID/PGID (default 99/100) on
 # every container start, so the exact values baked in here don't matter, as long as
-# they don't collide with anything already in the base image. (node:20-alpine ships
-# with its own pre-existing "node" user/group at 1000/1000, which is what this avoided.)
+# they don't collide with anything already in the base image. (The official node:alpine
+# images ship their own pre-existing "node" user/group at 1000/1000, which is what this avoided.)
 RUN addgroup -g 1500 nightlight && adduser -D -u 1500 -G nightlight -h /app nightlight
 
 COPY --from=mediamtx-binary /mediamtx /usr/local/bin/mediamtx
