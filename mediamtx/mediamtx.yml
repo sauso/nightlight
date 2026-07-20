@@ -55,7 +55,13 @@ hlsVariant: mpegts
 # first viewer request — avoids a startup race where an early request finds no
 # segments ready yet.
 hlsAlwaysRemux: yes
-hlsSegmentDuration: 1500ms
+# 1500ms was too aggressive for this camera's actual keyframe interval - MediaMTX can
+# only start a new segment at a keyframe, so an overly-short target just meant
+# segments fluctuated (2s, then 3s, etc.) waiting for whichever keyframe came next.
+# That inconsistency is specifically what triggers HLS playback errors on iOS. 2s is
+# a standard, widely-compatible target and much closer to what this camera naturally
+# produces, so segments should land consistently rather than drifting.
+hlsSegmentDuration: 2s
 hlsSegmentCount: 3
 hlsAllowOrigins: ["*"]
 
