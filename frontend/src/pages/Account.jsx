@@ -7,9 +7,21 @@ import AppHeader from '../components/AppHeader.jsx';
 const BLANK_FORM = { username: '', password: '', role: 'caregiver', first_name: '', last_name: '' };
 const BLANK_PASSWORD_FORM = { current_password: '', new_password: '', confirm_password: '' };
 
+function timeAgo(iso) {
+  const seconds = Math.floor((Date.now() - new Date(iso + 'Z').getTime()) / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 export default function Account() {
   const { user, logout, refresh } = useAuth();
   const [users, setUsers] = useState([]);
+  const [sessions, setSessions] = useState([]);
+  const [allSessions, setAllSessions] = useState([]);
   const [error, setError] = useState('');
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(null); // null | user being edited
@@ -21,9 +33,15 @@ export default function Account() {
   const [passwordSaved, setPasswordSaved] = useState(false);
 
   async function load() {
+    try {
+      setSessions(await api.get('/auth/sessions'));
+    } catch (err) {
+      setError(err.message);
+    }
     if (user?.role !== 'admin') return;
     try {
       setUsers(await api.get('/auth/users'));
+      setAllSessions(await api.get('/auth/sessions/all'));
     } catch (err) {
       setError(err.message);
     }
@@ -120,6 +138,22 @@ export default function Account() {
     }
   }
 
+  async function terminateSession(s) {
+    if (s.is_current) {
+      if (!confirm('This will sign you out of this device too. Continue?')) return;
+    }
+    try {
+      await api.del(`/auth/sessions/${s.id}`);
+      if (s.is_current) {
+        logout();
+        return;
+      }
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   return (
     <>
       <AppHeader title={displayName(user || {})} />
@@ -141,6 +175,21 @@ export default function Account() {
         >
           Change my password
         </button>
+
+        <div className="section-title">Signed in on</div>
+        <div className="card" style={{ marginBottom: 14 }}>
+          {sessions.map((s) => (
+            <div className="list-row" key={s.id}>
+              <div>
+                <div>{s.device}{s.is_current ? ' (this device)' : ''}</div>
+                <div className="camera-tile__sub">Active {timeAgo(s.last_seen_at)}</div>
+              </div>
+              <button className="icon-btn" onClick={() => terminateSession(s)}>
+                Sign out
+              </button>
+            </div>
+          ))}
+        </div>
 
         {user?.role === 'admin' && (
           <>
@@ -164,6 +213,22 @@ export default function Account() {
             <button className="btn btn-secondary" onClick={() => { setForm(BLANK_FORM); setAdding(true); }} style={{ marginBottom: 14 }}>
               + Add caregiver
             </button>
+
+            <div className="section-title">All active sessions</div>
+            <div className="card" style={{ marginBottom: 14 }}>
+              {allSessions.length === 0 && <div className="camera-tile__sub" style={{ padding: 12 }}>None active</div>}
+              {allSessions.map((s) => (
+                <div className="list-row" key={s.id}>
+                  <div>
+                    <div>{s.username} — {s.device}{s.is_current ? ' (this device)' : ''}</div>
+                    <div className="camera-tile__sub">Active {timeAgo(s.last_seen_at)}</div>
+                  </div>
+                  <button className="icon-btn" onClick={() => terminateSession(s)}>
+                    Sign out
+                  </button>
+                </div>
+              ))}
+            </div>
           </>
         )}
 

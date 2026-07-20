@@ -6,6 +6,14 @@ let stopped = false;
 
 const RESTART_DELAY_MS = 3000;
 
+function forwardLines(chunk, onLine) {
+  chunk
+    .toString()
+    .split('\n')
+    .filter((line) => line.length > 0)
+    .forEach(onLine);
+}
+
 // Manages the MediaMTX binary as a child process of this app - same restart-on-exit
 // pattern as transcoder.js uses for FFmpeg. Combining the two into one image means
 // this app is now responsible for both, rather than Docker/compose supervising two
@@ -21,12 +29,23 @@ export function startMediaMTX(configPath) {
       env.MTX_WEBRTCADDITIONALHOSTS = process.env.PUBLIC_HOST;
     }
 
-    proc = spawn('mediamtx', [configPath], { stdio: ['ignore', 'ignore', 'pipe'], env });
+    // Both streams piped (not 'ignore'/'inherit') so every line can be forwarded
+    // through our own logger - this is what makes MediaMTX's output show up in both
+    // `docker logs` and the in-app log viewer, rather than being silently discarded.
+    proc = spawn('mediamtx', [configPath], { stdio: ['ignore', 'pipe', 'pipe'], env });
 
     let lastLine = '';
+    proc.stdout.on('data', (chunk) => {
+      forwardLines(chunk, (line) => {
+        lastLine = line;
+        logger.raw('mediamtx', line);
+      });
+    });
     proc.stderr.on('data', (chunk) => {
-      const lines = chunk.toString().trim().split('\n');
-      if (lines.length) lastLine = lines[lines.length - 1];
+      forwardLines(chunk, (line) => {
+        lastLine = line;
+        logger.raw('mediamtx', line);
+      });
     });
 
     proc.on('exit', (code) => {

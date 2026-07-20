@@ -12,16 +12,16 @@ export default function Cameras() {
   const { kids: children, cameras, error: contextError, refresh } = useCameras();
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ name: '', rtsp_url: '', child_id: '' });
+  const [form, setForm] = useState({ name: '', rtsp_url: '', child_id: '', mqtt_topic: '' });
   const [busy, setBusy] = useState(false);
 
   function openNew() {
-    setForm({ name: '', rtsp_url: '', child_id: '' });
+    setForm({ name: '', rtsp_url: '', child_id: '', mqtt_topic: '' });
     setEditing({});
   }
 
   function openEdit(cam) {
-    setForm({ name: cam.name, rtsp_url: cam.rtsp_url, child_id: cam.child_id || '' });
+    setForm({ name: cam.name, rtsp_url: cam.rtsp_url, child_id: cam.child_id || '', mqtt_topic: cam.mqtt_topic || '' });
     setEditing(cam);
   }
 
@@ -140,6 +140,15 @@ export default function Cameras() {
                   <option key={child.id} value={child.id}>{child.name}</option>
                 ))}
               </select>
+            </div>
+            <div className="field">
+              <label htmlFor="cam-mqtt-topic">MQTT topic for temp/humidity (optional)</label>
+              <input
+                id="cam-mqtt-topic"
+                value={form.mqtt_topic}
+                onChange={(e) => setForm({ ...form, mqtt_topic: e.target.value })}
+                placeholder="e.g. zigbee2mqtt/Raffa Room Temp"
+              />
             </div>
             <button className="btn btn-primary" type="submit" disabled={busy}>
               {busy ? 'Saving…' : 'Save'}

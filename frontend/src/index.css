@@ -395,6 +395,14 @@ button {
   position: relative;
   aspect-ratio: 16 / 10;
   background: #0a0d1c;
+  overflow: hidden;
+  touch-action: manipulation; /* avoids the ~300ms tap delay some mobile browsers add */
+}
+
+.camera-tile__zoom-layer {
+  width: 100%;
+  height: 100%;
+  transition: transform 0.25s ease;
 }
 
 .whep-player, .whep-video {
@@ -603,6 +611,12 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.camera-tile__reading {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 
 /* --- Forms --- */
@@ -840,4 +854,36 @@ button {
   border-radius: 100px;
   background: var(--bg-elevated-2);
   color: var(--text-secondary);
+}
+
+/* --- Log viewer --- */
+.log-viewer__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.log-viewer__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.log-viewer__box {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  max-height: 320px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
 }

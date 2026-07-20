@@ -4,6 +4,7 @@ import { useSettings } from '../lib/SettingsContext.jsx';
 import { getCommonTimezones } from '../lib/greeting.js';
 import { FONT_PRESETS } from '../lib/fonts.js';
 import AppHeader from '../components/AppHeader.jsx';
+import LogViewer from '../components/LogViewer.jsx';
 
 const PRESETS = [
   { label: 'Nursery (default)', accent: '#F5D9A8', live: '#7FBFA3', offline: '#E08585' },
@@ -19,8 +20,16 @@ export default function Settings() {
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [timezones] = useState(getCommonTimezones);
+  const [mqttPasswordSet, setMqttPasswordSet] = useState(false);
 
-  useEffect(() => setForm(settings), [settings]);
+  useEffect(() => setForm((f) => ({ ...f, ...settings })), [settings]);
+
+  useEffect(() => {
+    api.get('/settings/mqtt').then((mqtt) => {
+      setForm((f) => ({ ...f, mqtt_host: mqtt.mqtt_host, mqtt_port: mqtt.mqtt_port, mqtt_username: mqtt.mqtt_username }));
+      setMqttPasswordSet(mqtt.mqtt_password_set);
+    }).catch(() => {});
+  }, []);
 
   async function save(e) {
     e.preventDefault();
@@ -28,14 +37,22 @@ export default function Settings() {
     setError('');
     setSaved(false);
     try {
-      await api.put('/settings', {
+      const payload = {
         app_name: form.app_name,
         accent_color: form.accent_color,
         live_color: form.live_color,
         offline_color: form.offline_color,
         timezone: form.timezone,
         font_choice: form.font_choice,
-      });
+        temp_unit: form.temp_unit,
+        mqtt_host: form.mqtt_host,
+        mqtt_port: form.mqtt_port,
+        mqtt_username: form.mqtt_username,
+      };
+      // Only send a new password if the admin actually typed one - an empty field
+      // means "keep whatever's already saved," not "clear it."
+      if (form.mqtt_password) payload.mqtt_password = form.mqtt_password;
+      await api.put('/settings', payload);
       await refresh();
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
@@ -177,10 +194,77 @@ export default function Settings() {
             </div>
           </div>
 
+          <div className="section-title">Temperature unit</div>
+          <div className="preset-row">
+            <button
+              type="button"
+              className={`font-btn${form.temp_unit === 'C' ? ' font-btn--active' : ''}`}
+              onClick={() => setForm({ ...form, temp_unit: 'C' })}
+            >
+              <span className="font-btn__label">°C</span>
+            </button>
+            <button
+              type="button"
+              className={`font-btn${form.temp_unit === 'F' ? ' font-btn--active' : ''}`}
+              onClick={() => setForm({ ...form, temp_unit: 'F' })}
+            >
+              <span className="font-btn__label">°F</span>
+            </button>
+          </div>
+
+          <div className="section-title">MQTT (room temperature / humidity)</div>
+          <div className="card">
+            <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
+              Optional - connects to your existing MQTT broker (e.g. from Home
+              Assistant / Zigbee2MQTT) to show temperature and humidity on each
+              camera. Leave the host blank if you don't use this.
+            </div>
+            <div className="field">
+              <label htmlFor="mqtt-host">Broker host</label>
+              <input
+                id="mqtt-host"
+                placeholder="e.g. 192.168.1.50"
+                value={form.mqtt_host || ''}
+                onChange={(e) => setForm({ ...form, mqtt_host: e.target.value })}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="mqtt-port">Broker port</label>
+              <input
+                id="mqtt-port"
+                type="number"
+                placeholder="1883"
+                value={form.mqtt_port || ''}
+                onChange={(e) => setForm({ ...form, mqtt_port: e.target.value })}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="mqtt-username">Username (optional)</label>
+              <input
+                id="mqtt-username"
+                value={form.mqtt_username || ''}
+                onChange={(e) => setForm({ ...form, mqtt_username: e.target.value })}
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label htmlFor="mqtt-password">Password (optional)</label>
+              <input
+                id="mqtt-password"
+                type="password"
+                placeholder={mqttPasswordSet ? 'Leave blank to keep current password' : ''}
+                value={form.mqtt_password || ''}
+                onChange={(e) => setForm({ ...form, mqtt_password: e.target.value })}
+              />
+            </div>
+          </div>
+
           <button className="btn btn-primary" type="submit" disabled={busy}>
             {busy ? 'Saving…' : 'Save changes'}
           </button>
         </form>
+
+        <div className="section-title">Recent logs</div>
+        <LogViewer />
       </main>
     </>
   );

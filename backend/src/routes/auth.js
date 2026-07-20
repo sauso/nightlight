@@ -35,11 +35,50 @@ function toPublicUser(u) {
   };
 }
 
-function sign(user) {
-  return jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, {
+// Lightweight device/browser description for the sessions list - not meant to be a
+// precise parser, just enough for someone to recognize "oh, that's my old phone."
+function describeDevice(userAgent) {
+  if (!userAgent) return 'Unknown device';
+  let os = 'Unknown OS';
+  if (/iPhone/.test(userAgent)) os = 'iPhone';
+  else if (/iPad/.test(userAgent)) os = 'iPad';
+  else if (/Android/.test(userAgent)) os = 'Android';
+  else if (/Mac OS X/.test(userAgent)) os = 'Mac';
+  else if (/Windows/.test(userAgent)) os = 'Windows';
+  else if (/Linux/.test(userAgent)) os = 'Linux';
+
+  let browser = 'Unknown browser';
+  if (/Edg\//.test(userAgent)) browser = 'Edge';
+  else if (/OPR\//.test(userAgent)) browser = 'Opera';
+  else if (/CriOS\//.test(userAgent) || (/Chrome\//.test(userAgent) && !/Chromium/.test(userAgent))) browser = 'Chrome';
+  else if (/Firefox\//.test(userAgent)) browser = 'Firefox';
+  else if (/Safari\//.test(userAgent) && !/Chrome/.test(userAgent)) browser = 'Safari';
+
+  return `${browser} on ${os}`;
+}
+
+function createSession(userId, userAgent) {
+  const id = uuid();
+  db.prepare('INSERT INTO sessions (id, user_id, user_agent) VALUES (?, ?, ?)').run(id, userId, userAgent || null);
+  return id;
+}
+
+function sign(user, sessionId) {
+  return jwt.sign({ id: user.id, username: user.username, role: user.role, sid: sessionId }, JWT_SECRET, {
     algorithm: 'HS256',
     expiresIn: '30d',
   });
+}
+
+function toPublicSession(s, currentSessionId) {
+  return {
+    id: s.id,
+    device: describeDevice(s.user_agent),
+    created_at: s.created_at,
+    last_seen_at: s.last_seen_at,
+    is_current: s.id === currentSessionId,
+    ...(s.username ? { username: s.username } : {}),
+  };
 }
 
 // Tells the frontend whether first-run setup (creating the admin account) is needed.
@@ -62,8 +101,9 @@ router.post('/setup', loginLimiter, (req, res) => {
     'INSERT INTO users (id, username, password_hash, role, first_name, last_name) VALUES (?, ?, ?, ?, ?, ?)'
   ).run(id, username, password_hash, 'admin', first_name?.trim() || null, last_name?.trim() || null);
   const user = { id, username, role: 'admin' };
+  const sessionId = createSession(id, req.headers['user-agent']);
   res.json({
-    token: sign(user),
+    token: sign(user, sessionId),
     user: toPublicUser({ ...user, first_name, last_name, created_at: null }),
   });
 });
@@ -74,13 +114,51 @@ router.post('/login', loginLimiter, (req, res) => {
   if (!user || !bcrypt.compareSync(password || '', user.password_hash)) {
     return res.status(401).json({ error: 'Incorrect username or password' });
   }
-  res.json({ token: sign(user), user: toPublicUser(user) });
+  const sessionId = createSession(user.id, req.headers['user-agent']);
+  res.json({ token: sign(user, sessionId), user: toPublicUser(user) });
+});
+
+// Ends just the current session - the token stops working on its very next use,
+// rather than remaining valid (just unused) until it naturally expires.
+router.post('/logout', requireAuth, (req, res) => {
+  db.prepare('DELETE FROM sessions WHERE id = ?').run(req.user.sid);
+  res.status(204).end();
 });
 
 router.get('/me', requireAuth, (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
   res.json(toPublicUser(user));
+});
+
+// Self-service: your own active sessions (other devices/browsers you're logged in on).
+router.get('/sessions', requireAuth, (req, res) => {
+  const sessions = db.prepare('SELECT * FROM sessions WHERE user_id = ? ORDER BY last_seen_at DESC').all(req.user.id);
+  res.json(sessions.map((s) => toPublicSession(s, req.user.sid)));
+});
+
+// Admin: every active session across every account - lets an admin revoke a
+// caregiver's access on a specific device without deleting their whole account.
+router.get('/sessions/all', requireAuth, requireAdmin, (req, res) => {
+  const sessions = db
+    .prepare(
+      `SELECT sessions.*, users.username FROM sessions
+       JOIN users ON users.id = sessions.user_id
+       ORDER BY last_seen_at DESC`
+    )
+    .all();
+  res.json(sessions.map((s) => toPublicSession(s, req.user.sid)));
+});
+
+// Terminate a session - your own, or (admins only) anyone's.
+router.delete('/sessions/:id', requireAuth, (req, res) => {
+  const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (session.user_id !== req.user.id && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Not allowed' });
+  }
+  db.prepare('DELETE FROM sessions WHERE id = ?').run(req.params.id);
+  res.status(204).end();
 });
 
 // Admin: manage caregiver accounts.

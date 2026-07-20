@@ -4,6 +4,7 @@ import db from '../db.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { upsertPath, removePath, getPathStatus, toPathName } from '../lib/mediamtx.js';
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
+import { getReading, subscribeAllCameraTopics } from '../lib/mqttClient.js';
 import { logger } from '../lib/logger.js';
 
 const router = Router();
@@ -16,7 +17,11 @@ function isValidRtsp(url) {
 router.get('/', async (req, res) => {
   const cameras = db.prepare('SELECT * FROM cameras ORDER BY sort_order, created_at').all();
   const withStatus = await Promise.all(
-    cameras.map(async (cam) => ({ ...cam, status: await getPathStatus(cam.mediamtx_path) }))
+    cameras.map(async (cam) => ({
+      ...cam,
+      status: await getPathStatus(cam.mediamtx_path),
+      mqtt: cam.mqtt_topic ? getReading(cam.mqtt_topic) : null,
+    }))
   );
   res.json(withStatus);
 });
@@ -37,7 +42,7 @@ router.put('/reorder', (req, res) => {
 });
 
 router.post('/', requireAdmin, async (req, res) => {
-  const { name, rtsp_url, child_id } = req.body || {};
+  const { name, rtsp_url, child_id, mqtt_topic } = req.body || {};
   if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
   if (!isValidRtsp(rtsp_url)) {
     return res.status(400).json({ error: 'A valid rtsp:// URL is required' });
@@ -51,16 +56,17 @@ router.post('/', requireAdmin, async (req, res) => {
   }
   const { maxOrder } = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS maxOrder FROM cameras').get();
   db.prepare(
-    'INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(id, name.trim(), rtsp_url.trim(), child_id || null, mediamtx_path, maxOrder + 1);
+    'INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path, sort_order, mqtt_topic) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, name.trim(), rtsp_url.trim(), child_id || null, mediamtx_path, maxOrder + 1, mqtt_topic?.trim() || null);
   await startTranscoder(id, rtsp_url.trim(), mediamtx_path);
+  subscribeAllCameraTopics();
   res.status(201).json(db.prepare('SELECT * FROM cameras WHERE id = ?').get(id));
 });
 
 router.put('/:id', async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
-  const { name, rtsp_url, child_id } = req.body || {};
+  const { name, rtsp_url, child_id, mqtt_topic } = req.body || {};
   const newRtsp = rtsp_url !== undefined ? rtsp_url.trim() : existing.rtsp_url;
   if (rtsp_url !== undefined && !isValidRtsp(rtsp_url)) {
     return res.status(400).json({ error: 'A valid rtsp:// URL is required' });
@@ -74,12 +80,14 @@ router.put('/:id', async (req, res) => {
     // RTSP URL changed - restart the transcoder pointed at the new address.
     await startTranscoder(req.params.id, newRtsp, existing.mediamtx_path);
   }
-  db.prepare('UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ? WHERE id = ?').run(
+  db.prepare('UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ? WHERE id = ?').run(
     name?.trim() || existing.name,
     newRtsp,
     child_id !== undefined ? child_id || null : existing.child_id,
+    mqtt_topic !== undefined ? mqtt_topic?.trim() || null : existing.mqtt_topic,
     req.params.id
   );
+  subscribeAllCameraTopics();
   res.json(db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id));
 });
 

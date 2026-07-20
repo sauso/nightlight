@@ -35,11 +35,19 @@ function loadOrCreateSecret() {
 const JWT_SECRET = loadOrCreateSecret();
 
 // A JWT being cryptographically valid only proves it was issued by us and hasn't
-// expired - it says nothing about whether the account it names still exists. Without
-// this check, deleting a caregiver wouldn't actually revoke their access until
-// whatever session they already had naturally expired (up to 30 days later).
-function userStillExists(id) {
-  return !!db.prepare('SELECT id FROM users WHERE id = ?').get(id);
+// expired - it says nothing about whether the session it names is still active.
+// Checking the session (rather than just whether the user still exists) is what
+// makes both "sign out this specific device" and "delete this caregiver" take effect
+// on the very next request, rather than waiting for the token to naturally expire.
+const touchSession = db.prepare(
+  "UPDATE sessions SET last_seen_at = datetime('now') WHERE id = ? AND last_seen_at < datetime('now', '-60 seconds')"
+);
+function sessionStillValid(sessionId) {
+  if (!sessionId) return false;
+  const row = db.prepare('SELECT id FROM sessions WHERE id = ?').get(sessionId);
+  if (!row) return false;
+  touchSession.run(sessionId); // throttled - only actually writes if last_seen_at is stale
+  return true;
 }
 
 export function requireAuth(req, res, next) {
@@ -48,7 +56,7 @@ export function requireAuth(req, res, next) {
   if (!token) return res.status(401).json({ error: 'Not authenticated' });
   try {
     const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
-    if (!userStillExists(payload.id)) return res.status(401).json({ error: 'Invalid or expired session' });
+    if (!sessionStillValid(payload.sid)) return res.status(401).json({ error: 'Invalid or expired session' });
     req.user = payload;
     next();
   } catch {
@@ -65,7 +73,7 @@ export function requireAuthQueryOrHeader(req, res, next) {
   if (!token) return res.status(401).json({ error: 'Not authenticated' });
   try {
     const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
-    if (!userStillExists(payload.id)) return res.status(401).json({ error: 'Invalid or expired session' });
+    if (!sessionStillValid(payload.sid)) return res.status(401).json({ error: 'Invalid or expired session' });
     req.user = payload;
     next();
   } catch {
