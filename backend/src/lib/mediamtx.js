@@ -1,4 +1,5 @@
-import fetch from 'node-fetch';
+// Node's built-in fetch (stable since Node 18) is used here - no import needed, it's
+// a global, same as console or setTimeout.
 
 // Host networking means MediaMTX's API is reachable on localhost from the backend container.
 const MEDIAMTX_API = process.env.MEDIAMTX_API || 'http://127.0.0.1:9997';
