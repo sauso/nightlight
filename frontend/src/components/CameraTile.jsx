@@ -189,7 +189,7 @@ export default function CameraTile({ camera, childName, dragHandleProps }) {
           className="camera-tile__zoom-layer"
           style={
             zoomed
-              ? { transform: 'scale(2)', transformOrigin: `${zoomOrigin.x}% ${zoomOrigin.y}%` }
+              ? { transform: 'scale(2.5)', transformOrigin: `${zoomOrigin.x}% ${zoomOrigin.y}%` }
               : undefined
           }
         >
