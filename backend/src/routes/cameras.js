@@ -53,7 +53,7 @@ router.post('/', requireAdmin, async (req, res) => {
   db.prepare(
     'INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
   ).run(id, name.trim(), rtsp_url.trim(), child_id || null, mediamtx_path, maxOrder + 1);
-  startTranscoder(id, rtsp_url.trim(), mediamtx_path);
+  await startTranscoder(id, rtsp_url.trim(), mediamtx_path);
   res.status(201).json(db.prepare('SELECT * FROM cameras WHERE id = ?').get(id));
 });
 
@@ -72,7 +72,7 @@ router.put('/:id', async (req, res) => {
       return res.status(502).json({ error: `Could not update stream: ${e.message}` });
     }
     // RTSP URL changed - restart the transcoder pointed at the new address.
-    startTranscoder(req.params.id, newRtsp, existing.mediamtx_path);
+    await startTranscoder(req.params.id, newRtsp, existing.mediamtx_path);
   }
   db.prepare('UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ? WHERE id = ?').run(
     name?.trim() || existing.name,
@@ -99,7 +99,7 @@ router.put('/:id/assign', (req, res) => {
 router.delete('/:id', async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
-  stopTranscoder(req.params.id);
+  await stopTranscoder(req.params.id);
   try {
     await removePath(existing.mediamtx_path);
   } catch (e) {

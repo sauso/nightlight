@@ -36,8 +36,11 @@ docker run -d \
   --name nightlight \
   --network host \
   --restart unless-stopped \
+  --log-opt max-size=10m \
+  --log-opt max-file=3 \
   -e PUID=99 \
   -e PGID=100 \
+  -e TZ=UTC \
   -v /path/to/your/data:/app/data \
   sauso/nightlight:latest
 ```
@@ -45,7 +48,13 @@ docker run -d \
 PUID/PGID control which user/group owns files this container creates in your data
 directory - the defaults above (99/100) match Unraid's own "nobody"/"users" convention,
 so they're usually already correct there. On another system, find your own with
-`id your_username`.
+`id your_username`. TZ (e.g. `Australia/Melbourne`) affects log timestamps only -
+[full list of values](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
+
+The `--log-opt` flags cap Docker's own log storage at 10MB × 3 files - without them,
+logs default to growing unbounded, which can be a real problem on Unraid specifically
+since Docker's storage there is a fixed-size image that can break the whole Docker
+service if it fills up.
 
 Or with Docker Compose:
 
@@ -143,18 +152,22 @@ if you want the full native-app-like install experience.
 
 ## Logs
 
-Both the app and MediaMTX write their logs to files in the data volume instead of Docker's
-own log storage, so normal operation doesn't fill up disk over time (this matters
-particularly on Unraid, where Docker's storage is a fixed-size image that can break the
-whole Docker service if it fills up):
+Both the app and MediaMTX log to stdout, captured by Docker in the normal way:
 
-- App logs: `<your data dir>/app.log` (rotates once it passes 5MB)
-- MediaMTX logs: `<your data dir>/mediamtx.log` (not auto-rotated — very unlikely to become
-  a real problem given your data dir is normal disk/array space rather than Docker's
-  constrained image, but worth an occasional glance if disk space is tight)
+```bash
+docker logs -f nightlight
+```
 
-Since `docker logs` will show little to nothing during normal operation, use these files
-(or `docker exec nightlight tail -f /app/data/app.log`) for troubleshooting instead.
+Docker's own log rotation (already configured in the `docker run`/Compose examples
+above, and in the Unraid template's extra parameters) caps total log storage at 10MB × 3
+files, so this doesn't grow unbounded - this matters particularly on Unraid, where
+Docker's storage is a fixed-size image that can break the whole Docker service if it
+fills up. If you deployed before this was added, add `--log-opt max-size=10m --log-opt
+max-file=3` yourself (or the Unraid template's "Extra Parameters" field) to get the
+same protection.
+
+Timestamps use your container's local time (see the `TZ` variable above) rather than
+UTC, so they line up with when you actually remember something happening.
 
 ## Troubleshooting
 
@@ -171,8 +184,7 @@ Since `docker logs` will show little to nothing during normal operation, use the
   An empty `"items":[]` with cameras added in the app means MediaMTX and the app's database
   have drifted apart — restarting the container re-syncs them automatically (see the
   startup log line "Reconciled N camera path(s)...").
-- **Checking logs**: see the "Logs" section above — `docker logs` shows little during
-  normal operation now, so check `app.log` / `mediamtx.log` in your data directory instead.
+- **Checking logs**: see the "Logs" section above — `docker logs -f nightlight`.
 
 ## Building from source
 

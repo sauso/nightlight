@@ -11,7 +11,7 @@ import manifestRoutes from './routes/manifest.js';
 import { requireAuth, requireAuthQueryOrHeader } from './middleware/auth.js';
 import db from './db.js';
 import { upsertPath, isPathConfiguredCorrectly, getPathStatus } from './lib/mediamtx.js';
-import { startTranscoder, stopTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder.js';
+import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder.js';
 import { startMediaMTX, stopMediaMTX } from './lib/mediamtxProcess.js';
 import { logger } from './lib/logger.js';
 
@@ -154,8 +154,7 @@ setInterval(async () => {
       logger.error(
         `Camera "${cam.name}" has been unready for over ${STUCK_THRESHOLD_MS / 1000}s - force-restarting its transcoder.`
       );
-      stopTranscoder(cam.id);
-      startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path);
+      await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path);
       notReadySince.delete(cam.id);
     }
   }
@@ -178,7 +177,7 @@ async function reconcileCameraPaths(attempt = 1) {
         fixedCount++;
       }
       if (!isRunning(cam.id)) {
-        startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path);
+        await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path);
       }
     }
     if (fixedCount > 0) {
@@ -196,9 +195,9 @@ async function reconcileCameraPaths(attempt = 1) {
 
 // Clean shutdown: stop every FFmpeg transcoder and MediaMTX itself, rather than
 // letting `docker stop` just kill the whole process tree indiscriminately.
-function shutdown() {
+async function shutdown() {
   logger.info('Shutting down - stopping transcoders and MediaMTX.');
-  stopAllTranscoders();
+  await stopAllTranscoders();
   stopMediaMTX();
   process.exit(0);
 }

@@ -16,6 +16,9 @@ services:
       # Find your own with `id your_username` if you want something else.
       - PUID=${PUID:-99}
       - PGID=${PGID:-100}
+      # Your local timezone (e.g. Australia/Melbourne) - affects log timestamps only.
+      # Defaults to UTC if unset. Full list: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+      - TZ=${TZ:-UTC}
       # Optional. A random, persistent secret is auto-generated and stored in the
       # data volume on first run if this is left unset - only set this yourself if
       # you specifically want a fixed value (e.g. shared across a migration).
