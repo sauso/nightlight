@@ -52,8 +52,14 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath) {
 
     let lastLine = '';
     proc.stderr.on('data', (chunk) => {
-      const lines = chunk.toString().trim().split('\n');
-      if (lines.length) lastLine = lines[lines.length - 1];
+      chunk
+        .toString()
+        .split('\n')
+        .filter((line) => line.length > 0)
+        .forEach((line) => {
+          lastLine = line;
+          logger.raw(`ffmpeg:${mediamtxPath}`, line);
+        });
     });
 
     proc.on('exit', (code) => {

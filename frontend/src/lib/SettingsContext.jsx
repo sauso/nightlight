@@ -5,12 +5,17 @@ import { FONT_PRESETS, DEFAULT_FONT_CHOICE } from './fonts.js';
 const SettingsContext = createContext(null);
 
 const DEFAULTS = {
-  app_name: 'The Nursery',
+  app_name: 'Nightlight',
   accent_color: '#F5D9A8',
   live_color: '#7FBFA3',
   offline_color: '#E08585',
   timezone: 'UTC',
   font_choice: DEFAULT_FONT_CHOICE,
+  temp_unit: 'C',
+  mqtt_host: '',
+  mqtt_port: '',
+  mqtt_username: '',
+  mqtt_password: '',
 };
 
 function applyTheme(settings) {

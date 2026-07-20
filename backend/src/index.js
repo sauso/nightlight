@@ -8,11 +8,13 @@ import childrenRoutes from './routes/children.js';
 import camerasRoutes from './routes/cameras.js';
 import settingsRoutes from './routes/settings.js';
 import manifestRoutes from './routes/manifest.js';
+import logsRoutes from './routes/logs.js';
 import { requireAuth, requireAuthQueryOrHeader } from './middleware/auth.js';
 import db from './db.js';
 import { upsertPath, isPathConfiguredCorrectly, getPathStatus } from './lib/mediamtx.js';
 import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder.js';
 import { startMediaMTX, stopMediaMTX } from './lib/mediamtxProcess.js';
+import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
 import { logger } from './lib/logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -27,6 +29,7 @@ const DATA_DIR = process.env.DATA_DIR || '/app/data';
 // migration - an old path baked into a data-volume copy that never got updated).
 const mediamtxConfigPath = path.join(__dirname, '..', 'mediamtx.yml');
 startMediaMTX(mediamtxConfigPath);
+refreshMqttConnection(); // no-ops if no broker is configured
 
 const app = express();
 
@@ -107,6 +110,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/children', childrenRoutes);
 app.use('/api/cameras', camerasRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/logs', logsRoutes);
 app.use('/manifest.webmanifest', manifestRoutes);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
@@ -193,12 +197,13 @@ async function reconcileCameraPaths(attempt = 1) {
   }
 }
 
-// Clean shutdown: stop every FFmpeg transcoder and MediaMTX itself, rather than
-// letting `docker stop` just kill the whole process tree indiscriminately.
+// Clean shutdown: stop every FFmpeg transcoder, MediaMTX, and the MQTT connection,
+// rather than letting `docker stop` just kill the whole process tree indiscriminately.
 async function shutdown() {
   logger.info('Shutting down - stopping transcoders and MediaMTX.');
   await stopAllTranscoders();
   stopMediaMTX();
+  stopMqtt();
   process.exit(0);
 }
 process.on('SIGTERM', shutdown);

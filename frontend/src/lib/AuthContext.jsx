@@ -33,6 +33,7 @@ export function AuthProvider({ children }) {
   }
 
   function logout() {
+    api.post('/auth/logout', {}).catch(() => {}); // best-effort - clear local state regardless
     setToken(null);
     setUser(null);
   }

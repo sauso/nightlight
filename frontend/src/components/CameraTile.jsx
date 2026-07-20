@@ -1,16 +1,59 @@
 import { useEffect, useRef, useState } from 'react';
 import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, GripVertical } from 'lucide-react';
+import { useSettings } from '../lib/SettingsContext.jsx';
 import WhepPlayer from './WhepPlayer.jsx';
 import HlsPlayer from './HlsPlayer.jsx';
 import BreathingDot from './BreathingDot.jsx';
 
+function formatReading(mqtt, tempUnit) {
+  if (!mqtt) return null;
+  const parts = [];
+  if (typeof mqtt.temperature === 'number') {
+    const value = tempUnit === 'F' ? (mqtt.temperature * 9) / 5 + 32 : mqtt.temperature;
+    parts.push(`${value.toFixed(1)}°${tempUnit}`);
+  }
+  if (typeof mqtt.humidity === 'number') {
+    parts.push(`${Math.round(mqtt.humidity)}%`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
 export default function CameraTile({ camera, childName, dragHandleProps }) {
-  const [muted, setMuted] = useState(false);
+  const { settings } = useSettings();
+  // Per-device, not synced through the backend - deliberately so a phone sitting next
+  // to you can stay muted while a tablet mounted in the nursery stays unmuted, rather
+  // than muting on one device silently muting it everywhere.
+  const muteKey = `nightlight_muted_${camera.id}`;
+  const [muted, setMuted] = useState(() => {
+    try {
+      return localStorage.getItem(muteKey) === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [mode, setMode] = useState('live'); // 'live' (WebRTC) | 'compat' (HLS)
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const manualModeRef = useRef(false);
   const videoWrapRef = useRef(null);
+
+  // Double-tap to zoom in centered on the tap point; while zoomed, a single tap
+  // re-centers the view on the new point (a way to "walk" the zoom around the frame
+  // without zooming out first), and a double-tap resets back to normal size. Refs
+  // (not just state) track the current values so the tap-timing logic always reads
+  // what's actually true right now, not a stale value captured when the timer/handler
+  // was first created.
+  const [zoomed, setZoomedState] = useState(false);
+  const [zoomOrigin, setZoomOrigin] = useState({ x: 50, y: 50 });
+  const zoomedRef = useRef(false);
+  const lastTapRef = useRef(0);
+  const singleTapTimeoutRef = useRef(null);
+  const DOUBLE_TAP_WINDOW_MS = 300;
+
+  function setZoomed(value) {
+    zoomedRef.current = value;
+    setZoomedState(value);
+  }
 
   // Track fullscreen state for this specific tile, and release the landscape lock on
   // exit so the rest of the app goes back to normal portrait behavior rather than
@@ -88,20 +131,80 @@ export default function CameraTile({ camera, childName, dragHandleProps }) {
     videoEl.requestPictureInPicture().catch(() => {});
   }
 
+  function toggleMute() {
+    setMuted((m) => {
+      const next = !m;
+      try {
+        localStorage.setItem(muteKey, String(next));
+      } catch {
+        // Private browsing / storage disabled - mute still works for this session,
+        // it just won't be remembered next time.
+      }
+      return next;
+    });
+  }
+
+  // Clean up any pending single-tap timer if the tile unmounts mid-wait.
+  useEffect(() => () => clearTimeout(singleTapTimeoutRef.current), []);
+
+  function handleVideoTap(e) {
+    // Only the video area itself should trigger zoom gestures - taps on the overlay
+    // buttons (mute, fullscreen, PiP, settings) shouldn't also register as a tap here.
+    if (e.target.closest('button')) return;
+
+    const rect = videoWrapRef.current.getBoundingClientRect();
+    const point = {
+      x: ((e.clientX - rect.left) / rect.width) * 100,
+      y: ((e.clientY - rect.top) / rect.height) * 100,
+    };
+
+    const now = Date.now();
+    const isDoubleTap = now - lastTapRef.current < DOUBLE_TAP_WINDOW_MS;
+    lastTapRef.current = now;
+
+    if (isDoubleTap) {
+      clearTimeout(singleTapTimeoutRef.current);
+      if (zoomedRef.current) {
+        setZoomed(false); // double-tap while zoomed -> reset to normal size
+      } else {
+        setZoomOrigin(point);
+        setZoomed(true); // double-tap at normal size -> zoom in centered here
+      }
+      return;
+    }
+
+    // Wait briefly to see if a second tap follows before treating this as a
+    // deliberate single tap (which only does something while already zoomed).
+    singleTapTimeoutRef.current = setTimeout(() => {
+      if (zoomedRef.current) {
+        setZoomOrigin(point); // single tap while zoomed -> re-center the view here
+      }
+    }, DOUBLE_TAP_WINDOW_MS);
+  }
+
   return (
     <div className="camera-tile">
-      <div className="camera-tile__video-wrap" ref={videoWrapRef}>
-        {mode === 'live' ? (
-          <WhepPlayer
-            mediamtxPath={camera.mediamtx_path}
-            active
-            muted={muted}
-            onFirstConnectFailed={handleFirstConnectFailed}
-            cameraName={camera.name}
-          />
-        ) : (
-          <HlsPlayer mediamtxPath={camera.mediamtx_path} active muted={muted} />
-        )}
+      <div className="camera-tile__video-wrap" ref={videoWrapRef} onClick={handleVideoTap}>
+        <div
+          className="camera-tile__zoom-layer"
+          style={
+            zoomed
+              ? { transform: 'scale(2)', transformOrigin: `${zoomOrigin.x}% ${zoomOrigin.y}%` }
+              : undefined
+          }
+        >
+          {mode === 'live' ? (
+            <WhepPlayer
+              mediamtxPath={camera.mediamtx_path}
+              active
+              muted={muted}
+              onFirstConnectFailed={handleFirstConnectFailed}
+              cameraName={camera.name}
+            />
+          ) : (
+            <HlsPlayer mediamtxPath={camera.mediamtx_path} active muted={muted} />
+          )}
+        </div>
 
         <button
           className="pip-btn"
@@ -142,7 +245,7 @@ export default function CameraTile({ camera, childName, dragHandleProps }) {
 
         <button
           className="mute-btn"
-          onClick={() => setMuted((m) => !m)}
+          onClick={toggleMute}
           aria-label={muted ? `Unmute ${camera.name}` : `Mute ${camera.name}`}
           aria-pressed={muted}
         >
@@ -169,6 +272,9 @@ export default function CameraTile({ camera, childName, dragHandleProps }) {
           </div>
         </div>
         <div className="status-row">
+          {formatReading(camera.mqtt, settings.temp_unit) && (
+            <span className="camera-tile__reading">{formatReading(camera.mqtt, settings.temp_unit)}</span>
+          )}
           <BreathingDot status={camera.statusLevel || 'connecting'} />
         </div>
       </div>
