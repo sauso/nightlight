@@ -15,15 +15,12 @@ function buildArgs(rtspUrl, mediamtxPath) {
     '-nostdin',
     '-loglevel', 'warning',
     '-rtsp_transport', 'tcp',
-    // This camera occasionally emits one garbage DTS value right at session start
-    // (observed: a single packet jumping to ~4.28 billion, near the 32-bit rollover
-    // point - a firmware bug in the camera itself). genpts alone still anchors off
-    // that corrupted value, poisoning the entire session's timeline for hours.
-    // igndts makes ffmpeg disregard the source's DTS field entirely and synthesize
-    // its own clean, monotonic timeline from frame order instead - so one bad
-    // timestamp from the camera can't derail everything downstream of it.
-    // discardcorrupt drops packets ffmpeg already knows are corrupt outright.
-    '-fflags', '+genpts+igndts+discardcorrupt',
+    // Every RTSP reconnect legitimately starts a fresh, near-zero timestamp epoch;
+    // genpts smooths that transition. This camera also occasionally sends one
+    // corrupted RTP timestamp (jumping to billions) that no amount of PTS/DTS
+    // reinterpretation can clean up after the fact - see the discontinuity
+    // detector below, which is the real defense against that.
+    '-fflags', '+genpts',
     '-i', rtspUrl,
     '-map', '0:v:0',
     '-map', '0:a:0?', // "?" makes these optional, in case a camera has no audio track at all
@@ -61,6 +58,13 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath) {
     processes.set(cameraId, entry);
 
     let lastLine = '';
+    // This camera occasionally sends one corrupted RTP timestamp (jumping to
+    // billions, near the 32-bit rollover point) which poisons every downstream
+    // PTS/DTS calculation for the rest of the session - no ffmpeg flag can clean
+    // that up after the fact once it's happened. Catching the discontinuity as
+    // soon as ffmpeg reports it and restarting immediately limits the damage to
+    // a ~5s reconnect blip instead of hours of garbled output.
+    let restarting = false;
     proc.stderr.on('data', (chunk) => {
       chunk
         .toString()
@@ -69,6 +73,13 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath) {
         .forEach((line) => {
           lastLine = line;
           logger.raw(`ffmpeg:${mediamtxPath}`, line);
+          if (!restarting && line.includes('DTS discontinuity in stream')) {
+            restarting = true;
+            logger.error(
+              `[ffmpeg:${mediamtxPath}] camera sent a corrupt timestamp - restarting now rather than let the session run poisoned`
+            );
+            proc.kill('SIGTERM');
+          }
         });
     });
 
