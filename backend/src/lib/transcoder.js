@@ -15,13 +15,15 @@ function buildArgs(rtspUrl, mediamtxPath) {
     '-nostdin',
     '-loglevel', 'warning',
     '-rtsp_transport', 'tcp',
-    // Some cameras (Renz Room in particular) have an unreliable internal RTP clock -
-    // their own timestamps jump or drift, which with `-c:v copy` below gets passed
-    // straight through and shows up as "Non-monotonic DTS" spam, and occasionally as
-    // an outright broken pipe to MediaMTX when the drift is bad enough. Stamping each
-    // packet with its actual arrival time instead of trusting the camera's own
-    // timestamp sidesteps the bad clock entirely.
-    '-use_wallclock_as_timestamps', '1',
+    // Every RTSP reconnect legitimately starts a fresh, near-zero timestamp epoch -
+    // but ffmpeg's internal counter doesn't rebase to match, so the new (correct, low)
+    // timestamps look "backward" relative to the old session until they numerically
+    // catch up. genpts regenerates smooth, monotonically increasing timestamps from
+    // the stream itself, fixing that discontinuity without touching real arrival
+    // timing - unlike -use_wallclock_as_timestamps (tried and reverted: it introduced
+    // constant "Queue input is backward in time" on the AAC track, since real RTP
+    // packet arrival is bursty and the audio encoder expects evenly-spaced timestamps).
+    '-fflags', '+genpts',
     '-i', rtspUrl,
     '-map', '0:v:0',
     '-map', '0:a:0?', // "?" makes these optional, in case a camera has no audio track at all
@@ -33,6 +35,7 @@ function buildArgs(rtspUrl, mediamtxPath) {
     // other - the same way MediaMTX already silently skips incompatible tracks per protocol.
     '-c:a:0', 'copy',
     '-c:a:1', 'aac', '-b:a:1', '64k', '-ar:1', '48000',
+    '-avoid_negative_ts', 'make_zero',
     '-f', 'rtsp',
     '-rtsp_transport', 'tcp',
     `rtsp://127.0.0.1:8554/${mediamtxPath}`,
