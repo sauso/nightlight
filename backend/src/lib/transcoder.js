@@ -15,15 +15,15 @@ function buildArgs(rtspUrl, mediamtxPath) {
     '-nostdin',
     '-loglevel', 'warning',
     '-rtsp_transport', 'tcp',
-    // Every RTSP reconnect legitimately starts a fresh, near-zero timestamp epoch -
-    // but ffmpeg's internal counter doesn't rebase to match, so the new (correct, low)
-    // timestamps look "backward" relative to the old session until they numerically
-    // catch up. genpts regenerates smooth, monotonically increasing timestamps from
-    // the stream itself, fixing that discontinuity without touching real arrival
-    // timing - unlike -use_wallclock_as_timestamps (tried and reverted: it introduced
-    // constant "Queue input is backward in time" on the AAC track, since real RTP
-    // packet arrival is bursty and the audio encoder expects evenly-spaced timestamps).
-    '-fflags', '+genpts',
+    // This camera occasionally emits one garbage DTS value right at session start
+    // (observed: a single packet jumping to ~4.28 billion, near the 32-bit rollover
+    // point - a firmware bug in the camera itself). genpts alone still anchors off
+    // that corrupted value, poisoning the entire session's timeline for hours.
+    // igndts makes ffmpeg disregard the source's DTS field entirely and synthesize
+    // its own clean, monotonic timeline from frame order instead - so one bad
+    // timestamp from the camera can't derail everything downstream of it.
+    // discardcorrupt drops packets ffmpeg already knows are corrupt outright.
+    '-fflags', '+genpts+igndts+discardcorrupt',
     '-i', rtspUrl,
     '-map', '0:v:0',
     '-map', '0:a:0?', // "?" makes these optional, in case a camera has no audio track at all
