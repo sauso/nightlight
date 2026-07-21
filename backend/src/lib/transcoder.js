@@ -15,6 +15,13 @@ function buildArgs(rtspUrl, mediamtxPath) {
     '-nostdin',
     '-loglevel', 'warning',
     '-rtsp_transport', 'tcp',
+    // Some cameras (Renz Room in particular) have an unreliable internal RTP clock -
+    // their own timestamps jump or drift, which with `-c:v copy` below gets passed
+    // straight through and shows up as "Non-monotonic DTS" spam, and occasionally as
+    // an outright broken pipe to MediaMTX when the drift is bad enough. Stamping each
+    // packet with its actual arrival time instead of trusting the camera's own
+    // timestamp sidesteps the bad clock entirely.
+    '-use_wallclock_as_timestamps', '1',
     '-i', rtspUrl,
     '-map', '0:v:0',
     '-map', '0:a:0?', // "?" makes these optional, in case a camera has no audio track at all
