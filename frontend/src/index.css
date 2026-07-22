@@ -67,7 +67,7 @@ button {
   min-height: 60px;
   display: flex;
   align-items: center;
-  padding: env(safe-area-inset-top) 20px 0;
+  padding: calc(8px + env(safe-area-inset-top)) 20px 8px;
   background: var(--bg-elevated);
   border-bottom: 1px solid var(--border);
 }
