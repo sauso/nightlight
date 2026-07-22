@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Headphones, GripVertical } from 'lucide-react';
+import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical } from 'lucide-react';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { isNativeApp, setBackgroundListening, onBackgroundStopped } from '../lib/nativeBridge.js';
 import WhepPlayer from './WhepPlayer.jsx';
@@ -48,6 +48,24 @@ export default function CameraTile({ camera, childName, dragHandleProps }) {
     }
   });
   const muted = audioState === 'off';
+
+  // 'on' mode should only actually produce audio while the app is genuinely
+  // open and in front - not when it's minimized or the screen is off. Without
+  // this, closing the app while in plain 'on' mode would leave audio playing
+  // for however long Android takes to suspend a backgrounded WebView, which is
+  // both surprising and wasteful. 'bg' mode is deliberately exempt: staying
+  // alive while backgrounded is the entire point of it, backed by the native
+  // foreground service. The Page Visibility API works here without any native
+  // code - Capacitor's WebView fires it correctly when the app is minimized.
+  const [pageVisible, setPageVisible] = useState(() => !document.hidden);
+  useEffect(() => {
+    function handleVisibilityChange() {
+      setPageVisible(!document.hidden);
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+  const effectiveMuted = muted || (audioState === 'on' && !pageVisible);
 
   const [mode, setMode] = useState('live'); // 'live' (WebRTC) | 'compat' (HLS)
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -252,12 +270,12 @@ export default function CameraTile({ camera, childName, dragHandleProps }) {
             <WhepPlayer
               mediamtxPath={camera.mediamtx_path}
               active
-              muted={muted}
+              muted={effectiveMuted}
               onFirstConnectFailed={handleFirstConnectFailed}
               cameraName={camera.name}
             />
           ) : (
-            <HlsPlayer mediamtxPath={camera.mediamtx_path} active muted={muted} />
+            <HlsPlayer mediamtxPath={camera.mediamtx_path} active muted={effectiveMuted} />
           )}
         </div>
 
@@ -306,7 +324,7 @@ export default function CameraTile({ camera, childName, dragHandleProps }) {
           {audioState === 'off' ? (
             <VolumeX size={16} />
           ) : audioState === 'bg' ? (
-            <Headphones size={16} />
+            <Radio size={16} />
           ) : (
             <Volume2 size={16} />
           )}
