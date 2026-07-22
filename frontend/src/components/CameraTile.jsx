@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical } from 'lucide-react';
 import { useSettings } from '../lib/SettingsContext.jsx';
-import { isNativeApp, setBackgroundListening, onBackgroundStopped } from '../lib/nativeBridge.js';
+import { isNativeApp, isSoftReload, setBackgroundListening, onBackgroundStopped } from '../lib/nativeBridge.js';
 import WhepPlayer from './WhepPlayer.jsx';
 import HlsPlayer from './HlsPlayer.jsx';
 import BreathingDot from './BreathingDot.jsx';
@@ -39,9 +39,13 @@ export default function CameraTile({ camera, childName, dragHandleProps }) {
       if (stored === 'true') return 'off'; // legacy boolean values from the old
       if (stored === 'false') return 'on'; // two-state mute
       if (stored === 'on' || stored === 'off') return stored;
-      // A stored 'bg' deliberately restores as 'on': starting a foreground
-      // service silently on app launch would be surprising - background mode is
+      // A stored 'bg' restores as 'bg' across our own background-triggered
+      // reload (isSoftReload) - the foreground service kept running the whole
+      // time, so JS state should catch back up to match it. Only on a genuine
+      // fresh app launch does it collapse to 'on': starting a foreground
+      // service silently on launch would be surprising - background mode is
       // something you switch on for tonight, not a persistent default.
+      if (stored === 'bg') return isSoftReload ? 'bg' : 'on';
       return 'on';
     } catch {
       return 'on';
