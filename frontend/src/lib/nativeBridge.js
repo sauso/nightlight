@@ -14,6 +14,24 @@ export function isNativeApp() {
   return !!window.Capacitor?.isNativePlatform?.();
 }
 
+// True if this JS context has already run once before in this browsing session -
+// i.e. this load came from our own location.reload() (see useReloadAfterBackground
+// in App.jsx, which reloads after a long spell backgrounded to clear up half-broken
+// WebRTC/HLS state), not a genuine fresh launch of the app. sessionStorage survives
+// a reload but is cleared when the WebView itself is destroyed and recreated, which
+// is what lets CameraTile tell the two apart - only a true fresh launch should
+// silently collapse a persisted Background-listening choice back to plain On.
+const SESSION_FLAG_KEY = 'nightlight_session_started';
+export const isSoftReload = (() => {
+  try {
+    const already = sessionStorage.getItem(SESSION_FLAG_KEY) === 'true';
+    sessionStorage.setItem(SESSION_FLAG_KEY, 'true');
+    return already;
+  } catch {
+    return false;
+  }
+})();
+
 function plugin() {
   return window.Capacitor?.Plugins?.BackgroundAudio ?? null;
 }
