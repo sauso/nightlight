@@ -31,7 +31,7 @@ export default function CameraTile({ camera, childName, dragHandleProps }) {
   //   'off' - muted (the old muted state)
   //   'bg'  - audio plays AND a native foreground service keeps it alive with the
   //           screen off / app minimised (native app only)
-  // Tapping the speaker cycles On -> Off -> Background -> On in the app, and just
+  // Tapping the speaker cycles Off -> On -> Background -> Off in the app, and just
   // On <-> Off in a browser where background mode doesn't exist.
   const [audioState, setAudioState] = useState(() => {
     try {
@@ -194,7 +194,7 @@ export default function CameraTile({ camera, childName, dragHandleProps }) {
     setAudioState((current) => {
       let next;
       if (isNativeApp()) {
-        next = current === 'on' ? 'off' : current === 'off' ? 'bg' : 'on';
+        next = current === 'off' ? 'on' : current === 'on' ? 'bg' : 'off';
       } else {
         next = current === 'off' ? 'on' : 'off';
       }
