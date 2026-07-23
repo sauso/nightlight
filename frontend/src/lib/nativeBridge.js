@@ -14,6 +14,16 @@ export function isNativeApp() {
   return !!window.Capacitor?.isNativePlatform?.();
 }
 
+// True if the native foreground service is currently holding a wake lock + wifi
+// lock for at least one camera (see AudioService.kt) - i.e. there's real evidence
+// the process and its network connections were kept alive through however long the
+// app was backgrounded, rather than frozen/suspended by Android. Used by
+// useReloadAfterBackground in App.jsx to decide whether a resume-triggered reload
+// is actually necessary, or would just interrupt a stream that never went stale.
+export function hasActiveBackgroundAudio() {
+  return activeCameras.size > 0;
+}
+
 // True if this JS context has already run once before in this browsing session -
 // i.e. this load came from our own location.reload() (see useReloadAfterBackground
 // in App.jsx, which reloads after a long spell backgrounded to clear up half-broken

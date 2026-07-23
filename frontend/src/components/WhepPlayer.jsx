@@ -245,7 +245,18 @@ export default function WhepPlayer({
 
   return (
     <div className="whep-player">
-      <video ref={videoRef} autoPlay playsInline muted className="whep-video" />
+      {/* Hidden until live: Android WebView renders <video> via a hardware overlay that
+          draws on top of the DOM regardless of stacking order, so an empty video element
+          would otherwise show through the "Connecting…" overlay below as a native
+          placeholder icon. */}
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        className="whep-video"
+        style={{ opacity: state === 'live' ? 1 : 0 }}
+      />
       <audio ref={audioRef} autoPlay />
       {state !== 'live' && (
         <div className={`whep-overlay whep-overlay--${state}`}>

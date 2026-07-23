@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './lib/AuthContext.jsx';
 import { SettingsProvider } from './lib/SettingsContext.jsx';
 import { CamerasProvider } from './lib/CamerasContext.jsx';
+import { isNativeApp, hasActiveBackgroundAudio } from './lib/nativeBridge.js';
 import NavBar from './components/NavBar.jsx';
 import LiveMonitor from './components/LiveMonitor.jsx';
 import InstallPrompt from './components/InstallPrompt.jsx';
@@ -23,6 +24,14 @@ const BACKGROUND_RELOAD_THRESHOLD_MS = 15000;
 // a full reload is what reliably fixes it, so this does that automatically the
 // moment you return, rather than leaving it for a person to notice and do by hand
 // (not ideal for something meant to be glanced at half-asleep).
+//
+// Exception: the Android app's native foreground service (AudioService.kt) holds a
+// wake lock + wifi lock specifically to keep the process and its connections alive
+// while backgrounded - if that was running the whole time, there's no "half-broken
+// network stack" to clean up, and reloading would just interrupt a stream that was
+// deliberately being kept live for background listening. In that case, trust the
+// WhepPlayer/HlsPlayer reconnect-if-actually-dead logic instead (see their own
+// visibilitychange handlers).
 function useReloadAfterBackground() {
   useEffect(() => {
     let hiddenAt = null;
@@ -32,7 +41,12 @@ function useReloadAfterBackground() {
       } else if (document.visibilityState === 'visible' && hiddenAt) {
         const hiddenFor = Date.now() - hiddenAt;
         hiddenAt = null;
-        if (hiddenFor > BACKGROUND_RELOAD_THRESHOLD_MS) {
+        // Checked now, not at hide-time: if the person tapped "Stop" on the
+        // notification partway through, the service (and its wake lock) already
+        // stopped covering the rest of the backgrounded period, so this correctly
+        // falls back to reload in that case.
+        const keptAliveByBackgroundAudio = isNativeApp() && hasActiveBackgroundAudio();
+        if (hiddenFor > BACKGROUND_RELOAD_THRESHOLD_MS && !keptAliveByBackgroundAudio) {
           window.location.reload();
         }
       }

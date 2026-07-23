@@ -20,6 +20,10 @@
 
 html, body, #root {
   height: 100%;
+  /* iOS Safari's elastic overscroll reveals whatever is behind the document past its
+     rendered box - html has no background of its own by default, so that bounce shows
+     up as a flash of white below the fixed bottom nav. Match it to the app background. */
+  background: var(--bg);
 }
 
 /* Static height:100% is based on the layout viewport, which mobile browsers actually
@@ -410,6 +414,10 @@ button {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.whep-video {
+  transition: opacity 0.2s ease;
 }
 
 .whep-overlay {
