@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- "Not a safety device" notice in the README and on the About page: Nightlight is
+  not a medical device and never a substitute for adult supervision.
+
 ## [0.2.0] - 2026-07-23
 
 ### Added
