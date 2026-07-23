@@ -79,13 +79,19 @@ export default function Cameras() {
                 <BreathingDot status={cam.statusLevel || 'connecting'} />
                 <div>
                   <div style={{ fontWeight: 600 }}>{cam.name}</div>
-                  <div className="camera-tile__sub" style={{ wordBreak: 'break-all' }}>{cam.rtsp_url}</div>
+                  {/* rtsp_url is only present for admins - the API redacts it otherwise,
+                      since it usually embeds the camera's own login credentials. */}
+                  {cam.rtsp_url && (
+                    <div className="camera-tile__sub" style={{ wordBreak: 'break-all' }}>{cam.rtsp_url}</div>
+                  )}
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                <button className="icon-btn" onClick={() => openEdit(cam)}>Edit</button>
-                <button className="icon-btn" onClick={() => remove(cam)}>Remove</button>
-              </div>
+              {isAdmin && (
+                <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                  <button className="icon-btn" onClick={() => openEdit(cam)}>Edit</button>
+                  <button className="icon-btn" onClick={() => remove(cam)}>Remove</button>
+                </div>
+              )}
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
               <label>Assigned to</label>

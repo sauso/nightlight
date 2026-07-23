@@ -16,9 +16,13 @@ function isValidRtsp(url) {
 
 router.get('/', async (req, res) => {
   const cameras = db.prepare('SELECT * FROM cameras ORDER BY sort_order, created_at').all();
+  const isAdmin = req.user?.role === 'admin';
   const withStatus = await Promise.all(
-    cameras.map(async (cam) => ({
+    cameras.map(async ({ rtsp_url, ...cam }) => ({
       ...cam,
+      // The RTSP URL usually embeds the camera's own login credentials - only the
+      // admin's camera-management form actually needs it back.
+      ...(isAdmin ? { rtsp_url } : {}),
       status: await getPathStatus(cam.mediamtx_path),
       mqtt: cam.mqtt_topic ? getReading(cam.mqtt_topic) : null,
     }))
@@ -63,14 +67,18 @@ router.post('/', requireAdmin, async (req, res) => {
   res.status(201).json(db.prepare('SELECT * FROM cameras WHERE id = ?').get(id));
 });
 
-router.put('/:id', async (req, res) => {
+// Admin-only, same as adding one: editing includes changing the RTSP URL, which
+// points this server's FFmpeg at an arbitrary address - that's camera management,
+// not day-to-day caregiving. (Reordering and child assignment below stay open to
+// every signed-in user - those are cosmetic.)
+router.put('/:id', requireAdmin, async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
   const { name, rtsp_url, child_id, mqtt_topic } = req.body || {};
-  const newRtsp = rtsp_url !== undefined ? rtsp_url.trim() : existing.rtsp_url;
   if (rtsp_url !== undefined && !isValidRtsp(rtsp_url)) {
     return res.status(400).json({ error: 'A valid rtsp:// URL is required' });
   }
+  const newRtsp = rtsp_url !== undefined ? rtsp_url.trim() : existing.rtsp_url;
   if (newRtsp !== existing.rtsp_url) {
     try {
       await upsertPath(existing.mediamtx_path);
@@ -104,7 +112,7 @@ router.put('/:id/assign', (req, res) => {
   res.json(db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id));
 });
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAdmin, async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
   await stopTranscoder(req.params.id);

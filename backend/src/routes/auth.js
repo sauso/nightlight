@@ -108,10 +108,17 @@ router.post('/setup', loginLimiter, (req, res) => {
   });
 });
 
+// Compared against when the username doesn't exist, so both failure paths cost one
+// bcrypt comparison - otherwise the "no such user" path returns measurably faster
+// than "wrong password", letting response timing confirm which usernames exist.
+const DUMMY_HASH = bcrypt.hashSync('timing-equalizer', 10);
+
 router.post('/login', loginLimiter, (req, res) => {
   const { username, password } = req.body || {};
-  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
-  if (!user || !bcrypt.compareSync(password || '', user.password_hash)) {
+  const user =
+    typeof username === 'string' ? db.prepare('SELECT * FROM users WHERE username = ?').get(username) : null;
+  const hashToCheck = user ? user.password_hash : DUMMY_HASH;
+  if (!bcrypt.compareSync(String(password || ''), hashToCheck) || !user) {
     return res.status(401).json({ error: 'Incorrect username or password' });
   }
   const sessionId = createSession(user.id, req.headers['user-agent']);
@@ -207,6 +214,13 @@ router.put('/users/:id', requireAuth, requireAdmin, (req, res) => {
 
   const password_hash = password ? bcrypt.hashSync(password, 10) : existing.password_hash;
 
+  // A password reset means the old credential can no longer be trusted - any session
+  // opened under it shouldn't outlive it. Spares only the requesting admin's own
+  // current session, for the case where they're resetting their own password.
+  if (password) {
+    db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.params.id, req.user.sid);
+  }
+
   db.prepare(
     'UPDATE users SET username = ?, role = ?, first_name = ?, last_name = ?, password_hash = ? WHERE id = ?'
   ).run(
@@ -233,6 +247,10 @@ router.put('/me/password', requireAuth, loginLimiter, (req, res) => {
   }
   const password_hash = bcrypt.hashSync(new_password, 10);
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(password_hash, req.user.id);
+  // Sign every other device out. Changing your password is exactly the move someone
+  // makes when a logged-in device is lost or no longer trusted - leaving those
+  // sessions valid for the rest of their 30 days would defeat the point.
+  db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.user.id, req.user.sid);
   res.json({ ok: true });
 });
 

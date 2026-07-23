@@ -1,8 +1,11 @@
 # --- Stage 1: build the React frontend ---
 FROM node:24-alpine AS frontend-build
 WORKDIR /frontend
-COPY frontend/package.json ./
-RUN npm install
+# npm ci against the committed lockfile, not npm install against version ranges -
+# the image gets the exact dependency tree that was tested, instead of whatever
+# each range happens to resolve to on the day the image is built.
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
@@ -41,8 +44,8 @@ RUN addgroup -g 1500 nightlight && adduser -D -u 1500 -G nightlight -h /app nigh
 COPY --from=mediamtx-binary /mediamtx /usr/local/bin/mediamtx
 RUN chmod +x /usr/local/bin/mediamtx
 
-COPY backend/package.json ./
-RUN npm install --omit=dev
+COPY backend/package.json backend/package-lock.json ./
+RUN npm ci --omit=dev
 
 COPY backend/src ./src
 COPY --from=frontend-build /frontend/dist ./public
@@ -56,6 +59,10 @@ COPY backend/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
 ENV DATA_DIR=/app/data
+# Express behaves differently outside production mode - most importantly, its default
+# error handler includes the full stack trace (leaking server file paths) in any 500
+# response. This also enables Express's view/route caching.
+ENV NODE_ENV=production
 VOLUME ["/app/data"]
 
 EXPOSE 4000
