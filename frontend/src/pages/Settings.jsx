@@ -26,7 +26,13 @@ export default function Settings() {
 
   useEffect(() => {
     api.get('/settings/mqtt').then((mqtt) => {
-      setForm((f) => ({ ...f, mqtt_host: mqtt.mqtt_host, mqtt_port: mqtt.mqtt_port, mqtt_username: mqtt.mqtt_username }));
+      setForm((f) => ({
+        ...f,
+        mqtt_enabled: mqtt.mqtt_enabled,
+        mqtt_host: mqtt.mqtt_host,
+        mqtt_port: mqtt.mqtt_port,
+        mqtt_username: mqtt.mqtt_username,
+      }));
       setMqttPasswordSet(mqtt.mqtt_password_set);
     }).catch(() => {});
   }, []);
@@ -45,6 +51,7 @@ export default function Settings() {
         timezone: form.timezone,
         font_choice: form.font_choice,
         temp_unit: form.temp_unit,
+        mqtt_enabled: form.mqtt_enabled,
         mqtt_host: form.mqtt_host,
         mqtt_port: form.mqtt_port,
         mqtt_username: form.mqtt_username,
@@ -217,8 +224,16 @@ export default function Settings() {
             <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
               Optional - connects to your existing MQTT broker (e.g. from Home
               Assistant / Zigbee2MQTT) to show temperature and humidity on each
-              camera. Leave the host blank if you don't use this.
+              camera.
             </div>
+            <label className="log-viewer__toggle" style={{ marginBottom: 14 }}>
+              <input
+                type="checkbox"
+                checked={!!form.mqtt_enabled}
+                onChange={(e) => setForm({ ...form, mqtt_enabled: e.target.checked })}
+              />
+              Enable MQTT
+            </label>
             <div className="field">
               <label htmlFor="mqtt-host">Broker host</label>
               <input

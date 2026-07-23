@@ -9,6 +9,7 @@ import camerasRoutes from './routes/cameras.js';
 import settingsRoutes from './routes/settings.js';
 import manifestRoutes from './routes/manifest.js';
 import logsRoutes from './routes/logs.js';
+import aboutRoutes from './routes/about.js';
 import { requireAuth, requireAuthQueryOrHeader } from './middleware/auth.js';
 import db from './db.js';
 import { upsertPath, isPathConfiguredCorrectly, getPathStatus } from './lib/mediamtx.js';
@@ -119,6 +120,7 @@ app.use('/api/children', childrenRoutes);
 app.use('/api/cameras', camerasRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/logs', logsRoutes);
+app.use('/api/about', aboutRoutes);
 app.use('/manifest.webmanifest', manifestRoutes);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));

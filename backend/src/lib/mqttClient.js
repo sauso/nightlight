@@ -8,7 +8,7 @@ const readings = new Map(); // topic -> { temperature?, humidity?, receivedAt }
 
 function getMqttSettings() {
   return db
-    .prepare('SELECT mqtt_host, mqtt_port, mqtt_username, mqtt_password FROM settings WHERE id = ?')
+    .prepare('SELECT mqtt_enabled, mqtt_host, mqtt_port, mqtt_username, mqtt_password FROM settings WHERE id = ?')
     .get('app');
 }
 
@@ -40,13 +40,16 @@ function subscribeAllCameraTopics() {
 export function refreshMqttConnection() {
   const cfg = getMqttSettings();
 
-  if (!cfg.mqtt_host) {
-    // Not configured (or was just cleared) - make sure nothing is left connected.
+  // Disabled counts the same as unconfigured: tear down any live connection and,
+  // critically, don't leave a client endlessly retrying a broker that's deliberately
+  // off. The saved broker config itself is untouched - re-enabling picks it back up.
+  if (!cfg.mqtt_host || !cfg.mqtt_enabled) {
     if (client) {
       client.end(true);
       client = null;
       currentConfigKey = null;
       readings.clear();
+      logger.info('[mqtt] Disconnected (disabled or unconfigured).');
     }
     return;
   }

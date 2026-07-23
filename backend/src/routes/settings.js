@@ -18,7 +18,7 @@ function getSettings() {
 // broker credentials have no reason to ever reach a client that isn't the admin
 // settings page specifically.
 function toPublicSettings(s) {
-  const { mqtt_host, mqtt_port, mqtt_username, mqtt_password, ...pub } = s;
+  const { mqtt_host, mqtt_port, mqtt_username, mqtt_password, mqtt_enabled, ...pub } = s;
   return pub;
 }
 
@@ -33,6 +33,7 @@ router.get('/', (req, res) => {
 router.get('/mqtt', requireAuth, requireAdmin, (req, res) => {
   const s = getSettings();
   res.json({
+    mqtt_enabled: !!s.mqtt_enabled,
     mqtt_host: s.mqtt_host || '',
     mqtt_port: s.mqtt_port || '',
     mqtt_username: s.mqtt_username || '',
@@ -53,7 +54,7 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
   const existing = getSettings();
   const {
     app_name, accent_color, live_color, offline_color, timezone, font_choice,
-    temp_unit, mqtt_host, mqtt_port, mqtt_username, mqtt_password,
+    temp_unit, mqtt_enabled, mqtt_host, mqtt_port, mqtt_username, mqtt_password,
   } = req.body || {};
 
   if (app_name !== undefined && !app_name.trim()) {
@@ -81,7 +82,7 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
   db.prepare(
     `UPDATE settings
      SET app_name = ?, accent_color = ?, live_color = ?, offline_color = ?, timezone = ?, font_choice = ?,
-         temp_unit = ?, mqtt_host = ?, mqtt_port = ?, mqtt_username = ?, mqtt_password = ?
+         temp_unit = ?, mqtt_enabled = ?, mqtt_host = ?, mqtt_port = ?, mqtt_username = ?, mqtt_password = ?
      WHERE id = ?`
   ).run(
     app_name?.trim() || existing.app_name,
@@ -91,6 +92,7 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     timezone || existing.timezone,
     font_choice || existing.font_choice,
     temp_unit || existing.temp_unit,
+    mqtt_enabled !== undefined ? (mqtt_enabled ? 1 : 0) : existing.mqtt_enabled,
     mqtt_host !== undefined ? (mqtt_host || '').trim() || null : existing.mqtt_host,
     mqtt_port !== undefined ? (mqtt_port ? parseInt(mqtt_port, 10) : null) : existing.mqtt_port,
     mqtt_username !== undefined ? (mqtt_username || '').trim() || null : existing.mqtt_username,

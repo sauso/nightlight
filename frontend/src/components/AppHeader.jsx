@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Menu, Palette, Settings as SettingsIcon, LogOut, Server } from 'lucide-react';
+import { Menu, Palette, Settings as SettingsIcon, LogOut, Server, Info } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { isNativeApp, changeServer } from '../lib/nativeBridge.js';
 
@@ -67,6 +67,10 @@ export default function AppHeader({ title }) {
                   Change server
                 </button>
               )}
+              <button className="hamburger-item" onClick={() => go('/about')}>
+                <Info size={19} />
+                About
+              </button>
               <button className="hamburger-item hamburger-item--logout" onClick={handleLogout}>
                 <LogOut size={19} />
                 Sign out
