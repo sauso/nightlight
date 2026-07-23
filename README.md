@@ -6,6 +6,12 @@ for sub-second latency — much lower than a typical HLS-based viewer. Installab
 phone's home screen as a standalone app (PWA). No cloud, no subscription, no account
 anywhere but your own network.
 
+> **⚠️ Not a safety device.** Nightlight is a convenience tool, not a safety device. It is
+> not a medical device, is not certified for safety monitoring of any kind, and must never
+> be used as a substitute for adult supervision. Streams can drop, apps can be killed by
+> the operating system, networks fail — never rely on this software to alert you to a
+> child in distress.
+
 ## How it works
 
 - **FFmpeg** pulls each camera's RTSP stream, copies the video through untouched, and

@@ -59,6 +59,15 @@ export default function About() {
             Donate via PayPal
           </a>
         </div>
+
+        <div className="card">
+          <div className="camera-tile__sub">
+            <strong>Not a safety device.</strong> Nightlight is a convenience tool — not a
+            medical device, and not certified for safety monitoring of any kind. Streams
+            can drop, apps can be stopped by the operating system, networks fail. Never
+            use it as a substitute for adult supervision.
+          </div>
+        </div>
       </main>
     </>
   );
