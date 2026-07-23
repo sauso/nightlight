@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Menu, Palette, Settings as SettingsIcon, LogOut } from 'lucide-react';
+import { Menu, Palette, Settings as SettingsIcon, LogOut, Server } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext.jsx';
+import { isNativeApp, changeServer } from '../lib/nativeBridge.js';
 
 // The hamburger menu lives here, inside the header, rather than floating independently
 // with its own position:fixed - the header itself is pinned to the top (position:
@@ -60,6 +61,12 @@ export default function AppHeader({ title }) {
                 <SettingsIcon size={19} />
                 Account
               </button>
+              {isNativeApp() && (
+                <button className="hamburger-item" onClick={changeServer}>
+                  <Server size={19} />
+                  Change server
+                </button>
+              )}
               <button className="hamburger-item hamburger-item--logout" onClick={handleLogout}>
                 <LogOut size={19} />
                 Sign out

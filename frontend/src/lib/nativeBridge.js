@@ -24,6 +24,21 @@ export function hasActiveBackgroundAudio() {
   return activeCameras.size > 0;
 }
 
+// Forget the saved server address and restart the native shell back into its
+// first-run setup screen (see ServerConfigPlugin.kt in nightlight-android). The
+// whole app reboots into a different page, so nothing after the restart() call
+// here ever runs.
+export async function changeServer() {
+  const p = window.Capacitor?.Plugins?.ServerConfig;
+  if (!p) return;
+  try {
+    await p.clear();
+    await p.restart();
+  } catch (err) {
+    console.warn('ServerConfig plugin call failed', err);
+  }
+}
+
 // True if this JS context has already run once before in this browsing session -
 // i.e. this load came from our own location.reload() (see useReloadAfterBackground
 // in App.jsx, which reloads after a long spell backgrounded to clear up half-broken
