@@ -9,6 +9,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-07-24
+
+### Fixed
+- A camera glitch could leave two FFmpeg processes fighting over the same
+  MediaMTX path indefinitely - MediaMTX lets a new publisher override the
+  current one, so each process kicked the other off and restarted, flapping the
+  stream every ~10 seconds (observed: 901 restarts over 2.5 hours overnight).
+  A crashed process now only restarts itself if it still owns the camera, and
+  re-checks ownership when its 5-second restart timer fires.
+
 ## [0.2.1] - 2026-07-23
 
 ### Added
@@ -60,7 +70,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/sauso/nightlight/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/sauso/nightlight/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/sauso/nightlight/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sauso/nightlight/releases/tag/v0.1.0
