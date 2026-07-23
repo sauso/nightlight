@@ -420,6 +420,17 @@ button {
   transition: opacity 0.2s ease;
 }
 
+/* Android WebView shows its own "tap to start" play button on a sourceless/paused
+   <video> even with no controls attribute - that's the ugly gray circle+triangle icon
+   before a stream connects. It's a UA shadow-DOM control, not something opacity on the
+   element reliably suppresses, so kill it directly. */
+.whep-video::-webkit-media-controls-start-playback-button,
+.whep-video::-webkit-media-controls-overlay-play-button {
+  display: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 .whep-overlay {
   position: absolute;
   inset: 0;
