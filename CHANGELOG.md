@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-23
+
 ### Added
 - "Not a safety device" notice in the README and on the About page: Nightlight is
   not a medical device and never a substitute for adult supervision.
@@ -58,6 +60,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/sauso/nightlight/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/sauso/nightlight/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sauso/nightlight/releases/tag/v0.1.0
