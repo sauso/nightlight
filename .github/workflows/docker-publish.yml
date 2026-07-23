@@ -6,6 +6,14 @@ on:
     tags: ['v*']
   workflow_dispatch: {}
 
+# A release pushes a commit to main AND a v* tag - two push events, two runs of
+# identical code. The tag run's published tags are a superset of the branch run's
+# (latest + sha + semver vs latest + sha), so keying concurrency on the commit lets
+# the tag run cancel the redundant branch run instead of building twice.
+concurrency:
+  group: docker-publish-${{ github.sha }}
+  cancel-in-progress: true
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
