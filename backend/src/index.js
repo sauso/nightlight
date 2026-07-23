@@ -33,6 +33,14 @@ refreshMqttConnection(); // no-ops if no broker is configured
 
 const app = express();
 
+// The app is reached through a reverse proxy for remote access (see the HLS comment in
+// mediamtx.yml), which sets X-Forwarded-For - trusting only loopback (not a blanket
+// `true`) means only a proxy running on this same host can supply that header, so it
+// can't be spoofed by a client to fake its IP. Without this, Express falls back to the
+// proxy's own loopback address for every request, which defeats the login route's
+// per-IP rate limiting (see auth.js) for anyone connecting through the proxy.
+app.set('trust proxy', 'loopback');
+
 // CSP is deliberately disabled here rather than misconfigured: the custom theming
 // feature applies colors via inline styles (document.documentElement.style...), and
 // WebRTC connects out to a STUN server - both need careful, tested CSP directives to
