@@ -142,6 +142,17 @@ app.listen(PORT, () => {
 // this makes it self-heal within a few minutes instead of needing a manual restart.
 setInterval(reconcileCameraPaths, 5 * 60 * 1000);
 
+// Housekeeping: every login inserts a sessions row, and only an explicit logout
+// deletes it, so abandoned rows accumulate forever. Anything idle past the JWT's own
+// 30-day lifetime (see routes/auth.js) can never authenticate again regardless, so
+// deleting it changes nothing except table size.
+function purgeExpiredSessions() {
+  const { changes } = db.prepare("DELETE FROM sessions WHERE last_seen_at < datetime('now', '-31 days')").run();
+  if (changes > 0) logger.info(`Purged ${changes} expired session(s).`);
+}
+purgeExpiredSessions();
+setInterval(purgeExpiredSessions, 24 * 60 * 60 * 1000);
+
 // Second, independent layer of defense: even with FFmpeg's own read timeout (see
 // transcoder.js), a stalled connection could conceivably hang in a way that never
 // triggers it. This watches MediaMTX's own "is this path actually receiving frames"
