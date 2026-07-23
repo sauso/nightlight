@@ -8,6 +8,12 @@ function whepUrl(mediamtxPath) {
   return `/live/${mediamtxPath}/whep`;
 }
 
+// Matches .camera-tile__video-wrap's background. A blank <video> with no poster is what
+// makes some WebViews draw their own default "start playback" icon over it - supplying
+// any poster, even a flat color, is the one fix that's reliably honored everywhere.
+const BLANK_POSTER =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3Crect width='1' height='1' fill='%230a0d1c'/%3E%3C/svg%3E";
+
 export default function WhepPlayer({
   mediamtxPath,
   active,
@@ -245,15 +251,16 @@ export default function WhepPlayer({
 
   return (
     <div className="whep-player">
-      {/* Hidden until live: Android WebView renders <video> via a hardware overlay that
-          draws on top of the DOM regardless of stacking order, so an empty video element
-          would otherwise show through the "Connecting…" overlay below as a native
-          placeholder icon. */}
+      {/* poster + opacity:0 until live - the Android app's WebView draws its own default
+          "start playback" icon over a blank/sourceless <video>, showing through the
+          "Connecting…" overlay below. Belt-and-suspenders against whichever mechanism
+          is actually responsible on that WebView. */}
       <video
         ref={videoRef}
         autoPlay
         playsInline
         muted
+        poster={BLANK_POSTER}
         className="whep-video"
         style={{ opacity: state === 'live' ? 1 : 0 }}
       />
