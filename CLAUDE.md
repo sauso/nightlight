@@ -9,6 +9,10 @@ child) over the home network via low-latency WebRTC, installable as a PWA. Runs 
 Docker container (host networking) bundling three processes: the Node backend, MediaMTX, and
 one FFmpeg process per camera.
 
+Every user-visible change must be recorded under `[Unreleased]` in `CHANGELOG.md` in the
+same commit (Keep a Changelog format, semver — see the changelog's own header for the
+release procedure).
+
 ## Commands
 
 There is no root-level build — `backend/` and `frontend/` are independent npm projects with
