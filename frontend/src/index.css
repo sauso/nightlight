@@ -875,6 +875,39 @@ button {
   color: var(--text-secondary);
 }
 
+/* --- About page --- */
+.about-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.about-hero__icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  flex-shrink: 0;
+  box-shadow: 0 8px 30px rgba(245, 217, 168, 0.18);
+}
+
+.about-hero__name {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.about-link {
+  text-decoration: none;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.about-link svg {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
 /* --- Log viewer --- */
 .log-viewer__toolbar {
   display: flex;
@@ -889,6 +922,32 @@ button {
   gap: 6px;
   font-size: 13px;
   color: var(--text-secondary);
+}
+
+.log-viewer__filter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.log-viewer__filter {
+  flex: 1;
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 14px;
+}
+
+.log-viewer__filter:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.log-viewer__filter-count {
+  flex-shrink: 0;
 }
 
 .log-viewer__box {

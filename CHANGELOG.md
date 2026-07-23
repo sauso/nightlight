@@ -9,6 +9,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-23
+
+### Added
+- MQTT can now be switched off in Settings without losing the saved broker
+  config - previously the only "off" was clearing the host, and a temporarily
+  stopped broker meant endless reconnect attempts in the logs.
+- Text filter on the log viewer (case-insensitive, with a match count) - much
+  easier to find specific events on a phone.
+- About page in the menu: app version, GitHub / changelog / issue links, and a
+  way to support the project.
+
 ## [0.1.0] - 2026-07-23
 
 ### Added
@@ -43,5 +54,6 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/sauso/nightlight/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sauso/nightlight/releases/tag/v0.1.0

@@ -102,6 +102,12 @@ if (!settingsColumns.includes('mqtt_host')) {
   db.exec('ALTER TABLE settings ADD COLUMN mqtt_username TEXT');
   db.exec('ALTER TABLE settings ADD COLUMN mqtt_password TEXT');
 }
+// Separate on/off switch rather than "blank host means off" - lets the broker
+// config stay saved while MQTT is temporarily disabled (e.g. broker down for
+// maintenance) instead of the client endlessly retrying a dead broker.
+if (!settingsColumns.includes('mqtt_enabled')) {
+  db.exec('ALTER TABLE settings ADD COLUMN mqtt_enabled INTEGER NOT NULL DEFAULT 1');
+}
 
 if (!camerasColumns.includes('mqtt_topic')) {
   db.exec('ALTER TABLE cameras ADD COLUMN mqtt_topic TEXT');

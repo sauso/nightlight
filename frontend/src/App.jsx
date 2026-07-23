@@ -12,6 +12,7 @@ import Children from './pages/Children.jsx';
 import Cameras from './pages/Cameras.jsx';
 import Account from './pages/Account.jsx';
 import Settings from './pages/Settings.jsx';
+import About from './pages/About.jsx';
 
 // How long the app needs to have been backgrounded before we reload on return. Short
 // enough to catch a real "put the phone away for a bit" gap, long enough that quickly
@@ -95,6 +96,7 @@ function Shell() {
                     <Route path="/cameras" element={<Cameras />} />
                     <Route path="/settings" element={<AdminProtected><Settings /></AdminProtected>} />
                     <Route path="/account" element={<Account />} />
+                    <Route path="/about" element={<About />} />
                   </Routes>
                   <NavBar />
                 </div>
