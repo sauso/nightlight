@@ -84,13 +84,24 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath) {
     });
 
     proc.on('exit', (code) => {
-      if (processes.get(cameraId) === entry) processes.delete(cameraId);
-      if (!entry.stopped) {
+      // Only the entry currently tracked in the map "owns" this camera. A stale
+      // process (superseded while it was still running) must NOT schedule its own
+      // resurrection: MediaMTX lets a new publisher override the current one, so a
+      // second lineage doesn't fail fast - it kicks the legitimate one off the
+      // path, which then restarts and kicks it back, indefinitely. That exact
+      // ping-pong once flapped a camera every ~10 seconds for 2.5 hours (901
+      // restarts) after a camera glitch got two lineages running at once.
+      const wasTracked = processes.get(cameraId) === entry;
+      if (wasTracked) processes.delete(cameraId);
+      if (!entry.stopped && wasTracked) {
         logger.error(
           `[ffmpeg:${mediamtxPath}] exited (code ${code}), restarting in 5s. Last output: ${lastLine}`
         );
         setTimeout(() => {
-          if (!entry.stopped) launch();
+          // Re-checked at fire time too: startTranscoder (watchdog, camera edit)
+          // may have started a new owner during the 5s delay - launching anyway
+          // would create exactly the two-lineage fight described above.
+          if (!entry.stopped && !processes.has(cameraId)) launch();
         }, RESTART_DELAY_MS);
       }
     });
