@@ -9,6 +9,7 @@ import camerasRoutes from './routes/cameras.js';
 import settingsRoutes from './routes/settings.js';
 import manifestRoutes from './routes/manifest.js';
 import logsRoutes from './routes/logs.js';
+import eventsRoutes from './routes/events.js';
 import aboutRoutes from './routes/about.js';
 import { requireAuth, requireAuthQueryOrHeader } from './middleware/auth.js';
 import db from './db.js';
@@ -17,6 +18,7 @@ import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder
 import { startMediaMTX, stopMediaMTX } from './lib/mediamtxProcess.js';
 import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
 import { logger } from './lib/logger.js';
+import { recordCameraEvent, EVENT } from './lib/cameraEvents.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || '/app/data';
@@ -120,6 +122,7 @@ app.use('/api/children', childrenRoutes);
 app.use('/api/cameras', camerasRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/logs', logsRoutes);
+app.use('/api/events', eventsRoutes);
 app.use('/api/about', aboutRoutes);
 app.use('/manifest.webmanifest', manifestRoutes);
 
@@ -161,6 +164,12 @@ setInterval(purgeExpiredSessions, 24 * 60 * 60 * 1000);
 // status directly, and force-restarts a camera's transcoder if it's been stuck
 // not-ready for too long - regardless of what the FFmpeg process itself is doing.
 const notReadySince = new Map(); // camera_id -> timestamp
+// Stable online/offline status per camera, so the Camera history panel gets one clean
+// "offline" event when a camera actually stops and one "online" event when it comes
+// back - not a new event every 15s poll while it stays down. Seeded lazily: the first
+// time we see a camera we adopt its current state silently (no event), so a restart of
+// the app doesn't log a phantom "came online" for every already-healthy camera.
+const onlineState = new Map(); // camera_id -> boolean
 const WATCHDOG_INTERVAL_MS = 15 * 1000;
 const STUCK_THRESHOLD_MS = 30 * 1000;
 
@@ -168,6 +177,21 @@ setInterval(async () => {
   const cameras = db.prepare('SELECT * FROM cameras').all();
   for (const cam of cameras) {
     const status = await getPathStatus(cam.mediamtx_path);
+
+    // Record sustained up/down transitions (see onlineState above). A brief blip that
+    // self-heals between two polls never flips this and so never logs an event here -
+    // those fine-grained restarts are recorded by the transcoder itself instead.
+    const wasOnline = onlineState.get(cam.id);
+    if (wasOnline === undefined) {
+      onlineState.set(cam.id, status.ready); // seed silently, no event
+    } else if (status.ready && !wasOnline) {
+      onlineState.set(cam.id, true);
+      recordCameraEvent(cam.id, cam.name, EVENT.ONLINE, 'stream recovered');
+    } else if (!status.ready && wasOnline) {
+      onlineState.set(cam.id, false);
+      recordCameraEvent(cam.id, cam.name, EVENT.OFFLINE, 'stream stopped delivering frames');
+    }
+
     if (status.ready) {
       notReadySince.delete(cam.id);
       continue;
@@ -179,7 +203,8 @@ setInterval(async () => {
       logger.error(
         `Camera "${cam.name}" has been unready for over ${STUCK_THRESHOLD_MS / 1000}s - force-restarting its transcoder.`
       );
-      await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path);
+      recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'force-restarted by watchdog (unready 30s+)');
+      await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
       notReadySince.delete(cam.id);
     }
   }
@@ -202,7 +227,7 @@ async function reconcileCameraPaths(attempt = 1) {
         fixedCount++;
       }
       if (!isRunning(cam.id)) {
-        await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path);
+        await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
       }
     }
     if (fixedCount > 0) {

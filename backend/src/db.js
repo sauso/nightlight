@@ -67,6 +67,22 @@ db.exec(`
     last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
+
+  -- A persistent history of camera up/down/restart events, so "was that the camera or
+  -- my phone?" can be answered after the fact from the app itself, not just by SSHing in
+  -- to read docker logs. camera_name is denormalized (copied in at insert time) rather
+  -- than joined, so the history survives the camera being deleted or renamed - it's a
+  -- record of what happened, not a live foreign-key relationship. No FK to cameras for
+  -- the same reason. Pruned by lib/cameraEvents.js so it can't grow unbounded.
+  CREATE TABLE IF NOT EXISTS camera_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    camera_id TEXT NOT NULL,
+    camera_name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    detail TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_camera_events_created_at ON camera_events(created_at);
 `);
 
 // Migrations: columns added after the initial release, for databases created before them.

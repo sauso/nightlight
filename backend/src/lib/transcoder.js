@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import { logger } from './logger.js';
+import { recordCameraEvent, EVENT } from './cameraEvents.js';
 
 // camera_id -> { proc, stopped }
 const processes = new Map();
@@ -43,7 +44,7 @@ export function isRunning(cameraId) {
   return processes.has(cameraId);
 }
 
-export async function startTranscoder(cameraId, rtspUrl, mediamtxPath) {
+export async function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraName = mediamtxPath) {
   // Wait for any previous process for this camera to actually be gone before
   // starting a new one - previously this fired stop and start back-to-back, which
   // left a real window where the old FFmpeg process was still holding the MediaMTX
@@ -78,6 +79,7 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath) {
             logger.error(
               `[ffmpeg:${mediamtxPath}] camera sent a corrupt timestamp - restarting now rather than let the session run poisoned`
             );
+            recordCameraEvent(cameraId, cameraName, EVENT.RESTART, 'camera sent a corrupt timestamp');
             proc.kill('SIGTERM');
           }
         });
@@ -97,6 +99,11 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath) {
         logger.error(
           `[ffmpeg:${mediamtxPath}] exited (code ${code}), restarting in 5s. Last output: ${lastLine}`
         );
+        // The DTS-discontinuity path already recorded its own, more specific event just
+        // before killing the process - don't double-log that same restart here.
+        if (!restarting) {
+          recordCameraEvent(cameraId, cameraName, EVENT.RESTART, `stream ended (exit code ${code})`);
+        }
         setTimeout(() => {
           // Re-checked at fire time too: startTranscoder (watchdog, camera edit)
           // may have started a new owner during the 5s delay - launching anyway

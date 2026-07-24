@@ -9,6 +9,20 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-24
+
+### Added
+- **Camera history** panel in Settings (admin): a persistent, at-a-glance log of camera
+  drop-outs, recoveries, and transcoder restarts, so "was that the camera, the server, or
+  just my phone?" can be answered from the app instead of by reading `docker logs`. A real
+  outage shows up here (every device saw it); a camera stuck on only one phone with nothing
+  in the history is that phone's WebRTC connection - reopen the app. Kept for up to 30 days
+  and hard-capped so it can't grow the data volume unbounded.
+- `KNOWN-ISSUES.md`, a catalogue of understood quirks (camera-firmware glitches, the
+  wedged-WebRTC-on-one-device case, the 30s watchdog recovery window, DTS log noise) with
+  what each means and whether it needs any action. Linked from the README's Troubleshooting
+  section, which also gained a note about the reopen-the-app fix for a stuck camera tile.
+
 ## [0.2.5] - 2026-07-24
 
 ### Fixed
@@ -91,7 +105,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/sauso/nightlight/compare/v0.2.5...v0.3.0
 [0.2.5]: https://github.com/sauso/nightlight/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/sauso/nightlight/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/sauso/nightlight/compare/v0.2.2...v0.2.3
