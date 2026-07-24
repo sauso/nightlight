@@ -9,6 +9,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-07-24
+
+### Security
+- Upgraded react-router 6 → 7, clearing a moderate advisory (GHSA-337j-9hxr-rhxg,
+  an SSR-only issue that this client-only SPA was never exposed to). No API
+  changes were needed - the app uses only React Router's library-mode surface,
+  which is unchanged in v7.
+
 ## [0.2.2] - 2026-07-24
 
 ### Fixed
@@ -70,7 +78,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/sauso/nightlight/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/sauso/nightlight/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/sauso/nightlight/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/sauso/nightlight/compare/v0.1.0...v0.2.0
