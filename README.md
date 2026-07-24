@@ -185,9 +185,11 @@ UTC, so they line up with when you actually remember something happening.
 - **A camera shows disconnected for a few seconds after opening the app and doesn't come
   back**: this is usually a stale WebRTC connection on the phone itself, not the camera or
   server — the video connection can get "wedged" after the phone sleeps, switches networks,
-  or hands off Wi-Fi/cellular, and won't always re-establish on its own. Just close and
-  reopen the app (or pull-to-refresh); it reconnects immediately. If a camera is *actually*
-  down, every device sees it, not just one — check the logs (below) to tell the two apart.
+  or hands off Wi-Fi/cellular, and won't always re-establish on its own. **Pull down on the
+  camera dashboard to reconnect** — this works in the browser and in the mobile apps, and
+  rebuilds the connection without a full restart. If a camera is *actually* down, every
+  device sees it, not just one — check the Camera history panel (Settings) or the logs
+  (below) to tell the two apart.
 - **Checking whether MediaMTX has registered your cameras**: its API is loopback-only (not
   reachable directly from a browser), so check it from inside the container:
   ```bash

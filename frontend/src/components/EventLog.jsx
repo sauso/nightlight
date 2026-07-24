@@ -104,8 +104,8 @@ export default function EventLog() {
       <div className="camera-tile__sub" style={{ marginTop: 6 }}>
         Camera up/down and restart history (kept for up to 30 days). A drop that shows here
         was real - every device saw it. A camera that looks stuck on only one phone, with
-        nothing here, is usually that phone's connection - reopen the app. See
-        <code>KNOWN-ISSUES.md</code> for more.
+        nothing here, is usually that phone's connection - pull down on the dashboard to
+        reconnect. See <code>KNOWN-ISSUES.md</code> for more.
       </div>
     </div>
   );

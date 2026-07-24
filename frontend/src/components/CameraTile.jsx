@@ -19,7 +19,7 @@ function formatReading(mqtt, tempUnit) {
   return parts.length > 0 ? parts.join(' · ') : null;
 }
 
-export default function CameraTile({ camera, childName, dragHandleProps }) {
+export default function CameraTile({ camera, childName, dragHandleProps, refreshNonce = 0 }) {
   const { settings } = useSettings();
   // Per-device, not synced through the backend - deliberately so a phone sitting next
   // to you can stay muted while a tablet mounted in the nursery stays unmuted, rather
@@ -270,8 +270,15 @@ export default function CameraTile({ camera, childName, dragHandleProps }) {
               : undefined
           }
         >
+          {/* refreshNonce is part of the key: a pull-to-refresh bumps it, which remounts
+              the player, tearing down and rebuilding the stream connection from scratch.
+              This is the in-app equivalent of restarting the app to clear a WebRTC
+              connection that's wedged "connected" but no longer delivering frames - and
+              it works inside the native WebView, where a browser refresh gesture doesn't
+              exist. Keyed here rather than on the tile so mute/zoom/mode state survives. */}
           {mode === 'live' ? (
             <WhepPlayer
+              key={`live-${refreshNonce}`}
               mediamtxPath={camera.mediamtx_path}
               active
               muted={effectiveMuted}
@@ -279,7 +286,12 @@ export default function CameraTile({ camera, childName, dragHandleProps }) {
               cameraName={camera.name}
             />
           ) : (
-            <HlsPlayer mediamtxPath={camera.mediamtx_path} active muted={effectiveMuted} />
+            <HlsPlayer
+              key={`compat-${refreshNonce}`}
+              mediamtxPath={camera.mediamtx_path}
+              active
+              muted={effectiveMuted}
+            />
           )}
         </div>
 

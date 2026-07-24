@@ -9,6 +9,21 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-24
+
+### Added
+- **Pull-to-refresh** on the camera dashboard: pull down to rebuild every camera's stream
+  connection without restarting the app. This is the fix for a camera that shows
+  disconnected on one device and won't come back on its own - a WebRTC connection that's
+  wedged "connected" but no longer delivering frames. Crucially it works inside the native
+  mobile apps too, where the browser's own pull-to-refresh gesture doesn't exist (so the
+  previous "just pull to refresh" advice couldn't actually be followed there). The
+  browser's native page-reload pull is suppressed so it can't fire underneath it.
+
+### Changed
+- Troubleshooting docs, the Camera history panel, and `KNOWN-ISSUES.md` now point to
+  pull-to-refresh (which works everywhere) rather than "close and reopen the app".
+
 ## [0.3.0] - 2026-07-24
 
 ### Added
@@ -105,7 +120,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/sauso/nightlight/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sauso/nightlight/compare/v0.2.5...v0.3.0
 [0.2.5]: https://github.com/sauso/nightlight/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/sauso/nightlight/compare/v0.2.3...v0.2.4

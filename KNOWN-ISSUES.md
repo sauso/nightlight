@@ -18,8 +18,9 @@ sleeps, changes networks, or hands off between Wi-Fi and cellular — the connec
 dead but the browser doesn't always tear it down and re-negotiate automatically. The
 server and camera are healthy; only that one client's connection is stuck.
 
-**What to do:** Close and reopen the app (or pull-to-refresh). It forces a fresh WebRTC
-handshake and reconnects immediately.
+**What to do:** **Pull down** on the camera dashboard to reconnect — this works in the
+browser *and* in the mobile apps, and rebuilds the stream connections without a full app
+restart. (Closing and reopening the app also works, but you shouldn't need to.)
 
 **Telling this apart from a real outage:** If a camera is genuinely down, *every* device
 sees it offline, and the **Camera history** panel (Settings → admin) records an

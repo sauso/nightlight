@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
+import { RefreshCw } from 'lucide-react';
 import {
   DndContext,
   PointerSensor,
@@ -10,6 +11,7 @@ import {
 import { SortableContext, rectSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
+import { usePullToRefresh } from '../lib/usePullToRefresh.js';
 import { api } from '../lib/api.js';
 import AppHeader from './AppHeader.jsx';
 import SortableCameraTile from './SortableCameraTile.jsx';
@@ -23,6 +25,18 @@ export default function LiveMonitor() {
   const isActive = location.pathname === '/';
   const { kids, cameras, error } = useCameras();
   const { settings } = useSettings();
+
+  // Bumping this remounts every camera player (see CameraTile), which rebuilds each
+  // stream connection from scratch - the in-app equivalent of restarting the app to
+  // clear a wedged WebRTC connection. Driven by pull-to-refresh below.
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const handleRefresh = useCallback(() => {
+    setRefreshNonce((n) => n + 1);
+  }, []);
+  const { containerRef, pull, refreshing, dragging, armed } = usePullToRefresh({
+    enabled: isActive,
+    onRefresh: handleRefresh,
+  });
 
   // A single flat, freely-reorderable list rather than grouped-by-child sections -
   // grouping doesn't mix well with free drag-reordering across children, and each
@@ -85,10 +99,37 @@ export default function LiveMonitor() {
 
   return (
     <div
+      ref={containerRef}
       className={`live-monitor ${isActive ? 'live-monitor--active' : 'live-monitor--hidden'}`}
       aria-hidden={!isActive}
     >
       <AppHeader title={settings.app_name} />
+
+      {/* Pull-to-refresh indicator. Its own height is what pushes the content down (in
+          normal flow), so there's no doubled offset from also translating the grid. The
+          icon rotates as you pull and spins while the reconnect runs. aria-hidden - it's
+          a transient affordance, not content. */}
+      <div
+        className={`ptr-indicator${refreshing ? ' ptr-indicator--spinning' : ''}`}
+        style={{
+          height: pull,
+          opacity: pull > 0 || refreshing ? 1 : 0,
+          transition: dragging ? 'none' : 'height 0.25s ease, opacity 0.25s ease',
+        }}
+        aria-hidden="true"
+      >
+        <RefreshCw
+          size={22}
+          className="ptr-indicator__icon"
+          style={{
+            transform: refreshing ? undefined : `rotate(${Math.min(180, pull * 2.2)}deg)`,
+          }}
+        />
+        <span className="ptr-indicator__label">
+          {refreshing ? 'Reconnecting…' : armed ? 'Release to reconnect' : 'Pull to reconnect'}
+        </span>
+      </div>
+
       <main className="app-main app-main--wide">
         {error && <div className="error-banner">{error}</div>}
 
@@ -103,7 +144,12 @@ export default function LiveMonitor() {
             <SortableContext items={orderedCameras.map((c) => c.id)} strategy={rectSortingStrategy}>
               <div className="card-grid">
                 {orderedCameras.map((cam) => (
-                  <SortableCameraTile key={cam.id} camera={cam} childName={childNameFor(cam)} />
+                  <SortableCameraTile
+                    key={cam.id}
+                    camera={cam}
+                    childName={childNameFor(cam)}
+                    refreshNonce={refreshNonce}
+                  />
                 ))}
               </div>
             </SortableContext>
