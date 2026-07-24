@@ -6,7 +6,7 @@ import AppHeader from '../components/AppHeader.jsx';
 
 const LINKS = [
   { label: 'GitHub — Nightlight', url: 'https://github.com/sauso/nightlight' },
-  { label: 'GitHub — Android app', url: 'https://github.com/sauso/nightlight-android' },
+  { label: 'GitHub — Mobile app', url: 'https://github.com/sauso/nightlight-mobile' },
   { label: 'Changelog', url: 'https://github.com/sauso/nightlight/blob/main/CHANGELOG.md' },
   { label: 'Report an issue', url: 'https://github.com/sauso/nightlight/issues' },
 ];

@@ -25,7 +25,7 @@ export function hasActiveBackgroundAudio() {
 }
 
 // Forget the saved server address and restart the native shell back into its
-// first-run setup screen (see ServerConfigPlugin.kt in nightlight-android). The
+// first-run setup screen (see ServerConfigPlugin.kt in nightlight-mobile). The
 // whole app reboots into a different page, so nothing after the restart() call
 // here ever runs.
 export async function changeServer() {
