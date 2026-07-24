@@ -5,6 +5,7 @@ import { getCommonTimezones } from '../lib/greeting.js';
 import { FONT_PRESETS } from '../lib/fonts.js';
 import AppHeader from '../components/AppHeader.jsx';
 import LogViewer from '../components/LogViewer.jsx';
+import EventLog from '../components/EventLog.jsx';
 
 const PRESETS = [
   { label: 'Nursery (default)', accent: '#F5D9A8', live: '#7FBFA3', offline: '#E08585' },
@@ -277,6 +278,9 @@ export default function Settings() {
             {busy ? 'Saving…' : 'Save changes'}
           </button>
         </form>
+
+        <div className="section-title">Camera history</div>
+        <EventLog />
 
         <div className="section-title">Recent logs</div>
         <LogViewer />

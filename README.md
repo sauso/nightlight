@@ -182,6 +182,12 @@ UTC, so they line up with when you actually remember something happening.
 - **Video won't connect from a phone but the pages load fine**: confirm the device is on
   the same LAN (for Low latency mode) — see "Remote / internet access" above if it's
   actually a different network.
+- **A camera shows disconnected for a few seconds after opening the app and doesn't come
+  back**: this is usually a stale WebRTC connection on the phone itself, not the camera or
+  server — the video connection can get "wedged" after the phone sleeps, switches networks,
+  or hands off Wi-Fi/cellular, and won't always re-establish on its own. Just close and
+  reopen the app (or pull-to-refresh); it reconnects immediately. If a camera is *actually*
+  down, every device sees it, not just one — check the logs (below) to tell the two apart.
 - **Checking whether MediaMTX has registered your cameras**: its API is loopback-only (not
   reachable directly from a browser), so check it from inside the container:
   ```bash
@@ -191,6 +197,10 @@ UTC, so they line up with when you actually remember something happening.
   have drifted apart — restarting the container re-syncs them automatically (see the
   startup log line "Reconciled N camera path(s)...").
 - **Checking logs**: see the "Logs" section above — `docker logs -f nightlight`.
+
+For a catalogue of understood quirks (camera glitches, WebRTC reconnects, the watchdog's
+recovery window) with what each one means and whether it needs any action, see
+[`KNOWN-ISSUES.md`](KNOWN-ISSUES.md).
 
 ## Building from source
 

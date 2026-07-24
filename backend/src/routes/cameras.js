@@ -62,7 +62,7 @@ router.post('/', requireAdmin, async (req, res) => {
   db.prepare(
     'INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path, sort_order, mqtt_topic) VALUES (?, ?, ?, ?, ?, ?, ?)'
   ).run(id, name.trim(), rtsp_url.trim(), child_id || null, mediamtx_path, maxOrder + 1, mqtt_topic?.trim() || null);
-  await startTranscoder(id, rtsp_url.trim(), mediamtx_path);
+  await startTranscoder(id, rtsp_url.trim(), mediamtx_path, name.trim());
   subscribeAllCameraTopics();
   res.status(201).json(db.prepare('SELECT * FROM cameras WHERE id = ?').get(id));
 });
@@ -86,7 +86,7 @@ router.put('/:id', requireAdmin, async (req, res) => {
       return res.status(502).json({ error: `Could not update stream: ${e.message}` });
     }
     // RTSP URL changed - restart the transcoder pointed at the new address.
-    await startTranscoder(req.params.id, newRtsp, existing.mediamtx_path);
+    await startTranscoder(req.params.id, newRtsp, existing.mediamtx_path, name?.trim() || existing.name);
   }
   db.prepare('UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ? WHERE id = ?').run(
     name?.trim() || existing.name,
