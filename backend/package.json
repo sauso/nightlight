@@ -13,7 +13,7 @@
     "express": "^4.21.2",
     "express-rate-limit": "^7.4.1",
     "helmet": "^8.0.0",
-    "http-proxy-middleware": "^3.0.3",
+    "http-proxy-middleware": "^4.2.0",
     "jsonwebtoken": "^9.0.2",
     "mqtt": "^5.10.1",
     "uuid": "^14.0.1"
