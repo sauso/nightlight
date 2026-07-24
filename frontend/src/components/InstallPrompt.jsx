@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { isNativeApp } from '../lib/nativeBridge.js';
 
 const DISMISS_KEY = 'nightlight_install_dismissed';
 
@@ -19,7 +20,10 @@ export default function InstallPrompt() {
   const [dismissed, setDismissed] = useState(() => localStorage.getItem(DISMISS_KEY) === '1');
 
   useEffect(() => {
-    if (isStandalone() || dismissed) return;
+    // Never inside the native Capacitor app - you're already "installed" there, and
+    // Capacitor's WebView doesn't report display-mode: standalone, so isStandalone()
+    // wouldn't catch it.
+    if (isNativeApp() || isStandalone() || dismissed) return;
 
     function handleBeforeInstall(e) {
       e.preventDefault();
@@ -55,7 +59,7 @@ export default function InstallPrompt() {
     dismiss();
   }
 
-  if (dismissed || isStandalone()) return null;
+  if (isNativeApp() || dismissed || isStandalone()) return null;
   if (!deferredEvent && !showIOSInstructions) return null;
 
   return (
