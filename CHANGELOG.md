@@ -9,6 +9,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-07-24
+
+### Changed
+- The About page's mobile-app GitHub link now points to `sauso/nightlight-mobile`
+  (the companion repo was renamed from `nightlight-android` ahead of iOS support).
+
 ## [0.2.3] - 2026-07-24
 
 ### Security
@@ -78,7 +84,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/sauso/nightlight/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/sauso/nightlight/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/sauso/nightlight/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/sauso/nightlight/compare/v0.2.0...v0.2.1
