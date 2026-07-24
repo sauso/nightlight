@@ -9,6 +9,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-07-24
+
+### Fixed
+- The "Add to Home Screen" install banner no longer appears inside the native
+  mobile app (it's only meaningful in a browser; the native WebView doesn't
+  report standalone display mode, so it was slipping through).
+
 ## [0.2.4] - 2026-07-24
 
 ### Changed
@@ -84,7 +91,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/sauso/nightlight/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/sauso/nightlight/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/sauso/nightlight/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/sauso/nightlight/compare/v0.2.1...v0.2.2
