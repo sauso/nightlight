@@ -24,6 +24,10 @@ html, body, #root {
      rendered box - html has no background of its own by default, so that bounce shows
      up as a flash of white below the fixed bottom nav. Match it to the app background. */
   background: var(--bg);
+  /* Stop the mobile browser's own pull-to-refresh (which reloads the whole page) from
+     firing underneath the app's custom pull-to-refresh gesture - see
+     lib/usePullToRefresh.js. `contain` keeps normal overscroll, just no page reload. */
+  overscroll-behavior-y: contain;
 }
 
 /* Static height:100% is based on the layout viewport, which mobile browsers actually
@@ -131,6 +135,38 @@ button {
   overflow: hidden;
   opacity: 0;
   pointer-events: none;
+}
+
+/* Pull-to-refresh indicator (camera dashboard). Height is driven inline from the pull
+   distance; overflow:hidden clips the icon/label as it collapses closed. */
+.ptr-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  overflow: hidden;
+  color: var(--text-secondary);
+}
+
+.ptr-indicator__icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.ptr-indicator--spinning .ptr-indicator__icon {
+  animation: ptr-spin 0.8s linear infinite;
+}
+
+.ptr-indicator__label {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+@keyframes ptr-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .install-banner {

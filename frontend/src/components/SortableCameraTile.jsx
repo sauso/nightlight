@@ -2,7 +2,7 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import CameraTile from './CameraTile.jsx';
 
-export default function SortableCameraTile({ camera, childName }) {
+export default function SortableCameraTile({ camera, childName, refreshNonce }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: camera.id,
   });
@@ -15,7 +15,12 @@ export default function SortableCameraTile({ camera, childName }) {
 
   return (
     <div ref={setNodeRef} style={style} className="sortable-camera-tile">
-      <CameraTile camera={camera} childName={childName} dragHandleProps={{ ...attributes, ...listeners }} />
+      <CameraTile
+        camera={camera}
+        childName={childName}
+        dragHandleProps={{ ...attributes, ...listeners }}
+        refreshNonce={refreshNonce}
+      />
     </div>
   );
 }
