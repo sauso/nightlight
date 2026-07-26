@@ -65,6 +65,13 @@ function pipPlugin() {
   return window.Capacitor?.Plugins?.Pip ?? null;
 }
 
+// True only where the native Activity-PiP plugin exists - i.e. the Android app. Lets the
+// UI branch synchronously (before doing async fullscreen work) between the native
+// fullscreen-then-PiP flow and the web <video> PiP API used in a browser and the iOS shell.
+export function hasNativePip() {
+  return !!pipPlugin();
+}
+
 // Enter native Android Activity Picture-in-Picture (floats the whole app window). The web
 // <video> PiP API isn't supported in Android's WebView, so this is how the PiP button
 // works there (see PipPlugin.kt in nightlight-mobile). Returns true only if PiP actually

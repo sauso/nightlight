@@ -9,6 +9,18 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-07-27
+
+### Fixed
+- Picture-in-Picture in the Android app now floats just the camera video instead of the
+  whole app UI. Because Android's Activity PiP can only float the entire window, the PiP
+  button now fullscreens the tile first (so the window *is* just the video) and then enters
+  PiP. Auto-PiP-on-leave is likewise now gated on a camera being fullscreen — pressing Home
+  from the grid just backgrounds normally (audio continues via the foreground service),
+  while pressing Home from a fullscreen camera floats that camera. Frontend-only; works with
+  the existing 0.4.0 APK. (Browser and iOS behavior unchanged — they use the web `<video>`
+  PiP API, which already floats a single video.)
+
 ## [0.4.3] - 2026-07-27
 
 ### Fixed
@@ -153,7 +165,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.4.4...HEAD
+[0.4.4]: https://github.com/sauso/nightlight/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/sauso/nightlight/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/sauso/nightlight/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/sauso/nightlight/compare/v0.4.0...v0.4.1
