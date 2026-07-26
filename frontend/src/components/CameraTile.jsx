@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical } from 'lucide-react';
 import { useSettings } from '../lib/SettingsContext.jsx';
-import { isNativeApp, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip } from '../lib/nativeBridge.js';
+import { isNativeApp, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip, hasNativePip } from '../lib/nativeBridge.js';
 import WhepPlayer from './WhepPlayer.jsx';
 import HlsPlayer from './HlsPlayer.jsx';
 import BreathingDot from './BreathingDot.jsx';
@@ -179,13 +179,33 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   }
 
   async function enterPip() {
-    // Android's WebView has no web <video> PiP API, so use the OS's Activity PiP via the
-    // native bridge (floats the whole app window). If that succeeds we're done; otherwise
-    // fall through to the web API (normal browser, or the iOS shell where the native Pip
-    // plugin isn't present).
-    if (isNativeApp() && (await enterNativePip())) return;
-
     const wrap = videoWrapRef.current;
+
+    // Native Android: Activity PiP floats the whole app *window*, so PiP-ing from the grid
+    // floats the entire UI and you can barely see the video. To float just the video, we
+    // first fullscreen this tile - the video then fills the window - and only then enter
+    // PiP, so the floating window shows the video alone. hasNativePip() is Android-only
+    // (the Pip plugin isn't registered in the iOS shell), so iOS falls through to the web
+    // path below. No native change needed: the native side floats whatever's on screen.
+    if (isNativeApp() && hasNativePip()) {
+      if (wrap && document.fullscreenElement !== wrap && wrap.requestFullscreen) {
+        try {
+          await wrap.requestFullscreen();
+          screen.orientation?.lock?.('landscape').catch(() => {});
+          // Let the WebView actually paint the fullscreen view before the PiP snapshot,
+          // otherwise the float can capture the pre-fullscreen (whole-app) frame.
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        } catch {
+          // Fullscreen refused - fall through to a plain whole-window PiP rather than fail.
+        }
+      }
+      if (await enterNativePip()) return;
+      // Native PiP unexpectedly didn't start - undo the fullscreen we just entered.
+      if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+      return;
+    }
+
+    // Web / iOS path: element-level PiP on the <video> itself.
     const videoEl = wrap?.querySelector('video');
     if (!videoEl || !document.pictureInPictureEnabled || videoEl.disablePictureInPicture) return;
 

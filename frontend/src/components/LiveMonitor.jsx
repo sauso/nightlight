@@ -65,14 +65,24 @@ export default function LiveMonitor() {
     });
   }
 
-  // Auto-enter Picture-in-Picture (native Android) when the user leaves the app, but only
-  // while the live camera view is actually on screen with at least one camera - so pressing
-  // Home from a management page just backgrounds normally. No-op off-native.
+  // Auto-enter Picture-in-Picture (native Android) on leaving the app - but only while a
+  // camera is *fullscreen*. Activity PiP floats the whole window, so it's only worth doing
+  // when the window is showing a single camera (fullscreen); from the grid it would float
+  // the whole UI, so pressing Home there just backgrounds normally (audio keeps going via
+  // the foreground service). Driven off the actual fullscreen state - a single writer, so
+  // no races between tiles. No-op off-native.
   useEffect(() => {
     if (!isNativeApp()) return undefined;
-    setAutoPictureInPicture(isActive && orderedCameras.length > 0);
-    return () => setAutoPictureInPicture(false);
-  }, [isActive, orderedCameras.length]);
+    function syncAutoPip() {
+      setAutoPictureInPicture(!!document.fullscreenElement);
+    }
+    document.addEventListener('fullscreenchange', syncAutoPip);
+    syncAutoPip();
+    return () => {
+      document.removeEventListener('fullscreenchange', syncAutoPip);
+      setAutoPictureInPicture(false);
+    };
+  }, []);
 
   // Keep the screen awake for as long as the monitor is open. Wake Lock is released
   // automatically whenever the tab is hidden, so it's re-requested on visibility change.
