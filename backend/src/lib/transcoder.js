@@ -32,6 +32,16 @@ function buildArgs(rtspUrl, mediamtxPath) {
     // protocol picks whichever of these two tracks it actually supports and ignores the
     // other - the same way MediaMTX already silently skips incompatible tracks per protocol.
     '-c:a:0', 'copy',
+    // Track 1 (AAC, for HLS/Compatibility mode) gets an async resampler. Some cameras
+    // send audio with jittery, occasionally-backward RTP timestamps (logged as "Queue
+    // input is backward in time"); fed straight to the AAC encoder that poisons the HLS
+    // muxer's timeline and shows up as "No signal" in Compatibility mode. aresample with
+    // async=1 rebuilds a continuous, monotonic output clock - padding gaps with silence
+    // and absorbing backward jumps - so HLS stays playable through the camera's audio
+    // glitches. This is a camera-side fault (see KNOWN-ISSUES.md); this just stops it
+    // taking Compatibility mode down with it. Only track 1 - the WebRTC copy track (a:0)
+    // can't be filtered and tolerates the jitter anyway.
+    '-filter:a:1', 'aresample=async=1:first_pts=0',
     '-c:a:1', 'aac', '-b:a:1', '64k', '-ar:1', '48000',
     '-avoid_negative_ts', 'make_zero',
     '-f', 'rtsp',

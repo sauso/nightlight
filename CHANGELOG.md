@@ -9,6 +9,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-27
+
+### Fixed
+- Compatibility (HLS) mode no longer shows "No signal" when a camera sends jittery or
+  briefly-backward audio timestamps. The AAC audio track now runs through an async
+  resampler (`aresample=async=1`) that rebuilds a continuous, monotonic timeline, so the
+  camera's audio-clock glitches (logged as "Queue input is backward in time") can't stall
+  the HLS muxer. Root cause is camera-side (see `KNOWN-ISSUES.md`); this keeps
+  Compatibility mode playable through it. Low latency (WebRTC) was unaffected either way.
+
 ## [0.4.0] - 2026-07-24
 
 ### Added
@@ -120,7 +130,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/sauso/nightlight/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/sauso/nightlight/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sauso/nightlight/compare/v0.2.5...v0.3.0
 [0.2.5]: https://github.com/sauso/nightlight/compare/v0.2.4...v0.2.5
