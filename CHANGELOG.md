@@ -9,6 +9,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-07-27
+
+### Fixed
+- The camera tile's Picture-in-Picture button now works in the Android app. Android's
+  WebView doesn't support the web `<video>` PiP API (which is why the button did nothing
+  there, while working in a browser), so it now routes through the native shell's Activity
+  PiP instead. Also auto-enters PiP when you leave the app while watching. Pairs with
+  nightlight-mobile 0.4.0 — needs that APK; on older APKs it harmlessly falls back to the
+  old behavior. (Android floats the whole app window, not a single tile — an OS
+  limitation.)
+
 ## [0.4.1] - 2026-07-27
 
 ### Fixed
@@ -130,7 +141,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/sauso/nightlight/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/sauso/nightlight/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/sauso/nightlight/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sauso/nightlight/compare/v0.2.5...v0.3.0

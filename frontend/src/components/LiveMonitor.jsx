@@ -11,6 +11,7 @@ import {
 import { SortableContext, rectSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
+import { isNativeApp, setAutoPictureInPicture } from '../lib/nativeBridge.js';
 import { usePullToRefresh } from '../lib/usePullToRefresh.js';
 import { api } from '../lib/api.js';
 import AppHeader from './AppHeader.jsx';
@@ -63,6 +64,15 @@ export default function LiveMonitor() {
       return next;
     });
   }
+
+  // Auto-enter Picture-in-Picture (native Android) when the user leaves the app, but only
+  // while the live camera view is actually on screen with at least one camera - so pressing
+  // Home from a management page just backgrounds normally. No-op off-native.
+  useEffect(() => {
+    if (!isNativeApp()) return undefined;
+    setAutoPictureInPicture(isActive && orderedCameras.length > 0);
+    return () => setAutoPictureInPicture(false);
+  }, [isActive, orderedCameras.length]);
 
   // Keep the screen awake for as long as the monitor is open. Wake Lock is released
   // automatically whenever the tab is hidden, so it's re-requested on visibility change.

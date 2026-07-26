@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical } from 'lucide-react';
 import { useSettings } from '../lib/SettingsContext.jsx';
-import { isNativeApp, isSoftReload, setBackgroundListening, onBackgroundStopped } from '../lib/nativeBridge.js';
+import { isNativeApp, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip } from '../lib/nativeBridge.js';
 import WhepPlayer from './WhepPlayer.jsx';
 import HlsPlayer from './HlsPlayer.jsx';
 import BreathingDot from './BreathingDot.jsx';
@@ -179,6 +179,12 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   }
 
   async function enterPip() {
+    // Android's WebView has no web <video> PiP API, so use the OS's Activity PiP via the
+    // native bridge (floats the whole app window). If that succeeds we're done; otherwise
+    // fall through to the web API (normal browser, or the iOS shell where the native Pip
+    // plugin isn't present).
+    if (isNativeApp() && (await enterNativePip())) return;
+
     const wrap = videoWrapRef.current;
     const videoEl = wrap?.querySelector('video');
     if (!videoEl || !document.pictureInPictureEnabled || videoEl.disablePictureInPicture) return;

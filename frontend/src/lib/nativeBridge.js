@@ -61,6 +61,41 @@ function plugin() {
   return window.Capacitor?.Plugins?.BackgroundAudio ?? null;
 }
 
+function pipPlugin() {
+  return window.Capacitor?.Plugins?.Pip ?? null;
+}
+
+// Enter native Android Activity Picture-in-Picture (floats the whole app window). The web
+// <video> PiP API isn't supported in Android's WebView, so this is how the PiP button
+// works there (see PipPlugin.kt in nightlight-mobile). Returns true only if PiP actually
+// started; returns false - so the caller can fall back to the web PiP API - in a browser,
+// or on any platform without the native Pip plugin (e.g. the iOS shell, which has no
+// equivalent yet).
+export async function enterNativePip() {
+  const p = pipPlugin();
+  if (!p) return false;
+  try {
+    const { entered } = await p.enter();
+    return !!entered;
+  } catch (err) {
+    console.warn('Pip.enter failed', err);
+    return false;
+  }
+}
+
+// Tell the native shell whether to auto-enter PiP when the user leaves the app (Home / app
+// switch). Enabled only while the live camera view is actually on screen, so leaving from
+// a management page just backgrounds normally. No-op off-native or without the plugin.
+export async function setAutoPictureInPicture(enabled) {
+  const p = pipPlugin();
+  if (!p) return;
+  try {
+    await p.setAutoEnter({ enabled: !!enabled });
+  } catch (err) {
+    console.warn('Pip.setAutoEnter failed', err);
+  }
+}
+
 async function syncService() {
   const p = plugin();
   if (!p) return;
