@@ -22,6 +22,15 @@ function buildArgs(rtspUrl, mediamtxPath) {
     // reinterpretation can clean up after the fact - see the discontinuity
     // detector below, which is the real defense against that.
     '-fflags', '+genpts',
+    // Discard the camera's own (buggy) RTP timestamps entirely and stamp each packet
+    // with the server's arrival time instead. Some cameras - notably the Sonoff
+    // GK-200MP2-B - send jittery/backward audio timestamps and occasional corrupt video
+    // timestamps; replacing them at the input with a monotonic wall-clock fixes both at
+    // the source, for every downstream track at once (the WebRTC copy tracks too, which
+    // the per-output aresample below can't reach). Trade-off: timing is arrival-based, so
+    // A/V lip-sync can drift slightly - acceptable for a monitor, and the alternative was
+    // stalled audio / stream restarts. Applied to the input, so it must precede -i.
+    '-use_wallclock_as_timestamps', '1',
     '-i', rtspUrl,
     '-map', '0:v:0',
     '-map', '0:a:0?', // "?" makes these optional, in case a camera has no audio track at all
