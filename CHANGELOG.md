@@ -9,6 +9,18 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-07-27
+
+### Fixed
+- Camera timestamp glitches are now corrected at the source: FFmpeg replaces each incoming
+  packet's timestamp with the server's arrival time (`-use_wallclock_as_timestamps 1`)
+  rather than trusting the camera's own clock. Some cameras (e.g. the Sonoff GK-200MP2-B)
+  send jittery/backward audio timestamps and occasional corrupt video timestamps; fixing
+  them at the input covers *every* downstream track at once, including the WebRTC copy
+  tracks that the HLS-only audio resampler (0.4.1) couldn't reach — so Low latency mode's
+  audio flapping is addressed too, not just Compatibility mode. Trade-off: timing is now
+  arrival-based, so A/V lip-sync may drift slightly; acceptable for a live monitor.
+
 ## [0.4.2] - 2026-07-27
 
 ### Fixed
@@ -141,7 +153,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/sauso/nightlight/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/sauso/nightlight/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/sauso/nightlight/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/sauso/nightlight/compare/v0.3.0...v0.4.0
