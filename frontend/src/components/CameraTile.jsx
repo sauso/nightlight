@@ -71,6 +71,14 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   }, []);
   const effectiveMuted = muted || (audioState === 'on' && !pageVisible);
 
+  // When the app is minimized and this camera isn't in Background mode, tear the stream
+  // connection down entirely (WhepPlayer/HlsPlayer both fully disconnect when active is
+  // false) rather than merely muting it - otherwise it keeps pulling video/audio over the
+  // network in the background, the real battery and data drain. It reconnects on return.
+  // Background mode is deliberately exempt: keeping the connection alive with the screen
+  // off is its entire purpose (backed by the native foreground service).
+  const streamActive = pageVisible || audioState === 'bg';
+
   const [mode, setMode] = useState('live'); // 'live' (WebRTC) | 'compat' (HLS)
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
@@ -306,7 +314,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
             <WhepPlayer
               key={`live-${refreshNonce}`}
               mediamtxPath={camera.mediamtx_path}
-              active
+              active={streamActive}
               muted={effectiveMuted}
               onFirstConnectFailed={handleFirstConnectFailed}
               cameraName={camera.name}
@@ -315,7 +323,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
             <HlsPlayer
               key={`compat-${refreshNonce}`}
               mediamtxPath={camera.mediamtx_path}
-              active
+              active={streamActive}
               muted={effectiveMuted}
             />
           )}

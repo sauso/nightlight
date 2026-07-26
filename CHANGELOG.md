@@ -9,6 +9,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-07-27
+
+### Changed
+- Minimizing the app now fully disconnects each camera stream unless it's in Background
+  mode, instead of just muting it. Previously a backgrounded app in On/Off audio mode kept
+  the WebRTC/HLS connection open — still pulling video and audio over the network and
+  decoding it — until the OS eventually froze the WebView, a needless battery and data
+  drain. The stream now tears down immediately on minimize (and reconnects on return).
+  Background mode is deliberately exempt: keeping the connection alive with the screen off
+  is its whole point. Affects both mobile apps.
+
 ## [0.4.4] - 2026-07-27
 
 ### Fixed
@@ -165,7 +176,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.4.5...HEAD
+[0.4.5]: https://github.com/sauso/nightlight/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/sauso/nightlight/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/sauso/nightlight/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/sauso/nightlight/compare/v0.4.1...v0.4.2
