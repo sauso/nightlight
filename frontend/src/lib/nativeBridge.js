@@ -72,6 +72,68 @@ export function hasNativePip() {
   return !!pipPlugin();
 }
 
+// Native Android PiP enter/leave. The web app uses this to hide the on-video overlay
+// buttons (mute/settings/fullscreen) while floating - they only waste space in the tiny
+// window. Returns an unsubscribe fn; no-op off-native.
+export function onPipModeChanged(callback) {
+  const p = pipPlugin();
+  if (!p) return () => {};
+  const handlePromise = p.addListener('pipModeChanged', ({ isInPip }) => callback(!!isInPip));
+  return () => {
+    handlePromise.then((handle) => handle.remove()).catch(() => {});
+  };
+}
+
+// --- Background-audio pause/resume (shared control surface) ---
+// The Android notification's Pause/Resume button and iOS's Now Playing controls both
+// funnel through here, so a single app-wide flag mutes/unmutes every Background-mode tile
+// consistently no matter which system UI triggered it. Muting (not disconnecting) means
+// resume is instant and the stream never drops.
+let bgPaused = false;
+const bgPauseSubs = new Set();
+
+export function isBackgroundPaused() {
+  return bgPaused;
+}
+
+export function setBackgroundPaused(paused) {
+  const next = !!paused;
+  if (next === bgPaused) return;
+  bgPaused = next;
+  bgPauseSubs.forEach((cb) => {
+    try {
+      cb(bgPaused);
+    } catch {
+      // A bad subscriber shouldn't stop the others from updating.
+    }
+  });
+  // Keep the web Media Session's playback state in sync - this is what drives the iOS
+  // Now Playing controls' play/pause glyph (and any other system media UI).
+  if ('mediaSession' in navigator) {
+    try {
+      navigator.mediaSession.playbackState = bgPaused ? 'paused' : 'playing';
+    } catch {
+      // Not all engines allow setting this - non-fatal.
+    }
+  }
+}
+
+export function subscribeBackgroundPaused(callback) {
+  bgPauseSubs.add(callback);
+  return () => bgPauseSubs.delete(callback);
+}
+
+// Android notification Pause/Resume taps (see AudioService.kt / BackgroundAudioPlugin.kt).
+// Returns an unsubscribe fn; no-op off-native.
+export function onBackgroundPauseChanged(callback) {
+  const p = plugin();
+  if (!p) return () => {};
+  const handlePromise = p.addListener('pauseChanged', ({ paused }) => callback(!!paused));
+  return () => {
+    handlePromise.then((handle) => handle.remove()).catch(() => {});
+  };
+}
+
 // Enter native Android Activity Picture-in-Picture (floats the whole app window). The web
 // <video> PiP API isn't supported in Android's WebView, so this is how the PiP button
 // works there (see PipPlugin.kt in nightlight-mobile). Returns true only if PiP actually

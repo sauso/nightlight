@@ -11,7 +11,13 @@ import {
 import { SortableContext, rectSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
-import { isNativeApp, setAutoPictureInPicture } from '../lib/nativeBridge.js';
+import {
+  isNativeApp,
+  setAutoPictureInPicture,
+  onPipModeChanged,
+  onBackgroundPauseChanged,
+  setBackgroundPaused,
+} from '../lib/nativeBridge.js';
 import { usePullToRefresh } from '../lib/usePullToRefresh.js';
 import { api } from '../lib/api.js';
 import AppHeader from './AppHeader.jsx';
@@ -64,6 +70,23 @@ export default function LiveMonitor() {
       return next;
     });
   }
+
+  // Native Android tells us when it enters/leaves PiP; toggle a body class so the CSS can
+  // hide the on-video overlay buttons (mute/settings/fullscreen) that just clutter the
+  // tiny floating window. Also relay the notification's Pause/Resume into the app-wide
+  // background-pause. Both no-op off-native.
+  useEffect(() => {
+    if (!isNativeApp()) return undefined;
+    const offPip = onPipModeChanged((isInPip) => {
+      document.body.classList.toggle('in-pip', isInPip);
+    });
+    const offPause = onBackgroundPauseChanged((paused) => setBackgroundPaused(paused));
+    return () => {
+      offPip();
+      offPause();
+      document.body.classList.remove('in-pip');
+    };
+  }, []);
 
   // Auto-enter Picture-in-Picture (native Android) on leaving the app - but only while a
   // camera is *fullscreen*. Activity PiP floats the whole window, so it's only worth doing

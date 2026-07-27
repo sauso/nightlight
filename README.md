@@ -2,9 +2,11 @@
 
 A mobile-friendly web app for watching multiple RTSP cameras, grouped by child, over your
 home network. Live video uses WebRTC (via [MediaMTX](https://github.com/bluenviron/mediamtx))
-for sub-second latency — much lower than a typical HLS-based viewer. Installable to your
-phone's home screen as a standalone app (PWA). No cloud, no subscription, no account
-anywhere but your own network.
+for sub-second latency — much lower than a typical HLS-based viewer. Use it in any browser,
+install it to your home screen as a PWA, or run the companion **native apps for Android and
+iOS** ([nightlight-mobile](https://github.com/sauso/nightlight-mobile)) for reliable
+background audio and picture-in-picture (see [Mobile apps](#mobile-apps-android--ios)
+below). No cloud, no subscription, no account anywhere but your own network.
 
 > **⚠️ Not a safety device.** Nightlight is a convenience tool, not a safety device. It is
 > not a medical device, is not certified for safety monitoring of any kind, and must never
@@ -156,6 +158,38 @@ address still lets you add it manually from the menu, but you may not get the au
 install banner. This is one more reason the reverse-proxy/HTTPS setup above is worth doing
 if you want the full native-app-like install experience.
 
+## Mobile apps (Android & iOS)
+
+Beyond the PWA, there are companion **native apps** in a separate repo,
+[nightlight-mobile](https://github.com/sauso/nightlight-mobile). They're thin native
+shells around this same web UI — the app loads the interface **live from your own server**
+rather than bundling it, so any server update applies to the apps automatically with no
+reinstall. On first launch you just enter your server's address (like the Home Assistant
+app); a "Change server" menu item switches later.
+
+What the native apps add over the browser/PWA:
+
+- **Reliable background listening** — keep hearing a camera with the screen off or the app
+  minimised. Android uses a foreground service (with a wake/wifi lock and a battery-
+  optimisation exemption); iOS uses a background audio session. Plain in-browser background
+  audio is unreliable by comparison.
+- **Pause/Resume from the system controls** — Android's notification and iOS's Now Playing
+  (Control Center / lock screen), plus a Stop on Android.
+- **Picture-in-Picture** — float a camera in a small always-on-top window while you use
+  other apps (Android; the browser has its own PiP too).
+- **Battery-friendly** — minimising the app disconnects streams unless a camera is in
+  Background mode, so nothing keeps pulling video in the background.
+
+**Getting them:**
+- **Android** — download the signed APK from the
+  [nightlight-mobile Releases](https://github.com/sauso/nightlight-mobile/releases) page and
+  sideload it (built and signed automatically in CI on each release).
+- **iOS** — no App Store build yet; it's installed by sideloading (e.g. AltStore/Sideloadly
+  with a free Apple ID). See the nightlight-mobile repo for the current status and steps.
+
+Both apps are built entirely in GitHub Actions — see the nightlight-mobile repo for how,
+and its own `CHANGELOG.md` for per-release notes.
+
 ## Logs
 
 Both the app and MediaMTX log to stdout, captured by Docker in the normal way:
@@ -190,6 +224,15 @@ UTC, so they line up with when you actually remember something happening.
   rebuilds the connection without a full restart. If a camera is *actually* down, every
   device sees it, not just one — check the Camera history panel (Settings) or the logs
   (below) to tell the two apart.
+- **Background listening stops after a while (Android app)**: Android's battery optimisation
+  (Doze) will eventually freeze the app and cut its network unless it's exempt. The app asks
+  for the exemption the first time you enable Background mode — if you declined, grant it
+  manually under Settings → Apps → Nightlight → Battery → Unrestricted. (Background audio is
+  a feature of the native apps, not the browser/PWA — see [Mobile apps](#mobile-apps-android--ios).)
+- **A camera says "No signal" only in Compatibility mode**: usually the camera sending bad
+  audio timestamps, which can stall the HLS pipeline. Nightlight resamples/rewrites camera
+  timestamps to ride through this, but if it persists, power-cycle or update that camera's
+  firmware. See [`KNOWN-ISSUES.md`](KNOWN-ISSUES.md).
 - **Checking whether MediaMTX has registered your cameras**: its API is loopback-only (not
   reachable directly from a browser), so check it from inside the container:
   ```bash

@@ -137,6 +137,18 @@ button {
   pointer-events: none;
 }
 
+/* While the Android app is floating in Picture-in-Picture, hide the on-video overlay
+   buttons - in the tiny PiP window they only obscure the video (the body gets the
+   `in-pip` class from LiveMonitor via the native pipModeChanged event). */
+body.in-pip .pip-btn,
+body.in-pip .settings-btn,
+body.in-pip .mute-btn,
+body.in-pip .fullscreen-btn,
+body.in-pip .tile-menu,
+body.in-pip .tile-menu-backdrop {
+  display: none !important;
+}
+
 /* Pull-to-refresh indicator (camera dashboard). Height is driven inline from the pull
    distance; overflow:hidden clips the icon/label as it collapses closed. */
 .ptr-indicator {
