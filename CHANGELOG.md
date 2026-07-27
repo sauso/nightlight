@@ -27,6 +27,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   camera name at the top of the card instead of floating against the middle of the details.
 
 ### Fixed
+- An unexpected UI error no longer blanks the whole app to a white screen that needs a restart
+  to recover — a top-level error boundary now catches it and offers a Reload button (showing the
+  underlying error for diagnosis) while keeping the app running.
 - The lock-screen / Now Playing controls (mobile) now show the camera that's actually in
   Background mode, instead of whichever camera connected most recently. Ownership of the
   system media session is now held only by the Background-audio camera rather than clobbered
