@@ -15,11 +15,22 @@ const DONATE_URL = 'https://www.paypal.com/donate/?hosted_button_id=VGCB7WFYPJQ3
 
 export default function About() {
   const { settings } = useSettings();
-  const [version, setVersion] = useState(null);
+  const [info, setInfo] = useState(null);
 
   useEffect(() => {
-    api.get('/about').then((info) => setVersion(info.version)).catch(() => setVersion('unknown'));
+    api.get('/about').then(setInfo).catch(() => setInfo({ version: 'unknown' }));
   }, []);
+
+  const version = info?.version;
+  // Build provenance: "<branch> · <short sha> · built <date>" - shown so you can confirm
+  // which commit an instance is actually running (staging vs prod, latest dev push, etc.).
+  const buildParts = info
+    ? [
+        info.gitRef,
+        info.gitSha ? info.gitSha.slice(0, 7) : null,
+        info.buildTime ? `built ${new Date(info.buildTime).toLocaleDateString()}` : null,
+      ].filter(Boolean)
+    : [];
 
   return (
     <>
@@ -32,6 +43,11 @@ export default function About() {
             <div className="camera-tile__sub">
               Version {version ?? '…'}
             </div>
+            {buildParts.length > 0 && (
+              <div className="camera-tile__sub" style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+                {buildParts.join(' · ')}
+              </div>
+            )}
             <div className="camera-tile__sub">
               Self-hosted baby monitor — no cloud, no subscription.
             </div>
