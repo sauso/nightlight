@@ -66,6 +66,32 @@ HLS can't carry at all — WebRTC can). This drives a specific pipeline, in orde
 4. **Frontend** picks WebRTC (`WhepPlayer.jsx`, "Low latency") or HLS (`HlsPlayer.jsx`,
    "Compatibility") per camera tile, toggled by the user.
 
+### ONVIF, PTZ, and camera credentials (`backend/src/lib/onvif.js`, `rtspProbe.js`)
+
+Cameras are added/edited by **components** (IP / port / path / username / password), not a
+raw RTSP URL. The route layer (`routes/cameras.js`) assembles those into the stored
+`rtsp_url` that the transcoder uses, and splits an existing `rtsp_url` back into fields for
+the edit form. **The password is never returned to the client** — GET responses carry the
+address in fields plus a credential-free display URL and a `rtsp_has_password` flag; on edit,
+a blank password means "keep the existing one." Keep that invariant.
+
+- **`lib/onvif.js`** — `onvif@0.8.1` client, deliberately resilient to minimal ONVIF servers
+  (the sonoff-hack Sonoff faults on `GetCapabilities`/`GetServices`): it tries the normal
+  connect, then falls back to hitting the media service directly at known paths, and
+  reconstructs the RTSP URL from the connect host + user's creds + the discovered path (never
+  the host/creds the camera returns — often empty/bogus). `probeOnvifCamera()` powers
+  add-by-IP (`POST /api/cameras/onvif-probe`) and also reports two-way-audio (`getAudioOutput-
+  Configurations`) and PTZ capability. **Discovery is add-by-IP, not multicast** — WS-Discovery
+  doesn't cross VLANs (see `planning/onvif-and-two-way-audio-scope.md`).
+- **PTZ** — `ptzNudge()` does start → hold `PTZ_NUDGE_MS` → stop in one call, so each press
+  moves a fixed distance regardless of tap/network timing (`POST /api/cameras/:id/ptz/nudge`;
+  the tile sends one per tap and repeats while held). ONVIF creds for control are the same
+  single credential set stored with the camera; capability/creds/profile-token are captured
+  at add time (`ptz_supported`, `onvif_*` columns) so control reconnects without re-querying.
+- **`lib/rtspProbe.js`** — `validateRtspStream()` (ffprobe over TCP) runs on add/edit so a
+  camera that can't be reached (bad creds/path/IP) isn't silently saved; the UI can override
+  with `force` for a camera that's just momentarily offline.
+
 ### Self-healing / reconciliation (`backend/src/index.js`)
 
 MediaMTX only learns about a camera when it's added/edited through the API, or via periodic

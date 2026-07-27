@@ -1,14 +1,28 @@
 # Nightlight: PTZ Camera Control — Scope Document
 
-Status: **Not started. Depends on ONVIF.** This builds directly on
-`onvif-and-two-way-audio-scope.md`: PTZ control is issued over ONVIF, so it
-needs Phase 1 (discovery — to obtain the camera's ONVIF device/PTZ service
-address and credentials) and a PTZ capability check (a sibling of that doc's
-Phase 2 backchannel check). Do not start this before ONVIF discovery exists.
+Status: **Implemented (on `dev` / staging) as of 2026-07-27.** Built on the ONVIF add-by-IP
+work (`onvif-and-two-way-audio-scope.md`). The design below is largely what shipped, with
+one deliberate change: movement uses **fixed-duration "nudges"** rather than raw press-to-
+release continuous move — see the implementation note under "Interaction model" below.
 
-Do not implement from this document alone — treat it as the starting brief and
-confirm current repo structure first (file paths below are best-guess from prior
-conversation, not verified against the live repo).
+### What shipped (2026-07-27)
+
+- **Capability + creds captured at ONVIF add time** (`ptz_supported`, plus the ONVIF
+  credentials and media profile token in `onvif_*` columns), so control reconnects without
+  re-querying. `probeOnvifCamera()` sets `ptz` from the profile's `PTZConfiguration`.
+- **`ptzNudge()` in `lib/onvif.js`** (start → hold `PTZ_NUDGE_MS` → stop in one call) via
+  `POST /api/cameras/:id/ptz/nudge` (any signed-in user). Fixed-distance per press, so it's
+  consistent regardless of tap/network timing, and self-stopping (plus a `continuousMove`
+  timeout backstop) so it can't run past the limit.
+- **`CameraTile.jsx`**: a move button (only when `ptz_supported`), a D-pad overlay,
+  hold-to-repeat nudges. Uses the proven inject-paths ONVIF approach (skip capabilities, hit
+  `/onvif/ptz_service`). Pan/tilt only for now — zoom/presets not built (see below).
+- The **runaway/consistency problems** that surfaced in testing (press-to-release timing +
+  per-request latency) are exactly why it became nudge-based. If a nudge feels too big/small,
+  tune `PTZ_NUDGE_MS` (currently 200ms).
+
+Not built yet: **optical zoom** (only offer if a camera reports a real zoom axis — distinct
+from the tile's existing double-tap digital zoom) and **presets**. Both remain as below.
 
 ---
 
