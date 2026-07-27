@@ -130,9 +130,23 @@ correctly. Don't silently "fix" this without doing that work.
 ### CI/CD
 
 `.github/workflows/docker-publish.yml` builds and pushes a multi-arch (amd64/arm64) image to
-Docker Hub (`sauso/nightlight`) on push to `main` and on `v*` tags — no test job exists in CI.
+Docker Hub (`sauso/nightlight`) — no test job exists in CI. Which tag it publishes depends on
+the ref:
+- push to **`dev`** → `:dev` (staging). Does NOT touch `:latest`.
+- push to **`main`** or a **`v*` tag** → `:latest` (+ semver tags). This is production.
 
-## Deploy pipeline
-- Pushing to `main` triggers a GitHub Actions workflow that builds the Docker image and pushes it to Docker Hub (sauso/nightlight)
-- After a push, the new image needs to be manually pulled and the container restarted on the Unraid server — this step is NOT automated, do not assume a push means the change is live
-- To verify a deploy went out, check the Actions tab or Docker Hub for the new image tag
+## Branching and deploy pipeline
+See the workspace `CLAUDE.md` for the branch model. In short: work on `dev`, release to
+`main` via PR. Two containers run on Unraid:
+
+- **Production** — host networking, `192.168.1.100`, runs `sauso/nightlight:latest`. Updated
+  only by a release to `main`.
+- **Staging** — on the `br0.10` ipvlan network at `192.168.2.150` (its own LAN IP, so WebRTC
+  works without host networking — MediaMTX advertises that routable IP), separate data dir
+  (`/mnt/user/appdata/nightlight-dev`), container name `nightlight-dev`, runs
+  `sauso/nightlight:dev`. Test dev builds here.
+
+Deploys are **not** automated — after CI publishes an image, pull it and recreate the relevant
+container on Unraid (prod pulls `:latest`, staging pulls `:dev`). A push/merge does NOT mean the
+change is live. Verify via the Actions tab / Docker Hub tag, then the running container's
+`org.opencontainers.image.revision` label.
