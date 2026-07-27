@@ -12,7 +12,11 @@ export default function Cameras() {
   const { kids: children, cameras, error: contextError, refresh } = useCameras();
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ name: '', rtsp_url: '', child_id: '', mqtt_topic: '' });
+  const EMPTY_FORM = {
+    name: '', rtsp_host: '', rtsp_port: '554', rtsp_path: '', rtsp_username: '', rtsp_password: '',
+    child_id: '', mqtt_topic: '',
+  };
+  const [form, setForm] = useState(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
   // ONVIF auto-fill sub-form (only in the Add flow).
   const [onvif, setOnvif] = useState({ host: '', port: '', username: '', password: '' });
@@ -26,13 +30,24 @@ export default function Cameras() {
   }
 
   function openNew() {
-    setForm({ name: '', rtsp_url: '', child_id: '', mqtt_topic: '' });
+    setForm(EMPTY_FORM);
     resetOnvif();
     setEditing({});
   }
 
   function openEdit(cam) {
-    setForm({ name: cam.name, rtsp_url: cam.rtsp_url, child_id: cam.child_id || '', mqtt_topic: cam.mqtt_topic || '' });
+    // The API sends the address split into fields (never the password) - populate them;
+    // the password field stays blank and means "keep the existing one" on save.
+    setForm({
+      name: cam.name,
+      rtsp_host: cam.rtsp_host || '',
+      rtsp_port: cam.rtsp_port || '554',
+      rtsp_path: cam.rtsp_path || '',
+      rtsp_username: cam.rtsp_username || '',
+      rtsp_password: '',
+      child_id: cam.child_id || '',
+      mqtt_topic: cam.mqtt_topic || '',
+    });
     resetOnvif();
     setEditing(cam);
   }
@@ -54,12 +69,18 @@ export default function Cameras() {
       });
       setForm((f) => ({
         ...f,
-        rtsp_url: r.rtspUrl,
+        // Address components from ONVIF; credentials default to the ONVIF login (usually the
+        // same as the camera's RTSP login - adjust below if not).
+        rtsp_host: r.rtspHost || onvif.host.trim(),
+        rtsp_port: r.rtspPort || '554',
+        rtsp_path: r.rtspPath || '',
+        rtsp_username: onvif.username,
+        rtsp_password: onvif.password,
         name: f.name || r.suggestedName || '',
         discovery_source: 'onvif',
         onvif_device_url: r.onvifDeviceUrl,
         backchannel_supported: r.backchannel,
-        // Stored so PTZ control can reconnect later (credentials from the sub-form above).
+        // Stored so PTZ control can reconnect later.
         ptz_supported: r.ptz ? 1 : 0,
         onvif_profile_token: r.profileToken || null,
         onvif_username: onvif.username,
@@ -69,7 +90,7 @@ export default function Cameras() {
       const talk =
         r.backchannel === 'yes' ? ' · two-way audio supported' : r.backchannel === 'no' ? ' · no two-way audio' : '';
       const ptz = r.ptz ? ' · PTZ' : '';
-      setOnvifMsg(`Found stream${res ? ` — ${res}` : ''}${talk}${ptz}. RTSP URL filled in below.`);
+      setOnvifMsg(`Found stream${res ? ` — ${res}` : ''}${talk}${ptz}. Address and login filled in below.`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -131,19 +152,22 @@ export default function Cameras() {
                 <BreathingDot status={cam.statusLevel || 'connecting'} />
                 <div>
                   <div style={{ fontWeight: 600 }}>{cam.name}</div>
-                  {/* rtsp_url is only present for admins - the API redacts it otherwise,
-                      since it usually embeds the camera's own login credentials. */}
-                  {cam.rtsp_url && (
-                    <div className="camera-tile__sub" style={{ wordBreak: 'break-all' }}>{cam.rtsp_url}</div>
+                  {/* Credential-free address (admins only - the API never sends the
+                      password or the full credentialed URL). */}
+                  {cam.rtsp_display && (
+                    <div className="camera-tile__sub" style={{ wordBreak: 'break-all' }}>{cam.rtsp_display}</div>
                   )}
-                  {/* Two-way-audio capability, detected over ONVIF at add time. Only shown
-                      when known - manual/unknown cameras get no badge to avoid clutter. */}
-                  {cam.backchannel_supported === 'yes' && (
-                    <span className="cam-badge cam-badge--ok">Two-way audio</span>
-                  )}
-                  {cam.backchannel_supported === 'no' && (
-                    <span className="cam-badge cam-badge--muted">No two-way audio</span>
-                  )}
+                  {/* Capability badges, detected over ONVIF at add time. Only shown when
+                      known - manual/unknown cameras get no badge to avoid clutter. */}
+                  <div className="cam-badge-row">
+                    {cam.ptz_supported ? <span className="cam-badge cam-badge--ok">PTZ</span> : null}
+                    {cam.backchannel_supported === 'yes' && (
+                      <span className="cam-badge cam-badge--ok">Two-way audio</span>
+                    )}
+                    {cam.backchannel_supported === 'no' && (
+                      <span className="cam-badge cam-badge--muted">No two-way audio</span>
+                    )}
+                  </div>
                 </div>
               </div>
               {isAdmin && (
@@ -233,20 +257,64 @@ export default function Cameras() {
                   </div>
                 </div>
                 <button type="button" className="btn" onClick={fetchFromOnvif} disabled={onvifBusy}>
-                  {onvifBusy ? 'Fetching…' : 'Fetch stream URL'}
+                  {onvifBusy ? 'Fetching…' : 'Fetch address & login'}
                 </button>
                 {onvifMsg && <div className="onvif-box__ok">{onvifMsg}</div>}
               </div>
             )}
+            {/* Address + login as separate fields - the app builds the rtsp:// URL from
+                these, so the password never sits in a visible URL. */}
+            <div className="onvif-box__row">
+              <div className="field">
+                <label htmlFor="cam-host">Camera IP address</label>
+                <input
+                  id="cam-host"
+                  value={form.rtsp_host}
+                  onChange={(e) => setForm({ ...form, rtsp_host: e.target.value })}
+                  required
+                  placeholder="192.168.1.50"
+                />
+              </div>
+              <div className="field" style={{ maxWidth: 90 }}>
+                <label htmlFor="cam-port">RTSP port</label>
+                <input
+                  id="cam-port"
+                  value={form.rtsp_port}
+                  onChange={(e) => setForm({ ...form, rtsp_port: e.target.value })}
+                  placeholder="554"
+                />
+              </div>
+            </div>
             <div className="field">
-              <label htmlFor="cam-rtsp">RTSP URL</label>
+              <label htmlFor="cam-path">Stream path</label>
               <input
-                id="cam-rtsp"
-                value={form.rtsp_url}
-                onChange={(e) => setForm({ ...form, rtsp_url: e.target.value })}
-                required
-                placeholder="rtsp://user:pass@192.168.1.50:554/stream1"
+                id="cam-path"
+                value={form.rtsp_path}
+                onChange={(e) => setForm({ ...form, rtsp_path: e.target.value })}
+                placeholder="/stream1"
               />
+            </div>
+            <div className="onvif-box__row">
+              <div className="field">
+                <label htmlFor="cam-user">Username</label>
+                <input
+                  id="cam-user"
+                  value={form.rtsp_username}
+                  onChange={(e) => setForm({ ...form, rtsp_username: e.target.value })}
+                  autoComplete="off"
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="cam-pass">Password</label>
+                <input
+                  id="cam-pass"
+                  type="password"
+                  value={form.rtsp_password}
+                  onChange={(e) => setForm({ ...form, rtsp_password: e.target.value })}
+                  autoComplete="off"
+                  placeholder={editing.id && editing.rtsp_has_password ? '•••••• (unchanged)' : ''}
+                />
+              </div>
             </div>
             <div className="field">
               <label htmlFor="cam-child">Assign to child (optional)</label>

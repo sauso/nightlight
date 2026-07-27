@@ -28,6 +28,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   belt-and-suspenders: the client stops on release/leave/cancel, and the camera also
   auto-stops a few seconds after any move server-side, so a move can't get stranded. Only
   shown on PTZ-capable cameras. See `planning/ptz-control-scope.md`.
+- **PTZ badge** in the Cameras list for pan/tilt-capable cameras (alongside the two-way-audio
+  badge).
+
+### Changed
+- **Camera credentials are entered as separate fields, not inside the RTSP URL.** The
+  add/edit camera form now takes IP address, port, stream path, username, and password as
+  distinct fields, and the app assembles the `rtsp://` URL server-side. The password is never
+  sent back to the browser or shown in a URL: the Cameras list shows a credential-free
+  address, and when editing, the password field is blank and left blank means "keep the
+  existing password." Fixes credentials being visible in plain text on the camera screen.
 
 ## [0.4.9] - 2026-07-27
 

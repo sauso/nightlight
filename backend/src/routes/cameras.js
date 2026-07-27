@@ -15,6 +15,53 @@ function isValidRtsp(url) {
   return typeof url === 'string' && /^rtsps?:\/\/.+/i.test(url.trim());
 }
 
+// The credential parts live in the UI as separate fields (IP / port / path / username /
+// password) and only get combined into the rtsp:// URL that FFmpeg uses here on the server -
+// so the password never appears in a visible URL field. assembleRtspUrl builds the URL;
+// parseRtspComponents splits an existing one back into fields for the edit form.
+function assembleRtspUrl({ host, port, path, username, password }) {
+  const h = String(host || '').trim();
+  if (!h) return null;
+  const p = String(port || '').trim() || '554';
+  let pathPart = String(path || '').trim();
+  if (pathPart && !pathPart.startsWith('/')) pathPart = `/${pathPart}`;
+  const cred = username ? `${encodeURIComponent(username)}:${encodeURIComponent(password || '')}@` : '';
+  return `rtsp://${cred}${h}:${p}${pathPart}`;
+}
+function parseRtspComponents(url) {
+  try {
+    const u = new URL(url);
+    return {
+      host: u.hostname,
+      port: u.port || '554',
+      path: (u.pathname || '') + (u.search || ''),
+      username: u.username ? decodeURIComponent(u.username) : '',
+      password: u.password ? decodeURIComponent(u.password) : '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Sanitized camera for API responses: never leaks the password or the credentialed URL.
+// Admins additionally get the address broken into fields (for the edit form) plus a
+// credential-free display URL and a flag for whether a password is set. ONVIF credentials
+// (used server-side for PTZ) are always stripped.
+function publicCamera(cam, isAdmin) {
+  const { rtsp_url, onvif_username, onvif_password, ...rest } = cam;
+  if (!isAdmin) return rest;
+  const parts = parseRtspComponents(rtsp_url) || {};
+  return {
+    ...rest,
+    rtsp_host: parts.host || '',
+    rtsp_port: parts.port || '',
+    rtsp_path: parts.path || '',
+    rtsp_username: parts.username || '',
+    rtsp_has_password: !!parts.password,
+    rtsp_display: parts.host ? `rtsp://${parts.host}:${parts.port}${parts.path || ''}` : '',
+  };
+}
+
 // ONVIF auto-fill: given a camera's IP + ONVIF credentials, connect and return a
 // ready-to-use RTSP URL plus detected codec/resolution, so the admin doesn't hand-type the
 // RTSP path. Read-only probe - creates nothing; the normal POST / still does the adding.
@@ -89,12 +136,8 @@ router.get('/', async (req, res) => {
   const cameras = db.prepare('SELECT * FROM cameras ORDER BY sort_order, created_at').all();
   const isAdmin = req.user?.role === 'admin';
   const withStatus = await Promise.all(
-    // rtsp_url and the ONVIF credentials embed camera logins - only the admin's
-    // camera-management form needs them back; strip them for everyone else. ptz_supported
-    // and onvif_device_url stay (the tiles need to know whether to show PTZ controls).
-    cameras.map(async ({ rtsp_url, onvif_username, onvif_password, ...cam }) => ({
-      ...cam,
-      ...(isAdmin ? { rtsp_url, onvif_username, onvif_password } : {}),
+    cameras.map(async (cam) => ({
+      ...publicCamera(cam, isAdmin),
       status: await getPathStatus(cam.mediamtx_path),
       mqtt: cam.mqtt_topic ? getReading(cam.mqtt_topic) : null,
     }))
@@ -119,13 +162,21 @@ router.put('/reorder', (req, res) => {
 
 router.post('/', requireAdmin, async (req, res) => {
   const {
-    name, rtsp_url, child_id, mqtt_topic,
+    name, rtsp_host, rtsp_port, rtsp_path, rtsp_username, rtsp_password,
+    child_id, mqtt_topic,
     discovery_source, onvif_device_url, backchannel_supported,
     ptz_supported, onvif_username, onvif_password, onvif_profile_token,
   } = req.body || {};
   if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
+  const rtsp_url = assembleRtspUrl({
+    host: rtsp_host,
+    port: rtsp_port,
+    path: rtsp_path,
+    username: rtsp_username,
+    password: rtsp_password,
+  });
   if (!isValidRtsp(rtsp_url)) {
-    return res.status(400).json({ error: 'A valid rtsp:// URL is required' });
+    return res.status(400).json({ error: 'A camera IP address is required' });
   }
   const id = uuid();
   const mediamtx_path = toPathName(id);
@@ -157,9 +208,9 @@ router.post('/', requireAdmin, async (req, res) => {
     source, isOnvif ? 1 : 0, onvifUrl, backchannel,
     ptz, onvifUser, onvifPass, profileToken
   );
-  await startTranscoder(id, rtsp_url.trim(), mediamtx_path, name.trim());
+  await startTranscoder(id, rtsp_url, mediamtx_path, name.trim());
   subscribeAllCameraTopics();
-  res.status(201).json(db.prepare('SELECT * FROM cameras WHERE id = ?').get(id));
+  res.status(201).json(publicCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(id), true));
 });
 
 // Admin-only, same as adding one: editing includes changing the RTSP URL, which
@@ -169,18 +220,33 @@ router.post('/', requireAdmin, async (req, res) => {
 router.put('/:id', requireAdmin, async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
-  const { name, rtsp_url, child_id, mqtt_topic } = req.body || {};
-  if (rtsp_url !== undefined && !isValidRtsp(rtsp_url)) {
-    return res.status(400).json({ error: 'A valid rtsp:// URL is required' });
+  const { name, rtsp_host, rtsp_port, rtsp_path, rtsp_username, rtsp_password, child_id, mqtt_topic } = req.body || {};
+
+  // Reassemble the RTSP URL from the edited fields. A field not sent keeps its current
+  // value; a blank password specifically means "keep the existing one" (the browser never
+  // received it, so it can't resend it). Nothing address-related sent => URL unchanged.
+  let newRtsp = existing.rtsp_url;
+  const addressEdited = [rtsp_host, rtsp_port, rtsp_path, rtsp_username, rtsp_password].some((v) => v !== undefined);
+  if (addressEdited) {
+    const cur = parseRtspComponents(existing.rtsp_url) || {};
+    const password = rtsp_password ? rtsp_password : cur.password; // blank/absent => keep
+    newRtsp = assembleRtspUrl({
+      host: rtsp_host !== undefined ? rtsp_host : cur.host,
+      port: rtsp_port !== undefined ? rtsp_port : cur.port,
+      path: rtsp_path !== undefined ? rtsp_path : cur.path,
+      username: rtsp_username !== undefined ? rtsp_username : cur.username,
+      password,
+    });
+    if (!isValidRtsp(newRtsp)) return res.status(400).json({ error: 'A camera IP address is required' });
   }
-  const newRtsp = rtsp_url !== undefined ? rtsp_url.trim() : existing.rtsp_url;
+
   if (newRtsp !== existing.rtsp_url) {
     try {
       await upsertPath(existing.mediamtx_path);
     } catch (e) {
       return res.status(502).json({ error: `Could not update stream: ${e.message}` });
     }
-    // RTSP URL changed - restart the transcoder pointed at the new address.
+    // Address changed - restart the transcoder pointed at the new one.
     await startTranscoder(req.params.id, newRtsp, existing.mediamtx_path, name?.trim() || existing.name);
   }
   db.prepare('UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ? WHERE id = ?').run(
@@ -191,7 +257,7 @@ router.put('/:id', requireAdmin, async (req, res) => {
     req.params.id
   );
   subscribeAllCameraTopics();
-  res.json(db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id));
+  res.json(publicCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id), true));
 });
 
 // Dedicated assignment endpoint: attach (or unattach with child_id: null) a camera to a child.
