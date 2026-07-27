@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical } from 'lucide-react';
 import { useSettings } from '../lib/SettingsContext.jsx';
-import { isNativeApp, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip, hasNativePip, subscribeBackgroundPaused, isBackgroundPaused } from '../lib/nativeBridge.js';
+import { isNativeApp, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip, hasNativePip, subscribeBackgroundPaused, isBackgroundPaused, setPipAutoEnteredFullscreen } from '../lib/nativeBridge.js';
 import WhepPlayer from './WhepPlayer.jsx';
 import HlsPlayer from './HlsPlayer.jsx';
 import BreathingDot from './BreathingDot.jsx';
@@ -203,9 +203,12 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
     // (the Pip plugin isn't registered in the iOS shell), so iOS falls through to the web
     // path below. No native change needed: the native side floats whatever's on screen.
     if (isNativeApp() && hasNativePip()) {
-      if (wrap && document.fullscreenElement !== wrap && wrap.requestFullscreen) {
+      const alreadyFullscreen = document.fullscreenElement === wrap;
+      let enteredFullscreenForPip = false;
+      if (wrap && !alreadyFullscreen && wrap.requestFullscreen) {
         try {
           await wrap.requestFullscreen();
+          enteredFullscreenForPip = true;
           screen.orientation?.lock?.('landscape').catch(() => {});
           // Let the WebView actually paint the fullscreen view before the PiP snapshot,
           // otherwise the float can capture the pre-fullscreen (whole-app) frame.
@@ -214,9 +217,14 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
           // Fullscreen refused - fall through to a plain whole-window PiP rather than fail.
         }
       }
+      // Record whether *we* entered fullscreen just for PiP, so leaving PiP can put the
+      // user back where they were (dashboard) rather than stranding them in fullscreen.
+      // If they were already fullscreen, leave that flag off so they stay there on return.
+      setPipAutoEnteredFullscreen(enteredFullscreenForPip);
       if (await enterNativePip()) return;
-      // Native PiP unexpectedly didn't start - undo the fullscreen we just entered.
-      if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+      // Native PiP unexpectedly didn't start - undo any fullscreen we entered and clear.
+      setPipAutoEnteredFullscreen(false);
+      if (enteredFullscreenForPip && document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
       return;
     }
 

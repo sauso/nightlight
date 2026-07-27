@@ -72,6 +72,19 @@ export function hasNativePip() {
   return !!pipPlugin();
 }
 
+// Whether the PiP button had to enter fullscreen itself to get a clean float (i.e. the
+// tile wasn't already fullscreen). Leaving PiP uses this to return the user to where they
+// were: exit fullscreen back to the dashboard if we entered it for them, or stay in
+// fullscreen if that's where they already were. Module scope so CameraTile (which sets it)
+// and LiveMonitor's PiP-mode listener (which acts on it) can share one flag.
+let pipAutoEnteredFullscreen = false;
+export function setPipAutoEnteredFullscreen(v) {
+  pipAutoEnteredFullscreen = !!v;
+}
+export function didPipAutoEnterFullscreen() {
+  return pipAutoEnteredFullscreen;
+}
+
 // Native Android PiP enter/leave. The web app uses this to hide the on-video overlay
 // buttons (mute/settings/fullscreen) while floating - they only waste space in the tiny
 // window. Returns an unsubscribe fn; no-op off-native.

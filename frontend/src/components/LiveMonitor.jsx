@@ -17,6 +17,8 @@ import {
   onPipModeChanged,
   onBackgroundPauseChanged,
   setBackgroundPaused,
+  didPipAutoEnterFullscreen,
+  setPipAutoEnteredFullscreen,
 } from '../lib/nativeBridge.js';
 import { usePullToRefresh } from '../lib/usePullToRefresh.js';
 import { api } from '../lib/api.js';
@@ -79,6 +81,14 @@ export default function LiveMonitor() {
     if (!isNativeApp()) return undefined;
     const offPip = onPipModeChanged((isInPip) => {
       document.body.classList.toggle('in-pip', isInPip);
+      // Leaving PiP: if the PiP button entered fullscreen itself just to get a clean
+      // float, drop back out of fullscreen so the user lands where they started (the
+      // dashboard). If they were already fullscreen when they hit PiP, the flag is off
+      // and we leave them in fullscreen.
+      if (!isInPip && didPipAutoEnterFullscreen()) {
+        setPipAutoEnteredFullscreen(false);
+        if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      }
     });
     const offPause = onBackgroundPauseChanged((paused) => setBackgroundPaused(paused));
     return () => {
