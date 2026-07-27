@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { getToken } from '../lib/api.js';
+import { setBackgroundPaused } from '../lib/nativeBridge.js';
 
 // The backend proxies WHEP straight through to MediaMTX under /live (see backend/src/index.js),
 // so this always uses the same origin/protocol the page was loaded with — no separate port,
@@ -163,15 +164,18 @@ export default function WhepPlayer({
               // signals to Chrome that this is deliberate, controllable background
               // media - metadata alone is informational and isn't enough on its own
               // to reliably keep audio playing once the tab is backgrounded.
+              // Play/pause from the system media UI (iOS Now Playing / lock screen, or a
+              // system media notification) routes through the app-wide background-pause so
+              // it mutes/unmutes every Background-mode tile consistently - the same action
+              // as the Android notification's Pause button. Muting (rather than truly
+              // pausing) keeps the stream at the live edge, so resume is instantly current.
+              // setBackgroundPaused also updates mediaSession.playbackState for the glyph.
               navigator.mediaSession.setActionHandler('play', () => {
+                setBackgroundPaused(false);
                 audioRef.current?.play().catch(() => {});
-                navigator.mediaSession.playbackState = 'playing';
               });
               navigator.mediaSession.setActionHandler('pause', () => {
-                // This is a live monitor feed, not a track - there's nothing meaningful
-                // to pause to, so just acknowledge the control rather than leave it
-                // unhandled.
-                navigator.mediaSession.playbackState = 'playing';
+                setBackgroundPaused(true);
               });
             }
           }

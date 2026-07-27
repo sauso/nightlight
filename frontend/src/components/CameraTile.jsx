@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical } from 'lucide-react';
 import { useSettings } from '../lib/SettingsContext.jsx';
-import { isNativeApp, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip, hasNativePip } from '../lib/nativeBridge.js';
+import { isNativeApp, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip, hasNativePip, subscribeBackgroundPaused, isBackgroundPaused } from '../lib/nativeBridge.js';
 import WhepPlayer from './WhepPlayer.jsx';
 import HlsPlayer from './HlsPlayer.jsx';
 import BreathingDot from './BreathingDot.jsx';
@@ -69,7 +69,14 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
-  const effectiveMuted = muted || (audioState === 'on' && !pageVisible);
+  // Background-audio pause (from the Android notification's Pause button or iOS's Now
+  // Playing controls) mutes every Background-mode tile app-wide. Kept separate from the
+  // per-tile mute so resuming restores exactly the previous state.
+  const [bgPaused, setBgPaused] = useState(isBackgroundPaused);
+  useEffect(() => subscribeBackgroundPaused(setBgPaused), []);
+
+  const effectiveMuted =
+    muted || (audioState === 'on' && !pageVisible) || (audioState === 'bg' && bgPaused);
 
   // When the app is minimized and this camera isn't in Background mode, tear the stream
   // connection down entirely (WhepPlayer/HlsPlayer both fully disconnect when active is

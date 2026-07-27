@@ -9,6 +9,21 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-07-27
+
+### Added
+- Background audio can now be **paused and resumed** from the system media controls -
+  Android's notification (a Pause/Resume button next to Stop) and iOS's Now Playing
+  controls (Control Center / lock screen). Pausing mutes the stream rather than
+  disconnecting it, so resuming is instant and stays at the live edge. Both routes share
+  one app-wide pause, so it stays consistent. (Android notification button needs
+  nightlight-mobile 0.4.1; iOS is frontend-only via the Web Media Session API.)
+
+### Fixed
+- In the Android app, the on-video overlay buttons (mute / settings / fullscreen) are now
+  hidden while a camera is floating in Picture-in-Picture, where they only obscured the
+  small window. Driven by the native PiP-mode signal (nightlight-mobile 0.4.1).
+
 ## [0.4.5] - 2026-07-27
 
 ### Changed
@@ -176,7 +191,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.4.5...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.4.6...HEAD
+[0.4.6]: https://github.com/sauso/nightlight/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/sauso/nightlight/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/sauso/nightlight/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/sauso/nightlight/compare/v0.4.2...v0.4.3
