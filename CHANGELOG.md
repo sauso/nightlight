@@ -9,11 +9,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-27
+
 ### Fixed
 - Add/edit dialogs no longer get pushed up under the status bar/notch when the on-screen
   keyboard opens on mobile, hiding the field you're typing in. The dialog now sizes itself to
-  the space above the keyboard and scrolls internally, so the focused field stays visible; the
-  title/close row stays pinned at the top.
+  the space above the keyboard and scrolls internally (so the focused field stays visible),
+  its top stays clear of the safe area, and the title/close row stays pinned at the top.
 
 ## [0.5.0] - 2026-07-27
 
@@ -274,7 +276,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/sauso/nightlight/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/sauso/nightlight/compare/v0.4.9...v0.5.0
 [0.4.9]: https://github.com/sauso/nightlight/compare/v0.4.8...v0.4.9
 [0.4.8]: https://github.com/sauso/nightlight/compare/v0.4.7...v0.4.8
