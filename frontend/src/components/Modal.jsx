@@ -70,12 +70,6 @@ export default function Modal({ title, onClose, children, placement = 'bottom' }
             justifyContent: 'space-between',
             alignItems: 'center',
             marginBottom: 16,
-            // Keep the title + close button visible while scrolling a long form.
-            position: 'sticky',
-            top: 0,
-            background: 'var(--bg-elevated)',
-            paddingBottom: 8,
-            zIndex: 1,
           }}
         >
           <h2 style={{ fontSize: 18 }}>{title}</h2>
