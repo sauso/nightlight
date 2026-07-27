@@ -9,6 +9,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **ONVIF auto-fill when adding a camera.** Enter the camera's IP and ONVIF username/password
+  in the Add-camera form and Nightlight connects over ONVIF to fetch the RTSP URL and detected
+  codec/resolution automatically, instead of hand-typing the RTSP path. Resilient to minimal
+  ONVIF servers (falls back to the media service directly when a camera faults on the usual
+  capability calls) and reconstructs the RTSP URL from the camera's IP + your credentials
+  rather than trusting the (often wrong) host/creds the camera returns. Manual RTSP entry
+  stays available. This is Phase 1 of planned ONVIF support (discovery-by-IP; multicast scan
+  intentionally skipped as it can't cross VLANs). See `planning/onvif-and-two-way-audio-scope.md`.
+
 ## [0.4.9] - 2026-07-27
 
 ### Changed

@@ -14,15 +14,60 @@ export default function Cameras() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: '', rtsp_url: '', child_id: '', mqtt_topic: '' });
   const [busy, setBusy] = useState(false);
+  // ONVIF auto-fill sub-form (only in the Add flow).
+  const [onvif, setOnvif] = useState({ host: '', port: '', username: '', password: '' });
+  const [onvifBusy, setOnvifBusy] = useState(false);
+  const [onvifMsg, setOnvifMsg] = useState('');
+
+  function resetOnvif() {
+    setOnvif({ host: '', port: '', username: '', password: '' });
+    setOnvifBusy(false);
+    setOnvifMsg('');
+  }
 
   function openNew() {
     setForm({ name: '', rtsp_url: '', child_id: '', mqtt_topic: '' });
+    resetOnvif();
     setEditing({});
   }
 
   function openEdit(cam) {
     setForm({ name: cam.name, rtsp_url: cam.rtsp_url, child_id: cam.child_id || '', mqtt_topic: cam.mqtt_topic || '' });
+    resetOnvif();
     setEditing(cam);
+  }
+
+  async function fetchFromOnvif() {
+    if (!onvif.host.trim()) {
+      setError('Enter the camera IP first');
+      return;
+    }
+    setOnvifBusy(true);
+    setOnvifMsg('');
+    setError('');
+    try {
+      const r = await api.post('/cameras/onvif-probe', {
+        host: onvif.host.trim(),
+        port: onvif.port ? Number(onvif.port) : undefined,
+        username: onvif.username,
+        password: onvif.password,
+      });
+      setForm((f) => ({
+        ...f,
+        rtsp_url: r.rtspUrl,
+        name: f.name || r.suggestedName || '',
+        discovery_source: 'onvif',
+        onvif_device_url: r.onvifDeviceUrl,
+      }));
+      const res = r.video?.width ? `${r.video.codec || ''} ${r.video.width}×${r.video.height}`.trim() : r.video?.codec || '';
+      setOnvifMsg(
+        `Found stream${res ? ` — ${res}` : ''}${r.audio?.codec ? ` + ${r.audio.codec} audio` : ''}. RTSP URL filled in below.`
+      );
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setOnvifBusy(false);
+    }
   }
 
   async function save(e) {
@@ -124,6 +169,60 @@ export default function Cameras() {
                 placeholder="e.g. Crib cam"
               />
             </div>
+            {!editing.id && (
+              <div className="onvif-box">
+                <div className="section-title" style={{ marginTop: 0 }}>Auto-fill from ONVIF camera (optional)</div>
+                <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
+                  Enter the camera's IP and ONVIF login to fetch its RTSP URL automatically,
+                  instead of typing it by hand.
+                </div>
+                <div className="onvif-box__row">
+                  <div className="field" style={{ marginBottom: 8 }}>
+                    <label htmlFor="onvif-host">Camera IP</label>
+                    <input
+                      id="onvif-host"
+                      value={onvif.host}
+                      onChange={(e) => setOnvif({ ...onvif, host: e.target.value })}
+                      placeholder="192.168.1.50"
+                    />
+                  </div>
+                  <div className="field" style={{ marginBottom: 8, maxWidth: 90 }}>
+                    <label htmlFor="onvif-port">Port</label>
+                    <input
+                      id="onvif-port"
+                      value={onvif.port}
+                      onChange={(e) => setOnvif({ ...onvif, port: e.target.value })}
+                      placeholder="80"
+                    />
+                  </div>
+                </div>
+                <div className="onvif-box__row">
+                  <div className="field" style={{ marginBottom: 8 }}>
+                    <label htmlFor="onvif-user">ONVIF username</label>
+                    <input
+                      id="onvif-user"
+                      value={onvif.username}
+                      onChange={(e) => setOnvif({ ...onvif, username: e.target.value })}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div className="field" style={{ marginBottom: 8 }}>
+                    <label htmlFor="onvif-pass">ONVIF password</label>
+                    <input
+                      id="onvif-pass"
+                      type="password"
+                      value={onvif.password}
+                      onChange={(e) => setOnvif({ ...onvif, password: e.target.value })}
+                      autoComplete="off"
+                    />
+                  </div>
+                </div>
+                <button type="button" className="btn" onClick={fetchFromOnvif} disabled={onvifBusy}>
+                  {onvifBusy ? 'Fetching…' : 'Fetch stream URL'}
+                </button>
+                {onvifMsg && <div className="onvif-box__ok">{onvifMsg}</div>}
+              </div>
+            )}
             <div className="field">
               <label htmlFor="cam-rtsp">RTSP URL</label>
               <input

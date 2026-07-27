@@ -1,9 +1,20 @@
 # Nightlight: ONVIF Discovery + Two-Way Audio — Scope Document
 
 Status: **Not started.** This is a planning document to hand to Claude Code
-when work actually begins — waiting on acquiring a camera confirmed to
-support ONVIF Profile T before starting, since Profile T is the profile most
-likely to include the audio backchannel needed for phase 3.
+when work actually begins. Phases 1–2 (discovery + capability check) can start
+against cameras already owned. Phase 3 (two-way audio) is waiting on acquiring
+a camera confirmed to support the **ONVIF audio backchannel**.
+
+> **Correction (2026-07-27): don't shop by "Profile T."** The audio backchannel
+> needed for two-way talk is a *conditional* ONVIF feature that appears in *some*
+> Profile S **and** *some* Profile T devices — plenty of Profile T cameras still
+> expose no audio output. So the thing to confirm before buying a Phase 3 test
+> camera is **explicit audio-backchannel support**, not the profile label:
+> the device answers `GetAudioOutputConfigurations`, and its RTSP accepts the
+> backchannel `Require: www.onvif.org/ver20/backchannel` header with a G.711
+> output. Verify up front with ONVIF Device Manager or an `ffmpeg`/`onvif` probe.
+> Brands that tend to implement it well: **Amcrest/Dahua-based** and
+> **Hikvision**; Reolink is hit-or-miss per model, so verify that specific model.
 
 Do not start implementation from this document alone — treat it as the
 starting brief, confirm current repo structure first (file paths below are
@@ -127,6 +138,20 @@ whether the acquired test camera's Profile T implementation behaves as
 advertised. Prototype against one known-good camera before generalizing.
 
 ---
+
+## Hardware findings
+
+- **Sonoff GK-200MP2-B (with `sonoff-hack` firmware — github.com/roleoroleo/sonoff-hack):**
+  a good **Phase 1–2 dev camera, not a Phase 3 camera.** The hack turns it into a clean
+  local ONVIF/RTSP camera (cloud-disabled, PTZ, one-way audio in) and it discovers via
+  WS-Discovery, so it's ideal for building/testing discovery and the capability check
+  (where it should correctly report `backchannel_supported: no`). But its bundled ONVIF
+  server is Profile S-class and implements **no audio backchannel** — confirmed by testing.
+  The camera hardware may have a speaker (the stock eWeLink app's intercom), but the only
+  path to it is Sonoff's proprietary cloud protocol; the open firmware doesn't bridge
+  talkback, and adding it would be camera-firmware work out of scope for this app. So it
+  cannot be the two-way-audio prototype target — a confirmed-backchannel camera is still
+  needed for Phase 3 (see the shopping note at the top).
 
 ## Suggested order of work when starting
 
