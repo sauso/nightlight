@@ -716,8 +716,9 @@ body.in-pip .tile-menu-backdrop {
   color: var(--live);
   border-color: var(--live);
 }
-.cam-badge--muted {
-  color: var(--text-secondary);
+.cam-badge--bad {
+  color: var(--offline);
+  border-color: var(--offline);
 }
 
 /* ONVIF auto-fill box in the Add-camera modal */

@@ -6,6 +6,7 @@ import { upsertPath, removePath, getPathStatus, toPathName } from '../lib/mediam
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
 import { getReading, subscribeAllCameraTopics } from '../lib/mqttClient.js';
 import { probeOnvifCamera, ptzContinuousMove, ptzStop } from '../lib/onvif.js';
+import { validateRtspStream } from '../lib/rtspProbe.js';
 import { logger } from '../lib/logger.js';
 
 const router = Router();
@@ -163,9 +164,9 @@ router.put('/reorder', (req, res) => {
 router.post('/', requireAdmin, async (req, res) => {
   const {
     name, rtsp_host, rtsp_port, rtsp_path, rtsp_username, rtsp_password,
-    child_id, mqtt_topic,
+    child_id, mqtt_topic, force,
     discovery_source, onvif_device_url, backchannel_supported,
-    ptz_supported, onvif_username, onvif_password, onvif_profile_token,
+    ptz_supported, onvif_profile_token,
   } = req.body || {};
   if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
   const rtsp_url = assembleRtspUrl({
@@ -177,6 +178,16 @@ router.post('/', requireAdmin, async (req, res) => {
   });
   if (!isValidRtsp(rtsp_url)) {
     return res.status(400).json({ error: 'A camera IP address is required' });
+  }
+  // Verify the stream actually works before saving (unless the user chose "save anyway"
+  // after a failed check). Catches wrong credentials / path / IP instead of storing a dead
+  // camera. 422 + needsConfirm lets the UI offer an override for a camera that's just
+  // briefly offline.
+  if (!force) {
+    const check = await validateRtspStream(rtsp_url);
+    if (!check.ok) {
+      return res.status(422).json({ error: `Couldn't reach the camera stream: ${check.error}`, needsConfirm: true });
+    }
   }
   const id = uuid();
   const mediamtx_path = toPathName(id);
@@ -194,8 +205,10 @@ router.post('/', requireAdmin, async (req, res) => {
   // PTZ control needs the ONVIF credentials + profile token later - only meaningful for
   // ONVIF-added cameras. ptz_supported gates whether the UI ever shows PTZ controls.
   const ptz = isOnvif && ptz_supported ? 1 : 0;
-  const onvifUser = isOnvif ? onvif_username || null : null;
-  const onvifPass = isOnvif ? onvif_password || null : null;
+  // ONVIF control (PTZ) reuses the same single credential set the user entered for the
+  // camera - no separate ONVIF login to enter twice.
+  const onvifUser = isOnvif ? rtsp_username || null : null;
+  const onvifPass = isOnvif ? rtsp_password || null : null;
   const profileToken = isOnvif ? onvif_profile_token || null : null;
   const { maxOrder } = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS maxOrder FROM cameras').get();
   db.prepare(
@@ -220,7 +233,7 @@ router.post('/', requireAdmin, async (req, res) => {
 router.put('/:id', requireAdmin, async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
-  const { name, rtsp_host, rtsp_port, rtsp_path, rtsp_username, rtsp_password, child_id, mqtt_topic } = req.body || {};
+  const { name, rtsp_host, rtsp_port, rtsp_path, rtsp_username, rtsp_password, child_id, mqtt_topic, force } = req.body || {};
 
   // Reassemble the RTSP URL from the edited fields. A field not sent keeps its current
   // value; a blank password specifically means "keep the existing one" (the browser never
@@ -238,6 +251,14 @@ router.put('/:id', requireAdmin, async (req, res) => {
       password,
     });
     if (!isValidRtsp(newRtsp)) return res.status(400).json({ error: 'A camera IP address is required' });
+  }
+
+  // Validate the new address before applying it (unless overridden) - same as adding.
+  if (newRtsp !== existing.rtsp_url && !force) {
+    const check = await validateRtspStream(newRtsp);
+    if (!check.ok) {
+      return res.status(422).json({ error: `Couldn't reach the camera stream: ${check.error}`, needsConfirm: true });
+    }
   }
 
   if (newRtsp !== existing.rtsp_url) {
