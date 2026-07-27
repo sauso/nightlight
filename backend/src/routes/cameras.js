@@ -64,7 +64,7 @@ router.put('/reorder', (req, res) => {
 });
 
 router.post('/', requireAdmin, async (req, res) => {
-  const { name, rtsp_url, child_id, mqtt_topic, discovery_source, onvif_device_url } = req.body || {};
+  const { name, rtsp_url, child_id, mqtt_topic, discovery_source, onvif_device_url, backchannel_supported } = req.body || {};
   if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
   if (!isValidRtsp(rtsp_url)) {
     return res.status(400).json({ error: 'A valid rtsp:// URL is required' });
@@ -80,10 +80,11 @@ router.post('/', requireAdmin, async (req, res) => {
   // later ONVIF work (capability check, PTZ) can reconnect. Defaults to a plain manual add.
   const source = discovery_source === 'onvif' ? 'onvif' : 'manual';
   const onvifUrl = source === 'onvif' && onvif_device_url ? onvif_device_url.trim() : null;
+  const backchannel = ['yes', 'no'].includes(backchannel_supported) ? backchannel_supported : 'unknown';
   const { maxOrder } = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS maxOrder FROM cameras').get();
   db.prepare(
-    'INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path, sort_order, mqtt_topic, discovery_source, onvif_capable, onvif_device_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(id, name.trim(), rtsp_url.trim(), child_id || null, mediamtx_path, maxOrder + 1, mqtt_topic?.trim() || null, source, source === 'onvif' ? 1 : 0, onvifUrl);
+    'INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path, sort_order, mqtt_topic, discovery_source, onvif_capable, onvif_device_url, backchannel_supported) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, name.trim(), rtsp_url.trim(), child_id || null, mediamtx_path, maxOrder + 1, mqtt_topic?.trim() || null, source, source === 'onvif' ? 1 : 0, onvifUrl, backchannel);
   await startTranscoder(id, rtsp_url.trim(), mediamtx_path, name.trim());
   subscribeAllCameraTopics();
   res.status(201).json(db.prepare('SELECT * FROM cameras WHERE id = ?').get(id));

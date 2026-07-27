@@ -141,6 +141,12 @@ if (!camerasColumns.includes('onvif_capable')) {
 if (!camerasColumns.includes('onvif_device_url')) {
   db.exec('ALTER TABLE cameras ADD COLUMN onvif_device_url TEXT');
 }
+// Two-way-audio (ONVIF backchannel) capability, captured at ONVIF add time:
+// 'yes' | 'no' | 'unknown' (unknown = manually added, or ONVIF didn't say). Informational
+// for now; Phase 3 (two-way audio) would only ever be offered on 'yes'.
+if (!camerasColumns.includes('backchannel_supported')) {
+  db.exec("ALTER TABLE cameras ADD COLUMN backchannel_supported TEXT NOT NULL DEFAULT 'unknown'");
+}
 
 // Ensure the single settings row always exists.
 db.prepare(

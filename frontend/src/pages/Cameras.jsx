@@ -58,11 +58,12 @@ export default function Cameras() {
         name: f.name || r.suggestedName || '',
         discovery_source: 'onvif',
         onvif_device_url: r.onvifDeviceUrl,
+        backchannel_supported: r.backchannel,
       }));
       const res = r.video?.width ? `${r.video.codec || ''} ${r.video.width}×${r.video.height}`.trim() : r.video?.codec || '';
-      setOnvifMsg(
-        `Found stream${res ? ` — ${res}` : ''}${r.audio?.codec ? ` + ${r.audio.codec} audio` : ''}. RTSP URL filled in below.`
-      );
+      const talk =
+        r.backchannel === 'yes' ? ' · two-way audio supported' : r.backchannel === 'no' ? ' · no two-way audio' : '';
+      setOnvifMsg(`Found stream${res ? ` — ${res}` : ''}${talk}. RTSP URL filled in below.`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -128,6 +129,14 @@ export default function Cameras() {
                       since it usually embeds the camera's own login credentials. */}
                   {cam.rtsp_url && (
                     <div className="camera-tile__sub" style={{ wordBreak: 'break-all' }}>{cam.rtsp_url}</div>
+                  )}
+                  {/* Two-way-audio capability, detected over ONVIF at add time. Only shown
+                      when known - manual/unknown cameras get no badge to avoid clutter. */}
+                  {cam.backchannel_supported === 'yes' && (
+                    <span className="cam-badge cam-badge--ok">Two-way audio</span>
+                  )}
+                  {cam.backchannel_supported === 'no' && (
+                    <span className="cam-badge cam-badge--muted">No two-way audio</span>
                   )}
                 </div>
               </div>
