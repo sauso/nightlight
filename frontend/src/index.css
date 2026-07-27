@@ -698,9 +698,14 @@ body.in-pip .tile-menu-backdrop {
 }
 
 /* Camera capability badges (e.g. two-way audio) in the Cameras list */
+.cam-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
 .cam-badge {
   display: inline-block;
-  margin-top: 6px;
   padding: 2px 8px;
   border-radius: 999px;
   font-size: 11px;

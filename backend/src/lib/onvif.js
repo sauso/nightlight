@@ -70,11 +70,14 @@ function pickBestProfile(profiles) {
   })[0];
 }
 
-// The path from getStreamUri is trustworthy; the host and any embedded credentials are not
-// (see header). Substitute the connect host and the user's credentials.
-function buildRtspUrl({ streamUri, host, username, password }) {
+// The path (and any port) from getStreamUri is trustworthy; the host and embedded
+// credentials are not (see header) - so we return the path/port as address components and
+// pair them with the host we connected to. The app assembles these with the user's
+// credentials into the final rtsp:// URL server-side (see routes/cameras.js), so the
+// password never lands in a URL field in the UI.
+function rtspPartsFromStreamUri({ streamUri, host }) {
   let path = '/';
-  let rtspPort = DEFAULT_RTSP_PORT;
+  let port = DEFAULT_RTSP_PORT;
   const m = /^rtsps?:\/\/([^/]*)(\/.*)?$/i.exec((streamUri || '').trim());
   if (m) {
     if (m[2]) path = m[2];
@@ -82,10 +85,9 @@ function buildRtspUrl({ streamUri, host, username, password }) {
     const authority = m[1] || '';
     const hostPart = authority.includes('@') ? authority.split('@').pop() : authority;
     const portMatch = /:(\d+)$/.exec(hostPart);
-    if (portMatch) rtspPort = portMatch[1];
+    if (portMatch) port = portMatch[1];
   }
-  const cred = username ? `${encodeURIComponent(username)}:${encodeURIComponent(password || '')}@` : '';
-  return `rtsp://${cred}${host}:${rtspPort}${path}`;
+  return { host, port: String(port), path };
 }
 
 /**
@@ -146,12 +148,7 @@ export async function probeOnvifCamera({ host, port, username, password }) {
     throw new Error(`Connected over ONVIF but could not get the stream URL: ${e.message}`);
   });
 
-  const rtspUrl = buildRtspUrl({
-    streamUri: stream?.uri || '',
-    host: cleanHost,
-    username,
-    password,
-  });
+  const rtspParts = rtspPartsFromStreamUri({ streamUri: stream?.uri || '', host: cleanHost });
 
   // Phase 2: record whether the camera exposes an audio output (two-way-audio backchannel),
   // while we're already connected. Read-only, best-effort - never fails the probe.
@@ -166,7 +163,11 @@ export async function probeOnvifCamera({ host, port, username, password }) {
   const info = await pcall(cam, 'getDeviceInformation').catch(() => null);
   const vid = best?.videoEncoderConfiguration || {};
   return {
-    rtspUrl,
+    // Address components for the add-camera form; the app pairs these with the entered
+    // credentials to build the RTSP URL server-side.
+    rtspHost: rtspParts.host,
+    rtspPort: rtspParts.port,
+    rtspPath: rtspParts.path,
     suggestedName: info ? [info.manufacturer, info.model].filter(Boolean).join(' ').trim() || null : null,
     video: {
       codec: vid.encoding || null,
