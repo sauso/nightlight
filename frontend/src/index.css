@@ -876,6 +876,11 @@ body.in-pip .tile-menu-backdrop {
 }
 
 .btn-danger {
+  background: var(--offline);
+  color: #2a0f0f;
+}
+
+.btn-danger {
   background: transparent;
   border: 1px solid var(--offline);
   color: var(--offline);
