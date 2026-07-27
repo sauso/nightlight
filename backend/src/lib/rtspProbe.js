@@ -47,7 +47,13 @@ export function validateRtspStream(rtspUrl) {
         lines.find((l) => /unauthor|401|refused|timed out|not found|404|no route|host/i.test(l)) ||
         lines[lines.length - 1] ||
         'Could not connect to the stream';
-      resolve({ ok: false, error: reason.replace(/^rtsps?:\/\/\S+:\s*/i, '') });
+      // Strip ffmpeg's noise: a leading "[rtsp @ 0x...] " tag and any URL prefix, so the
+      // message reads like "method DESCRIBE failed: 401 (Unauthorized)".
+      const clean = reason
+        .replace(/^\[[^\]]*\]\s*/, '')
+        .replace(/^rtsps?:\/\/\S+:\s*/i, '')
+        .trim();
+      resolve({ ok: false, error: clean || 'Could not connect to the stream' });
     });
   });
 }
