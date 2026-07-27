@@ -20,10 +20,14 @@ export default function Cameras() {
   const [busy, setBusy] = useState(false);
   const [onvifBusy, setOnvifBusy] = useState(false);
   const [onvifMsg, setOnvifMsg] = useState('');
+  // When the stream validation on save fails, we surface it inline with a "Save anyway"
+  // option instead of a blocking browser confirm().
+  const [confirmMsg, setConfirmMsg] = useState('');
 
   function openNew() {
     setForm(EMPTY_FORM);
     setOnvifMsg('');
+    setConfirmMsg('');
     setEditing({});
   }
 
@@ -41,6 +45,7 @@ export default function Cameras() {
       mqtt_topic: cam.mqtt_topic || '',
     });
     setOnvifMsg('');
+    setConfirmMsg('');
     setEditing(cam);
   }
 
@@ -89,32 +94,32 @@ export default function Cameras() {
     return editing?.id ? api.put(`/cameras/${editing.id}`, payload) : api.post('/cameras', payload);
   }
 
-  async function save(e) {
-    e.preventDefault();
+  async function doSave(force) {
     setBusy(true);
     setError('');
-    const payload = { ...form, child_id: form.child_id || null };
+    const payload = { ...form, child_id: form.child_id || null, ...(force ? { force: true } : {}) };
     try {
       await submitCamera(payload);
       setEditing(null);
       await refresh();
     } catch (err) {
       // The server validates the stream first; if it couldn't reach it (bad creds/path, or
-      // the camera's just offline right now) it asks whether to save anyway.
-      if (err.data?.needsConfirm && confirm(`${err.message}\n\nSave the camera anyway?`)) {
-        try {
-          await submitCamera({ ...payload, force: true });
-          setEditing(null);
-          await refresh();
-        } catch (err2) {
-          setError(err2.message);
-        }
-      } else if (!err.data?.needsConfirm) {
+      // the camera's just offline right now) it flags needsConfirm - surface that inline
+      // with a "Save anyway" button rather than a browser popup.
+      if (err.data?.needsConfirm) {
+        setConfirmMsg(err.message);
+      } else {
         setError(err.message);
       }
     } finally {
       setBusy(false);
     }
+  }
+
+  function save(e) {
+    e.preventDefault();
+    setConfirmMsg(''); // a fresh Save re-validates (e.g. after fixing the password)
+    doSave(false);
   }
 
   async function assign(cam, childId) {
@@ -300,9 +305,25 @@ export default function Cameras() {
                 placeholder="e.g. zigbee2mqtt/Raffa Room Temp"
               />
             </div>
-            <button className="btn btn-primary" type="submit" disabled={busy}>
-              {busy ? 'Saving…' : 'Save'}
-            </button>
+            {confirmMsg && (
+              <div className="form-warning">
+                <div>Couldn't reach the camera stream: {confirmMsg}</div>
+                <div className="camera-tile__sub" style={{ marginTop: 4 }}>
+                  Check the IP, path, and login — or if the camera's just offline right now,
+                  save it anyway.
+                </div>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-primary" type="submit" disabled={busy}>
+                {busy ? 'Saving…' : confirmMsg ? 'Retry save' : 'Save'}
+              </button>
+              {confirmMsg && (
+                <button className="btn" type="button" onClick={() => doSave(true)} disabled={busy}>
+                  Save anyway
+                </button>
+              )}
+            </div>
           </form>
         </Modal>
       )}

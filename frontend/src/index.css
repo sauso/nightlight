@@ -697,6 +697,18 @@ body.in-pip .tile-menu-backdrop {
   color: var(--accent);
 }
 
+/* Inline warning inside a form (e.g. stream validation failed on save) - softer than the
+   red error banner, since it's a "heads up, but you can proceed" state. */
+.form-warning {
+  background: rgba(224, 133, 133, 0.12);
+  border: 1px solid var(--offline);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
 /* Camera capability badges (e.g. two-way audio) in the Cameras list */
 .cam-badge-row {
   display: flex;
