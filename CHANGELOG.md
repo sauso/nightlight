@@ -9,6 +9,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-07-27
+
+### Fixed
+- Camera tiles are now 16:9 (were 16:10), matching the native aspect ratio of virtually all
+  IP cameras. The taller tile made `object-fit: cover` crop the left/right edges, which was
+  hiding the camera's own on-screen timestamp; at 16:9 the full frame shows.
+
+### Changed
+- Softened the camera tile corners a little less aggressively (16px → 10px radius).
+
 ## [0.4.7] - 2026-07-27
 
 ### Changed
@@ -203,7 +213,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.4.7...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.4.8...HEAD
+[0.4.8]: https://github.com/sauso/nightlight/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/sauso/nightlight/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/sauso/nightlight/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/sauso/nightlight/compare/v0.4.4...v0.4.5

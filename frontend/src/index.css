@@ -439,13 +439,18 @@ body.in-pip .tile-menu-backdrop {
 .camera-tile {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  /* Deliberately gentler than the app-wide --radius (16px) - softened corners, but not
+     as pronounced, so the tiles read a little more like a video panel. */
+  border-radius: 10px;
   overflow: hidden;
 }
 
 .camera-tile__video-wrap {
   position: relative;
-  aspect-ratio: 16 / 10;
+  /* Match the camera's native 16:9 so object-fit: cover fills the frame exactly instead
+     of cropping the left/right edges (which was cutting off the camera's own timestamp
+     overlay). Virtually all IP cameras output 16:9. */
+  aspect-ratio: 16 / 9;
   background: #0a0d1c;
   overflow: hidden;
   touch-action: manipulation; /* avoids the ~300ms tap delay some mobile browsers add */
