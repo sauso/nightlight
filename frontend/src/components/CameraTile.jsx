@@ -378,6 +378,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
               muted={effectiveMuted}
               onFirstConnectFailed={handleFirstConnectFailed}
               cameraName={camera.name}
+              isBackgroundAudio={audioState === 'bg'}
             />
           ) : (
             <HlsPlayer

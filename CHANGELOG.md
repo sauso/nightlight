@@ -9,6 +9,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+- The lock-screen / Now Playing controls (mobile) now show the camera that's actually in
+  Background mode, instead of whichever camera connected most recently. Ownership of the
+  system media session is now held only by the Background-audio camera rather than clobbered
+  by every camera on connect.
+
 ## [0.5.2] - 2026-07-27
 
 ### Added
