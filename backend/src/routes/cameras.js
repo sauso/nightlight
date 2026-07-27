@@ -5,6 +5,7 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { upsertPath, removePath, getPathStatus, toPathName } from '../lib/mediamtx.js';
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
 import { getReading, subscribeAllCameraTopics } from '../lib/mqttClient.js';
+import { probeOnvifCamera } from '../lib/onvif.js';
 import { logger } from '../lib/logger.js';
 
 const router = Router();
@@ -13,6 +14,23 @@ router.use(requireAuth);
 function isValidRtsp(url) {
   return typeof url === 'string' && /^rtsps?:\/\/.+/i.test(url.trim());
 }
+
+// ONVIF auto-fill: given a camera's IP + ONVIF credentials, connect and return a
+// ready-to-use RTSP URL plus detected codec/resolution, so the admin doesn't hand-type the
+// RTSP path. Read-only probe - creates nothing; the normal POST / still does the adding.
+router.post('/onvif-probe', requireAdmin, async (req, res) => {
+  const { host, port, username, password } = req.body || {};
+  if (!host || !host.trim()) return res.status(400).json({ error: 'Camera IP address is required' });
+  try {
+    const result = await probeOnvifCamera({ host, port, username, password });
+    res.json(result);
+  } catch (err) {
+    // Expected failure mode (wrong IP/creds, not an ONVIF camera, timeout) - 502, not 500,
+    // and pass the message through so the UI can show it.
+    logger.info(`[onvif] probe of ${host} failed: ${err.message}`);
+    res.status(502).json({ error: err.message || 'ONVIF probe failed' });
+  }
+});
 
 router.get('/', async (req, res) => {
   const cameras = db.prepare('SELECT * FROM cameras ORDER BY sort_order, created_at').all();
@@ -46,7 +64,7 @@ router.put('/reorder', (req, res) => {
 });
 
 router.post('/', requireAdmin, async (req, res) => {
-  const { name, rtsp_url, child_id, mqtt_topic } = req.body || {};
+  const { name, rtsp_url, child_id, mqtt_topic, discovery_source, onvif_device_url } = req.body || {};
   if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
   if (!isValidRtsp(rtsp_url)) {
     return res.status(400).json({ error: 'A valid rtsp:// URL is required' });
@@ -58,10 +76,14 @@ router.post('/', requireAdmin, async (req, res) => {
   } catch (e) {
     return res.status(502).json({ error: `Could not register stream with MediaMTX: ${e.message}` });
   }
+  // Record ONVIF provenance when the RTSP URL was auto-filled via the probe above, so
+  // later ONVIF work (capability check, PTZ) can reconnect. Defaults to a plain manual add.
+  const source = discovery_source === 'onvif' ? 'onvif' : 'manual';
+  const onvifUrl = source === 'onvif' && onvif_device_url ? onvif_device_url.trim() : null;
   const { maxOrder } = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS maxOrder FROM cameras').get();
   db.prepare(
-    'INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path, sort_order, mqtt_topic) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).run(id, name.trim(), rtsp_url.trim(), child_id || null, mediamtx_path, maxOrder + 1, mqtt_topic?.trim() || null);
+    'INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path, sort_order, mqtt_topic, discovery_source, onvif_capable, onvif_device_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, name.trim(), rtsp_url.trim(), child_id || null, mediamtx_path, maxOrder + 1, mqtt_topic?.trim() || null, source, source === 'onvif' ? 1 : 0, onvifUrl);
   await startTranscoder(id, rtsp_url.trim(), mediamtx_path, name.trim());
   subscribeAllCameraTopics();
   res.status(201).json(db.prepare('SELECT * FROM cameras WHERE id = ?').get(id));

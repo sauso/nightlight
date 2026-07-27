@@ -129,6 +129,19 @@ if (!camerasColumns.includes('mqtt_topic')) {
   db.exec('ALTER TABLE cameras ADD COLUMN mqtt_topic TEXT');
 }
 
+// ONVIF: how a camera was added and (for cameras added via ONVIF) where its ONVIF device
+// service lives, so later ONVIF operations (two-way-audio capability check, PTZ) can
+// reconnect without re-discovering. discovery_source is 'manual' | 'onvif'.
+if (!camerasColumns.includes('discovery_source')) {
+  db.exec("ALTER TABLE cameras ADD COLUMN discovery_source TEXT NOT NULL DEFAULT 'manual'");
+}
+if (!camerasColumns.includes('onvif_capable')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN onvif_capable INTEGER NOT NULL DEFAULT 0');
+}
+if (!camerasColumns.includes('onvif_device_url')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN onvif_device_url TEXT');
+}
+
 // Ensure the single settings row always exists.
 db.prepare(
   `INSERT OR IGNORE INTO settings (id, app_name, accent_color, live_color, offline_color, timezone, font_choice, temp_unit)

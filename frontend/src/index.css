@@ -638,6 +638,29 @@ body.in-pip .tile-menu-backdrop {
   color: var(--accent);
 }
 
+/* ONVIF auto-fill box in the Add-camera modal */
+.onvif-box {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 14px;
+  background: var(--bg-elevated);
+}
+.onvif-box__row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.onvif-box__row .field {
+  flex: 1;
+  min-width: 140px;
+}
+.onvif-box__ok {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--live);
+}
+
 .camera-tile__video-wrap:fullscreen {
   display: flex;
   align-items: center;
