@@ -28,16 +28,25 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   belt-and-suspenders: the client stops on release/leave/cancel, and the camera also
   auto-stops a few seconds after any move server-side, so a move can't get stranded. Only
   shown on PTZ-capable cameras. See `planning/ptz-control-scope.md`.
-- **PTZ badge** in the Cameras list for pan/tilt-capable cameras (alongside the two-way-audio
-  badge).
+- **PTZ and Two-way Audio badges** in the Cameras list for ONVIF-added cameras — green when
+  supported, red when not. (Manual cameras show neither, since their capabilities aren't
+  probed.)
+- **Stream validation on save.** Adding or changing a camera's address now tests the RTSP
+  stream first (over TCP, briefly) and reports failures like wrong credentials or an
+  unreachable path up front, instead of silently saving a dead camera. If it can't reach the
+  camera (e.g. it's momentarily offline) it offers "save anyway."
 
 ### Changed
 - **Camera credentials are entered as separate fields, not inside the RTSP URL.** The
-  add/edit camera form now takes IP address, port, stream path, username, and password as
+  add/edit camera form takes IP address, port, stream path, username, and password as
   distinct fields, and the app assembles the `rtsp://` URL server-side. The password is never
   sent back to the browser or shown in a URL: the Cameras list shows a credential-free
   address, and when editing, the password field is blank and left blank means "keep the
   existing password." Fixes credentials being visible in plain text on the camera screen.
+- **ONVIF auto-fill simplified** to a single "Fetch" button that uses the IP you've already
+  entered — no separate ONVIF login fields. Credentials are optional for the fetch (most
+  cameras answer unauthenticated); you enter the camera login once, in the shared username/
+  password fields.
 
 ## [0.4.9] - 2026-07-27
 

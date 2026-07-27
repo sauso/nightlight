@@ -18,20 +18,12 @@ export default function Cameras() {
   };
   const [form, setForm] = useState(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
-  // ONVIF auto-fill sub-form (only in the Add flow).
-  const [onvif, setOnvif] = useState({ host: '', port: '', username: '', password: '' });
   const [onvifBusy, setOnvifBusy] = useState(false);
   const [onvifMsg, setOnvifMsg] = useState('');
 
-  function resetOnvif() {
-    setOnvif({ host: '', port: '', username: '', password: '' });
-    setOnvifBusy(false);
-    setOnvifMsg('');
-  }
-
   function openNew() {
     setForm(EMPTY_FORM);
-    resetOnvif();
+    setOnvifMsg('');
     setEditing({});
   }
 
@@ -48,12 +40,16 @@ export default function Cameras() {
       child_id: cam.child_id || '',
       mqtt_topic: cam.mqtt_topic || '',
     });
-    resetOnvif();
+    setOnvifMsg('');
     setEditing(cam);
   }
 
+  // Fetch port/path (and detected capabilities) over ONVIF using the IP already typed in the
+  // form. Credentials are optional - many cameras answer the profile query unauthenticated;
+  // if yours needs auth, fill username/password first and they'll be used.
   async function fetchFromOnvif() {
-    if (!onvif.host.trim()) {
+    const host = form.rtsp_host.trim();
+    if (!host) {
       setError('Enter the camera IP first');
       return;
     }
@@ -62,35 +58,26 @@ export default function Cameras() {
     setError('');
     try {
       const r = await api.post('/cameras/onvif-probe', {
-        host: onvif.host.trim(),
-        port: onvif.port ? Number(onvif.port) : undefined,
-        username: onvif.username,
-        password: onvif.password,
+        host,
+        username: form.rtsp_username || undefined,
+        password: form.rtsp_password || undefined,
       });
       setForm((f) => ({
         ...f,
-        // Address components from ONVIF; credentials default to the ONVIF login (usually the
-        // same as the camera's RTSP login - adjust below if not).
-        rtsp_host: r.rtspHost || onvif.host.trim(),
-        rtsp_port: r.rtspPort || '554',
-        rtsp_path: r.rtspPath || '',
-        rtsp_username: onvif.username,
-        rtsp_password: onvif.password,
+        rtsp_host: r.rtspHost || host,
+        rtsp_port: r.rtspPort || f.rtsp_port || '554',
+        rtsp_path: r.rtspPath || f.rtsp_path,
         name: f.name || r.suggestedName || '',
         discovery_source: 'onvif',
         onvif_device_url: r.onvifDeviceUrl,
         backchannel_supported: r.backchannel,
-        // Stored so PTZ control can reconnect later.
         ptz_supported: r.ptz ? 1 : 0,
         onvif_profile_token: r.profileToken || null,
-        onvif_username: onvif.username,
-        onvif_password: onvif.password,
       }));
       const res = r.video?.width ? `${r.video.codec || ''} ${r.video.width}×${r.video.height}`.trim() : r.video?.codec || '';
-      const talk =
-        r.backchannel === 'yes' ? ' · two-way audio supported' : r.backchannel === 'no' ? ' · no two-way audio' : '';
+      const talk = r.backchannel === 'yes' ? ' · two-way audio' : r.backchannel === 'no' ? ' · no two-way audio' : '';
       const ptz = r.ptz ? ' · PTZ' : '';
-      setOnvifMsg(`Found stream${res ? ` — ${res}` : ''}${talk}${ptz}. Address and login filled in below.`);
+      setOnvifMsg(`Found stream${res ? ` — ${res}` : ''}${talk}${ptz}. Port & path filled in — enter the username/password below.`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -98,21 +85,33 @@ export default function Cameras() {
     }
   }
 
+  function submitCamera(payload) {
+    return editing?.id ? api.put(`/cameras/${editing.id}`, payload) : api.post('/cameras', payload);
+  }
+
   async function save(e) {
     e.preventDefault();
     setBusy(true);
     setError('');
+    const payload = { ...form, child_id: form.child_id || null };
     try {
-      const payload = { ...form, child_id: form.child_id || null };
-      if (editing?.id) {
-        await api.put(`/cameras/${editing.id}`, payload);
-      } else {
-        await api.post('/cameras', payload);
-      }
+      await submitCamera(payload);
       setEditing(null);
       await refresh();
     } catch (err) {
-      setError(err.message);
+      // The server validates the stream first; if it couldn't reach it (bad creds/path, or
+      // the camera's just offline right now) it asks whether to save anyway.
+      if (err.data?.needsConfirm && confirm(`${err.message}\n\nSave the camera anyway?`)) {
+        try {
+          await submitCamera({ ...payload, force: true });
+          setEditing(null);
+          await refresh();
+        } catch (err2) {
+          setError(err2.message);
+        }
+      } else if (!err.data?.needsConfirm) {
+        setError(err.message);
+      }
     } finally {
       setBusy(false);
     }
@@ -157,17 +156,21 @@ export default function Cameras() {
                   {cam.rtsp_display && (
                     <div className="camera-tile__sub" style={{ wordBreak: 'break-all' }}>{cam.rtsp_display}</div>
                   )}
-                  {/* Capability badges, detected over ONVIF at add time. Only shown when
-                      known - manual/unknown cameras get no badge to avoid clutter. */}
-                  <div className="cam-badge-row">
-                    {cam.ptz_supported ? <span className="cam-badge cam-badge--ok">PTZ</span> : null}
-                    {cam.backchannel_supported === 'yes' && (
-                      <span className="cam-badge cam-badge--ok">Two-way audio</span>
-                    )}
-                    {cam.backchannel_supported === 'no' && (
-                      <span className="cam-badge cam-badge--muted">No two-way audio</span>
-                    )}
-                  </div>
+                  {/* Capability badges - only for cameras probed over ONVIF (we actually
+                      know); green = supported, red = not. Manual cameras show none, so we
+                      never falsely claim "not supported" for something we didn't check. */}
+                  {cam.discovery_source === 'onvif' && (
+                    <div className="cam-badge-row">
+                      <span className={`cam-badge ${cam.ptz_supported ? 'cam-badge--ok' : 'cam-badge--bad'}`}>
+                        PTZ
+                      </span>
+                      <span
+                        className={`cam-badge ${cam.backchannel_supported === 'yes' ? 'cam-badge--ok' : 'cam-badge--bad'}`}
+                      >
+                        Two-way Audio
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
               {isAdmin && (
@@ -208,60 +211,6 @@ export default function Cameras() {
                 placeholder="e.g. Crib cam"
               />
             </div>
-            {!editing.id && (
-              <div className="onvif-box">
-                <div className="section-title" style={{ marginTop: 0 }}>Auto-fill from ONVIF camera (optional)</div>
-                <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
-                  Enter the camera's IP and ONVIF login to fetch its RTSP URL automatically,
-                  instead of typing it by hand.
-                </div>
-                <div className="onvif-box__row">
-                  <div className="field" style={{ marginBottom: 8 }}>
-                    <label htmlFor="onvif-host">Camera IP</label>
-                    <input
-                      id="onvif-host"
-                      value={onvif.host}
-                      onChange={(e) => setOnvif({ ...onvif, host: e.target.value })}
-                      placeholder="192.168.1.50"
-                    />
-                  </div>
-                  <div className="field" style={{ marginBottom: 8, maxWidth: 90 }}>
-                    <label htmlFor="onvif-port">Port</label>
-                    <input
-                      id="onvif-port"
-                      value={onvif.port}
-                      onChange={(e) => setOnvif({ ...onvif, port: e.target.value })}
-                      placeholder="80"
-                    />
-                  </div>
-                </div>
-                <div className="onvif-box__row">
-                  <div className="field" style={{ marginBottom: 8 }}>
-                    <label htmlFor="onvif-user">ONVIF username</label>
-                    <input
-                      id="onvif-user"
-                      value={onvif.username}
-                      onChange={(e) => setOnvif({ ...onvif, username: e.target.value })}
-                      autoComplete="off"
-                    />
-                  </div>
-                  <div className="field" style={{ marginBottom: 8 }}>
-                    <label htmlFor="onvif-pass">ONVIF password</label>
-                    <input
-                      id="onvif-pass"
-                      type="password"
-                      value={onvif.password}
-                      onChange={(e) => setOnvif({ ...onvif, password: e.target.value })}
-                      autoComplete="off"
-                    />
-                  </div>
-                </div>
-                <button type="button" className="btn" onClick={fetchFromOnvif} disabled={onvifBusy}>
-                  {onvifBusy ? 'Fetching…' : 'Fetch address & login'}
-                </button>
-                {onvifMsg && <div className="onvif-box__ok">{onvifMsg}</div>}
-              </div>
-            )}
             {/* Address + login as separate fields - the app builds the rtsp:// URL from
                 these, so the password never sits in a visible URL. */}
             <div className="onvif-box__row">
@@ -285,6 +234,19 @@ export default function Cameras() {
                 />
               </div>
             </div>
+            {!editing.id && (
+              <div className="onvif-fetch">
+                <button type="button" className="btn" onClick={fetchFromOnvif} disabled={onvifBusy}>
+                  {onvifBusy ? 'Fetching…' : '↻ Fetch port & path from ONVIF'}
+                </button>
+                <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                  Optional: enter the IP above and fetch the stream port &amp; path
+                  automatically. Most cameras don't need a login for this; if yours does, fill
+                  the username/password below first.
+                </div>
+                {onvifMsg && <div className="onvif-box__ok">{onvifMsg}</div>}
+              </div>
+            )}
             <div className="field">
               <label htmlFor="cam-path">Stream path</label>
               <input
