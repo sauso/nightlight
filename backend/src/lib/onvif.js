@@ -22,6 +22,16 @@ const REQUEST_TIMEOUT_MS = 8000;
 // endpoints via GetCapabilities. /onvif/media_service covers onvif_simple_server (Sonoff).
 const MEDIA_PATH_FALLBACKS = ['/onvif/media_service', '/onvif/media'];
 const DEVICE_PATH = '/onvif/device_service';
+const PTZ_PATH = '/onvif/ptz_service';
+// Camera auto-stops a continuous move after this long even if the Stop command is lost
+// (dropped release, network blip) - the primary runaway-pan failsafe. The client also
+// sends Stop on release; this is the belt to that suspenders.
+const PTZ_MOVE_TIMEOUT_MS = 3000;
+
+function clampVelocity(n) {
+  const v = Number(n) || 0;
+  return Math.max(-1, Math.min(1, v));
+}
 
 function connectStandard(opts) {
   return new Promise((resolve, reject) => {
@@ -164,6 +174,57 @@ export async function probeOnvifCamera({ host, port, username, password }) {
       height: vid.resolution?.height || null,
     },
     backchannel, // 'yes' | 'no' | 'unknown' — two-way-audio capability
+    // PTZ support: the media profile carries a PTZConfiguration when the camera is
+    // pan/tilt/zoom-capable. profileToken is stored so later PTZ commands don't have to
+    // re-fetch profiles on every move.
+    ptz: !!best?.PTZConfiguration,
+    profileToken: profileToken(best),
     onvifDeviceUrl: `http://${cleanHost}:${onvifPort}${DEVICE_PATH}`,
   };
+}
+
+// Unconnected Cam with service paths pre-injected, for control ops (PTZ) against minimal
+// ONVIF servers - skips the capability discovery those servers fault on. No network here;
+// the actual SOAP call happens in the command below. Auth uses local time (no getSystem-
+// DateAndTime sync needed) - proven to work against the Sonoff, whose clock tracks NTP.
+function makeControlCam({ host, port, username, password }) {
+  const cam = new Cam({
+    hostname: host,
+    port: Number(port) || DEFAULT_ONVIF_PORT,
+    username: username || undefined,
+    password: password || undefined,
+    timeout: REQUEST_TIMEOUT_MS,
+    autoconnect: false,
+  });
+  cam.media2Support = false;
+  cam.uri = { media: { path: MEDIA_PATH_FALLBACKS[0] }, ptz: { path: PTZ_PATH }, device: { path: DEVICE_PATH } };
+  return cam;
+}
+
+/**
+ * Continuous PTZ move at the given velocities (each -1..1). The camera auto-stops after
+ * PTZ_MOVE_TIMEOUT_MS as a failsafe; the client should still send ptzStop on release.
+ */
+export function ptzContinuousMove({ host, port, username, password, profileToken, pan = 0, tilt = 0, zoom = 0 }) {
+  const cam = makeControlCam({ host, port, username, password });
+  return new Promise((resolve, reject) => {
+    cam.continuousMove(
+      {
+        x: clampVelocity(pan),
+        y: clampVelocity(tilt),
+        zoom: clampVelocity(zoom),
+        profileToken,
+        timeout: PTZ_MOVE_TIMEOUT_MS,
+      },
+      (err) => (err ? reject(err) : resolve())
+    );
+  });
+}
+
+/** Stop any ongoing PTZ movement. */
+export function ptzStop({ host, port, username, password, profileToken }) {
+  const cam = makeControlCam({ host, port, username, password });
+  return new Promise((resolve, reject) => {
+    cam.stop({ profileToken, panTilt: true, zoom: true }, (err) => (err ? reject(err) : resolve()));
+  });
 }

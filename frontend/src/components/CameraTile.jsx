@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical } from 'lucide-react';
+import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { api } from '../lib/api.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { isNativeApp, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip, hasNativePip, subscribeBackgroundPaused, isBackgroundPaused, setPipAutoEnteredFullscreen } from '../lib/nativeBridge.js';
 import WhepPlayer from './WhepPlayer.jsx';
@@ -312,6 +313,38 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
     }, DOUBLE_TAP_WINDOW_MS);
   }
 
+  // --- PTZ (pan/tilt) control, for ONVIF cameras that report support ---
+  const [ptzOpen, setPtzOpen] = useState(false);
+  const ptzMovingRef = useRef(false);
+  const PTZ_SPEED = 0.5;
+
+  function ptzMove(pan, tilt) {
+    ptzMovingRef.current = true;
+    // Fire-and-forget; the camera also auto-stops via the server-side timeout failsafe.
+    api.post(`/cameras/${camera.id}/ptz/move`, { pan, tilt }).catch(() => {});
+  }
+  function ptzStopMove() {
+    if (!ptzMovingRef.current) return;
+    ptzMovingRef.current = false;
+    api.post(`/cameras/${camera.id}/ptz/stop`, {}).catch(() => {});
+  }
+  // Hold an arrow to move, release to stop. Pointer capture keeps the release on the button
+  // even if the finger slides off; pointercancel/leave cover interruptions - so a move can't
+  // get stranded (belt to the server-side auto-stop).
+  function ptzHold(pan, tilt) {
+    return {
+      onPointerDown: (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+        ptzMove(pan, tilt);
+      },
+      onPointerUp: ptzStopMove,
+      onPointerCancel: ptzStopMove,
+      onPointerLeave: ptzStopMove,
+    };
+  }
+
   return (
     <div className="camera-tile">
       <div className="camera-tile__video-wrap" ref={videoWrapRef} onClick={handleVideoTap}>
@@ -380,6 +413,46 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
                 onClick={() => selectMode('compat')}
               >
                 Compatibility
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* PTZ control - only for cameras that reported pan/tilt support over ONVIF. */}
+        {camera.ptz_supported ? (
+          <button
+            className="ptz-btn"
+            onClick={() => setPtzOpen((o) => !o)}
+            aria-label={`Move ${camera.name}`}
+            aria-expanded={ptzOpen}
+          >
+            <Move size={16} />
+          </button>
+        ) : null}
+
+        {ptzOpen && (
+          <>
+            <div
+              className="tile-menu-backdrop"
+              onClick={() => {
+                ptzStopMove();
+                setPtzOpen(false);
+              }}
+            />
+            <div className="ptz-pad" role="group" aria-label="Pan and tilt controls">
+              <button className="ptz-arrow" aria-label="Tilt up" {...ptzHold(0, PTZ_SPEED)}>
+                <ChevronUp size={24} />
+              </button>
+              <div className="ptz-pad__mid">
+                <button className="ptz-arrow" aria-label="Pan left" {...ptzHold(-PTZ_SPEED, 0)}>
+                  <ChevronLeft size={24} />
+                </button>
+                <button className="ptz-arrow" aria-label="Pan right" {...ptzHold(PTZ_SPEED, 0)}>
+                  <ChevronRight size={24} />
+                </button>
+              </div>
+              <button className="ptz-arrow" aria-label="Tilt down" {...ptzHold(0, -PTZ_SPEED)}>
+                <ChevronDown size={24} />
               </button>
             </div>
           </>
