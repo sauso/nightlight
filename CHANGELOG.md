@@ -24,10 +24,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   push-to-talk later, which will only ever be offered on cameras that report support. (Phase 2
   of the ONVIF plan.)
 - **Pan/tilt control (PTZ).** Cameras that report PTZ over ONVIF get a move button on their
-  camera tile; tapping it opens a D-pad — hold an arrow to pan/tilt, release to stop. Stop is
-  belt-and-suspenders: the client stops on release/leave/cancel, and the camera also
-  auto-stops a few seconds after any move server-side, so a move can't get stranded. Only
-  shown on PTZ-capable cameras. See `planning/ptz-control-scope.md`.
+  camera tile; tapping it opens a D-pad. Each press moves a fixed, consistent amount — the
+  server starts, briefly holds, then stops the move ("nudge"), so distance doesn't depend on
+  how long you tapped or on network timing. Holding an arrow repeats the nudge for continued
+  movement, and every move self-stops (with a server-side timeout backstop), so it can't run
+  away past the limit. Only shown on PTZ-capable cameras. See `planning/ptz-control-scope.md`.
 - **PTZ and Two-way Audio badges** in the Cameras list for ONVIF-added cameras — green when
   supported, red when not. (Manual cameras show neither, since their capabilities aren't
   probed.)

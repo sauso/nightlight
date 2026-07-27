@@ -338,7 +338,7 @@ export default function Cameras() {
       )}
 
       {removing && (
-        <Modal title="Remove camera" onClose={() => (removeBusy ? null : setRemoving(null))}>
+        <Modal title="Remove camera" placement="top" onClose={() => (removeBusy ? null : setRemoving(null))}>
           <p style={{ marginTop: 0 }}>
             Remove <strong>{removing.name}</strong>? This stops its stream and deletes it from
             Nightlight. It can't be undone (you can always add it again).
