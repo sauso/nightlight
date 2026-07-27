@@ -41,9 +41,10 @@ export default function Modal({ title, onClose, children, placement = 'bottom' }
         display: 'flex',
         alignItems: top ? 'flex-start' : 'flex-end',
         justifyContent: 'center',
-        // A top sheet must clear the device safe area (status bar / notch) so it lines up
-        // with the header rather than hiding behind it - matters in the native mobile app.
-        paddingTop: top ? 'env(safe-area-inset-top, 0px)' : undefined,
+        // Always keep the modal clear of the device safe area (status bar / notch): a top
+        // sheet starts below it, and a bottom sheet that grows tall (long form, or pushed up
+        // by the keyboard) is capped so its top can't slide under it either.
+        paddingTop: 'env(safe-area-inset-top, 0px)',
         zIndex: 50,
       }}
       onClick={onClose}
