@@ -1,0 +1,247 @@
+import onvifPkg from 'onvif';
+import { logger } from './logger.js';
+
+// ONVIF client used to auto-fill a camera's RTSP URL (and detected codec/resolution) from
+// its IP + ONVIF credentials, instead of hand-typing the RTSP path. Deliberately resilient
+// to minimal/non-compliant ONVIF servers: the sonoff-hack Sonoff (onvif_simple_server), for
+// example, faults on GetCapabilities/GetServices during the library's normal connect, and
+// returns host-less stream URIs with bogus embedded credentials. So we:
+//   1. try the standard connect, but
+//   2. on failure, talk to the media service directly at known paths, and
+//   3. rebuild the RTSP URL from the trustworthy part (the path) plus the host we connected
+//      to and the credentials the user supplied - never the host/creds the camera returns.
+// Discovery-by-multicast is deliberately NOT used: WS-Discovery is L2-multicast and doesn't
+// cross VLANs, whereas add-by-IP is unicast and works across a routed network.
+
+const { Cam } = onvifPkg;
+
+const DEFAULT_ONVIF_PORT = 80;
+const DEFAULT_RTSP_PORT = 554;
+const REQUEST_TIMEOUT_MS = 8000;
+// Media-service paths to try when the ONVIF server is too minimal to advertise its own
+// endpoints via GetCapabilities. /onvif/media_service covers onvif_simple_server (Sonoff).
+const MEDIA_PATH_FALLBACKS = ['/onvif/media_service', '/onvif/media'];
+const DEVICE_PATH = '/onvif/device_service';
+const PTZ_PATH = '/onvif/ptz_service';
+// Camera auto-stops a continuous move after this long even if the Stop command is lost
+// (dropped release, network blip) - the runaway-pan failsafe.
+const PTZ_MOVE_TIMEOUT_MS = 3000;
+// A single "nudge" = a fixed-duration move. Distance is set by this server-side hold time,
+// NOT by how long the user held the button or by network timing, so every press travels the
+// same amount (see ptzNudge). Tune here if steps feel too big/small.
+const PTZ_NUDGE_MS = 200;
+
+function clampVelocity(n) {
+  const v = Number(n) || 0;
+  return Math.max(-1, Math.min(1, v));
+}
+
+function connectStandard(opts) {
+  return new Promise((resolve, reject) => {
+    const cam = new Cam(opts, (err) => (err ? reject(err) : resolve(cam)));
+  });
+}
+
+function pcall(cam, method, arg) {
+  return new Promise((resolve, reject) => {
+    const cb = (err, data) => (err ? reject(err) : resolve(data));
+    arg === undefined ? cam[method](cb) : cam[method](arg, cb);
+  });
+}
+
+function profileToken(p) {
+  return p?.token || p?.$?.token || p?.$?.Token || null;
+}
+
+// Two-way-audio (ONVIF backchannel) support = does the device expose an audio *output*?
+// A populated GetAudioOutputConfigurations list => yes; an empty list, or an explicit
+// "AudioOutputNotSupported"/"not supported" fault (what the Sonoff returns) => no; any other
+// error/timeout => unknown (don't claim either way). Returns 'yes' | 'no' | 'unknown'.
+function classifyBackchannel(err, configs) {
+  if (!err) return configs && configs.length > 0 ? 'yes' : 'no';
+  const msg = (err.message || '').toLowerCase();
+  if (msg.includes('not supported') || msg.includes('audiooutputnotsupported')) return 'no';
+  return 'unknown';
+}
+
+// Highest-resolution profile is normally the "main" stream.
+function pickBestProfile(profiles) {
+  return [...profiles].sort((a, b) => {
+    const ar = a?.videoEncoderConfiguration?.resolution || {};
+    const br = b?.videoEncoderConfiguration?.resolution || {};
+    return (br.width || 0) * (br.height || 0) - (ar.width || 0) * (ar.height || 0);
+  })[0];
+}
+
+// The path (and any port) from getStreamUri is trustworthy; the host and embedded
+// credentials are not (see header) - so we return the path/port as address components and
+// pair them with the host we connected to. The app assembles these with the user's
+// credentials into the final rtsp:// URL server-side (see routes/cameras.js), so the
+// password never lands in a URL field in the UI.
+function rtspPartsFromStreamUri({ streamUri, host }) {
+  let path = '/';
+  let port = DEFAULT_RTSP_PORT;
+  const m = /^rtsps?:\/\/([^/]*)(\/.*)?$/i.exec((streamUri || '').trim());
+  if (m) {
+    if (m[2]) path = m[2];
+    // A host-less URI ("rtsp://user:pass@/path") leaves the authority empty or just creds.
+    const authority = m[1] || '';
+    const hostPart = authority.includes('@') ? authority.split('@').pop() : authority;
+    const portMatch = /:(\d+)$/.exec(hostPart);
+    if (portMatch) port = portMatch[1];
+  }
+  return { host, port: String(port), path };
+}
+
+/**
+ * Probe a camera over ONVIF and return a ready-to-use RTSP URL plus detected media info.
+ * Read-only - does not create or modify anything. Throws with a user-facing message on
+ * failure (bad host/creds, not an ONVIF camera, timeout).
+ */
+export async function probeOnvifCamera({ host, port, username, password }) {
+  if (!host || !host.trim()) throw new Error('Camera IP address is required');
+  const cleanHost = host.trim();
+  const onvifPort = Number(port) || DEFAULT_ONVIF_PORT;
+  const opts = {
+    hostname: cleanHost,
+    port: onvifPort,
+    username: username || undefined,
+    password: password || undefined,
+    timeout: REQUEST_TIMEOUT_MS,
+  };
+
+  let cam;
+  let profiles = [];
+  try {
+    cam = await connectStandard(opts);
+    profiles = await pcall(cam, 'getProfiles').catch(() => []);
+  } catch (err) {
+    // Minimal servers fault on GetCapabilities/GetServices during connect - fall through
+    // to the direct-media-service path below with an unconnected client.
+    logger.info(`[onvif] standard connect failed for ${cleanHost} (${err.message}); trying media service directly`);
+    cam = new Cam({ ...opts, autoconnect: false });
+    cam.media2Support = false;
+  }
+
+  if (profiles.length === 0) {
+    let lastErr = null;
+    for (const mpath of MEDIA_PATH_FALLBACKS) {
+      cam.uri = { ...(cam.uri || {}), media: { path: mpath }, device: { path: DEVICE_PATH } };
+      try {
+        profiles = await pcall(cam, 'getProfiles');
+        if (profiles.length > 0) break;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    if (profiles.length === 0) {
+      throw new Error(
+        `No ONVIF media profiles found at ${cleanHost}:${onvifPort}` +
+          (lastErr ? ` (${lastErr.message})` : '') +
+          '. Check the IP, port, and ONVIF username/password.'
+      );
+    }
+  }
+
+  const best = pickBestProfile(profiles);
+  const stream = await pcall(cam, 'getStreamUri', {
+    protocol: 'RTSP',
+    profileToken: profileToken(best),
+  }).catch((e) => {
+    throw new Error(`Connected over ONVIF but could not get the stream URL: ${e.message}`);
+  });
+
+  const rtspParts = rtspPartsFromStreamUri({ streamUri: stream?.uri || '', host: cleanHost });
+
+  // Phase 2: record whether the camera exposes an audio output (two-way-audio backchannel),
+  // while we're already connected. Read-only, best-effort - never fails the probe.
+  const backchannel = await new Promise((resolve) => {
+    try {
+      cam.getAudioOutputConfigurations((e, configs) => resolve(classifyBackchannel(e, configs)));
+    } catch {
+      resolve('unknown');
+    }
+  });
+
+  const info = await pcall(cam, 'getDeviceInformation').catch(() => null);
+  const vid = best?.videoEncoderConfiguration || {};
+  return {
+    // Address components for the add-camera form; the app pairs these with the entered
+    // credentials to build the RTSP URL server-side.
+    rtspHost: rtspParts.host,
+    rtspPort: rtspParts.port,
+    rtspPath: rtspParts.path,
+    suggestedName: info ? [info.manufacturer, info.model].filter(Boolean).join(' ').trim() || null : null,
+    video: {
+      codec: vid.encoding || null,
+      width: vid.resolution?.width || null,
+      height: vid.resolution?.height || null,
+    },
+    backchannel, // 'yes' | 'no' | 'unknown' — two-way-audio capability
+    // PTZ support: the media profile carries a PTZConfiguration when the camera is
+    // pan/tilt/zoom-capable. profileToken is stored so later PTZ commands don't have to
+    // re-fetch profiles on every move.
+    ptz: !!best?.PTZConfiguration,
+    profileToken: profileToken(best),
+    onvifDeviceUrl: `http://${cleanHost}:${onvifPort}${DEVICE_PATH}`,
+  };
+}
+
+// Unconnected Cam with service paths pre-injected, for control ops (PTZ) against minimal
+// ONVIF servers - skips the capability discovery those servers fault on. No network here;
+// the actual SOAP call happens in the command below. Auth uses local time (no getSystem-
+// DateAndTime sync needed) - proven to work against the Sonoff, whose clock tracks NTP.
+function makeControlCam({ host, port, username, password }) {
+  const cam = new Cam({
+    hostname: host,
+    port: Number(port) || DEFAULT_ONVIF_PORT,
+    username: username || undefined,
+    password: password || undefined,
+    timeout: REQUEST_TIMEOUT_MS,
+    autoconnect: false,
+  });
+  cam.media2Support = false;
+  cam.uri = { media: { path: MEDIA_PATH_FALLBACKS[0] }, ptz: { path: PTZ_PATH }, device: { path: DEVICE_PATH } };
+  return cam;
+}
+
+/**
+ * Continuous PTZ move at the given velocities (each -1..1). The camera auto-stops after
+ * PTZ_MOVE_TIMEOUT_MS as a failsafe; the client should still send ptzStop on release.
+ */
+export function ptzContinuousMove({ host, port, username, password, profileToken, pan = 0, tilt = 0, zoom = 0 }) {
+  const cam = makeControlCam({ host, port, username, password });
+  return new Promise((resolve, reject) => {
+    cam.continuousMove(
+      {
+        x: clampVelocity(pan),
+        y: clampVelocity(tilt),
+        zoom: clampVelocity(zoom),
+        profileToken,
+        timeout: PTZ_MOVE_TIMEOUT_MS,
+      },
+      (err) => (err ? reject(err) : resolve())
+    );
+  });
+}
+
+/** Stop any ongoing PTZ movement. */
+export function ptzStop({ host, port, username, password, profileToken }) {
+  const cam = makeControlCam({ host, port, username, password });
+  return new Promise((resolve, reject) => {
+    cam.stop({ profileToken, panTilt: true, zoom: true }, (err) => (err ? reject(err) : resolve()));
+  });
+}
+
+/**
+ * A single fixed-distance nudge: start moving, hold for a set time, then stop. Because the
+ * duration is a server-side constant, every press travels the same amount regardless of how
+ * briefly the button was tapped or of network latency - which is what makes the D-pad feel
+ * consistent. The continuousMove still carries its own auto-stop timeout, so even if the
+ * stop below is lost the camera won't run away.
+ */
+export async function ptzNudge(conn) {
+  await ptzContinuousMove(conn);
+  await new Promise((r) => setTimeout(r, PTZ_NUDGE_MS));
+  await ptzStop(conn).catch(() => {}); // best-effort; auto-stop timeout is the backstop
+}

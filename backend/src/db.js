@@ -129,6 +129,42 @@ if (!camerasColumns.includes('mqtt_topic')) {
   db.exec('ALTER TABLE cameras ADD COLUMN mqtt_topic TEXT');
 }
 
+// ONVIF: how a camera was added and (for cameras added via ONVIF) where its ONVIF device
+// service lives, so later ONVIF operations (two-way-audio capability check, PTZ) can
+// reconnect without re-discovering. discovery_source is 'manual' | 'onvif'.
+if (!camerasColumns.includes('discovery_source')) {
+  db.exec("ALTER TABLE cameras ADD COLUMN discovery_source TEXT NOT NULL DEFAULT 'manual'");
+}
+if (!camerasColumns.includes('onvif_capable')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN onvif_capable INTEGER NOT NULL DEFAULT 0');
+}
+if (!camerasColumns.includes('onvif_device_url')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN onvif_device_url TEXT');
+}
+// Two-way-audio (ONVIF backchannel) capability, captured at ONVIF add time:
+// 'yes' | 'no' | 'unknown' (unknown = manually added, or ONVIF didn't say). Informational
+// for now; Phase 3 (two-way audio) would only ever be offered on 'yes'.
+if (!camerasColumns.includes('backchannel_supported')) {
+  db.exec("ALTER TABLE cameras ADD COLUMN backchannel_supported TEXT NOT NULL DEFAULT 'unknown'");
+}
+// PTZ: whether the camera supports pan/tilt/zoom, plus the ONVIF credentials and media
+// profile token needed to issue control commands later (stored at ONVIF add time so PTZ
+// moves don't need to re-authenticate/re-query profiles each time). Credentials are as
+// sensitive as the ones already embedded in rtsp_url, and are redacted from non-admin API
+// responses the same way.
+if (!camerasColumns.includes('ptz_supported')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN ptz_supported INTEGER NOT NULL DEFAULT 0');
+}
+if (!camerasColumns.includes('onvif_username')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN onvif_username TEXT');
+}
+if (!camerasColumns.includes('onvif_password')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN onvif_password TEXT');
+}
+if (!camerasColumns.includes('onvif_profile_token')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN onvif_profile_token TEXT');
+}
+
 // Ensure the single settings row always exists.
 db.prepare(
   `INSERT OR IGNORE INTO settings (id, app_name, accent_color, live_color, offline_color, timezone, font_choice, temp_unit)

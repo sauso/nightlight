@@ -35,7 +35,10 @@ async function request(method, url, body) {
   }
 
   if (!res.ok) {
-    throw new Error(data?.error || `Request failed (${res.status})`);
+    const err = new Error(data?.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    err.data = data; // lets callers act on structured fields (e.g. needsConfirm)
+    throw err;
   }
   return data;
 }

@@ -26,7 +26,9 @@ below). No cloud, no subscription, no account anywhere but your own network.
   and manages both MediaMTX and one FFmpeg process per camera as child processes —
   starting them, restarting on crash, and stopping them when a camera's removed.
 - **Frontend** (React) is a mobile-first, installable app: a live dashboard grouped by
-  child, plus screens to manage children, cameras, and caregiver accounts.
+  child, plus screens to manage children, cameras, and caregiver accounts. Cameras can be
+  added by IP over **ONVIF** (auto-filling the stream details), and PTZ (pan/tilt) cameras
+  get on-screen controls — see [Managing cameras](#managing-cameras).
 
 Everything above runs in a **single Docker container** using **host networking**, which is
 the simplest and most reliable way to run WebRTC on a local network (no NAT/ICE headaches,
@@ -74,16 +76,19 @@ docker compose up -d
 
 Then, from any phone/laptop on the same network, visit `http://<server-ip>:4000`. The
 first time you visit, you'll be asked to create the admin account — do this first, from a
-trusted device. Then add your children (Children tab), add each camera's RTSP URL (Cameras
-tab), and assign cameras to children.
+trusted device. Then add your children (Children tab), add your cameras (Cameras tab — by
+IP via ONVIF, or by RTSP details; see [Managing cameras](#managing-cameras)), and assign
+cameras to children.
 
 ### Requirements
 
 - Any always-on Linux box on the same network as your cameras (a Raspberry Pi, an Unraid
   server, anything running Docker). Both `amd64` and `arm64` are supported.
 - Cameras that expose an RTSP stream (almost all "dumb" IP cameras and most smart cameras
-  with a local RTSP option do — check the camera's manual for the RTSP URL format, usually
-  something like `rtsp://username:password@192.168.1.50:554/stream1`).
+  with a local RTSP option do — check the camera's manual for the RTSP path, usually
+  something like `/stream1`).
+- **ONVIF is optional but handy**: if a camera supports it, Nightlight can fetch the stream
+  details from just its IP, and enable pan/tilt controls on cameras that report PTZ.
 
 ## Running on Unraid
 
@@ -104,6 +109,45 @@ Apps tab), install it locally by placing the file where Unraid looks for user te
 
 This is a single container — no extra plugins needed, Unraid's normal Docker UI handles it
 directly.
+
+## Managing cameras
+
+Cameras are added and edited from the **Cameras** tab (admin only). A camera's address is
+entered as separate fields — **IP address**, **RTSP port** (usually 554), **stream path**,
+and the camera's **username / password**. Nightlight assembles the `rtsp://` URL from those
+itself, so the password never appears in a URL on screen.
+
+**Adding a camera**
+
+- **Via ONVIF (easiest):** type the camera's IP and press **Fetch port & path from ONVIF**.
+  Nightlight queries the camera and fills in the port and stream path for you, and detects
+  whether it supports pan/tilt and two-way audio. Most cameras answer this without a login;
+  if yours needs one, fill in the username/password first. Then make sure the login is
+  entered and Save.
+- **Manually:** type the IP, port, path, and login yourself (see the camera's manual for its
+  RTSP path, e.g. `/stream1`).
+- On **Save**, Nightlight briefly tests the stream first and won't store a camera it can't
+  reach (wrong login, path, or IP) — it tells you why. If the camera just happens to be
+  offline right then, you can choose **Save anyway**.
+
+**Capability badges** — cameras added via ONVIF show badges in the list: **PTZ** and
+**Two-way Audio**, green when supported, red when not. (Manually-added cameras show neither,
+since their capabilities aren't probed.)
+
+**Pan/tilt (PTZ)** — on cameras that report PTZ, a move button appears on the camera tile
+(next to the stream-quality gear). Tap it for an on-screen D-pad: each press nudges the
+camera a fixed amount, and holding an arrow keeps it moving; it stops on release and can't
+run past the limit. (Two-way audio isn't wired up yet — the badge is groundwork for it.)
+
+**Editing** — Edit shows the same fields. Leave the **password blank to keep the existing
+one** — it's never sent back to your browser. Changing the address re-tests the stream, the
+same as adding.
+
+**Removing** — Remove asks for confirmation, then stops the stream and deletes the camera.
+You can always add it again.
+
+**Assigning to a child** — use the "Assigned to" dropdown on each camera. (This is just for
+grouping the dashboard; any signed-in user can change it.)
 
 ## Adding caregivers
 

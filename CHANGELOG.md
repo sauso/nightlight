@@ -9,6 +9,48 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-27
+
+### Added
+- **ONVIF auto-fill when adding a camera.** Enter the camera's IP and ONVIF username/password
+  in the Add-camera form and Nightlight connects over ONVIF to fetch the RTSP URL and detected
+  codec/resolution automatically, instead of hand-typing the RTSP path. Resilient to minimal
+  ONVIF servers (falls back to the media service directly when a camera faults on the usual
+  capability calls) and reconstructs the RTSP URL from the camera's IP + your credentials
+  rather than trusting the (often wrong) host/creds the camera returns. Manual RTSP entry
+  stays available. This is Phase 1 of planned ONVIF support (discovery-by-IP; multicast scan
+  intentionally skipped as it can't cross VLANs). See `planning/onvif-and-two-way-audio-scope.md`.
+- **Two-way-audio capability detection.** Adding a camera via ONVIF now also checks whether it
+  exposes an audio output (the two-way-audio backchannel) and shows a badge in the Cameras
+  list ("Two-way audio" / "No two-way audio"). Informational for now — groundwork for actual
+  push-to-talk later, which will only ever be offered on cameras that report support. (Phase 2
+  of the ONVIF plan.)
+- **Pan/tilt control (PTZ).** Cameras that report PTZ over ONVIF get a move button on their
+  camera tile; tapping it opens a D-pad. Each press moves a fixed, consistent amount — the
+  server starts, briefly holds, then stops the move ("nudge"), so distance doesn't depend on
+  how long you tapped or on network timing. Holding an arrow repeats the nudge for continued
+  movement, and every move self-stops (with a server-side timeout backstop), so it can't run
+  away past the limit. Only shown on PTZ-capable cameras. See `planning/ptz-control-scope.md`.
+- **PTZ and Two-way Audio badges** in the Cameras list for ONVIF-added cameras — green when
+  supported, red when not. (Manual cameras show neither, since their capabilities aren't
+  probed.)
+- **Stream validation on save.** Adding or changing a camera's address now tests the RTSP
+  stream first (over TCP, briefly) and reports failures like wrong credentials or an
+  unreachable path up front, instead of silently saving a dead camera. If it can't reach the
+  camera (e.g. it's momentarily offline) it offers "save anyway."
+
+### Changed
+- **Camera credentials are entered as separate fields, not inside the RTSP URL.** The
+  add/edit camera form takes IP address, port, stream path, username, and password as
+  distinct fields, and the app assembles the `rtsp://` URL server-side. The password is never
+  sent back to the browser or shown in a URL: the Cameras list shows a credential-free
+  address, and when editing, the password field is blank and left blank means "keep the
+  existing password." Fixes credentials being visible in plain text on the camera screen.
+- **ONVIF auto-fill simplified** to a single "Fetch" button that uses the IP you've already
+  entered — no separate ONVIF login fields. Credentials are optional for the fetch (most
+  cameras answer unauthenticated); you enter the camera login once, in the shared username/
+  password fields.
+
 ## [0.4.9] - 2026-07-27
 
 ### Changed
@@ -226,7 +268,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.4.9...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/sauso/nightlight/compare/v0.4.9...v0.5.0
 [0.4.9]: https://github.com/sauso/nightlight/compare/v0.4.8...v0.4.9
 [0.4.8]: https://github.com/sauso/nightlight/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/sauso/nightlight/compare/v0.4.6...v0.4.7
