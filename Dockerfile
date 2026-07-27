@@ -63,6 +63,18 @@ ENV DATA_DIR=/app/data
 # error handler includes the full stack trace (leaking server file paths) in any 500
 # response. This also enables Express's view/route caching.
 ENV NODE_ENV=production
+
+# Build provenance, passed by CI (see .github/workflows/docker-publish.yml). The running
+# instance reports these on the About page so you can tell exactly which commit/branch it
+# was built from - i.e. verify from the app whether staging/prod is on the code you expect,
+# without relying on the (only-bumped-at-release) version number.
+ARG GIT_SHA=unknown
+ARG GIT_REF=unknown
+ARG BUILD_TIME=unknown
+ENV NIGHTLIGHT_GIT_SHA=$GIT_SHA
+ENV NIGHTLIGHT_GIT_REF=$GIT_REF
+ENV NIGHTLIGHT_BUILD_TIME=$BUILD_TIME
+
 VOLUME ["/app/data"]
 
 EXPOSE 4000

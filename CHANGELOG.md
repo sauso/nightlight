@@ -9,6 +9,19 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-07-27
+
+### Added
+- The About page now shows **build provenance** for the running instance — branch, short
+  commit, and build date. Lets you confirm exactly which code a server is running (e.g. that
+  a dev push actually reached staging, or which commit is in production) without relying on
+  the version number, which only changes at release.
+
+### Fixed
+- The add/edit/remove dialog title no longer detaches and floats at the top of the screen
+  when the dialog's content is scrolled (a regression from the 0.5.1 keyboard fix); the
+  header now scrolls with the content as normal.
+
 ## [0.5.1] - 2026-07-27
 
 ### Fixed
@@ -276,7 +289,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/sauso/nightlight/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/sauso/nightlight/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/sauso/nightlight/compare/v0.4.9...v0.5.0
 [0.4.9]: https://github.com/sauso/nightlight/compare/v0.4.8...v0.4.9
