@@ -9,6 +9,19 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.4.9] - 2026-07-27
+
+### Changed
+- A brand-new visitor on a device now starts **muted** rather than unmuted. Muted audio
+  autoplays cleanly (no browser gesture needed), and it's the politer default. Returning
+  visitors are unaffected — each camera still remembers whatever you last set it to.
+
+### Removed
+- The "🔈 Tap for sound" prompt. When a browser blocks unmuted autoplay (no interaction yet
+  on the page), the stream now just resumes silently on your first click/tap anywhere
+  instead of showing a prompt to dismiss. Combined with the muted default above, most opens
+  never hit the block at all.
+
 ## [0.4.8] - 2026-07-27
 
 ### Fixed
@@ -213,7 +226,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.4.8...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.4.9...HEAD
+[0.4.9]: https://github.com/sauso/nightlight/compare/v0.4.8...v0.4.9
 [0.4.8]: https://github.com/sauso/nightlight/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/sauso/nightlight/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/sauso/nightlight/compare/v0.4.5...v0.4.6

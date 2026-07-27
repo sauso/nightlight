@@ -651,20 +651,6 @@ body.in-pip .tile-menu-backdrop {
   object-fit: contain;
 }
 
-.whep-gesture-btn {
-  position: absolute;
-  bottom: 10px;
-  left: 10px;
-  right: 10px;
-  border: 1px solid var(--border);
-  background: rgba(10, 13, 28, 0.75);
-  color: var(--accent);
-  border-radius: 10px;
-  padding: 8px 10px;
-  font-size: 13px;
-  cursor: pointer;
-  z-index: 2;
-}
 
 .camera-tile__meta {
   display: flex;

@@ -49,13 +49,23 @@ export default function WhepPlayer({
       .catch(() => setNeedsGesture(true));
   }, [muted]);
 
-  function handleEnableSound() {
-    if (!audioRef.current) return;
-    audioRef.current
-      .play()
-      .then(() => setNeedsGesture(false))
-      .catch(() => {});
-  }
+  // When the browser blocks unmuted autoplay (no user gesture yet on this page load),
+  // don't show a "Tap for sound" prompt - just silently retry playback on the first
+  // interaction anywhere on the page. So an unmuted stream starts the moment the person
+  // clicks/taps anything, with no extra affordance to dismiss. (A brand-new visitor
+  // defaults to muted - see CameraTile - so they never hit this; it only matters for a
+  // returning visitor whose saved state was unmuted.)
+  useEffect(() => {
+    if (!needsGesture || muted) return undefined;
+    const resume = () => {
+      audioRef.current
+        ?.play()
+        .then(() => setNeedsGesture(false))
+        .catch(() => {});
+    };
+    document.addEventListener('pointerdown', resume);
+    return () => document.removeEventListener('pointerdown', resume);
+  }, [needsGesture, muted]);
 
   // Mobile browsers can drop WebRTC connections when backgrounded for a while - but
   // often they don't, especially for audio, which is why Android shows a media
@@ -275,11 +285,6 @@ export default function WhepPlayer({
           {state === 'error' && <span>{errorMsg || 'No signal'}</span>}
           {state === 'idle' && <span>Tap to view</span>}
         </div>
-      )}
-      {state === 'live' && !muted && needsGesture && (
-        <button className="whep-gesture-btn" onClick={handleEnableSound}>
-          🔈 Tap for sound
-        </button>
       )}
     </div>
   );
