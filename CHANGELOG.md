@@ -9,6 +9,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- The About page now shows **build provenance** for the running instance — branch, short
+  commit, and build date. Lets you confirm exactly which code a server is running (e.g. that
+  a dev push actually reached staging, or which commit is in production) without relying on
+  the version number, which only changes at release.
+
 ## [0.5.1] - 2026-07-27
 
 ### Fixed
