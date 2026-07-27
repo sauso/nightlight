@@ -144,6 +144,8 @@ body.in-pip .pip-btn,
 body.in-pip .settings-btn,
 body.in-pip .mute-btn,
 body.in-pip .fullscreen-btn,
+body.in-pip .ptz-btn,
+body.in-pip .ptz-pad,
 body.in-pip .tile-menu,
 body.in-pip .tile-menu-backdrop {
   display: none !important;
@@ -616,7 +618,8 @@ body.in-pip .tile-menu-backdrop {
 .mute-btn,
 .pip-btn,
 .settings-btn,
-.fullscreen-btn {
+.fullscreen-btn,
+.ptz-btn {
   background: none;
   backdrop-filter: none;
   border-radius: 0;
@@ -627,15 +630,130 @@ body.in-pip .tile-menu-backdrop {
 .mute-btn svg,
 .pip-btn svg,
 .settings-btn svg,
-.fullscreen-btn svg {
+.fullscreen-btn svg,
+.ptz-btn svg {
   width: 20px;  /* 16 * 1.25 */
   height: 20px;
+}
+
+/* PTZ toggle button - sits next to the settings icon, bottom-left. */
+.ptz-btn {
+  position: absolute;
+  bottom: 10px;
+  left: 48px;
+  width: 30px;
+  height: 30px;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 2;
+}
+
+/* PTZ D-pad overlay: arrows arranged in a cross, centered over the video. The pad itself
+   is click-through (pointer-events:none) so tapping between arrows falls to the backdrop
+   and closes it; only the arrows are interactive. */
+.ptz-pad {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.ptz-pad__mid {
+  display: flex;
+  gap: 56px;
+}
+.ptz-arrow {
+  pointer-events: auto;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(10, 13, 28, 0.55);
+  backdrop-filter: blur(4px);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  touch-action: none; /* don't let a hold be treated as a scroll/pan gesture */
+  user-select: none;
+  -webkit-user-select: none;
+}
+.ptz-arrow:active {
+  background: var(--accent);
+  color: var(--bg);
 }
 
 /* Background-listening keeps a distinct accent tint over the white, so it's clear at a
    glance the camera is being held alive in the background (not merely unmuted). */
 .mute-btn--bg {
   color: var(--accent);
+}
+
+/* Inline warning inside a form (e.g. stream validation failed on save) - softer than the
+   red error banner, since it's a "heads up, but you can proceed" state. */
+.form-warning {
+  background: rgba(224, 133, 133, 0.12);
+  border: 1px solid var(--offline);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+/* Camera capability badges (e.g. two-way audio) in the Cameras list */
+.cam-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.cam-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+}
+.cam-badge--ok {
+  color: var(--live);
+  border-color: var(--live);
+}
+.cam-badge--bad {
+  color: var(--offline);
+  border-color: var(--offline);
+}
+
+/* ONVIF auto-fill box in the Add-camera modal */
+.onvif-box {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 14px;
+  background: var(--bg-elevated);
+}
+.onvif-box__row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.onvif-box__row .field {
+  flex: 1;
+  min-width: 140px;
+}
+.onvif-box__ok {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--live);
 }
 
 .camera-tile__video-wrap:fullscreen {
@@ -755,6 +873,11 @@ body.in-pip .tile-menu-backdrop {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-primary);
+}
+
+.btn-danger {
+  background: var(--offline);
+  color: #2a0f0f;
 }
 
 .btn-danger {
