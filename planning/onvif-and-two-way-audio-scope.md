@@ -1,9 +1,10 @@
 # Nightlight: ONVIF Discovery + Two-Way Audio — Scope Document
 
-Status: **Not started.** This is a planning document to hand to Claude Code
-when work actually begins. Phases 1–2 (discovery + capability check) can start
-against cameras already owned. Phase 3 (two-way audio) is waiting on acquiring
-a camera confirmed to support the **ONVIF audio backchannel**.
+Status: **Phase 1 built (on `dev`, being tested on staging) as of 2026-07-27.**
+Implemented as **ONVIF add-by-IP**, not multicast discovery — see the Phase 1
+implementation notes below for why and what was learned against the real Sonoff.
+Phase 2 (capability check) not started. Phase 3 (two-way audio) is waiting on
+acquiring a camera confirmed to support the **ONVIF audio backchannel**.
 
 > **Correction (2026-07-27): don't shop by "Profile T."** The audio backchannel
 > needed for two-way talk is a *conditional* ONVIF feature that appears in *some*
@@ -67,6 +68,39 @@ LAN discovery.
 
 **Risk:** low. Discovery either succeeds or fails per camera; doesn't affect
 already-configured cameras using the existing manual flow.
+
+### Phase 1 implementation notes (2026-07-27 — what actually shipped)
+
+Built as **add-by-IP, not multicast WS-Discovery.** Probing the real setup showed
+multicast is the wrong primary mechanism here:
+- **WS-Discovery multicast doesn't cross VLANs** (it's L2; needs IGMP/PIM, not just
+  unicast routing). The owner's cameras and Nightlight instances live on different VLANs
+  (camera on VLAN3, prod on VLAN1, staging on VLAN10), so a scan only ever finds
+  same-VLAN cameras. **Unicast add-by-IP works across the routed network.** Multicast
+  scan was intentionally dropped (can be added later purely as a same-VLAN convenience).
+
+What shipped (library: `onvif@^0.8.1`, classic `Cam` API):
+- `backend/src/lib/onvif.js` `probeOnvifCamera({host, port, username, password})` →
+  `{ rtspUrl, suggestedName, video:{codec,width,height}, audio:{codec}, onvifDeviceUrl }`.
+- `POST /api/cameras/onvif-probe` (admin, read-only) — creates nothing; the normal
+  `POST /api/cameras` still adds.
+- `cameras` table gained `discovery_source` (`manual`|`onvif`), `onvif_capable`,
+  `onvif_device_url` (so Phase 2/PTZ can reconnect).
+- Add-camera modal gained an "Auto-fill from ONVIF" block; manual entry stays.
+
+**Resilient-client learnings (from the sonoff-hack Sonoff — a deliberately awkward test
+case).** Its `onvif_simple_server` is a rough ONVIF citizen; a naive client fails on it:
+- It **faults (`ter:ActionFailed`) on `GetCapabilities`/`GetServices`** — even
+  unauthenticated — which is what the library's normal `connect()` calls, so connect
+  fails outright. Fix: on connect failure, skip capabilities and hit the **media service
+  directly** at a known path (`/onvif/media_service`), then `GetProfiles`/`GetStreamUri`.
+- `GetStreamUri` returns a **host-less URI with bogus embedded creds**
+  (`rtsp://hack:hack@/av_stream/ch0`). Fix: trust only the **path**; rebuild the URL from
+  the **IP we connected to** + the **credentials the user supplied**. Verified: the
+  rebuilt `rtsp://<user>:<pass>@<ip>:554/av_stream/ch0` streams H264 1080p + G.711 audio.
+- Its ONVIF creds and RTSP creds can differ; never assume the stream URI's creds are usable.
+
+A compliant camera should just work via the normal connect path (no fallback needed).
 
 ---
 
