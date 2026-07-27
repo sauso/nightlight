@@ -29,7 +29,7 @@ const PTZ_MOVE_TIMEOUT_MS = 3000;
 // A single "nudge" = a fixed-duration move. Distance is set by this server-side hold time,
 // NOT by how long the user held the button or by network timing, so every press travels the
 // same amount (see ptzNudge). Tune here if steps feel too big/small.
-const PTZ_NUDGE_MS = 400;
+const PTZ_NUDGE_MS = 200;
 
 function clampVelocity(n) {
   const v = Number(n) || 0;
