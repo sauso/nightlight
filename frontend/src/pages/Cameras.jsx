@@ -182,7 +182,6 @@ export default function Cameras() {
               <div className="cam-card__title">
                 <BreathingDot status={cam.disabled ? 'offline' : cam.statusLevel || 'connecting'} />
                 <span className="cam-card__name">{cam.name}</span>
-                {cam.disabled && <span className="cam-badge cam-badge--off">Disabled</span>}
               </div>
               {isAdmin && (
                 <div className="cam-card__actions">
