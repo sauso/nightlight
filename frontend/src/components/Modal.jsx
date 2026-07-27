@@ -1,10 +1,42 @@
+import { useEffect, useRef } from 'react';
+
 export default function Modal({ title, onClose, children, placement = 'bottom' }) {
   const top = placement === 'top';
+  const overlayRef = useRef(null);
+
+  // Keep the modal inside the region the on-screen keyboard leaves visible. Without this, a
+  // tall form (e.g. edit camera) gets shoved up under the status bar/notch when the keyboard
+  // opens and the focused field disappears. We size/position the overlay to the visual
+  // viewport (which shrinks and shifts as the keyboard appears) and let the card scroll, so
+  // the focused field always stays reachable above the keyboard. Falls back to full-screen
+  // where VisualViewport isn't available.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return undefined;
+    const el = overlayRef.current;
+    function sync() {
+      if (!el) return;
+      el.style.height = `${vv.height}px`;
+      el.style.top = `${vv.offsetTop}px`;
+    }
+    sync();
+    vv.addEventListener('resize', sync);
+    vv.addEventListener('scroll', sync);
+    return () => {
+      vv.removeEventListener('resize', sync);
+      vv.removeEventListener('scroll', sync);
+    };
+  }, []);
+
   return (
     <div
+      ref={overlayRef}
       style={{
         position: 'fixed',
-        inset: 0,
+        left: 0,
+        right: 0,
+        top: 0,
+        height: '100%',
         background: 'rgba(10, 13, 28, 0.7)',
         display: 'flex',
         alignItems: top ? 'flex-start' : 'flex-end',
@@ -24,10 +56,27 @@ export default function Modal({ title, onClose, children, placement = 'bottom' }
           margin: 0,
           // Sheet hugs whichever edge it slides from - rounded corners on the inner side only.
           borderRadius: top ? '0 0 20px 20px' : '20px 20px 0 0',
+          // Never exceed the visible area; scroll within it so the keyboard can't hide fields.
+          maxHeight: '100%',
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 16,
+            // Keep the title + close button visible while scrolling a long form.
+            position: 'sticky',
+            top: 0,
+            background: 'var(--bg-elevated)',
+            paddingBottom: 8,
+            zIndex: 1,
+          }}
+        >
           <h2 style={{ fontSize: 18 }}>{title}</h2>
           <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
         </div>

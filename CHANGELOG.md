@@ -9,6 +9,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+- Add/edit dialogs no longer get pushed up under the status bar/notch when the on-screen
+  keyboard opens on mobile, hiding the field you're typing in. The dialog now sizes itself to
+  the space above the keyboard and scrolls internally, so the focused field stays visible; the
+  title/close row stays pinned at the top.
+
 ## [0.5.0] - 2026-07-27
 
 ### Added
