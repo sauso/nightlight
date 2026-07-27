@@ -69,10 +69,11 @@ export default function Cameras() {
       });
       setForm((f) => ({
         ...f,
+        // Deliberately do NOT touch the name - it's the user's to set, and the ONVIF-reported
+        // model name isn't useful. Only fill in the address details.
         rtsp_host: r.rtspHost || host,
         rtsp_port: r.rtspPort || f.rtsp_port || '554',
         rtsp_path: r.rtspPath || f.rtsp_path,
-        name: f.name || r.suggestedName || '',
         discovery_source: 'onvif',
         onvif_device_url: r.onvifDeviceUrl,
         backchannel_supported: r.backchannel,
