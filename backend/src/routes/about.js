@@ -14,10 +14,23 @@ try {
   // Leave as 'unknown' rather than fail startup over cosmetic info.
 }
 
+// Build provenance baked in by CI (see Dockerfile / docker-publish.yml). Lets the About
+// page show exactly which commit/branch this instance is running - so you can verify a
+// deploy from the app rather than trusting the release-only version number.
+function envOrNull(name) {
+  const v = process.env[name];
+  return v && v !== 'unknown' ? v : null;
+}
+const build = {
+  gitSha: envOrNull('NIGHTLIGHT_GIT_SHA'),
+  gitRef: envOrNull('NIGHTLIGHT_GIT_REF'),
+  buildTime: envOrNull('NIGHTLIGHT_BUILD_TIME'),
+};
+
 const router = Router();
 
 router.get('/', requireAuth, (req, res) => {
-  res.json({ version });
+  res.json({ version, ...build });
 });
 
 export default router;
