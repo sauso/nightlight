@@ -46,9 +46,13 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
       // service silently on launch would be surprising - background mode is
       // something you switch on for tonight, not a persistent default.
       if (stored === 'bg') return isSoftReload ? 'bg' : 'on';
-      return 'on';
+      // Nothing saved = a brand-new visitor on this device. Default to muted: it means
+      // audio autoplays cleanly with no browser "tap for sound" gesture prompt, and it's
+      // the polite default (no unexpected sound on first open). Returning visitors keep
+      // whatever they last chose, via the branches above.
+      return 'off';
     } catch {
-      return 'on';
+      return 'off';
     }
   });
   const muted = audioState === 'off';
