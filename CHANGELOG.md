@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-27
+
 ### Added
 - **ONVIF auto-fill when adding a camera.** Enter the camera's IP and ONVIF username/password
   in the Add-camera form and Nightlight connects over ONVIF to fetch the RTSP URL and detected
@@ -266,7 +268,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.4.9...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/sauso/nightlight/compare/v0.4.9...v0.5.0
 [0.4.9]: https://github.com/sauso/nightlight/compare/v0.4.8...v0.4.9
 [0.4.8]: https://github.com/sauso/nightlight/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/sauso/nightlight/compare/v0.4.6...v0.4.7
