@@ -23,6 +23,9 @@ export default function Cameras() {
   // When the stream validation on save fails, we surface it inline with a "Save anyway"
   // option instead of a blocking browser confirm().
   const [confirmMsg, setConfirmMsg] = useState('');
+  // Camera pending removal - drives an in-app confirm modal instead of window.confirm.
+  const [removing, setRemoving] = useState(null);
+  const [removeBusy, setRemoveBusy] = useState(false);
 
   function openNew() {
     setForm(EMPTY_FORM);
@@ -132,13 +135,18 @@ export default function Cameras() {
     }
   }
 
-  async function remove(cam) {
-    if (!confirm(`Remove camera "${cam.name}"?`)) return;
+  async function confirmRemove() {
+    if (!removing) return;
+    setRemoveBusy(true);
+    setError('');
     try {
-      await api.del(`/cameras/${cam.id}`);
+      await api.del(`/cameras/${removing.id}`);
+      setRemoving(null);
       await refresh();
     } catch (err) {
       setError(err.message);
+    } finally {
+      setRemoveBusy(false);
     }
   }
 
@@ -182,7 +190,7 @@ export default function Cameras() {
               {isAdmin && (
                 <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
                   <button className="icon-btn" onClick={() => openEdit(cam)}>Edit</button>
-                  <button className="icon-btn" onClick={() => remove(cam)}>Remove</button>
+                  <button className="icon-btn" onClick={() => setRemoving(cam)}>Remove</button>
                 </div>
               )}
             </div>
@@ -326,6 +334,23 @@ export default function Cameras() {
               )}
             </div>
           </form>
+        </Modal>
+      )}
+
+      {removing && (
+        <Modal title="Remove camera" onClose={() => (removeBusy ? null : setRemoving(null))}>
+          <p style={{ marginTop: 0 }}>
+            Remove <strong>{removing.name}</strong>? This stops its stream and deletes it from
+            Nightlight. It can't be undone (you can always add it again).
+          </p>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button className="btn" type="button" onClick={() => setRemoving(null)} disabled={removeBusy}>
+              Cancel
+            </button>
+            <button className="btn btn-danger" type="button" onClick={confirmRemove} disabled={removeBusy}>
+              {removeBusy ? 'Removing…' : 'Remove'}
+            </button>
+          </div>
         </Modal>
       )}
     </>
