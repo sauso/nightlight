@@ -165,6 +165,14 @@ if (!camerasColumns.includes('onvif_profile_token')) {
   db.exec('ALTER TABLE cameras ADD COLUMN onvif_profile_token TEXT');
 }
 
+// Admin can turn a camera off entirely (server-side): its transcoder is stopped and its
+// MediaMTX path dropped, so it consumes no camera/server/network resources and disappears
+// from the live grid, without deleting it. Distinct from the per-device "stop playback"
+// toggle on a tile, which only tears down that one viewer's stream.
+if (!camerasColumns.includes('disabled')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0');
+}
+
 // Ensure the single settings row always exists.
 db.prepare(
   `INSERT OR IGNORE INTO settings (id, app_name, accent_color, live_color, offline_color, timezone, font_choice, temp_unit)

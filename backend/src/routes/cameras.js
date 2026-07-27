@@ -252,7 +252,10 @@ router.put('/:id', requireAdmin, async (req, res) => {
     }
   }
 
-  if (newRtsp !== existing.rtsp_url) {
+  // A disabled camera has no MediaMTX path or transcoder by design - just save the new
+  // address; it takes effect when the camera is re-enabled. Touching MediaMTX here would
+  // silently bring a turned-off camera back to life.
+  if (newRtsp !== existing.rtsp_url && !existing.disabled) {
     try {
       await upsertPath(existing.mediamtx_path);
     } catch (e) {
@@ -269,6 +272,35 @@ router.put('/:id', requireAdmin, async (req, res) => {
     req.params.id
   );
   subscribeAllCameraTopics();
+  res.json(publicCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id), true));
+});
+
+// Turn a camera fully on/off server-side (admin-only, like editing). Disabling stops the
+// transcoder and drops the MediaMTX path, so it stops pulling from the camera and streaming
+// entirely; enabling re-registers the path and restarts the transcoder. The row (and its
+// settings/history) is kept - this is a reversible on/off switch, not a delete.
+router.put('/:id/enabled', requireAdmin, async (req, res) => {
+  const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Camera not found' });
+  const enabled = !!(req.body || {}).enabled;
+  if (enabled) {
+    try {
+      await upsertPath(existing.mediamtx_path);
+    } catch (e) {
+      return res.status(502).json({ error: `Could not re-register stream with MediaMTX: ${e.message}` });
+    }
+    await startTranscoder(req.params.id, existing.rtsp_url, existing.mediamtx_path, existing.name);
+  } else {
+    await stopTranscoder(req.params.id);
+    try {
+      await removePath(existing.mediamtx_path);
+    } catch (e) {
+      // Log but still record it as disabled - the transcoder is already stopped, so no
+      // frames flow regardless of whether the path removal succeeded.
+      logger.error('Failed to remove MediaMTX path on disable:', e.message);
+    }
+  }
+  db.prepare('UPDATE cameras SET disabled = ? WHERE id = ?').run(enabled ? 0 : 1, req.params.id);
   res.json(publicCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id), true));
 });
 
