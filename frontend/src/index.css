@@ -638,6 +638,24 @@ body.in-pip .tile-menu-backdrop {
   color: var(--accent);
 }
 
+/* Camera capability badges (e.g. two-way audio) in the Cameras list */
+.cam-badge {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+}
+.cam-badge--ok {
+  color: var(--live);
+  border-color: var(--live);
+}
+.cam-badge--muted {
+  color: var(--text-secondary);
+}
+
 /* ONVIF auto-fill box in the Add-camera modal */
 .onvif-box {
   border: 1px solid var(--border);

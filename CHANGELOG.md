@@ -18,6 +18,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   rather than trusting the (often wrong) host/creds the camera returns. Manual RTSP entry
   stays available. This is Phase 1 of planned ONVIF support (discovery-by-IP; multicast scan
   intentionally skipped as it can't cross VLANs). See `planning/onvif-and-two-way-audio-scope.md`.
+- **Two-way-audio capability detection.** Adding a camera via ONVIF now also checks whether it
+  exposes an audio output (the two-way-audio backchannel) and shows a badge in the Cameras
+  list ("Two-way audio" / "No two-way audio"). Informational for now — groundwork for actual
+  push-to-talk later, which will only ever be offered on cameras that report support. (Phase 2
+  of the ONVIF plan.)
 
 ## [0.4.9] - 2026-07-27
 

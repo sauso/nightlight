@@ -40,6 +40,17 @@ function profileToken(p) {
   return p?.token || p?.$?.token || p?.$?.Token || null;
 }
 
+// Two-way-audio (ONVIF backchannel) support = does the device expose an audio *output*?
+// A populated GetAudioOutputConfigurations list => yes; an empty list, or an explicit
+// "AudioOutputNotSupported"/"not supported" fault (what the Sonoff returns) => no; any other
+// error/timeout => unknown (don't claim either way). Returns 'yes' | 'no' | 'unknown'.
+function classifyBackchannel(err, configs) {
+  if (!err) return configs && configs.length > 0 ? 'yes' : 'no';
+  const msg = (err.message || '').toLowerCase();
+  if (msg.includes('not supported') || msg.includes('audiooutputnotsupported')) return 'no';
+  return 'unknown';
+}
+
 // Highest-resolution profile is normally the "main" stream.
 function pickBestProfile(profiles) {
   return [...profiles].sort((a, b) => {
@@ -132,9 +143,18 @@ export async function probeOnvifCamera({ host, port, username, password }) {
     password,
   });
 
+  // Phase 2: record whether the camera exposes an audio output (two-way-audio backchannel),
+  // while we're already connected. Read-only, best-effort - never fails the probe.
+  const backchannel = await new Promise((resolve) => {
+    try {
+      cam.getAudioOutputConfigurations((e, configs) => resolve(classifyBackchannel(e, configs)));
+    } catch {
+      resolve('unknown');
+    }
+  });
+
   const info = await pcall(cam, 'getDeviceInformation').catch(() => null);
   const vid = best?.videoEncoderConfiguration || {};
-  const aud = best?.audioEncoderConfiguration || {};
   return {
     rtspUrl,
     suggestedName: info ? [info.manufacturer, info.model].filter(Boolean).join(' ').trim() || null : null,
@@ -143,7 +163,7 @@ export async function probeOnvifCamera({ host, port, username, password }) {
       width: vid.resolution?.width || null,
       height: vid.resolution?.height || null,
     },
-    audio: { codec: aud.encoding || null },
+    backchannel, // 'yes' | 'no' | 'unknown' — two-way-audio capability
     onvifDeviceUrl: `http://${cleanHost}:${onvifPort}${DEVICE_PATH}`,
   };
 }
