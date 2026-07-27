@@ -5,7 +5,7 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { upsertPath, removePath, getPathStatus, toPathName } from '../lib/mediamtx.js';
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
 import { getReading, subscribeAllCameraTopics } from '../lib/mqttClient.js';
-import { probeOnvifCamera } from '../lib/onvif.js';
+import { probeOnvifCamera, ptzContinuousMove, ptzStop } from '../lib/onvif.js';
 import { logger } from '../lib/logger.js';
 
 const router = Router();
@@ -32,15 +32,69 @@ router.post('/onvif-probe', requireAdmin, async (req, res) => {
   }
 });
 
+// PTZ control. Any signed-in user can reposition a camera (day-to-day, like reordering) -
+// not admin-only. The camera auto-stops a few seconds after a move server-side (runaway
+// failsafe in ptzContinuousMove); the client also calls /stop on release.
+function ptzConnForCamera(id, res) {
+  const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(id);
+  if (!cam) {
+    res.status(404).json({ error: 'Camera not found' });
+    return null;
+  }
+  if (!cam.ptz_supported || !cam.onvif_device_url) {
+    res.status(400).json({ error: 'This camera does not support PTZ' });
+    return null;
+  }
+  try {
+    const u = new URL(cam.onvif_device_url);
+    return {
+      host: u.hostname,
+      port: u.port || 80,
+      username: cam.onvif_username,
+      password: cam.onvif_password,
+      profileToken: cam.onvif_profile_token,
+    };
+  } catch {
+    res.status(500).json({ error: 'Stored ONVIF address for this camera is invalid' });
+    return null;
+  }
+}
+
+router.post('/:id/ptz/move', async (req, res) => {
+  const conn = ptzConnForCamera(req.params.id, res);
+  if (!conn) return;
+  const { pan, tilt, zoom } = req.body || {};
+  try {
+    await ptzContinuousMove({ ...conn, pan, tilt, zoom });
+    res.json({ ok: true });
+  } catch (e) {
+    logger.info(`[ptz] move failed for ${req.params.id}: ${e.message}`);
+    res.status(502).json({ error: e.message || 'PTZ move failed' });
+  }
+});
+
+router.post('/:id/ptz/stop', async (req, res) => {
+  const conn = ptzConnForCamera(req.params.id, res);
+  if (!conn) return;
+  try {
+    await ptzStop(conn);
+    res.json({ ok: true });
+  } catch (e) {
+    logger.info(`[ptz] stop failed for ${req.params.id}: ${e.message}`);
+    res.status(502).json({ error: e.message || 'PTZ stop failed' });
+  }
+});
+
 router.get('/', async (req, res) => {
   const cameras = db.prepare('SELECT * FROM cameras ORDER BY sort_order, created_at').all();
   const isAdmin = req.user?.role === 'admin';
   const withStatus = await Promise.all(
-    cameras.map(async ({ rtsp_url, ...cam }) => ({
+    // rtsp_url and the ONVIF credentials embed camera logins - only the admin's
+    // camera-management form needs them back; strip them for everyone else. ptz_supported
+    // and onvif_device_url stay (the tiles need to know whether to show PTZ controls).
+    cameras.map(async ({ rtsp_url, onvif_username, onvif_password, ...cam }) => ({
       ...cam,
-      // The RTSP URL usually embeds the camera's own login credentials - only the
-      // admin's camera-management form actually needs it back.
-      ...(isAdmin ? { rtsp_url } : {}),
+      ...(isAdmin ? { rtsp_url, onvif_username, onvif_password } : {}),
       status: await getPathStatus(cam.mediamtx_path),
       mqtt: cam.mqtt_topic ? getReading(cam.mqtt_topic) : null,
     }))
@@ -64,7 +118,11 @@ router.put('/reorder', (req, res) => {
 });
 
 router.post('/', requireAdmin, async (req, res) => {
-  const { name, rtsp_url, child_id, mqtt_topic, discovery_source, onvif_device_url, backchannel_supported } = req.body || {};
+  const {
+    name, rtsp_url, child_id, mqtt_topic,
+    discovery_source, onvif_device_url, backchannel_supported,
+    ptz_supported, onvif_username, onvif_password, onvif_profile_token,
+  } = req.body || {};
   if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
   if (!isValidRtsp(rtsp_url)) {
     return res.status(400).json({ error: 'A valid rtsp:// URL is required' });
@@ -79,12 +137,26 @@ router.post('/', requireAdmin, async (req, res) => {
   // Record ONVIF provenance when the RTSP URL was auto-filled via the probe above, so
   // later ONVIF work (capability check, PTZ) can reconnect. Defaults to a plain manual add.
   const source = discovery_source === 'onvif' ? 'onvif' : 'manual';
-  const onvifUrl = source === 'onvif' && onvif_device_url ? onvif_device_url.trim() : null;
+  const isOnvif = source === 'onvif';
+  const onvifUrl = isOnvif && onvif_device_url ? onvif_device_url.trim() : null;
   const backchannel = ['yes', 'no'].includes(backchannel_supported) ? backchannel_supported : 'unknown';
+  // PTZ control needs the ONVIF credentials + profile token later - only meaningful for
+  // ONVIF-added cameras. ptz_supported gates whether the UI ever shows PTZ controls.
+  const ptz = isOnvif && ptz_supported ? 1 : 0;
+  const onvifUser = isOnvif ? onvif_username || null : null;
+  const onvifPass = isOnvif ? onvif_password || null : null;
+  const profileToken = isOnvif ? onvif_profile_token || null : null;
   const { maxOrder } = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS maxOrder FROM cameras').get();
   db.prepare(
-    'INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path, sort_order, mqtt_topic, discovery_source, onvif_capable, onvif_device_url, backchannel_supported) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(id, name.trim(), rtsp_url.trim(), child_id || null, mediamtx_path, maxOrder + 1, mqtt_topic?.trim() || null, source, source === 'onvif' ? 1 : 0, onvifUrl, backchannel);
+    `INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path, sort_order, mqtt_topic,
+       discovery_source, onvif_capable, onvif_device_url, backchannel_supported,
+       ptz_supported, onvif_username, onvif_password, onvif_profile_token)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id, name.trim(), rtsp_url.trim(), child_id || null, mediamtx_path, maxOrder + 1, mqtt_topic?.trim() || null,
+    source, isOnvif ? 1 : 0, onvifUrl, backchannel,
+    ptz, onvifUser, onvifPass, profileToken
+  );
   await startTranscoder(id, rtsp_url.trim(), mediamtx_path, name.trim());
   subscribeAllCameraTopics();
   res.status(201).json(db.prepare('SELECT * FROM cameras WHERE id = ?').get(id));

@@ -23,6 +23,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   list ("Two-way audio" / "No two-way audio"). Informational for now — groundwork for actual
   push-to-talk later, which will only ever be offered on cameras that report support. (Phase 2
   of the ONVIF plan.)
+- **Pan/tilt control (PTZ).** Cameras that report PTZ over ONVIF get a move button on their
+  camera tile; tapping it opens a D-pad — hold an arrow to pan/tilt, release to stop. Stop is
+  belt-and-suspenders: the client stops on release/leave/cancel, and the camera also
+  auto-stops a few seconds after any move server-side, so a move can't get stranded. Only
+  shown on PTZ-capable cameras. See `planning/ptz-control-scope.md`.
 
 ## [0.4.9] - 2026-07-27
 

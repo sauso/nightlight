@@ -59,11 +59,17 @@ export default function Cameras() {
         discovery_source: 'onvif',
         onvif_device_url: r.onvifDeviceUrl,
         backchannel_supported: r.backchannel,
+        // Stored so PTZ control can reconnect later (credentials from the sub-form above).
+        ptz_supported: r.ptz ? 1 : 0,
+        onvif_profile_token: r.profileToken || null,
+        onvif_username: onvif.username,
+        onvif_password: onvif.password,
       }));
       const res = r.video?.width ? `${r.video.codec || ''} ${r.video.width}×${r.video.height}`.trim() : r.video?.codec || '';
       const talk =
         r.backchannel === 'yes' ? ' · two-way audio supported' : r.backchannel === 'no' ? ' · no two-way audio' : '';
-      setOnvifMsg(`Found stream${res ? ` — ${res}` : ''}${talk}. RTSP URL filled in below.`);
+      const ptz = r.ptz ? ' · PTZ' : '';
+      setOnvifMsg(`Found stream${res ? ` — ${res}` : ''}${talk}${ptz}. RTSP URL filled in below.`);
     } catch (err) {
       setError(err.message);
     } finally {

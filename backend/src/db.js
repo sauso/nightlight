@@ -147,6 +147,23 @@ if (!camerasColumns.includes('onvif_device_url')) {
 if (!camerasColumns.includes('backchannel_supported')) {
   db.exec("ALTER TABLE cameras ADD COLUMN backchannel_supported TEXT NOT NULL DEFAULT 'unknown'");
 }
+// PTZ: whether the camera supports pan/tilt/zoom, plus the ONVIF credentials and media
+// profile token needed to issue control commands later (stored at ONVIF add time so PTZ
+// moves don't need to re-authenticate/re-query profiles each time). Credentials are as
+// sensitive as the ones already embedded in rtsp_url, and are redacted from non-admin API
+// responses the same way.
+if (!camerasColumns.includes('ptz_supported')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN ptz_supported INTEGER NOT NULL DEFAULT 0');
+}
+if (!camerasColumns.includes('onvif_username')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN onvif_username TEXT');
+}
+if (!camerasColumns.includes('onvif_password')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN onvif_password TEXT');
+}
+if (!camerasColumns.includes('onvif_profile_token')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN onvif_profile_token TEXT');
+}
 
 // Ensure the single settings row always exists.
 db.prepare(
