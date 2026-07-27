@@ -605,6 +605,34 @@ body.in-pip .tile-menu-backdrop {
   backdrop-filter: blur(4px);
 }
 
+/* Overlay controls over the video: drop the grey box entirely and show just the icon -
+   white with a soft black glow so it stays legible over any footage, and 25% larger for
+   an easier tap. The 30x30 button stays as an invisible tap target. */
+.mute-btn,
+.pip-btn,
+.settings-btn,
+.fullscreen-btn {
+  background: none;
+  backdrop-filter: none;
+  border-radius: 0;
+  color: #fff;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.9)) drop-shadow(0 0 4px rgba(0, 0, 0, 0.55));
+}
+
+.mute-btn svg,
+.pip-btn svg,
+.settings-btn svg,
+.fullscreen-btn svg {
+  width: 20px;  /* 16 * 1.25 */
+  height: 20px;
+}
+
+/* Background-listening keeps a distinct accent tint over the white, so it's clear at a
+   glance the camera is being held alive in the background (not merely unmuted). */
+.mute-btn--bg {
+  color: var(--accent);
+}
+
 .camera-tile__video-wrap:fullscreen {
   display: flex;
   align-items: center;

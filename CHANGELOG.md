@@ -9,6 +9,18 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-07-27
+
+### Changed
+- Leaving Picture-in-Picture now returns you to where you were, not always to fullscreen.
+  If you opened PiP from the dashboard, expanding it back drops out of the fullscreen it
+  used internally and returns to the dashboard; if you were already fullscreen on a camera,
+  it stays fullscreen. (Uses the native PiP-mode signal from nightlight-mobile 0.4.1.)
+- Restyled the on-video overlay controls (mute / settings / PiP / fullscreen): dropped the
+  grey box, and the icons are now larger and white with a soft black glow, so they read
+  cleanly over any footage without a heavy chrome background. Background-listening keeps an
+  accent tint to stay distinguishable.
+
 ## [0.4.6] - 2026-07-27
 
 ### Added
@@ -191,7 +203,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.4.6...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.4.7...HEAD
+[0.4.7]: https://github.com/sauso/nightlight/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/sauso/nightlight/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/sauso/nightlight/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/sauso/nightlight/compare/v0.4.3...v0.4.4
