@@ -315,45 +315,43 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
 
   // --- PTZ (pan/tilt) control, for ONVIF cameras that report support ---
   const [ptzOpen, setPtzOpen] = useState(false);
-  const ptzMovingRef = useRef(false);
-  const ptzMoveReqRef = useRef(null);
+  const ptzHoldingRef = useRef(false);
   const PTZ_SPEED = 0.5;
 
-  function ptzMove(pan, tilt) {
-    ptzMovingRef.current = true;
-    // Keep the move request's promise so Stop can wait for it (see ptzStopMove).
-    ptzMoveReqRef.current = api.post(`/cameras/${camera.id}/ptz/move`, { pan, tilt }).catch(() => {});
-  }
-  async function ptzStopMove() {
-    if (!ptzMovingRef.current) return;
-    ptzMovingRef.current = false;
-    // Wait until the move request has actually been sent before sending Stop. A very quick
-    // tap otherwise fires move and stop near-simultaneously; if the camera receives stop
-    // first (a no-op, since it isn't moving yet) and move second, the move runs until the
-    // server-side timeout - the "runaway" past the limit. Ordering them fixes it.
-    try {
-      await ptzMoveReqRef.current;
-    } catch {
-      // ignore - we still send stop
+  // Each press sends fixed-duration "nudges" (the server starts, holds, and stops the move),
+  // so a tap always travels a consistent amount regardless of how briefly it was pressed or
+  // of network timing. A quick tap completes exactly one nudge (the loop only re-checks the
+  // hold flag after the in-flight nudge resolves); holding repeats nudges for continued
+  // movement. No stranded moves - each nudge self-stops.
+  async function ptzHoldLoop(pan, tilt) {
+    if (ptzHoldingRef.current) return; // already running for this press
+    ptzHoldingRef.current = true;
+    while (ptzHoldingRef.current) {
+      try {
+        await api.post(`/cameras/${camera.id}/ptz/nudge`, { pan, tilt });
+      } catch {
+        break; // stop repeating if a nudge fails
+      }
     }
-    api.post(`/cameras/${camera.id}/ptz/stop`, {}).catch(() => {});
   }
-  // Hold an arrow to move, release to stop. Pointer capture keeps the release on the button
-  // even if the finger slides off; pointercancel/leave cover interruptions - so a move can't
-  // get stranded (belt to the server-side auto-stop).
+  function ptzEndHold() {
+    ptzHoldingRef.current = false;
+  }
   function ptzHold(pan, tilt) {
     return {
       onPointerDown: (e) => {
         e.preventDefault();
         e.stopPropagation();
         e.currentTarget.setPointerCapture?.(e.pointerId);
-        ptzMove(pan, tilt);
+        ptzHoldLoop(pan, tilt);
       },
-      onPointerUp: ptzStopMove,
-      onPointerCancel: ptzStopMove,
-      onPointerLeave: ptzStopMove,
+      onPointerUp: ptzEndHold,
+      onPointerCancel: ptzEndHold,
+      onPointerLeave: ptzEndHold,
     };
   }
+  // Stop any active hold-loop if the tile unmounts mid-press.
+  useEffect(() => () => { ptzHoldingRef.current = false; }, []);
 
   return (
     <div className="camera-tile">
@@ -445,7 +443,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
             <div
               className="tile-menu-backdrop"
               onClick={() => {
-                ptzStopMove();
+                ptzEndHold();
                 setPtzOpen(false);
               }}
             />

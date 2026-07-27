@@ -24,9 +24,12 @@ const MEDIA_PATH_FALLBACKS = ['/onvif/media_service', '/onvif/media'];
 const DEVICE_PATH = '/onvif/device_service';
 const PTZ_PATH = '/onvif/ptz_service';
 // Camera auto-stops a continuous move after this long even if the Stop command is lost
-// (dropped release, network blip) - the primary runaway-pan failsafe. The client also
-// sends Stop on release; this is the belt to that suspenders.
+// (dropped release, network blip) - the runaway-pan failsafe.
 const PTZ_MOVE_TIMEOUT_MS = 3000;
+// A single "nudge" = a fixed-duration move. Distance is set by this server-side hold time,
+// NOT by how long the user held the button or by network timing, so every press travels the
+// same amount (see ptzNudge). Tune here if steps feel too big/small.
+const PTZ_NUDGE_MS = 400;
 
 function clampVelocity(n) {
   const v = Number(n) || 0;
@@ -228,4 +231,17 @@ export function ptzStop({ host, port, username, password, profileToken }) {
   return new Promise((resolve, reject) => {
     cam.stop({ profileToken, panTilt: true, zoom: true }, (err) => (err ? reject(err) : resolve()));
   });
+}
+
+/**
+ * A single fixed-distance nudge: start moving, hold for a set time, then stop. Because the
+ * duration is a server-side constant, every press travels the same amount regardless of how
+ * briefly the button was tapped or of network latency - which is what makes the D-pad feel
+ * consistent. The continuousMove still carries its own auto-stop timeout, so even if the
+ * stop below is lost the camera won't run away.
+ */
+export async function ptzNudge(conn) {
+  await ptzContinuousMove(conn);
+  await new Promise((r) => setTimeout(r, PTZ_NUDGE_MS));
+  await ptzStop(conn).catch(() => {}); // best-effort; auto-stop timeout is the backstop
 }

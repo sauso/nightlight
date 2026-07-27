@@ -5,7 +5,7 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { upsertPath, removePath, getPathStatus, toPathName } from '../lib/mediamtx.js';
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
 import { getReading, subscribeAllCameraTopics } from '../lib/mqttClient.js';
-import { probeOnvifCamera, ptzContinuousMove, ptzStop } from '../lib/onvif.js';
+import { probeOnvifCamera, ptzNudge } from '../lib/onvif.js';
 import { validateRtspStream } from '../lib/rtspProbe.js';
 import { logger } from '../lib/logger.js';
 
@@ -108,28 +108,19 @@ function ptzConnForCamera(id, res) {
   }
 }
 
-router.post('/:id/ptz/move', async (req, res) => {
+// One fixed-distance nudge per call (start -> hold -> stop, server-side), so each press of
+// a D-pad arrow travels a consistent amount. The client sends one per tap, and repeats while
+// a button is held for continued movement.
+router.post('/:id/ptz/nudge', async (req, res) => {
   const conn = ptzConnForCamera(req.params.id, res);
   if (!conn) return;
   const { pan, tilt, zoom } = req.body || {};
   try {
-    await ptzContinuousMove({ ...conn, pan, tilt, zoom });
+    await ptzNudge({ ...conn, pan, tilt, zoom });
     res.json({ ok: true });
   } catch (e) {
-    logger.info(`[ptz] move failed for ${req.params.id}: ${e.message}`);
+    logger.info(`[ptz] nudge failed for ${req.params.id}: ${e.message}`);
     res.status(502).json({ error: e.message || 'PTZ move failed' });
-  }
-});
-
-router.post('/:id/ptz/stop', async (req, res) => {
-  const conn = ptzConnForCamera(req.params.id, res);
-  if (!conn) return;
-  try {
-    await ptzStop(conn);
-    res.json({ ok: true });
-  } catch (e) {
-    logger.info(`[ptz] stop failed for ${req.params.id}: ${e.message}`);
-    res.status(502).json({ error: e.message || 'PTZ stop failed' });
   }
 });
 

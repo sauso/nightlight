@@ -1,4 +1,5 @@
-export default function Modal({ title, onClose, children }) {
+export default function Modal({ title, onClose, children, placement = 'bottom' }) {
+  const top = placement === 'top';
   return (
     <div
       style={{
@@ -6,7 +7,7 @@ export default function Modal({ title, onClose, children }) {
         inset: 0,
         background: 'rgba(10, 13, 28, 0.7)',
         display: 'flex',
-        alignItems: 'flex-end',
+        alignItems: top ? 'flex-start' : 'flex-end',
         justifyContent: 'center',
         zIndex: 50,
       }}
@@ -14,7 +15,13 @@ export default function Modal({ title, onClose, children }) {
     >
       <div
         className="card"
-        style={{ width: '100%', maxWidth: 440, margin: 0, borderRadius: '20px 20px 0 0', marginBottom: 0 }}
+        style={{
+          width: '100%',
+          maxWidth: 440,
+          margin: 0,
+          // Sheet hugs whichever edge it slides from - rounded corners on the inner side only.
+          borderRadius: top ? '0 0 20px 20px' : '20px 20px 0 0',
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
