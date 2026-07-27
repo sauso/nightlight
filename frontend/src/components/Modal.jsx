@@ -9,6 +9,9 @@ export default function Modal({ title, onClose, children, placement = 'bottom' }
         display: 'flex',
         alignItems: top ? 'flex-start' : 'flex-end',
         justifyContent: 'center',
+        // A top sheet must clear the device safe area (status bar / notch) so it lines up
+        // with the header rather than hiding behind it - matters in the native mobile app.
+        paddingTop: top ? 'env(safe-area-inset-top, 0px)' : undefined,
         zIndex: 50,
       }}
       onClick={onClose}
