@@ -94,6 +94,21 @@ export default function LiveMonitor() {
         setPipAutoEnteredFullscreen(false);
         if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
       }
+      // Android's WebView can hold onto the tiny PiP window's viewport scale after the window
+      // returns to full size, leaving the whole UI zoomed until an app restart. Re-writing the
+      // viewport meta (force scale=1, then restore) makes the WebView recompute
+      // width=device-width at the restored size. Delayed so the window (and any fullscreen
+      // exit above) has settled back to full before we nudge it. No-op on iOS - this PiP
+      // signal only fires from the Android Activity-PiP path.
+      if (!isInPip) {
+        setTimeout(() => {
+          const vp = document.querySelector('meta[name="viewport"]');
+          if (!vp) return;
+          const content = vp.getAttribute('content');
+          vp.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover');
+          requestAnimationFrame(() => vp.setAttribute('content', content));
+        }, 400);
+      }
     });
     const offPause = onBackgroundPauseChanged((paused) => setBackgroundPaused(paused));
     return () => {
