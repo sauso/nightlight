@@ -70,7 +70,19 @@ router.post('/onvif-probe', requireAdmin, async (req, res) => {
   const { host, port, username, password } = req.body || {};
   if (!host || !host.trim()) return res.status(400).json({ error: 'Camera IP address is required' });
   try {
-    const result = await probeOnvifCamera({ host, port, username, password });
+    // Cap the whole probe so a slow/unresponsive camera can't keep the request open long
+    // enough for a reverse proxy in front of us to time out and return its own (bodiless)
+    // 502 - which the client can only show as a generic "Request failed". We'd rather always
+    // answer with a clear JSON error the UI can surface in the add-camera dialog.
+    const result = await Promise.race([
+      probeOnvifCamera({ host, port, username, password }),
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error('ONVIF probe timed out — the camera didn’t respond in time. Check the IP/port, that the camera is reachable, and the ONVIF username/password.')),
+          18000
+        )
+      ),
+    ]);
     res.json(result);
   } catch (err) {
     // Expected failure mode (wrong IP/creds, not an ONVIF camera, timeout) - 502, not 500,

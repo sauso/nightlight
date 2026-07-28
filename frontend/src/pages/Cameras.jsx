@@ -20,6 +20,10 @@ export default function Cameras() {
   const [busy, setBusy] = useState(false);
   const [onvifBusy, setOnvifBusy] = useState(false);
   const [onvifMsg, setOnvifMsg] = useState('');
+  // Errors from actions *inside* the add/edit modal (ONVIF fetch, save) shown within the
+  // modal itself - not the page-level `error` banner, which renders behind the modal where
+  // it can't be seen.
+  const [modalError, setModalError] = useState('');
   // When the stream validation on save fails, we surface it inline with a "Save anyway"
   // option instead of a blocking browser confirm().
   const [confirmMsg, setConfirmMsg] = useState('');
@@ -33,6 +37,7 @@ export default function Cameras() {
     setForm(EMPTY_FORM);
     setOnvifMsg('');
     setConfirmMsg('');
+    setModalError('');
     setEditing({});
   }
 
@@ -51,6 +56,7 @@ export default function Cameras() {
     });
     setOnvifMsg('');
     setConfirmMsg('');
+    setModalError('');
     setEditing(cam);
   }
 
@@ -60,12 +66,12 @@ export default function Cameras() {
   async function fetchFromOnvif() {
     const host = form.rtsp_host.trim();
     if (!host) {
-      setError('Enter the camera IP first');
+      setModalError('Enter the camera IP first');
       return;
     }
     setOnvifBusy(true);
     setOnvifMsg('');
-    setError('');
+    setModalError('');
     try {
       const r = await api.post('/cameras/onvif-probe', {
         host,
@@ -90,7 +96,7 @@ export default function Cameras() {
       const ptz = r.ptz ? ' · PTZ' : '';
       setOnvifMsg(`Found stream${res ? ` — ${res}` : ''}${talk}${ptz}. Port & path filled in — enter the username/password below.`);
     } catch (err) {
-      setError(err.message);
+      setModalError(err.message);
     } finally {
       setOnvifBusy(false);
     }
@@ -102,7 +108,7 @@ export default function Cameras() {
 
   async function doSave(force) {
     setBusy(true);
-    setError('');
+    setModalError('');
     const payload = { ...form, child_id: form.child_id || null, ...(force ? { force: true } : {}) };
     try {
       await submitCamera(payload);
@@ -115,7 +121,7 @@ export default function Cameras() {
       if (err.data?.needsConfirm) {
         setConfirmMsg(err.message);
       } else {
-        setError(err.message);
+        setModalError(err.message);
       }
     } finally {
       setBusy(false);
@@ -125,6 +131,7 @@ export default function Cameras() {
   function save(e) {
     e.preventDefault();
     setConfirmMsg(''); // a fresh Save re-validates (e.g. after fixing the password)
+    setModalError('');
     doSave(false);
   }
 
@@ -337,6 +344,7 @@ export default function Cameras() {
                 placeholder="e.g. zigbee2mqtt/Raffa Room Temp"
               />
             </div>
+            {modalError && <div className="error-banner" style={{ marginBottom: 12 }}>{modalError}</div>}
             {confirmMsg && (
               <div className="form-warning">
                 <div>Couldn't reach the camera stream: {confirmMsg}</div>
