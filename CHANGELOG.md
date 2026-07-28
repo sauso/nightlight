@@ -10,9 +10,6 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Fixed
-- Android: returning from Picture-in-Picture no longer sometimes leaves the whole app zoomed
-  in (stuck until an app restart). On leaving PiP the viewport is nudged so the WebView
-  recomputes its scale at the restored full-window size instead of keeping the tiny PiP scale.
 - The lock-screen / Now Playing controls for a Background-audio camera on **Compatibility (HLS)**
   now show the camera's name and app artwork (instead of just "Nightlight" with a blank tile),
   and their Pause/Play buttons work — Play resumes at the live edge rather than stalling on a
