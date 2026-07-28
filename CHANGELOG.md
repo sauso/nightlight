@@ -10,6 +10,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Fixed
+- Switching servers ("Change server" in the native app) now immediately stops all camera
+  audio/video and the background-audio service before restarting, instead of leaving the old
+  server's sound playing after the switch and stacking a second audio session when you returned.
 - The app is no longer pinch/double-tap **page-zoomable** (it's a fixed-layout app, not a
   scrollable document). This fixes an Android bug where double-tapping the Picture-in-Picture
   window zoomed the entire UI and left it stuck zoomed until an app restart. (A camera tile's

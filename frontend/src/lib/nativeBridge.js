@@ -31,6 +31,24 @@ export function hasActiveBackgroundAudio() {
 export async function changeServer() {
   const p = window.Capacitor?.Plugins?.ServerConfig;
   if (!p) return;
+  // Tear down all playback and the background-audio service BEFORE restarting. The restart
+  // rebuilds the WebView, but on its own it doesn't reliably stop media that's already playing
+  // (Android's foreground service keeps the process/audio alive; iOS's old web view can linger
+  // behind the swapped root controller). Left as-is, the old server's sound keeps going after
+  // the switch and a second session stacks on top when you come back. So: stop every audio/video
+  // element here and now, release the native foreground service, and only then clear + restart.
+  try {
+    document.querySelectorAll('audio, video').forEach((el) => {
+      try { el.pause(); } catch { /* ignore */ }
+      el.srcObject = null;
+      el.removeAttribute('src');
+      try { el.load(); } catch { /* ignore */ }
+    });
+  } catch { /* ignore */ }
+  try {
+    activeCameras.clear();
+    await plugin()?.stop();
+  } catch { /* ignore */ }
   try {
     await p.clear();
     await p.restart();
