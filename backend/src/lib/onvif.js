@@ -51,7 +51,7 @@ function friendlyAuthError(err) {
     return 'This camera has temporarily locked out logins after too many failed attempts. ' +
       'Wait a few minutes, then try again with the correct ONVIF username and password.';
   }
-  // Wrong or missing credentials.
+  // Wrong or missing credentials (explicit auth faults).
   if (
     msg.includes('not authorized') ||
     msg.includes('notauthorized') ||
@@ -62,6 +62,15 @@ function friendlyAuthError(err) {
   ) {
     return 'The ONVIF username or password appears to be incorrect. Double-check them before ' +
       'retrying — repeated wrong attempts can temporarily lock the camera out.';
+  }
+  // Some cameras don't return a clean auth fault for bad/blank credentials - instead the
+  // library can't parse the (challenge) response and reports a generic "Wrong ONVIF SOAP
+  // response". In the add-by-IP flow the overwhelmingly common cause is exactly that, so hint
+  // at credentials while hedging (it can also be a wrong ONVIF port or a non-ONVIF device).
+  if (msg.includes('wrong onvif soap response') || msg.includes('invalid soap')) {
+    return 'The camera rejected the ONVIF request — most often the ONVIF username or password ' +
+      'is wrong (repeated wrong attempts can lock the camera out). If they are definitely ' +
+      'correct, check the ONVIF port.';
   }
   return null;
 }
