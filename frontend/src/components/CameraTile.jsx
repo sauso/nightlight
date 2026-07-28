@@ -26,6 +26,26 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   // to you can stay muted while a tablet mounted in the nursery stays unmuted, rather
   // than muting on one device silently muting it everywhere.
   const muteKey = `nightlight_muted_${camera.id}`;
+  // Per-device "stop playback" for this tile - tears the stream down entirely on this device
+  // to save bandwidth/data when you only care about some cameras, without affecting the
+  // server-side stream or any other viewer. Persisted per-camera like mute, so a stopped
+  // camera stays stopped across reloads until you start it again here.
+  const stopKey = `nightlight_stopped_${camera.id}`;
+  const [stopped, setStoppedState] = useState(() => {
+    try {
+      return localStorage.getItem(stopKey) === 'true';
+    } catch {
+      return false;
+    }
+  });
+  function setStopped(value) {
+    setStoppedState(value);
+    try {
+      localStorage.setItem(stopKey, value ? 'true' : 'false');
+    } catch {
+      // Private browsing / storage disabled - still works for this session.
+    }
+  }
 
   // Audio is a three-way state in the native Android app, two-way on the web:
   //   'on'  - audio plays while the app is open (the old unmuted state)
@@ -88,8 +108,9 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   // false) rather than merely muting it - otherwise it keeps pulling video/audio over the
   // network in the background, the real battery and data drain. It reconnects on return.
   // Background mode is deliberately exempt: keeping the connection alive with the screen
-  // off is its entire purpose (backed by the native foreground service).
-  const streamActive = pageVisible || audioState === 'bg';
+  // off is its entire purpose (backed by the native foreground service). A tile the user has
+  // explicitly stopped stays torn down no matter what - that's the whole point of stopping it.
+  const streamActive = !stopped && (pageVisible || audioState === 'bg');
 
   const [mode, setMode] = useState('live'); // 'live' (WebRTC) | 'compat' (HLS)
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -134,9 +155,11 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   // notification retitles itself as cameras join and leave.
   useEffect(() => {
     if (!isNativeApp()) return undefined;
-    setBackgroundListening(camera.id, camera.name, audioState === 'bg');
+    // A stopped tile releases its claim on the background service too - no point keeping a
+    // foreground-audio notification alive for a camera whose stream we've torn down.
+    setBackgroundListening(camera.id, camera.name, audioState === 'bg' && !stopped);
     return undefined;
-  }, [audioState, camera.id, camera.name]);
+  }, [audioState, camera.id, camera.name, stopped]);
 
   // If the person taps "Stop" on the Android notification, every tile in background
   // mode drops back to plain On. Also make sure an unmounting tile releases its
@@ -378,6 +401,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
               muted={effectiveMuted}
               onFirstConnectFailed={handleFirstConnectFailed}
               cameraName={camera.name}
+              isBackgroundAudio={audioState === 'bg'}
             />
           ) : (
             <HlsPlayer
@@ -421,6 +445,16 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
                 onClick={() => selectMode('compat')}
               >
                 Compatibility
+              </button>
+              <div className="tile-menu__divider" />
+              <button
+                className="tile-menu__item"
+                onClick={() => {
+                  setStopped(!stopped);
+                  setModeMenuOpen(false);
+                }}
+              >
+                {stopped ? 'Start camera' : 'Stop camera'}
               </button>
             </div>
           </>
@@ -486,6 +520,18 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
         >
           {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
         </button>
+
+        {/* Covers the whole tile when stopped - the stream is torn down (see streamActive),
+            so this replaces the players' own idle overlay with a clear "you stopped this"
+            message and a one-tap way to bring it back. */}
+        {stopped && (
+          <div className="camera-tile__stopped">
+            <span>Camera stopped</span>
+            <button className="btn btn-sm" onClick={() => setStopped(false)}>
+              Start camera
+            </button>
+          </div>
+        )}
       </div>
       <div className="camera-tile__meta">
         <div className="camera-tile__meta-left">

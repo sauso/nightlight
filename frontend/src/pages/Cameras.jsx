@@ -26,6 +26,8 @@ export default function Cameras() {
   // Camera pending removal - drives an in-app confirm modal instead of window.confirm.
   const [removing, setRemoving] = useState(null);
   const [removeBusy, setRemoveBusy] = useState(false);
+  // Camera whose enable/disable toggle is in flight, so we can disable just that button.
+  const [togglingId, setTogglingId] = useState(null);
 
   function openNew() {
     setForm(EMPTY_FORM);
@@ -135,6 +137,19 @@ export default function Cameras() {
     }
   }
 
+  async function toggleEnabled(cam) {
+    setTogglingId(cam.id);
+    setError('');
+    try {
+      await api.put(`/cameras/${cam.id}/enabled`, { enabled: !!cam.disabled });
+      await refresh();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setTogglingId(null);
+    }
+  }
+
   async function confirmRemove() {
     if (!removing) return;
     setRemoveBusy(true);
@@ -159,42 +174,50 @@ export default function Cameras() {
         {cameras.length === 0 && <div className="empty-state">No cameras added yet.</div>}
 
         {cameras.map((cam) => (
-          <div className="card" key={cam.id}>
-            <div className="list-row" style={{ border: 'none', padding: '0 0 10px' }}>
-              <div className="status-row">
-                <BreathingDot status={cam.statusLevel || 'connecting'} />
-                <div>
-                  <div style={{ fontWeight: 600 }}>{cam.name}</div>
-                  {/* Credential-free address (admins only - the API never sends the
-                      password or the full credentialed URL). */}
-                  {cam.rtsp_display && (
-                    <div className="camera-tile__sub" style={{ wordBreak: 'break-all' }}>{cam.rtsp_display}</div>
-                  )}
-                  {/* Capability badges - only for cameras probed over ONVIF (we actually
-                      know); green = supported, red = not. Manual cameras show none, so we
-                      never falsely claim "not supported" for something we didn't check. */}
-                  {cam.discovery_source === 'onvif' && (
-                    <div className="cam-badge-row">
-                      <span className={`cam-badge ${cam.ptz_supported ? 'cam-badge--ok' : 'cam-badge--bad'}`}>
-                        PTZ
-                      </span>
-                      <span
-                        className={`cam-badge ${cam.backchannel_supported === 'yes' ? 'cam-badge--ok' : 'cam-badge--bad'}`}
-                      >
-                        Two-way Audio
-                      </span>
-                    </div>
-                  )}
-                </div>
+          <div className={`card cam-card${cam.disabled ? ' cam-card--off' : ''}`} key={cam.id}>
+            {/* Header: name (with its status dot) on the left, the actions on the right, both
+                pinned to the top so the buttons line up with the name rather than floating
+                against the middle of the taller address/badges block below. */}
+            <div className="cam-card__head">
+              <div className="cam-card__title">
+                <BreathingDot status={cam.disabled ? 'offline' : cam.statusLevel || 'connecting'} />
+                <span className="cam-card__name">{cam.name}</span>
               </div>
               {isAdmin && (
-                <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                <div className="cam-card__actions">
+                  <button
+                    className="icon-btn"
+                    onClick={() => toggleEnabled(cam)}
+                    disabled={togglingId === cam.id}
+                  >
+                    {togglingId === cam.id ? '…' : cam.disabled ? 'Enable' : 'Disable'}
+                  </button>
                   <button className="icon-btn" onClick={() => openEdit(cam)}>Edit</button>
                   <button className="icon-btn" onClick={() => setRemoving(cam)}>Remove</button>
                 </div>
               )}
             </div>
-            <div className="field" style={{ marginBottom: 0 }}>
+            {/* Credential-free address (admins only - the API never sends the password or the
+                full credentialed URL). */}
+            {cam.rtsp_display && (
+              <div className="camera-tile__sub cam-card__addr">{cam.rtsp_display}</div>
+            )}
+            {/* Capability flags - shown on every camera for consistency. Green = yes, red = no.
+                ONVIF reflects how it was added; PTZ / Two-way Audio are only ever "yes" for a
+                camera probed over ONVIF that reported them (a manual add can't tell us, so it
+                reads red). */}
+            <div className="cam-badge-row">
+              <span className={`cam-badge ${cam.discovery_source === 'onvif' ? 'cam-badge--ok' : 'cam-badge--bad'}`}>
+                ONVIF
+              </span>
+              <span className={`cam-badge ${cam.ptz_supported ? 'cam-badge--ok' : 'cam-badge--bad'}`}>
+                PTZ
+              </span>
+              <span className={`cam-badge ${cam.backchannel_supported === 'yes' ? 'cam-badge--ok' : 'cam-badge--bad'}`}>
+                Two-way Audio
+              </span>
+            </div>
+            <div className="field" style={{ marginBottom: 0, marginTop: 12 }}>
               <label>Assigned to</label>
               <select value={cam.child_id || ''} onChange={(e) => assign(cam, e.target.value)}>
                 <option value="">Unassigned</option>

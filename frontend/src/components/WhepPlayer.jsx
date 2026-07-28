@@ -21,6 +21,7 @@ export default function WhepPlayer({
   muted = false,
   onFirstConnectFailed,
   cameraName,
+  isBackgroundAudio = false,
 }) {
   const videoRef = useRef(null);
   // Audio lives on its own <audio> element, separate from <video> - Chrome treats
@@ -95,6 +96,38 @@ export default function WhepPlayer({
     return () => clearTimeout(timer);
   }, [state]);
 
+  // Own the system media session (Now Playing / lock screen) ONLY while this camera is the
+  // active Background-audio one and actually streaming - so the lock-screen controls show the
+  // correct camera (previously every camera set the single global session on connect, so the
+  // last one to connect/reconnect won, showing the wrong camera). Registering real action
+  // handlers is also what signals the OS this is deliberate, controllable background media.
+  // Play/pause route through the app-wide background pause (mute/unmute), matching the
+  // Android notification's Pause button. Cleaned up when this camera stops being the bg one.
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !isBackgroundAudio || state !== 'live') return undefined;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({ title: cameraName || 'Camera', artist: 'Nightlight' });
+      navigator.mediaSession.playbackState = 'playing';
+      navigator.mediaSession.setActionHandler('play', () => {
+        setBackgroundPaused(false);
+        audioRef.current?.play().catch(() => {});
+      });
+      navigator.mediaSession.setActionHandler('pause', () => {
+        setBackgroundPaused(true);
+      });
+    } catch {
+      // Not every engine supports the full Media Session API - non-fatal.
+    }
+    return () => {
+      try {
+        navigator.mediaSession.setActionHandler('play', null);
+        navigator.mediaSession.setActionHandler('pause', null);
+      } catch {
+        // ignore
+      }
+    };
+  }, [isBackgroundAudio, state, cameraName]);
+
   useEffect(() => {
     if (!active) return;
     let cancelled = false;
@@ -164,30 +197,9 @@ export default function WhepPlayer({
             setState('live');
             everConnectedRef.current = true;
             clearTimeout(firstConnectTimeoutId);
-            if ('mediaSession' in navigator) {
-              navigator.mediaSession.metadata = new MediaMetadata({
-                title: cameraName || 'Camera',
-                artist: 'Nightlight',
-              });
-              navigator.mediaSession.playbackState = 'playing';
-              // Registering real action handlers (even simple ones) is what actually
-              // signals to Chrome that this is deliberate, controllable background
-              // media - metadata alone is informational and isn't enough on its own
-              // to reliably keep audio playing once the tab is backgrounded.
-              // Play/pause from the system media UI (iOS Now Playing / lock screen, or a
-              // system media notification) routes through the app-wide background-pause so
-              // it mutes/unmutes every Background-mode tile consistently - the same action
-              // as the Android notification's Pause button. Muting (rather than truly
-              // pausing) keeps the stream at the live edge, so resume is instantly current.
-              // setBackgroundPaused also updates mediaSession.playbackState for the glyph.
-              navigator.mediaSession.setActionHandler('play', () => {
-                setBackgroundPaused(false);
-                audioRef.current?.play().catch(() => {});
-              });
-              navigator.mediaSession.setActionHandler('pause', () => {
-                setBackgroundPaused(true);
-              });
-            }
+            // The system media session (Now Playing / lock screen) is owned only by the
+            // Background-mode camera - see the dedicated effect below. Setting it here, for
+            // every camera on connect, is what made Now Playing show the wrong camera.
           }
           if (['failed', 'closed'].includes(pc.connectionState)) {
             clearTimeout(disconnectedGraceTimeoutId);
@@ -244,10 +256,6 @@ export default function WhepPlayer({
     return () => {
       cancelled = true;
       clearTimeout(firstConnectTimeoutId);
-      if ('mediaSession' in navigator) {
-        navigator.mediaSession.setActionHandler('play', null);
-        navigator.mediaSession.setActionHandler('pause', null);
-      }
       if (pcRef.current) {
         pcRef.current.close();
         pcRef.current = null;

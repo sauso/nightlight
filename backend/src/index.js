@@ -176,6 +176,14 @@ const STUCK_THRESHOLD_MS = 30 * 1000;
 setInterval(async () => {
   const cameras = db.prepare('SELECT * FROM cameras').all();
   for (const cam of cameras) {
+    // A disabled camera intentionally has no path/transcoder - skip it entirely so the
+    // watchdog doesn't read it as "unready", log phantom offline events, or try to restart
+    // it. Clear any tracked state so re-enabling starts clean (seeds silently, no event).
+    if (cam.disabled) {
+      notReadySince.delete(cam.id);
+      onlineState.delete(cam.id);
+      continue;
+    }
     const status = await getPathStatus(cam.mediamtx_path);
 
     // Record sustained up/down transitions (see onlineState above). A brief blip that
@@ -222,6 +230,9 @@ async function reconcileCameraPaths(attempt = 1) {
   try {
     let fixedCount = 0;
     for (const cam of cameras) {
+      // Disabled cameras are deliberately off - don't recreate their path or start their
+      // transcoder (that's what keeps them off across an app restart, since this runs on boot).
+      if (cam.disabled) continue;
       if (!(await isPathConfiguredCorrectly(cam.mediamtx_path))) {
         await upsertPath(cam.mediamtx_path);
         fixedCount++;

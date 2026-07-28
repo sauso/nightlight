@@ -9,6 +9,38 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-28
+
+### Added
+- **Stop/Start a camera's playback per device**, from the tile's ⚙ menu. Stopping tears that
+  camera's stream down on this device only (showing a "Camera stopped" message) so you can kill
+  the ones you don't need and save bandwidth — handy on cellular — without affecting the
+  server-side stream or other viewers. The choice is remembered per camera on that device.
+- **Enable/Disable a camera** from the Cameras screen, alongside Edit and Remove. Disabling
+  turns the whole stream off server-side (stops its transcoder and drops its MediaMTX path, so
+  it consumes no camera/network/server resources) and hides it from the live grid, without
+  deleting the camera or its history. Re-enable to bring it back.
+- The Cameras screen now shows three capability flags — **ONVIF**, **PTZ**, and **Two-way
+  Audio** — on every camera (green = yes, red = no), for consistency, rather than only on
+  ONVIF-added ones.
+
+### Changed
+- The Cameras screen cards were reorganised so the Edit/Remove/Enable actions line up with the
+  camera name at the top of the card instead of floating against the middle of the details.
+
+### Fixed
+- Disabling or removing a camera in the native app no longer crashes the whole UI. Tearing down
+  a tile's native background-audio listener assumed Capacitor's `addListener` returned a promise;
+  on versions where it returns the handle directly this threw `.then is not a function` during
+  the tile's unmount. Listener teardown now handles both shapes.
+- An unexpected UI error no longer blanks the whole app to a white screen that needs a restart
+  to recover — a top-level error boundary now catches it and offers a Reload button (showing the
+  underlying error for diagnosis) while keeping the app running.
+- The lock-screen / Now Playing controls (mobile) now show the camera that's actually in
+  Background mode, instead of whichever camera connected most recently. Ownership of the
+  system media session is now held only by the Background-audio camera rather than clobbered
+  by every camera on connect.
+
 ## [0.5.2] - 2026-07-27
 
 ### Added

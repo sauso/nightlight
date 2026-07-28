@@ -53,6 +53,11 @@ export default function LiveMonitor() {
   const [orderedCameras, setOrderedCameras] = useState(cameras);
   useEffect(() => setOrderedCameras(cameras), [cameras]);
 
+  // Cameras an admin has turned off don't belong on the live grid at all - they have no
+  // stream. Filter them out for display only; orderedCameras stays the full list so drag
+  // reordering keeps their saved position rather than dropping them out of the order.
+  const visibleCameras = orderedCameras.filter((cam) => !cam.disabled);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
@@ -186,17 +191,17 @@ export default function LiveMonitor() {
       <main className="app-main app-main--wide">
         {error && <div className="error-banner">{error}</div>}
 
-        {orderedCameras.length === 0 && (
+        {visibleCameras.length === 0 && (
           <div className="empty-state">
             No cameras yet. Add one from the Cameras tab to start watching.
           </div>
         )}
 
-        {orderedCameras.length > 0 && (
+        {visibleCameras.length > 0 && (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={orderedCameras.map((c) => c.id)} strategy={rectSortingStrategy}>
+            <SortableContext items={visibleCameras.map((c) => c.id)} strategy={rectSortingStrategy}>
               <div className="card-grid">
-                {orderedCameras.map((cam) => (
+                {visibleCameras.map((cam) => (
                   <SortableCameraTile
                     key={cam.id}
                     camera={cam}
