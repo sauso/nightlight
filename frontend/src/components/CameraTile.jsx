@@ -409,6 +409,8 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
               mediamtxPath={camera.mediamtx_path}
               active={streamActive}
               muted={effectiveMuted}
+              cameraName={camera.name}
+              isBackgroundAudio={audioState === 'bg'}
             />
           )}
         </div>

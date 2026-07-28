@@ -15,6 +15,14 @@ function whepUrl(mediamtxPath) {
 const BLANK_POSTER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3Crect width='1' height='1' fill='%230a0d1c'/%3E%3C/svg%3E";
 
+// App icon shown as the lock-screen / Now Playing artwork (same-origin URLs the OS fetches).
+// Without any artwork, iOS shows a blank tile; without metadata at all it falls back to just
+// the app name.
+export const NOW_PLAYING_ARTWORK = [
+  { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+  { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+];
+
 export default function WhepPlayer({
   mediamtxPath,
   active,
@@ -106,7 +114,7 @@ export default function WhepPlayer({
   useEffect(() => {
     if (!('mediaSession' in navigator) || !isBackgroundAudio || state !== 'live') return undefined;
     try {
-      navigator.mediaSession.metadata = new MediaMetadata({ title: cameraName || 'Camera', artist: 'Nightlight' });
+      navigator.mediaSession.metadata = new MediaMetadata({ title: cameraName || 'Camera', artist: 'Nightlight', artwork: NOW_PLAYING_ARTWORK });
       navigator.mediaSession.playbackState = 'playing';
       navigator.mediaSession.setActionHandler('play', () => {
         setBackgroundPaused(false);

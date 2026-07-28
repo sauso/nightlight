@@ -10,6 +10,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Fixed
+- The lock-screen / Now Playing controls for a Background-audio camera on **Compatibility (HLS)**
+  now show the camera's name and app artwork (instead of just "Nightlight" with a blank tile),
+  and their Pause/Play buttons work — Play resumes at the live edge rather than stalling on a
+  stale paused position. (HLS previously set no media session at all, so iOS used its default
+  controls, which couldn't cleanly resume a live stream.)
 - A failed ONVIF fetch caused by a wrong/missing ONVIF username or password now says so
   explicitly ("The ONVIF username or password appears to be incorrect… repeated wrong attempts
   can temporarily lock the camera"), instead of a vague "no media profiles found" — and a
