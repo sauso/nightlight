@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-28
+
 ### Added
 - **Stop/Start a camera's playback per device**, from the tile's ⚙ menu. Stopping tears that
   camera's stream down on this device only (showing a "Camera stopped" message) so you can kill
