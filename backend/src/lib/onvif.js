@@ -36,6 +36,36 @@ function clampVelocity(n) {
   return Math.max(-1, Math.min(1, v));
 }
 
+// Map an ONVIF SOAP fault to a clear, user-facing reason when it's specifically an auth
+// problem - so the add-camera dialog can say "wrong username/password" instead of a vague
+// "no profiles found". This matters because repeatedly retrying wrong ONVIF credentials is
+// exactly what makes many cameras lock themselves out for ~30 minutes. Returns null for
+// anything that isn't recognisably an auth/lockout fault (so those keep their normal message,
+// and a minimal server that merely faults on GetCapabilities still falls through to the
+// direct-media-service path rather than being mislabelled as an auth failure).
+function friendlyAuthError(err) {
+  const msg = (err?.message || '').toLowerCase();
+  if (!msg) return null;
+  // The camera has locked out logins after too many bad attempts (fault wording varies).
+  if (msg.includes('locked') || (msg.includes('try') && msg.includes('minute'))) {
+    return 'This camera has temporarily locked out logins after too many failed attempts. ' +
+      'Wait a few minutes, then try again with the correct ONVIF username and password.';
+  }
+  // Wrong or missing credentials.
+  if (
+    msg.includes('not authorized') ||
+    msg.includes('notauthorized') ||
+    msg.includes('unauthorized') ||
+    msg.includes('requires authorization') ||
+    msg.includes('authentication failed') ||
+    msg.includes('auth failed')
+  ) {
+    return 'The ONVIF username or password appears to be incorrect. Double-check them before ' +
+      'retrying — repeated wrong attempts can temporarily lock the camera out.';
+  }
+  return null;
+}
+
 function connectStandard(opts) {
   return new Promise((resolve, reject) => {
     const cam = new Cam(opts, (err) => (err ? reject(err) : resolve(cam)));
@@ -112,19 +142,23 @@ export async function probeOnvifCamera({ host, port, username, password }) {
 
   let cam;
   let profiles = [];
+  let connectErr = null;
   try {
     cam = await connectStandard(opts);
     profiles = await pcall(cam, 'getProfiles').catch(() => []);
   } catch (err) {
     // Minimal servers fault on GetCapabilities/GetServices during connect - fall through
-    // to the direct-media-service path below with an unconnected client.
+    // to the direct-media-service path below with an unconnected client. Keep the error
+    // though: if it was actually an auth/lockout fault, that's the real reason and we want
+    // to report it clearly rather than the generic "no profiles" message.
+    connectErr = err;
     logger.info(`[onvif] standard connect failed for ${cleanHost} (${err.message}); trying media service directly`);
     cam = new Cam({ ...opts, autoconnect: false });
     cam.media2Support = false;
   }
 
   if (profiles.length === 0) {
-    let lastErr = null;
+    let lastErr = connectErr;
     for (const mpath of MEDIA_PATH_FALLBACKS) {
       cam.uri = { ...(cam.uri || {}), media: { path: mpath }, device: { path: DEVICE_PATH } };
       try {
@@ -135,6 +169,10 @@ export async function probeOnvifCamera({ host, port, username, password }) {
       }
     }
     if (profiles.length === 0) {
+      // Prefer a specific "bad credentials"/"locked out" message when the fault says so -
+      // that's what stops the user retrying blindly and re-locking the camera.
+      const authMsg = friendlyAuthError(connectErr) || friendlyAuthError(lastErr);
+      if (authMsg) throw new Error(authMsg);
       throw new Error(
         `No ONVIF media profiles found at ${cleanHost}:${onvifPort}` +
           (lastErr ? ` (${lastErr.message})` : '') +
