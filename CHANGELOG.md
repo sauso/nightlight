@@ -10,6 +10,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Fixed
+- A failed ONVIF fetch caused by a wrong/missing ONVIF username or password now says so
+  explicitly ("The ONVIF username or password appears to be incorrect… repeated wrong attempts
+  can temporarily lock the camera"), instead of a vague "no media profiles found" — and a
+  camera that has already locked itself out reports that clearly too. This stops the blind
+  retrying that triggers the lockout in the first place.
 - Errors while adding/editing a camera (a failed ONVIF fetch, or a save that couldn't reach
   the camera) now appear **inside the add-camera dialog** instead of in the page banner hidden
   behind it, so you can actually see what went wrong.
