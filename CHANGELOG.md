@@ -10,6 +10,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Fixed
+- The app is no longer pinch/double-tap **page-zoomable** (it's a fixed-layout app, not a
+  scrollable document). This fixes an Android bug where double-tapping the Picture-in-Picture
+  window zoomed the entire UI and left it stuck zoomed until an app restart. (A camera tile's
+  own double-tap-to-zoom is a separate JS/CSS transform and still works.)
 - The lock-screen / Now Playing controls for a Background-audio camera on **Compatibility (HLS)**
   now show the camera's name and app artwork (instead of just "Nightlight" with a blank tile),
   and their Pause/Play buttons work — Play resumes at the live edge rather than stalling on a
