@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { getToken } from '../lib/api.js';
+import { NOW_PLAYING_ARTWORK } from './WhepPlayer.jsx';
 
 // The token travels as a query param (not an Authorization header) because Safari's
 // native HLS playback fetches segments itself with no way for us to attach headers.
@@ -14,7 +15,7 @@ function hlsUrl(mediamtxPath) {
 const BLANK_POSTER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3Crect width='1' height='1' fill='%230a0d1c'/%3E%3C/svg%3E";
 
-export default function HlsPlayer({ mediamtxPath, active, muted = false }) {
+export default function HlsPlayer({ mediamtxPath, active, muted = false, cameraName, isBackgroundAudio = false }) {
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
   const stateRef = useRef('idle');
@@ -29,6 +30,50 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false }) {
   useEffect(() => {
     if (videoRef.current) videoRef.current.muted = muted;
   }, [muted]);
+
+  // Own the system media session (Now Playing / lock screen) while this HLS camera is the
+  // active Background-audio one and actually playing - so it shows the camera's name + app
+  // artwork instead of just the app name with a blank tile, and its Pause/Play buttons work.
+  // HLS plays through the native media element, so pause/play drive that element directly.
+  // Crucially, resume seeks to the live edge first: a live stream paused for a while has had
+  // its old position expire, so a plain play() just stalls - which is exactly why Play did
+  // "nothing" before. Registering handlers at all is also what stops iOS falling back to its
+  // default handlers (which pause the element with no way to cleanly resume a live stream).
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !isBackgroundAudio || state !== 'live') return undefined;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: cameraName || 'Camera',
+        artist: 'Nightlight',
+        artwork: NOW_PLAYING_ARTWORK,
+      });
+      navigator.mediaSession.playbackState = 'playing';
+      navigator.mediaSession.setActionHandler('pause', () => {
+        videoRef.current?.pause();
+        try { navigator.mediaSession.playbackState = 'paused'; } catch { /* ignore */ }
+      });
+      navigator.mediaSession.setActionHandler('play', () => {
+        const v = videoRef.current;
+        if (v) {
+          try {
+            if (v.seekable.length > 0) v.currentTime = v.seekable.end(v.seekable.length - 1);
+          } catch { /* seekable not ready - just play from wherever */ }
+          v.play().catch(() => {});
+        }
+        try { navigator.mediaSession.playbackState = 'playing'; } catch { /* ignore */ }
+      });
+    } catch {
+      // Not every engine supports the full Media Session API - non-fatal.
+    }
+    return () => {
+      try {
+        navigator.mediaSession.setActionHandler('play', null);
+        navigator.mediaSession.setActionHandler('pause', null);
+      } catch {
+        // ignore
+      }
+    };
+  }, [isBackgroundAudio, state, cameraName]);
 
   // Mobile browsers can suspend media/network when backgrounded for a while - but
   // often audio keeps playing fine on its own. Only reconnect if it's actually not
