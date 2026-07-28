@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './lib/AuthContext.jsx';
 import { SettingsProvider } from './lib/SettingsContext.jsx';
 import { CamerasProvider } from './lib/CamerasContext.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 import { isNativeApp, hasActiveBackgroundAudio } from './lib/nativeBridge.js';
 import NavBar from './components/NavBar.jsx';
 import LiveMonitor from './components/LiveMonitor.jsx';
@@ -111,10 +112,12 @@ function Shell() {
 
 export default function App() {
   return (
-    <SettingsProvider>
-      <AuthProvider>
-        <Shell />
-      </AuthProvider>
-    </SettingsProvider>
+    <ErrorBoundary>
+      <SettingsProvider>
+        <AuthProvider>
+          <Shell />
+        </AuthProvider>
+      </SettingsProvider>
+    </ErrorBoundary>
   );
 }

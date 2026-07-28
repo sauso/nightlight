@@ -594,6 +594,35 @@ body.in-pip .tile-menu-backdrop {
   font-weight: 600;
 }
 
+.tile-menu__divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 6px;
+}
+
+/* Shown over a tile the user has stopped (per-device playback off, stream torn down). */
+.camera-tile__stopped {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: #0a0d1c;
+  color: var(--text-secondary);
+  font-size: 14px;
+  z-index: 5;
+}
+.camera-tile__stopped .btn-sm {
+  width: auto;
+  padding: 8px 16px;
+  font-size: 13px;
+  background: var(--bg-elevated-2);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+
 .fullscreen-btn {
   position: absolute;
   bottom: 10px;
@@ -731,6 +760,86 @@ body.in-pip .tile-menu-backdrop {
 .cam-badge--bad {
   color: var(--offline);
   border-color: var(--offline);
+}
+/* Full-screen fallback shown by ErrorBoundary when a render throw would otherwise blank
+   the app. Kept dependency-free (no context/theme hooks) so it renders even if those broke. */
+.crash-screen {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-primary);
+  background: var(--bg);
+}
+.crash-screen__title {
+  font-size: 20px;
+  margin: 0;
+}
+.crash-screen__body {
+  color: var(--text-secondary);
+  margin: 0;
+  max-width: 360px;
+}
+.crash-screen__btn {
+  width: auto;
+}
+.crash-screen__details {
+  max-width: 100%;
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.crash-screen__details pre {
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 40vh;
+  overflow: auto;
+  background: var(--bg-elevated);
+  border-radius: 8px;
+  padding: 10px;
+  margin-top: 8px;
+}
+
+/* Camera management card (Cameras page) */
+.cam-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cam-card__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0; /* let the name ellipsis instead of pushing the actions out of line */
+  flex: 1 1 auto;
+}
+.cam-card__name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cam-card__actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.cam-card__addr {
+  word-break: break-all;
+  margin-top: 8px;
+}
+/* A disabled camera reads as dimmed, but its actions (to re-enable) stay fully legible. */
+.cam-card--off .cam-card__addr,
+.cam-card--off .cam-badge-row,
+.cam-card--off .field {
+  opacity: 0.55;
 }
 
 /* ONVIF auto-fill box in the Add-camera modal */
