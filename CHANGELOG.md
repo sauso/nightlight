@@ -18,8 +18,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - Errors while adding/editing a camera (a failed ONVIF fetch, or a save that couldn't reach
   the camera) now appear **inside the add-camera dialog** instead of in the page banner hidden
   behind it, so you can actually see what went wrong.
-- The ONVIF fetch now fails fast with a clear message if a camera doesn't respond in time,
-  rather than hanging long enough for a reverse proxy to return a bare "Request failed (502)".
+- A failed ONVIF fetch now returns a normal 4xx (not a 5xx), so a reverse proxy (e.g.
+  Cloudflare) passes the real error message through instead of swallowing it and showing a
+  bare "Request failed (502)". Also capped the probe at 18s so a truly unresponsive camera
+  still fails with a clear message rather than hanging.
 
 ## [0.6.0] - 2026-07-28
 

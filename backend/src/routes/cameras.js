@@ -85,10 +85,12 @@ router.post('/onvif-probe', requireAdmin, async (req, res) => {
     ]);
     res.json(result);
   } catch (err) {
-    // Expected failure mode (wrong IP/creds, not an ONVIF camera, timeout) - 502, not 500,
-    // and pass the message through so the UI can show it.
+    // Expected failure mode (wrong IP/creds, not an ONVIF camera, timeout). Use 422, NOT a
+    // 5xx: a reverse proxy (e.g. Cloudflare) will replace a 5xx from the origin with its own
+    // bodiless error page, so the client would only ever see a generic "Request failed (502)"
+    // instead of the real reason. A 4xx passes through with our JSON message intact.
     logger.info(`[onvif] probe of ${host} failed: ${err.message}`);
-    res.status(502).json({ error: err.message || 'ONVIF probe failed' });
+    res.status(422).json({ error: err.message || 'ONVIF probe failed' });
   }
 });
 
