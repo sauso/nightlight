@@ -85,6 +85,15 @@ export function didPipAutoEnterFullscreen() {
   return pipAutoEnteredFullscreen;
 }
 
+// Capacitor's addListener returns either a Promise<PluginListenerHandle> or, depending on the
+// Capacitor/plugin version, the handle itself synchronously. Promise.resolve normalises both,
+// so tearing a listener down never throws ".then is not a function" - which matters because
+// these unsubscribes run inside React effect cleanups (e.g. when a camera tile unmounts on
+// disable/remove), where an uncaught throw takes down the whole app.
+function removeListener(handleOrPromise) {
+  Promise.resolve(handleOrPromise).then((h) => h?.remove?.()).catch(() => {});
+}
+
 // Native Android PiP enter/leave. The web app uses this to hide the on-video overlay
 // buttons (mute/settings/fullscreen) while floating - they only waste space in the tiny
 // window. Returns an unsubscribe fn; no-op off-native.
@@ -93,7 +102,7 @@ export function onPipModeChanged(callback) {
   if (!p) return () => {};
   const handlePromise = p.addListener('pipModeChanged', ({ isInPip }) => callback(!!isInPip));
   return () => {
-    handlePromise.then((handle) => handle.remove()).catch(() => {});
+    removeListener(handlePromise);
   };
 }
 
@@ -143,7 +152,7 @@ export function onBackgroundPauseChanged(callback) {
   if (!p) return () => {};
   const handlePromise = p.addListener('pauseChanged', ({ paused }) => callback(!!paused));
   return () => {
-    handlePromise.then((handle) => handle.remove()).catch(() => {});
+    removeListener(handlePromise);
   };
 }
 
@@ -221,6 +230,6 @@ export function onBackgroundStopped(callback) {
     callback();
   });
   return () => {
-    handlePromise.then((handle) => handle.remove()).catch(() => {});
+    removeListener(handlePromise);
   };
 }

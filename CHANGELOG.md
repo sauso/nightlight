@@ -27,6 +27,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   camera name at the top of the card instead of floating against the middle of the details.
 
 ### Fixed
+- Disabling or removing a camera in the native app no longer crashes the whole UI. Tearing down
+  a tile's native background-audio listener assumed Capacitor's `addListener` returned a promise;
+  on versions where it returns the handle directly this threw `.then is not a function` during
+  the tile's unmount. Listener teardown now handles both shapes.
 - An unexpected UI error no longer blanks the whole app to a white screen that needs a restart
   to recover — a top-level error boundary now catches it and offers a Reload button (showing the
   underlying error for diagnosis) while keeping the app running.
