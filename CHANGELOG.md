@@ -19,7 +19,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   own double-tap-to-zoom is a separate JS/CSS transform and still works.)
 - The lock-screen / Now Playing title (and the Android background-listening notification) shows
   the **camera's name** when you're listening to one camera, or **"Multiple Cameras"** when
-  several are in Background mode — updating live as cameras join or leave.
+  several are in Background mode — updating live as cameras join or leave. Pausing/resuming from
+  the lock screen now pauses/resumes **all** the background cameras together, not just one.
 - On the mobile lock screen / Now Playing, a Background-audio camera now shows its **name and
   app artwork** (instead of just "Nightlight" with a blank tile), and its **Pause/Play controls
   work** — Pause genuinely pauses and Play resumes, instead of dropping the session (which showed
