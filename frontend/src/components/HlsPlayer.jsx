@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { getToken } from '../lib/api.js';
-import { setBackgroundPaused } from '../lib/nativeBridge.js';
-import { NOW_PLAYING_ARTWORK } from './WhepPlayer.jsx';
 
 // The token travels as a query param (not an Authorization header) because Safari's
 // native HLS playback fetches segments itself with no way for us to attach headers.
@@ -16,7 +14,7 @@ function hlsUrl(mediamtxPath) {
 const BLANK_POSTER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3Crect width='1' height='1' fill='%230a0d1c'/%3E%3C/svg%3E";
 
-export default function HlsPlayer({ mediamtxPath, active, muted = false, cameraName, isBackgroundAudio = false }) {
+export default function HlsPlayer({ mediamtxPath, active, muted = false }) {
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
   const stateRef = useRef('idle');
@@ -37,42 +35,10 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false, cameraN
     if (!muted) video.play().catch(() => {});
   }, [muted]);
 
-  // Own the system media session (Now Playing / lock screen) while this HLS camera is the
-  // active Background-audio one and actually playing - so it shows the camera's name + app
-  // artwork instead of just the app name with a blank tile, and its Pause/Play buttons work.
-  // Pause/Play route through the app-wide background pause (mute/unmute), NOT an element
-  // pause: muting keeps the stream live (picture stays, resume is instant) and matches how
-  // the rest of the app - and the Android notification - handles pause. Pausing the actual
-  // <video> instead made the picture vanish and left it stuck paused (no audio) until restart.
-  useEffect(() => {
-    if (!('mediaSession' in navigator) || !isBackgroundAudio || state !== 'live') return undefined;
-    try {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: cameraName || 'Camera',
-        artist: 'Nightlight',
-        artwork: NOW_PLAYING_ARTWORK,
-      });
-      navigator.mediaSession.playbackState = 'playing';
-      // setBackgroundPaused also syncs navigator.mediaSession.playbackState (see nativeBridge).
-      navigator.mediaSession.setActionHandler('pause', () => {
-        setBackgroundPaused(true);
-      });
-      navigator.mediaSession.setActionHandler('play', () => {
-        setBackgroundPaused(false);
-        videoRef.current?.play().catch(() => {});
-      });
-    } catch {
-      // Not every engine supports the full Media Session API - non-fatal.
-    }
-    return () => {
-      try {
-        navigator.mediaSession.setActionHandler('play', null);
-        navigator.mediaSession.setActionHandler('pause', null);
-      } catch {
-        // ignore
-      }
-    };
-  }, [isBackgroundAudio, state, cameraName]);
+  // Note: HLS deliberately does NOT own the system media session (Now Playing / lock screen).
+  // On iOS a <video> element (which is what HLS plays through) is paused by the OS in the
+  // background, so HLS can't sustain background audio there anyway - that's what Low latency
+  // (WebRTC, a separate <audio> element) is for, and it owns the media session (see WhepPlayer).
 
   // Mobile browsers can suspend media/network when backgrounded for a while - but
   // often audio keeps playing fine on its own. Only reconnect if it's actually not

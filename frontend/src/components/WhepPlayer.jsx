@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { getToken } from '../lib/api.js';
-import { setBackgroundPaused } from '../lib/nativeBridge.js';
 
 // The backend proxies WHEP straight through to MediaMTX under /live (see backend/src/index.js),
 // so this always uses the same origin/protocol the page was loaded with — no separate port,
@@ -118,12 +117,19 @@ export default function WhepPlayer({
     try {
       navigator.mediaSession.metadata = new MediaMetadata({ title: cameraName || 'Camera', artist: 'Nightlight', artwork: NOW_PLAYING_ARTWORK });
       navigator.mediaSession.playbackState = 'playing';
-      navigator.mediaSession.setActionHandler('play', () => {
-        setBackgroundPaused(false);
-        audioRef.current?.play().catch(() => {});
-      });
+      // Real pause/play of the <audio> element (not a mute): iOS tracks the element's actual
+      // playback state for Now Playing, so a mute-with-playbackState='paused' mismatch made it
+      // drop our session (→ "My music") and refuse to resume. Pausing the element for real keeps
+      // our session shown as paused and lets Play resume it. The audio is on its own element, so
+      // there's no video to blank. The WebRTC stream keeps flowing, so play() resumes at the live
+      // edge. (In-app, the speaker button still recovers via cycleAudio's background-pause clear.)
       navigator.mediaSession.setActionHandler('pause', () => {
-        setBackgroundPaused(true);
+        audioRef.current?.pause();
+        try { navigator.mediaSession.playbackState = 'paused'; } catch { /* ignore */ }
+      });
+      navigator.mediaSession.setActionHandler('play', () => {
+        audioRef.current?.play().catch(() => {});
+        try { navigator.mediaSession.playbackState = 'playing'; } catch { /* ignore */ }
       });
     } catch {
       // Not every engine supports the full Media Session API - non-fatal.
