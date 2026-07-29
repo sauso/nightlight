@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { getToken } from '../lib/api.js';
+import { subscribeBackgroundCameras, backgroundCameraCount } from '../lib/nativeBridge.js';
 
 // The backend proxies WHEP straight through to MediaMTX under /live (see backend/src/index.js),
 // so this always uses the same origin/protocol the page was loaded with — no separate port,
@@ -115,8 +116,19 @@ export default function WhepPlayer({
   // Android notification's Pause button. Cleaned up when this camera stops being the bg one.
   useEffect(() => {
     if (!('mediaSession' in navigator) || !isBackgroundAudio || state !== 'live') return undefined;
+    // Title shows this camera's name when it's the only one being listened to, or "Multiple
+    // Cameras" when several are. Re-applied whenever the background-camera set changes, since a
+    // second camera joining (or leaving) should flip the title live.
+    function applyMetadata() {
+      try {
+        const title = backgroundCameraCount() >= 2 ? 'Multiple Cameras' : cameraName || 'Camera';
+        navigator.mediaSession.metadata = new MediaMetadata({ title, artist: 'Nightlight', artwork: NOW_PLAYING_ARTWORK });
+      } catch {
+        // ignore
+      }
+    }
     try {
-      navigator.mediaSession.metadata = new MediaMetadata({ title: cameraName || 'Camera', artist: 'Nightlight', artwork: NOW_PLAYING_ARTWORK });
+      applyMetadata();
       navigator.mediaSession.playbackState = 'playing';
       // Real pause/play of the <audio> element (not a mute): iOS tracks the element's actual
       // playback state for Now Playing, so a mute-with-playbackState='paused' mismatch made it
@@ -135,7 +147,9 @@ export default function WhepPlayer({
     } catch {
       // Not every engine supports the full Media Session API - non-fatal.
     }
+    const unsubscribe = subscribeBackgroundCameras(applyMetadata);
     return () => {
+      unsubscribe();
       try {
         navigator.mediaSession.setActionHandler('play', null);
         navigator.mediaSession.setActionHandler('pause', null);

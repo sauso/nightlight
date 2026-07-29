@@ -222,7 +222,7 @@ async function syncService() {
       return;
     }
     const names = [...activeCameras.values()];
-    const label = names.length === 1 ? names[0] : `${names.length} cameras`;
+    const label = names.length === 1 ? names[0] : 'Multiple Cameras';
     // Calling start while the service is already running just updates the
     // notification text - it does not restart anything.
     await p.start({ label });
@@ -230,6 +230,18 @@ async function syncService() {
     // Native call failing shouldn't break audio in the WebView itself.
     console.warn('BackgroundAudio plugin call failed', err);
   }
+}
+
+// Subscribers notified when the SET of background-listening cameras changes (a camera joins or
+// leaves). Lets the media session retitle itself - one camera shows its name, several show
+// "Multiple Cameras" - reactively, since activeCameras is a plain Map, not React state.
+const bgCameraSubs = new Set();
+export function subscribeBackgroundCameras(callback) {
+  bgCameraSubs.add(callback);
+  return () => bgCameraSubs.delete(callback);
+}
+export function backgroundCameraCount() {
+  return activeCameras.size;
 }
 
 export function setBackgroundListening(cameraId, cameraName, enabled) {
@@ -240,8 +252,11 @@ export function setBackgroundListening(cameraId, cameraName, enabled) {
   } else {
     activeCameras.delete(cameraId);
   }
-  // Only touch the service when membership actually changed.
-  if (activeCameras.size !== before || enabled) syncService();
+  const membershipChanged = activeCameras.size !== before;
+  // Only touch the service when membership actually changed (or a label refresh came in).
+  if (membershipChanged || enabled) syncService();
+  // Retitle the media session only when the count crosses between one and several.
+  if (membershipChanged) bgCameraSubs.forEach((cb) => { try { cb(); } catch { /* ignore */ } });
 }
 
 // Fired when the person taps "Stop" on the Android notification. Tiles use
