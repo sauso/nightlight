@@ -19,9 +19,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   own double-tap-to-zoom is a separate JS/CSS transform and still works.)
 - The lock-screen / Now Playing controls for a Background-audio camera on **Compatibility (HLS)**
   now show the camera's name and app artwork (instead of just "Nightlight" with a blank tile),
-  and their Pause/Play buttons work — Play resumes at the live edge rather than stalling on a
-  stale paused position. (HLS previously set no media session at all, so iOS used its default
-  controls, which couldn't cleanly resume a live stream.)
+  and Pause/Play work by muting/unmuting the live stream — so the picture stays and resume is
+  instant, matching how the rest of the app pauses. (Previously HLS set no media session, so iOS
+  used default controls that paused the video element itself, making the picture vanish and
+  leaving background audio stuck silent until a restart.)
+- Fixed Background-mode audio staying silent after a lock-screen/notification Pause until a full
+  app restart: tapping a tile's audio button now clears a lingering background-pause, and
+  un-muting reliably resumes playback even if the video element had been paused.
 - A failed ONVIF fetch caused by a wrong/missing ONVIF username or password now says so
   explicitly ("The ONVIF username or password appears to be incorrect… repeated wrong attempts
   can temporarily lock the camera"), instead of a vague "no media profiles found" — and a

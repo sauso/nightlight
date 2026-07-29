@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
-import { isNativeApp, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip, hasNativePip, subscribeBackgroundPaused, isBackgroundPaused, setPipAutoEnteredFullscreen } from '../lib/nativeBridge.js';
+import { isNativeApp, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip, hasNativePip, subscribeBackgroundPaused, isBackgroundPaused, setBackgroundPaused, setPipAutoEnteredFullscreen } from '../lib/nativeBridge.js';
 import WhepPlayer from './WhepPlayer.jsx';
 import HlsPlayer from './HlsPlayer.jsx';
 import BreathingDot from './BreathingDot.jsx';
@@ -272,6 +272,10 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   }
 
   function cycleAudio() {
+    // Tapping the speaker is an explicit "I want to control audio now", so clear any lingering
+    // background-pause (from the lock-screen / notification Pause). Otherwise a stale pause
+    // would keep Background mode silent even after toggling to it, until an app restart.
+    setBackgroundPaused(false);
     setAudioState((current) => {
       let next;
       if (isNativeApp()) {
