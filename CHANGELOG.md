@@ -25,6 +25,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   (HLS) is a foreground option there, since iOS suspends its video element in the background.
 - Fixed Background-mode audio staying silent after a lock-screen/notification Pause until a full
   app restart: tapping a tile's audio button now clears a lingering background-pause.
+- On iOS, a camera in **Compatibility** mode no longer offers the Background-audio state (its
+  speaker toggle is just mute/unmute) — since iOS can't sustain HLS audio in the background,
+  offering it there was misleading. Switching a camera to Compatibility while it's listening in
+  Background drops it back to plain On.
 - A failed ONVIF fetch caused by a wrong/missing ONVIF username or password now says so
   explicitly ("The ONVIF username or password appears to be incorrect… repeated wrong attempts
   can temporarily lock the camera"), instead of a vague "no media profiles found" — and a
