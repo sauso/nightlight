@@ -17,15 +17,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   scrollable document). This fixes an Android bug where double-tapping the Picture-in-Picture
   window zoomed the entire UI and left it stuck zoomed until an app restart. (A camera tile's
   own double-tap-to-zoom is a separate JS/CSS transform and still works.)
-- The lock-screen / Now Playing controls for a Background-audio camera on **Compatibility (HLS)**
-  now show the camera's name and app artwork (instead of just "Nightlight" with a blank tile),
-  and Pause/Play work by muting/unmuting the live stream — so the picture stays and resume is
-  instant, matching how the rest of the app pauses. (Previously HLS set no media session, so iOS
-  used default controls that paused the video element itself, making the picture vanish and
-  leaving background audio stuck silent until a restart.)
+- On the mobile lock screen / Now Playing, a Background-audio camera now shows its **name and
+  app artwork** (instead of just "Nightlight" with a blank tile), and its **Pause/Play controls
+  work** — Pause genuinely pauses and Play resumes, instead of dropping the session (which showed
+  another app's "now playing" and couldn't be resumed from the lock screen). Background audio on
+  iOS runs through **Low latency** mode, which keeps playing with the screen off; Compatibility
+  (HLS) is a foreground option there, since iOS suspends its video element in the background.
 - Fixed Background-mode audio staying silent after a lock-screen/notification Pause until a full
-  app restart: tapping a tile's audio button now clears a lingering background-pause, and
-  un-muting reliably resumes playback even if the video element had been paused.
+  app restart: tapping a tile's audio button now clears a lingering background-pause.
 - A failed ONVIF fetch caused by a wrong/missing ONVIF username or password now says so
   explicitly ("The ONVIF username or password appears to be incorrect… repeated wrong attempts
   can temporarily lock the camera"), instead of a vague "no media profiles found" — and a
