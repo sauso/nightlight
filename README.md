@@ -186,6 +186,13 @@ the same port 443 as everything else with **no extra port forwarding at all**. U
 you'd rather not forward a UDP port, or if you're ever watching from a network that blocks
 outbound UDP (some corporate/public Wi-Fi).
 
+> **iOS background audio:** Compatibility mode **cannot** keep playing audio in the background
+> on iPhone/iPad — iOS suspends the video element it plays through a few seconds after you lock
+> the screen or leave the app. Use **Low latency** mode for any camera you want to keep hearing
+> with the screen off on iOS; it plays audio through a separate audio element that iOS keeps
+> alive (and it's what drives the lock-screen / Now Playing controls). Android is unaffected —
+> its background-listening service keeps both modes alive. See [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
+
 Both modes work automatically once SWAG + `PUBLIC_HOST` are set up — Compatibility mode
 needs nothing further, since it's already proxied through the app's normal port.
 
@@ -216,7 +223,9 @@ What the native apps add over the browser/PWA:
 - **Reliable background listening** — keep hearing a camera with the screen off or the app
   minimised. Android uses a foreground service (with a wake/wifi lock and a battery-
   optimisation exemption); iOS uses a background audio session. Plain in-browser background
-  audio is unreliable by comparison.
+  audio is unreliable by comparison. **On iOS this requires a camera in Low latency mode** —
+  Compatibility (HLS) can't sustain background audio there (iOS suspends its video element); see
+  the Low latency / Compatibility notes above and [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
 - **Pause/Resume from the system controls** — Android's notification and iOS's Now Playing
   (Control Center / lock screen), plus a Stop on Android.
 - **Picture-in-Picture** — float a camera in a small always-on-top window while you use
