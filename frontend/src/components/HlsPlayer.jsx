@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { getToken } from '../lib/api.js';
+import { setBackgroundPaused } from '../lib/nativeBridge.js';
 import { NOW_PLAYING_ARTWORK } from './WhepPlayer.jsx';
 
 // The token travels as a query param (not an Authorization header) because Safari's
@@ -28,17 +29,21 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false, cameraN
   }
 
   useEffect(() => {
-    if (videoRef.current) videoRef.current.muted = muted;
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = muted;
+    // Resume playback when unmuting - the element can have been paused (e.g. iOS pausing a
+    // backgrounded video), and merely clearing muted wouldn't restart it, leaving no audio.
+    if (!muted) video.play().catch(() => {});
   }, [muted]);
 
   // Own the system media session (Now Playing / lock screen) while this HLS camera is the
   // active Background-audio one and actually playing - so it shows the camera's name + app
   // artwork instead of just the app name with a blank tile, and its Pause/Play buttons work.
-  // HLS plays through the native media element, so pause/play drive that element directly.
-  // Crucially, resume seeks to the live edge first: a live stream paused for a while has had
-  // its old position expire, so a plain play() just stalls - which is exactly why Play did
-  // "nothing" before. Registering handlers at all is also what stops iOS falling back to its
-  // default handlers (which pause the element with no way to cleanly resume a live stream).
+  // Pause/Play route through the app-wide background pause (mute/unmute), NOT an element
+  // pause: muting keeps the stream live (picture stays, resume is instant) and matches how
+  // the rest of the app - and the Android notification - handles pause. Pausing the actual
+  // <video> instead made the picture vanish and left it stuck paused (no audio) until restart.
   useEffect(() => {
     if (!('mediaSession' in navigator) || !isBackgroundAudio || state !== 'live') return undefined;
     try {
@@ -48,19 +53,13 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false, cameraN
         artwork: NOW_PLAYING_ARTWORK,
       });
       navigator.mediaSession.playbackState = 'playing';
+      // setBackgroundPaused also syncs navigator.mediaSession.playbackState (see nativeBridge).
       navigator.mediaSession.setActionHandler('pause', () => {
-        videoRef.current?.pause();
-        try { navigator.mediaSession.playbackState = 'paused'; } catch { /* ignore */ }
+        setBackgroundPaused(true);
       });
       navigator.mediaSession.setActionHandler('play', () => {
-        const v = videoRef.current;
-        if (v) {
-          try {
-            if (v.seekable.length > 0) v.currentTime = v.seekable.end(v.seekable.length - 1);
-          } catch { /* seekable not ready - just play from wherever */ }
-          v.play().catch(() => {});
-        }
-        try { navigator.mediaSession.playbackState = 'playing'; } catch { /* ignore */ }
+        setBackgroundPaused(false);
+        videoRef.current?.play().catch(() => {});
       });
     } catch {
       // Not every engine supports the full Media Session API - non-fatal.

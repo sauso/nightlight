@@ -18,9 +18,11 @@ const BLANK_POSTER =
 // App icon shown as the lock-screen / Now Playing artwork (same-origin URLs the OS fetches).
 // Without any artwork, iOS shows a blank tile; without metadata at all it falls back to just
 // the app name.
+// Use the maskable icons: they're full-bleed with a solid background (drawn to fill the whole
+// square), so the OS shows a clean tile instead of the standard icon's transparent/white margin.
 export const NOW_PLAYING_ARTWORK = [
-  { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
-  { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+  { src: '/icons/icon-maskable-192.png', sizes: '192x192', type: 'image/png' },
+  { src: '/icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png' },
 ];
 
 export default function WhepPlayer({
