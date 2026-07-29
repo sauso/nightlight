@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
-import { isNativeApp, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip, hasNativePip, subscribeBackgroundPaused, isBackgroundPaused, setBackgroundPaused, setPipAutoEnteredFullscreen } from '../lib/nativeBridge.js';
+import { isNativeApp, isIOS, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip, hasNativePip, subscribeBackgroundPaused, isBackgroundPaused, setBackgroundPaused, setPipAutoEnteredFullscreen } from '../lib/nativeBridge.js';
 import WhepPlayer from './WhepPlayer.jsx';
 import HlsPlayer from './HlsPlayer.jsx';
 import BreathingDot from './BreathingDot.jsx';
@@ -113,6 +113,11 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   const streamActive = !stopped && (pageVisible || audioState === 'bg');
 
   const [mode, setMode] = useState('live'); // 'live' (WebRTC) | 'compat' (HLS)
+  // Background audio needs the native app, and on iOS it additionally needs Low latency (WebRTC):
+  // iOS suspends the <video> element that Compatibility (HLS) plays through, so HLS can't sustain
+  // background audio there. So the third "Background" state is offered everywhere in the native
+  // app except iOS + Compatibility, where the speaker toggle is just Off <-> On.
+  const canBackgroundAudio = isNativeApp() && !(isIOS() && mode === 'compat');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const manualModeRef = useRef(false);
@@ -278,7 +283,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
     setBackgroundPaused(false);
     setAudioState((current) => {
       let next;
-      if (isNativeApp()) {
+      if (canBackgroundAudio) {
         next = current === 'off' ? 'on' : current === 'on' ? 'bg' : 'off';
       } else {
         next = current === 'off' ? 'on' : 'off';
@@ -293,12 +298,27 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
     });
   }
 
+  // If Background audio isn't available for this camera's current mode (iOS + Compatibility) but
+  // the tile is somehow in it - e.g. it was listening in Background on Low latency and the user
+  // switched it to Compatibility - drop back to plain On, so we don't claim a background session
+  // iOS will just suspend.
+  useEffect(() => {
+    if (audioState === 'bg' && !canBackgroundAudio) {
+      setAudioState('on');
+      try {
+        localStorage.setItem(muteKey, 'on');
+      } catch {
+        // ignore
+      }
+    }
+  }, [canBackgroundAudio, audioState, muteKey]);
+
   const audioLabel =
     audioState === 'off'
       ? `${camera.name} muted - tap to unmute`
       : audioState === 'bg'
         ? `${camera.name} listening in background - tap to return to normal audio`
-        : isNativeApp()
+        : canBackgroundAudio
           ? `${camera.name} audio on - tap to mute, tap twice for background listening`
           : `Mute ${camera.name}`;
 

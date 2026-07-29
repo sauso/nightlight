@@ -14,6 +14,13 @@ export function isNativeApp() {
   return !!window.Capacitor?.isNativePlatform?.();
 }
 
+// True only in the native iOS app. Used to hide options that can't work there - e.g. Background
+// audio in Compatibility (HLS) mode, which iOS suspends in the background (only Low latency's
+// dedicated audio element survives). Returns false in a browser and in the Android app.
+export function isIOS() {
+  return window.Capacitor?.getPlatform?.() === 'ios';
+}
+
 // True if the native foreground service is currently holding a wake lock + wifi
 // lock for at least one camera (see AudioService.kt) - i.e. there's real evidence
 // the process and its network connections were kept alive through however long the
