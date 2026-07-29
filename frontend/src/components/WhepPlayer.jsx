@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { getToken } from '../lib/api.js';
-import { subscribeBackgroundCameras, backgroundCameraCount } from '../lib/nativeBridge.js';
+import { subscribeBackgroundCameras, backgroundCameraCount, subscribeBackgroundAudioCommand, commandBackgroundAudio } from '../lib/nativeBridge.js';
 
 // The backend proxies WHEP straight through to MediaMTX under /live (see backend/src/index.js),
 // so this always uses the same origin/protocol the page was loaded with — no separate port,
@@ -134,21 +134,30 @@ export default function WhepPlayer({
       // drop our session (→ "My music") and refuse to resume. Pausing the element for real keeps
       // our session shown as paused and lets Play resume it. The audio is on its own element, so
       // there's no video to blank. The WebRTC stream keeps flowing, so play() resumes at the live
-      // edge. (In-app, the speaker button still recovers via cycleAudio's background-pause clear.)
+      // edge. Pause/Play broadcast to ALL background players (commandBackgroundAudio) so several
+      // cameras pause/resume together, not just this one. (In-app, the speaker button still
+      // recovers via cycleAudio's background-pause clear.)
       navigator.mediaSession.setActionHandler('pause', () => {
-        audioRef.current?.pause();
+        commandBackgroundAudio(true);
         try { navigator.mediaSession.playbackState = 'paused'; } catch { /* ignore */ }
       });
       navigator.mediaSession.setActionHandler('play', () => {
-        audioRef.current?.play().catch(() => {});
+        commandBackgroundAudio(false);
         try { navigator.mediaSession.playbackState = 'playing'; } catch { /* ignore */ }
       });
     } catch {
       // Not every engine supports the full Media Session API - non-fatal.
     }
     const unsubscribe = subscribeBackgroundCameras(applyMetadata);
+    // Respond to Pause/Play from whichever camera owns the media session, so this one pauses/
+    // resumes in lock-step with the rest.
+    const unsubscribeCmd = subscribeBackgroundAudioCommand((paused) => {
+      if (paused) audioRef.current?.pause();
+      else audioRef.current?.play().catch(() => {});
+    });
     return () => {
       unsubscribe();
+      unsubscribeCmd();
       try {
         navigator.mediaSession.setActionHandler('play', null);
         navigator.mediaSession.setActionHandler('pause', null);

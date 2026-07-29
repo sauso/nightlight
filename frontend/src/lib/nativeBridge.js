@@ -244,6 +244,19 @@ export function backgroundCameraCount() {
   return activeCameras.size;
 }
 
+// A command bus for background audio: the lock-screen / Now Playing Pause and Play broadcast to
+// EVERY background-listening player, so all of them pause/resume together rather than just
+// whichever one happens to own the media session. (iOS pauses the audio elements for real - see
+// WhepPlayer - which is per-element, so a single owner couldn't stop the others on its own.)
+const bgAudioCmdSubs = new Set();
+export function subscribeBackgroundAudioCommand(callback) {
+  bgAudioCmdSubs.add(callback);
+  return () => bgAudioCmdSubs.delete(callback);
+}
+export function commandBackgroundAudio(paused) {
+  bgAudioCmdSubs.forEach((cb) => { try { cb(!!paused); } catch { /* ignore */ } });
+}
+
 export function setBackgroundListening(cameraId, cameraName, enabled) {
   if (!isNativeApp()) return;
   const before = activeCameras.size;
