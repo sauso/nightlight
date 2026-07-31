@@ -18,10 +18,9 @@ const BLANK_POSTER =
 // App icon shown as the lock-screen / Now Playing artwork (same-origin URLs the OS fetches).
 // Without any artwork, iOS shows a blank tile; without metadata at all it falls back to just
 // the app name.
-// Dedicated Now Playing tile (icons/now-playing-512.png): the app icon flattened onto an OPAQUE
-// navy background (its transparent rounded corners filled with navy). Opaque is the point - a
-// transparent tile renders its margin WHITE on the iOS lock screen; navy corners don't, and match
-// the icon's own backdrop, so it reads as the app icon at full size with no white/coloured border.
+// Dedicated Now Playing tile (icons/now-playing-512.png): the crisp app icon at full size over a
+// blurred, scene-coloured backdrop that fills the margin. Fully opaque (no white on the iOS lock
+// screen), and the blurred fill avoids the hard seam a flat-colour margin shows at large size.
 export const NOW_PLAYING_ARTWORK = [
   { src: '/icons/now-playing-512.png', sizes: '512x512', type: 'image/png' },
 ];
