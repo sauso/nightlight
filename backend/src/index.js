@@ -13,7 +13,7 @@ import eventsRoutes from './routes/events.js';
 import aboutRoutes from './routes/about.js';
 import { requireAuth, requireAuthQueryOrHeader } from './middleware/auth.js';
 import db from './db.js';
-import { upsertPath, isPathConfiguredCorrectly, getPathStatus } from './lib/mediamtx.js';
+import { upsertCameraPaths, areCameraPathsConfigured, getPathStatus } from './lib/mediamtx.js';
 import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder.js';
 import { startMediaMTX, stopMediaMTX } from './lib/mediamtxProcess.js';
 import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
@@ -233,8 +233,8 @@ async function reconcileCameraPaths(attempt = 1) {
       // Disabled cameras are deliberately off - don't recreate their path or start their
       // transcoder (that's what keeps them off across an app restart, since this runs on boot).
       if (cam.disabled) continue;
-      if (!(await isPathConfiguredCorrectly(cam.mediamtx_path))) {
-        await upsertPath(cam.mediamtx_path);
+      if (!(await areCameraPathsConfigured(cam.mediamtx_path))) {
+        await upsertCameraPaths(cam.mediamtx_path);
         fixedCount++;
       }
       if (!isRunning(cam.id)) {

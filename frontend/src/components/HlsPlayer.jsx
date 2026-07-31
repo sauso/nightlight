@@ -53,8 +53,10 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false, isBackg
     }
   }, [muted, useIosBgAudio]);
 
-  // Feed the dedicated <audio> element the HLS stream (native iOS HLS) while it's carrying
-  // background audio; tear it down otherwise so it isn't fetching in the normal foreground case.
+  // Feed the dedicated <audio> element the AUDIO-ONLY HLS stream (the `<path>-audio` sidecar the
+  // transcoder publishes) while it's carrying background audio; tear it down otherwise so it isn't
+  // fetching in the normal foreground case. Audio-only (no video track) is what lets iOS keep it
+  // playing in the background, and its regular segments avoid the video-keyframe stutter.
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return undefined;
@@ -64,7 +66,7 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false, isBackg
       audio.load();
       return undefined;
     }
-    audio.src = hlsUrl(mediamtxPath);
+    audio.src = hlsUrl(`${mediamtxPath}-audio`);
     audio.muted = muted;
     audio.play().catch(() => {});
     return () => {
