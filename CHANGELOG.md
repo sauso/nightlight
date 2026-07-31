@@ -9,6 +9,45 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-07-31
+
+### Fixed
+- Switching servers ("Change server" in the native app) now immediately stops all camera
+  audio/video and the background-audio service before restarting, instead of leaving the old
+  server's sound playing after the switch and stacking a second audio session when you returned.
+- The app is no longer pinch/double-tap **page-zoomable** (it's a fixed-layout app, not a
+  scrollable document). This fixes an Android bug where double-tapping the Picture-in-Picture
+  window zoomed the entire UI and left it stuck zoomed until an app restart. (A camera tile's
+  own double-tap-to-zoom is a separate JS/CSS transform and still works.)
+- The lock-screen / Now Playing title (and the Android background-listening notification) shows
+  the **camera's name** when you're listening to one camera, or **"Multiple Cameras"** when
+  several are in Background mode — updating live as cameras join or leave. Pausing/resuming from
+  the lock screen now pauses/resumes **all** the background cameras together, not just one.
+- On the mobile lock screen / Now Playing, a Background-audio camera now shows its **name and
+  app artwork** (instead of just "Nightlight" with a blank tile), and its **Pause/Play controls
+  work** — Pause genuinely pauses and Play resumes, instead of dropping the session (which showed
+  another app's "now playing" and couldn't be resumed from the lock screen). Background audio on
+  iOS runs through **Low latency** mode, which keeps playing with the screen off; Compatibility
+  (HLS) is a foreground option there, since iOS suspends its video element in the background.
+- Fixed Background-mode audio staying silent after a lock-screen/notification Pause until a full
+  app restart: tapping a tile's audio button now clears a lingering background-pause.
+- On iOS, a camera in **Compatibility** mode no longer offers the Background-audio state (its
+  speaker toggle is just mute/unmute) — since iOS can't sustain HLS audio in the background,
+  offering it there was misleading. Switching a camera to Compatibility while it's listening in
+  Background drops it back to plain On.
+- A failed ONVIF fetch caused by a wrong/missing ONVIF username or password now says so
+  explicitly ("The ONVIF username or password appears to be incorrect… repeated wrong attempts
+  can temporarily lock the camera"), instead of a vague "no media profiles found" — and a
+  camera that has already locked itself out reports that clearly too. This stops the blind
+  retrying that triggers the lockout in the first place.
+- Errors while adding/editing a camera (a failed ONVIF fetch, or a save that couldn't reach
+  the camera) now appear **inside the add-camera dialog** instead of in the page banner hidden
+  behind it, so you can actually see what went wrong.
+- A failed ONVIF fetch now returns a normal 4xx (not a 5xx), so a reverse proxy (e.g.
+  Cloudflare) passes the real error message through instead of swallowing it and showing a
+  bare "Request failed (502)". Also capped the probe at 18s so a truly unresponsive camera
+  still fails with a clear message rather than hanging.
+
 ## [0.6.0] - 2026-07-28
 
 ### Added

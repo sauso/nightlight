@@ -14,6 +14,13 @@ export function isNativeApp() {
   return !!window.Capacitor?.isNativePlatform?.();
 }
 
+// True only in the native iOS app. Used to hide options that can't work there - e.g. Background
+// audio in Compatibility (HLS) mode, which iOS suspends in the background (only Low latency's
+// dedicated audio element survives). Returns false in a browser and in the Android app.
+export function isIOS() {
+  return window.Capacitor?.getPlatform?.() === 'ios';
+}
+
 // True if the native foreground service is currently holding a wake lock + wifi
 // lock for at least one camera (see AudioService.kt) - i.e. there's real evidence
 // the process and its network connections were kept alive through however long the
@@ -31,6 +38,24 @@ export function hasActiveBackgroundAudio() {
 export async function changeServer() {
   const p = window.Capacitor?.Plugins?.ServerConfig;
   if (!p) return;
+  // Tear down all playback and the background-audio service BEFORE restarting. The restart
+  // rebuilds the WebView, but on its own it doesn't reliably stop media that's already playing
+  // (Android's foreground service keeps the process/audio alive; iOS's old web view can linger
+  // behind the swapped root controller). Left as-is, the old server's sound keeps going after
+  // the switch and a second session stacks on top when you come back. So: stop every audio/video
+  // element here and now, release the native foreground service, and only then clear + restart.
+  try {
+    document.querySelectorAll('audio, video').forEach((el) => {
+      try { el.pause(); } catch { /* ignore */ }
+      el.srcObject = null;
+      el.removeAttribute('src');
+      try { el.load(); } catch { /* ignore */ }
+    });
+  } catch { /* ignore */ }
+  try {
+    activeCameras.clear();
+    await plugin()?.stop();
+  } catch { /* ignore */ }
   try {
     await p.clear();
     await p.restart();
@@ -197,7 +222,7 @@ async function syncService() {
       return;
     }
     const names = [...activeCameras.values()];
-    const label = names.length === 1 ? names[0] : `${names.length} cameras`;
+    const label = names.length === 1 ? names[0] : 'Multiple Cameras';
     // Calling start while the service is already running just updates the
     // notification text - it does not restart anything.
     await p.start({ label });
@@ -205,6 +230,31 @@ async function syncService() {
     // Native call failing shouldn't break audio in the WebView itself.
     console.warn('BackgroundAudio plugin call failed', err);
   }
+}
+
+// Subscribers notified when the SET of background-listening cameras changes (a camera joins or
+// leaves). Lets the media session retitle itself - one camera shows its name, several show
+// "Multiple Cameras" - reactively, since activeCameras is a plain Map, not React state.
+const bgCameraSubs = new Set();
+export function subscribeBackgroundCameras(callback) {
+  bgCameraSubs.add(callback);
+  return () => bgCameraSubs.delete(callback);
+}
+export function backgroundCameraCount() {
+  return activeCameras.size;
+}
+
+// A command bus for background audio: the lock-screen / Now Playing Pause and Play broadcast to
+// EVERY background-listening player, so all of them pause/resume together rather than just
+// whichever one happens to own the media session. (iOS pauses the audio elements for real - see
+// WhepPlayer - which is per-element, so a single owner couldn't stop the others on its own.)
+const bgAudioCmdSubs = new Set();
+export function subscribeBackgroundAudioCommand(callback) {
+  bgAudioCmdSubs.add(callback);
+  return () => bgAudioCmdSubs.delete(callback);
+}
+export function commandBackgroundAudio(paused) {
+  bgAudioCmdSubs.forEach((cb) => { try { cb(!!paused); } catch { /* ignore */ } });
 }
 
 export function setBackgroundListening(cameraId, cameraName, enabled) {
@@ -215,8 +265,11 @@ export function setBackgroundListening(cameraId, cameraName, enabled) {
   } else {
     activeCameras.delete(cameraId);
   }
-  // Only touch the service when membership actually changed.
-  if (activeCameras.size !== before || enabled) syncService();
+  const membershipChanged = activeCameras.size !== before;
+  // Only touch the service when membership actually changed (or a label refresh came in).
+  if (membershipChanged || enabled) syncService();
+  // Retitle the media session only when the count crosses between one and several.
+  if (membershipChanged) bgCameraSubs.forEach((cb) => { try { cb(); } catch { /* ignore */ } });
 }
 
 // Fired when the person taps "Stop" on the Android notification. Tiles use

@@ -2,7 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- maximum-scale=1 + user-scalable=no disable the browser/WebView's built-in pinch and
+         double-tap PAGE zoom. This is a fixed-layout app (its own double-tap-to-zoom on a camera
+         is a JS/CSS transform, unaffected by this), and leaving page zoom on caused a nasty
+         Android bug: double-tapping the PiP window zoomed the whole app and left it stuck until
+         restart. Not left scalable for accessibility because the app is not a scrollable document. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#12172B" />
     <title>Nightlight — Baby Monitor</title>
 
