@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import { logger } from './logger.js';
 import { recordCameraEvent, EVENT } from './cameraEvents.js';
+import { audioPathName } from './mediamtx.js';
 
 // camera_id -> { proc, stopped }
 const processes = new Map();
@@ -56,6 +57,23 @@ function buildArgs(rtspUrl, mediamtxPath) {
     '-f', 'rtsp',
     '-rtsp_transport', 'tcp',
     `rtsp://127.0.0.1:8554/${mediamtxPath}`,
+
+    // Second output: an AUDIO-ONLY AAC stream to the sidecar path (see mediamtx.js). This is what
+    // iOS Compatibility-mode background audio plays. Two reasons it's a separate stream, not the
+    // main one: (1) iOS suspends any media element carrying a video track in the background, so
+    // the audio has to come from a video-less stream to keep playing; (2) HLS segments the main
+    // stream on the camera's (often irregular) video keyframes, which makes iOS stutter - an
+    // audio-only stream segments on a regular cadence instead, so it's smooth. Same aresample as
+    // track 1 to absorb the camera's audio-clock jitter. (Assumes the camera has an audio track,
+    // which every listening-capable camera does; a truly audio-less camera would make this output
+    // empty - handled before release.)
+    '-map', '0:a:0?',
+    '-filter:a', 'aresample=async=1:first_pts=0',
+    '-c:a', 'aac', '-b:a', '64k', '-ar', '48000',
+    '-avoid_negative_ts', 'make_zero',
+    '-f', 'rtsp',
+    '-rtsp_transport', 'tcp',
+    `rtsp://127.0.0.1:8554/${audioPathName(mediamtxPath)}`,
   ];
 }
 
