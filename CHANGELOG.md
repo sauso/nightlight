@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-07-31
+
 ### Fixed
 - Switching servers ("Change server" in the native app) now immediately stops all camera
   audio/video and the background-audio service before restarting, instead of leaving the old
