@@ -113,11 +113,11 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   const streamActive = !stopped && (pageVisible || audioState === 'bg');
 
   const [mode, setMode] = useState('live'); // 'live' (WebRTC) | 'compat' (HLS)
-  // Background audio needs the native app, and on iOS it additionally needs Low latency (WebRTC):
-  // iOS suspends the <video> element that Compatibility (HLS) plays through, so HLS can't sustain
-  // background audio there. So the third "Background" state is offered everywhere in the native
-  // app except iOS + Compatibility, where the speaker toggle is just Off <-> On.
-  const canBackgroundAudio = isNativeApp() && !(isIOS() && mode === 'compat');
+  // Background audio needs the native app. (EXPERIMENTAL: iOS + Compatibility is allowed again -
+  // HlsPlayer now routes the sound through a dedicated <audio> element in the background, since
+  // iOS suspends the <video> element HLS normally plays through. If that proves unreliable on
+  // device, this gate goes back to `&& !(isIOS() && mode === 'compat')`.)
+  const canBackgroundAudio = isNativeApp();
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const manualModeRef = useRef(false);
@@ -433,6 +433,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
               mediamtxPath={camera.mediamtx_path}
               active={streamActive}
               muted={effectiveMuted}
+              isBackgroundAudio={audioState === 'bg'}
             />
           )}
         </div>
