@@ -1,7 +1,12 @@
 version: 2
 updates:
+  # target-branch: "dev" so dependency updates land on dev and go through staging first,
+  # like every other change (main is production-only - see CLAUDE.md). Without this,
+  # Dependabot defaults to the repo's default branch (main) and would push updates straight
+  # to prod, bypassing the staging soak.
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
 
@@ -10,10 +15,12 @@ updates:
   # `npm audit` yourself.
   - package-ecosystem: "npm"
     directory: "/backend"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
 
   - package-ecosystem: "npm"
     directory: "/frontend"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
