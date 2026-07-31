@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { getToken } from '../lib/api.js';
-import { setBackgroundPaused } from '../lib/nativeBridge.js';
+import { subscribeBackgroundCameras, backgroundCameraCount, subscribeBackgroundAudioCommand, commandBackgroundAudio } from '../lib/nativeBridge.js';
 
 // The backend proxies WHEP straight through to MediaMTX under /live (see backend/src/index.js),
 // so this always uses the same origin/protocol the page was loaded with — no separate port,
@@ -14,6 +14,16 @@ function whepUrl(mediamtxPath) {
 // any poster, even a flat color, is the one fix that's reliably honored everywhere.
 const BLANK_POSTER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3Crect width='1' height='1' fill='%230a0d1c'/%3E%3C/svg%3E";
+
+// App icon shown as the lock-screen / Now Playing artwork (same-origin URLs the OS fetches).
+// Without any artwork, iOS shows a blank tile; without metadata at all it falls back to just
+// the app name.
+// Dedicated Now Playing tile (icons/now-playing-512.png): the full app icon at its normal size,
+// centred on a transparent canvas with a margin around it - so it reads as the app icon rather
+// than a zoomed-in crop of the illustration on the lock screen.
+export const NOW_PLAYING_ARTWORK = [
+  { src: '/icons/now-playing-512.png', sizes: '512x512', type: 'image/png' },
+];
 
 export default function WhepPlayer({
   mediamtxPath,
@@ -105,20 +115,49 @@ export default function WhepPlayer({
   // Android notification's Pause button. Cleaned up when this camera stops being the bg one.
   useEffect(() => {
     if (!('mediaSession' in navigator) || !isBackgroundAudio || state !== 'live') return undefined;
+    // Title shows this camera's name when it's the only one being listened to, or "Multiple
+    // Cameras" when several are. Re-applied whenever the background-camera set changes, since a
+    // second camera joining (or leaving) should flip the title live.
+    function applyMetadata() {
+      try {
+        const title = backgroundCameraCount() >= 2 ? 'Multiple Cameras' : cameraName || 'Camera';
+        navigator.mediaSession.metadata = new MediaMetadata({ title, artist: 'Nightlight', artwork: NOW_PLAYING_ARTWORK });
+      } catch {
+        // ignore
+      }
+    }
     try {
-      navigator.mediaSession.metadata = new MediaMetadata({ title: cameraName || 'Camera', artist: 'Nightlight' });
+      applyMetadata();
       navigator.mediaSession.playbackState = 'playing';
-      navigator.mediaSession.setActionHandler('play', () => {
-        setBackgroundPaused(false);
-        audioRef.current?.play().catch(() => {});
-      });
+      // Real pause/play of the <audio> element (not a mute): iOS tracks the element's actual
+      // playback state for Now Playing, so a mute-with-playbackState='paused' mismatch made it
+      // drop our session (→ "My music") and refuse to resume. Pausing the element for real keeps
+      // our session shown as paused and lets Play resume it. The audio is on its own element, so
+      // there's no video to blank. The WebRTC stream keeps flowing, so play() resumes at the live
+      // edge. Pause/Play broadcast to ALL background players (commandBackgroundAudio) so several
+      // cameras pause/resume together, not just this one. (In-app, the speaker button still
+      // recovers via cycleAudio's background-pause clear.)
       navigator.mediaSession.setActionHandler('pause', () => {
-        setBackgroundPaused(true);
+        commandBackgroundAudio(true);
+        try { navigator.mediaSession.playbackState = 'paused'; } catch { /* ignore */ }
+      });
+      navigator.mediaSession.setActionHandler('play', () => {
+        commandBackgroundAudio(false);
+        try { navigator.mediaSession.playbackState = 'playing'; } catch { /* ignore */ }
       });
     } catch {
       // Not every engine supports the full Media Session API - non-fatal.
     }
+    const unsubscribe = subscribeBackgroundCameras(applyMetadata);
+    // Respond to Pause/Play from whichever camera owns the media session, so this one pauses/
+    // resumes in lock-step with the rest.
+    const unsubscribeCmd = subscribeBackgroundAudioCommand((paused) => {
+      if (paused) audioRef.current?.pause();
+      else audioRef.current?.play().catch(() => {});
+    });
     return () => {
+      unsubscribe();
+      unsubscribeCmd();
       try {
         navigator.mediaSession.setActionHandler('play', null);
         navigator.mediaSession.setActionHandler('pause', null);

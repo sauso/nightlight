@@ -61,6 +61,24 @@ reconnect.
 (reopen the app, or toggle the camera's Low latency/Compatibility switch) forces it
 sooner.
 
+## Background audio stops on iOS in Compatibility mode
+
+**What you see:** On iPhone/iPad, a camera set to **Compatibility** mode keeps playing audio
+for only a few seconds after you lock the screen or background the app, then goes silent. In
+**Low latency** mode the same camera keeps playing indefinitely (tested for hours). The
+lock-screen / Now Playing controls also only work in Low latency mode.
+
+**Why:** iOS lets an *audio* element keep playing in the background but suspends a *video*
+element. Compatibility (HLS) plays through a single `<video>` element, so iOS pauses it a few
+seconds after the app backgrounds and its audio stops. Low latency (WebRTC) plays audio through
+a dedicated `<audio>` element, which iOS keeps alive. This is an **iOS platform limitation** — it
+can't be worked around from the web layer, which is why Nightlight owns the lock-screen media
+session only on the Low latency stream.
+
+**What to do:** Use **Low latency** mode for any camera you want to keep listening to with the
+screen off on iOS. Android is unaffected — its foreground background-listening service keeps the
+process (and the video element) alive, so both modes sustain background audio there.
+
 ## Non-monotonic DTS spam in the logs
 
 **What you see:** `docker logs` filling with `Non-monotonic DTS; previous: … current: …`

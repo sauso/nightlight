@@ -27,8 +27,18 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false }) {
   }
 
   useEffect(() => {
-    if (videoRef.current) videoRef.current.muted = muted;
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = muted;
+    // Resume playback when unmuting - the element can have been paused (e.g. iOS pausing a
+    // backgrounded video), and merely clearing muted wouldn't restart it, leaving no audio.
+    if (!muted) video.play().catch(() => {});
   }, [muted]);
+
+  // Note: HLS deliberately does NOT own the system media session (Now Playing / lock screen).
+  // On iOS a <video> element (which is what HLS plays through) is paused by the OS in the
+  // background, so HLS can't sustain background audio there anyway - that's what Low latency
+  // (WebRTC, a separate <audio> element) is for, and it owns the media session (see WhepPlayer).
 
   // Mobile browsers can suspend media/network when backgrounded for a while - but
   // often audio keeps playing fine on its own. Only reconnect if it's actually not
