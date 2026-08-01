@@ -61,29 +61,29 @@ reconnect.
 (reopen the app, or toggle the camera's Low latency/Compatibility switch) forces it
 sooner.
 
-## iOS lock-screen controls only work in Low latency mode
+## Compatibility background audio on iOS can be choppy on some cameras
 
 **What you see:** On iPhone/iPad, both **Low latency** and **Compatibility** now keep audio
-playing after you lock the screen or background the app. But the lock-screen / Now Playing
-controls (the camera name, artwork, and pause button on the lock screen) only appear in **Low
-latency** mode. In Compatibility mode the audio keeps going, just without those controls — and
-its smoothness depends on the camera (see below).
+playing (with working lock-screen play/pause) after you lock the screen or background the app. In
+**Compatibility** mode, though, the audio can be choppy on some cameras, and the lock screen shows
+plainer Now Playing info than Low latency does — the camera's name and artwork only appear in
+**Low latency** mode.
 
 **Why:** iOS lets an *audio* element keep playing in the background but suspends a *video*
 element. Compatibility (HLS) originally played through a single `<video>` element, so iOS paused
 it a few seconds after backgrounding. Nightlight now also publishes a separate **audio-only**
 stream and plays Compatibility background sound through a dedicated `<audio>` element (the same
-technique that always worked for Low latency's WebRTC audio), which iOS keeps alive. The
-lock-screen media session is still wired only to the Low latency stream; extending it to the
+technique that always worked for Low latency's WebRTC audio), which iOS keeps alive and gives its
+own lock-screen controls. The audio-only HLS stream is cut into segments independently of the
+camera, so it plays smoothly for most cameras — but a camera with a very irregular keyframe
+cadence can still make it choppy. Nightlight only sets the custom Now Playing metadata (camera
+name + artwork + its own pause wiring) on the Low latency stream; extending that to the
 Compatibility audio path is on the backlog.
 
-**A caveat on Compatibility smoothness:** the audio-only HLS stream is cut into segments
-independently of the camera, so it plays smoothly for most cameras — but a camera with a very
-irregular keyframe cadence can still make Compatibility audio choppy. **Low latency** remains the
-smoothest and most fully-featured option on iOS, so prefer it when you can; use Compatibility
-when a camera or network can't sustain WebRTC. Android is unaffected — its foreground
-background-listening service keeps the whole process alive, so both modes sustain background
-audio there regardless.
+**What to do:** **Low latency** remains the smoothest and most fully-featured option on iOS, so
+prefer it when you can; use Compatibility when a camera or network can't sustain WebRTC. Android is
+unaffected — its foreground background-listening service keeps the whole process alive, so both
+modes sustain background audio there regardless.
 
 ## Non-monotonic DTS spam in the logs
 
