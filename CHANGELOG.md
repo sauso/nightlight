@@ -10,9 +10,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Added
-- **Compatibility mode's iOS background audio now shows full Now Playing info** — the camera's
-  name, the artwork, and a working Pause/Play on the lock screen, exactly like Low latency mode.
-  Previously the Compatibility background stream played but showed only iOS's bare default controls.
+- **Compatibility mode's iOS background audio now has proper lock-screen controls** — the Nightlight
+  artwork and a working Pause/Play, where before it showed only iOS's bare default controls. (The
+  lock-screen *title* still shows the app name rather than the camera name in Compatibility mode —
+  an iOS limitation of native HLS streams; Low latency shows the exact name. See KNOWN-ISSUES.)
 
 ### Fixed
 - **Pausing background audio from the iOS lock screen now stops _every_ background camera**, not
