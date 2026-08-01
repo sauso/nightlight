@@ -64,24 +64,24 @@ sooner.
 ## Compatibility background audio on iOS can be choppy on some cameras
 
 **What you see:** On iPhone/iPad, both **Low latency** and **Compatibility** now keep audio
-playing in the background, with the same lock-screen / Now Playing controls (the camera name,
-artwork, and Pause/Play). Two smaller differences remain in **Compatibility** mode: the audio can
-be choppy on some cameras, and when *several* cameras are listening in the background at once the
-lock screen shows the first one's name rather than "Multiple Cameras" (Pause/Play still control all
-of them).
+playing in the background, with working lock-screen **Pause/Play** and the Nightlight **artwork**.
+In **Compatibility** mode, though: (1) the audio can be choppy on some cameras, and (2) the
+lock-screen **title doesn't reliably show the specific camera** — it usually shows the app name
+("Nightlight"), or with several cameras the first one's name, rather than the camera name or
+"Multiple Cameras." **Low latency** shows the exact camera name (or "Multiple Cameras") correctly.
 
 **Why:** iOS lets an *audio* element keep playing in the background but suspends a *video*
 element. Compatibility (HLS) originally played through a single `<video>` element, so iOS paused
 it a few seconds after backgrounding. Nightlight now also publishes a separate **audio-only**
 stream and plays Compatibility background sound through a dedicated `<audio>` element (the same
-technique that always worked for Low latency's WebRTC audio), which iOS keeps alive - and it drives
-the same Now Playing metadata + controls the Low latency stream does. The audio-only HLS stream is
-cut into segments independently of the camera, so it plays smoothly for most cameras — but a camera
-with a very irregular keyframe cadence can still make it choppy. And because iOS gives each native
-HLS stream its own system "now playing" entry, with several Compatibility cameras it labels the
-lock screen after the first stream rather than the combined "Multiple Cameras" title (Low latency's
-WebRTC audio has no such per-stream entry, so it labels correctly); Pause/Play are routed through
-an app-wide control, so they still start/stop every background camera together.
+technique that always worked for Low latency's WebRTC audio), which iOS keeps alive. The audio-only
+HLS stream is cut into segments independently of the camera, so it plays smoothly for most cameras
+— but a camera with a very irregular keyframe cadence can still make it choppy. And because iOS
+treats each native HLS stream as its own system media item — which carries iOS's own "now playing"
+info and doesn't reliably adopt the title we set (`navigator.mediaSession.metadata`) — the
+lock-screen title falls back to the app name or the first stream. Low latency's WebRTC audio isn't
+a native media item, so our title always applies there. Pause/Play are routed through an app-wide
+control, so they still start/stop every background camera together in both modes.
 
 **What to do:** **Low latency** is still the smoothest option on iOS, so prefer it when you can;
 use Compatibility when a camera or network can't sustain WebRTC. Android is
