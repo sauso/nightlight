@@ -48,10 +48,16 @@ export default function WhepPlayer({
   useEffect(() => {
     if (!audioRef.current) return;
     audioRef.current.muted = muted;
-    audioRef.current
-      .play()
-      .then(() => setNeedsGesture(false))
-      .catch(() => setNeedsGesture(true));
+    // Only (re)start playback when unmuted. When muted we must NOT call play(): a lock-screen
+    // Pause mutes this tile app-wide (effectiveMuted) *and* deliberately pauses the element (see
+    // useNowPlaying); a play() here would resume it muted, leaving a playing element with
+    // playbackState 'paused' - the mismatch that makes iOS drop the Now Playing session.
+    if (!muted) {
+      audioRef.current
+        .play()
+        .then(() => setNeedsGesture(false))
+        .catch(() => setNeedsGesture(true));
+    }
   }, [muted]);
 
   // When the browser blocks unmuted autoplay (no user gesture yet on this page load),

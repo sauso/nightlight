@@ -65,8 +65,10 @@ sooner.
 
 **What you see:** On iPhone/iPad, both **Low latency** and **Compatibility** now keep audio
 playing in the background, with the same lock-screen / Now Playing controls (the camera name,
-artwork, and Pause/Play). The one remaining difference is smoothness: in **Compatibility** mode the
-audio can be choppy on some cameras.
+artwork, and Pause/Play). Two smaller differences remain in **Compatibility** mode: the audio can
+be choppy on some cameras, and when *several* cameras are listening in the background at once the
+lock screen shows the first one's name rather than "Multiple Cameras" (Pause/Play still control all
+of them).
 
 **Why:** iOS lets an *audio* element keep playing in the background but suspends a *video*
 element. Compatibility (HLS) originally played through a single `<video>` element, so iOS paused
@@ -75,7 +77,11 @@ stream and plays Compatibility background sound through a dedicated `<audio>` el
 technique that always worked for Low latency's WebRTC audio), which iOS keeps alive - and it drives
 the same Now Playing metadata + controls the Low latency stream does. The audio-only HLS stream is
 cut into segments independently of the camera, so it plays smoothly for most cameras — but a camera
-with a very irregular keyframe cadence can still make it choppy.
+with a very irregular keyframe cadence can still make it choppy. And because iOS gives each native
+HLS stream its own system "now playing" entry, with several Compatibility cameras it labels the
+lock screen after the first stream rather than the combined "Multiple Cameras" title (Low latency's
+WebRTC audio has no such per-stream entry, so it labels correctly); Pause/Play are routed through
+an app-wide control, so they still start/stop every background camera together.
 
 **What to do:** **Low latency** is still the smoothest option on iOS, so prefer it when you can;
 use Compatibility when a camera or network can't sustain WebRTC. Android is
