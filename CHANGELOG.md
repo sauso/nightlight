@@ -9,6 +9,27 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-08-02
+
+### Removed
+- **iOS Compatibility-mode background audio is no longer supported** (it was added in 0.6.2). On iOS
+  a Compatibility (HLS) stream is a native media item that iOS controls itself — it inconsistently
+  showed the camera name/artwork, wouldn't reliably route the lock-screen Pause, and got confused
+  with several cameras or when switching modes. It caused more problems than it solved, so it's been
+  removed along with its server-side audio-only sidecar stream. **Background listening on iOS now
+  requires Low latency**, which works reliably (its WebRTC audio isn't a native media item, so
+  Nightlight fully owns the lock-screen name, artwork, and controls). The Background option is
+  hidden for a camera set to Compatibility on iOS. Android is unaffected — both modes still do
+  background audio there via the foreground service. See KNOWN-ISSUES.md.
+
+### Fixed
+- **Pull-to-refresh no longer restarts the cameras server-side.** The server-side reconnect added in
+  0.6.2 restarted the transcoders for *every* device, so a refresh on one phone interrupted the
+  stream on every other viewer. Pull-to-refresh is back to a local, client-only reconnect; a genuine
+  upstream wedge is handled by the server's own audio-liveness watchdog.
+- **Stopping the cameras now clears the Now Playing tile immediately.** Previously it could leave a
+  stale, paused lock-screen tile behind whose Play button did nothing.
+
 ## [0.6.2] - 2026-08-01
 
 ### Added

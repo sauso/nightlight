@@ -257,6 +257,24 @@ export function commandBackgroundAudio(paused) {
   bgAudioCmdSubs.forEach((cb) => { try { cb(!!paused); } catch { /* ignore */ } });
 }
 
+// Wipe the system media session (Now Playing / lock screen) so its tile disappears immediately
+// once no camera is listening in the background any more. Without this, stopping the cameras left a
+// stale "paused" tile behind whose Play button did nothing - the streams it referred to were gone.
+// Clearing metadata + playbackState 'none' + the action handlers is what removes the tile.
+export function clearNowPlaying() {
+  setBackgroundPaused(false); // reset any lingering pause so the next background session starts clean
+  if ('mediaSession' in navigator) {
+    try {
+      navigator.mediaSession.metadata = null;
+      navigator.mediaSession.playbackState = 'none';
+      navigator.mediaSession.setActionHandler('play', null);
+      navigator.mediaSession.setActionHandler('pause', null);
+    } catch {
+      // Not every engine supports the full Media Session API - non-fatal.
+    }
+  }
+}
+
 export function setBackgroundListening(cameraId, cameraName, enabled) {
   if (!isNativeApp()) return;
   const before = activeCameras.size;
@@ -270,6 +288,8 @@ export function setBackgroundListening(cameraId, cameraName, enabled) {
   if (membershipChanged || enabled) syncService();
   // Retitle the media session only when the count crosses between one and several.
   if (membershipChanged) bgCameraSubs.forEach((cb) => { try { cb(); } catch { /* ignore */ } });
+  // The last background camera just left - tear the Now Playing tile down right away.
+  if (membershipChanged && activeCameras.size === 0) clearNowPlaying();
 }
 
 // Fired when the person taps "Stop" on the Android notification. Tiles use
@@ -280,6 +300,7 @@ export function onBackgroundStopped(callback) {
 
   const handlePromise = p.addListener('stopped', () => {
     activeCameras.clear();
+    clearNowPlaying();
     callback();
   });
   return () => {
