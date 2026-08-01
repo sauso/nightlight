@@ -80,8 +80,10 @@ HLS stream is cut into segments independently of the camera, so it plays smoothl
 treats each native HLS stream as its own system media item — which carries iOS's own "now playing"
 info and doesn't reliably adopt the title we set (`navigator.mediaSession.metadata`) — the
 lock-screen title falls back to the app name or the first stream. Low latency's WebRTC audio isn't
-a native media item, so our title always applies there. Pause/Play are routed through an app-wide
-control, so they still start/stop every background camera together in both modes.
+a native media item, so our title always applies there. Pause/Play *do* still control every
+background camera together: because iOS won't call our handler for the backgrounded HLS stream, the
+app instead watches for iOS's own pause/play of that stream and mirrors it to the rest — so one
+lock-screen Pause or Play stops or starts them all.
 
 **What to do:** **Low latency** is still the smoothest option on iOS, so prefer it when you can;
 use Compatibility when a camera or network can't sustain WebRTC. Android is
