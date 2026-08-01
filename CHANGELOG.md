@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-08-02
+
 ### Removed
 - **iOS Compatibility-mode background audio is no longer supported** (it was added in 0.6.2). On iOS
   a Compatibility (HLS) stream is a native media item that iOS controls itself — it inconsistently
