@@ -9,6 +9,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+- Low-latency (WebRTC) audio/video could silently stop reaching clients after a container
+  restart or deploy: MediaMTX's WebRTC address auto-detection sometimes ran before host
+  networking was ready and advertised only `127.0.0.1` (unreachable by any client) for the whole
+  session — while every camera still showed healthy, because nothing in the stream health touches
+  the WebRTC ICE candidate. The app now detects the host's own routable IP and passes it to
+  MediaMTX explicitly (alongside any `PUBLIC_HOST`), and waits briefly for the network at startup,
+  so a reachable WebRTC address is always advertised.
+
 ## [0.6.1] - 2026-07-31
 
 ### Fixed
