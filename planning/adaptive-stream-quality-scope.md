@@ -147,3 +147,55 @@ not a failure.
 3. Phase 2 - ships independently and is immediately useful on its own.
 4. Phase 3 only after phases 1-2 are stable, with a genuine willingness to
    remove it if it doesn't earn its place.
+
+---
+
+## Review notes / recommended adjustments (2026-08-02)
+
+Feedback on the brief above — fold these in as work starts.
+
+- **Core premise verified.** The transcoder really is `-c:v copy`
+  (`backend/src/lib/transcoder.js`), so there is exactly one bitrate per camera and WebRTC's
+  congestion control has no lower tier to fall back to. Sub-streams (no server-side *video*
+  transcode ladder) are the right cost tradeoff for the Unraid box. Green-lit.
+
+- **Don't couple Phase 1/2 to ONVIF.** The brief makes sub-stream discovery depend on ONVIF
+  `GetProfiles`, but the Sonoff GK-200MP2-B is only minimally ONVIF-compliant (it faults on
+  `GetCapabilities`/`GetServices` — see `onvif-and-two-way-audio-scope.md` and the fallbacks in
+  `lib/onvif.js`), so `GetProfiles` may not cleanly enumerate a main/sub list on that hardware.
+  Sub-streams are usually just a second RTSP path (e.g. `.../stream2` or `ch1`). Since cameras are
+  already added by components with a user-entered RTSP path, make the **primary mechanism a
+  manually-entered sub-stream RTSP path**, with ONVIF `GetProfiles` as an optional auto-fill. This
+  decouples the genuinely-valuable manual selector (Phase 2) from the flaky-on-our-hardware ONVIF
+  path.
+
+- **Prefer on-demand sub-stream transcoders over continuous.** The brief flags this as an open
+  question; weight it toward on-demand. Two concrete risks, both made vivid this session: (a) it
+  doubles the FFmpeg process + restart surface per camera (these cameras already wedge — audio
+  stalls, DTS discontinuities, hence the self-heal watchdog); (b) more importantly it opens a
+  **second concurrent RTSP pull from the camera**, and cheap cameras cap simultaneous clients
+  (often 2–4) — main + sub + a VLC check could exhaust that and break the *main* stream. On-demand
+  (spin up Low only when a client selects it) sidesteps both.
+
+- **"Zero server-side transcoding" is video-only.** Each tier still needs the audio dual-track
+  treatment (G711→AAC for HLS + copy for WebRTC, `transcoder.js`), so audio is still transcoded per
+  active tier (cheap, but the pipeline must account for it). Consider whether a Low tier even needs
+  its own audio, or can be video-only.
+
+- **Multi-path-per-camera is exactly the complexity just removed** (the audio sidecar, backed out in
+  0.6.3). Not a blocker, but go in eyes-open: each tier is another MediaMTX path × (WebRTC + HLS).
+  On-demand keeps it contained.
+
+- **Phase 3 auto-switch meets iOS reconnect fragility.** Switching tiers tears down and rebuilds the
+  peer connection, and WebRTC can occasionally wedge on reconnect on iOS. The asymmetric-threshold /
+  cooldown / switch-cap design already points the right way; just keep auto-switching conservative,
+  and note "hold last frame" helps UX but not the wedge risk.
+
+- **Cheap validation spike before Phase 1:** run a second `-c:v copy` sub transcoder on one camera
+  for a few hours and watch for camera RTSP-client-limit errors / instability. That single test
+  de-risks the whole premise (continuous-vs-on-demand and the client-limit question) for near-zero
+  cost.
+
+- **Priority:** the manual selector is independently shippable and targets a *real, observed* pain
+  (stuttering on slow/remote links — the very reason Compatibility mode exists), so it ranks above
+  motion/push-notifications for near-term value. Don't let it block on ONVIF.
