@@ -13,12 +13,13 @@ import eventsRoutes from './routes/events.js';
 import aboutRoutes from './routes/about.js';
 import { requireAuth, requireAuthQueryOrHeader } from './middleware/auth.js';
 import db from './db.js';
-import { upsertPath, isPathConfiguredCorrectly, getPathStatus } from './lib/mediamtx.js';
+import { upsertCameraPaths, areCameraPathsConfigured, getPathStatus } from './lib/mediamtx.js';
 import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder.js';
 import { startMediaMTX, stopMediaMTX } from './lib/mediamtxProcess.js';
 import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
 import { logger } from './lib/logger.js';
 import { recordCameraEvent, EVENT } from './lib/cameraEvents.js';
+import { probeAudioFlowing, tracksHaveAudio } from './lib/audioLiveness.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || '/app/data';
@@ -218,6 +219,48 @@ setInterval(async () => {
   }
 }, WATCHDOG_INTERVAL_MS);
 
+// Third watchdog: audio liveness. The frame watchdog above can't see a camera whose AUDIO track
+// stalls while video keeps flowing - the path still reads "ready" and frames keep arriving, so it
+// never trips (the tell is sound working in VLC/a fresh connection but not in the app). This
+// periodically probes that audio is actually flowing (see audioLiveness.js) and force-restarts a
+// camera whose audio has stalled. Confirmed over two consecutive checks so a momentary blip - or a
+// one-off probe failure - never triggers a needless restart. Runs on its own slower interval
+// because each probe reads a few seconds of the stream, unlike the cheap ready-poll above.
+const audioStallCounts = new Map(); // camera_id -> consecutive stalled checks
+const AUDIO_CHECK_INTERVAL_MS = 2 * 60 * 1000;
+const AUDIO_STALL_RESTART_THRESHOLD = 2;
+
+setInterval(async () => {
+  const cameras = db.prepare('SELECT * FROM cameras').all();
+  for (const cam of cameras) {
+    if (cam.disabled) {
+      audioStallCounts.delete(cam.id);
+      continue;
+    }
+    const status = await getPathStatus(cam.mediamtx_path);
+    // Only meaningful once the stream is up AND actually carries audio - never restart a camera
+    // that legitimately has no audio track (its "no audio flowing" is correct, not a stall).
+    if (!status.ready || !tracksHaveAudio(status.tracks)) {
+      audioStallCounts.delete(cam.id);
+      continue;
+    }
+    const flowing = await probeAudioFlowing(cam.mediamtx_path);
+    if (flowing !== false) {
+      // true (flowing) or null (couldn't tell) - clear the counter, don't act on an unknown.
+      audioStallCounts.delete(cam.id);
+      continue;
+    }
+    const stalls = (audioStallCounts.get(cam.id) || 0) + 1;
+    audioStallCounts.set(cam.id, stalls);
+    if (stalls >= AUDIO_STALL_RESTART_THRESHOLD) {
+      logger.error(`Camera "${cam.name}" audio has stalled (declared but not flowing) - restarting its transcoder.`);
+      recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'audio stalled - restarted by watchdog');
+      await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
+      audioStallCounts.delete(cam.id);
+    }
+  }
+}, AUDIO_CHECK_INTERVAL_MS);
+
 // MediaMTX only learns about a camera when it's added/edited through our API, or from
 // this reconciliation. Important: every actual config write to MediaMTX forces it to
 // reload that path, which disconnects whatever is currently publishing to it - so this
@@ -233,8 +276,8 @@ async function reconcileCameraPaths(attempt = 1) {
       // Disabled cameras are deliberately off - don't recreate their path or start their
       // transcoder (that's what keeps them off across an app restart, since this runs on boot).
       if (cam.disabled) continue;
-      if (!(await isPathConfiguredCorrectly(cam.mediamtx_path))) {
-        await upsertPath(cam.mediamtx_path);
+      if (!(await areCameraPathsConfigured(cam.mediamtx_path))) {
+        await upsertCameraPaths(cam.mediamtx_path);
         fixedCount++;
       }
       if (!isRunning(cam.id)) {
