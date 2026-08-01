@@ -13,7 +13,7 @@ import eventsRoutes from './routes/events.js';
 import aboutRoutes from './routes/about.js';
 import { requireAuth, requireAuthQueryOrHeader } from './middleware/auth.js';
 import db from './db.js';
-import { upsertCameraPaths, areCameraPathsConfigured, getPathStatus } from './lib/mediamtx.js';
+import { upsertPath, isPathConfiguredCorrectly, getPathStatus } from './lib/mediamtx.js';
 import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder.js';
 import { startMediaMTX, stopMediaMTX } from './lib/mediamtxProcess.js';
 import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
@@ -213,7 +213,7 @@ setInterval(async () => {
         `Camera "${cam.name}" has been unready for over ${STUCK_THRESHOLD_MS / 1000}s - force-restarting its transcoder.`
       );
       recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'force-restarted by watchdog (unready 30s+)');
-      await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name, cam.has_audio !== 0);
+      await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
       notReadySince.delete(cam.id);
     }
   }
@@ -255,7 +255,7 @@ setInterval(async () => {
     if (stalls >= AUDIO_STALL_RESTART_THRESHOLD) {
       logger.error(`Camera "${cam.name}" audio has stalled (declared but not flowing) - restarting its transcoder.`);
       recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'audio stalled - restarted by watchdog');
-      await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name, cam.has_audio !== 0);
+      await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
       audioStallCounts.delete(cam.id);
     }
   }
@@ -276,12 +276,12 @@ async function reconcileCameraPaths(attempt = 1) {
       // Disabled cameras are deliberately off - don't recreate their path or start their
       // transcoder (that's what keeps them off across an app restart, since this runs on boot).
       if (cam.disabled) continue;
-      if (!(await areCameraPathsConfigured(cam.mediamtx_path))) {
-        await upsertCameraPaths(cam.mediamtx_path);
+      if (!(await isPathConfiguredCorrectly(cam.mediamtx_path))) {
+        await upsertPath(cam.mediamtx_path);
         fixedCount++;
       }
       if (!isRunning(cam.id)) {
-        await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name, cam.has_audio !== 0);
+        await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
       }
     }
     if (fixedCount > 0) {

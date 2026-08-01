@@ -4,7 +4,6 @@ import {
   backgroundCameraCount,
   subscribeBackgroundAudioCommand,
   commandBackgroundAudio,
-  setBackgroundPaused,
 } from './nativeBridge.js';
 
 // App icon shown as the lock-screen / Now Playing artwork (same-origin URLs the OS fetches).
@@ -20,22 +19,18 @@ export const NOW_PLAYING_ARTWORK = [
 ];
 
 // Own the system media session (Now Playing / lock screen) while this camera is the active
-// Background-audio one and actually playing. Shared by both players so Low latency (WebRTC) and
-// Compatibility (HLS, iOS background) present identical metadata + controls - the same camera
-// name, the same artwork, the same real Pause/Play.
+// Background-audio one and actually playing. Used by the Low latency (WebRTC) player, whose audio
+// isn't a native media item, so iOS honours the metadata + controls we set here. (Compatibility/
+// HLS deliberately does NOT use this: on iOS the native HLS stream carries its own system session
+// that ignores our overrides, and Compatibility background audio isn't supported on iOS - see
+// CameraTile / KNOWN-ISSUES.)
 //
-// `mediaElRef` is the element actually carrying the background sound (the dedicated <audio>
-// element in both callers). Pause/Play do two things together:
-//  1. setBackgroundPaused - the app-wide flag every tile's `effectiveMuted` honors, so a single
-//     lock-screen Pause silences EVERY background camera via a React prop. This is what makes
-//     multi-camera pause reliable: on iOS, native HLS gives each <audio> element its own system
-//     "now playing" association, so a per-element handler (or the commandBackgroundAudio bus
-//     below) only reaches whichever element iOS has focused - the app-wide mute reaches them all.
-//  2. commandBackgroundAudio - a real pause() of the audio elements (not just a mute). iOS tracks
-//     the focused element's actual playback state for Now Playing, so a mute-with-playbackState=
-//     'paused' mismatch made it drop our session (-> "My music") and refuse to resume; really
-//     pausing the element keeps the session shown as paused and lets Play resume it at the live
-//     edge.
+// `mediaElRef` is the element carrying the background sound (the dedicated <audio> element). Pause/
+// Play operate on it for real (not a mute): iOS tracks the element's actual playback state for Now
+// Playing, so a mute-with-playbackState='paused' mismatch made it drop our session (-> "My music")
+// and refuse to resume. Really pausing the element keeps the session shown as paused and lets Play
+// resume it at the live edge. Pause/Play broadcast to ALL background players (commandBackgroundAudio)
+// so several cameras pause/resume together, not just whichever one owns the media session.
 export function useNowPlayingSession({ enabled, cameraName, mediaElRef }) {
   useEffect(() => {
     if (!('mediaSession' in navigator) || !enabled) return undefined;
@@ -54,12 +49,10 @@ export function useNowPlayingSession({ enabled, cameraName, mediaElRef }) {
       applyMetadata();
       navigator.mediaSession.playbackState = 'playing';
       navigator.mediaSession.setActionHandler('pause', () => {
-        setBackgroundPaused(true); // app-wide: mutes every background tile, including ones iOS didn't focus
-        commandBackgroundAudio(true); // real-pause the audio elements so iOS keeps the session 'paused'
+        commandBackgroundAudio(true);
         try { navigator.mediaSession.playbackState = 'paused'; } catch { /* ignore */ }
       });
       navigator.mediaSession.setActionHandler('play', () => {
-        setBackgroundPaused(false);
         commandBackgroundAudio(false);
         try { navigator.mediaSession.playbackState = 'playing'; } catch { /* ignore */ }
       });
