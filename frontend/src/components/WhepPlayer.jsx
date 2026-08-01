@@ -21,8 +21,11 @@ const BLANK_POSTER =
 // Dedicated Now Playing tile (icons/now-playing-512.png): the crisp app icon at full size over a
 // blurred, scene-coloured backdrop that fills the margin. Fully opaque (no white on the iOS lock
 // screen), and the blurred fill avoids the hard seam a flat-colour margin shows at large size.
+// The ?v= is a cache-buster: this artwork URL is otherwise stable, so the WebView / iOS artwork
+// cache keeps serving an old image after we change the file (which is why the lock screen looked
+// stale). BUMP THIS whenever now-playing-512.png changes.
 export const NOW_PLAYING_ARTWORK = [
-  { src: '/icons/now-playing-512.png', sizes: '512x512', type: 'image/png' },
+  { src: '/icons/now-playing-512.png?v=2', sizes: '512x512', type: 'image/png' },
 ];
 
 export default function WhepPlayer({
