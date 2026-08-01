@@ -434,6 +434,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
               active={streamActive}
               muted={effectiveMuted}
               isBackgroundAudio={audioState === 'bg'}
+              cameraName={camera.name}
             />
           )}
         </div>
