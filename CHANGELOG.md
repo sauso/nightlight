@@ -9,6 +9,35 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-01
+
+### Added
+- **Self-healing for stalled camera audio.** A new watchdog periodically checks that each camera's
+  audio is actually *flowing* (not just that the track is declared) and force-restarts a camera
+  whose audio has stalled while video kept going — a state the existing frame/ready watchdog can't
+  see (the stream still reads "ready"), and the reason sound would work in VLC but not the app until
+  a manual restart. Confirmed over two consecutive checks so a blip never triggers a needless restart.
+- **Pull-to-refresh now reconnects the cameras server-side**, not just the client. Previously a
+  refresh only rebuilt the phone's connection, which couldn't fix a stream wedged upstream; now it
+  also restarts the transcoders, so pulling to refresh clears that class of problem.
+- **Compatibility (HLS) mode can now sustain background audio on iOS too** — previously only Low
+  latency (WebRTC) could, because iOS suspends the video element HLS plays through. The transcoder
+  now also publishes an audio-only stream that iOS keeps alive in the background. (Audio smoothness
+  in Compatibility mode depends on the camera's keyframe cadence; Low latency stays the smoothest.)
+
+### Changed
+- The lock-screen / Now Playing artwork is now a clean full-frame image, with no white or coloured
+  border at any size.
+
+### Fixed
+- Low-latency (WebRTC) audio/video could silently stop reaching clients after a container
+  restart or deploy: MediaMTX's WebRTC address auto-detection sometimes ran before host
+  networking was ready and advertised only `127.0.0.1` (unreachable by any client) for the whole
+  session — while every camera still showed healthy, because nothing in the stream health touches
+  the WebRTC ICE candidate. The app now detects the host's own routable IP and passes it to
+  MediaMTX explicitly (alongside any `PUBLIC_HOST`), and waits briefly for the network at startup,
+  so a reachable WebRTC address is always advertised.
+
 ## [0.6.1] - 2026-07-31
 
 ### Fixed

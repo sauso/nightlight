@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
-import { upsertPath, removePath, getPathStatus, toPathName } from '../lib/mediamtx.js';
+import { upsertCameraPaths, removeCameraPaths, getPathStatus, toPathName } from '../lib/mediamtx.js';
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
 import { getReading, subscribeAllCameraTopics } from '../lib/mqttClient.js';
 import { probeOnvifCamera, ptzNudge } from '../lib/onvif.js';
@@ -151,6 +151,24 @@ router.get('/', async (req, res) => {
   res.json(withStatus);
 });
 
+// Force a fresh camera connection for every enabled camera - the server-side half of the
+// dashboard's pull-to-refresh. A client-only refresh (remounting the players) can't fix a
+// transcoder wedged upstream - e.g. a camera whose audio track stalls while video keeps flowing:
+// the path still reads "ready" so the watchdog doesn't catch it, and reconnecting the client just
+// re-attaches to the same wedged stream. Restarting the transcoder reconnects to the camera and
+// clears it. Mounted before /:id so "reconnect" isn't matched as an :id.
+router.post('/reconnect', async (req, res) => {
+  const cameras = db.prepare('SELECT * FROM cameras WHERE disabled = 0').all();
+  await Promise.all(
+    cameras.map((cam) =>
+      startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name).catch((e) =>
+        logger.error(`[reconnect] failed to restart ${cam.name}: ${e.message}`)
+      )
+    )
+  );
+  res.json({ ok: true, restarted: cameras.length });
+});
+
 // Persists a custom drag-and-drop order for the Nursery page. Mounted before /:id so
 // Express matches this literal path first, rather than treating "reorder" as an :id.
 router.put('/reorder', (req, res) => {
@@ -197,7 +215,7 @@ router.post('/', requireAdmin, async (req, res) => {
   const id = uuid();
   const mediamtx_path = toPathName(id);
   try {
-    await upsertPath(mediamtx_path);
+    await upsertCameraPaths(mediamtx_path);
   } catch (e) {
     return res.status(502).json({ error: `Could not register stream with MediaMTX: ${e.message}` });
   }
@@ -271,7 +289,7 @@ router.put('/:id', requireAdmin, async (req, res) => {
   // silently bring a turned-off camera back to life.
   if (newRtsp !== existing.rtsp_url && !existing.disabled) {
     try {
-      await upsertPath(existing.mediamtx_path);
+      await upsertCameraPaths(existing.mediamtx_path);
     } catch (e) {
       return res.status(502).json({ error: `Could not update stream: ${e.message}` });
     }
@@ -299,7 +317,7 @@ router.put('/:id/enabled', requireAdmin, async (req, res) => {
   const enabled = !!(req.body || {}).enabled;
   if (enabled) {
     try {
-      await upsertPath(existing.mediamtx_path);
+      await upsertCameraPaths(existing.mediamtx_path);
     } catch (e) {
       return res.status(502).json({ error: `Could not re-register stream with MediaMTX: ${e.message}` });
     }
@@ -307,7 +325,7 @@ router.put('/:id/enabled', requireAdmin, async (req, res) => {
   } else {
     await stopTranscoder(req.params.id);
     try {
-      await removePath(existing.mediamtx_path);
+      await removeCameraPaths(existing.mediamtx_path);
     } catch (e) {
       // Log but still record it as disabled - the transcoder is already stopped, so no
       // frames flow regardless of whether the path removal succeeded.
@@ -336,7 +354,7 @@ router.delete('/:id', requireAdmin, async (req, res) => {
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
   await stopTranscoder(req.params.id);
   try {
-    await removePath(existing.mediamtx_path);
+    await removeCameraPaths(existing.mediamtx_path);
   } catch (e) {
     // Log but don't block deletion of the DB record.
     logger.error('Failed to remove MediaMTX path:', e.message);
