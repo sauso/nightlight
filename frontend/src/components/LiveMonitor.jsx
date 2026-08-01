@@ -39,7 +39,15 @@ export default function LiveMonitor() {
   // stream connection from scratch - the in-app equivalent of restarting the app to
   // clear a wedged WebRTC connection. Driven by pull-to-refresh below.
   const [refreshNonce, setRefreshNonce] = useState(0);
-  const handleRefresh = useCallback(() => {
+  const handleRefresh = useCallback(async () => {
+    // Ask the server to reconnect to the cameras first - this clears an upstream wedge that a
+    // client-only remount can't (e.g. a camera whose audio stalled while video kept flowing).
+    // Then bump the nonce to remount the players so they re-attach to the fresh streams.
+    try {
+      await api.post('/cameras/reconnect');
+    } catch {
+      // Best-effort - even if it fails, still remount the players below.
+    }
     setRefreshNonce((n) => n + 1);
   }, []);
   const { containerRef, pull, refreshing, dragging, armed } = usePullToRefresh({

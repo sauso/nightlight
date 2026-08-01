@@ -151,6 +151,24 @@ router.get('/', async (req, res) => {
   res.json(withStatus);
 });
 
+// Force a fresh camera connection for every enabled camera - the server-side half of the
+// dashboard's pull-to-refresh. A client-only refresh (remounting the players) can't fix a
+// transcoder wedged upstream - e.g. a camera whose audio track stalls while video keeps flowing:
+// the path still reads "ready" so the watchdog doesn't catch it, and reconnecting the client just
+// re-attaches to the same wedged stream. Restarting the transcoder reconnects to the camera and
+// clears it. Mounted before /:id so "reconnect" isn't matched as an :id.
+router.post('/reconnect', async (req, res) => {
+  const cameras = db.prepare('SELECT * FROM cameras WHERE disabled = 0').all();
+  await Promise.all(
+    cameras.map((cam) =>
+      startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name).catch((e) =>
+        logger.error(`[reconnect] failed to restart ${cam.name}: ${e.message}`)
+      )
+    )
+  );
+  res.json({ ok: true, restarted: cameras.length });
+});
+
 // Persists a custom drag-and-drop order for the Nursery page. Mounted before /:id so
 // Express matches this literal path first, rather than treating "reorder" as an :id.
 router.put('/reorder', (req, res) => {

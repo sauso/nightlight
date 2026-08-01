@@ -9,6 +9,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **Self-healing for stalled camera audio.** A new watchdog periodically checks that each camera's
+  audio is actually *flowing* (not just that the track is declared) and force-restarts a camera
+  whose audio has stalled while video kept going — a state the existing frame/ready watchdog can't
+  see (the stream still reads "ready"), and the reason sound would work in VLC but not the app until
+  a manual restart. Confirmed over two consecutive checks so a blip never triggers a needless restart.
+- **Pull-to-refresh now reconnects the cameras server-side**, not just the client. Previously a
+  refresh only rebuilt the phone's connection, which couldn't fix a stream wedged upstream; now it
+  also restarts the transcoders, so pulling to refresh clears that class of problem.
+
 ### Fixed
 - Low-latency (WebRTC) audio/video could silently stop reaching clients after a container
   restart or deploy: MediaMTX's WebRTC address auto-detection sometimes ran before host

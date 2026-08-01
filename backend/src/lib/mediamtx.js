@@ -90,10 +90,10 @@ export async function removePath(pathName) {
 export async function getPathStatus(pathName) {
   try {
     const res = await fetch(`${MEDIAMTX_API}/v3/paths/get/${pathName}`);
-    if (!res.ok) return { ready: false };
+    if (!res.ok) return { ready: false, tracks: [] };
     const data = await res.json();
-    return { ready: !!data.ready, readers: data.readers?.length || 0 };
+    return { ready: !!data.ready, readers: data.readers?.length || 0, tracks: data.tracks || [] };
   } catch {
-    return { ready: false };
+    return { ready: false, tracks: [] };
   }
 }
