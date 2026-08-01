@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { getToken } from '../lib/api.js';
-import { isIOS } from '../lib/nativeBridge.js';
+import { isIOS, commandBackgroundAudio, setBackgroundPaused, isBackgroundPaused } from '../lib/nativeBridge.js';
 import { useNowPlayingSession } from '../lib/useNowPlaying.js';
 
 // The token travels as a query param (not an Authorization header) because Safari's
@@ -63,6 +63,16 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false, isBackg
     }
   }, [muted, useIosBgAudio]);
 
+  // While WE programmatically pause/play the audio element (teardown, reconnect), suppress the
+  // pause/play PROPAGATION below - otherwise our own changes would look like an iOS lock-screen
+  // action and pause every other camera. The pause/play events fire asynchronously, so clear the
+  // flag on the next tick, after they've had their chance to run.
+  const bgEventSuppressRef = useRef(false);
+  function suppressBgAudioEvents(fn) {
+    bgEventSuppressRef.current = true;
+    try { fn(); } finally { setTimeout(() => { bgEventSuppressRef.current = false; }, 0); }
+  }
+
   // Feed the dedicated <audio> element the AUDIO-ONLY HLS stream (the `<path>-audio` sidecar the
   // transcoder publishes) while it's carrying background audio; tear it down otherwise so it isn't
   // fetching in the normal foreground case. Audio-only (no video track) is what lets iOS keep it
@@ -71,22 +81,57 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false, isBackg
     const audio = audioRef.current;
     if (!audio) return undefined;
     if (!(active && useIosBgAudio)) {
-      audio.pause();
-      audio.removeAttribute('src');
-      audio.load();
+      suppressBgAudioEvents(() => {
+        audio.pause();
+        audio.removeAttribute('src');
+        audio.load();
+      });
       return undefined;
     }
     audio.src = hlsUrl(`${mediamtxPath}-audio`);
     audio.muted = muted;
-    audio.play().catch(() => {});
+    suppressBgAudioEvents(() => audio.play().catch(() => {}));
     return () => {
-      audio.pause();
-      audio.removeAttribute('src');
-      audio.load();
+      suppressBgAudioEvents(() => {
+        audio.pause();
+        audio.removeAttribute('src');
+        audio.load();
+      });
     };
     // muted is handled by the effect above - excluded here so a mute toggle doesn't reload src.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, useIosBgAudio, mediamtxPath, reconnectKey]);
+
+  // iOS drives the native HLS element's lock-screen controls itself and, once the app is
+  // backgrounded, does NOT call our mediaSession Pause/Play handlers - it just pauses/plays THIS
+  // element directly. Listen for that and mirror it to every other background camera (and the
+  // app-wide pause state), so one lock-screen Pause stops them all and Play resumes them all.
+  // Only while this element is the iOS background carrier. isBackgroundPaused() is the intended
+  // state: we act only when the element diverges from it (a real iOS action), which also stops the
+  // mirror from looping back on itself (the pause/play we broadcast leave the state matching, so
+  // the resulting events are ignored). Declared after the sidecar effect so its listeners are
+  // removed before that effect's teardown pause on unmount.
+  useEffect(() => {
+    if (!(active && useIosBgAudio)) return undefined;
+    const audio = audioRef.current;
+    if (!audio) return undefined;
+    const onPause = () => {
+      if (bgEventSuppressRef.current || isBackgroundPaused()) return;
+      setBackgroundPaused(true);
+      commandBackgroundAudio(true);
+    };
+    const onPlay = () => {
+      if (bgEventSuppressRef.current || !isBackgroundPaused()) return;
+      setBackgroundPaused(false);
+      commandBackgroundAudio(false);
+    };
+    audio.addEventListener('pause', onPause);
+    audio.addEventListener('play', onPlay);
+    return () => {
+      audio.removeEventListener('pause', onPause);
+      audio.removeEventListener('play', onPlay);
+    };
+  }, [active, useIosBgAudio]);
 
   // Mobile browsers can suspend media/network when backgrounded for a while - but
   // often audio keeps playing fine on its own. Only reconnect if it's actually not

@@ -11,17 +11,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 - **Compatibility mode's iOS background audio now has proper lock-screen controls** — the Nightlight
-  artwork and a working Pause/Play, where before it showed only iOS's bare default controls. (The
-  lock-screen *title* still shows the app name rather than the camera name in Compatibility mode —
-  an iOS limitation of native HLS streams; Low latency shows the exact name. See KNOWN-ISSUES.)
+  artwork and a Pause/Play that starts/stops every background camera together, even from the locked
+  screen. (The lock-screen *title* still shows the app name rather than the camera name in
+  Compatibility mode — an iOS limitation of native HLS streams; Low latency shows the exact name.
+  See KNOWN-ISSUES.)
 
 ### Fixed
 - **Pausing background audio from the iOS lock screen now stops _every_ background camera**, not
-  just the one iOS had focused. In Compatibility mode iOS gives each HLS stream its own system
-  media session and only routed the pause to one; Pause/Play now also drive an app-wide control
-  that mutes/resumes all background-listening tiles together. (With several Compatibility cameras
-  the lock screen still shows the first one's name rather than "Multiple Cameras" — an iOS
-  per-stream limitation noted in KNOWN-ISSUES.)
+  just the one iOS had focused. In Compatibility mode iOS controls each native HLS stream itself
+  and, once backgrounded, doesn't call our Pause handler — it just pauses that one stream. The app
+  now watches for iOS's own pause/play of the stream and mirrors it to all the other background
+  cameras (and the app-wide pause state), so a single lock-screen Pause or Play affects them all.
 - **A camera with no audio track no longer breaks its video.** The audio-only sidecar stream (added
   in 0.6.2 for iOS Compatibility background audio) has no streams to publish for an audio-less
   camera, which failed the whole transcoder and took the picture down with it. Nightlight now
