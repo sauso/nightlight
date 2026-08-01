@@ -15,6 +15,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   Previously the Compatibility background stream played but showed only iOS's bare default controls.
 
 ### Fixed
+- **Pausing background audio from the iOS lock screen now stops _every_ background camera**, not
+  just the one iOS had focused. In Compatibility mode iOS gives each HLS stream its own system
+  media session and only routed the pause to one; Pause/Play now also drive an app-wide control
+  that mutes/resumes all background-listening tiles together. (With several Compatibility cameras
+  the lock screen still shows the first one's name rather than "Multiple Cameras" — an iOS
+  per-stream limitation noted in KNOWN-ISSUES.)
 - **A camera with no audio track no longer breaks its video.** The audio-only sidecar stream (added
   in 0.6.2 for iOS Compatibility background audio) has no streams to publish for an audio-less
   camera, which failed the whole transcoder and took the picture down with it. Nightlight now
