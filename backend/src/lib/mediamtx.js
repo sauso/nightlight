@@ -9,32 +9,6 @@ export function toPathName(id) {
   return `cam_${id.replace(/[^a-zA-Z0-9_-]/g, '')}`;
 }
 
-// Each camera has a second, audio-only MediaMTX path alongside its main video+audio one: the
-// transcoder publishes an audio-only AAC stream here as well (see transcoder.js). This is what
-// iOS Compatibility-mode background audio plays - an audio-only HLS survives iOS backgrounding
-// (no <video> element for the OS to suspend), and its segments aren't cut on the camera's
-// irregular video keyframes, so it plays smoothly where the full stream stutters on iOS.
-export function audioPathName(pathName) {
-  return `${pathName}-audio`;
-}
-
-// Create/remove/verify a camera's paths as a pair, so the audio-only sidecar path is always
-// kept in lock-step with the main path.
-export async function upsertCameraPaths(pathName) {
-  await upsertPath(pathName);
-  await upsertPath(audioPathName(pathName));
-}
-export async function removeCameraPaths(pathName) {
-  await removePath(pathName);
-  await removePath(audioPathName(pathName)).catch(() => {});
-}
-export async function areCameraPathsConfigured(pathName) {
-  return (
-    (await isPathConfiguredCorrectly(pathName)) &&
-    (await isPathConfiguredCorrectly(audioPathName(pathName)))
-  );
-}
-
 // The path has no pull source — it's publisher-only. Our FFmpeg transcoder (see
 // transcoder.js) pulls the camera's RTSP feed itself and publishes the (audio
 // re-encoded) result straight into this path, rather than MediaMTX pulling the

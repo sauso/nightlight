@@ -1,7 +1,6 @@
 import { spawn } from 'child_process';
 import { logger } from './logger.js';
 import { recordCameraEvent, EVENT } from './cameraEvents.js';
-import { audioPathName } from './mediamtx.js';
 
 // camera_id -> { proc, stopped }
 const processes = new Map();
@@ -12,8 +11,8 @@ const RESTART_DELAY_MS = 5000;
 // able to block a restart forever.
 const FORCE_KILL_TIMEOUT_MS = 3000;
 
-function buildArgs(rtspUrl, mediamtxPath, hasAudio) {
-  const args = [
+function buildArgs(rtspUrl, mediamtxPath) {
+  return [
     '-nostdin',
     '-loglevel', 'warning',
     '-rtsp_transport', 'tcp',
@@ -58,38 +57,13 @@ function buildArgs(rtspUrl, mediamtxPath, hasAudio) {
     '-rtsp_transport', 'tcp',
     `rtsp://127.0.0.1:8554/${mediamtxPath}`,
   ];
-
-  // Second output: an AUDIO-ONLY AAC stream to the sidecar path (see mediamtx.js). This is what
-  // iOS Compatibility-mode background audio plays. Two reasons it's a separate stream, not the
-  // main one: (1) iOS suspends any media element carrying a video track in the background, so
-  // the audio has to come from a video-less stream to keep playing; (2) HLS segments the main
-  // stream on the camera's (often irregular) video keyframes, which makes iOS stutter - an
-  // audio-only stream segments on a regular cadence instead, so it's smooth. Same aresample as
-  // track 1 to absorb the camera's audio-clock jitter.
-  //
-  // Only added when the camera actually has an audio track (has_audio, from the RTSP probe -
-  // see rtspProbe.js / db.js). An audio-only output for a camera with no audio would contain no
-  // streams, which fails the entire FFmpeg command and would take the video output down with it.
-  if (hasAudio) {
-    args.push(
-      '-map', '0:a:0?',
-      '-filter:a', 'aresample=async=1:first_pts=0',
-      '-c:a', 'aac', '-b:a', '64k', '-ar', '48000',
-      '-avoid_negative_ts', 'make_zero',
-      '-f', 'rtsp',
-      '-rtsp_transport', 'tcp',
-      `rtsp://127.0.0.1:8554/${audioPathName(mediamtxPath)}`,
-    );
-  }
-
-  return args;
 }
 
 export function isRunning(cameraId) {
   return processes.has(cameraId);
 }
 
-export async function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraName = mediamtxPath, hasAudio = true) {
+export async function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraName = mediamtxPath) {
   // Wait for any previous process for this camera to actually be gone before
   // starting a new one - previously this fired stop and start back-to-back, which
   // left a real window where the old FFmpeg process was still holding the MediaMTX
@@ -99,7 +73,7 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraNam
   await stopTranscoder(cameraId);
 
   function launch() {
-    const proc = spawn('ffmpeg', buildArgs(rtspUrl, mediamtxPath, hasAudio), { stdio: ['ignore', 'ignore', 'pipe'] });
+    const proc = spawn('ffmpeg', buildArgs(rtspUrl, mediamtxPath), { stdio: ['ignore', 'ignore', 'pipe'] });
     const entry = { proc, stopped: false };
     processes.set(cameraId, entry);
 

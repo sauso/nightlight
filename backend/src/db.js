@@ -173,16 +173,6 @@ if (!camerasColumns.includes('disabled')) {
   db.exec('ALTER TABLE cameras ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0');
 }
 
-// Whether the camera actually has an audio track, detected by the RTSP probe at add/edit time
-// (see lib/rtspProbe.js). Gates the transcoder's second, audio-only output (the iOS
-// Compatibility background-audio sidecar): a truly audio-less camera would make that output
-// contain no streams, which fails the whole FFmpeg command and would take the video down with
-// it. Defaults to 1 so every camera that existed before this column - all of which have audio -
-// keeps its sidecar; a genuinely audio-less camera is stored as 0 when the probe finds no audio.
-if (!camerasColumns.includes('has_audio')) {
-  db.exec('ALTER TABLE cameras ADD COLUMN has_audio INTEGER NOT NULL DEFAULT 1');
-}
-
 // Ensure the single settings row always exists.
 db.prepare(
   `INSERT OR IGNORE INTO settings (id, app_name, accent_color, live_color, offline_color, timezone, font_choice, temp_unit)

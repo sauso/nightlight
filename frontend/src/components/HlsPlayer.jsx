@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { getToken } from '../lib/api.js';
-import { isIOS, commandBackgroundAudio, setBackgroundPaused, isBackgroundPaused } from '../lib/nativeBridge.js';
-import { useNowPlayingSession } from '../lib/useNowPlaying.js';
 
 // The token travels as a query param (not an Authorization header) because Safari's
 // native HLS playback fetches segments itself with no way for us to attach headers.
@@ -16,9 +14,8 @@ function hlsUrl(mediamtxPath) {
 const BLANK_POSTER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3Crect width='1' height='1' fill='%230a0d1c'/%3E%3C/svg%3E";
 
-export default function HlsPlayer({ mediamtxPath, active, muted = false, isBackgroundAudio = false, cameraName }) {
+export default function HlsPlayer({ mediamtxPath, active, muted = false }) {
   const videoRef = useRef(null);
-  const audioRef = useRef(null);
   const hlsRef = useRef(null);
   const stateRef = useRef('idle');
   const [state, setStateRaw] = useState('idle'); // idle | connecting | live | error
@@ -29,109 +26,14 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false, isBackg
     setStateRaw(next);
   }
 
-  // iOS background audio for Compatibility mode. iOS suspends the <video> element HLS plays
-  // through the moment the app backgrounds, so its audio stops - which is why HLS couldn't do
-  // background audio there. Route the sound through a dedicated <audio> element fed the audio-only
-  // sidecar stream (see the effect below) while this is the Background-listening camera on iOS:
-  // iOS keeps <audio> alive backgrounded (that's how WebRTC/Low latency works too). iOS-only:
-  // elsewhere (Android) the <video> element keeps working in the background via the foreground
-  // service.
-  const useIosBgAudio = isBackgroundAudio && isIOS();
-
-  // Own the Now Playing / lock-screen session while carrying iOS background audio, so
-  // Compatibility mode shows the same camera name, artwork, and Pause/Play as Low latency does
-  // (Android's own foreground-service notification covers that case there). The <audio> element
-  // below is the sound source, so Pause/Play act on it - see the shared hook.
-  useNowPlayingSession({
-    enabled: active && useIosBgAudio,
-    cameraName,
-    mediaElRef: audioRef,
-  });
-
+  // Keep the <video> element's muted flag in sync with the mute toggle, and retry playback (e.g.
+  // after the user unmutes) since some browsers pause on unmute otherwise.
   useEffect(() => {
     const video = videoRef.current;
-    if (video) {
-      // When the dedicated audio element carries the sound (iOS background), keep the video muted
-      // so the stream's audio doesn't play twice.
-      video.muted = useIosBgAudio ? true : muted;
-      if (!video.muted) video.play().catch(() => {});
-    }
-    const audio = audioRef.current;
-    if (audio && useIosBgAudio) {
-      audio.muted = muted;
-      if (!muted) audio.play().catch(() => {});
-    }
-  }, [muted, useIosBgAudio]);
-
-  // While WE programmatically pause/play the audio element (teardown, reconnect), suppress the
-  // pause/play PROPAGATION below - otherwise our own changes would look like an iOS lock-screen
-  // action and pause every other camera. The pause/play events fire asynchronously, so clear the
-  // flag on the next tick, after they've had their chance to run.
-  const bgEventSuppressRef = useRef(false);
-  function suppressBgAudioEvents(fn) {
-    bgEventSuppressRef.current = true;
-    try { fn(); } finally { setTimeout(() => { bgEventSuppressRef.current = false; }, 0); }
-  }
-
-  // Feed the dedicated <audio> element the AUDIO-ONLY HLS stream (the `<path>-audio` sidecar the
-  // transcoder publishes) while it's carrying background audio; tear it down otherwise so it isn't
-  // fetching in the normal foreground case. Audio-only (no video track) is what lets iOS keep it
-  // playing in the background, and its regular segments avoid the video-keyframe stutter.
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return undefined;
-    if (!(active && useIosBgAudio)) {
-      suppressBgAudioEvents(() => {
-        audio.pause();
-        audio.removeAttribute('src');
-        audio.load();
-      });
-      return undefined;
-    }
-    audio.src = hlsUrl(`${mediamtxPath}-audio`);
-    audio.muted = muted;
-    suppressBgAudioEvents(() => audio.play().catch(() => {}));
-    return () => {
-      suppressBgAudioEvents(() => {
-        audio.pause();
-        audio.removeAttribute('src');
-        audio.load();
-      });
-    };
-    // muted is handled by the effect above - excluded here so a mute toggle doesn't reload src.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, useIosBgAudio, mediamtxPath, reconnectKey]);
-
-  // iOS drives the native HLS element's lock-screen controls itself and, once the app is
-  // backgrounded, does NOT call our mediaSession Pause/Play handlers - it just pauses/plays THIS
-  // element directly. Listen for that and mirror it to every other background camera (and the
-  // app-wide pause state), so one lock-screen Pause stops them all and Play resumes them all.
-  // Only while this element is the iOS background carrier. isBackgroundPaused() is the intended
-  // state: we act only when the element diverges from it (a real iOS action), which also stops the
-  // mirror from looping back on itself (the pause/play we broadcast leave the state matching, so
-  // the resulting events are ignored). Declared after the sidecar effect so its listeners are
-  // removed before that effect's teardown pause on unmount.
-  useEffect(() => {
-    if (!(active && useIosBgAudio)) return undefined;
-    const audio = audioRef.current;
-    if (!audio) return undefined;
-    const onPause = () => {
-      if (bgEventSuppressRef.current || isBackgroundPaused()) return;
-      setBackgroundPaused(true);
-      commandBackgroundAudio(true);
-    };
-    const onPlay = () => {
-      if (bgEventSuppressRef.current || !isBackgroundPaused()) return;
-      setBackgroundPaused(false);
-      commandBackgroundAudio(false);
-    };
-    audio.addEventListener('pause', onPause);
-    audio.addEventListener('play', onPlay);
-    return () => {
-      audio.removeEventListener('pause', onPause);
-      audio.removeEventListener('play', onPlay);
-    };
-  }, [active, useIosBgAudio]);
+    if (!video) return;
+    video.muted = muted;
+    if (!muted) video.play().catch(() => {});
+  }, [muted]);
 
   // Mobile browsers can suspend media/network when backgrounded for a while - but
   // often audio keeps playing fine on its own. Only reconnect if it's actually not
@@ -245,9 +147,6 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false, isBackg
         className="whep-video"
         style={{ opacity: state === 'live' ? 1 : 0 }}
       />
-      {/* Carries the sound on iOS while this is the Background-listening camera (see useIosBgAudio) -
-          an <audio> element survives iOS backgrounding where the <video> above doesn't. */}
-      <audio ref={audioRef} autoPlay />
       {state !== 'live' && (
         <div className={`whep-overlay whep-overlay--${state}`}>
           {state === 'connecting' && <span>Connecting…</span>}
