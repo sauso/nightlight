@@ -9,6 +9,18 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **Compatibility mode's iOS background audio now shows full Now Playing info** — the camera's
+  name, the artwork, and a working Pause/Play on the lock screen, exactly like Low latency mode.
+  Previously the Compatibility background stream played but showed only iOS's bare default controls.
+
+### Fixed
+- **A camera with no audio track no longer breaks its video.** The audio-only sidecar stream (added
+  in 0.6.2 for iOS Compatibility background audio) has no streams to publish for an audio-less
+  camera, which failed the whole transcoder and took the picture down with it. Nightlight now
+  detects whether a camera has audio when you add or edit it, and only runs the sidecar when it
+  does. (Every real listening camera has audio, so this only ever mattered for a video-only feed.)
+
 ## [0.6.2] - 2026-08-01
 
 ### Added

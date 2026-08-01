@@ -37,7 +37,9 @@ export function validateRtspStream(rtspUrl) {
     proc.on('exit', (code) => {
       clearTimeout(killer);
       if (code === 0 && /(video|audio)/i.test(out)) {
-        resolve({ ok: true });
+        // `out` is one codec_type per line (e.g. "video\naudio"). Report whether an audio track
+        // is present so the caller can record has_audio and gate the audio-only sidecar output.
+        resolve({ ok: true, hasAudio: /audio/i.test(out) });
         return;
       }
       // Surface the most useful line of ffprobe's error output (e.g. "401 Unauthorized",

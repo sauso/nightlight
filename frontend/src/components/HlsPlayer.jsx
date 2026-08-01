@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { getToken } from '../lib/api.js';
 import { isIOS } from '../lib/nativeBridge.js';
+import { useNowPlayingSession } from '../lib/useNowPlaying.js';
 
 // The token travels as a query param (not an Authorization header) because Safari's
 // native HLS playback fetches segments itself with no way for us to attach headers.
@@ -15,7 +16,7 @@ function hlsUrl(mediamtxPath) {
 const BLANK_POSTER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3Crect width='1' height='1' fill='%230a0d1c'/%3E%3C/svg%3E";
 
-export default function HlsPlayer({ mediamtxPath, active, muted = false, isBackgroundAudio = false }) {
+export default function HlsPlayer({ mediamtxPath, active, muted = false, isBackgroundAudio = false, cameraName }) {
   const videoRef = useRef(null);
   const audioRef = useRef(null);
   const hlsRef = useRef(null);
@@ -28,15 +29,24 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false, isBackg
     setStateRaw(next);
   }
 
-  // EXPERIMENTAL iOS background audio for Compatibility mode. iOS suspends the <video> element
-  // HLS plays through the moment the app backgrounds, so its audio stops - which is why HLS
-  // couldn't do background audio there. Route the sound through a dedicated <audio> element while
-  // this is the Background-listening camera on iOS: iOS keeps <audio> alive backgrounded (that's
-  // how WebRTC/Low latency works too). Whether iOS will actually play audio from this video-
-  // bearing stream on an <audio> tag is the thing under test; if not, we'll need an audio-only
-  // stream instead. iOS-only: elsewhere (Android) the <video> element keeps working in the
-  // background via the foreground service.
+  // iOS background audio for Compatibility mode. iOS suspends the <video> element HLS plays
+  // through the moment the app backgrounds, so its audio stops - which is why HLS couldn't do
+  // background audio there. Route the sound through a dedicated <audio> element fed the audio-only
+  // sidecar stream (see the effect below) while this is the Background-listening camera on iOS:
+  // iOS keeps <audio> alive backgrounded (that's how WebRTC/Low latency works too). iOS-only:
+  // elsewhere (Android) the <video> element keeps working in the background via the foreground
+  // service.
   const useIosBgAudio = isBackgroundAudio && isIOS();
+
+  // Own the Now Playing / lock-screen session while carrying iOS background audio, so
+  // Compatibility mode shows the same camera name, artwork, and Pause/Play as Low latency does
+  // (Android's own foreground-service notification covers that case there). The <audio> element
+  // below is the sound source, so Pause/Play act on it - see the shared hook.
+  useNowPlayingSession({
+    enabled: active && useIosBgAudio,
+    cameraName,
+    mediaElRef: audioRef,
+  });
 
   useEffect(() => {
     const video = videoRef.current;

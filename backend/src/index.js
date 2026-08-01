@@ -213,7 +213,7 @@ setInterval(async () => {
         `Camera "${cam.name}" has been unready for over ${STUCK_THRESHOLD_MS / 1000}s - force-restarting its transcoder.`
       );
       recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'force-restarted by watchdog (unready 30s+)');
-      await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
+      await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name, cam.has_audio !== 0);
       notReadySince.delete(cam.id);
     }
   }
@@ -255,7 +255,7 @@ setInterval(async () => {
     if (stalls >= AUDIO_STALL_RESTART_THRESHOLD) {
       logger.error(`Camera "${cam.name}" audio has stalled (declared but not flowing) - restarting its transcoder.`);
       recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'audio stalled - restarted by watchdog');
-      await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
+      await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name, cam.has_audio !== 0);
       audioStallCounts.delete(cam.id);
     }
   }
@@ -281,7 +281,7 @@ async function reconcileCameraPaths(attempt = 1) {
         fixedCount++;
       }
       if (!isRunning(cam.id)) {
-        await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
+        await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name, cam.has_audio !== 0);
       }
     }
     if (fixedCount > 0) {

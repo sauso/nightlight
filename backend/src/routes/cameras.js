@@ -161,7 +161,7 @@ router.post('/reconnect', async (req, res) => {
   const cameras = db.prepare('SELECT * FROM cameras WHERE disabled = 0').all();
   await Promise.all(
     cameras.map((cam) =>
-      startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name).catch((e) =>
+      startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name, cam.has_audio !== 0).catch((e) =>
         logger.error(`[reconnect] failed to restart ${cam.name}: ${e.message}`)
       )
     )
@@ -206,11 +206,16 @@ router.post('/', requireAdmin, async (req, res) => {
   // after a failed check). Catches wrong credentials / path / IP instead of storing a dead
   // camera. 422 + needsConfirm lets the UI offer an override for a camera that's just
   // briefly offline.
+  // Whether to publish the audio-only sidecar (see transcoder.js): only if the camera actually
+  // has audio. Determined by the probe below; a force-add skips the probe, so assume audio (the
+  // safe default - matches every real camera; a re-save will correct a genuinely audio-less one).
+  let hasAudio = true;
   if (!force) {
     const check = await validateRtspStream(rtsp_url);
     if (!check.ok) {
       return res.status(422).json({ error: `Couldn't reach the camera stream: ${check.error}`, needsConfirm: true });
     }
+    hasAudio = !!check.hasAudio;
   }
   const id = uuid();
   const mediamtx_path = toPathName(id);
@@ -237,14 +242,14 @@ router.post('/', requireAdmin, async (req, res) => {
   db.prepare(
     `INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path, sort_order, mqtt_topic,
        discovery_source, onvif_capable, onvif_device_url, backchannel_supported,
-       ptz_supported, onvif_username, onvif_password, onvif_profile_token)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       ptz_supported, onvif_username, onvif_password, onvif_profile_token, has_audio)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id, name.trim(), rtsp_url.trim(), child_id || null, mediamtx_path, maxOrder + 1, mqtt_topic?.trim() || null,
     source, isOnvif ? 1 : 0, onvifUrl, backchannel,
-    ptz, onvifUser, onvifPass, profileToken
+    ptz, onvifUser, onvifPass, profileToken, hasAudio ? 1 : 0
   );
-  await startTranscoder(id, rtsp_url, mediamtx_path, name.trim());
+  await startTranscoder(id, rtsp_url, mediamtx_path, name.trim(), hasAudio);
   subscribeAllCameraTopics();
   res.status(201).json(publicCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(id), true));
 });
@@ -276,12 +281,16 @@ router.put('/:id', requireAdmin, async (req, res) => {
     if (!isValidRtsp(newRtsp)) return res.status(400).json({ error: 'A camera IP address is required' });
   }
 
-  // Validate the new address before applying it (unless overridden) - same as adding.
+  // Validate the new address before applying it (unless overridden) - same as adding. A fresh
+  // address means re-detecting whether the camera has audio (it may be a different camera); keep
+  // the stored value otherwise, or when a force-save skips the probe.
+  let hasAudio = existing.has_audio !== 0;
   if (newRtsp !== existing.rtsp_url && !force) {
     const check = await validateRtspStream(newRtsp);
     if (!check.ok) {
       return res.status(422).json({ error: `Couldn't reach the camera stream: ${check.error}`, needsConfirm: true });
     }
+    hasAudio = !!check.hasAudio;
   }
 
   // A disabled camera has no MediaMTX path or transcoder by design - just save the new
@@ -294,13 +303,14 @@ router.put('/:id', requireAdmin, async (req, res) => {
       return res.status(502).json({ error: `Could not update stream: ${e.message}` });
     }
     // Address changed - restart the transcoder pointed at the new one.
-    await startTranscoder(req.params.id, newRtsp, existing.mediamtx_path, name?.trim() || existing.name);
+    await startTranscoder(req.params.id, newRtsp, existing.mediamtx_path, name?.trim() || existing.name, hasAudio);
   }
-  db.prepare('UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ? WHERE id = ?').run(
+  db.prepare('UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?, has_audio = ? WHERE id = ?').run(
     name?.trim() || existing.name,
     newRtsp,
     child_id !== undefined ? child_id || null : existing.child_id,
     mqtt_topic !== undefined ? mqtt_topic?.trim() || null : existing.mqtt_topic,
+    hasAudio ? 1 : 0,
     req.params.id
   );
   subscribeAllCameraTopics();
@@ -321,7 +331,7 @@ router.put('/:id/enabled', requireAdmin, async (req, res) => {
     } catch (e) {
       return res.status(502).json({ error: `Could not re-register stream with MediaMTX: ${e.message}` });
     }
-    await startTranscoder(req.params.id, existing.rtsp_url, existing.mediamtx_path, existing.name);
+    await startTranscoder(req.params.id, existing.rtsp_url, existing.mediamtx_path, existing.name, existing.has_audio !== 0);
   } else {
     await stopTranscoder(req.params.id);
     try {

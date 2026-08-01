@@ -187,12 +187,11 @@ you'd rather not forward a UDP port, or if you're ever watching from a network t
 outbound UDP (some corporate/public Wi-Fi).
 
 > **iOS background audio:** Both modes now keep playing audio in the background on iPhone/iPad,
-> with working lock-screen play/pause. **Low latency** is still the best iOS experience — smoothest
-> audio, plus the richer Now Playing metadata (the camera's name and artwork). **Compatibility**
-> also sustains background audio now (via a separate audio-only stream that iOS keeps alive); its
-> smoothness depends on the camera's keyframe cadence, so prefer Low latency on iOS where you can.
-> Android is unaffected — its background-listening service keeps both modes alive. See
-> [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
+> with the same lock-screen / Now Playing controls (camera name, artwork, Pause/Play).
+> **Compatibility** does this via a separate audio-only stream that iOS keeps alive; its smoothness
+> depends on the camera's keyframe cadence, so **Low latency** is still the smoothest choice on iOS —
+> prefer it where you can. Android is unaffected — its background-listening service keeps both modes
+> alive. See [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
 
 Both modes work automatically once SWAG + `PUBLIC_HOST` are set up — Compatibility mode
 needs nothing further, since it's already proxied through the app's normal port.
@@ -224,10 +223,9 @@ What the native apps add over the browser/PWA:
 - **Reliable background listening** — keep hearing a camera with the screen off or the app
   minimised. Android uses a foreground service (with a wake/wifi lock and a battery-
   optimisation exemption); iOS uses a background audio session. Plain in-browser background
-  audio is unreliable by comparison. On iOS both modes now sustain background audio with working
-  lock-screen controls, but **Low latency is the better choice** — smoothest audio plus the richer
-  Now Playing metadata (camera name + artwork); see the Low latency / Compatibility notes above and
-  [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
+  audio is unreliable by comparison. On iOS both modes now sustain background audio with the same
+  lock-screen controls (camera name, artwork, Pause/Play), but **Low latency is the smoothest
+  choice**; see the Low latency / Compatibility notes above and [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
 - **Pause/Resume from the system controls** — Android's notification and iOS's Now Playing
   (Control Center / lock screen), plus a Stop on Android.
 - **Picture-in-Picture** — float a camera in a small always-on-top window while you use
