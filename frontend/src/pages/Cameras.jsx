@@ -88,6 +88,7 @@ export default function Cameras() {
         rtsp_host: r.rtspHost || host,
         rtsp_port: r.rtspPort || f.rtsp_port || '554',
         rtsp_path: r.rtspPath || f.rtsp_path,
+        sub_rtsp_path: r.subRtspPath || f.sub_rtsp_path,
         discovery_source: 'onvif',
         onvif_device_url: r.onvifDeviceUrl,
         backchannel_supported: r.backchannel,
@@ -97,7 +98,8 @@ export default function Cameras() {
       const res = r.video?.width ? `${r.video.codec || ''} ${r.video.width}×${r.video.height}`.trim() : r.video?.codec || '';
       const talk = r.backchannel === 'yes' ? ' · two-way audio' : r.backchannel === 'no' ? ' · no two-way audio' : '';
       const ptz = r.ptz ? ' · PTZ' : '';
-      setOnvifMsg(`Found stream${res ? ` — ${res}` : ''}${talk}${ptz}. Port & path filled in — enter the username/password below.`);
+      const low = r.subRtspPath ? ' · low-quality stream' : '';
+      setOnvifMsg(`Found stream${res ? ` — ${res}` : ''}${talk}${ptz}${low}. Port & path${r.subRtspPath ? ' (incl. low-quality)' : ''} filled in.`);
     } catch (err) {
       setModalError(err.message);
     } finally {
@@ -289,6 +291,9 @@ export default function Cameras() {
                   value={form.rtsp_username}
                   onChange={(e) => setForm({ ...form, rtsp_username: e.target.value })}
                   autoComplete="off"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                 />
               </div>
               <div className="field">
@@ -299,6 +304,9 @@ export default function Cameras() {
                   value={form.rtsp_password}
                   onChange={(e) => setForm({ ...form, rtsp_password: e.target.value })}
                   autoComplete="off"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   placeholder={editing.id && editing.rtsp_has_password ? '•••••• (unchanged)' : ''}
                 />
               </div>
@@ -323,7 +331,14 @@ export default function Cameras() {
                 value={form.rtsp_path}
                 onChange={(e) => setForm({ ...form, rtsp_path: e.target.value })}
                 placeholder="/stream1"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
               />
+              <p className="onvif-box__hint">
+                The main (high-quality) stream path. Filled in by the ONVIF fetch above, or enter it
+                manually (e.g. <code>/Streaming/Channels/101</code>).
+              </p>
             </div>
             <div className="field">
               <label htmlFor="cam-sub-path">Low-quality stream path (optional)</label>
@@ -332,12 +347,15 @@ export default function Cameras() {
                 value={form.sub_rtsp_path}
                 onChange={(e) => setForm({ ...form, sub_rtsp_path: e.target.value })}
                 autoComplete="off"
-                placeholder="e.g. /Streaming/Channels/102"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder="/Streaming/Channels/102"
               />
               <p className="onvif-box__hint">
-                Most cameras expose a second, lower-resolution stream at a different path. Enter it to
-                add a &quot;Low&quot; quality option on the camera tile (it reuses the address and login
-                above). Leave blank for none.
+                A second, lower-resolution stream (e.g. <code>/Streaming/Channels/102</code>) that adds
+                a &quot;Low&quot; quality option on the tile — it reuses the address and login above.
+                Filled in by the ONVIF fetch if the camera has one; leave blank for none.
               </p>
             </div>
             {editing.id && (editing.backchannel_supported === 'yes' || form.backchannel_supported === 'yes') && (
@@ -356,6 +374,9 @@ export default function Cameras() {
                       value={form.talk_username}
                       onChange={(e) => setForm({ ...form, talk_username: e.target.value })}
                       autoComplete="off"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
                     />
                   </div>
                   <div className="field">
@@ -366,6 +387,9 @@ export default function Cameras() {
                       value={form.talk_password}
                       onChange={(e) => setForm({ ...form, talk_password: e.target.value })}
                       autoComplete="off"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
                       placeholder={editing.talk_has_password ? '•••••• (unchanged)' : ''}
                     />
                   </div>
