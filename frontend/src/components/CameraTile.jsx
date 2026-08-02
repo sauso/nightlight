@@ -164,6 +164,11 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   const canBackgroundAudio = isNativeApp() && !(isIOS() && mode === 'compat');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
+  const [qualityMenuOpen, setQualityMenuOpen] = useState(false); // drill-in submenu for High/Low
+  function closeMenu() {
+    setModeMenuOpen(false);
+    setQualityMenuOpen(false);
+  }
   const manualModeRef = useRef(false);
   const videoWrapRef = useRef(null);
 
@@ -491,7 +496,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
 
         <button
           className="settings-btn"
-          onClick={() => setModeMenuOpen((o) => !o)}
+          onClick={() => { setModeMenuOpen((o) => !o); setQualityMenuOpen(false); }}
           aria-label="Stream quality settings"
           aria-expanded={modeMenuOpen}
         >
@@ -500,47 +505,66 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
 
         {modeMenuOpen && (
           <>
-            <div className="tile-menu-backdrop" onClick={() => setModeMenuOpen(false)} />
+            <div className="tile-menu-backdrop" onClick={closeMenu} />
             <div className="tile-menu">
-              <button
-                className={`tile-menu__item${mode === 'live' ? ' tile-menu__item--active' : ''}`}
-                onClick={() => selectMode('live')}
-              >
-                Low latency
-              </button>
-              <button
-                className={`tile-menu__item${mode === 'compat' ? ' tile-menu__item--active' : ''}`}
-                onClick={() => selectMode('compat')}
-              >
-                Compatibility
-              </button>
-              {camera.has_sub && (
+              {qualityMenuOpen ? (
+                // Quality submenu (drill-in) - keeps the main menu short so it never needs scrolling.
                 <>
+                  <button
+                    className="tile-menu__item tile-menu__item--back"
+                    onClick={() => setQualityMenuOpen(false)}
+                  >
+                    ‹ Quality
+                  </button>
                   <div className="tile-menu__divider" />
                   <button
                     className={`tile-menu__item${quality === 'high' ? ' tile-menu__item--active' : ''}`}
-                    onClick={() => { setQuality('high'); setModeMenuOpen(false); }}
+                    onClick={() => { setQuality('high'); closeMenu(); }}
                   >
-                    High quality
+                    High
                   </button>
                   <button
                     className={`tile-menu__item${quality === 'low' ? ' tile-menu__item--active' : ''}`}
-                    onClick={() => { setQuality('low'); setModeMenuOpen(false); }}
+                    onClick={() => { setQuality('low'); closeMenu(); }}
                   >
-                    Low quality
+                    Low
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    className={`tile-menu__item${mode === 'live' ? ' tile-menu__item--active' : ''}`}
+                    onClick={() => selectMode('live')}
+                  >
+                    Low latency
+                  </button>
+                  <button
+                    className={`tile-menu__item${mode === 'compat' ? ' tile-menu__item--active' : ''}`}
+                    onClick={() => selectMode('compat')}
+                  >
+                    Compatibility
+                  </button>
+                  {camera.has_sub && (
+                    <>
+                      <div className="tile-menu__divider" />
+                      <button
+                        className="tile-menu__item tile-menu__item--submenu"
+                        onClick={() => setQualityMenuOpen(true)}
+                      >
+                        <span>Quality</span>
+                        <span className="tile-menu__value">{quality === 'low' ? 'Low ›' : 'High ›'}</span>
+                      </button>
+                    </>
+                  )}
+                  <div className="tile-menu__divider" />
+                  <button
+                    className="tile-menu__item"
+                    onClick={() => { setStopped(!stopped); closeMenu(); }}
+                  >
+                    {stopped ? 'Start camera' : 'Stop camera'}
                   </button>
                 </>
               )}
-              <div className="tile-menu__divider" />
-              <button
-                className="tile-menu__item"
-                onClick={() => {
-                  setStopped(!stopped);
-                  setModeMenuOpen(false);
-                }}
-              >
-                {stopped ? 'Start camera' : 'Stop camera'}
-              </button>
             </div>
           </>
         )}
