@@ -170,15 +170,17 @@ server.on('upgrade', (req, socket, head) => {
 async function handleTalkConnection(ws, camera, user) {
   let session = null;
   let closed = false;
+  let bytes = 0;
   const cleanup = () => {
     if (closed) return;
     closed = true;
+    logger.info(`[talk] session ended for "${camera.name}" (${bytes} audio bytes forwarded)`);
     try { session?.close(); } catch { /* ignore */ }
     try { ws.close(); } catch { /* ignore */ }
   };
   // Register the audio handler before the (async) session start so nothing races; audio arriving
   // before the session is up is simply dropped (the client waits for our 'ready' before sending).
-  ws.on('message', (data, isBinary) => { if (isBinary) session?.write(data); });
+  ws.on('message', (data, isBinary) => { if (isBinary) { bytes += data.length; session?.write(data); } });
   ws.on('close', cleanup);
   ws.on('error', cleanup);
   try {

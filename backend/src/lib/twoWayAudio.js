@@ -91,6 +91,10 @@ class HikvisionTalk {
   }
 
   async start() {
+    // Hikvision allows only ONE two-way-audio session at a time and returns 403 on open while one
+    // is held. A talk that didn't close cleanly (crash, dropped socket) can leave one stuck, so
+    // always release any existing session first - best-effort, ignore the result.
+    await this._request('PUT', `${this.base}/close`).catch(() => {});
     const open = await this._request('PUT', `${this.base}/open`);
     if (open.status !== 200) {
       const err = new Error(`Hikvision talk open failed (HTTP ${open.status})`);

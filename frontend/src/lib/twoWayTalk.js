@@ -1,5 +1,10 @@
 import { getToken } from './api.js';
 
+// Makeup gain applied to the mic before mu-law encoding. The camera's own speaker volume is the
+// bigger lever (set it high in the camera's web UI), but these speakers run quiet, so lift the
+// outgoing level here too. Hard-clipped, so raising it trades headroom for loudness.
+const TALK_GAIN = 3;
+
 // G.711 mu-law encode: one 16-bit signed PCM sample -> one 8-bit mu-law byte. The camera's
 // two-way-audio channel expects G.711 mu-law at 8 kHz mono (see backend/lib/twoWayAudio.js).
 function linearToMuLaw(sample) {
@@ -61,6 +66,9 @@ export function startTalk(cameraId, { onError, onReady } = {}) {
 
       const Ctx = window.AudioContext || window.webkitAudioContext;
       ctx = new Ctx({ sampleRate: 8000 }); // connecting the mic resamples it to this rate for us
+      // A freshly-created context can start suspended even from a user gesture; without resuming it,
+      // onaudioprocess never fires and no audio is sent (looked like a dead mic).
+      if (ctx.state === 'suspended') { try { await ctx.resume(); } catch { /* ignore */ } }
       const inRate = ctx.sampleRate;
       source = ctx.createMediaStreamSource(stream);
       processor = ctx.createScriptProcessor(2048, 1, 1);
@@ -88,7 +96,9 @@ export function startTalk(cameraId, { onError, onReady } = {}) {
         const pcm = downsample(e.inputBuffer.getChannelData(0), inRate);
         const out = new Uint8Array(pcm.length);
         for (let i = 0; i < pcm.length; i++) {
-          const s = Math.max(-1, Math.min(1, pcm[i]));
+          // Makeup gain (hard-clipped) before mu-law: these camera speakers are quiet, so lift the
+          // level and let it clip like a limiter - fine for intelligible voice talk-down.
+          const s = Math.max(-1, Math.min(1, pcm[i] * TALK_GAIN));
           out[i] = linearToMuLaw((s * 32767) | 0);
         }
         ws.send(out.buffer);
