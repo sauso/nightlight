@@ -215,12 +215,20 @@ set at add time from the capability probe. Adding a new camera type is then one 
 rewrite.
 
 **Sink implementations, easiest first:**
-- **`hikvision-isapi`** (this camera, and Hikvision generally) — HTTP, not RTSP: `PUT
-  /ISAPI/System/TwoWayAudio/channels/1/open` then stream G.711 μ-law to `.../audioData`. No RTSP
-  backchannel, no ffmpeg leg, no MediaMTX for the talk path. **Much** simpler than Path A. Caveat:
-  ISAPI is HTTP-digest and Hikvision gates it per-user — the stored `testuser` account (fine for
-  ONVIF/RTSP) got `401` on ISAPI, including `/ISAPI/System/deviceInfo`, so **use the admin account
-  or grant that user "Remote: two-way audio"/web permission.** Prototype this first.
+- **`hikvision-isapi`** (this camera, and Hikvision generally) — **CONFIRMED working 2026-08-02.**
+  HTTP, not RTSP: `PUT /ISAPI/System/TwoWayAudio/channels/1/open` → stream to `.../audioData` →
+  `.../close`. No RTSP backchannel, no ffmpeg leg, no MediaMTX for the talk path. **Much** simpler
+  than Path A. Verified live: `GET /ISAPI/System/TwoWayAudio/channels` returns channel `id=1` with
+  **`audioCompressionType: G.711ulaw`** (μ-law, 8 kHz mono) — so the backend transcodes the browser
+  mic → G.711 μ-law and streams the bytes to `audioData`.
+  - **Auth gotcha (important):** ISAPI is HTTP-digest against Hikvision's **web/ISAPI user DB, which
+    is SEPARATE from the ONVIF user DB** (ONVIF users live under Network → Integration Protocol →
+    ONVIF; web/ISAPI users under System → User Management). The ONVIF-only account we store for the
+    camera (used for RTSP + the capability probe) gets `401` on ISAPI even for `deviceInfo`. Fix: a
+    **normal web account** was created on the test camera and ISAPI then returns `200`. So the
+    Hikvision talk sink needs its **own web/ISAPI credential field**, distinct from the stored
+    ONVIF/RTSP creds. (Also note Hikvision's "Illegal Login Lock" — repeated bad logins lock the
+    source IP ~30 min; disable under Security → Security Service if it bites during dev.)
 - **`onvif-backchannel`** (generic, vendor-neutral) — the custom-RTSP engine from correction #1.
   Harder; build only once a second brand needs it.
 - **`thingino`** (open Ingenic firmware, if flashed on a future camera) — its ONVIF is
