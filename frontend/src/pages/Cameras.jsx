@@ -20,6 +20,8 @@ export default function Cameras() {
   const [busy, setBusy] = useState(false);
   const [onvifBusy, setOnvifBusy] = useState(false);
   const [onvifMsg, setOnvifMsg] = useState('');
+  const [talkVerifyBusy, setTalkVerifyBusy] = useState(false);
+  const [talkVerifyMsg, setTalkVerifyMsg] = useState(null); // { ok, text } | null
   // Errors from actions *inside* the add/edit modal (ONVIF fetch, save) shown within the
   // modal itself - not the page-level `error` banner, which renders behind the modal where
   // it can't be seen.
@@ -38,6 +40,7 @@ export default function Cameras() {
     setOnvifMsg('');
     setConfirmMsg('');
     setModalError('');
+    setTalkVerifyMsg(null);
     setEditing({});
   }
 
@@ -60,6 +63,7 @@ export default function Cameras() {
     setOnvifMsg('');
     setConfirmMsg('');
     setModalError('');
+    setTalkVerifyMsg(null);
     setEditing(cam);
   }
 
@@ -104,6 +108,29 @@ export default function Cameras() {
       setModalError(err.message);
     } finally {
       setOnvifBusy(false);
+    }
+  }
+
+  // Verify the two-way-audio login without saving. On edit, an unchanged (blank) password falls
+  // back to the stored one via the camera id.
+  async function verifyTalk() {
+    const host = form.rtsp_host.trim();
+    if (!host) { setTalkVerifyMsg({ ok: false, text: 'Enter the camera IP first' }); return; }
+    if (!form.talk_username.trim()) { setTalkVerifyMsg({ ok: false, text: 'Enter the talk username first' }); return; }
+    setTalkVerifyBusy(true);
+    setTalkVerifyMsg(null);
+    try {
+      const r = await api.post('/cameras/verify-talk', {
+        host,
+        username: form.talk_username.trim(),
+        password: form.talk_password || undefined,
+        id: editing.id || undefined,
+      });
+      setTalkVerifyMsg({ ok: true, text: `Talk login works${r.codec ? ` — ${r.codec}` : ''}` });
+    } catch (err) {
+      setTalkVerifyMsg({ ok: false, text: err.message });
+    } finally {
+      setTalkVerifyBusy(false);
     }
   }
 
@@ -394,6 +421,12 @@ export default function Cameras() {
                     />
                   </div>
                 </div>
+                <button type="button" className="btn" onClick={verifyTalk} disabled={talkVerifyBusy} style={{ marginTop: 4 }}>
+                  {talkVerifyBusy ? 'Verifying…' : 'Verify login'}
+                </button>
+                {talkVerifyMsg && (
+                  <div className={talkVerifyMsg.ok ? 'onvif-box__ok' : 'onvif-box__err'}>{talkVerifyMsg.text}</div>
+                )}
               </div>
             )}
             <div className="field">

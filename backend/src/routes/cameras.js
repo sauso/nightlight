@@ -5,6 +5,7 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { upsertPath, removePath, getPathStatus, toPathName } from '../lib/mediamtx.js';
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
 import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.js';
+import { verifyTalkCreds } from '../lib/twoWayAudio.js';
 import { getReading, subscribeAllCameraTopics } from '../lib/mqttClient.js';
 import { probeOnvifCamera, ptzNudge } from '../lib/onvif.js';
 import { validateRtspStream } from '../lib/rtspProbe.js';
@@ -178,6 +179,21 @@ router.put('/reorder', (req, res) => {
   });
   applyOrder(order);
   res.json({ ok: true });
+});
+
+// Verify two-way-audio (talk) credentials without saving - the "Verify login" button in the
+// add/edit form. On edit, a blank password + camera id falls back to the stored password (same
+// "blank = keep" rule as elsewhere). Mounted before /:id so "verify-talk" isn't matched as an :id.
+router.post('/verify-talk', requireAdmin, async (req, res) => {
+  const { host, username, password, id } = req.body || {};
+  if (!host || !host.trim()) return res.status(400).json({ error: 'Camera IP address is required' });
+  let pass = password;
+  if (!pass && id) pass = db.prepare('SELECT talk_password FROM cameras WHERE id = ?').get(id)?.talk_password || null;
+  if (!username || !pass) return res.status(400).json({ error: 'Enter the talk username and password first' });
+  const result = await verifyTalkCreds({ host: host.trim(), username, password: pass });
+  // 422 (not 5xx) so a reverse proxy passes the message through - see the onvif-probe note above.
+  if (!result.ok) return res.status(422).json({ error: result.error || 'Verification failed' });
+  res.json({ ok: true, codec: result.codec });
 });
 
 router.post('/', requireAdmin, async (req, res) => {
