@@ -14,7 +14,7 @@ export default function Cameras() {
   const [editing, setEditing] = useState(null);
   const EMPTY_FORM = {
     name: '', rtsp_host: '', rtsp_port: '554', rtsp_path: '', rtsp_username: '', rtsp_password: '',
-    child_id: '', mqtt_topic: '',
+    child_id: '', mqtt_topic: '', talk_username: '', talk_password: '',
   };
   const [form, setForm] = useState(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
@@ -53,6 +53,8 @@ export default function Cameras() {
       rtsp_password: '',
       child_id: cam.child_id || '',
       mqtt_topic: cam.mqtt_topic || '',
+      talk_username: cam.talk_username || '',
+      talk_password: '',
     });
     setOnvifMsg('');
     setConfirmMsg('');
@@ -322,6 +324,38 @@ export default function Cameras() {
                 />
               </div>
             </div>
+            {editing.id && editing.backchannel_supported === 'yes' && (
+              <div className="onvif-box">
+                <div className="onvif-box__title">Two-way audio (talk-back)</div>
+                <p className="onvif-box__hint">
+                  This camera supports talk-back. Enter its <strong>web login</strong> to enable the
+                  hold-to-talk button — for Hikvision that's the Configuration → User Management
+                  account, which is separate from the ONVIF user. Leave the username blank to turn it off.
+                </p>
+                <div className="onvif-box__row">
+                  <div className="field">
+                    <label htmlFor="cam-talk-user">Talk username</label>
+                    <input
+                      id="cam-talk-user"
+                      value={form.talk_username}
+                      onChange={(e) => setForm({ ...form, talk_username: e.target.value })}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="cam-talk-pass">Talk password</label>
+                    <input
+                      id="cam-talk-pass"
+                      type="password"
+                      value={form.talk_password}
+                      onChange={(e) => setForm({ ...form, talk_password: e.target.value })}
+                      autoComplete="off"
+                      placeholder={editing.talk_has_password ? '•••••• (unchanged)' : ''}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="field">
               <label htmlFor="cam-child">Assign to child (optional)</label>
               <select

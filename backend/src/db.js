@@ -173,6 +173,22 @@ if (!camerasColumns.includes('disabled')) {
   db.exec('ALTER TABLE cameras ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0');
 }
 
+// Two-way audio (talk-back). The camera's speaker is reached by a "talk sink" whose type is
+// talk_backend ('hikvision-isapi' | 'onvif-backchannel' | null=off). It needs its own credentials:
+// on Hikvision the speaker is driven via ISAPI, which authenticates against the camera's regular
+// web/ISAPI user database - SEPARATE from the ONVIF users we store in onvif_username/password (an
+// ONVIF-only account gets 401 on ISAPI). Stored as sensitively as the ONVIF creds and redacted from
+// non-admin API responses the same way.
+if (!camerasColumns.includes('talk_backend')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN talk_backend TEXT');
+}
+if (!camerasColumns.includes('talk_username')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN talk_username TEXT');
+}
+if (!camerasColumns.includes('talk_password')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN talk_password TEXT');
+}
+
 // Ensure the single settings row always exists.
 db.prepare(
   `INSERT OR IGNORE INTO settings (id, app_name, accent_color, live_color, offline_color, timezone, font_choice, temp_unit)

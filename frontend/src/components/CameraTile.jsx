@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic } from 'lucide-react';
 import { api } from '../lib/api.js';
+import { startTalk } from '../lib/twoWayTalk.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { isNativeApp, isIOS, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip, hasNativePip, subscribeBackgroundPaused, isBackgroundPaused, setBackgroundPaused, setPipAutoEnteredFullscreen } from '../lib/nativeBridge.js';
 import WhepPlayer from './WhepPlayer.jsx';
@@ -100,8 +101,31 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   const [bgPaused, setBgPaused] = useState(isBackgroundPaused);
   useEffect(() => subscribeBackgroundPaused(setBgPaused), []);
 
+  // Two-way audio (push-to-talk). While talking we duck THIS camera's incoming audio - the camera
+  // is half-duplex (walkie-talkie), and leaving its mic live would feed its own speaker back as echo.
+  const [talking, setTalking] = useState(false);
+  const talkStopRef = useRef(null);
+  const [talkError, setTalkError] = useState('');
+  function startTalking(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (talkStopRef.current) return;
+    setTalkError('');
+    setTalking(true);
+    talkStopRef.current = startTalk(camera.id, {
+      onError: (msg) => { setTalkError(msg || 'Talk failed'); stopTalking(); },
+    });
+  }
+  function stopTalking() {
+    setTalking(false);
+    try { talkStopRef.current?.(); } catch { /* ignore */ }
+    talkStopRef.current = null;
+  }
+  // Make sure a held talk is torn down if the tile unmounts mid-press.
+  useEffect(() => () => { try { talkStopRef.current?.(); } catch { /* ignore */ } }, []);
+
   const effectiveMuted =
-    muted || (audioState === 'on' && !pageVisible) || (audioState === 'bg' && bgPaused);
+    talking || muted || (audioState === 'on' && !pageVisible) || (audioState === 'bg' && bgPaused);
 
   // When the app is minimized and this camera isn't in Background mode, tear the stream
   // connection down entirely (WhepPlayer/HlsPlayer both fully disconnect when active is
@@ -539,6 +563,22 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
             <Volume2 size={16} />
           )}
         </button>
+        {/* Push-to-talk: only for cameras an admin has set up two-way audio on. Hold to talk;
+            release to stop. Uses pointer events so a press that slides off still ends the talk. */}
+        {camera.talk_configured && (
+          <button
+            className={`talk-btn${talking ? ' talk-btn--active' : ''}`}
+            onPointerDown={startTalking}
+            onPointerUp={stopTalking}
+            onPointerLeave={stopTalking}
+            onPointerCancel={stopTalking}
+            onContextMenu={(e) => e.preventDefault()}
+            aria-label={`Hold to talk to ${camera.name}`}
+            title={talkError || 'Hold to talk'}
+          >
+            <Mic size={16} />
+          </button>
+        )}
         <button
           className="fullscreen-btn"
           onClick={toggleFullscreen}
