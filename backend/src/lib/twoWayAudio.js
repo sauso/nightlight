@@ -109,7 +109,15 @@ class HikvisionTalk {
     // Reuse the open challenge with nc=2 so we can send auth up front (a streaming body can't be
     // replayed after a 401). Then keep this request open and write mu-law bytes to it as they come.
     const path = `${this.base}/audioData`;
-    const headers = { 'Content-Type': 'application/octet-stream' };
+    const headers = {
+      'Content-Type': 'application/octet-stream',
+      // Stream with a fixed (huge) Content-Length rather than chunked transfer-encoding. This camera
+      // does NOT de-chunk the audioData body, so a chunked stream plays as silence; a plain-bodied
+      // stream plays correctly. We send audio until the talk ends, then close the connection well
+      // short of this length - node emits a benign content-length-mismatch that the error handler
+      // below swallows, and the camera has already played everything we sent.
+      'Content-Length': '2147483647',
+    };
     if (this.challenge) {
       headers.Authorization = digestHeader(this.challenge, 'PUT', path, this.username, this.password, 2);
     }
