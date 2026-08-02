@@ -49,17 +49,23 @@ function parseRtspComponents(url) {
 // credential-free display URL and a flag for whether a password is set. ONVIF credentials
 // (used server-side for PTZ) are always stripped.
 function publicCamera(cam, isAdmin) {
-  const { rtsp_url, onvif_username, onvif_password, ...rest } = cam;
-  if (!isAdmin) return rest;
+  const { rtsp_url, onvif_username, onvif_password, talk_username, talk_password, ...rest } = cam;
+  // talk_configured (safe for everyone) is what the tile uses to show/hide the talk button.
+  const base = { ...rest, talk_configured: !!(cam.talk_backend && talk_username && talk_password) };
+  if (!isAdmin) return base;
   const parts = parseRtspComponents(rtsp_url) || {};
   return {
-    ...rest,
+    ...base,
     rtsp_host: parts.host || '',
     rtsp_port: parts.port || '',
     rtsp_path: parts.path || '',
     rtsp_username: parts.username || '',
     rtsp_has_password: !!parts.password,
     rtsp_display: parts.host ? `rtsp://${parts.host}:${parts.port}${parts.path || ''}` : '',
+    // Two-way-audio creds for the edit form: username shown, password never returned (a set flag
+    // plus "blank keeps existing" on save, same pattern as the RTSP password).
+    talk_username: talk_username || '',
+    talk_has_password: !!talk_password,
   };
 }
 
@@ -238,7 +244,8 @@ router.post('/', requireAdmin, async (req, res) => {
 router.put('/:id', requireAdmin, async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
-  const { name, rtsp_host, rtsp_port, rtsp_path, rtsp_username, rtsp_password, child_id, mqtt_topic, force } = req.body || {};
+  const { name, rtsp_host, rtsp_port, rtsp_path, rtsp_username, rtsp_password, child_id, mqtt_topic, force,
+    talk_username, talk_password } = req.body || {};
 
   // Reassemble the RTSP URL from the edited fields. A field not sent keeps its current
   // value; a blank password specifically means "keep the existing one" (the browser never
@@ -278,11 +285,29 @@ router.put('/:id', requireAdmin, async (req, res) => {
     // Address changed - restart the transcoder pointed at the new one.
     await startTranscoder(req.params.id, newRtsp, existing.mediamtx_path, name?.trim() || existing.name);
   }
-  db.prepare('UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ? WHERE id = ?').run(
+  // Two-way audio credentials. talk_username not sent => leave unchanged; sent empty => disable
+  // talk-back (clear backend + creds); a value => enable the Hikvision ISAPI sink. A blank password
+  // keeps the stored one (same "blank = keep" rule as the RTSP password).
+  let talkBackend = existing.talk_backend;
+  let talkUser = existing.talk_username;
+  let talkPass = existing.talk_password;
+  if (talk_username !== undefined) {
+    if (!talk_username.trim()) {
+      talkBackend = null; talkUser = null; talkPass = null;
+    } else {
+      talkBackend = 'hikvision-isapi';
+      talkUser = talk_username.trim();
+      talkPass = talk_password ? talk_password : existing.talk_password;
+    }
+  }
+  db.prepare('UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?, talk_backend = ?, talk_username = ?, talk_password = ? WHERE id = ?').run(
     name?.trim() || existing.name,
     newRtsp,
     child_id !== undefined ? child_id || null : existing.child_id,
     mqtt_topic !== undefined ? mqtt_topic?.trim() || null : existing.mqtt_topic,
+    talkBackend,
+    talkUser,
+    talkPass,
     req.params.id
   );
   subscribeAllCameraTopics();

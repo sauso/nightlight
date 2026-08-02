@@ -9,6 +9,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **Two-way audio (talk-back).** Cameras that support it now show a **hold-to-talk** button — press
+  and hold to speak through the camera's speaker, release to stop; your voice is captured, encoded to
+  G.711, and streamed to the camera, and the camera's own audio is ducked while you talk (it's
+  half-duplex, walkie-talkie style). Set it up per camera in Cameras → edit by entering the camera's
+  **web login** (for Hikvision, the User Management account — separate from the ONVIF user). Only the
+  Hikvision ISAPI backend is implemented so far.
+
 ## [0.6.3] - 2026-08-02
 
 ### Removed
