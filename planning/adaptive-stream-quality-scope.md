@@ -1,9 +1,13 @@
 # Nightlight: Adaptive Stream Quality — Scope Document
 
-Status: **Not started.** Planning document only, to hand to Claude Code when
-work begins. Confirm current repo structure against this document before
-starting - file paths below are best-guess from prior conversation, not
-verified against the live repo.
+Status: **Phase 2 (manual High/Low selector) BUILT** on `dev` (2026-08-02). A camera can be given a
+lower-res sub-stream path (Cameras → edit → "Low-quality stream path", e.g. `/Streaming/Channels/102`);
+a second transcoder leg publishes it into a `<path>-sub` MediaMTX path (see `lib/subStream.js`), and
+each tile offers High/Low in its settings menu (per-device). The sub-stream **runs continuously**
+for now — **Phase 1's on-demand question and Phase 3 (auto-switching) are NOT built** and remain the
+follow-ups (see Review notes below). The validation spike passed: the Hikvision sub-stream
+(`Channels/102`, 1280×720 H.264) pulls fine concurrently with the 4K main. Phase-1-via-ONVIF
+auto-fill of the sub path was intentionally skipped in favour of manual entry (see Review notes).
 
 ---
 
