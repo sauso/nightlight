@@ -152,6 +152,42 @@ export function talkConfigured(camera) {
   return camera.talk_backend === 'hikvision-isapi' && !!camera.talk_username && !!camera.talk_password;
 }
 
+// Verify talk credentials without opening a session: an authenticated ISAPI read of the TwoWayAudio
+// channel. Resolves { ok: true, codec } or { ok: false, error }. Used by the "Verify login" button
+// so a wrong account (the ONVIF-user-vs-web-user trap) is caught before saving, rather than showing
+// up later as silent no-audio.
+export function verifyTalkCreds({ host, port = 80, username, password, channel = 1 }) {
+  return new Promise((resolve) => {
+    if (!host || !username || !password) return resolve({ ok: false, error: 'Missing camera address or talk credentials' });
+    const path = `/ISAPI/System/TwoWayAudio/channels/${channel}`;
+    const attempt = (authHeader, isRetry) => {
+      const headers = authHeader ? { Authorization: authHeader } : {};
+      const req = http.request({ host, port, path, method: 'GET', timeout: 8000, headers }, (res) => {
+        let b = '';
+        res.on('data', (d) => (b += d));
+        res.on('end', () => {
+          if (res.statusCode === 401 && !isRetry && res.headers['www-authenticate']) {
+            const ch = parseChallenge(res.headers['www-authenticate']);
+            return attempt(digestHeader(ch, 'GET', path, username, password, 1), true);
+          }
+          if (res.statusCode === 401) {
+            return resolve({ ok: false, error: 'Login failed (401) - check the username/password. On Hikvision this must be the camera\'s web (User Management) account, not the ONVIF user.' });
+          }
+          if (res.statusCode === 200) {
+            const codec = /<audioCompressionType>([^<]+)</.exec(b)?.[1] || null;
+            return resolve({ ok: true, codec });
+          }
+          resolve({ ok: false, error: `Camera returned HTTP ${res.statusCode}` });
+        });
+      });
+      req.on('error', (e) => resolve({ ok: false, error: e.message || 'Could not reach the camera' }));
+      req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'Timed out reaching the camera' }); });
+      req.end();
+    };
+    attempt(null, false);
+  });
+}
+
 // Create (and start) a talk session for a camera. Resolves an object with write(buf) / close().
 export async function startTalkSession(camera) {
   if (!talkConfigured(camera)) throw new Error('Two-way audio is not configured for this camera');

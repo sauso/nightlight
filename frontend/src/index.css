@@ -926,6 +926,11 @@ body.in-pip .tile-menu-backdrop {
   font-size: 12px;
   color: var(--live);
 }
+.onvif-box__err {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--offline, #e08585);
+}
 .onvif-box__title {
   font-weight: 600;
   margin-bottom: 6px;
