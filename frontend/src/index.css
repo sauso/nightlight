@@ -598,6 +598,12 @@ body.in-pip .tile-menu-backdrop {
   padding: 4px;
   z-index: 4;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  /* The tile clips overflow (overflow:hidden for rounded corners/zoom), and this menu grows upward.
+     With the quality options it can be taller than a short tile - cap it and scroll so the top item
+     (Low latency) is never clipped out of reach. */
+  max-height: calc(100% - 56px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .tile-menu__item {

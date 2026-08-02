@@ -253,7 +253,8 @@ router.put('/:id', requireAdmin, async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
   const { name, rtsp_host, rtsp_port, rtsp_path, rtsp_username, rtsp_password, child_id, mqtt_topic, force,
-    talk_username, talk_password, sub_rtsp_path } = req.body || {};
+    talk_username, talk_password, sub_rtsp_path,
+    discovery_source, onvif_device_url, backchannel_supported, ptz_supported, onvif_profile_token } = req.body || {};
 
   // Reassemble the RTSP URL from the edited fields. A field not sent keeps its current
   // value; a blank password specifically means "keep the existing one" (the browser never
@@ -321,7 +322,33 @@ router.put('/:id', requireAdmin, async (req, res) => {
       subUrl = assembleRtspUrl({ host: cur.host, port: cur.port, path: sp, username: cur.username, password: cur.password });
     }
   }
-  db.prepare('UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?, talk_backend = ?, talk_username = ?, talk_password = ?, sub_rtsp_url = ? WHERE id = ?').run(
+  // ONVIF-detected capabilities, from a re-fetch in the edit form (payload has discovery_source
+  // === 'onvif'). Lets an existing camera pick up two-way-audio / PTZ support without re-adding it.
+  // A plain edit doesn't send these, so everything stays as-is.
+  let discSource = existing.discovery_source;
+  let onvifCapable = existing.onvif_capable;
+  let onvifUrl = existing.onvif_device_url;
+  let backchannel = existing.backchannel_supported;
+  let ptz = existing.ptz_supported;
+  let profileToken = existing.onvif_profile_token;
+  let onvifUser = existing.onvif_username;
+  let onvifPass = existing.onvif_password;
+  if (discovery_source === 'onvif') {
+    discSource = 'onvif';
+    onvifCapable = 1;
+    if (onvif_device_url !== undefined) onvifUrl = onvif_device_url ? onvif_device_url.trim() : null;
+    if (backchannel_supported !== undefined) backchannel = ['yes', 'no'].includes(backchannel_supported) ? backchannel_supported : 'unknown';
+    if (ptz_supported !== undefined) ptz = ptz_supported ? 1 : 0;
+    if (onvif_profile_token !== undefined) profileToken = onvif_profile_token || null;
+    // ONVIF control (PTZ) reuses the RTSP credentials the user entered.
+    if (rtsp_username !== undefined) onvifUser = rtsp_username || null;
+    if (rtsp_password) onvifPass = rtsp_password; // blank keeps the stored one
+  }
+  db.prepare(`UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?,
+      talk_backend = ?, talk_username = ?, talk_password = ?, sub_rtsp_url = ?,
+      discovery_source = ?, onvif_capable = ?, onvif_device_url = ?, backchannel_supported = ?,
+      ptz_supported = ?, onvif_profile_token = ?, onvif_username = ?, onvif_password = ?
+    WHERE id = ?`).run(
     name?.trim() || existing.name,
     newRtsp,
     child_id !== undefined ? child_id || null : existing.child_id,
@@ -330,6 +357,14 @@ router.put('/:id', requireAdmin, async (req, res) => {
     talkUser,
     talkPass,
     subUrl,
+    discSource,
+    onvifCapable,
+    onvifUrl,
+    backchannel,
+    ptz,
+    profileToken,
+    onvifUser,
+    onvifPass,
     req.params.id
   );
   // Apply the sub-stream change to the running pipeline (unless the camera is disabled): start/
