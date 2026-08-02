@@ -180,7 +180,18 @@ async function handleTalkConnection(ws, camera, user) {
   };
   // Register the audio handler before the (async) session start so nothing races; audio arriving
   // before the session is up is simply dropped (the client waits for our 'ready' before sending).
-  ws.on('message', (data, isBinary) => { if (isBinary) { bytes += data.length; session?.write(data); } });
+  let sampled = false;
+  ws.on('message', (data, isBinary) => {
+    if (!isBinary) return;
+    if (!sampled) {
+      sampled = true;
+      const b = Buffer.from(data);
+      // mu-law silence is ~0xff/0x7f; varied bytes here mean real captured audio.
+      logger.info(`[talk] first audio bytes for "${camera.name}": ${b.slice(0, 12).toString('hex')}`);
+    }
+    bytes += data.length;
+    session?.write(data);
+  });
   ws.on('close', cleanup);
   ws.on('error', cleanup);
   try {
