@@ -238,13 +238,19 @@ export async function probeOnvifCamera({ host, port, username, password }) {
 
   const info = await pcall(cam, 'getDeviceInformation').catch(() => null);
   const vid = best?.videoEncoderConfiguration || {};
+  // Hikvision's ONVIF stream URIs carry a `?transportmode=…&profile=Profile_N` query that its own
+  // web/RTSP account rejects (401) - the clean /Streaming/Channels/NNN path is what works. Strip it
+  // for Hikvision so the pre-filled paths just work. Left intact for other brands (e.g. Dahua needs
+  // its ?channel=…&subtype=… query).
+  const isHik = /hikvision/i.test(info?.manufacturer || '');
+  const cleanPath = (p) => (isHik && p ? p.split('?')[0] : p);
   return {
     // Address components for the add-camera form; the app pairs these with the entered
     // credentials to build the RTSP URL server-side.
     rtspHost: rtspParts.host,
     rtspPort: rtspParts.port,
-    rtspPath: rtspParts.path,
-    subRtspPath, // lowest-res sub-stream path for the "Low quality" option, or null
+    rtspPath: cleanPath(rtspParts.path),
+    subRtspPath: cleanPath(subRtspPath), // lowest-res sub-stream path for "Low quality", or null
 
     suggestedName: info ? [info.manufacturer, info.model].filter(Boolean).join(' ').trim() || null : null,
     video: {
