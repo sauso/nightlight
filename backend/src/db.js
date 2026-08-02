@@ -189,6 +189,17 @@ if (!camerasColumns.includes('talk_password')) {
   db.exec('ALTER TABLE cameras ADD COLUMN talk_password TEXT');
 }
 
+// Adaptive stream quality: an optional lower-resolution sub-stream URL. Nearly every IP camera
+// exposes a second, lower-bitrate RTSP endpoint in hardware (for Hikvision, .../Streaming/Channels/
+// 102), giving a "Low" quality tier at zero server-side transcoding cost - a fallback for congested
+// connections (WebRTC can then drop to it instead of just stuttering). When set, the transcoder runs
+// a second leg publishing this into a `<path>-sub` MediaMTX path. Full URL (with creds) like
+// rtsp_url, so a camera whose sub-stream uses a different path/host still works; redacted from
+// non-admin API responses.
+if (!camerasColumns.includes('sub_rtsp_url')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN sub_rtsp_url TEXT');
+}
+
 // Ensure the single settings row always exists.
 db.prepare(
   `INSERT OR IGNORE INTO settings (id, app_name, accent_color, live_color, offline_color, timezone, font_choice, temp_unit)
