@@ -281,28 +281,6 @@ export default function Cameras() {
                 />
               </div>
             </div>
-            {!editing.id && (
-              <div className="onvif-fetch">
-                <button type="button" className="btn" onClick={fetchFromOnvif} disabled={onvifBusy}>
-                  {onvifBusy ? 'Fetching…' : '↻ Fetch port & path from ONVIF'}
-                </button>
-                <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-                  Optional: enter the IP above and fetch the stream port &amp; path
-                  automatically. Most cameras don't need a login for this; if yours does, fill
-                  the username/password below first.
-                </div>
-                {onvifMsg && <div className="onvif-box__ok">{onvifMsg}</div>}
-              </div>
-            )}
-            <div className="field">
-              <label htmlFor="cam-path">Stream path</label>
-              <input
-                id="cam-path"
-                value={form.rtsp_path}
-                onChange={(e) => setForm({ ...form, rtsp_path: e.target.value })}
-                placeholder="/stream1"
-              />
-            </div>
             <div className="onvif-box__row">
               <div className="field">
                 <label htmlFor="cam-user">Username</label>
@@ -325,6 +303,28 @@ export default function Cameras() {
                 />
               </div>
             </div>
+            {/* ONVIF fetch is available when adding AND editing: re-fetching an existing camera
+                re-detects its port/path and capabilities (two-way audio, PTZ). Uses the login above. */}
+            <div className="onvif-fetch">
+              <button type="button" className="btn" onClick={fetchFromOnvif} disabled={onvifBusy}>
+                {onvifBusy ? 'Fetching…' : '↻ Fetch port, path & capabilities from ONVIF'}
+              </button>
+              <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                Optional: fetch the stream port, path and capabilities (two-way audio, PTZ) over
+                ONVIF using the IP and login above. Most cameras don't need a login for this; if
+                yours does, fill it in first.
+              </div>
+              {onvifMsg && <div className="onvif-box__ok">{onvifMsg}</div>}
+            </div>
+            <div className="field">
+              <label htmlFor="cam-path">Stream path</label>
+              <input
+                id="cam-path"
+                value={form.rtsp_path}
+                onChange={(e) => setForm({ ...form, rtsp_path: e.target.value })}
+                placeholder="/stream1"
+              />
+            </div>
             <div className="field">
               <label htmlFor="cam-sub-path">Low-quality stream path (optional)</label>
               <input
@@ -340,7 +340,7 @@ export default function Cameras() {
                 above). Leave blank for none.
               </p>
             </div>
-            {editing.id && editing.backchannel_supported === 'yes' && (
+            {editing.id && (editing.backchannel_supported === 'yes' || form.backchannel_supported === 'yes') && (
               <div className="onvif-box">
                 <div className="onvif-box__title">Two-way audio (talk-back)</div>
                 <p className="onvif-box__hint">
