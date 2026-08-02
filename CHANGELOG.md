@@ -10,6 +10,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Added
+- **Choose stream quality per camera (High/Low).** If a camera exposes a lower-resolution
+  sub-stream, add its path in Cameras → edit ("Low-quality stream path", e.g. `/Streaming/Channels/102`
+  on Hikvision) and each tile gains a High/Low choice in its settings menu. Low is a fallback for
+  slow or congested connections; the tier comes straight from the camera's second stream, so there's
+  no extra video transcoding on the server. The choice is per-device (like mute). *(The sub-stream
+  currently runs continuously alongside the main one; an on-demand version is a planned follow-up.)*
 - **Two-way audio (talk-back).** Cameras that support it now show a **hold-to-talk** button — press
   and hold to speak through the camera's speaker, release to stop; your voice is captured, encoded to
   G.711, and streamed to the camera, and the camera's own audio is ducked while you talk (it's

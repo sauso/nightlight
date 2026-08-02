@@ -14,7 +14,7 @@ export default function Cameras() {
   const [editing, setEditing] = useState(null);
   const EMPTY_FORM = {
     name: '', rtsp_host: '', rtsp_port: '554', rtsp_path: '', rtsp_username: '', rtsp_password: '',
-    child_id: '', mqtt_topic: '', talk_username: '', talk_password: '',
+    child_id: '', mqtt_topic: '', talk_username: '', talk_password: '', sub_rtsp_path: '',
   };
   const [form, setForm] = useState(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
@@ -55,6 +55,7 @@ export default function Cameras() {
       mqtt_topic: cam.mqtt_topic || '',
       talk_username: cam.talk_username || '',
       talk_password: '',
+      sub_rtsp_path: cam.sub_rtsp_path || '',
     });
     setOnvifMsg('');
     setConfirmMsg('');
@@ -323,6 +324,21 @@ export default function Cameras() {
                   placeholder={editing.id && editing.rtsp_has_password ? '•••••• (unchanged)' : ''}
                 />
               </div>
+            </div>
+            <div className="field">
+              <label htmlFor="cam-sub-path">Low-quality stream path (optional)</label>
+              <input
+                id="cam-sub-path"
+                value={form.sub_rtsp_path}
+                onChange={(e) => setForm({ ...form, sub_rtsp_path: e.target.value })}
+                autoComplete="off"
+                placeholder="e.g. /Streaming/Channels/102"
+              />
+              <p className="onvif-box__hint">
+                Most cameras expose a second, lower-resolution stream at a different path. Enter it to
+                add a &quot;Low&quot; quality option on the camera tile (it reuses the address and login
+                above). Leave blank for none.
+              </p>
             </div>
             {editing.id && editing.backchannel_supported === 'yes' && (
               <div className="onvif-box">
