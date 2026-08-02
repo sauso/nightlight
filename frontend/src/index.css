@@ -633,6 +633,22 @@ body.in-pip .tile-menu-backdrop {
   background: var(--border);
   margin: 4px 6px;
 }
+/* "Quality" row that drills into the High/Low submenu: label left, current value + chevron right. */
+.tile-menu__item--submenu {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.tile-menu__value {
+  color: var(--text-secondary);
+  opacity: 0.75;
+  font-size: 12px;
+}
+.tile-menu__item--back {
+  font-weight: 600;
+  color: var(--text-primary);
+}
 
 /* Shown over a tile the user has stopped (per-device playback off, stream torn down). */
 .camera-tile__stopped {
