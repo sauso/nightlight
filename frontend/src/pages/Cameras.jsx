@@ -330,7 +330,7 @@ export default function Cameras() {
                 id="cam-path"
                 value={form.rtsp_path}
                 onChange={(e) => setForm({ ...form, rtsp_path: e.target.value })}
-                placeholder="/stream1"
+                placeholder="/Streaming/Channels/101"
                 autoCapitalize="none"
                 autoCorrect="off"
                 spellCheck={false}
@@ -358,7 +358,7 @@ export default function Cameras() {
                 Filled in by the ONVIF fetch if the camera has one; leave blank for none.
               </p>
             </div>
-            {editing.id && (editing.backchannel_supported === 'yes' || form.backchannel_supported === 'yes') && (
+            {(editing.backchannel_supported === 'yes' || form.backchannel_supported === 'yes') && (
               <div className="onvif-box">
                 <div className="onvif-box__title">Two-way audio (talk-back)</div>
                 <p className="onvif-box__hint">

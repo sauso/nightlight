@@ -186,6 +186,7 @@ router.post('/', requireAdmin, async (req, res) => {
     child_id, mqtt_topic, force,
     discovery_source, onvif_device_url, backchannel_supported,
     ptz_supported, onvif_profile_token,
+    talk_username, talk_password, sub_rtsp_path,
   } = req.body || {};
   if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
   const rtsp_url = assembleRtspUrl({
@@ -229,18 +230,30 @@ router.post('/', requireAdmin, async (req, res) => {
   const onvifUser = isOnvif ? rtsp_username || null : null;
   const onvifPass = isOnvif ? rtsp_password || null : null;
   const profileToken = isOnvif ? onvif_profile_token || null : null;
+  // Two-way audio creds (optional at add time - a username enables the Hikvision ISAPI sink).
+  const talkUser = talk_username && talk_username.trim() ? talk_username.trim() : null;
+  const talkBackend = talkUser ? 'hikvision-isapi' : null;
+  const talkPass = talkUser ? talk_password || null : null;
+  // Low-quality sub-stream: a path on the same camera (reuses the main host/port/creds).
+  const subUrl = sub_rtsp_path && sub_rtsp_path.trim()
+    ? assembleRtspUrl({ host: rtsp_host, port: rtsp_port, path: sub_rtsp_path.trim(), username: rtsp_username, password: rtsp_password })
+    : null;
   const { maxOrder } = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS maxOrder FROM cameras').get();
   db.prepare(
     `INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path, sort_order, mqtt_topic,
        discovery_source, onvif_capable, onvif_device_url, backchannel_supported,
-       ptz_supported, onvif_username, onvif_password, onvif_profile_token)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       ptz_supported, onvif_username, onvif_password, onvif_profile_token,
+       talk_backend, talk_username, talk_password, sub_rtsp_url)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id, name.trim(), rtsp_url.trim(), child_id || null, mediamtx_path, maxOrder + 1, mqtt_topic?.trim() || null,
     source, isOnvif ? 1 : 0, onvifUrl, backchannel,
-    ptz, onvifUser, onvifPass, profileToken
+    ptz, onvifUser, onvifPass, profileToken,
+    talkBackend, talkUser, talkPass, subUrl
   );
   await startTranscoder(id, rtsp_url, mediamtx_path, name.trim());
+  const added = db.prepare('SELECT * FROM cameras WHERE id = ?').get(id);
+  if (subConfigured(added)) await startSubStream(added).catch((e) => logger.error(`[substream] add failed: ${e.message}`));
   subscribeAllCameraTopics();
   res.status(201).json(publicCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(id), true));
 });
