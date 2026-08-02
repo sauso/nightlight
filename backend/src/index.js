@@ -14,6 +14,7 @@ import eventsRoutes from './routes/events.js';
 import aboutRoutes from './routes/about.js';
 import { requireAuth, requireAuthQueryOrHeader, verifyToken } from './middleware/auth.js';
 import { startTalkSession, talkConfigured } from './lib/twoWayAudio.js';
+import { subConfigured, isSubRunning, startSubStream } from './lib/subStream.js';
 import db from './db.js';
 import { upsertPath, isPathConfiguredCorrectly, getPathStatus } from './lib/mediamtx.js';
 import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder.js';
@@ -345,6 +346,10 @@ async function reconcileCameraPaths(attempt = 1) {
       }
       if (!isRunning(cam.id)) {
         await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
+      }
+      // Keep the optional low-quality sub-stream (adaptive quality) alive the same way.
+      if (subConfigured(cam) && !isSubRunning(cam.id)) {
+        await startSubStream(cam);
       }
     }
     if (fixedCount > 0) {

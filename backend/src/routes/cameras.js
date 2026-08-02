@@ -4,6 +4,7 @@ import db from '../db.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { upsertPath, removePath, getPathStatus, toPathName } from '../lib/mediamtx.js';
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
+import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.js';
 import { getReading, subscribeAllCameraTopics } from '../lib/mqttClient.js';
 import { probeOnvifCamera, ptzNudge } from '../lib/onvif.js';
 import { validateRtspStream } from '../lib/rtspProbe.js';
@@ -49,11 +50,16 @@ function parseRtspComponents(url) {
 // credential-free display URL and a flag for whether a password is set. ONVIF credentials
 // (used server-side for PTZ) are always stripped.
 function publicCamera(cam, isAdmin) {
-  const { rtsp_url, onvif_username, onvif_password, talk_username, talk_password, ...rest } = cam;
-  // talk_configured (safe for everyone) is what the tile uses to show/hide the talk button.
-  const base = { ...rest, talk_configured: !!(cam.talk_backend && talk_username && talk_password) };
+  const { rtsp_url, onvif_username, onvif_password, talk_username, talk_password, sub_rtsp_url, ...rest } = cam;
+  // talk_configured / has_sub (safe for everyone) drive the tile's talk button + quality selector.
+  const base = {
+    ...rest,
+    talk_configured: !!(cam.talk_backend && talk_username && talk_password),
+    has_sub: !!(sub_rtsp_url && sub_rtsp_url.trim()),
+  };
   if (!isAdmin) return base;
   const parts = parseRtspComponents(rtsp_url) || {};
+  const subParts = sub_rtsp_url ? parseRtspComponents(sub_rtsp_url) || {} : {};
   return {
     ...base,
     rtsp_host: parts.host || '',
@@ -66,6 +72,8 @@ function publicCamera(cam, isAdmin) {
     // plus "blank keeps existing" on save, same pattern as the RTSP password).
     talk_username: talk_username || '',
     talk_has_password: !!talk_password,
+    // Low-quality sub-stream: only the path is edited (it reuses the main stream's host/creds).
+    sub_rtsp_path: subParts.path || '',
   };
 }
 
@@ -245,7 +253,7 @@ router.put('/:id', requireAdmin, async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
   const { name, rtsp_host, rtsp_port, rtsp_path, rtsp_username, rtsp_password, child_id, mqtt_topic, force,
-    talk_username, talk_password } = req.body || {};
+    talk_username, talk_password, sub_rtsp_path } = req.body || {};
 
   // Reassemble the RTSP URL from the edited fields. A field not sent keeps its current
   // value; a blank password specifically means "keep the existing one" (the browser never
@@ -300,7 +308,20 @@ router.put('/:id', requireAdmin, async (req, res) => {
       talkPass = talk_password ? talk_password : existing.talk_password;
     }
   }
-  db.prepare('UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?, talk_backend = ?, talk_username = ?, talk_password = ? WHERE id = ?').run(
+  // Low-quality sub-stream (adaptive quality). sub_rtsp_path not sent => unchanged; sent empty =>
+  // no sub-stream; a value => build a sub URL reusing the (possibly updated) main stream's host/
+  // port/creds, differing only in the path (e.g. Hikvision .../Streaming/Channels/102).
+  let subUrl = existing.sub_rtsp_url;
+  if (sub_rtsp_path !== undefined) {
+    const sp = String(sub_rtsp_path).trim();
+    if (!sp) {
+      subUrl = null;
+    } else {
+      const cur = parseRtspComponents(newRtsp) || {};
+      subUrl = assembleRtspUrl({ host: cur.host, port: cur.port, path: sp, username: cur.username, password: cur.password });
+    }
+  }
+  db.prepare('UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?, talk_backend = ?, talk_username = ?, talk_password = ?, sub_rtsp_url = ? WHERE id = ?').run(
     name?.trim() || existing.name,
     newRtsp,
     child_id !== undefined ? child_id || null : existing.child_id,
@@ -308,8 +329,20 @@ router.put('/:id', requireAdmin, async (req, res) => {
     talkBackend,
     talkUser,
     talkPass,
+    subUrl,
     req.params.id
   );
+  // Apply the sub-stream change to the running pipeline (unless the camera is disabled): start/
+  // restart its transcoder if a sub-stream is configured, or tear it down if it was cleared.
+  if (!existing.disabled) {
+    const updated = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+    try {
+      if (subConfigured(updated)) await startSubStream(updated);
+      else await stopSubStream(updated);
+    } catch (e) {
+      logger.error(`[substream] failed to apply for ${updated.name}: ${e.message}`);
+    }
+  }
   subscribeAllCameraTopics();
   res.json(publicCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id), true));
 });
@@ -329,8 +362,10 @@ router.put('/:id/enabled', requireAdmin, async (req, res) => {
       return res.status(502).json({ error: `Could not re-register stream with MediaMTX: ${e.message}` });
     }
     await startTranscoder(req.params.id, existing.rtsp_url, existing.mediamtx_path, existing.name);
+    if (subConfigured(existing)) await startSubStream(existing).catch((e) => logger.error(`[substream] enable failed: ${e.message}`));
   } else {
     await stopTranscoder(req.params.id);
+    await stopSubStream(existing).catch(() => {});
     try {
       await removePath(existing.mediamtx_path);
     } catch (e) {
@@ -360,6 +395,7 @@ router.delete('/:id', requireAdmin, async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
   await stopTranscoder(req.params.id);
+  await stopSubStream(existing).catch(() => {});
   try {
     await removePath(existing.mediamtx_path);
   } catch (e) {

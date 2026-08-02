@@ -9,6 +9,13 @@ export function toPathName(id) {
   return `cam_${id.replace(/[^a-zA-Z0-9_-]/g, '')}`;
 }
 
+// The low-quality sub-stream lives at a sibling MediaMTX path (see db.js sub_rtsp_url). A second
+// transcoder leg publishes the camera's sub-stream here, so clients can pick High (the main path)
+// or Low (this one) - see the "quality" selector in the frontend.
+export function subPathName(pathName) {
+  return `${pathName}-sub`;
+}
+
 // The path has no pull source — it's publisher-only. Our FFmpeg transcoder (see
 // transcoder.js) pulls the camera's RTSP feed itself and publishes the (audio
 // re-encoded) result straight into this path, rather than MediaMTX pulling the
