@@ -84,6 +84,7 @@ export default function Cameras() {
         host,
         username: form.rtsp_username || undefined,
         password: form.rtsp_password || undefined,
+        id: editing.id || undefined, // on edit, blank password falls back to the stored one
       });
       setForm((f) => ({
         ...f,

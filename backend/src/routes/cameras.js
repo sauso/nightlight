@@ -82,8 +82,15 @@ function publicCamera(cam, isAdmin) {
 // ready-to-use RTSP URL plus detected codec/resolution, so the admin doesn't hand-type the
 // RTSP path. Read-only probe - creates nothing; the normal POST / still does the adding.
 router.post('/onvif-probe', requireAdmin, async (req, res) => {
-  const { host, port, username, password } = req.body || {};
+  const { host, port, username, id } = req.body || {};
+  let { password } = req.body || {};
   if (!host || !host.trim()) return res.status(400).json({ error: 'Camera IP address is required' });
+  // On edit, the password field comes back blank (we never return it). Fall back to the stored
+  // credential so re-fetching ONVIF on an existing camera works without re-typing the password.
+  if (!password && id) {
+    const cam = db.prepare('SELECT rtsp_url, onvif_password FROM cameras WHERE id = ?').get(id);
+    password = cam?.onvif_password || parseRtspComponents(cam?.rtsp_url || '')?.password || undefined;
+  }
   try {
     // Cap the whole probe so a slow/unresponsive camera can't keep the request open long
     // enough for a reverse proxy in front of us to time out and return its own (bodiless)
