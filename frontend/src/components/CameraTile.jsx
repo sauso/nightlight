@@ -137,6 +137,24 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   const streamActive = !stopped && (pageVisible || audioState === 'bg');
 
   const [mode, setMode] = useState('live'); // 'live' (WebRTC) | 'compat' (HLS)
+
+  // Stream quality: 'high' (the main stream) | 'low' (the camera's lower-res sub-stream, if it has
+  // one - camera.has_sub). Per-device, like mute: a phone on mobile data and a wall tablet on wifi
+  // want different answers. Selecting Low points the player at the `<path>-sub` MediaMTX path.
+  const qualityKey = `nightlight_quality_${camera.id}`;
+  const [quality, setQualityState] = useState(() => {
+    try {
+      return localStorage.getItem(qualityKey) === 'low' ? 'low' : 'high';
+    } catch {
+      return 'high';
+    }
+  });
+  function setQuality(q) {
+    setQualityState(q);
+    try { localStorage.setItem(qualityKey, q); } catch { /* ignore */ }
+  }
+  const effectivePath =
+    quality === 'low' && camera.has_sub ? `${camera.mediamtx_path}-sub` : camera.mediamtx_path;
   // Background audio needs the native app, and on iOS it's Low-latency-only. Compatibility (HLS)
   // background audio on iOS was tried and dropped: iOS runs the native HLS stream's own lock-screen
   // session and won't reliably let us show the camera name/artwork, catch the lock-screen pause, or
@@ -446,7 +464,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
           {mode === 'live' ? (
             <WhepPlayer
               key={`live-${refreshNonce}`}
-              mediamtxPath={camera.mediamtx_path}
+              mediamtxPath={effectivePath}
               active={streamActive}
               muted={effectiveMuted}
               onFirstConnectFailed={handleFirstConnectFailed}
@@ -456,7 +474,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
           ) : (
             <HlsPlayer
               key={`compat-${refreshNonce}`}
-              mediamtxPath={camera.mediamtx_path}
+              mediamtxPath={effectivePath}
               active={streamActive}
               muted={effectiveMuted}
             />
@@ -496,6 +514,23 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
               >
                 Compatibility
               </button>
+              {camera.has_sub && (
+                <>
+                  <div className="tile-menu__divider" />
+                  <button
+                    className={`tile-menu__item${quality === 'high' ? ' tile-menu__item--active' : ''}`}
+                    onClick={() => { setQuality('high'); setModeMenuOpen(false); }}
+                  >
+                    High quality
+                  </button>
+                  <button
+                    className={`tile-menu__item${quality === 'low' ? ' tile-menu__item--active' : ''}`}
+                    onClick={() => { setQuality('low'); setModeMenuOpen(false); }}
+                  >
+                    Low quality
+                  </button>
+                </>
+              )}
               <div className="tile-menu__divider" />
               <button
                 className="tile-menu__item"
