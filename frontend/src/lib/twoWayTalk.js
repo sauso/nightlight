@@ -22,14 +22,21 @@ function linearToMuLaw(sample) {
   return ~(sign | (exponent << 4) | mantissa) & 0xff;
 }
 
-// Crude decimation, used only if the AudioContext ignored our 8 kHz request and ran at a higher
-// rate (most engines honour it and resample the mic for us, so this rarely runs).
+// Downsample the mic (native rate, usually 48 kHz) to 8 kHz by box-averaging each output sample
+// over its source window - a cheap low-pass that keeps voice intelligible without much aliasing.
 function downsample(input, inRate) {
   if (inRate <= 8000) return input;
   const ratio = inRate / 8000;
   const outLen = Math.floor(input.length / ratio);
   const out = new Float32Array(outLen);
-  for (let i = 0; i < outLen; i++) out[i] = input[Math.floor(i * ratio)];
+  for (let i = 0; i < outLen; i++) {
+    const start = Math.floor(i * ratio);
+    const end = Math.min(input.length, Math.floor((i + 1) * ratio));
+    let sum = 0;
+    let count = 0;
+    for (let j = start; j < end; j++) { sum += input[j]; count++; }
+    out[i] = count ? sum / count : 0;
+  }
   return out;
 }
 
@@ -65,7 +72,10 @@ export function startTalk(cameraId, { onError, onReady } = {}) {
       if (stopped) { stream.getTracks().forEach((t) => t.stop()); return; }
 
       const Ctx = window.AudioContext || window.webkitAudioContext;
-      ctx = new Ctx({ sampleRate: 8000 }); // connecting the mic resamples it to this rate for us
+      // Use the context's NATIVE rate and downsample to 8 kHz ourselves. Forcing an 8 kHz context
+      // makes some browsers feed the mic in as silence (the graph runs - correct byte rate - but the
+      // samples are all zero), which is exactly the "sends audio but camera is silent" symptom.
+      ctx = new Ctx();
       // A freshly-created context can start suspended even from a user gesture; without resuming it,
       // onaudioprocess never fires and no audio is sent (looked like a dead mic).
       if (ctx.state === 'suspended') { try { await ctx.resume(); } catch { /* ignore */ } }
