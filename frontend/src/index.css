@@ -935,6 +935,13 @@ body.in-pip .tile-menu-backdrop {
   font-size: 12px;
   color: var(--text-secondary);
 }
+.onvif-box__hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
 
 .camera-tile__video-wrap:fullscreen {
   display: flex;

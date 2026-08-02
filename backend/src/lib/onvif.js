@@ -112,6 +112,19 @@ function pickBestProfile(profiles) {
   })[0];
 }
 
+// Lowest-resolution profile other than the main - the optional "Low quality" sub-stream. Returns
+// null when the camera only exposes one profile.
+function pickSubProfile(profiles, best) {
+  const bestToken = profileToken(best);
+  const others = profiles.filter((p) => profileToken(p) !== bestToken);
+  if (others.length === 0) return null;
+  return others.sort((a, b) => {
+    const ar = a?.videoEncoderConfiguration?.resolution || {};
+    const br = b?.videoEncoderConfiguration?.resolution || {};
+    return (ar.width || 0) * (ar.height || 0) - (br.width || 0) * (br.height || 0);
+  })[0];
+}
+
 // The path (and any port) from getStreamUri is trustworthy; the host and embedded
 // credentials are not (see header) - so we return the path/port as address components and
 // pair them with the host we connected to. The app assembles these with the user's
@@ -200,6 +213,19 @@ export async function probeOnvifCamera({ host, port, username, password }) {
 
   const rtspParts = rtspPartsFromStreamUri({ streamUri: stream?.uri || '', host: cleanHost });
 
+  // Also grab the lowest-res sub-stream's path (if the camera has one), to pre-fill the "Low
+  // quality" option in the add/edit form. Best-effort - never fails the probe.
+  let subRtspPath = null;
+  const sub = pickSubProfile(profiles, best);
+  if (sub) {
+    const subStream = await pcall(cam, 'getStreamUri', { protocol: 'RTSP', profileToken: profileToken(sub) }).catch(() => null);
+    if (subStream?.uri) {
+      const subParts = rtspPartsFromStreamUri({ streamUri: subStream.uri, host: cleanHost });
+      // Only useful if it's actually a different path from the main stream.
+      if (subParts.path && subParts.path !== rtspParts.path) subRtspPath = subParts.path;
+    }
+  }
+
   // Phase 2: record whether the camera exposes an audio output (two-way-audio backchannel),
   // while we're already connected. Read-only, best-effort - never fails the probe.
   const backchannel = await new Promise((resolve) => {
@@ -218,6 +244,8 @@ export async function probeOnvifCamera({ host, port, username, password }) {
     rtspHost: rtspParts.host,
     rtspPort: rtspParts.port,
     rtspPath: rtspParts.path,
+    subRtspPath, // lowest-res sub-stream path for the "Low quality" option, or null
+
     suggestedName: info ? [info.manufacturer, info.model].filter(Boolean).join(' ').trim() || null : null,
     video: {
       codec: vid.encoding || null,
