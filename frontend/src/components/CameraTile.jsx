@@ -105,24 +105,39 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   // is half-duplex (walkie-talkie), and leaving its mic live would feed its own speaker back as echo.
   const [talking, setTalking] = useState(false);
   const talkStopRef = useRef(null);
+  const talkTimeoutRef = useRef(null);
   const [talkError, setTalkError] = useState('');
-  function startTalking(e) {
-    e.preventDefault();
-    e.stopPropagation();
+  // Tap-to-talk (toggle), not hold: tap once to go live, tap again to stop. A safety cap auto-stops
+  // it so a forgotten "on" can't leave the mic live indefinitely (the reason the old design held).
+  const TALK_MAX_MS = 2 * 60 * 1000;
+  function startTalking() {
     if (talkStopRef.current) return;
     setTalkError('');
     setTalking(true);
     talkStopRef.current = startTalk(camera.id, {
       onError: (msg) => { setTalkError(msg || 'Talk failed'); stopTalking(); },
     });
+    clearTimeout(talkTimeoutRef.current);
+    talkTimeoutRef.current = setTimeout(stopTalking, TALK_MAX_MS);
   }
   function stopTalking() {
+    clearTimeout(talkTimeoutRef.current);
     setTalking(false);
     try { talkStopRef.current?.(); } catch { /* ignore */ }
     talkStopRef.current = null;
   }
-  // Make sure a held talk is torn down if the tile unmounts mid-press.
-  useEffect(() => () => { try { talkStopRef.current?.(); } catch { /* ignore */ } }, []);
+  function toggleTalk(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (talkStopRef.current) stopTalking();
+    else startTalking();
+  }
+  // Tear down talk if the tile unmounts, and stop the live mic if the app is backgrounded.
+  useEffect(() => () => { clearTimeout(talkTimeoutRef.current); try { talkStopRef.current?.(); } catch { /* ignore */ } }, []);
+  useEffect(() => {
+    if (talking && !pageVisible) stopTalking();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [talking, pageVisible]);
 
   const effectiveMuted =
     talking || muted || (audioState === 'on' && !pageVisible) || (audioState === 'bg' && bgPaused);
@@ -622,18 +637,15 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
             <Volume2 size={16} />
           )}
         </button>
-        {/* Push-to-talk: only for cameras an admin has set up two-way audio on. Hold to talk;
-            release to stop. Uses pointer events so a press that slides off still ends the talk. */}
+        {/* Tap-to-talk (toggle): only for cameras an admin has set up two-way audio on. Tap to go
+            live (button turns red + pulses), tap again to stop; auto-stops after a couple of minutes. */}
         {camera.talk_configured && (
           <button
             className={`talk-btn${talking ? ' talk-btn--active' : ''}`}
-            onPointerDown={startTalking}
-            onPointerUp={stopTalking}
-            onPointerLeave={stopTalking}
-            onPointerCancel={stopTalking}
-            onContextMenu={(e) => e.preventDefault()}
-            aria-label={`Hold to talk to ${camera.name}`}
-            title={talkError || 'Hold to talk'}
+            onClick={toggleTalk}
+            aria-label={talking ? `Stop talking to ${camera.name}` : `Talk to ${camera.name}`}
+            aria-pressed={talking}
+            title={talkError || (talking ? 'Tap to stop' : 'Tap to talk')}
           >
             <Mic size={16} />
           </button>

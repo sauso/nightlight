@@ -710,11 +710,15 @@ body.in-pip .tile-menu-backdrop {
 /* ...except while the mic is live: bring back a solid accent chip so "you're talking" is obvious.
    Higher specificity (two classes) so it wins over the icon-only rule above regardless of order. */
 .talk-btn.talk-btn--active {
-  background: var(--accent);
-  color: #0a0d1c;
+  background: #e0555f; /* "live" red - unmistakably mic-on */
+  color: #fff;
   filter: none;
   border-radius: 8px;
-  box-shadow: 0 0 0 3px rgba(245, 217, 168, 0.35);
+  animation: talk-pulse 1.4s ease-in-out infinite;
+}
+@keyframes talk-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(224, 85, 95, 0.55); }
+  50% { box-shadow: 0 0 0 7px rgba(224, 85, 95, 0); }
 }
 
 .mute-btn svg,
