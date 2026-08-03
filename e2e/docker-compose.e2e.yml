@@ -26,7 +26,9 @@ services:
   # The real app, staging image. Data is ephemeral (tmpfs) so every run is a
   # clean first-run: no seeded DB, the tests drive the real create-admin flow.
   nightlight:
-    image: sauso/nightlight:dev
+    # Defaults to the staging image; CI can override (e.g. to test an image built
+    # from the exact PR commit) via NIGHTLIGHT_IMAGE.
+    image: ${NIGHTLIGHT_IMAGE:-sauso/nightlight:dev}
     depends_on:
       - fakecam
     environment:
