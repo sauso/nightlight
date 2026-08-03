@@ -470,11 +470,14 @@ export default function Cameras() {
             </div>
 
             {editing.id && (
-              <div className="field">
-                <label>Motion detection</label>
-                <label className="log-viewer__toggle" style={{ margin: '4px 0 0' }}>
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                  Motion detection
+                </label>
+                <label className="log-viewer__toggle" style={{ margin: 0 }}>
                   <input
                     type="checkbox"
+                    style={{ width: 'auto', margin: 0 }}
                     checked={form.detect_motion_enabled}
                     onChange={(e) => setForm({ ...form, detect_motion_enabled: e.target.checked })}
                   />
