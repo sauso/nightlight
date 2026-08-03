@@ -12,6 +12,7 @@ import manifestRoutes from './routes/manifest.js';
 import logsRoutes from './routes/logs.js';
 import eventsRoutes from './routes/events.js';
 import aboutRoutes from './routes/about.js';
+import pushRoutes from './routes/push.js';
 import { requireAuth, requireAuthQueryOrHeader, verifyToken } from './middleware/auth.js';
 import { startTalkSession, talkConfigured } from './lib/twoWayAudio.js';
 import { subConfigured, isSubRunning, startSubStream } from './lib/subStream.js';
@@ -19,6 +20,7 @@ import db from './db.js';
 import { upsertPath, isPathConfiguredCorrectly, getPathStatus } from './lib/mediamtx.js';
 import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder.js';
 import { startMotionDetector, isDetecting, stopAllMotionDetectors } from './lib/motionDetector.js';
+import { initPush } from './lib/push.js';
 import { startMediaMTX, stopMediaMTX } from './lib/mediamtxProcess.js';
 import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
 import { logger } from './lib/logger.js';
@@ -129,6 +131,7 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/logs', logsRoutes);
 app.use('/api/events', eventsRoutes);
 app.use('/api/about', aboutRoutes);
+app.use('/api/push', pushRoutes);
 app.use('/manifest.webmanifest', manifestRoutes);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
@@ -145,6 +148,7 @@ const PORT = process.env.PORT || 4000;
 const server = app.listen(PORT, () => {
   logger.info(`Baby monitor backend listening on port ${PORT}`);
   reconcileCameraPaths();
+  initPush();
 });
 
 // --- Two-way audio (talk-back) over WebSocket ---
