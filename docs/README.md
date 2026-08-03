@@ -8,20 +8,17 @@ feature reference, see the [main README](../README.md).
 > rather than drifting. See [e2e/README.md](../e2e/README.md#refreshing-the-documentation-screenshots)
 > for how to refresh them.
 
-## Signing in
-
-Nightlight is private to your network and gated behind a login. On first run it prompts you
-to create the admin account; after that, caregivers sign in here.
-
-![The Nightlight sign-in screen](screenshots/login.png)
-
 ## The nursery dashboard
 
-The home screen is a live grid of camera tiles. Each tile plays low-latency video, shows the
-camera's name and which child it's assigned to, and has controls for audio, fullscreen,
-picture-in-picture, and stream quality. Tiles can be dragged to reorder them.
+The home screen is a live grid of camera tiles. Each tile plays low-latency video and shows
+the camera's name, which child it's assigned to, a connection indicator, and controls for
+audio, fullscreen, picture-in-picture, and stream quality. Tiles can be dragged to reorder.
 
 ![The nursery dashboard with a camera tile](screenshots/dashboard.png)
+
+> This capture comes from the automated test environment, which has a synthetic camera and
+> no real video source behind the tile — hence the "No signal". On a real deployment the
+> tile shows the camera's live feed.
 
 ## Adding a camera
 

@@ -8,7 +8,7 @@ const { CAMERA, ensureSyntheticCamera } = require('./helpers');
 // each shot asserts the screen actually rendered before capturing.
 const SHOTS = 'screenshots';
 
-test('capture documentation screenshots', async ({ page, browser }) => {
+test('capture documentation screenshots', async ({ page }) => {
   await ensureSyntheticCamera(page);
 
   // The live dashboard with a camera tile.
@@ -30,15 +30,4 @@ test('capture documentation screenshots', async ({ page, browser }) => {
   await page.goto('/#/settings');
   await expect(page.getByRole('button', { name: 'Save changes' })).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/settings.png`, fullPage: true });
-
-  // The sign-in screen, from a fresh unauthenticated context.
-  const ctx = await browser.newContext({
-    ignoreHTTPSErrors: true,
-    baseURL: process.env.BASE_URL || 'http://localhost:4000',
-  });
-  const fresh = await ctx.newPage();
-  await fresh.goto('/');
-  await expect(fresh.getByRole('button', { name: /Sign in|Create admin account/ })).toBeVisible();
-  await fresh.screenshot({ path: `${SHOTS}/login.png` });
-  await ctx.close();
 });
