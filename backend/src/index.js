@@ -3,6 +3,7 @@ import helmet from 'helmet';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createProxyMiddleware } from 'http-proxy-middleware';
+import { WebSocketServer } from 'ws';
 import authRoutes from './routes/auth.js';
 import childrenRoutes from './routes/children.js';
 import camerasRoutes from './routes/cameras.js';
@@ -11,7 +12,9 @@ import manifestRoutes from './routes/manifest.js';
 import logsRoutes from './routes/logs.js';
 import eventsRoutes from './routes/events.js';
 import aboutRoutes from './routes/about.js';
-import { requireAuth, requireAuthQueryOrHeader } from './middleware/auth.js';
+import { requireAuth, requireAuthQueryOrHeader, verifyToken } from './middleware/auth.js';
+import { startTalkSession, talkConfigured } from './lib/twoWayAudio.js';
+import { subConfigured, isSubRunning, startSubStream } from './lib/subStream.js';
 import db from './db.js';
 import { upsertPath, isPathConfiguredCorrectly, getPathStatus } from './lib/mediamtx.js';
 import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder.js';
@@ -138,10 +141,71 @@ app.get('*', (req, res) => {
 });
 
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   logger.info(`Baby monitor backend listening on port ${PORT}`);
   reconcileCameraPaths();
 });
+
+// --- Two-way audio (talk-back) over WebSocket ---
+// The client opens ws(s)://<origin>/api/talk?camera=<id>&token=<jwt> and streams raw G.711 mu-law
+// audio as binary frames; we forward them to the camera's speaker (see lib/twoWayAudio.js). Auth is
+// the same JWT+session as the REST API (passed as a query param, since browsers can't set headers on
+// a WebSocket handshake), and any signed-in user may talk - it's a caregiving action, like PTZ.
+const talkWss = new WebSocketServer({ noServer: true });
+server.on('upgrade', (req, socket, head) => {
+  let url;
+  try { url = new URL(req.url, 'http://localhost'); } catch { socket.destroy(); return; }
+  if (url.pathname !== '/api/talk') { socket.destroy(); return; }
+  const user = verifyToken(url.searchParams.get('token'));
+  if (!user) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
+  const cameraId = url.searchParams.get('camera');
+  const camera = cameraId ? db.prepare('SELECT * FROM cameras WHERE id = ?').get(cameraId) : null;
+  if (!camera || camera.disabled || !talkConfigured(camera)) {
+    socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+  talkWss.handleUpgrade(req, socket, head, (ws) => handleTalkConnection(ws, camera, user));
+});
+
+async function handleTalkConnection(ws, camera, user) {
+  let session = null;
+  let closed = false;
+  let bytes = 0;
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    logger.info(`[talk] session ended for "${camera.name}" (${bytes} audio bytes forwarded)`);
+    try { session?.close(); } catch { /* ignore */ }
+    try { ws.close(); } catch { /* ignore */ }
+  };
+  // Register the audio handler before the (async) session start so nothing races; audio arriving
+  // before the session is up is simply dropped (the client waits for our 'ready' before sending).
+  let sampled = false;
+  ws.on('message', (data, isBinary) => {
+    if (!isBinary) return;
+    if (!sampled) {
+      sampled = true;
+      const b = Buffer.from(data);
+      // mu-law silence is ~0xff/0x7f; varied bytes here mean real captured audio.
+      logger.info(`[talk] first audio bytes for "${camera.name}": ${b.slice(0, 12).toString('hex')}`);
+    }
+    bytes += data.length;
+    session?.write(data);
+  });
+  ws.on('close', cleanup);
+  ws.on('error', cleanup);
+  try {
+    session = await startTalkSession(camera);
+    if (closed) { session.close(); return; } // client hung up during startup
+    logger.info(`[talk] session started for "${camera.name}" by ${user.username || 'user'}`);
+    ws.send(JSON.stringify({ type: 'ready' }));
+  } catch (e) {
+    logger.error(`[talk] failed to start for "${camera.name}": ${e.message}`);
+    try { ws.send(JSON.stringify({ type: 'error', error: e.message })); } catch { /* ignore */ }
+    cleanup();
+  }
+}
 
 // Also re-check periodically (not just at startup) — if MediaMTX is ever restarted
 // on its own (e.g. after a config change, or a crash) without the app restarting too,
@@ -282,6 +346,10 @@ async function reconcileCameraPaths(attempt = 1) {
       }
       if (!isRunning(cam.id)) {
         await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
+      }
+      // Keep the optional low-quality sub-stream (adaptive quality) alive the same way.
+      if (subConfigured(cam) && !isSubRunning(cam.id)) {
+        await startSubStream(cam);
       }
     }
     if (fixedCount > 0) {

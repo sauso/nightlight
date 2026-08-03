@@ -50,6 +50,19 @@ function sessionStillValid(sessionId) {
   return true;
 }
 
+// Verify a raw JWT the same way the middleware does (signature + live session), for contexts
+// without an Express req/res - e.g. the WebSocket upgrade handshake. Returns the payload or null.
+export function verifyToken(token) {
+  if (!token) return null;
+  try {
+    const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+    if (!sessionStillValid(payload.sid)) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
 export function requireAuth(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;

@@ -1,7 +1,9 @@
 # Nightlight: Documentation (with screenshots) + End-to-End Testing — Scope Document
 
-Status: **Not started.** Planning document only, to hand to Claude Code when
-work begins. Confirm current repo structure against this document before
+Status: **Not started; process refined 2026-08-02.** Planning document - hand to Claude Code when
+work begins (planned after the next feature release). The original brief is below; a **refined,
+phased process with the up-front decisions and current-app testability notes is at the bottom**
+("Refined process & current-app notes") - start from there. Confirm current repo structure before
 starting.
 
 ---
@@ -126,3 +128,56 @@ before concluding Android UI/instrumented testing isn't feasible at all.
    deliberately (see open questions above).
 5. Only then evaluate Android instrumented testing (Espresso) as a
    separate, later piece of work in the `nightlight-android` repo.
+
+---
+
+## Refined process & current-app notes (2026-08-02)
+
+The phased "how to progress it", building on the order above. **The single first move is Phase 1**
+(the synthetic RTSP camera) - it unblocks everything and is small/self-contained.
+
+### Phase 0 - three decisions to lock first (no code)
+1. **Where tests live:** a top-level **`e2e/`** folder in `nightlight` with its own
+   `docker-compose.e2e.yml`. It's test infrastructure, not app code - keep it out of `frontend/`.
+2. **Auth bootstrap:** drive the real **first-run flow** (create admin -> log in) rather than seeding
+   the DB, so it exercises a real path and survives auth changes. (The app gates everything behind
+   login; first-run creates the admin - see `routes/auth.js`.)
+3. **CI trigger scope:** run E2E **on the `dev -> main` PR** (gates the prod release) plus a
+   **nightly** run on `dev`. NOT every commit - the suite spins up container + synthetic camera +
+   browser, so it's minutes.
+
+### Phase 1 - synthetic RTSP camera (the unblocker)
+- `docker-compose.e2e.yml` with (a) the `nightlight` image and (b) a sidecar looping a short clip
+  into a lightweight RTSP server (a second `mediamtx`, or `ffmpeg -stream_loop -1 … -f rtsp
+  rtsp://fakecam:8554/test`). The test adds a camera pointing at that URL; the real pipeline
+  (transcoder -> Nightlight's own MediaMTX -> WHEP/HLS) does the rest.
+- **Prove-out gate:** bring up compose, add the camera via the API, confirm the path goes `ready` and
+  WHEP serves frames - before writing any Playwright.
+
+### Phase 2 - a small set of Playwright specs (prove the pattern first)
+First-run -> login; add camera (synthetic source) -> tile shows live; the three-state audio button
+cycle (Off -> On -> Background) + visual states; one settings flow (e.g. temperature-unit toggle).
+
+### Phase 3 - screenshots + docs from the same specs
+Add `page.screenshot()` at good states, then write the `docs/` markdown (Part 1) around the generated
+images so docs are born in sync with the real UI.
+
+### Phase 4 - wire into CI
+New `e2e.yml`: bring up the compose stack, run Playwright, **upload screenshots + traces as
+artifacts** (traces are essential for debugging CI-only failures). Trigger per Phase 0.
+
+### Phase 5 - Android (Espresso), separate + later
+Only after web E2E is stable. Local emulator was dead (no nested virt) but **GitHub Linux runners
+have KVM**, so a CI emulator is realistic. Own workflow in `nightlight-mobile`, testing the genuinely
+native bits (foreground service surviving screen-off, notification Stop).
+
+### Testability of the newer features (scope the first suite to the stable core)
+The app has grown a lot since this brief (two-way audio, adaptive stream quality, PTZ, ONVIF add,
+camera history). Defer the hard-to-fake ones:
+- **Two-way audio:** Playwright can fake a mic (`--use-fake-device-for-media-stream`) and assert the
+  talk WebSocket connects and streams bytes - but NOT that the camera physically plays it. A light
+  "WS opens + bytes flow" test, later, not first.
+- **Adaptive quality:** testable - give the synthetic source a second path and assert High/Low swaps
+  the player's stream. Good Phase-2-plus candidate.
+- **ONVIF discovery / two-way-audio ISAPI:** skip early; faking an ONVIF/Hikvision-ISAPI server in CI
+  is a rabbit hole. Test manual add first.

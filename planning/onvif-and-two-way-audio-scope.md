@@ -1,10 +1,12 @@
 # Nightlight: ONVIF Discovery + Two-Way Audio — Scope Document
 
-Status: **Phase 1 built (on `dev`, being tested on staging) as of 2026-07-27.**
-Implemented as **ONVIF add-by-IP**, not multicast discovery — see the Phase 1
-implementation notes below for why and what was learned against the real Sonoff.
-Phase 2 (capability check) not started. Phase 3 (two-way audio) is waiting on
-acquiring a camera confirmed to support the **ONVIF audio backchannel**.
+Status: **Phase 1 built** (ONVIF add-by-IP, not multicast discovery — see the Phase 1 notes for
+why and what was learned against the real Sonoff). **Phase 2 (capability check) is also built** —
+`probeOnvifCamera()` runs `GetAudioOutputConfigurations` at add time and records
+`backchannel_supported` (`yes`/`no`/`unknown`), surfaced in the camera UI. **Phase 3 (two-way audio)
+is ready to start (2026-08-02):** a confirmed-backchannel camera has been acquired — a **Hikvision
+DS-2CD2386G2-ISU/SL** — so see "Phase 3 — implementation findings & revised approach" below for the
+concrete plan (it corrects the original Phase 3 architecture).
 
 > **Correction (2026-07-27): don't shop by "Profile T."** The audio backchannel
 > needed for two-way talk is a *conditional* ONVIF feature that appears in *some*
@@ -186,6 +188,64 @@ advertised. Prototype against one known-good camera before generalizing.
   talkback, and adding it would be camera-firmware work out of scope for this app. So it
   cannot be the two-way-audio prototype target — a confirmed-backchannel camera is still
   needed for Phase 3 (see the shopping note at the top).
+
+- **Hikvision DS-2CD2386G2-ISU/SL (firmware V5.7.19)** — acquired 2026-08-02, the **Phase 3
+  prototype camera.** On staging as "Test" at `192.168.5.11`. Live ONVIF probe confirmed a real
+  speaker: `GetAudioOutputConfigurations` returns one output with
+  `sendPrimacy: www.onvif.org/ver20/HalfDuplex/Auto` (half-duplex = walkie-talkie, which matches
+  the push-to-talk + duck-incoming UX). Full ONVIF service set (ver20 media, deviceIO). RTSP is the
+  Hikvision scheme `rtsp://<u>:<p>@ip:554/Streaming/Channels/101`.
+
+## Phase 3 — implementation findings & revised approach (2026-08-02)
+
+Probed the real Hikvision above before starting. Two corrections to the Phase 3 plan:
+
+**1. The proposed "ffmpeg leg → RTSP backchannel" does NOT work.** ffmpeg cannot perform the ONVIF
+audio backchannel handshake — the backchannel is a *sendonly* media track negotiated inside the
+downstream RTSP `DESCRIBE` (`Require: www.onvif.org/ver20/backchannel`), not a normal RTSP
+publish/ANNOUNCE. So the generic-ONVIF path needs a **custom RTSP client** (raw DESCRIBE/SETUP/RTP,
+or GStreamer), not ffmpeg. (MediaMTX in the image is **v1.19.3**, which *does* support WHIP ingest,
+so the browser→server half is fine — it's only the server→camera leg that the plan got wrong.)
+
+**2. Design it as a pluggable "talk sink", because the server→speaker leg is the only camera-specific
+part.** The browser→server→G.711 (μ-law 8 kHz) pipeline is identical for every camera — build it
+once. Behind it, a `TalkSink` interface with one implementation per camera type, selected by a new
+`talk_backend` column on the camera (`hikvision-isapi` | `onvif-backchannel` | `thingino` | `none`),
+set at add time from the capability probe. Adding a new camera type is then one new sink, not a
+rewrite.
+
+**Sink implementations, easiest first:**
+- **`hikvision-isapi`** (this camera, and Hikvision generally) — **CONFIRMED working 2026-08-02.**
+  HTTP, not RTSP: `PUT /ISAPI/System/TwoWayAudio/channels/1/open` → stream to `.../audioData` →
+  `.../close`. No RTSP backchannel, no ffmpeg leg, no MediaMTX for the talk path. **Much** simpler
+  than Path A. Verified live: `GET /ISAPI/System/TwoWayAudio/channels` returns channel `id=1` with
+  **`audioCompressionType: G.711ulaw`** (μ-law, 8 kHz mono) — so the backend transcodes the browser
+  mic → G.711 μ-law and streams the bytes to `audioData`.
+  - **Auth gotcha (important):** ISAPI is HTTP-digest against Hikvision's **web/ISAPI user DB, which
+    is SEPARATE from the ONVIF user DB** (ONVIF users live under Network → Integration Protocol →
+    ONVIF; web/ISAPI users under System → User Management). The ONVIF-only account we store for the
+    camera (used for RTSP + the capability probe) gets `401` on ISAPI even for `deviceInfo`. Fix: a
+    **normal web account** was created on the test camera and ISAPI then returns `200`. So the
+    Hikvision talk sink needs its **own web/ISAPI credential field**, distinct from the stored
+    ONVIF/RTSP creds. (Also note Hikvision's "Illegal Login Lock" — repeated bad logins lock the
+    source IP ~30 min; disable under Security → Security Service if it bites during dev.)
+- **`onvif-backchannel`** (generic, vendor-neutral) — the custom-RTSP engine from correction #1.
+  Harder; build only once a second brand needs it.
+- **`thingino`** (open Ingenic firmware, if flashed on a future camera) — its ONVIF is
+  `onvif_simple_server` (minimal Profile S, historically **no** backchannel), so it'll likely probe
+  as `backchannel: no/unknown` and NOT use the ONVIF path. But it's an open Linux device you control,
+  so it exposes a direct audio-in path (an RTSP backchannel *if* the flashed `prudynt` build
+  supports two-way audio, else a native audio-play hook — HTTP/MQTT/`audioplay` to the ALSA device).
+  Verify on the actual build; often easier than a vendor API since there's no locked permission
+  model. If `prudynt` does expose the backchannel, it can reuse the `onvif-backchannel` sink engine.
+
+**Transport for the outbound (talk) audio:** a **WebSocket** (browser mic → PCM/Opus → backend →
+transcode to G.711 μ-law → sink) is simpler and lower-latency than routing outbound audio through
+WHIP/MediaMTX. Keep MediaMTX for the downstream view only.
+
+**Revised recommendation:** build the shared browser→server→G.711 front end + the `TalkSink`
+abstraction, ship the **Hikvision-ISAPI sink first** against `192.168.5.11` to get talk-back working
+end-to-end on real hardware, then add `onvif-backchannel` / `thingino` sinks later as needed.
 
 ## Suggested order of work when starting
 

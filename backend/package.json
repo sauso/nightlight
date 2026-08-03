@@ -1,6 +1,6 @@
 {
   "name": "babymonitor-backend",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "main": "src/index.js",
@@ -17,6 +17,7 @@
     "jsonwebtoken": "^9.0.2",
     "mqtt": "^5.10.1",
     "onvif": "^0.8.1",
-    "uuid": "^14.0.1"
+    "uuid": "^14.0.1",
+    "ws": "^8.21.1"
   }
 }

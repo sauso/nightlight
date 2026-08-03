@@ -14,12 +14,14 @@ export default function Cameras() {
   const [editing, setEditing] = useState(null);
   const EMPTY_FORM = {
     name: '', rtsp_host: '', rtsp_port: '554', rtsp_path: '', rtsp_username: '', rtsp_password: '',
-    child_id: '', mqtt_topic: '',
+    child_id: '', mqtt_topic: '', talk_username: '', talk_password: '', sub_rtsp_path: '',
   };
   const [form, setForm] = useState(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
   const [onvifBusy, setOnvifBusy] = useState(false);
   const [onvifMsg, setOnvifMsg] = useState('');
+  const [talkVerifyBusy, setTalkVerifyBusy] = useState(false);
+  const [talkVerifyMsg, setTalkVerifyMsg] = useState(null); // { ok, text } | null
   // Errors from actions *inside* the add/edit modal (ONVIF fetch, save) shown within the
   // modal itself - not the page-level `error` banner, which renders behind the modal where
   // it can't be seen.
@@ -38,6 +40,7 @@ export default function Cameras() {
     setOnvifMsg('');
     setConfirmMsg('');
     setModalError('');
+    setTalkVerifyMsg(null);
     setEditing({});
   }
 
@@ -53,10 +56,14 @@ export default function Cameras() {
       rtsp_password: '',
       child_id: cam.child_id || '',
       mqtt_topic: cam.mqtt_topic || '',
+      talk_username: cam.talk_username || '',
+      talk_password: '',
+      sub_rtsp_path: cam.sub_rtsp_path || '',
     });
     setOnvifMsg('');
     setConfirmMsg('');
     setModalError('');
+    setTalkVerifyMsg(null);
     setEditing(cam);
   }
 
@@ -77,6 +84,7 @@ export default function Cameras() {
         host,
         username: form.rtsp_username || undefined,
         password: form.rtsp_password || undefined,
+        id: editing.id || undefined, // on edit, blank password falls back to the stored one
       });
       setForm((f) => ({
         ...f,
@@ -85,6 +93,7 @@ export default function Cameras() {
         rtsp_host: r.rtspHost || host,
         rtsp_port: r.rtspPort || f.rtsp_port || '554',
         rtsp_path: r.rtspPath || f.rtsp_path,
+        sub_rtsp_path: r.subRtspPath || f.sub_rtsp_path,
         discovery_source: 'onvif',
         onvif_device_url: r.onvifDeviceUrl,
         backchannel_supported: r.backchannel,
@@ -94,11 +103,35 @@ export default function Cameras() {
       const res = r.video?.width ? `${r.video.codec || ''} ${r.video.width}×${r.video.height}`.trim() : r.video?.codec || '';
       const talk = r.backchannel === 'yes' ? ' · two-way audio' : r.backchannel === 'no' ? ' · no two-way audio' : '';
       const ptz = r.ptz ? ' · PTZ' : '';
-      setOnvifMsg(`Found stream${res ? ` — ${res}` : ''}${talk}${ptz}. Port & path filled in — enter the username/password below.`);
+      const low = r.subRtspPath ? ' · low-quality stream' : '';
+      setOnvifMsg(`Found stream${res ? ` — ${res}` : ''}${talk}${ptz}${low}. Port & path${r.subRtspPath ? ' (incl. low-quality)' : ''} filled in.`);
     } catch (err) {
       setModalError(err.message);
     } finally {
       setOnvifBusy(false);
+    }
+  }
+
+  // Verify the two-way-audio login without saving. On edit, an unchanged (blank) password falls
+  // back to the stored one via the camera id.
+  async function verifyTalk() {
+    const host = form.rtsp_host.trim();
+    if (!host) { setTalkVerifyMsg({ ok: false, text: 'Enter the camera IP first' }); return; }
+    if (!form.talk_username.trim()) { setTalkVerifyMsg({ ok: false, text: 'Enter the talk username first' }); return; }
+    setTalkVerifyBusy(true);
+    setTalkVerifyMsg(null);
+    try {
+      const r = await api.post('/cameras/verify-talk', {
+        host,
+        username: form.talk_username.trim(),
+        password: form.talk_password || undefined,
+        id: editing.id || undefined,
+      });
+      setTalkVerifyMsg({ ok: true, text: `Talk login works${r.codec ? ` — ${r.codec}` : ''}` });
+    } catch (err) {
+      setTalkVerifyMsg({ ok: false, text: err.message });
+    } finally {
+      setTalkVerifyBusy(false);
     }
   }
 
@@ -278,28 +311,6 @@ export default function Cameras() {
                 />
               </div>
             </div>
-            {!editing.id && (
-              <div className="onvif-fetch">
-                <button type="button" className="btn" onClick={fetchFromOnvif} disabled={onvifBusy}>
-                  {onvifBusy ? 'Fetching…' : '↻ Fetch port & path from ONVIF'}
-                </button>
-                <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-                  Optional: enter the IP above and fetch the stream port &amp; path
-                  automatically. Most cameras don't need a login for this; if yours does, fill
-                  the username/password below first.
-                </div>
-                {onvifMsg && <div className="onvif-box__ok">{onvifMsg}</div>}
-              </div>
-            )}
-            <div className="field">
-              <label htmlFor="cam-path">Stream path</label>
-              <input
-                id="cam-path"
-                value={form.rtsp_path}
-                onChange={(e) => setForm({ ...form, rtsp_path: e.target.value })}
-                placeholder="/stream1"
-              />
-            </div>
             <div className="onvif-box__row">
               <div className="field">
                 <label htmlFor="cam-user">Username</label>
@@ -308,6 +319,9 @@ export default function Cameras() {
                   value={form.rtsp_username}
                   onChange={(e) => setForm({ ...form, rtsp_username: e.target.value })}
                   autoComplete="off"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                 />
               </div>
               <div className="field">
@@ -318,10 +332,104 @@ export default function Cameras() {
                   value={form.rtsp_password}
                   onChange={(e) => setForm({ ...form, rtsp_password: e.target.value })}
                   autoComplete="off"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   placeholder={editing.id && editing.rtsp_has_password ? '•••••• (unchanged)' : ''}
                 />
               </div>
             </div>
+            {/* ONVIF fetch is available when adding AND editing: re-fetching an existing camera
+                re-detects its port/path and capabilities (two-way audio, PTZ). Uses the login above. */}
+            <div className="onvif-fetch">
+              <button type="button" className="btn" onClick={fetchFromOnvif} disabled={onvifBusy}>
+                {onvifBusy ? 'Fetching…' : '↻ Fetch port, path & capabilities from ONVIF'}
+              </button>
+              <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                Optional: fetch the stream port, path and capabilities (two-way audio, PTZ) over
+                ONVIF using the IP and login above. Most cameras don't need a login for this; if
+                yours does, fill it in first.
+              </div>
+              {onvifMsg && <div className="onvif-box__ok">{onvifMsg}</div>}
+            </div>
+            <div className="field">
+              <label htmlFor="cam-path">Stream path</label>
+              <input
+                id="cam-path"
+                value={form.rtsp_path}
+                onChange={(e) => setForm({ ...form, rtsp_path: e.target.value })}
+                placeholder="/Streaming/Channels/101"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <p className="onvif-box__hint">
+                The main (high-quality) stream path. Filled in by the ONVIF fetch above, or enter it
+                manually (e.g. <code>/Streaming/Channels/101</code>).
+              </p>
+            </div>
+            <div className="field">
+              <label htmlFor="cam-sub-path">Low-quality stream path (optional)</label>
+              <input
+                id="cam-sub-path"
+                value={form.sub_rtsp_path}
+                onChange={(e) => setForm({ ...form, sub_rtsp_path: e.target.value })}
+                autoComplete="off"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder="/Streaming/Channels/102"
+              />
+              <p className="onvif-box__hint">
+                A second, lower-resolution stream (e.g. <code>/Streaming/Channels/102</code>) that adds
+                a &quot;Low&quot; quality option on the tile — it reuses the address and login above.
+                Filled in by the ONVIF fetch if the camera has one; leave blank for none.
+              </p>
+            </div>
+            {(editing.backchannel_supported === 'yes' || form.backchannel_supported === 'yes') && (
+              <div className="onvif-box">
+                <div className="onvif-box__title">Two-way audio (talk-back)</div>
+                <p className="onvif-box__hint">
+                  This camera supports talk-back. Enter its <strong>web login</strong> to enable the
+                  hold-to-talk button — for Hikvision that's the Configuration → User Management
+                  account, which is separate from the ONVIF user. Leave the username blank to turn it off.
+                </p>
+                <div className="onvif-box__row">
+                  <div className="field">
+                    <label htmlFor="cam-talk-user">Talk username</label>
+                    <input
+                      id="cam-talk-user"
+                      value={form.talk_username}
+                      onChange={(e) => setForm({ ...form, talk_username: e.target.value })}
+                      autoComplete="off"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="cam-talk-pass">Talk password</label>
+                    <input
+                      id="cam-talk-pass"
+                      type="password"
+                      value={form.talk_password}
+                      onChange={(e) => setForm({ ...form, talk_password: e.target.value })}
+                      autoComplete="off"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      placeholder={editing.talk_has_password ? '•••••• (unchanged)' : ''}
+                    />
+                  </div>
+                </div>
+                <button type="button" className="btn" onClick={verifyTalk} disabled={talkVerifyBusy} style={{ marginTop: 4 }}>
+                  {talkVerifyBusy ? 'Verifying…' : 'Verify login'}
+                </button>
+                {talkVerifyMsg && (
+                  <div className={talkVerifyMsg.ok ? 'onvif-box__ok' : 'onvif-box__err'}>{talkVerifyMsg.text}</div>
+                )}
+              </div>
+            )}
             <div className="field">
               <label htmlFor="cam-child">Assign to child (optional)</label>
               <select
