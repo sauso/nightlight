@@ -13,7 +13,12 @@ module.exports = defineConfig({
   // retry would re-add and leave a duplicate camera, breaking later specs. Keep the
   // suite deterministic instead.
   retries: 0,
-  reporter: [['list'], ['html', { outputFolder: 'playwright-report', open: 'never' }]],
+  reporter: [
+    ['list'],
+    ['html', { outputFolder: 'playwright-report', open: 'never' }],
+    // Machine-readable results, turned into a GitHub run-page summary by summarize.mjs.
+    ['json', { outputFile: 'results.json' }],
+  ],
   outputDir: 'test-results',
   use: {
     // In-compose the app is reachable by service name over HTTPS (Caddy sidecar);
