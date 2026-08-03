@@ -471,13 +471,14 @@ export default function Cameras() {
 
             {editing.id && (
               <div className="field">
-                <label className="log-viewer__toggle" style={{ marginBottom: 0 }}>
+                <label>Motion detection</label>
+                <label className="log-viewer__toggle" style={{ margin: '4px 0 0' }}>
                   <input
                     type="checkbox"
                     checked={form.detect_motion_enabled}
                     onChange={(e) => setForm({ ...form, detect_motion_enabled: e.target.checked })}
                   />
-                  Motion detection
+                  Enable
                 </label>
                 <div className="camera-tile__sub" style={{ marginTop: 6 }}>
                   Watches this camera for movement and logs an alert (see Settings → Recent alerts).
