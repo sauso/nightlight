@@ -288,10 +288,15 @@ setInterval(async () => {
 // never trips (the tell is sound working in VLC/a fresh connection but not in the app). This
 // periodically probes that audio is actually flowing (see audioLiveness.js) and force-restarts a
 // camera whose audio has stalled. Confirmed over two consecutive checks so a momentary blip - or a
-// one-off probe failure - never triggers a needless restart. Runs on its own slower interval
-// because each probe reads a few seconds of the stream, unlike the cheap ready-poll above.
+// one-off probe failure - never triggers a needless restart (see the interval constant below).
 const audioStallCounts = new Map(); // camera_id -> consecutive stalled checks
-const AUDIO_CHECK_INTERVAL_MS = 2 * 60 * 1000;
+// 30s interval + 2 consecutive stalls => a stall is caught and healed in ~30-60s. That
+// matters for a monitor - minutes of dead audio is too long. The probe is cheap on a
+// healthy camera (audio delivers dozens of packets/sec, so it hits MIN_AUDIO_PACKETS and
+// returns in well under a second); only a genuinely stalled one waits the full 6s timeout.
+// Requiring two consecutive stalls still filters blips and probes that land during a normal
+// restart (a not-ready path is skipped, and an inconclusive probe resets the counter).
+const AUDIO_CHECK_INTERVAL_MS = 30 * 1000;
 const AUDIO_STALL_RESTART_THRESHOLD = 2;
 
 setInterval(async () => {
