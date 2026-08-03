@@ -9,6 +9,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-08-03
+
+### Changed
+- **The audio-liveness watchdog now recovers stalled audio in ~30–60s instead of 2–4 minutes.**
+  It checks every 30 seconds (was every 2 minutes); it still requires two consecutive stalled
+  checks before restarting a camera, so brief blips are ignored. The check is cheap on a healthy
+  camera (it returns in well under a second), so the faster cadence adds negligible load — a
+  genuinely stalled camera is just healed much sooner. A chronically flaky camera will restart
+  more often as a result; the real fix for that is the camera itself.
+
 ## [0.7.0] - 2026-08-03
 
 ### Added

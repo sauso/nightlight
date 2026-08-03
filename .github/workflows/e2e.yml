@@ -1,0 +1,71 @@
+name: End-to-end tests
+
+# Runs the e2e/ stack (real app image + synthetic RTSP camera) on a GitHub Linux
+# runner. Deliberately NOT on every push — the stack spins up containers + a fake
+# camera + a browser, so it's minutes, not seconds. Per the scope doc's Phase 0
+# decision it runs where it earns its cost:
+#   - on a dev -> main PR   : gates the production release
+#   - nightly on dev        : catches drift between releases
+#   - manual (dispatch)     : on demand
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 15 * * *' # 15:00 UTC nightly
+  workflow_dispatch: {}
+
+# Don't pile up runs; a newer commit on the same PR/branch supersedes an in-flight one.
+concurrency:
+  group: e2e-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # A nightly (schedule) run fires from the default branch — point it at dev,
+          # the branch we actually want covered between releases. PR/dispatch use their
+          # own triggering ref.
+          ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
+
+      # Phase 1: the whole pipeline (transcoder -> MediaMTX -> HLS) delivers playable
+      # frames from the synthetic camera. Self-contained: brings the stack up and tears
+      # it back down. Gate for Phase 2 — no point driving the UI if the pipeline is dead.
+      - name: Phase 1 — pipeline prove-out
+        working-directory: e2e
+        run: bash prove.sh
+
+      # Phase 2: the Playwright UI suite (first-run, add camera -> live tile, audio
+      # toggle, settings) against a fresh stack. The Playwright report + traces are
+      # written to the mounted host dir, so they survive the stack teardown.
+      - name: Phase 2 — Playwright UI suite
+        working-directory: e2e
+        run: bash test.sh
+
+      - name: Upload Playwright report + traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            e2e/playwright/playwright-report
+            e2e/playwright/test-results
+          if-no-files-found: ignore
+
+      # Documentation screenshots (from 05-screenshots.spec.js). Download this artifact
+      # and commit the images under docs/screenshots/ to refresh the docs — see e2e/README.md.
+      - name: Upload documentation screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-screenshots
+          path: e2e/playwright/screenshots
+          if-no-files-found: ignore
+
+      - name: Tear down (safety net)
+        if: always()
+        working-directory: e2e
+        run: docker compose -f docker-compose.e2e.yml -p nightlight-e2e --profile test down -v || true

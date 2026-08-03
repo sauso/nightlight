@@ -1,0 +1,21 @@
+# TLS terminator for the e2e stack, so the browser talks HTTPS to the app like
+# production (behind a real reverse proxy). This matters because MediaMTX's HLS
+# cookie-check sets a `Secure; SameSite=None` cookie — which a browser will only
+# store over a *trusted* HTTPS origin. Our cert is self-signed (internal CA), so
+# Chromium (even with ignoreHTTPSErrors) treats the origin as insecure and drops
+# the cookie, breaking Compatibility (HLS) playback.
+#
+# Rather than install the internal CA into Chromium's trust store, we downgrade
+# just that cookie for the test browser: strip `Secure` (and, since SameSite=None
+# is invalid without Secure, make it Lax). This is a test-harness adaptation for
+# the self-signed cert only — production is real HTTPS and keeps the Secure cookie.
+{
+	auto_https disable_redirects
+}
+
+https://proxy {
+	tls internal
+	reverse_proxy nightlight:4000 {
+		header_down Set-Cookie "Secure; SameSite=None; Partitioned" "SameSite=Lax"
+	}
+}

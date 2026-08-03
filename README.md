@@ -14,6 +14,12 @@ below). No cloud, no subscription, no account anywhere but your own network.
 > the operating system, networks fail — never rely on this software to alert you to a
 > child in distress.
 
+## Screenshots
+
+See the [visual walkthrough](docs/README.md) for a tour of the main screens (sign-in, the
+nursery dashboard, adding a camera, and settings). Those images are generated automatically
+by the end-to-end test suite, so they stay in sync with the actual UI.
+
 ## How it works
 
 - **FFmpeg** pulls each camera's RTSP stream, copies the video through untouched, and
