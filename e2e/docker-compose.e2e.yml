@@ -45,6 +45,18 @@ services:
     tmpfs:
       - /app/data
 
+  # TLS terminator (see proxy/Caddyfile). The browser talks HTTPS to the app like
+  # production, so MediaMTX's `Secure` HLS cookie is stored and Compatibility playback
+  # works. Only the in-network Playwright service needs it; the host port is for poking.
+  proxy:
+    image: caddy:2-alpine
+    depends_on:
+      - nightlight
+    volumes:
+      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "${E2E_HTTPS_PORT:-8443}:443"
+
   # Playwright UI tests (Phase 2). Runs in the official image on the same network, so
   # it reaches the app by service name and needs no host Node. Behind the "test"
   # profile so the Phase 1 prove-out (`prove.sh`) doesn't start it; run it with
@@ -55,10 +67,13 @@ services:
     depends_on:
       - nightlight
       - fakecam
+      - proxy
     working_dir: /work
     ipc: host # Playwright's recommendation — avoids Chromium OOM/crash under load
     environment:
-      - BASE_URL=http://nightlight:4000
+      # HTTPS via the Caddy sidecar (self-signed) so the browser stores MediaMTX's
+      # Secure HLS cookie — the config sets ignoreHTTPSErrors for the internal cert.
+      - BASE_URL=https://proxy
       - CI=1
     volumes:
       - ./playwright:/work
