@@ -16,10 +16,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   slow or congested connections; the tier comes straight from the camera's second stream, so there's
   no extra video transcoding on the server. The choice is per-device (like mute). *(The sub-stream
   currently runs continuously alongside the main one; an on-demand version is a planned follow-up.)*
-- **Two-way audio (talk-back).** Cameras that support it now show a **hold-to-talk** button — press
-  and hold to speak through the camera's speaker, release to stop; your voice is captured, encoded to
-  G.711, and streamed to the camera, and the camera's own audio is ducked while you talk (it's
-  half-duplex, walkie-talkie style). Set it up per camera in Cameras → edit by entering the camera's
+- **Two-way audio (talk-back).** Cameras that support it now show a **talk** button — tap to start
+  talking through the camera's speaker (the button turns red and pulses while live), tap again to
+  stop (and it auto-stops after a couple of minutes as a safety net). Your voice is captured, encoded
+  to G.711, and streamed to the camera, and the camera's own audio is ducked while you talk (it's
+  half-duplex). Set it up per camera in Cameras → edit by entering the camera's
   **web login** (for Hikvision, the User Management account — separate from the ONVIF user). Only the
   Hikvision ISAPI backend is implemented so far.
 
