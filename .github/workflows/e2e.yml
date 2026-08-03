@@ -2,8 +2,8 @@ name: End-to-end tests
 
 # Runs the e2e/ stack (real app image + synthetic RTSP camera) on a GitHub Linux
 # runner. Deliberately NOT on every push — the stack spins up containers + a fake
-# camera, so it's minutes, not seconds. Per the scope doc's Phase 0 decision it
-# runs where it earns its cost:
+# camera + a browser, so it's minutes, not seconds. Per the scope doc's Phase 0
+# decision it runs where it earns its cost:
 #   - on a dev -> main PR   : gates the production release
 #   - nightly on dev        : catches drift between releases
 #   - manual (dispatch)     : on demand
@@ -31,27 +31,31 @@ jobs:
           # own triggering ref.
           ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
 
-      - name: Phase 1 — synthetic camera goes live end-to-end
+      # Phase 1: the whole pipeline (transcoder -> MediaMTX -> HLS) delivers playable
+      # frames from the synthetic camera. Self-contained: brings the stack up and tears
+      # it back down. Gate for Phase 2 — no point driving the UI if the pipeline is dead.
+      - name: Phase 1 — pipeline prove-out
         working-directory: e2e
-        # --keep leaves the stack up so the steps below can grab logs on failure;
-        # the final step tears it down regardless. Invoked via bash so it doesn't
-        # depend on the executable bit surviving a Windows commit.
-        run: bash ./prove.sh --keep
+        run: bash prove.sh
 
-      - name: Collect stack logs
-        if: always()
+      # Phase 2: the Playwright UI suite (first-run, add camera -> live tile, audio
+      # toggle, settings) against a fresh stack. The Playwright report + traces are
+      # written to the mounted host dir, so they survive the stack teardown.
+      - name: Phase 2 — Playwright UI suite
         working-directory: e2e
-        run: docker compose -f docker-compose.e2e.yml -p nightlight-e2e logs --no-color > stack-logs.txt 2>&1 || true
+        run: bash test.sh
 
-      - name: Upload logs
+      - name: Upload Playwright report + traces
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-stack-logs
-          path: e2e/stack-logs.txt
+          name: playwright-report
+          path: |
+            e2e/playwright/playwright-report
+            e2e/playwright/test-results
           if-no-files-found: ignore
 
-      - name: Tear down
+      - name: Tear down (safety net)
         if: always()
         working-directory: e2e
-        run: docker compose -f docker-compose.e2e.yml -p nightlight-e2e down -v || true
+        run: docker compose -f docker-compose.e2e.yml -p nightlight-e2e --profile test down -v || true

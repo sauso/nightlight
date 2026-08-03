@@ -44,3 +44,24 @@ services:
       - "${E2E_PORT:-4000}:4000"
     tmpfs:
       - /app/data
+
+  # Playwright UI tests (Phase 2). Runs in the official image on the same network, so
+  # it reaches the app by service name and needs no host Node. Behind the "test"
+  # profile so the Phase 1 prove-out (`prove.sh`) doesn't start it; run it with
+  # `docker compose --profile test run --rm playwright` (or via ./test.sh).
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.49.0-jammy
+    profiles: ["test"]
+    depends_on:
+      - nightlight
+      - fakecam
+    working_dir: /work
+    ipc: host # Playwright's recommendation — avoids Chromium OOM/crash under load
+    environment:
+      - BASE_URL=http://nightlight:4000
+      - CI=1
+    volumes:
+      - ./playwright:/work
+    # The image ships the browsers (PLAYWRIGHT_BROWSERS_PATH is baked in), so npm only
+    # fetches @playwright/test (pinned to the image version) — no browser download.
+    command: sh -c "npm install --no-audit --no-fund && npx playwright test"

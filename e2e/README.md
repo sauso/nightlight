@@ -15,14 +15,26 @@ MediaMTX → WHEP/HLS) is exercised with no camera hardware. See
 - `prove.sh` — Phase 1 gate: brings the stack up, drives the real create-admin
   flow, adds the synthetic camera through the real API, and confirms playable
   HLS frames come out the far end. Run this before writing/trusting Playwright.
+- `playwright/` — Phase 2 UI suite (first-run → login, add camera → live tile,
+  audio toggle, settings). Runs as an in-compose service (`test` profile) using
+  the official Playwright image, so it needs no host Node.
+- `test.sh` — brings up a fresh stack and runs the Playwright suite in-network.
+  The report + traces land in `playwright/playwright-report` and
+  `playwright/test-results`.
 
 ## Run (needs a Docker host)
 
 ```bash
 cd e2e
-./prove.sh            # up → prove → down
+./prove.sh            # Phase 1: pipeline prove-out (up → prove → down)
+./test.sh             # Phase 2: Playwright UI suite (up → test → down)
 ./prove.sh --keep     # leave it running to poke at http://localhost:4000
 ```
 
-Playwright specs (Phase 2) and the CI workflow (Phase 4) build on this same
-stack — added in later phases.
+Heads-up: the Playwright image is ~1.9 GB. Run this on a machine with room —
+GitHub-hosted runners (where CI runs it, see `.github/workflows/e2e.yml`) are
+the intended venue; a small Docker vdisk (e.g. Unraid's default 40 GB, already
+full of other images) can run out of space pulling it.
+
+CI (`.github/workflows/e2e.yml`) runs both phases on `ubuntu-latest`, on a
+dev → main PR, nightly on dev, and on manual dispatch.
