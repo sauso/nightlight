@@ -1,0 +1,4 @@
+# Shell scripts must keep LF endings — they run on Linux (CI, the Docker host).
+# A CRLF shebang line silently breaks execution, so pin these regardless of the
+# committer's platform / core.autocrlf setting.
+*.sh text eol=lf
