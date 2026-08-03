@@ -4,6 +4,8 @@ import db from '../db.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { upsertPath, removePath, getPathStatus, toPathName } from '../lib/mediamtx.js';
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
+import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.js';
+import { verifyTalkCreds } from '../lib/twoWayAudio.js';
 import { getReading, subscribeAllCameraTopics } from '../lib/mqttClient.js';
 import { probeOnvifCamera, ptzNudge } from '../lib/onvif.js';
 import { validateRtspStream } from '../lib/rtspProbe.js';
@@ -49,17 +51,30 @@ function parseRtspComponents(url) {
 // credential-free display URL and a flag for whether a password is set. ONVIF credentials
 // (used server-side for PTZ) are always stripped.
 function publicCamera(cam, isAdmin) {
-  const { rtsp_url, onvif_username, onvif_password, ...rest } = cam;
-  if (!isAdmin) return rest;
-  const parts = parseRtspComponents(rtsp_url) || {};
-  return {
+  const { rtsp_url, onvif_username, onvif_password, talk_username, talk_password, sub_rtsp_url, ...rest } = cam;
+  // talk_configured / has_sub (safe for everyone) drive the tile's talk button + quality selector.
+  const base = {
     ...rest,
+    talk_configured: !!(cam.talk_backend && talk_username && talk_password),
+    has_sub: !!(sub_rtsp_url && sub_rtsp_url.trim()),
+  };
+  if (!isAdmin) return base;
+  const parts = parseRtspComponents(rtsp_url) || {};
+  const subParts = sub_rtsp_url ? parseRtspComponents(sub_rtsp_url) || {} : {};
+  return {
+    ...base,
     rtsp_host: parts.host || '',
     rtsp_port: parts.port || '',
     rtsp_path: parts.path || '',
     rtsp_username: parts.username || '',
     rtsp_has_password: !!parts.password,
     rtsp_display: parts.host ? `rtsp://${parts.host}:${parts.port}${parts.path || ''}` : '',
+    // Two-way-audio creds for the edit form: username shown, password never returned (a set flag
+    // plus "blank keeps existing" on save, same pattern as the RTSP password).
+    talk_username: talk_username || '',
+    talk_has_password: !!talk_password,
+    // Low-quality sub-stream: only the path is edited (it reuses the main stream's host/creds).
+    sub_rtsp_path: subParts.path || '',
   };
 }
 
@@ -67,8 +82,15 @@ function publicCamera(cam, isAdmin) {
 // ready-to-use RTSP URL plus detected codec/resolution, so the admin doesn't hand-type the
 // RTSP path. Read-only probe - creates nothing; the normal POST / still does the adding.
 router.post('/onvif-probe', requireAdmin, async (req, res) => {
-  const { host, port, username, password } = req.body || {};
+  const { host, port, username, id } = req.body || {};
+  let { password } = req.body || {};
   if (!host || !host.trim()) return res.status(400).json({ error: 'Camera IP address is required' });
+  // On edit, the password field comes back blank (we never return it). Fall back to the stored
+  // credential so re-fetching ONVIF on an existing camera works without re-typing the password.
+  if (!password && id) {
+    const cam = db.prepare('SELECT rtsp_url, onvif_password FROM cameras WHERE id = ?').get(id);
+    password = cam?.onvif_password || parseRtspComponents(cam?.rtsp_url || '')?.password || undefined;
+  }
   try {
     // Cap the whole probe so a slow/unresponsive camera can't keep the request open long
     // enough for a reverse proxy in front of us to time out and return its own (bodiless)
@@ -166,12 +188,28 @@ router.put('/reorder', (req, res) => {
   res.json({ ok: true });
 });
 
+// Verify two-way-audio (talk) credentials without saving - the "Verify login" button in the
+// add/edit form. On edit, a blank password + camera id falls back to the stored password (same
+// "blank = keep" rule as elsewhere). Mounted before /:id so "verify-talk" isn't matched as an :id.
+router.post('/verify-talk', requireAdmin, async (req, res) => {
+  const { host, username, password, id } = req.body || {};
+  if (!host || !host.trim()) return res.status(400).json({ error: 'Camera IP address is required' });
+  let pass = password;
+  if (!pass && id) pass = db.prepare('SELECT talk_password FROM cameras WHERE id = ?').get(id)?.talk_password || null;
+  if (!username || !pass) return res.status(400).json({ error: 'Enter the talk username and password first' });
+  const result = await verifyTalkCreds({ host: host.trim(), username, password: pass });
+  // 422 (not 5xx) so a reverse proxy passes the message through - see the onvif-probe note above.
+  if (!result.ok) return res.status(422).json({ error: result.error || 'Verification failed' });
+  res.json({ ok: true, codec: result.codec });
+});
+
 router.post('/', requireAdmin, async (req, res) => {
   const {
     name, rtsp_host, rtsp_port, rtsp_path, rtsp_username, rtsp_password,
     child_id, mqtt_topic, force,
     discovery_source, onvif_device_url, backchannel_supported,
     ptz_supported, onvif_profile_token,
+    talk_username, talk_password, sub_rtsp_path,
   } = req.body || {};
   if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
   const rtsp_url = assembleRtspUrl({
@@ -215,18 +253,30 @@ router.post('/', requireAdmin, async (req, res) => {
   const onvifUser = isOnvif ? rtsp_username || null : null;
   const onvifPass = isOnvif ? rtsp_password || null : null;
   const profileToken = isOnvif ? onvif_profile_token || null : null;
+  // Two-way audio creds (optional at add time - a username enables the Hikvision ISAPI sink).
+  const talkUser = talk_username && talk_username.trim() ? talk_username.trim() : null;
+  const talkBackend = talkUser ? 'hikvision-isapi' : null;
+  const talkPass = talkUser ? talk_password || null : null;
+  // Low-quality sub-stream: a path on the same camera (reuses the main host/port/creds).
+  const subUrl = sub_rtsp_path && sub_rtsp_path.trim()
+    ? assembleRtspUrl({ host: rtsp_host, port: rtsp_port, path: sub_rtsp_path.trim(), username: rtsp_username, password: rtsp_password })
+    : null;
   const { maxOrder } = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS maxOrder FROM cameras').get();
   db.prepare(
     `INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path, sort_order, mqtt_topic,
        discovery_source, onvif_capable, onvif_device_url, backchannel_supported,
-       ptz_supported, onvif_username, onvif_password, onvif_profile_token)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       ptz_supported, onvif_username, onvif_password, onvif_profile_token,
+       talk_backend, talk_username, talk_password, sub_rtsp_url)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id, name.trim(), rtsp_url.trim(), child_id || null, mediamtx_path, maxOrder + 1, mqtt_topic?.trim() || null,
     source, isOnvif ? 1 : 0, onvifUrl, backchannel,
-    ptz, onvifUser, onvifPass, profileToken
+    ptz, onvifUser, onvifPass, profileToken,
+    talkBackend, talkUser, talkPass, subUrl
   );
   await startTranscoder(id, rtsp_url, mediamtx_path, name.trim());
+  const added = db.prepare('SELECT * FROM cameras WHERE id = ?').get(id);
+  if (subConfigured(added)) await startSubStream(added).catch((e) => logger.error(`[substream] add failed: ${e.message}`));
   subscribeAllCameraTopics();
   res.status(201).json(publicCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(id), true));
 });
@@ -238,7 +288,9 @@ router.post('/', requireAdmin, async (req, res) => {
 router.put('/:id', requireAdmin, async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
-  const { name, rtsp_host, rtsp_port, rtsp_path, rtsp_username, rtsp_password, child_id, mqtt_topic, force } = req.body || {};
+  const { name, rtsp_host, rtsp_port, rtsp_path, rtsp_username, rtsp_password, child_id, mqtt_topic, force,
+    talk_username, talk_password, sub_rtsp_path,
+    discovery_source, onvif_device_url, backchannel_supported, ptz_supported, onvif_profile_token } = req.body || {};
 
   // Reassemble the RTSP URL from the edited fields. A field not sent keeps its current
   // value; a blank password specifically means "keep the existing one" (the browser never
@@ -278,13 +330,90 @@ router.put('/:id', requireAdmin, async (req, res) => {
     // Address changed - restart the transcoder pointed at the new one.
     await startTranscoder(req.params.id, newRtsp, existing.mediamtx_path, name?.trim() || existing.name);
   }
-  db.prepare('UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ? WHERE id = ?').run(
+  // Two-way audio credentials. talk_username not sent => leave unchanged; sent empty => disable
+  // talk-back (clear backend + creds); a value => enable the Hikvision ISAPI sink. A blank password
+  // keeps the stored one (same "blank = keep" rule as the RTSP password).
+  let talkBackend = existing.talk_backend;
+  let talkUser = existing.talk_username;
+  let talkPass = existing.talk_password;
+  if (talk_username !== undefined) {
+    if (!talk_username.trim()) {
+      talkBackend = null; talkUser = null; talkPass = null;
+    } else {
+      talkBackend = 'hikvision-isapi';
+      talkUser = talk_username.trim();
+      talkPass = talk_password ? talk_password : existing.talk_password;
+    }
+  }
+  // Low-quality sub-stream (adaptive quality). sub_rtsp_path not sent => unchanged; sent empty =>
+  // no sub-stream; a value => build a sub URL reusing the (possibly updated) main stream's host/
+  // port/creds, differing only in the path (e.g. Hikvision .../Streaming/Channels/102).
+  let subUrl = existing.sub_rtsp_url;
+  if (sub_rtsp_path !== undefined) {
+    const sp = String(sub_rtsp_path).trim();
+    if (!sp) {
+      subUrl = null;
+    } else {
+      const cur = parseRtspComponents(newRtsp) || {};
+      subUrl = assembleRtspUrl({ host: cur.host, port: cur.port, path: sp, username: cur.username, password: cur.password });
+    }
+  }
+  // ONVIF-detected capabilities, from a re-fetch in the edit form (payload has discovery_source
+  // === 'onvif'). Lets an existing camera pick up two-way-audio / PTZ support without re-adding it.
+  // A plain edit doesn't send these, so everything stays as-is.
+  let discSource = existing.discovery_source;
+  let onvifCapable = existing.onvif_capable;
+  let onvifUrl = existing.onvif_device_url;
+  let backchannel = existing.backchannel_supported;
+  let ptz = existing.ptz_supported;
+  let profileToken = existing.onvif_profile_token;
+  let onvifUser = existing.onvif_username;
+  let onvifPass = existing.onvif_password;
+  if (discovery_source === 'onvif') {
+    discSource = 'onvif';
+    onvifCapable = 1;
+    if (onvif_device_url !== undefined) onvifUrl = onvif_device_url ? onvif_device_url.trim() : null;
+    if (backchannel_supported !== undefined) backchannel = ['yes', 'no'].includes(backchannel_supported) ? backchannel_supported : 'unknown';
+    if (ptz_supported !== undefined) ptz = ptz_supported ? 1 : 0;
+    if (onvif_profile_token !== undefined) profileToken = onvif_profile_token || null;
+    // ONVIF control (PTZ) reuses the RTSP credentials the user entered.
+    if (rtsp_username !== undefined) onvifUser = rtsp_username || null;
+    if (rtsp_password) onvifPass = rtsp_password; // blank keeps the stored one
+  }
+  db.prepare(`UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?,
+      talk_backend = ?, talk_username = ?, talk_password = ?, sub_rtsp_url = ?,
+      discovery_source = ?, onvif_capable = ?, onvif_device_url = ?, backchannel_supported = ?,
+      ptz_supported = ?, onvif_profile_token = ?, onvif_username = ?, onvif_password = ?
+    WHERE id = ?`).run(
     name?.trim() || existing.name,
     newRtsp,
     child_id !== undefined ? child_id || null : existing.child_id,
     mqtt_topic !== undefined ? mqtt_topic?.trim() || null : existing.mqtt_topic,
+    talkBackend,
+    talkUser,
+    talkPass,
+    subUrl,
+    discSource,
+    onvifCapable,
+    onvifUrl,
+    backchannel,
+    ptz,
+    profileToken,
+    onvifUser,
+    onvifPass,
     req.params.id
   );
+  // Apply the sub-stream change to the running pipeline (unless the camera is disabled): start/
+  // restart its transcoder if a sub-stream is configured, or tear it down if it was cleared.
+  if (!existing.disabled) {
+    const updated = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+    try {
+      if (subConfigured(updated)) await startSubStream(updated);
+      else await stopSubStream(updated);
+    } catch (e) {
+      logger.error(`[substream] failed to apply for ${updated.name}: ${e.message}`);
+    }
+  }
   subscribeAllCameraTopics();
   res.json(publicCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id), true));
 });
@@ -304,8 +433,10 @@ router.put('/:id/enabled', requireAdmin, async (req, res) => {
       return res.status(502).json({ error: `Could not re-register stream with MediaMTX: ${e.message}` });
     }
     await startTranscoder(req.params.id, existing.rtsp_url, existing.mediamtx_path, existing.name);
+    if (subConfigured(existing)) await startSubStream(existing).catch((e) => logger.error(`[substream] enable failed: ${e.message}`));
   } else {
     await stopTranscoder(req.params.id);
+    await stopSubStream(existing).catch(() => {});
     try {
       await removePath(existing.mediamtx_path);
     } catch (e) {
@@ -335,6 +466,7 @@ router.delete('/:id', requireAdmin, async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
   await stopTranscoder(req.params.id);
+  await stopSubStream(existing).catch(() => {});
   try {
     await removePath(existing.mediamtx_path);
   } catch (e) {

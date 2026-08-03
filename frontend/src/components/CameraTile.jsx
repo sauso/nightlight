@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic } from 'lucide-react';
 import { api } from '../lib/api.js';
+import { startTalk } from '../lib/twoWayTalk.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { isNativeApp, isIOS, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip, hasNativePip, subscribeBackgroundPaused, isBackgroundPaused, setBackgroundPaused, setPipAutoEnteredFullscreen } from '../lib/nativeBridge.js';
 import WhepPlayer from './WhepPlayer.jsx';
@@ -100,8 +101,46 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   const [bgPaused, setBgPaused] = useState(isBackgroundPaused);
   useEffect(() => subscribeBackgroundPaused(setBgPaused), []);
 
+  // Two-way audio (push-to-talk). While talking we duck THIS camera's incoming audio - the camera
+  // is half-duplex (walkie-talkie), and leaving its mic live would feed its own speaker back as echo.
+  const [talking, setTalking] = useState(false);
+  const talkStopRef = useRef(null);
+  const talkTimeoutRef = useRef(null);
+  const [talkError, setTalkError] = useState('');
+  // Tap-to-talk (toggle), not hold: tap once to go live, tap again to stop. A safety cap auto-stops
+  // it so a forgotten "on" can't leave the mic live indefinitely (the reason the old design held).
+  const TALK_MAX_MS = 2 * 60 * 1000;
+  function startTalking() {
+    if (talkStopRef.current) return;
+    setTalkError('');
+    setTalking(true);
+    talkStopRef.current = startTalk(camera.id, {
+      onError: (msg) => { setTalkError(msg || 'Talk failed'); stopTalking(); },
+    });
+    clearTimeout(talkTimeoutRef.current);
+    talkTimeoutRef.current = setTimeout(stopTalking, TALK_MAX_MS);
+  }
+  function stopTalking() {
+    clearTimeout(talkTimeoutRef.current);
+    setTalking(false);
+    try { talkStopRef.current?.(); } catch { /* ignore */ }
+    talkStopRef.current = null;
+  }
+  function toggleTalk(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (talkStopRef.current) stopTalking();
+    else startTalking();
+  }
+  // Tear down talk if the tile unmounts, and stop the live mic if the app is backgrounded.
+  useEffect(() => () => { clearTimeout(talkTimeoutRef.current); try { talkStopRef.current?.(); } catch { /* ignore */ } }, []);
+  useEffect(() => {
+    if (talking && !pageVisible) stopTalking();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [talking, pageVisible]);
+
   const effectiveMuted =
-    muted || (audioState === 'on' && !pageVisible) || (audioState === 'bg' && bgPaused);
+    talking || muted || (audioState === 'on' && !pageVisible) || (audioState === 'bg' && bgPaused);
 
   // When the app is minimized and this camera isn't in Background mode, tear the stream
   // connection down entirely (WhepPlayer/HlsPlayer both fully disconnect when active is
@@ -113,6 +152,24 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   const streamActive = !stopped && (pageVisible || audioState === 'bg');
 
   const [mode, setMode] = useState('live'); // 'live' (WebRTC) | 'compat' (HLS)
+
+  // Stream quality: 'high' (the main stream) | 'low' (the camera's lower-res sub-stream, if it has
+  // one - camera.has_sub). Per-device, like mute: a phone on mobile data and a wall tablet on wifi
+  // want different answers. Selecting Low points the player at the `<path>-sub` MediaMTX path.
+  const qualityKey = `nightlight_quality_${camera.id}`;
+  const [quality, setQualityState] = useState(() => {
+    try {
+      return localStorage.getItem(qualityKey) === 'low' ? 'low' : 'high';
+    } catch {
+      return 'high';
+    }
+  });
+  function setQuality(q) {
+    setQualityState(q);
+    try { localStorage.setItem(qualityKey, q); } catch { /* ignore */ }
+  }
+  const effectivePath =
+    quality === 'low' && camera.has_sub ? `${camera.mediamtx_path}-sub` : camera.mediamtx_path;
   // Background audio needs the native app, and on iOS it's Low-latency-only. Compatibility (HLS)
   // background audio on iOS was tried and dropped: iOS runs the native HLS stream's own lock-screen
   // session and won't reliably let us show the camera name/artwork, catch the lock-screen pause, or
@@ -122,6 +179,11 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   const canBackgroundAudio = isNativeApp() && !(isIOS() && mode === 'compat');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
+  const [qualityMenuOpen, setQualityMenuOpen] = useState(false); // drill-in submenu for High/Low
+  function closeMenu() {
+    setModeMenuOpen(false);
+    setQualityMenuOpen(false);
+  }
   const manualModeRef = useRef(false);
   const videoWrapRef = useRef(null);
 
@@ -422,7 +484,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
           {mode === 'live' ? (
             <WhepPlayer
               key={`live-${refreshNonce}`}
-              mediamtxPath={camera.mediamtx_path}
+              mediamtxPath={effectivePath}
               active={streamActive}
               muted={effectiveMuted}
               onFirstConnectFailed={handleFirstConnectFailed}
@@ -432,7 +494,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
           ) : (
             <HlsPlayer
               key={`compat-${refreshNonce}`}
-              mediamtxPath={camera.mediamtx_path}
+              mediamtxPath={effectivePath}
               active={streamActive}
               muted={effectiveMuted}
             />
@@ -449,7 +511,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
 
         <button
           className="settings-btn"
-          onClick={() => setModeMenuOpen((o) => !o)}
+          onClick={() => { setModeMenuOpen((o) => !o); setQualityMenuOpen(false); }}
           aria-label="Stream quality settings"
           aria-expanded={modeMenuOpen}
         >
@@ -458,30 +520,66 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
 
         {modeMenuOpen && (
           <>
-            <div className="tile-menu-backdrop" onClick={() => setModeMenuOpen(false)} />
+            <div className="tile-menu-backdrop" onClick={closeMenu} />
             <div className="tile-menu">
-              <button
-                className={`tile-menu__item${mode === 'live' ? ' tile-menu__item--active' : ''}`}
-                onClick={() => selectMode('live')}
-              >
-                Low latency
-              </button>
-              <button
-                className={`tile-menu__item${mode === 'compat' ? ' tile-menu__item--active' : ''}`}
-                onClick={() => selectMode('compat')}
-              >
-                Compatibility
-              </button>
-              <div className="tile-menu__divider" />
-              <button
-                className="tile-menu__item"
-                onClick={() => {
-                  setStopped(!stopped);
-                  setModeMenuOpen(false);
-                }}
-              >
-                {stopped ? 'Start camera' : 'Stop camera'}
-              </button>
+              {qualityMenuOpen ? (
+                // Quality submenu (drill-in) - keeps the main menu short so it never needs scrolling.
+                <>
+                  <button
+                    className="tile-menu__item tile-menu__item--back"
+                    onClick={() => setQualityMenuOpen(false)}
+                  >
+                    ‹ Quality
+                  </button>
+                  <div className="tile-menu__divider" />
+                  <button
+                    className={`tile-menu__item${quality === 'high' ? ' tile-menu__item--active' : ''}`}
+                    onClick={() => { setQuality('high'); closeMenu(); }}
+                  >
+                    High
+                  </button>
+                  <button
+                    className={`tile-menu__item${quality === 'low' ? ' tile-menu__item--active' : ''}`}
+                    onClick={() => { setQuality('low'); closeMenu(); }}
+                  >
+                    Low
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    className={`tile-menu__item${mode === 'live' ? ' tile-menu__item--active' : ''}`}
+                    onClick={() => selectMode('live')}
+                  >
+                    Low latency
+                  </button>
+                  <button
+                    className={`tile-menu__item${mode === 'compat' ? ' tile-menu__item--active' : ''}`}
+                    onClick={() => selectMode('compat')}
+                  >
+                    Compatibility
+                  </button>
+                  {camera.has_sub && (
+                    <>
+                      <div className="tile-menu__divider" />
+                      <button
+                        className="tile-menu__item tile-menu__item--submenu"
+                        onClick={() => setQualityMenuOpen(true)}
+                      >
+                        <span>Quality</span>
+                        <span className="tile-menu__value">{quality === 'low' ? 'Low ›' : 'High ›'}</span>
+                      </button>
+                    </>
+                  )}
+                  <div className="tile-menu__divider" />
+                  <button
+                    className="tile-menu__item"
+                    onClick={() => { setStopped(!stopped); closeMenu(); }}
+                  >
+                    {stopped ? 'Start camera' : 'Stop camera'}
+                  </button>
+                </>
+              )}
             </div>
           </>
         )}
@@ -539,6 +637,19 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
             <Volume2 size={16} />
           )}
         </button>
+        {/* Tap-to-talk (toggle): only for cameras an admin has set up two-way audio on. Tap to go
+            live (button turns red + pulses), tap again to stop; auto-stops after a couple of minutes. */}
+        {camera.talk_configured && (
+          <button
+            className={`talk-btn${talking ? ' talk-btn--active' : ''}`}
+            onClick={toggleTalk}
+            aria-label={talking ? `Stop talking to ${camera.name}` : `Talk to ${camera.name}`}
+            aria-pressed={talking}
+            title={talkError || (talking ? 'Tap to stop' : 'Tap to talk')}
+          >
+            <Mic size={16} />
+          </button>
+        )}
         <button
           className="fullscreen-btn"
           onClick={toggleFullscreen}

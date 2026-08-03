@@ -9,6 +9,23 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-03
+
+### Added
+- **Choose stream quality per camera (High/Low).** If a camera exposes a lower-resolution
+  sub-stream, add its path in Cameras → edit ("Low-quality stream path", e.g. `/Streaming/Channels/102`
+  on Hikvision) and each tile gains a High/Low choice in its settings menu. Low is a fallback for
+  slow or congested connections; the tier comes straight from the camera's second stream, so there's
+  no extra video transcoding on the server. The choice is per-device (like mute). *(The sub-stream
+  currently runs continuously alongside the main one; an on-demand version is a planned follow-up.)*
+- **Two-way audio (talk-back).** Cameras that support it now show a **talk** button — tap to start
+  talking through the camera's speaker (the button turns red and pulses while live), tap again to
+  stop (and it auto-stops after a couple of minutes as a safety net). Your voice is captured, encoded
+  to G.711, and streamed to the camera, and the camera's own audio is ducked while you talk (it's
+  half-duplex). Set it up per camera in Cameras → edit by entering the camera's
+  **web login** (for Hikvision, the User Management account — separate from the ONVIF user). Only the
+  Hikvision ISAPI backend is implemented so far.
+
 ## [0.6.3] - 2026-08-02
 
 ### Removed

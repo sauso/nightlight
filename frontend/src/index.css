@@ -143,6 +143,7 @@ button {
 body.in-pip .pip-btn,
 body.in-pip .settings-btn,
 body.in-pip .mute-btn,
+body.in-pip .talk-btn,
 body.in-pip .fullscreen-btn,
 body.in-pip .ptz-btn,
 body.in-pip .ptz-pad,
@@ -517,6 +518,33 @@ body.in-pip .tile-menu-backdrop {
   backdrop-filter: blur(4px);
 }
 
+/* Push-to-talk (two-way audio). Top-left, away from the other controls; turns solid accent while
+   the mic is live. touch-action:none so holding it doesn't scroll/zoom the tile on touch. */
+.talk-btn {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: none;
+  background: rgba(10, 13, 28, 0.55);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 2;
+  backdrop-filter: blur(4px);
+  touch-action: none;
+}
+
+.talk-btn--active {
+  background: var(--accent);
+  color: #0a0d1c;
+  box-shadow: 0 0 0 3px rgba(245, 217, 168, 0.35);
+}
+
 .pip-btn {
   position: absolute;
   bottom: 10px;
@@ -570,6 +598,12 @@ body.in-pip .tile-menu-backdrop {
   padding: 4px;
   z-index: 4;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  /* The tile clips overflow (overflow:hidden for rounded corners/zoom), and this menu grows upward.
+     With the quality options it can be taller than a short tile - cap it and scroll so the top item
+     (Low latency) is never clipped out of reach. */
+  max-height: calc(100% - 56px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .tile-menu__item {
@@ -598,6 +632,22 @@ body.in-pip .tile-menu-backdrop {
   height: 1px;
   background: var(--border);
   margin: 4px 6px;
+}
+/* "Quality" row that drills into the High/Low submenu: label left, current value + chevron right. */
+.tile-menu__item--submenu {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.tile-menu__value {
+  color: var(--text-secondary);
+  opacity: 0.75;
+  font-size: 12px;
+}
+.tile-menu__item--back {
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 /* Shown over a tile the user has stopped (per-device playback off, stream torn down). */
@@ -648,7 +698,8 @@ body.in-pip .tile-menu-backdrop {
 .pip-btn,
 .settings-btn,
 .fullscreen-btn,
-.ptz-btn {
+.ptz-btn,
+.talk-btn {
   background: none;
   backdrop-filter: none;
   border-radius: 0;
@@ -656,11 +707,26 @@ body.in-pip .tile-menu-backdrop {
   filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.9)) drop-shadow(0 0 4px rgba(0, 0, 0, 0.55));
 }
 
+/* ...except while the mic is live: bring back a solid accent chip so "you're talking" is obvious.
+   Higher specificity (two classes) so it wins over the icon-only rule above regardless of order. */
+.talk-btn.talk-btn--active {
+  background: #e0555f; /* "live" red - unmistakably mic-on */
+  color: #fff;
+  filter: none;
+  border-radius: 8px;
+  animation: talk-pulse 1.4s ease-in-out infinite;
+}
+@keyframes talk-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(224, 85, 95, 0.55); }
+  50% { box-shadow: 0 0 0 7px rgba(224, 85, 95, 0); }
+}
+
 .mute-btn svg,
 .pip-btn svg,
 .settings-btn svg,
 .fullscreen-btn svg,
-.ptz-btn svg {
+.ptz-btn svg,
+.talk-btn svg {
   width: 20px;  /* 16 * 1.25 */
   height: 20px;
 }
@@ -863,6 +929,27 @@ body.in-pip .tile-menu-backdrop {
   margin-top: 8px;
   font-size: 12px;
   color: var(--live);
+}
+.onvif-box__err {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--offline, #e08585);
+}
+.onvif-box__title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.onvif-box__hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.onvif-box__hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
 }
 
 .camera-tile__video-wrap:fullscreen {
