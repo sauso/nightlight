@@ -45,6 +45,12 @@ jobs:
         working-directory: e2e
         run: bash test.sh
 
+      # Render a pass/fail table on the Actions run page, so results are visible at a
+      # glance without downloading the report artifact.
+      - name: Test summary
+        if: always()
+        run: node e2e/playwright/summarize.mjs e2e/playwright/results.json >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload Playwright report + traces
         if: always()
         uses: actions/upload-artifact@v4
