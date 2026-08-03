@@ -1,10 +1,10 @@
 # Nightlight: Documentation (with screenshots) + End-to-End Testing — Scope Document
 
-Status: **Not started; process refined 2026-08-02.** Planning document - hand to Claude Code when
-work begins (planned after the next feature release). The original brief is below; a **refined,
-phased process with the up-front decisions and current-app testability notes is at the bottom**
-("Refined process & current-app notes") - start from there. Confirm current repo structure before
-starting.
+Status: **Phase 1 complete (2026-08-03).** Process refined 2026-08-02; work started after the 0.7.0
+release. The synthetic-camera stack + prove-out gate now live in `e2e/` and pass end-to-end (real
+first-run admin, real API camera add with validation, HLS serving live frames). **Next: Phase 2**
+(a small set of Playwright specs). The original brief is below; the **refined, phased process is at
+the bottom** ("Refined process & current-app notes"). Confirm current repo structure before each phase.
 
 ---
 
