@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-03
+
 ### Added
 - **Choose stream quality per camera (High/Low).** If a camera exposes a lower-resolution
   sub-stream, add its path in Cameras → edit ("Low-quality stream path", e.g. `/Streaming/Channels/102`
