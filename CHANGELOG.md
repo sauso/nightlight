@@ -9,6 +9,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **Motion detection (per camera).** Turn it on for a camera in Cameras → edit and Nightlight
+  watches its video server-side for movement, logging an alert (Settings → **Recent alerts**) when
+  motion is sustained past a confirmation delay — at most once per cooldown. Tunable **sensitivity**,
+  **confirm** delay, and **cooldown** per camera. It samples the low-quality sub-stream when there is
+  one (so it's cheap), and is off by default. Currently watches the whole frame — a crib-zone picker
+  and phone push notifications are planned follow-ups.
+
 ## [0.7.1] - 2026-08-03
 
 ### Changed
