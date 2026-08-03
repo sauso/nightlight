@@ -1,0 +1,57 @@
+name: End-to-end tests
+
+# Runs the e2e/ stack (real app image + synthetic RTSP camera) on a GitHub Linux
+# runner. Deliberately NOT on every push — the stack spins up containers + a fake
+# camera, so it's minutes, not seconds. Per the scope doc's Phase 0 decision it
+# runs where it earns its cost:
+#   - on a dev -> main PR   : gates the production release
+#   - nightly on dev        : catches drift between releases
+#   - manual (dispatch)     : on demand
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 15 * * *' # 15:00 UTC nightly
+  workflow_dispatch: {}
+
+# Don't pile up runs; a newer commit on the same PR/branch supersedes an in-flight one.
+concurrency:
+  group: e2e-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # A nightly (schedule) run fires from the default branch — point it at dev,
+          # the branch we actually want covered between releases. PR/dispatch use their
+          # own triggering ref.
+          ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
+
+      - name: Phase 1 — synthetic camera goes live end-to-end
+        working-directory: e2e
+        # --keep leaves the stack up so the steps below can grab logs on failure;
+        # the final step tears it down regardless. Invoked via bash so it doesn't
+        # depend on the executable bit surviving a Windows commit.
+        run: bash ./prove.sh --keep
+
+      - name: Collect stack logs
+        if: always()
+        working-directory: e2e
+        run: docker compose -f docker-compose.e2e.yml -p nightlight-e2e logs --no-color > stack-logs.txt 2>&1 || true
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-stack-logs
+          path: e2e/stack-logs.txt
+          if-no-files-found: ignore
+
+      - name: Tear down
+        if: always()
+        working-directory: e2e
+        run: docker compose -f docker-compose.e2e.yml -p nightlight-e2e down -v || true
