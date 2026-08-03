@@ -1,0 +1,82 @@
+# End-to-end test stack: the real Nightlight image + a synthetic RTSP camera.
+#
+# This is test infrastructure, NOT part of the production deployment. It runs the
+# real app image against a fake-but-real video/audio stream so the whole pipeline
+# (transcoder -> MediaMTX -> WHEP/HLS) is exercised with no camera hardware.
+#
+# Unlike production (host networking, for WebRTC ICE), this uses a bridge network
+# so the app can reach the synthetic camera by service name. That's fine for the
+# HLS-based prove-out and for Playwright driving the UI; full WebRTC ICE from an
+# external browser isn't the thing under test here.
+#
+#   docker compose -f docker-compose.e2e.yml up -d
+#   ./prove.sh                       # Phase 1 gate: stream goes live end-to-end
+#   docker compose -f docker-compose.e2e.yml down -v
+
+name: nightlight-e2e
+
+services:
+  # Synthetic camera — see fakecam/mediamtx.yml.
+  fakecam:
+    image: bluenviron/mediamtx:latest-ffmpeg
+    restart: unless-stopped
+    volumes:
+      - ./fakecam/mediamtx.yml:/mediamtx.yml:ro
+
+  # The real app, staging image. Data is ephemeral (tmpfs) so every run is a
+  # clean first-run: no seeded DB, the tests drive the real create-admin flow.
+  nightlight:
+    # Defaults to the staging image; CI can override (e.g. to test an image built
+    # from the exact PR commit) via NIGHTLIGHT_IMAGE.
+    image: ${NIGHTLIGHT_IMAGE:-sauso/nightlight:dev}
+    depends_on:
+      - fakecam
+    environment:
+      - TZ=UTC
+      # Run the app as root inside the throwaway container so the tmpfs data dir
+      # is writable without host uid/gid juggling — this container is disposable.
+      - PUID=0
+      - PGID=0
+    ports:
+      # Host port is overridable (E2E_PORT) so the stack can run on a box where
+      # something else — e.g. a prod container on host networking — already holds
+      # 4000. CI has no such conflict, so it defaults to 4000.
+      - "${E2E_PORT:-4000}:4000"
+    tmpfs:
+      - /app/data
+
+  # TLS terminator (see proxy/Caddyfile). The browser talks HTTPS to the app like
+  # production, so MediaMTX's `Secure` HLS cookie is stored and Compatibility playback
+  # works. Only the in-network Playwright service needs it; the host port is for poking.
+  proxy:
+    image: caddy:2-alpine
+    depends_on:
+      - nightlight
+    volumes:
+      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "${E2E_HTTPS_PORT:-8443}:443"
+
+  # Playwright UI tests (Phase 2). Runs in the official image on the same network, so
+  # it reaches the app by service name and needs no host Node. Behind the "test"
+  # profile so the Phase 1 prove-out (`prove.sh`) doesn't start it; run it with
+  # `docker compose --profile test run --rm playwright` (or via ./test.sh).
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.49.0-jammy
+    profiles: ["test"]
+    depends_on:
+      - nightlight
+      - fakecam
+      - proxy
+    working_dir: /work
+    ipc: host # Playwright's recommendation — avoids Chromium OOM/crash under load
+    environment:
+      # HTTPS via the Caddy sidecar (self-signed) so the browser stores MediaMTX's
+      # Secure HLS cookie — the config sets ignoreHTTPSErrors for the internal cert.
+      - BASE_URL=https://proxy
+      - CI=1
+    volumes:
+      - ./playwright:/work
+    # The image ships the browsers (PLAYWRIGHT_BROWSERS_PATH is baked in), so npm only
+    # fetches @playwright/test (pinned to the image version) — no browser download.
+    command: sh -c "npm install --no-audit --no-fund && npx playwright test"

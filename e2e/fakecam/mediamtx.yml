@@ -1,0 +1,28 @@
+# Synthetic RTSP camera for end-to-end tests.
+#
+# A standalone MediaMTX that, on demand (when Nightlight's transcoder opens the
+# stream), spins up an ffmpeg generating a test pattern + tone and publishes it
+# back into itself as RTSP. Nightlight then treats rtsp://fakecam:8554/test like
+# any real camera. No sample video file needed — the source is fully synthetic.
+#
+# Audio is G.711 µ-law (pcm_mulaw), matching what real IP cameras typically send
+# on the WebRTC-copied track — so the pipeline is exercised the same way prod is,
+# not with an AAC source WebRTC couldn't carry.
+
+logLevel: warn
+
+paths:
+  test:
+    # Always-on, like a real IP camera: the generator starts with the server and
+    # publishes continuously, so the stream is live the instant Nightlight's
+    # transcoder connects — no cold-start race. (An on-demand source only starts on
+    # first read, which raced the UI flow and left MediaMTX with no publisher, so
+    # WHEP/HLS 404'd in the browser even though the pipeline itself was fine.)
+    runOnInit: >
+      ffmpeg -hide_banner -loglevel warning -re
+      -f lavfi -i testsrc=size=640x480:rate=15
+      -f lavfi -i sine=frequency=500:sample_rate=8000
+      -c:v libx264 -profile:v baseline -pix_fmt yuv420p -preset ultrafast -tune zerolatency -g 30
+      -c:a pcm_mulaw -ar 8000 -ac 1
+      -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/test
+    runOnInitRestart: yes

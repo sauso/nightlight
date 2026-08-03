@@ -1,0 +1,11 @@
+{
+  "name": "nightlight-e2e-playwright",
+  "private": true,
+  "description": "End-to-end UI tests for Nightlight (run against the e2e compose stack).",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.49.0"
+  }
+}

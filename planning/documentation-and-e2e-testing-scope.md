@@ -1,10 +1,12 @@
 # Nightlight: Documentation (with screenshots) + End-to-End Testing — Scope Document
 
-Status: **Not started; process refined 2026-08-02.** Planning document - hand to Claude Code when
-work begins (planned after the next feature release). The original brief is below; a **refined,
-phased process with the up-front decisions and current-app testability notes is at the bottom**
-("Refined process & current-app notes") - start from there. Confirm current repo structure before
-starting.
+Status: **Phases 1–2 complete (2026-08-03).** Process refined 2026-08-02; work started after the
+0.7.0 release. `e2e/` has the synthetic-camera stack + `prove.sh` (Phase 1 gate) and a Playwright
+UI suite (Phase 2: first-run→login, add-camera→live tile, audio toggle, settings), both green on
+GitHub-hosted runners via `.github/workflows/e2e.yml`. **Next: Phase 3** (screenshots + `docs/` from
+the same specs), then Phase 4 remainder / Phase 5 (Android). The original brief is below; the
+**refined, phased process is at the bottom** ("Refined process & current-app notes"). See also the
+notes appended there on what Phase 2 uncovered. Confirm current repo structure before each phase.
 
 ---
 
@@ -181,3 +183,21 @@ camera history). Defer the hard-to-fake ones:
   the player's stream. Good Phase-2-plus candidate.
 - **ONVIF discovery / two-way-audio ISAPI:** skip early; faking an ONVIF/Hikvision-ISAPI server in CI
   is a rabbit hole. Test manual add first.
+
+### Phase 2 notes — what building the Playwright suite uncovered (2026-08-03)
+- **Synthetic camera must be always-on** (`runOnInit`), not on-demand: a cold on-demand source raced
+  the UI add flow, leaving MediaMTX with no publisher, so WHEP/HLS 404'd in the browser.
+- **Run the suite over HTTPS** (a Caddy TLS sidecar, self-signed): MediaMTX's HLS cookie-check sets a
+  `Secure; SameSite=None` cookie that browsers won't store over plain HTTP. Caddy also downgrades that
+  one cookie to `SameSite=Lax` for the test browser, since a self-signed cert still isn't a trusted
+  secure context. Playwright runs with `ignoreHTTPSErrors`.
+- **Don't assert in-browser video decode in CI.** `hls.js` wouldn't progress past MediaMTX's master
+  playlist in the proxied/synthetic env (re-fetches master, never requests the variant), and WebRTC
+  ICE between containers is unreliable. The add-camera spec instead asserts the tile is wired to a
+  **live stream** (its HLS manifest serves `#EXTM3U` to the browser). `prove.sh` already proves frames
+  decode through the pipeline; frame-accurate playback is a real-device concern.
+- **`retries: 0`** — the suite shares one backend/DB and the add-camera spec mutates it; a retry left a
+  duplicate camera and broke later specs.
+- **Product finding (not test-only): Compatibility/HLS mode is broken over plain HTTP** for real users,
+  for the same `Secure`-cookie reason — a LAN box served at `http://…` can't play HLS; only Low latency
+  (WebRTC) works. Worth a fix or a documented caveat.
