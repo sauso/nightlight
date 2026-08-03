@@ -32,6 +32,12 @@ const PIXEL_DELTA = 24;
 // flickers frame to frame); only a gap longer than this ends the run.
 const ACTIVE_GRACE_MS = 1500;
 
+// When (re)starting a detector, wait up to this long for the preferred sub-stream to start
+// publishing before settling for the heavier main stream, polling readiness this often. We
+// never spawn ffmpeg against a not-yet-ready path, so there's no 404 churn at startup/after a blip.
+const SUB_GRACE_MS = 45000;
+const READY_POLL_MS = 2000;
+
 // Map 1..100 sensitivity to the fraction of zone pixels that must change for a frame to count
 // as "active". Higher sensitivity => smaller fraction => easier to trigger.
 function activeFractionThreshold(sensitivity) {
@@ -63,21 +69,31 @@ function zoneBounds(camera) {
   return { x0, y0, x1, y1 };
 }
 
-// Prefer the sub-stream (far cheaper to decode), but only when it's actually publishing right
-// now — otherwise read the main path. Re-checked on every (re)launch, so after a blip that took
-// the sub down with it, the detector returns to the sub once it's back instead of staying stuck
-// on the heavier main stream. Avoids the old "try sub, 404, fall back" churn.
-async function choosePath(camera) {
-  if (camera.sub_rtsp_url && String(camera.sub_rtsp_url).trim()) {
-    const sub = subPathName(camera.mediamtx_path);
-    try {
-      const st = await getPathStatus(sub);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Resolve to the path to analyse once one is actually publishing, preferring the sub-stream
+// (cheap to decode). Polls MediaMTX readiness rather than spawning ffmpeg speculatively, so we
+// never hit a 404 (at startup, or after a blip took both streams down): it waits up to
+// SUB_GRACE_MS for the sub, then settles for the main path if the sub still isn't up. Because
+// this runs on every (re)launch, the detector also returns to the sub after a blip instead of
+// staying stuck on the heavier main stream. Resolves null if the detector was stopped meanwhile.
+async function pickReadyPath(camera, entry) {
+  const sub = camera.sub_rtsp_url && String(camera.sub_rtsp_url).trim() ? subPathName(camera.mediamtx_path) : null;
+  const main = camera.mediamtx_path;
+  const deadline = Date.now() + SUB_GRACE_MS;
+  for (;;) {
+    if (entry.stopped) return null;
+    if (sub) {
+      const st = await getPathStatus(sub).catch(() => null);
       if (st && st.ready) return sub;
-    } catch {
-      /* fall through to the main path */
     }
+    // No sub, or the sub grace has elapsed: take the main path as soon as it's ready.
+    if (!sub || Date.now() > deadline) {
+      const st = await getPathStatus(main).catch(() => null);
+      if (st && st.ready) return main;
+    }
+    await sleep(READY_POLL_MS);
   }
-  return camera.mediamtx_path;
 }
 
 export function isDetecting(cameraId) {
@@ -99,8 +115,8 @@ export async function startMotionDetector(camera) {
     // double-run this camera's detector.
     const entry = { proc: null, stopped: false };
     detectors.set(camera.id, entry);
-    const path = await choosePath(camera);
-    if (entry.stopped) {
+    const path = await pickReadyPath(camera, entry);
+    if (!path || entry.stopped) {
       if (detectors.get(camera.id) === entry) detectors.delete(camera.id);
       return;
     }
