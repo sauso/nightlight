@@ -1,9 +1,12 @@
 # Nightlight: Motion/Sound Detection + Push Notifications — Scope Document
 
-Status: **Not started.** Planning document only, to hand to Claude Code when
-work begins. Confirm current repo structure against this document before
-starting - file paths and library choices below are proposals, not verified
-against the live repo.
+Status: **Not started; direction locked 2026-08-03** (see "Decisions & refined plan" at the
+bottom — read it first, it narrows the original brief below). In short: target events are
+**baby crying + baby stirring in the crib** (not person/room detection); built **natively into
+Nightlight**; **CPU-first, Node + FFmpeg only** for the core feature, with a spare **USB Coral** as
+an *optional, runtime-detected* accelerator for the later cry-*classification* stage only. Confirm
+current repo structure against this document before starting - file paths and library choices are
+proposals, not verified against the live repo.
 
 ---
 
@@ -151,3 +154,50 @@ Android/iOS app
 4. Only then evaluate whether cry-specific classification is worth
    attempting, informed by how well plain sound-detection performs in
    practice.
+
+---
+
+## Decisions & refined plan (2026-08-03)
+
+Decisions taken with the user, narrowing the brief above:
+
+- **Target events: baby crying + baby stirring in the crib.** NOT person/room-presence detection
+  and not general motion. This matters because it makes the **Google Coral peripheral** — the two
+  chosen events are the CPU-friendly ones (crib-zone frame-diff + sound presence). The Coral's real
+  strength (person/object detection) wasn't chosen, and it's unreliable on a swaddled infant anyway.
+- **Build natively into Nightlight** (not via Frigate/MQTT interop). Keep it self-contained.
+- **Coral is a spare USB Accelerator and MUST be optional.** The system runs fully without one; a
+  Coral, if present, is detected at runtime with a graceful CPU fallback. Given the chosen events,
+  the Coral is only relevant to the *optional, last* stage (cry-classification), which also runs on
+  CPU — so it may never be needed.
+
+### Architecture consequence: the core feature is Node + FFmpeg only (no Python, no Coral)
+- **Motion (crib stirring):** a cheap low-res/low-fps FFmpeg leg off the existing MediaMTX path
+  (`127.0.0.1:8554/<path>`, reusing the already-pulled stream rather than hitting the camera again)
+  → frame-diff against the previous frame, masked to a **per-camera crib zone** the user draws.
+  Threshold + confirmation-delay + cooldown. Done in Node (sampled raw frames from FFmpeg, or
+  FFmpeg's own `select=gt(scene,…)`/scene-detection). No ML.
+- **Sound (crying, stage 1 = presence):** FFmpeg's `silencedetect` filter on the audio (silence_end
+  → sound started; "present sustained N seconds" = gap to next silence_start), or `node-vad`. Zero
+  new dependencies. Distinguishes "something's making noise" from silence — not "is it a cry".
+- **Cry-classification (stage 2, OPTIONAL, later):** only if plain presence proves too noisy. A
+  Python + TFLite component running **YAMNet** (AudioSet, has a "Baby cry, infant cry" class),
+  CPU by default, using the **USB Coral if detected** (`pycoral`/`libedgetpu`, Coral passed through
+  to the container with `--device`). This is the only part that introduces Python/Coral, and it's
+  deferred until the simpler triggers are proven.
+
+### Sequencing (supersedes "Suggested order of work" above for this direction)
+1. **Push pipeline end-to-end, Android/FCM**, fired by a manual test event — prove
+   detect → push → phone shows notification → tap opens the right camera, before any detection
+   exists. (`google-services.json` plumbing is dormant-but-present; needs a real Firebase project +
+   client token registration + a backend token store.)
+2. **Motion (crib-zone frame-diff)** as the first real trigger, with the crib-zone picker UI and
+   per-camera enable/sensitivity settings.
+3. **Sound presence** as the second trigger.
+4. **Tune** cooldown / confirmation-delay / sensitivity against real usage for a week+ (alert
+   fatigue is the most likely quiet failure — see above).
+5. **Optional cry-classification** (YAMNet, CPU or Coral), only if warranted by step 4.
+
+### Blocker to plan around
+- **iOS push needs APNs → the Apple Developer account, which is deferred** (see the mobile repo's
+  iOS notes). So this feature is **Android-first**; iOS notifications wait on that account.
