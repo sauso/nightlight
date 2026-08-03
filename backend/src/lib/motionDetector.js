@@ -1,6 +1,6 @@
 import { spawn } from 'child_process';
 import { logger } from './logger.js';
-import { subPathName } from './mediamtx.js';
+import { subPathName, getPathStatus } from './mediamtx.js';
 import { recordDetectionEvent, ALERT } from './detectionEvents.js';
 
 // Server-side motion detection. Per camera with detection enabled, a cheap FFmpeg leg reads
@@ -63,6 +63,23 @@ function zoneBounds(camera) {
   return { x0, y0, x1, y1 };
 }
 
+// Prefer the sub-stream (far cheaper to decode), but only when it's actually publishing right
+// now — otherwise read the main path. Re-checked on every (re)launch, so after a blip that took
+// the sub down with it, the detector returns to the sub once it's back instead of staying stuck
+// on the heavier main stream. Avoids the old "try sub, 404, fall back" churn.
+async function choosePath(camera) {
+  if (camera.sub_rtsp_url && String(camera.sub_rtsp_url).trim()) {
+    const sub = subPathName(camera.mediamtx_path);
+    try {
+      const st = await getPathStatus(sub);
+      if (st && st.ready) return sub;
+    } catch {
+      /* fall through to the main path */
+    }
+  }
+  return camera.mediamtx_path;
+}
+
 export function isDetecting(cameraId) {
   return detectors.has(cameraId);
 }
@@ -71,19 +88,22 @@ export async function startMotionDetector(camera) {
   await stopMotionDetector(camera.id);
   if (!camera.detect_motion_enabled || camera.disabled) return;
 
-  // Prefer the sub-stream (far cheaper to decode); fall back to the main path if the sub
-  // isn't actually publishing (handled by the quick-failure check in launch's exit below).
-  const hasSub = !!(camera.sub_rtsp_url && String(camera.sub_rtsp_url).trim());
-  const mainPath = camera.mediamtx_path;
-  let path = hasSub ? subPathName(camera.mediamtx_path) : mainPath;
   const { x0, y0, x1, y1 } = zoneBounds(camera);
   const zonePixels = (x1 - x0) * (y1 - y0);
   const threshold = activeFractionThreshold(camera.detect_sensitivity);
   const confirmMs = Math.max(0, (camera.detect_confirm_s ?? 3) * 1000);
   const cooldownMs = Math.max(1, camera.detect_cooldown_s ?? 60) * 1000;
 
-  function launch() {
-    const startedAt = Date.now();
+  async function launch() {
+    // Claim the slot before the async gap below, so a concurrent start/reconcile can't
+    // double-run this camera's detector.
+    const entry = { proc: null, stopped: false };
+    detectors.set(camera.id, entry);
+    const path = await choosePath(camera);
+    if (entry.stopped) {
+      if (detectors.get(camera.id) === entry) detectors.delete(camera.id);
+      return;
+    }
     const args = [
       '-nostdin',
       '-loglevel', 'error',
@@ -95,8 +115,7 @@ export async function startMotionDetector(camera) {
       '-',
     ];
     const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    const entry = { proc, stopped: false };
-    detectors.set(camera.id, entry);
+    entry.proc = proc;
 
     let prev = null;
     let buf = Buffer.alloc(0);
@@ -152,22 +171,18 @@ export async function startMotionDetector(camera) {
       const wasTracked = detectors.get(camera.id) === entry;
       if (wasTracked) detectors.delete(camera.id);
       if (!entry.stopped && wasTracked) {
-        // A near-instant exit on the sub path usually means it isn't publishing (404) — fall
-        // back to the main path, which the transcoder always publishes.
-        if (Date.now() - startedAt < 4000 && path !== mainPath) {
-          logger.error(`[detect:${path}] not available, falling back to the main stream`);
-          path = mainPath;
-        } else {
-          logger.error(`[detect:${path}] exited (code ${code}), restarting in 5s`);
-        }
+        // code 0 = the upstream stream ended (a camera/transcoder blip), not an error — just
+        // reconnect quietly, re-picking sub vs main. Only a real failure is logged loudly.
+        if (code === 0) logger.raw(`detect:${path}`, 'stream ended, reconnecting');
+        else logger.error(`[detect:${path}] exited (code ${code}), restarting in 5s`);
         setTimeout(() => {
-          if (!entry.stopped && !detectors.has(camera.id)) launch();
+          if (!entry.stopped && !detectors.has(camera.id)) launch().catch(() => {});
         }, RESTART_DELAY_MS);
       }
     });
   }
 
-  launch();
+  launch().catch(() => {});
 }
 
 export function stopMotionDetector(cameraId) {
@@ -175,6 +190,9 @@ export function stopMotionDetector(cameraId) {
   if (!entry) return Promise.resolve();
   entry.stopped = true;
   detectors.delete(cameraId);
+  // Caught during launch()'s async path-selection gap (no process spawned yet) — the launch
+  // will see `stopped` and abort itself, so there's nothing to kill.
+  if (!entry.proc) return Promise.resolve();
   return new Promise((resolve) => {
     let resolved = false;
     const done = () => {
