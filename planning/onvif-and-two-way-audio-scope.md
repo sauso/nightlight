@@ -4,9 +4,12 @@ Status: **Phase 1 built** (ONVIF add-by-IP, not multicast discovery — see the 
 why and what was learned against the real Sonoff). **Phase 2 (capability check) is also built** —
 `probeOnvifCamera()` runs `GetAudioOutputConfigurations` at add time and records
 `backchannel_supported` (`yes`/`no`/`unknown`), surfaced in the camera UI. **Phase 3 (two-way audio)
-is ready to start (2026-08-02):** a confirmed-backchannel camera has been acquired — a **Hikvision
-DS-2CD2386G2-ISU/SL** — so see "Phase 3 — implementation findings & revised approach" below for the
-concrete plan (it corrects the original Phase 3 architecture).
+is BUILT and shipped in 0.7.0 (2026-08-03):** a tap-to-talk toggle on supported cameras, on a
+Hikvision **ISAPI** backend (not the originally-planned approach — see "Phase 3 — implementation
+findings & revised approach" below), with per-camera web-login credentials and a Verify button.
+Confirmed working on the **Hikvision DS-2CD2386G2-ISU/SL**. No further two-way-audio phases are
+outstanding; other backends (generic ONVIF backchannel / Dahua) remain possible future work only if
+a non-Hikvision camera needs it.
 
 > **Correction (2026-07-27): don't shop by "Profile T."** The audio backchannel
 > needed for two-way talk is a *conditional* ONVIF feature that appears in *some*
