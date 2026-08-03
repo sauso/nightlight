@@ -9,12 +9,18 @@ module.exports = defineConfig({
   workers: 1,
   timeout: 90_000,
   expect: { timeout: 20_000 },
-  retries: process.env.CI ? 1 : 0,
+  // No retries: specs share one backend/DB, and the add-camera spec mutates it — a
+  // retry would re-add and leave a duplicate camera, breaking later specs. Keep the
+  // suite deterministic instead.
+  retries: 0,
   reporter: [['list'], ['html', { outputFolder: 'playwright-report', open: 'never' }]],
   outputDir: 'test-results',
   use: {
-    // In-compose the app is reachable by service name; locally/CI it can be a host port.
+    // In-compose the app is reachable by service name over HTTPS (Caddy sidecar);
+    // locally/CI it can be a host port.
     baseURL: process.env.BASE_URL || 'http://localhost:4000',
+    // The in-compose HTTPS proxy uses a self-signed (internal CA) cert.
+    ignoreHTTPSErrors: true,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',

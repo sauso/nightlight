@@ -17,8 +17,8 @@ KEEP=0
 cleanup() { [ "$KEEP" = "1" ] || "${COMPOSE[@]}" --profile test down -v >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
-echo "== Bringing up app + synthetic camera"
-"${COMPOSE[@]}" up -d nightlight fakecam
+echo "== Bringing up app + synthetic camera + TLS proxy"
+"${COMPOSE[@]}" up -d nightlight fakecam proxy
 
 echo "== Waiting for the app to answer"
 for i in $(seq 1 60); do
