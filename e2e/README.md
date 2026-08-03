@@ -38,3 +38,17 @@ full of other images) can run out of space pulling it.
 
 CI (`.github/workflows/e2e.yml`) runs both phases on `ubuntu-latest`, on a
 dev → main PR, nightly on dev, and on manual dispatch.
+
+## Refreshing the documentation screenshots
+
+`playwright/tests/05-screenshots.spec.js` captures the app's main screens (as a byproduct
+of the suite) into `playwright/screenshots/` (gitignored). CI uploads them as the
+**`docs-screenshots`** artifact. To refresh the images used in [docs/](../docs/README.md):
+
+1. Trigger an e2e run (a dev → main PR, the nightly, or a manual dispatch once the workflow
+   is on the default branch).
+2. Download the **`docs-screenshots`** artifact from that run
+   (`gh run download <run-id> --name docs-screenshots --dir docs/screenshots`).
+3. Commit the updated PNGs under `docs/screenshots/`.
+
+They're committed (not generated at doc-view time) so they render on GitHub.
