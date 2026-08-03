@@ -104,6 +104,22 @@ the README, keeps it from filling the disk.)
 
 ## Confirmed bugs (fix pending)
 
-_None currently tracked. When one is confirmed but not yet fixed, it goes here with the
-symptom and, if known, a workaround — so it's not mistaken for one of the understood
-behaviours above._
+### Compatibility (HLS) mode doesn't play when the app is served over plain HTTP
+
+**What you see:** A camera set to **Compatibility** never shows video (the tile sits on
+"Connecting…" then "No signal") when you're reaching Nightlight over an **`http://`** URL —
+typically a LAN address like `http://192.168.1.100` with no reverse proxy / TLS in front.
+**Low latency** (WebRTC) mode on the same camera works fine, and Compatibility works fine once
+the app is served over **HTTPS**.
+
+**Why:** MediaMTX's HLS server does a cookie-based check on the playlist request and sets that
+cookie with the `Secure` attribute. Browsers refuse to store a `Secure` cookie on an insecure
+(`http://`) origin, so the check never completes and every HLS request fails. WebRTC doesn't use
+that cookie, so Low latency is unaffected. This surfaced while building the end-to-end tests,
+where the same thing broke in-browser HLS until the test stack was served over TLS (see
+`planning/documentation-and-e2e-testing-scope.md`).
+
+**What to do:** Use **Low latency** on a plain-HTTP LAN setup, or put the app behind HTTPS (a
+reverse proxy such as SWAG — see the README's "Running behind a reverse proxy" section), after
+which Compatibility works. A proper fix (e.g. having the app strip `Secure` from that cookie when
+it's serving over HTTP) is not yet implemented.
