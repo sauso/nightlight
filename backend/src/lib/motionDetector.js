@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import { logger } from './logger.js';
 import { subPathName, getPathStatus } from './mediamtx.js';
 import { recordDetectionEvent, ALERT } from './detectionEvents.js';
+import { sendToAll, pushEnabled } from './push.js';
 
 // Server-side motion detection. Per camera with detection enabled, a cheap FFmpeg leg reads
 // the already-published MediaMTX stream (the sub-stream when there is one — far cheaper to
@@ -159,6 +160,9 @@ export async function startMotionDetector(camera) {
             const pct = (fraction * 100).toFixed(1);
             recordDetectionEvent(camera.id, camera.name, ALERT.MOTION, `motion (${pct}% of zone)`);
             logger.info(`[detect] motion on "${camera.name}" (${pct}% of zone)`);
+            if (pushEnabled()) {
+              sendToAll(camera.name, 'Motion detected', { cameraId: camera.id, type: ALERT.MOTION }).catch(() => {});
+            }
           }
         } else if (activeSince && now - lastActive > ACTIVE_GRACE_MS) {
           activeSince = 0; // the run ended (gap exceeded the grace window)

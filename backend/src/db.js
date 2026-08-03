@@ -97,6 +97,17 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_detection_events_created_at ON detection_events(created_at);
+
+  -- FCM device tokens for push notifications (one row per app install that registered). The
+  -- token is the primary key so re-registering the same device is idempotent; user_id is who
+  -- was logged in when it registered (informational). Tokens FCM reports as dead are pruned by
+  -- lib/push.js when a send fails against them.
+  CREATE TABLE IF NOT EXISTS push_tokens (
+    token TEXT PRIMARY KEY,
+    user_id TEXT,
+    platform TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 // Migrations: columns added after the initial release, for databases created before them.
