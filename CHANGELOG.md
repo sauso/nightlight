@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-08-03
+
 ### Changed
 - **The audio-liveness watchdog now recovers stalled audio in ~30–60s instead of 2–4 minutes.**
   It checks every 30 seconds (was every 2 minutes); it still requires two consecutive stalled
