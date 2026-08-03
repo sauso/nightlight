@@ -40,12 +40,6 @@ function activeFractionThreshold(sensitivity) {
   return 0.002 + (0.1 - 0.002) * ((100 - s) / 99);
 }
 
-// Analyse the sub-stream if the camera has one (cheap to decode), else the main path.
-function analysisPath(camera) {
-  const hasSub = !!(camera.sub_rtsp_url && String(camera.sub_rtsp_url).trim());
-  return hasSub ? subPathName(camera.mediamtx_path) : camera.mediamtx_path;
-}
-
 // detect_zone JSON ({x,y,w,h} in 0..1 frame fractions) -> pixel bounds in the analysis frame.
 // Anything missing/degenerate falls back to the whole frame.
 function zoneBounds(camera) {
@@ -77,7 +71,11 @@ export async function startMotionDetector(camera) {
   await stopMotionDetector(camera.id);
   if (!camera.detect_motion_enabled || camera.disabled) return;
 
-  const path = analysisPath(camera);
+  // Prefer the sub-stream (far cheaper to decode); fall back to the main path if the sub
+  // isn't actually publishing (handled by the quick-failure check in launch's exit below).
+  const hasSub = !!(camera.sub_rtsp_url && String(camera.sub_rtsp_url).trim());
+  const mainPath = camera.mediamtx_path;
+  let path = hasSub ? subPathName(camera.mediamtx_path) : mainPath;
   const { x0, y0, x1, y1 } = zoneBounds(camera);
   const zonePixels = (x1 - x0) * (y1 - y0);
   const threshold = activeFractionThreshold(camera.detect_sensitivity);
@@ -85,6 +83,7 @@ export async function startMotionDetector(camera) {
   const cooldownMs = Math.max(1, camera.detect_cooldown_s ?? 60) * 1000;
 
   function launch() {
+    const startedAt = Date.now();
     const args = [
       '-nostdin',
       '-loglevel', 'error',
@@ -122,7 +121,7 @@ export async function startMotionDetector(camera) {
           lastActive = now;
           if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs) {
             lastAlert = now; // cooldown gates re-fire; a continuing run alerts once per cooldown
-            const pct = Math.round(fraction * 100);
+            const pct = (fraction * 100).toFixed(1);
             recordDetectionEvent(camera.id, camera.name, ALERT.MOTION, `motion (${pct}% of zone)`);
             logger.info(`[detect] motion on "${camera.name}" (${pct}% of zone)`);
           }
@@ -153,7 +152,14 @@ export async function startMotionDetector(camera) {
       const wasTracked = detectors.get(camera.id) === entry;
       if (wasTracked) detectors.delete(camera.id);
       if (!entry.stopped && wasTracked) {
-        logger.error(`[detect:${path}] exited (code ${code}), restarting in 5s`);
+        // A near-instant exit on the sub path usually means it isn't publishing (404) — fall
+        // back to the main path, which the transcoder always publishes.
+        if (Date.now() - startedAt < 4000 && path !== mainPath) {
+          logger.error(`[detect:${path}] not available, falling back to the main stream`);
+          path = mainPath;
+        } else {
+          logger.error(`[detect:${path}] exited (code ${code}), restarting in 5s`);
+        }
         setTimeout(() => {
           if (!entry.stopped && !detectors.has(camera.id)) launch();
         }, RESTART_DELAY_MS);
