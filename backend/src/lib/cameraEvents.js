@@ -70,3 +70,8 @@ export function getRecentEvents(limit = 200) {
     .prepare('SELECT * FROM camera_events ORDER BY id DESC LIMIT ?')
     .all(Math.min(limit, MAX_ROWS));
 }
+
+// Wipe the whole camera up/down/restart history (admin action). Returns how many rows were removed.
+export function clearCameraEvents() {
+  return db.prepare('DELETE FROM camera_events').run().changes;
+}

@@ -52,6 +52,16 @@ export default function EventLog() {
     return () => clearInterval(interval);
   }, [autoRefresh]);
 
+  async function clearAll() {
+    if (!confirm('Clear all camera history? This permanently deletes the up/down/restart history and cannot be undone.')) return;
+    try {
+      await api.del('/events');
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   return (
     <div className="event-log">
       <div className="log-viewer__toolbar">
@@ -64,6 +74,7 @@ export default function EventLog() {
           Auto-refresh
         </label>
         <button type="button" className="icon-btn" onClick={load}>Refresh now</button>
+        <button type="button" className="icon-btn" onClick={clearAll}>Clear log</button>
       </div>
 
       {error && <div className="error-banner">{error}</div>}

@@ -49,6 +49,16 @@ export default function RecentAlerts() {
     return () => clearInterval(interval);
   }, [autoRefresh]);
 
+  async function clearAll() {
+    if (!confirm('Clear all recent alerts? This permanently deletes the alert history and cannot be undone.')) return;
+    try {
+      await api.del('/cameras/alerts');
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   return (
     <div className="event-log">
       <div className="log-viewer__toolbar">
@@ -57,6 +67,7 @@ export default function RecentAlerts() {
           Auto-refresh
         </label>
         <button type="button" className="icon-btn" onClick={load}>Refresh now</button>
+        <button type="button" className="icon-btn" onClick={clearAll}>Clear log</button>
       </div>
 
       {error && <div className="error-banner">{error}</div>}

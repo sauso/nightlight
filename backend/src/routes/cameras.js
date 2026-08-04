@@ -6,7 +6,7 @@ import { upsertPath, removePath, getPathStatus, toPathName } from '../lib/mediam
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
 import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.js';
 import { startMotionDetector, stopMotionDetector } from '../lib/motionDetector.js';
-import { getRecentDetectionEvents } from '../lib/detectionEvents.js';
+import { getRecentDetectionEvents, clearDetectionEvents } from '../lib/detectionEvents.js';
 import { verifyTalkCreds } from '../lib/twoWayAudio.js';
 import { getReading, subscribeAllCameraTopics } from '../lib/mqttClient.js';
 import { probeOnvifCamera, ptzNudge } from '../lib/onvif.js';
@@ -204,6 +204,11 @@ router.get('/', async (req, res) => {
 // caregiver can see them. Literal path, mounted before /:id so it isn't treated as an :id.
 router.get('/alerts', requireAuth, (req, res) => {
   res.json(getRecentDetectionEvents(200));
+});
+
+// Clear the whole Recent alerts history (admin only). Mounted before /:id like the GET above.
+router.delete('/alerts', requireAuth, requireAdmin, (req, res) => {
+  res.json({ cleared: clearDetectionEvents() });
 });
 
 // Persists a custom drag-and-drop order for the Nursery page. Mounted before /:id so

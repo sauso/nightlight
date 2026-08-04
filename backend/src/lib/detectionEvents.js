@@ -52,3 +52,8 @@ export function getRecentDetectionEvents(limit = 200) {
     .prepare('SELECT * FROM detection_events ORDER BY id DESC LIMIT ?')
     .all(Math.min(limit, MAX_ROWS));
 }
+
+// Wipe the whole "Recent alerts" history (admin action). Returns how many rows were removed.
+export function clearDetectionEvents() {
+  return db.prepare('DELETE FROM detection_events').run().changes;
+}
