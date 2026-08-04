@@ -34,3 +34,9 @@ Admins can theme the app (name, colors, font), set the timezone and temperature 
 connect an MQTT broker to show room temperature/humidity on each tile.
 
 ![The settings screen](screenshots/settings.png)
+
+## Push notifications
+
+Nightlight can push a motion alert to your phone even when the app is closed — using your own
+Firebase project (nothing is shared through a Nightlight cloud). It's optional and off by default.
+See **[notifications.md](notifications.md)** for the one-time setup.

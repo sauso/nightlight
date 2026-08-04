@@ -83,6 +83,31 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_camera_events_created_at ON camera_events(created_at);
+
+  -- Detection alerts (motion now, sound later): a separate history from camera_events
+  -- above, because "the baby stirred / there's crying" is a different question from "was
+  -- the camera up?" and is surfaced as its own "Recent alerts" view. Same denormalized,
+  -- pruned, FK-free shape as camera_events (see lib/detectionEvents.js).
+  CREATE TABLE IF NOT EXISTS detection_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    camera_id TEXT NOT NULL,
+    camera_name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    detail TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_detection_events_created_at ON detection_events(created_at);
+
+  -- FCM device tokens for push notifications (one row per app install that registered). The
+  -- token is the primary key so re-registering the same device is idempotent; user_id is who
+  -- was logged in when it registered (informational). Tokens FCM reports as dead are pruned by
+  -- lib/push.js when a send fails against them.
+  CREATE TABLE IF NOT EXISTS push_tokens (
+    token TEXT PRIMARY KEY,
+    user_id TEXT,
+    platform TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 // Migrations: columns added after the initial release, for databases created before them.
@@ -198,6 +223,28 @@ if (!camerasColumns.includes('talk_password')) {
 // non-admin API responses.
 if (!camerasColumns.includes('sub_rtsp_url')) {
   db.exec('ALTER TABLE cameras ADD COLUMN sub_rtsp_url TEXT');
+}
+
+// Motion detection (server-side, per camera). Off by default. When enabled, a cheap
+// low-res/low-fps FFmpeg leg (off the sub-stream when there is one) frame-diffs the video
+// and logs a detection_event when movement is sustained past the confirmation delay, no
+// more than once per cooldown. detect_zone is an optional JSON {x,y,w,h} rectangle in
+// 0..1 frame fractions to restrict detection to (e.g. just the crib); null = whole frame.
+// See lib/motionDetector.js.
+if (!camerasColumns.includes('detect_motion_enabled')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN detect_motion_enabled INTEGER NOT NULL DEFAULT 0');
+}
+if (!camerasColumns.includes('detect_zone')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN detect_zone TEXT');
+}
+if (!camerasColumns.includes('detect_sensitivity')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN detect_sensitivity INTEGER NOT NULL DEFAULT 50');
+}
+if (!camerasColumns.includes('detect_cooldown_s')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN detect_cooldown_s INTEGER NOT NULL DEFAULT 60');
+}
+if (!camerasColumns.includes('detect_confirm_s')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN detect_confirm_s INTEGER NOT NULL DEFAULT 3');
 }
 
 // Ensure the single settings row always exists.

@@ -1386,6 +1386,8 @@ body.in-pip .tile-menu-backdrop {
 .event-log__dot--offline { background: var(--offline); }
 .event-log__dot--online { background: var(--live); }
 .event-log__dot--restart { background: var(--accent); }
+.event-log__dot--motion { background: #e0a57f; }
+.event-log__dot--sound { background: #8fd1e0; }
 
 .event-log__body {
   flex: 1;

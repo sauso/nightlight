@@ -18,3 +18,7 @@ data/
 *.log
 .vscode/
 .idea/
+
+# Firebase service-account credential — a secret, mounted into the data dir, never committed.
+firebase-service-account.json
+**/firebase-service-account.json

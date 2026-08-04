@@ -1,12 +1,14 @@
 # Nightlight: Documentation (with screenshots) + End-to-End Testing — Scope Document
 
-Status: **Phases 1–2 complete (2026-08-03).** Process refined 2026-08-02; work started after the
-0.7.0 release. `e2e/` has the synthetic-camera stack + `prove.sh` (Phase 1 gate) and a Playwright
-UI suite (Phase 2: first-run→login, add-camera→live tile, audio toggle, settings), both green on
-GitHub-hosted runners via `.github/workflows/e2e.yml`. **Next: Phase 3** (screenshots + `docs/` from
-the same specs), then Phase 4 remainder / Phase 5 (Android). The original brief is below; the
-**refined, phased process is at the bottom** ("Refined process & current-app notes"). See also the
-notes appended there on what Phase 2 uncovered. Confirm current repo structure before each phase.
+Status: **Phases 1–3 complete (2026-08-03).** Work started after the 0.7.0 release. `e2e/` has the
+synthetic-camera stack + `prove.sh` (Phase 1), a Playwright UI suite (Phase 2: first-run→login,
+add-camera→live tile, audio toggle, settings), and auto-generated documentation screenshots + a
+`docs/` visual walkthrough (Phase 3) — all green on GitHub-hosted runners via
+`.github/workflows/e2e.yml`, which also renders a pass/fail summary on the run page. **Next:
+Phase 5** (Android/Espresso instrumented tests). The optional Phase 4 refinement — build the image
+from the exact PR commit in CI rather than testing the `:dev` tag — also remains. The original brief
+is below; the **refined, phased process is at the bottom** ("Refined process & current-app notes"),
+including the notes on what Phase 2 uncovered. Confirm current repo structure before each phase.
 
 ---
 

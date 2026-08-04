@@ -1,5 +1,10 @@
+# Pin Node exactly. The floating node:24-alpine tag moved to 24.19.0, which aborts at startup
+# under our native modules + child-process spawns ("RemoveEnvironmentCleanupHook: Assertion
+# failed: (env) != nullptr"). 24.18.1 is the version prod runs on and is known-good. Bump this
+# deliberately after testing, not implicitly on every rebuild.
+
 # --- Stage 1: build the React frontend ---
-FROM node:24-alpine AS frontend-build
+FROM node:24.18.1-alpine AS frontend-build
 WORKDIR /frontend
 # npm ci against the committed lockfile, not npm install against version ranges -
 # the image gets the exact dependency tree that was tested, instead of whatever
@@ -18,7 +23,7 @@ RUN npm run build
 FROM bluenviron/mediamtx:1 AS mediamtx-binary
 
 # --- Stage 3: combined runtime (app + MediaMTX + FFmpeg) ---
-FROM node:24-alpine
+FROM node:24.18.1-alpine
 WORKDIR /app
 
 # python3/make/g++: needed to compile better-sqlite3's native addon.
