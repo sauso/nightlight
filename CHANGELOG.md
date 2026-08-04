@@ -37,11 +37,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   no extra video transcoding on the server. The choice is per-device (like mute). *(The sub-stream
   currently runs continuously alongside the main one; an on-demand version is a planned follow-up.)*
 - **Push notifications for detection alerts (Android).** When a camera with motion detection sees
-  movement, the server can now send a push notification to the mobile app, so you're alerted even
-  when it's closed/backgrounded. Requires a Firebase service-account credential mounted at
-  `DATA_DIR/firebase-service-account.json` (absent = push simply disabled; the in-app **Recent
-  alerts** list works regardless) and the companion app rebuilt with FCM. The app registers on
-  sign-in and unregisters on sign-out. iOS push waits on APNs (deferred).
+  movement, the server sends a push notification to the app, so you're alerted even when it's closed.
+  Self-hosted-friendly: each install uses its **own Firebase project** — drop your Firebase
+  **service-account** key and **google-services.json** into `DATA_DIR` (absent = push simply disabled;
+  the in-app **Recent alerts** list works regardless), and the app initializes Firebase at runtime
+  from your server (the released APK is generic — nothing baked in). Opt in per device under
+  **Account → Notifications**. Full setup in `docs/notifications.md`. iOS waits on APNs (deferred).
 - **Two-way audio (talk-back).** Cameras that support it now show a **talk** button — tap to start
   talking through the camera's speaker (the button turns red and pulses while live), tap again to
   stop (and it auto-stops after a couple of minutes as a safety net). Your voice is captured, encoded
