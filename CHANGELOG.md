@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+- **Motion detection can now be set when *adding* a camera**, not only when editing — the Add camera
+  form gained the same Motion detection section, applied as soon as the camera is created.
+
 ### Added
 - **A "Clear log" button on each list under Settings → Logs** (Recent alerts, Camera history, and
   Recent logs), each behind an "are you sure?" confirmation. Clearing the logs buffer doesn't affect
