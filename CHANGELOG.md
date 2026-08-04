@@ -9,6 +9,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+- **Settings is now split into focused sub-pages** instead of one long scroll: a hub lists **General**
+  (app name, timezone, theme, font, colours, temperature unit), **MQTT**, **Push notifications**,
+  **User management**, and **Logs** (recent alerts, camera history, server logs). **Caregiver accounts
+  and "all active sessions" moved out of Account into Settings → User management**; Account keeps your
+  own profile, password, this-device sessions, and per-device notification toggle.
+
 ### Added
 - **A dedicated "Enable push notifications" switch in Settings → Notifications**, separate from motion
   detection. Turning it on **validates your Firebase files are present and valid** and refuses (with a
