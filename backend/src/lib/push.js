@@ -7,9 +7,12 @@ import db from '../db.js';
 // so it is NEVER baked into the (public) image — it's mounted as a file into the data dir. If
 // it's absent, push is simply disabled (no error): everything else, including the in-app alerts
 // list, works without it.
-const CRED_PATH =
-  process.env.FIREBASE_CREDENTIALS ||
-  path.join(process.env.DATA_DIR || '/app/data', 'firebase-service-account.json');
+const DATA_DIR = process.env.DATA_DIR || '/app/data';
+const CRED_PATH = process.env.FIREBASE_CREDENTIALS || path.join(DATA_DIR, 'firebase-service-account.json');
+// The client-side Firebase config (the admin's google-services.json). Nightlight is self-hosted,
+// so each install uses its OWN Firebase project: the generic app fetches these values from its own
+// server at runtime and initializes Firebase with them (rather than baking them into the APK).
+const CLIENT_CONFIG_PATH = process.env.FIREBASE_CLIENT_CONFIG || path.join(DATA_DIR, 'google-services.json');
 
 // Android notification channel the app must define (see the mobile client). Matched here so the
 // notification is delivered to the right channel on Android 8+.
@@ -36,6 +39,26 @@ export async function initPush() {
 
 export function pushEnabled() {
   return !!messaging;
+}
+
+// The Firebase client config the mobile app needs to initialize FCM at runtime, read from the
+// admin's google-services.json. Returns null if it isn't present or is malformed. Re-read each
+// call (cheap, tiny file) so dropping the file in doesn't need a restart to take effect.
+export function getClientConfig() {
+  try {
+    if (!fs.existsSync(CLIENT_CONFIG_PATH)) return null;
+    const gs = JSON.parse(fs.readFileSync(CLIENT_CONFIG_PATH, 'utf8'));
+    const client = gs?.client?.[0];
+    const appId = client?.client_info?.mobilesdk_app_id;
+    const apiKey = client?.api_key?.[0]?.current_key;
+    const projectId = gs?.project_info?.project_id;
+    const senderId = gs?.project_info?.project_number;
+    if (!appId || !apiKey || !projectId || !senderId) return null;
+    // Only the (non-secret) client identifiers — never the service-account private key.
+    return { appId, apiKey, projectId, senderId };
+  } catch {
+    return null;
+  }
 }
 
 export function registerToken(token, platform, userId) {
