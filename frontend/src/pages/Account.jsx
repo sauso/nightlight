@@ -3,6 +3,13 @@ import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import Modal from '../components/Modal.jsx';
 import AppHeader from '../components/AppHeader.jsx';
+import {
+  notificationsSupported,
+  notificationsEnabled,
+  enableNotifications,
+  disableNotifications,
+  getServerPushStatus,
+} from '../lib/pushNotifications.js';
 
 const BLANK_FORM = { username: '', password: '', role: 'caregiver', first_name: '', last_name: '' };
 const BLANK_PASSWORD_FORM = { current_password: '', new_password: '', confirm_password: '' };
@@ -31,6 +38,25 @@ export default function Account() {
   const [passwordForm, setPasswordForm] = useState(BLANK_PASSWORD_FORM);
   const [passwordError, setPasswordError] = useState('');
   const [passwordSaved, setPasswordSaved] = useState(false);
+  // Notifications (per-device, native app only).
+  const [notifEnabled, setNotifEnabled] = useState(notificationsEnabled());
+  const [serverPush, setServerPush] = useState(null); // { configured } | null (loading)
+  const [notifBusy, setNotifBusy] = useState(false);
+
+  useEffect(() => {
+    if (notificationsSupported()) getServerPushStatus().then(setServerPush);
+  }, []);
+
+  async function toggleNotifications(on) {
+    setNotifBusy(true);
+    try {
+      if (on) await enableNotifications();
+      else await disableNotifications();
+      setNotifEnabled(notificationsEnabled());
+    } finally {
+      setNotifBusy(false);
+    }
+  }
 
   async function load() {
     try {
@@ -190,6 +216,37 @@ export default function Account() {
             </div>
           ))}
         </div>
+
+        {notificationsSupported() && (
+          <>
+            <div className="section-title">Notifications</div>
+            <div className="card" style={{ marginBottom: 14 }}>
+              {serverPush && !serverPush.configured ? (
+                <div className="camera-tile__sub" style={{ padding: 12 }}>
+                  Notifications aren't set up on this server yet. An admin needs to add a Firebase
+                  project — see <strong>docs/notifications.md</strong>.
+                </div>
+              ) : (
+                <>
+                  <label className="log-viewer__toggle" style={{ padding: 12, margin: 0 }}>
+                    <input
+                      type="checkbox"
+                      style={{ width: 'auto', margin: 0 }}
+                      checked={notifEnabled}
+                      disabled={notifBusy || !serverPush}
+                      onChange={(e) => toggleNotifications(e.target.checked)}
+                    />
+                    Send motion alerts to this device
+                  </label>
+                  <div className="camera-tile__sub" style={{ padding: '0 12px 12px' }}>
+                    Get a push notification when a camera with motion detection sees movement, even
+                    when the app is closed. Turning this on asks for notification permission.
+                  </div>
+                </>
+              )}
+            </div>
+          </>
+        )}
 
         {user?.role === 'admin' && (
           <>

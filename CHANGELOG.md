@@ -9,6 +9,23 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-04
+
+### Added
+- **Motion detection (per camera).** Turn it on for a camera in Cameras → edit and Nightlight
+  watches its video server-side for movement, logging an alert (Settings → **Recent alerts**) when
+  motion is sustained past a confirmation delay — at most once per cooldown. Tunable **sensitivity**,
+  **confirm** delay, and **cooldown** per camera. It samples the low-quality sub-stream when there is
+  one (so it's cheap), and is off by default. Currently watches the whole frame — a crib-zone picker
+  is a planned follow-up.
+- **Push notifications for detection alerts (Android).** When a camera with motion detection sees
+  movement, the server sends a push notification to the app, so you're alerted even when it's closed.
+  Self-hosted-friendly: each install uses its **own Firebase project** — drop your Firebase
+  **service-account** key and **google-services.json** into `DATA_DIR` (absent = push simply disabled;
+  the in-app **Recent alerts** list works regardless), and the app initializes Firebase at runtime
+  from your server (the released APK is generic — nothing baked in). Opt in per device under
+  **Account → Notifications**. Full setup in `docs/notifications.md`. iOS waits on APNs (deferred).
+
 ## [0.7.1] - 2026-08-03
 
 ### Changed
@@ -437,7 +454,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/sauso/nightlight/compare/v0.7.1...v0.8.0
+[0.7.1]: https://github.com/sauso/nightlight/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/sauso/nightlight/compare/v0.6.3...v0.7.0
+[0.6.3]: https://github.com/sauso/nightlight/compare/v0.6.2...v0.6.3
+[0.6.2]: https://github.com/sauso/nightlight/compare/v0.6.1...v0.6.2
+[0.6.1]: https://github.com/sauso/nightlight/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/sauso/nightlight/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/sauso/nightlight/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/sauso/nightlight/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/sauso/nightlight/compare/v0.4.9...v0.5.0

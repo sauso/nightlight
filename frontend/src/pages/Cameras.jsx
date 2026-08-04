@@ -15,6 +15,8 @@ export default function Cameras() {
   const EMPTY_FORM = {
     name: '', rtsp_host: '', rtsp_port: '554', rtsp_path: '', rtsp_username: '', rtsp_password: '',
     child_id: '', mqtt_topic: '', talk_username: '', talk_password: '', sub_rtsp_path: '',
+    // Motion detection (only settable on an existing camera — see the edit-only section below).
+    detect_motion_enabled: false, detect_sensitivity: 50, detect_cooldown_s: 60, detect_confirm_s: 3,
   };
   const [form, setForm] = useState(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
@@ -59,6 +61,10 @@ export default function Cameras() {
       talk_username: cam.talk_username || '',
       talk_password: '',
       sub_rtsp_path: cam.sub_rtsp_path || '',
+      detect_motion_enabled: !!cam.detect_motion_enabled,
+      detect_sensitivity: cam.detect_sensitivity ?? 50,
+      detect_cooldown_s: cam.detect_cooldown_s ?? 60,
+      detect_confirm_s: cam.detect_confirm_s ?? 3,
     });
     setOnvifMsg('');
     setConfirmMsg('');
@@ -145,6 +151,16 @@ export default function Cameras() {
     const payload = { ...form, child_id: form.child_id || null, ...(force ? { force: true } : {}) };
     try {
       await submitCamera(payload);
+      // Detection settings live on the camera but are applied via their own endpoint (they
+      // restart the detector). Only meaningful for an existing camera.
+      if (editing?.id) {
+        await api.put(`/cameras/${editing.id}/detection`, {
+          motion_enabled: !!form.detect_motion_enabled,
+          sensitivity: Number(form.detect_sensitivity),
+          cooldown_s: Number(form.detect_cooldown_s),
+          confirm_s: Number(form.detect_confirm_s),
+        });
+      }
       setEditing(null);
       await refresh();
     } catch (err) {
@@ -452,6 +468,75 @@ export default function Cameras() {
                 placeholder="e.g. zigbee2mqtt/Raffa Room Temp"
               />
             </div>
+
+            {editing.id && (
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                  Motion detection
+                </label>
+                <label className="log-viewer__toggle" style={{ margin: 0 }}>
+                  <input
+                    type="checkbox"
+                    style={{ width: 'auto', margin: 0 }}
+                    checked={form.detect_motion_enabled}
+                    onChange={(e) => setForm({ ...form, detect_motion_enabled: e.target.checked })}
+                  />
+                  Enable
+                </label>
+                <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                  Watches this camera for movement and logs an alert (see Settings → Recent alerts).
+                  Off by default; it uses the low-quality sub-stream when there is one.
+                </div>
+                {form.detect_motion_enabled && (
+                  <>
+                    <div className="field" style={{ marginTop: 12, marginBottom: 8 }}>
+                      <label htmlFor="detect-sensitivity">Sensitivity: {form.detect_sensitivity}</label>
+                      <input
+                        id="detect-sensitivity"
+                        type="range"
+                        min="1"
+                        max="100"
+                        value={form.detect_sensitivity}
+                        onChange={(e) => setForm({ ...form, detect_sensitivity: Number(e.target.value) })}
+                      />
+                      <div className="camera-tile__sub">
+                        Higher triggers on smaller movements (and more false alarms).
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <div className="field" style={{ flex: 1 }}>
+                        <label htmlFor="detect-confirm">Confirm for (seconds)</label>
+                        <input
+                          id="detect-confirm"
+                          type="number"
+                          min="0"
+                          max="30"
+                          value={form.detect_confirm_s}
+                          onChange={(e) => setForm({ ...form, detect_confirm_s: e.target.value })}
+                        />
+                      </div>
+                      <div className="field" style={{ flex: 1 }}>
+                        <label htmlFor="detect-cooldown">Cooldown (seconds)</label>
+                        <input
+                          id="detect-cooldown"
+                          type="number"
+                          min="1"
+                          max="3600"
+                          value={form.detect_cooldown_s}
+                          onChange={(e) => setForm({ ...form, detect_cooldown_s: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                    <div className="camera-tile__sub">
+                      <strong>Confirm</strong> = movement must persist this long before it counts
+                      (filters brief blips). <strong>Cooldown</strong> = the minimum gap between
+                      alerts from this camera.
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
             {modalError && <div className="error-banner" style={{ marginBottom: 12 }}>{modalError}</div>}
             {confirmMsg && (
               <div className="form-warning">

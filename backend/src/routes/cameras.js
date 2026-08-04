@@ -5,6 +5,8 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { upsertPath, removePath, getPathStatus, toPathName } from '../lib/mediamtx.js';
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
 import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.js';
+import { startMotionDetector, stopMotionDetector } from '../lib/motionDetector.js';
+import { getRecentDetectionEvents } from '../lib/detectionEvents.js';
 import { verifyTalkCreds } from '../lib/twoWayAudio.js';
 import { getReading, subscribeAllCameraTopics } from '../lib/mqttClient.js';
 import { probeOnvifCamera, ptzNudge } from '../lib/onvif.js';
@@ -50,6 +52,29 @@ function parseRtspComponents(url) {
 // Admins additionally get the address broken into fields (for the edit form) plus a
 // credential-free display URL and a flag for whether a password is set. ONVIF credentials
 // (used server-side for PTZ) are always stripped.
+// The crib zone is stored as a JSON string {x,y,w,h} in 0..1 frame fractions (null = whole
+// frame). Parse leniently for output; null on anything malformed.
+function parseZone(raw) {
+  if (!raw) return null;
+  try {
+    const z = JSON.parse(raw);
+    if (z && ['x', 'y', 'w', 'h'].every((k) => typeof z[k] === 'number')) return z;
+  } catch {
+    /* fall through */
+  }
+  return null;
+}
+
+// Validate + clamp a zone from the client into a storable JSON string (or null = whole frame).
+function serializeZone(z) {
+  if (!z) return null;
+  const nums = ['x', 'y', 'w', 'h'].map((k) => Number(z[k]));
+  if (nums.some((n) => !Number.isFinite(n))) return null;
+  const [x, y, w, h] = nums.map((n) => Math.min(1, Math.max(0, n)));
+  if (w <= 0 || h <= 0) return null;
+  return JSON.stringify({ x, y, w, h });
+}
+
 function publicCamera(cam, isAdmin) {
   const { rtsp_url, onvif_username, onvif_password, talk_username, talk_password, sub_rtsp_url, ...rest } = cam;
   // talk_configured / has_sub (safe for everyone) drive the tile's talk button + quality selector.
@@ -57,6 +82,8 @@ function publicCamera(cam, isAdmin) {
     ...rest,
     talk_configured: !!(cam.talk_backend && talk_username && talk_password),
     has_sub: !!(sub_rtsp_url && sub_rtsp_url.trim()),
+    // Parse the crib zone (stored as a JSON string) into an object for the client.
+    detect_zone: parseZone(cam.detect_zone),
   };
   if (!isAdmin) return base;
   const parts = parseRtspComponents(rtsp_url) || {};
@@ -171,6 +198,12 @@ router.get('/', async (req, res) => {
     }))
   );
   res.json(withStatus);
+});
+
+// Recent detection alerts (motion now, sound later) — the "Recent alerts" list. Any signed-in
+// caregiver can see them. Literal path, mounted before /:id so it isn't treated as an :id.
+router.get('/alerts', requireAuth, (req, res) => {
+  res.json(getRecentDetectionEvents(200));
 });
 
 // Persists a custom drag-and-drop order for the Nursery page. Mounted before /:id so
@@ -413,6 +446,10 @@ router.put('/:id', requireAdmin, async (req, res) => {
     } catch (e) {
       logger.error(`[substream] failed to apply for ${updated.name}: ${e.message}`);
     }
+    // The stream (or which path the detector should read) may have changed — restart the
+    // motion detector so it re-attaches to the current stream. No-op if detection is off.
+    if (updated.detect_motion_enabled) await startMotionDetector(updated).catch(() => {});
+    else await stopMotionDetector(updated.id).catch(() => {});
   }
   subscribeAllCameraTopics();
   res.json(publicCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id), true));
@@ -434,9 +471,11 @@ router.put('/:id/enabled', requireAdmin, async (req, res) => {
     }
     await startTranscoder(req.params.id, existing.rtsp_url, existing.mediamtx_path, existing.name);
     if (subConfigured(existing)) await startSubStream(existing).catch((e) => logger.error(`[substream] enable failed: ${e.message}`));
+    if (existing.detect_motion_enabled) await startMotionDetector(existing).catch(() => {});
   } else {
     await stopTranscoder(req.params.id);
     await stopSubStream(existing).catch(() => {});
+    await stopMotionDetector(req.params.id).catch(() => {});
     try {
       await removePath(existing.mediamtx_path);
     } catch (e) {
@@ -447,6 +486,41 @@ router.put('/:id/enabled', requireAdmin, async (req, res) => {
   }
   db.prepare('UPDATE cameras SET disabled = ? WHERE id = ?').run(enabled ? 0 : 1, req.params.id);
   res.json(publicCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id), true));
+});
+
+// Motion-detection settings for a camera (admin). Applies immediately — starts/stops/restarts
+// the detector to match. `zone` is {x,y,w,h} in 0..1 frame fractions, or null for the whole frame.
+router.put('/:id/detection', requireAdmin, async (req, res) => {
+  const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Camera not found' });
+  const { motion_enabled, zone, sensitivity, cooldown_s, confirm_s } = req.body || {};
+
+  const enabled = motion_enabled ? 1 : 0;
+  const zoneJson = zone === undefined ? existing.detect_zone : serializeZone(zone);
+  const sens =
+    sensitivity === undefined
+      ? existing.detect_sensitivity
+      : Math.min(100, Math.max(1, Math.round(Number(sensitivity)) || 50));
+  const cooldown =
+    cooldown_s === undefined ? existing.detect_cooldown_s : Math.max(1, Math.round(Number(cooldown_s)) || 60);
+  const confirm =
+    confirm_s === undefined ? existing.detect_confirm_s : Math.max(0, Math.round(Number(confirm_s)) || 0);
+
+  db.prepare(
+    `UPDATE cameras SET detect_motion_enabled = ?, detect_zone = ?, detect_sensitivity = ?,
+       detect_cooldown_s = ?, detect_confirm_s = ? WHERE id = ?`
+  ).run(enabled, zoneJson, sens, cooldown, confirm, req.params.id);
+
+  const updated = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+  // Apply to the live detector now (a disabled camera's detector starts when it's re-enabled).
+  if (!updated.disabled) {
+    if (updated.detect_motion_enabled) {
+      await startMotionDetector(updated).catch((e) => logger.error(`[detect] start failed: ${e.message}`));
+    } else {
+      await stopMotionDetector(updated.id).catch(() => {});
+    }
+  }
+  res.json(publicCamera(updated, true));
 });
 
 // Dedicated assignment endpoint: attach (or unattach with child_id: null) a camera to a child.
@@ -467,6 +541,7 @@ router.delete('/:id', requireAdmin, async (req, res) => {
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
   await stopTranscoder(req.params.id);
   await stopSubStream(existing).catch(() => {});
+  await stopMotionDetector(req.params.id).catch(() => {});
   try {
     await removePath(existing.mediamtx_path);
   } catch (e) {
