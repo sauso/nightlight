@@ -194,7 +194,7 @@ export default function SettingsGeneral() {
             </button>
           </div>
 
-          <button className="btn btn-primary" type="submit" disabled={busy}>
+          <button className="btn btn-primary" type="submit" disabled={busy} style={{ marginTop: 20 }}>
             {busy ? 'Saving…' : 'Save changes'}
           </button>
         </form>
