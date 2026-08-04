@@ -9,6 +9,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **A dedicated "Enable push notifications" switch in Settings → Notifications**, separate from motion
+  detection. Turning it on **validates your Firebase files are present and valid** and refuses (with a
+  message naming what's missing) otherwise, so push can't be left half-configured. Motion detection
+  and the in-app **Recent alerts** list are unaffected — they work with or without push.
+
+### Changed
+- **Push is now off until an admin enables it** (above), rather than sending as soon as the Firebase
+  files exist. Enabling also initializes Firebase on the spot, so dropping the files in no longer
+  needs a container restart.
+
 ## [0.8.0] - 2026-08-04
 
 ### Added

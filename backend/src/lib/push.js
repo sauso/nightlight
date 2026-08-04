@@ -20,10 +20,15 @@ const ANDROID_CHANNEL = 'nightlight_alerts';
 
 let messaging = null;
 
+// Idempotent: initializes firebase-admin from the mounted service-account key the first time it
+// finds one. Safe to call again after the admin drops the file in and enables push (no restart
+// needed). Returns whether messaging is ready. Absent credential is not an error — push is simply
+// unavailable until it's provided.
 export async function initPush() {
+  if (messaging) return true;
   if (!fs.existsSync(CRED_PATH)) {
     logger.info(`[push] no Firebase credentials at ${CRED_PATH} — push notifications disabled`);
-    return;
+    return false;
   }
   try {
     const cred = JSON.parse(fs.readFileSync(CRED_PATH, 'utf8'));
@@ -32,13 +37,55 @@ export async function initPush() {
     initializeApp({ credential: cert(cred) });
     messaging = getMessaging();
     logger.info(`[push] Firebase initialized (project ${cred.project_id})`);
+    return true;
   } catch (e) {
     logger.error('[push] failed to initialize Firebase:', e.message);
+    return false;
   }
 }
 
+// Can this server technically deliver a push right now? Needs both the service-account key (to
+// send) and the client config (so the app could register). Independent of the admin on/off switch.
+export function pushConfigured() {
+  return !!messaging && !!getClientConfig();
+}
+
+// The admin's explicit on/off switch (Settings → Notifications). Read live so it takes effect
+// without a restart.
+function pushSettingOn() {
+  try {
+    return !!db.prepare('SELECT push_enabled FROM settings WHERE id = ?').get('app')?.push_enabled;
+  } catch {
+    return false;
+  }
+}
+
+// The single source of truth for "will a push actually be sent": the admin turned it on AND the
+// server is technically able to deliver. Gates sendToAll and is what the app's status reflects.
 export function pushEnabled() {
-  return !!messaging;
+  return pushSettingOn() && pushConfigured();
+}
+
+// Validate the Firebase setup for the admin's "enable push" action, with a specific message per
+// missing/invalid piece so the Settings page can tell the admin exactly what to fix. Returns
+// { ok: true } or { ok: false, error }.
+export function validatePushSetup() {
+  if (!fs.existsSync(CRED_PATH)) {
+    return { ok: false, error: 'The Firebase service-account key (firebase-service-account.json) is missing from the data directory.' };
+  }
+  try {
+    const cred = JSON.parse(fs.readFileSync(CRED_PATH, 'utf8'));
+    if (!cred.project_id || !cred.private_key) throw new Error('missing fields');
+  } catch {
+    return { ok: false, error: 'firebase-service-account.json is present but is not a valid service-account key.' };
+  }
+  if (!fs.existsSync(CLIENT_CONFIG_PATH)) {
+    return { ok: false, error: 'google-services.json is missing from the data directory.' };
+  }
+  if (!getClientConfig()) {
+    return { ok: false, error: 'google-services.json is present but is missing required fields (app id / api key / project id / sender id).' };
+  }
+  return { ok: true };
 }
 
 // The Firebase client config the mobile app needs to initialize FCM at runtime, read from the
@@ -78,7 +125,7 @@ export function removeToken(token) {
 // Fire-and-forget push to every registered device. Never throws into the caller (a push failure
 // must not disrupt detection). Prunes tokens FCM reports as permanently dead.
 export async function sendToAll(title, body, data = {}) {
-  if (!messaging) return;
+  if (!pushEnabled()) return;
   const tokens = db.prepare('SELECT token FROM push_tokens').all().map((r) => r.token);
   if (tokens.length === 0) return;
   // FCM data payload values must all be strings.

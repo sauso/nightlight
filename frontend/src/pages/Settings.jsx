@@ -23,8 +23,31 @@ export default function Settings() {
   const [busy, setBusy] = useState(false);
   const [timezones] = useState(getCommonTimezones);
   const [mqttPasswordSet, setMqttPasswordSet] = useState(false);
+  // Push is its own immediate switch (validated server-side on enable), not part of the main form.
+  const [pushStatus, setPushStatus] = useState(null); // { push_enabled, configured } | null
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushError, setPushError] = useState('');
 
   useEffect(() => setForm((f) => ({ ...f, ...settings })), [settings]);
+
+  useEffect(() => {
+    api.get('/push/status').then(setPushStatus).catch(() => {});
+  }, []);
+
+  async function togglePush(on) {
+    setPushBusy(true);
+    setPushError('');
+    try {
+      // Server validates the Firebase files when enabling and 400s if any are missing.
+      setPushStatus(await api.put('/push/enable', { enabled: on }));
+    } catch (err) {
+      setPushError(err.message);
+      // Snap the toggle back to the real (unchanged) server state.
+      api.get('/push/status').then(setPushStatus).catch(() => {});
+    } finally {
+      setPushBusy(false);
+    }
+  }
 
   useEffect(() => {
     api.get('/settings/mqtt').then((mqtt) => {
@@ -279,6 +302,34 @@ export default function Settings() {
             {busy ? 'Saving…' : 'Save changes'}
           </button>
         </form>
+
+        <div className="section-title">Notifications (push)</div>
+        <div className="card">
+          <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
+            Send a push notification to phones when a camera with motion detection sees movement,
+            even when the app is closed. Requires your own Firebase project — drop{' '}
+            <strong>firebase-service-account.json</strong> and <strong>google-services.json</strong>{' '}
+            into the data directory first (see <strong>docs/notifications.md</strong>). Motion
+            detection and the in-app <strong>Recent alerts</strong> below work with or without this.
+          </div>
+          {pushError && (
+            <div className="error-banner" style={{ marginBottom: 10 }}>{pushError}</div>
+          )}
+          <label className="log-viewer__toggle">
+            <input
+              type="checkbox"
+              checked={!!pushStatus?.push_enabled}
+              disabled={pushBusy || !pushStatus}
+              onChange={(e) => togglePush(e.target.checked)}
+            />
+            Enable push notifications
+          </label>
+          {pushStatus && !pushStatus.configured && (
+            <div className="camera-tile__sub" style={{ marginTop: 10 }}>
+              Firebase files aren't detected in the data directory yet — add them, then enable.
+            </div>
+          )}
+        </div>
 
         <div className="section-title">Recent alerts</div>
         <RecentAlerts />

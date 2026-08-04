@@ -256,11 +256,12 @@ To enable it:
    `com.sauso.nightlight` (SHA-1 not needed). Download its **`google-services.json`**.
 2. In Firebase **Project settings → Service accounts**, **Generate new private key** — this is the
    secret **`firebase-service-account.json`**.
-3. Drop both files into your data dir (e.g. `/mnt/user/appdata/nightlight`), keep the service-account
-   file private (`chmod 600`), and **`docker restart nightlight`**. The log should show
-   `[push] Firebase initialized`.
-4. In the app, **Account → Notifications → "Send motion alerts to this device"** (each device opts in
-   separately), then enable **Motion detection** on a camera in **Cameras → edit**.
+3. Drop both files into your data dir (e.g. `/mnt/user/appdata/nightlight`) and keep the
+   service-account file private (`chmod 600`).
+4. In the web app, **Settings → Notifications (push) → "Enable push notifications."** Saving checks
+   both files are present and valid (and tells you exactly which is missing if not).
+5. On each phone, **Account → Notifications → "Send motion alerts to this device"** (each device opts
+   in separately), then enable **Motion detection** on a camera in **Cameras → edit**.
 
 Without the two files, push is simply disabled — nothing else changes. Full walkthrough with
 troubleshooting: **[docs/notifications.md](docs/notifications.md)**.
