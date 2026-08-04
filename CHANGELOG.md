@@ -9,6 +9,31 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-04
+
+### Added
+- **A dedicated "Enable push notifications" switch in Settings → Notifications**, separate from motion
+  detection. Turning it on **validates your Firebase files are present and valid** and refuses (with a
+  message naming what's missing) otherwise, so push can't be left half-configured. Motion detection
+  and the in-app **Recent alerts** list are unaffected — they work with or without push.
+- **A "Clear log" button on each list under Settings → Logs** (Recent alerts, Camera history, and
+  Recent logs), each behind an in-app "are you sure?" confirmation. Clearing the logs buffer doesn't
+  affect `docker logs`.
+
+### Changed
+- **Settings is now split into focused sub-pages** instead of one long scroll: a hub lists **General**
+  (app name, timezone, theme, font, colours, temperature unit), **MQTT**, **Push notifications**,
+  **User management**, and **Logs** (recent alerts, camera history, server logs). **Caregiver accounts
+  and "all active sessions" moved out of Account into Settings → User management**; Account keeps your
+  own profile, password, this-device sessions, and per-device notification toggle.
+- **Push is now off until an admin enables it** (above), rather than sending as soon as the Firebase
+  files exist. Enabling also initializes Firebase on the spot, so dropping the files in no longer
+  needs a container restart.
+
+### Fixed
+- **Motion detection can now be set when *adding* a camera**, not only when editing — the Add camera
+  form gained the same Motion detection section, applied as soon as the camera is created.
+
 ## [0.8.0] - 2026-08-04
 
 ### Added
@@ -454,7 +479,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/sauso/nightlight/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/sauso/nightlight/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/sauso/nightlight/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/sauso/nightlight/compare/v0.6.3...v0.7.0

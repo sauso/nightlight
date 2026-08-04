@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
+import Modal from './Modal.jsx';
 
 export default function LogViewer() {
   const [lines, setLines] = useState([]);
   const [error, setError] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [filter, setFilter] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [clearBusy, setClearBusy] = useState(false);
   const boxRef = useRef(null);
 
   async function load() {
@@ -24,6 +27,19 @@ export default function LogViewer() {
     const interval = setInterval(load, 5000);
     return () => clearInterval(interval);
   }, [autoRefresh]);
+
+  async function doClear() {
+    setClearBusy(true);
+    try {
+      await api.del('/logs');
+      setConfirming(false);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setClearBusy(false);
+    }
+  }
 
   // Case-insensitive substring match, applied client-side so it works on the
   // already-loaded buffer without any new API surface.
@@ -45,8 +61,28 @@ export default function LogViewer() {
           />
           Auto-refresh
         </label>
-        <button type="button" className="icon-btn" onClick={load}>Refresh now</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button" className="icon-btn" onClick={load}>Refresh now</button>
+          <button type="button" className="icon-btn" onClick={() => setConfirming(true)}>Clear log</button>
+        </div>
       </div>
+
+      {confirming && (
+        <Modal title="Clear recent logs" placement="top" onClose={() => (clearBusy ? null : setConfirming(false))}>
+          <p style={{ marginTop: 0 }}>
+            Clear the recent logs shown here? This empties the in-app buffer (it doesn't affect{' '}
+            <code>docker logs</code>) and can't be undone.
+          </p>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button className="btn" type="button" onClick={() => setConfirming(false)} disabled={clearBusy}>
+              Cancel
+            </button>
+            <button className="btn btn-danger" type="button" onClick={doClear} disabled={clearBusy}>
+              {clearBusy ? 'Clearing…' : 'Clear log'}
+            </button>
+          </div>
+        </Modal>
+      )}
       <div className="log-viewer__filter-row">
         <input
           type="search"

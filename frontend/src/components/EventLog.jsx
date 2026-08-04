@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
+import Modal from './Modal.jsx';
 
 // Human-facing labels/colors for each event type the backend records (see
 // lib/cameraEvents.js EVENT). Anything unrecognized falls back to a neutral style so a
@@ -32,6 +33,8 @@ export default function EventLog() {
   const [error, setError] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [confirming, setConfirming] = useState(false);
+  const [clearBusy, setClearBusy] = useState(false);
 
   async function load() {
     try {
@@ -52,6 +55,19 @@ export default function EventLog() {
     return () => clearInterval(interval);
   }, [autoRefresh]);
 
+  async function doClear() {
+    setClearBusy(true);
+    try {
+      await api.del('/events');
+      setConfirming(false);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setClearBusy(false);
+    }
+  }
+
   return (
     <div className="event-log">
       <div className="log-viewer__toolbar">
@@ -63,8 +79,28 @@ export default function EventLog() {
           />
           Auto-refresh
         </label>
-        <button type="button" className="icon-btn" onClick={load}>Refresh now</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button" className="icon-btn" onClick={load}>Refresh now</button>
+          <button type="button" className="icon-btn" onClick={() => setConfirming(true)}>Clear log</button>
+        </div>
       </div>
+
+      {confirming && (
+        <Modal title="Clear camera history" placement="top" onClose={() => (clearBusy ? null : setConfirming(false))}>
+          <p style={{ marginTop: 0 }}>
+            Clear all camera history? This permanently deletes the up/down/restart history and can't
+            be undone.
+          </p>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button className="btn" type="button" onClick={() => setConfirming(false)} disabled={clearBusy}>
+              Cancel
+            </button>
+            <button className="btn btn-danger" type="button" onClick={doClear} disabled={clearBusy}>
+              {clearBusy ? 'Clearing…' : 'Clear log'}
+            </button>
+          </div>
+        </Modal>
+      )}
 
       {error && <div className="error-banner">{error}</div>}
 

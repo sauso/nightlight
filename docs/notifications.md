@@ -62,14 +62,21 @@ On restart the logs should show `[push] Firebase initialized (project <your-proj
 see `no Firebase credentials … push notifications disabled`, the service-account file isn't where the
 server expects it.
 
-### 5. Turn it on in the app
+### 5. Enable push on the server (admin, one-time)
+- In the web app, go to **Settings → Notifications (push)** and turn on **"Enable push
+  notifications."**
+- Saving **validates both files above are present and valid** — if one is missing it tells you
+  exactly which, and nothing is enabled. This is a deliberate server-level switch: motion detection
+  and the in-app **Recent alerts** list work regardless; only phone notifications wait on this.
+
+### 6. Turn it on for your device (each phone)
 - Install/update the **Nightlight Android app** (the standard release APK — no per-user build needed).
 - Open it, sign in, then go to **Account → Notifications** and enable **"Send motion alerts to this
   device."** Allow the notification permission when asked. (Each device opts in separately.)
 - If that section says *"Notifications aren't set up on this server,"* your `google-services.json`
-  isn't being read — re-check step 4.
+  isn't being read — re-check step 4. If it says *"set up but not enabled,"* do step 5.
 
-### 6. Enable motion detection on a camera
+### 7. Enable motion detection on a camera
 - **Cameras → edit** a camera → **Motion detection** → **Enable**. Tune sensitivity/cooldown to taste.
 - Move in front of that camera — you should get a notification, and it also appears under
   **Settings → Recent alerts**.
