@@ -226,6 +226,11 @@ export default function Account() {
                   Notifications aren't set up on this server yet. An admin needs to add a Firebase
                   project — see <strong>docs/notifications.md</strong>.
                 </div>
+              ) : serverPush && !serverPush.push_enabled ? (
+                <div className="camera-tile__sub" style={{ padding: 12 }}>
+                  Push notifications are set up but not enabled on this server yet. An admin can turn
+                  them on under <strong>Settings → Notifications</strong>.
+                </div>
               ) : (
                 <>
                   <label className="log-viewer__toggle" style={{ padding: 12, margin: 0 }}>
