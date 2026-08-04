@@ -1,7 +1,12 @@
 # Pin Node exactly. The floating node:24-alpine tag moved to 24.19.0, which aborts at startup
 # under our native modules + child-process spawns ("RemoveEnvironmentCleanupHook: Assertion
-# failed: (env) != nullptr"). 24.18.1 is the version prod runs on and is known-good. Bump this
-# deliberately after testing, not implicitly on every rebuild.
+# failed: (env) != nullptr"). Root cause: 24.19.0 added per-object environment cleanup hooks to
+# node::ObjectWrap (nodejs/node#63642); better-sqlite3 subclasses ObjectWrap, so its wrapped
+# objects now register a cleanup hook whose removal path asserts env != nullptr and hard-abort()s
+# during our teardown. No upstream fix as of the pin; still present on later 24.x. 24.18.1 is the
+# version prod runs on and is known-good. Before unpinning, test a newer Node on staging (or wait
+# for a better-sqlite3 / node-addon-api release that adapts to the new ObjectWrap contract) —
+# bump deliberately after testing, not implicitly on every rebuild.
 
 # --- Stage 1: build the React frontend ---
 FROM node:24.18.1-alpine AS frontend-build
