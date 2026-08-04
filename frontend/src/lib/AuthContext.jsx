@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { api, getToken, setToken } from './api.js';
+import { unregisterPushNotifications } from './pushNotifications.js';
 
 const AuthContext = createContext(null);
 
@@ -33,6 +34,8 @@ export function AuthProvider({ children }) {
   }
 
   function logout() {
+    // Stop this device receiving alerts (best-effort, while the token is still valid).
+    unregisterPushNotifications().catch(() => {});
     api.post('/auth/logout', {}).catch(() => {}); // best-effort - clear local state regardless
     setToken(null);
     setUser(null);
