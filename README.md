@@ -20,6 +20,12 @@ See the [visual walkthrough](docs/README.md) for a tour of the main screens (sig
 nursery dashboard, adding a camera, and settings). Those images are generated automatically
 by the end-to-end test suite, so they stay in sync with the actual UI.
 
+## Notifications
+
+Optional **push notifications** for motion alerts (Android) use **your own Firebase project** — no
+shared cloud. See **[docs/notifications.md](docs/notifications.md)** for setup. The in-app
+Settings → Recent alerts list works with or without push.
+
 ## How it works
 
 - **FFmpeg** pulls each camera's RTSP stream, copies the video through untouched, and
