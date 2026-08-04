@@ -14,6 +14,11 @@ import Children from './pages/Children.jsx';
 import Cameras from './pages/Cameras.jsx';
 import Account from './pages/Account.jsx';
 import Settings from './pages/Settings.jsx';
+import SettingsGeneral from './pages/SettingsGeneral.jsx';
+import SettingsMqtt from './pages/SettingsMqtt.jsx';
+import SettingsPush from './pages/SettingsPush.jsx';
+import SettingsUsers from './pages/SettingsUsers.jsx';
+import SettingsLogs from './pages/SettingsLogs.jsx';
 import About from './pages/About.jsx';
 
 // How long the app needs to have been backgrounded before we reload on return. Short
@@ -103,6 +108,11 @@ function Shell() {
                     <Route path="/children" element={<Children />} />
                     <Route path="/cameras" element={<Cameras />} />
                     <Route path="/settings" element={<AdminProtected><Settings /></AdminProtected>} />
+                    <Route path="/settings/general" element={<AdminProtected><SettingsGeneral /></AdminProtected>} />
+                    <Route path="/settings/mqtt" element={<AdminProtected><SettingsMqtt /></AdminProtected>} />
+                    <Route path="/settings/push" element={<AdminProtected><SettingsPush /></AdminProtected>} />
+                    <Route path="/settings/users" element={<AdminProtected><SettingsUsers /></AdminProtected>} />
+                    <Route path="/settings/logs" element={<AdminProtected><SettingsLogs /></AdminProtected>} />
                     <Route path="/account" element={<Account />} />
                     <Route path="/about" element={<About />} />
                   </Routes>

@@ -150,6 +150,14 @@ if (!settingsColumns.includes('mqtt_enabled')) {
   db.exec('ALTER TABLE settings ADD COLUMN mqtt_enabled INTEGER NOT NULL DEFAULT 1');
 }
 
+// Admin-level switch for push notifications, separate from motion detection: motion
+// detection still records in-app alerts on its own, but no push is sent unless an admin
+// has explicitly enabled it here (which also validates the Firebase files are present).
+// Defaults off so an existing install never starts pushing until it's deliberately turned on.
+if (!settingsColumns.includes('push_enabled')) {
+  db.exec('ALTER TABLE settings ADD COLUMN push_enabled INTEGER NOT NULL DEFAULT 0');
+}
+
 if (!camerasColumns.includes('mqtt_topic')) {
   db.exec('ALTER TABLE cameras ADD COLUMN mqtt_topic TEXT');
 }

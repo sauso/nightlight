@@ -15,7 +15,8 @@ export default function Cameras() {
   const EMPTY_FORM = {
     name: '', rtsp_host: '', rtsp_port: '554', rtsp_path: '', rtsp_username: '', rtsp_password: '',
     child_id: '', mqtt_topic: '', talk_username: '', talk_password: '', sub_rtsp_path: '',
-    // Motion detection (only settable on an existing camera — see the edit-only section below).
+    // Motion detection — settable on both add and edit; applied via the /detection endpoint
+    // after the camera exists (see doSave).
     detect_motion_enabled: false, detect_sensitivity: 50, detect_cooldown_s: 60, detect_confirm_s: 3,
   };
   const [form, setForm] = useState(EMPTY_FORM);
@@ -150,11 +151,13 @@ export default function Cameras() {
     setModalError('');
     const payload = { ...form, child_id: form.child_id || null, ...(force ? { force: true } : {}) };
     try {
-      await submitCamera(payload);
-      // Detection settings live on the camera but are applied via their own endpoint (they
-      // restart the detector). Only meaningful for an existing camera.
-      if (editing?.id) {
-        await api.put(`/cameras/${editing.id}/detection`, {
+      const saved = await submitCamera(payload);
+      // Detection settings live on the camera but are applied via their own endpoint (it
+      // (re)starts the detector). Works for a brand-new camera too — use the id the create
+      // call just assigned it.
+      const cameraId = editing?.id || saved?.id;
+      if (cameraId) {
+        await api.put(`/cameras/${cameraId}/detection`, {
           motion_enabled: !!form.detect_motion_enabled,
           sensitivity: Number(form.detect_sensitivity),
           cooldown_s: Number(form.detect_cooldown_s),
@@ -469,7 +472,7 @@ export default function Cameras() {
               />
             </div>
 
-            {editing.id && (
+            {(
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>
                   Motion detection

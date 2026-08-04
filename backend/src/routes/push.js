@@ -1,6 +1,10 @@
 import { Router } from 'express';
-import { requireAuth } from '../middleware/auth.js';
-import { registerToken, removeToken, pushEnabled, getClientConfig } from '../lib/push.js';
+import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import {
+  registerToken, removeToken, pushEnabled, pushConfigured, getClientConfig,
+  validatePushSetup, initPush,
+} from '../lib/push.js';
+import db from '../db.js';
 
 const router = Router();
 
@@ -29,10 +33,31 @@ router.get('/config', requireAuth, (req, res) => {
   res.json({ configured: true, ...cfg });
 });
 
-// Whether the server can actually deliver push (service-account present) and is fully configured
-// (client config present too). Lets the app show an accurate notifications status.
+// Notifications status. `configured` = the server can technically deliver (Firebase files present
+// and valid); `push_enabled` = an admin has turned push on AND it's configured (i.e. pushes will
+// actually be sent). The app uses these to show accurate state and gate its per-device toggle.
 router.get('/status', requireAuth, (req, res) => {
-  res.json({ push_enabled: pushEnabled(), configured: !!getClientConfig() });
+  res.json({ push_enabled: pushEnabled(), configured: pushConfigured() });
+});
+
+// Admin-only server-level switch for push, kept separate from motion detection: motion detection
+// still logs in-app alerts on its own, but nothing is pushed to phones unless this is on. Turning
+// it ON validates the Firebase files up front and rejects (400, so the message survives any reverse
+// proxy) if anything is missing, rather than silently accepting a setting that can't deliver.
+router.put('/enable', requireAuth, requireAdmin, async (req, res) => {
+  const enabled = !!(req.body && req.body.enabled);
+  if (enabled) {
+    const check = validatePushSetup();
+    if (!check.ok) return res.status(400).json({ error: check.error });
+    // Files are present now even if they were dropped in after startup — initialize on the spot so
+    // enabling takes effect without a container restart.
+    const ready = await initPush();
+    if (!ready || !pushConfigured()) {
+      return res.status(400).json({ error: 'Firebase failed to initialize from those files — check the server logs.' });
+    }
+  }
+  db.prepare('UPDATE settings SET push_enabled = ? WHERE id = ?').run(enabled ? 1 : 0, 'app');
+  res.json({ push_enabled: pushEnabled(), configured: pushConfigured() });
 });
 
 export default router;
