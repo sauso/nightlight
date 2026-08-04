@@ -22,9 +22,25 @@ by the end-to-end test suite, so they stay in sync with the actual UI.
 
 ## Notifications
 
-Optional **push notifications** for motion alerts (Android) use **your own Firebase project** — no
-shared cloud. See **[docs/notifications.md](docs/notifications.md)** for setup. The in-app
-Settings → Recent alerts list works with or without push.
+Optional **push notifications** send a phone alert (Android) the moment a camera with motion detection
+sees movement — even when the app is closed. Because Nightlight is self-hosted, they go through **your
+own Firebase project**, not a shared cloud, so there's a one-time setup. The in-app
+**Settings → Recent alerts** list works with or without push.
+
+**To enable it:**
+
+1. Create a free **Firebase** project and register an Android app with package name
+   `com.sauso.nightlight` (SHA-1 not needed). Download its **`google-services.json`**.
+2. In Firebase **Project settings → Service accounts**, **Generate new private key** — this is the
+   secret **`firebase-service-account.json`**.
+3. Drop both files into your data dir (e.g. `/mnt/user/appdata/nightlight`), keep the service-account
+   file private (`chmod 600`), and **`docker restart nightlight`**. The log should show
+   `[push] Firebase initialized`.
+4. In the Android app, **Account → Notifications → "Send motion alerts to this device"** (each device
+   opts in separately), then enable **Motion detection** on a camera in **Cameras → edit**.
+
+Without the two files, push is simply disabled — nothing else changes. Full walkthrough with
+troubleshooting: **[docs/notifications.md](docs/notifications.md)**.
 
 ## How it works
 
