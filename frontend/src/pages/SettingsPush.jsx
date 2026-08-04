@@ -5,23 +5,34 @@ import SettingsBack from '../components/SettingsBack.jsx';
 
 export default function SettingsPush() {
   const [pushStatus, setPushStatus] = useState(null); // { push_enabled, configured } | null
+  const [enabled, setEnabled] = useState(false); // local checkbox state, applied on Save
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    api.get('/push/status').then(setPushStatus).catch(() => {});
+    api.get('/push/status').then((s) => {
+      setPushStatus(s);
+      setEnabled(!!s.push_enabled);
+    }).catch(() => {});
   }, []);
 
-  async function togglePush(on) {
+  async function save(e) {
+    e.preventDefault();
     setBusy(true);
     setError('');
+    setSaved(false);
     try {
       // Server validates the Firebase files when enabling and 400s if any are missing.
-      setPushStatus(await api.put('/push/enable', { enabled: on }));
+      const next = await api.put('/push/enable', { enabled });
+      setPushStatus(next);
+      setEnabled(!!next.push_enabled);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
     } catch (err) {
       setError(err.message);
-      // Snap the toggle back to the real (unchanged) server state.
-      api.get('/push/status').then(setPushStatus).catch(() => {});
+      // Revert the toggle to the real (unchanged) server state.
+      setEnabled(!!pushStatus?.push_enabled);
     } finally {
       setBusy(false);
     }
@@ -32,33 +43,39 @@ export default function SettingsPush() {
       <AppHeader title="Push notifications" />
       <main className="app-main">
         <SettingsBack />
-        <div className="card">
-          <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
-            Send a push notification to phones when a camera with motion detection sees movement,
-            even when the app is closed. Requires your own Firebase project — drop{' '}
-            <strong>firebase-service-account.json</strong> and <strong>google-services.json</strong>{' '}
-            into the data directory first (see <strong>docs/notifications.md</strong>). Motion
-            detection and the in-app <strong>Recent alerts</strong> (under Logs) work with or without
-            this.
-          </div>
-          {error && (
-            <div className="error-banner" style={{ marginBottom: 10 }}>{error}</div>
-          )}
-          <label className="log-viewer__toggle">
-            <input
-              type="checkbox"
-              checked={!!pushStatus?.push_enabled}
-              disabled={busy || !pushStatus}
-              onChange={(e) => togglePush(e.target.checked)}
-            />
-            Enable push notifications
-          </label>
-          {pushStatus && !pushStatus.configured && (
-            <div className="camera-tile__sub" style={{ marginTop: 10 }}>
-              Firebase files aren't detected in the data directory yet — add them, then enable.
+        {error && <div className="error-banner">{error}</div>}
+        {saved && <div className="saved-banner">Saved ✓</div>}
+
+        <form onSubmit={save}>
+          <div className="card">
+            <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
+              Send a push notification to phones when a camera with motion detection sees movement,
+              even when the app is closed. Requires your own Firebase project — drop{' '}
+              <strong>firebase-service-account.json</strong> and <strong>google-services.json</strong>{' '}
+              into the data directory first (see <strong>docs/notifications.md</strong>). Motion
+              detection and the in-app <strong>Recent alerts</strong> (under Logs) work with or
+              without this.
             </div>
-          )}
-        </div>
+            <label className="log-viewer__toggle" style={{ margin: 0 }}>
+              <input
+                type="checkbox"
+                checked={enabled}
+                disabled={busy || !pushStatus}
+                onChange={(e) => setEnabled(e.target.checked)}
+              />
+              Enable push notifications
+            </label>
+            {pushStatus && !pushStatus.configured && (
+              <div className="camera-tile__sub" style={{ marginTop: 10 }}>
+                Firebase files aren't detected in the data directory yet — add them, then enable.
+              </div>
+            )}
+          </div>
+
+          <button className="btn btn-primary" type="submit" disabled={busy || !pushStatus}>
+            {busy ? 'Saving…' : 'Save changes'}
+          </button>
+        </form>
       </main>
     </>
   );
