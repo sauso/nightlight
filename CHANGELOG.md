@@ -9,6 +9,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **A "Clear log" button on each list under Settings → Logs** (Recent alerts, Camera history, and
+  Recent logs), each behind an "are you sure?" confirmation. Clearing the logs buffer doesn't affect
+  `docker logs`.
+
 ### Changed
 - **Settings is now split into focused sub-pages** instead of one long scroll: a hub lists **General**
   (app name, timezone, theme, font, colours, temperature unit), **MQTT**, **Push notifications**,

@@ -25,6 +25,16 @@ export default function LogViewer() {
     return () => clearInterval(interval);
   }, [autoRefresh]);
 
+  async function clearAll() {
+    if (!confirm('Clear the recent logs shown here? This empties the in-app buffer (it does not affect docker logs) and cannot be undone.')) return;
+    try {
+      await api.del('/logs');
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   // Case-insensitive substring match, applied client-side so it works on the
   // already-loaded buffer without any new API surface.
   const query = filter.trim().toLowerCase();
@@ -46,6 +56,7 @@ export default function LogViewer() {
           Auto-refresh
         </label>
         <button type="button" className="icon-btn" onClick={load}>Refresh now</button>
+        <button type="button" className="icon-btn" onClick={clearAll}>Clear log</button>
       </div>
       <div className="log-viewer__filter-row">
         <input

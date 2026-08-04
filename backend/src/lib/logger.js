@@ -56,4 +56,7 @@ export const logger = {
     pushToBuffer(tagged);
   },
   getRecent: () => [...buffer],
+  // Empties the in-memory ring buffer shown in the log viewer (admin action). Doesn't touch
+  // stdout/`docker logs` — only the in-app "recent activity" view.
+  clear: () => { buffer.length = 0; },
 };
