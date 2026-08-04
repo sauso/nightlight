@@ -26,8 +26,9 @@ test('capture documentation screenshots', async ({ page }) => {
   await page.getByLabel('Stream path', { exact: true }).fill('/Streaming/Channels/101');
   await page.screenshot({ path: `${SHOTS}/add-camera.png` });
 
-  // The settings screen (full page — it's taller than the viewport).
-  await page.goto('/#/settings');
+  // The settings screen. Settings is a hub of sub-pages now; General holds the app
+  // name / theme / etc. and is the closest equivalent to the old single settings page.
+  await page.goto('/#/settings/general');
   await expect(page.getByRole('button', { name: 'Save changes' })).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/settings.png`, fullPage: true });
 });
