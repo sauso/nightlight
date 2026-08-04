@@ -201,3 +201,55 @@ Decisions taken with the user, narrowing the brief above:
 ### Blocker to plan around
 - **iOS push needs APNs → the Apple Developer account, which is deferred** (see the mobile repo's
   iOS notes). So this feature is **Android-first**; iOS notifications wait on that account.
+
+---
+
+## Sound detection — refined lowest-cost plan + Coral weigh-up (2026-08-04)
+
+**Status / sequencing:** push + frame-diff motion are **shipped in 0.8.0**. The **MQTT detection
+source** (`motion-detection-source-scope.md`) is next. **Sound detection comes after MQTT.** Design
+only — nothing built.
+
+### Lowest-cost approach (Stage 1 = loudness presence)
+Mirror the motion detector: a dedicated, isolated **audio-only FFmpeg leg** off the local MediaMTX
+stream (`127.0.0.1:8554/<path>`, `-vn`), parse its output, and on a sustained trigger call the **same**
+`recordDetectionEvent` + `sendToAll` the motion detector uses (same `detection_events`, Recent alerts,
+per-camera enable/confirm/cooldown, and the admin push gate). **Zero new dependencies, negligible CPU,
+and it doesn't touch the streaming pipeline.** Implementation is essentially "`motionDetector.js` for
+audio" + a toggle in the same camera-edit section.
+
+### Must account for: white-noise machines
+This deployment (and nurseries generally) run a **white-noise machine / fan**, so the audio is
+**never silent**. That rules out FFmpeg `silencedetect` as the primitive — it would read "sound
+present" 24/7 and never fire usefully. Instead threshold on **loudness level above the ambient
+floor**, sustained: use `astats`/`ebur128` windowed RMS, and either **auto-calibrate the per-camera
+ambient floor** (learn the white-noise baseline, trigger on a delta above it) or expose a dB threshold
+slider like motion's sensitivity. A cry is markedly louder than the white-noise baseline, so a
+level-over-ambient trigger is both robust to white noise and still near-free.
+
+### The ladder up: gated cry-classification (only if needed)
+Loudness alone can't tell **cry vs talk vs dog/TV** — that needs a model. Keep the model **gated by
+the loudness trigger**: the free level-check runs always; the model runs **only on the ~1–2s clip that
+tripped the gate**, never continuously. Model = **YAMNet** (TFLite, AudioSet "Baby cry, infant cry"
+class). Build this only if a week of real loudness-only usage shows too many false alarms.
+
+### Coral weigh-up (rough, to inform the buy/skip decision)
+The Coral USB Accelerator (Edge TPU) speeds up INT8 TFLite inference. For **this** design its value is
+marginal, because YAMNet is tiny and (crucially) we run it **gated**, not continuously.
+
+| | **Without Coral (CPU-only YAMNet)** | **With Coral** |
+|---|---|---|
+| Per-inference latency (~1s clip) | ~5–20 ms on a modern x86 core; ~50–150 ms on a weak Atom/Celeron | ~2–5 ms, roughly independent of host CPU |
+| CPU load, **gated** design (a handful of inferences per event, events rare) | **Negligible** | Negligible (offloaded, but there was nothing to offload) |
+| CPU load **if we ever went continuous** (sliding-window, per camera) | Meaningful — e.g. ~10 infer/s × ~15 ms ≈ **~15% of a core per camera**, scales with cameras | Near-zero — this is where Coral actually earns its place |
+| Accuracy | float32 — the reference | Requires **full INT8 quantization** → typically *equal or marginally lower* accuracy, not higher |
+| Setup / maintenance cost | Python + TFLite only (needed for the classifier either way) | Adds USB passthrough (`--device`), `libedgetpu`/`pycoral`, Edge-TPU model compilation, a hardware dependency + graceful-absent fallback |
+| Power | — | ~2 W (negligible) |
+
+**Read:** with the gated architecture, the CPU cost of classification is already trivial, so **you
+almost certainly don't need the Coral to ship this well.** The Coral only pays off if you later (a)
+move to **continuous** classification, (b) run **many** cameras, or (c) run on a **weak CPU** — the
+high-inference-rate regimes. Note it does **not** improve accuracy for the same model (INT8 can even
+cost a hair). So: keep it exactly as already scoped — **optional, runtime-detected, CPU fallback** —
+and plug it in only if real usage lands you in one of those regimes. Buying one up front is not
+necessary for a good result.
