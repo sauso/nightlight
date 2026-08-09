@@ -24,8 +24,11 @@ const MEDIA_PATH_FALLBACKS = ['/onvif/media_service', '/onvif/media'];
 const DEVICE_PATH = '/onvif/device_service';
 const PTZ_PATH = '/onvif/ptz_service';
 // Camera auto-stops a continuous move after this long even if the Stop command is lost
-// (dropped release, network blip) - the runaway-pan failsafe.
-const PTZ_MOVE_TIMEOUT_MS = 3000;
+// (dropped release, network blip) - the runaway-pan failsafe. Kept deliberately short: on a
+// camera that honours this timeout, a completely-lost Stop caps the overrun here instead of
+// letting the move run for seconds. The explicit Stop (see reliableStop) is still the primary
+// mechanism; this only bounds the worst case when every Stop attempt is dropped/rejected.
+const PTZ_MOVE_TIMEOUT_MS = 1500;
 // A single "nudge" = a fixed-duration move. Distance is set by this server-side hold time,
 // NOT by how long the user held the button or by network timing, so every press travels the
 // same amount (see ptzNudge). Tune here if steps feel too big/small.
@@ -313,6 +316,29 @@ function ensureAuthClock(cam) {
   });
 }
 
+// Send a Stop, retrying briefly. A single dropped or auth-rejected Stop otherwise lets the
+// move run all the way to the PTZ_MOVE_TIMEOUT_MS failsafe — which the user sees as the camera
+// "running away" past the intended nudge. On a password-protected camera the very first Stop
+// after a move can be the one the camera rejects (stale WS-Security digest / timing), so a
+// couple of quick retries makes the stop reliable. Returns true once the camera acknowledges a
+// Stop; logs (but never throws) if every attempt failed, so a genuinely unstoppable camera is
+// visible in the logs rather than silently relying on the failsafe.
+async function reliableStop(cam, profileToken, { attempts = 3, label = 'ptz' } = {}) {
+  let lastErr = null;
+  for (let i = 0; i < attempts; i++) {
+    lastErr = await new Promise((resolve) => {
+      cam.stop({ profileToken, panTilt: true, zoom: true }, (err) => resolve(err || null));
+    });
+    if (!lastErr) return true;
+    await new Promise((r) => setTimeout(r, 120));
+  }
+  logger.info(
+    `[ptz] Stop not acknowledged after ${attempts} attempts (${label}): ` +
+      `${lastErr?.message || 'unknown error'}. Falling back to the ${PTZ_MOVE_TIMEOUT_MS}ms move failsafe.`
+  );
+  return false;
+}
+
 /**
  * Continuous PTZ move at the given velocities (each -1..1). The camera auto-stops after
  * PTZ_MOVE_TIMEOUT_MS as a failsafe; the client should still send ptzStop on release.
@@ -338,9 +364,7 @@ export async function ptzContinuousMove({ host, port, username, password, profil
 export async function ptzStop({ host, port, username, password, profileToken }) {
   const cam = makeControlCam({ host, port, username, password });
   await ensureAuthClock(cam);
-  return new Promise((resolve, reject) => {
-    cam.stop({ profileToken, panTilt: true, zoom: true }, (err) => (err ? reject(err) : resolve()));
-  });
+  await reliableStop(cam, profileToken, { label: 'ptzStop' });
 }
 
 /**
@@ -361,6 +385,7 @@ export async function ptzNudge({ host, port, username, password, profileToken, p
     );
   });
   await new Promise((r) => setTimeout(r, PTZ_NUDGE_MS));
-  // best-effort; the continuousMove auto-stop timeout is the backstop
-  await new Promise((resolve) => cam.stop({ profileToken, panTilt: true, zoom: true }, () => resolve()));
+  // Reliable stop (retries) so a single dropped/rejected Stop doesn't let the nudge run to the
+  // move failsafe; the continuousMove auto-stop timeout remains the ultimate backstop.
+  await reliableStop(cam, profileToken, { label: 'ptzNudge' });
 }
