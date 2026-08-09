@@ -74,12 +74,13 @@ export async function sendPushover({ title, message, url, urlTitle, priority, im
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       const msg = Array.isArray(data.errors) && data.errors.length ? data.errors.join('; ') : `HTTP ${res.status}`;
-      logger.error('[pushover] send failed:', msg);
+      logger.error(`[pushover] send failed (${res.status}): ${msg}`);
       return { ok: false, error: msg };
     }
+    logger.info(`[pushover] sent "${title || 'notification'}"${image && image.length ? ` with snapshot (${image.length} bytes)` : ' (no image)'}`);
     return { ok: true };
   } catch (e) {
-    logger.error('[pushover] send failed:', e.message);
+    logger.error('[pushover] send failed (network):', e.message);
     return { ok: false, error: e.message };
   }
 }
