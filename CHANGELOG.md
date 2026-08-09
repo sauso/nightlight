@@ -16,6 +16,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   seeds the clock (from the camera's own time, falling back to the server's) before each move.
 
 ### Added
+- **Per-camera alert schedule ("only alert during set hours").** In a camera's Motion detection
+  settings you can now restrict alerts to a time window — e.g. 20:00 to 07:00 (overnight windows
+  work). Outside the window, motion is ignored completely: **no push and no in-app Recent-alerts
+  entry**. Uses the app timezone from Settings; off by default (alert 24/7).
 - **Pushover notifications** as an alternative to Firebase — much simpler to set up and it **works on
   iOS** (the recipient installs the Pushover app; no Firebase project, no Apple Developer account).
   Configure an application token + user/group key in **Settings → Push notifications**; it validates

@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import db from '../db.js';
 import { logger } from './logger.js';
 import { subPathName, getPathStatus } from './mediamtx.js';
 import { recordDetectionEvent, ALERT } from './detectionEvents.js';
@@ -73,6 +74,38 @@ function zoneBounds(camera) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Current minutes-since-midnight (0..1439) in the app's configured timezone — the reference clock for
+// each camera's motion-alert window. Falls back to UTC if the timezone lookup/format ever fails.
+function nowMinutesInAppTz() {
+  let tz = 'UTC';
+  try {
+    tz = db.prepare('SELECT timezone FROM settings WHERE id = ?').get('app')?.timezone || 'UTC';
+  } catch { /* keep UTC */ }
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).formatToParts(new Date());
+    const h = Number(parts.find((p) => p.type === 'hour').value);
+    const m = Number(parts.find((p) => p.type === 'minute').value);
+    return (h % 24) * 60 + m;
+  } catch {
+    const d = new Date();
+    return d.getUTCHours() * 60 + d.getUTCMinutes();
+  }
+}
+
+// Is this camera inside its motion-alert window right now? True when no schedule is set. Handles
+// windows that wrap midnight (start > end, e.g. 20:00–07:00). A zero-length window (start == end) is
+// treated as "always on" rather than "never".
+function inActiveWindow(camera) {
+  if (!camera.detect_schedule_enabled) return true;
+  const start = camera.detect_start | 0;
+  const end = camera.detect_end | 0;
+  if (start === end) return true;
+  const now = nowMinutesInAppTz();
+  return start < end ? now >= start && now < end : now >= start || now < end;
+}
 
 // Resolve to the path to analyse once one is actually publishing, preferring the sub-stream
 // (cheap to decode). Polls MediaMTX readiness rather than spawning ffmpeg speculatively, so we
@@ -157,7 +190,10 @@ export async function startMotionDetector(camera) {
         if (fraction >= threshold) {
           if (!activeSince) activeSince = now;
           lastActive = now;
-          if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs) {
+          if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs && inActiveWindow(camera)) {
+            // inActiveWindow gates the WHOLE alert: outside a camera's schedule, motion produces no
+            // in-app event and no push, and lastAlert is left untouched so an alert can fire promptly
+            // the moment the window opens.
             lastAlert = now; // cooldown gates re-fire; a continuing run alerts once per cooldown
             const pct = (fraction * 100).toFixed(1);
             recordDetectionEvent(camera.id, camera.name, ALERT.MOTION, `motion (${pct}% of zone)`);
