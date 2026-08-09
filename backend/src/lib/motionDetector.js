@@ -198,25 +198,32 @@ export async function startMotionDetector(camera) {
             const pct = (fraction * 100).toFixed(1);
             recordDetectionEvent(camera.id, camera.name, ALERT.MOTION, `motion (${pct}% of zone)`);
             logger.info(`[detect] motion on "${camera.name}" (${pct}% of zone)`);
-            if (pushEnabled()) {
-              sendToAll(camera.name, 'Motion detected', { cameraId: camera.id, type: ALERT.MOTION }).catch(() => {});
-            }
-            if (pushoverEnabled()) {
-              // Grab the triggering frame (best-effort) and deep-link so tapping opens the app on
-              // this camera. Snapshot + send are async and fire-and-forget — never block the loop.
-              logger.info(`[detect] sending Pushover alert for "${camera.name}"`);
+            const firePush = pushEnabled();
+            const firePushover = pushoverEnabled();
+            if (firePush || firePushover) {
+              // Capture the triggering frame ONCE (best-effort) and share it across both channels —
+              // Firebase and Pushover both attach the same picture. Snapshot + sends are async and
+              // fire-and-forget so the detection loop is never blocked.
               captureSnapshot(path)
                 .then((image) => {
                   if (!image) logger.info(`[detect] no snapshot for "${camera.name}" (grab failed/timed out) — sending without image`);
-                  return sendPushover({
-                    title: `${camera.name} — motion`,
-                    message: 'Motion detected',
-                    url: `nightlight://camera/${camera.id}`,
-                    urlTitle: 'Open in Nightlight',
-                    image,
-                  });
+                  if (firePush) {
+                    logger.info(`[detect] sending Firebase alert for "${camera.name}"`);
+                    sendToAll(camera.name, 'Motion detected', { cameraId: camera.id, type: ALERT.MOTION }, image).catch(() => {});
+                  }
+                  if (firePushover) {
+                    // Deep-link so tapping opens the app on this camera.
+                    logger.info(`[detect] sending Pushover alert for "${camera.name}"`);
+                    sendPushover({
+                      title: `${camera.name} — motion`,
+                      message: 'Motion detected',
+                      url: `nightlight://camera/${camera.id}`,
+                      urlTitle: 'Open in Nightlight',
+                      image,
+                    }).catch((e) => logger.error(`[pushover] alert failed for "${camera.name}": ${e.message}`));
+                  }
                 })
-                .catch((e) => logger.error(`[pushover] alert failed for "${camera.name}": ${e.message}`));
+                .catch(() => {});
             }
           }
         } else if (activeSince && now - lastActive > ACTIVE_GRACE_MS) {
