@@ -9,6 +9,7 @@ import { initPushNotifications } from './lib/pushNotifications.js';
 import NavBar from './components/NavBar.jsx';
 import LiveMonitor from './components/LiveMonitor.jsx';
 import InstallPrompt from './components/InstallPrompt.jsx';
+import PushBanner from './components/PushBanner.jsx';
 import Login from './pages/Login.jsx';
 import Children from './pages/Children.jsx';
 import Cameras from './pages/Cameras.jsx';
@@ -94,6 +95,7 @@ function Shell() {
   return (
     <>
       <InstallPrompt />
+      <PushBanner />
       <Routes>
         <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
         <Route

@@ -54,7 +54,9 @@ async function ensureListeners(PN) {
     currentToken = t?.value || null;
     if (!currentToken) return;
     try {
-      await api.post('/push/register', { token: currentToken, platform: 'android' });
+      // baseUrl = the origin this app reaches the server through, so image alerts can build a
+      // snapshot URL this device can actually fetch (LAN IP or public domain — whichever it used).
+      await api.post('/push/register', { token: currentToken, platform: 'android', baseUrl: window.location.origin });
     } catch {
       // Non-fatal — re-registers next launch.
     }
@@ -63,6 +65,20 @@ async function ensureListeners(PN) {
   // Tapping an alert opens the app to the nursery (the alerting camera's tile is there).
   await PN.addListener('pushNotificationActionPerformed', () => {
     window.location.hash = '#/';
+  });
+  // A push that arrives while the app is in the FOREGROUND is not shown in the system tray by
+  // Android — it's delivered here instead. Re-broadcast it as an in-app banner so foreground FCM
+  // alerts are still visible (Pushover shows its own since it's a separate app). See PushBanner.jsx.
+  await PN.addListener('pushNotificationReceived', (notif) => {
+    window.dispatchEvent(
+      new CustomEvent('nightlight:push', {
+        detail: {
+          title: notif?.title || notif?.data?.title || 'Camera alert',
+          body: notif?.body || notif?.data?.body || 'Motion detected',
+          cameraId: notif?.data?.cameraId || null,
+        },
+      })
+    );
   });
 }
 
