@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-09
+
 ### Added
 - **In-app banner for push alerts while the app is open.** Android doesn't show a system-tray
   notification for a Firebase push that arrives while the app is in the foreground, so those alerts
@@ -515,7 +517,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/sauso/nightlight/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/sauso/nightlight/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/sauso/nightlight/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/sauso/nightlight/compare/v0.7.1...v0.8.0
