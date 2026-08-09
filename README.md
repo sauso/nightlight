@@ -245,26 +245,28 @@ What the native apps add over the browser/PWA:
 
 ### Push notifications (motion alerts)
 
-The apps can show a **phone notification** when a camera with motion detection sees movement — even
-when the app is closed (**Android only** for now). Because Nightlight is self-hosted, these go through
-**your own Firebase project**, not a shared cloud, so there's a one-time setup. The in-app
-**Settings → Recent alerts** list works with or without push.
+Get a **phone notification** when a camera with motion detection sees movement — even when the app is
+closed. It's off by default, and the in-app **Settings → Recent alerts** list works with or without
+it. There are two ways to set it up (pick one), both configured under **Settings → Push
+notifications**:
 
-To enable it:
+**Pushover (recommended — simplest, and works on iOS).** A small notification service (the same one
+Sonarr/Radarr use). No Firebase project, no Apple Developer account.
 
-1. Create a free **Firebase** project and register an Android app with package name
-   `com.sauso.nightlight` (SHA-1 not needed). Download its **`google-services.json`**.
-2. In Firebase **Project settings → Service accounts**, **Generate new private key** — this is the
-   secret **`firebase-service-account.json`**.
-3. Drop both files into your data dir (e.g. `/mnt/user/appdata/nightlight`) and keep the
-   service-account file private (`chmod 600`).
-4. In the web app, **Settings → Notifications (push) → "Enable push notifications."** Saving checks
-   both files are present and valid (and tells you exactly which is missing if not).
-5. On each phone, **Account → Notifications → "Send motion alerts to this device"** (each device opts
-   in separately), then enable **Motion detection** on a camera in **Cameras → edit**.
+1. Install the **Pushover** app on your phone and note your **User Key** (or make a Delivery Group to
+   alert several caregivers).
+2. Create a Pushover application at [pushover.net/apps/build](https://pushover.net/apps/build) and copy
+   its **API Token**.
+3. In **Settings → Push notifications → Pushover**, paste the token + your user/group key, **Enable**,
+   **Save** (it verifies with Pushover), and **Send test**. Then enable **Motion detection** on a
+   camera. Alerts arrive with a **snapshot** of what triggered them.
 
-Without the two files, push is simply disabled — nothing else changes. Full walkthrough with
-troubleshooting: **[docs/notifications.md](docs/notifications.md)**.
+**Firebase / FCM (Android app only).** Delivers straight to the Nightlight Android app via your own
+Firebase project: drop `google-services.json` + a `firebase-service-account.json` service-account key
+into your data dir (e.g. `/mnt/user/appdata/nightlight`, keep the key `chmod 600`), then enable it
+under **Settings → Push notifications**. Each phone opts in under **Account → Notifications**.
+
+Full walkthrough for both, with troubleshooting: **[docs/notifications.md](docs/notifications.md)**.
 
 **Getting them:**
 - **Android** — download the signed APK from the

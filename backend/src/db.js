@@ -158,6 +158,15 @@ if (!settingsColumns.includes('push_enabled')) {
   db.exec('ALTER TABLE settings ADD COLUMN push_enabled INTEGER NOT NULL DEFAULT 0');
 }
 
+// Pushover notifications — an alternative to the Firebase/FCM path that needs no Firebase project
+// and works on iOS (the recipient installs the Pushover app). The server just POSTs to Pushover's
+// API with an application token + a user/group key. Off until configured + enabled.
+if (!settingsColumns.includes('pushover_enabled')) {
+  db.exec('ALTER TABLE settings ADD COLUMN pushover_enabled INTEGER NOT NULL DEFAULT 0');
+  db.exec('ALTER TABLE settings ADD COLUMN pushover_app_token TEXT');
+  db.exec('ALTER TABLE settings ADD COLUMN pushover_user_key TEXT');
+}
+
 if (!camerasColumns.includes('mqtt_topic')) {
   db.exec('ALTER TABLE cameras ADD COLUMN mqtt_topic TEXT');
 }
@@ -253,6 +262,16 @@ if (!camerasColumns.includes('detect_cooldown_s')) {
 }
 if (!camerasColumns.includes('detect_confirm_s')) {
   db.exec('ALTER TABLE cameras ADD COLUMN detect_confirm_s INTEGER NOT NULL DEFAULT 3');
+}
+
+// Optional per-camera active window for motion alerts ("quiet hours"): when enabled, motion outside
+// the window is fully ignored (no push, no in-app alert). detect_start/detect_end are minutes since
+// midnight (0..1439) in the app's configured timezone; start > end means the window wraps midnight
+// (e.g. 20:00–07:00). Off by default = alert 24/7.
+if (!camerasColumns.includes('detect_schedule_enabled')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN detect_schedule_enabled INTEGER NOT NULL DEFAULT 0');
+  db.exec('ALTER TABLE cameras ADD COLUMN detect_start INTEGER NOT NULL DEFAULT 0');
+  db.exec('ALTER TABLE cameras ADD COLUMN detect_end INTEGER NOT NULL DEFAULT 0');
 }
 
 // Ensure the single settings row always exists.
