@@ -427,7 +427,12 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   // --- PTZ (pan/tilt) control, for ONVIF cameras that report support ---
   const [ptzOpen, setPtzOpen] = useState(false);
   const ptzHoldingRef = useRef(false);
-  const PTZ_SPEED = 0.5;
+  // Move velocity per nudge (ONVIF x/y are -1..1). Kept modest because some cameras
+  // (notably Sonoff-hack / onvif_simple_server) answer ContinuousMove slowly and moving for a
+  // variable 0.4-2.3s regardless of our hold time — a lower speed keeps that variable-length
+  // move to a smaller, less jarring angle (distance = speed x time). A "real" ONVIF PTZ camera
+  // responds in tens of ms and is unaffected either way.
+  const PTZ_SPEED = 0.25;
 
   // Each press sends fixed-duration "nudges" (the server starts, holds, and stops the move),
   // so a tap always travels a consistent amount regardless of how briefly it was pressed or

@@ -9,6 +9,30 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-09
+
+### Fixed
+- **PTZ now works on cameras whose ONVIF user is password-protected.** PTZ commands skip the ONVIF
+  connect handshake (to tolerate minimal cameras), which also skipped the WS-Security clock sync — so
+  authenticated moves carried a stale ~1970 timestamp that cameras enforcing auth rejected. PTZ now
+  seeds the clock (from the camera's own time, falling back to the server's) before each move.
+- **PTZ nudges are steadier and no longer "run away" past a tap.** Each nudge's Stop was best-effort
+  with no retry, so a single dropped/rejected Stop let the move coast to its ~3s failsafe; the Stop is
+  now retried and logged and the failsafe shortened. Nudge speed was also lowered so cameras with slow,
+  variable ONVIF response (e.g. Sonoff-hack) travel a smaller, more consistent amount per tap. PTZ now
+  logs a per-nudge line (velocity, timing, Stop result) for troubleshooting.
+
+### Added
+- **Per-camera alert schedule ("only alert during set hours").** In a camera's Motion detection
+  settings you can now restrict alerts to a time window — e.g. 20:00 to 07:00 (overnight windows
+  work). Outside the window, motion is ignored completely: **no push and no in-app Recent-alerts
+  entry**. Uses the app timezone from Settings; off by default (alert 24/7).
+- **Pushover notifications** as an alternative to Firebase — much simpler to set up and it **works on
+  iOS** (the recipient installs the Pushover app; no Firebase project, no Apple Developer account).
+  Configure an application token + user/group key in **Settings → Push notifications**; it validates
+  with Pushover on save and has a **Send test** button. Motion alerts include a **snapshot** of the
+  frame that triggered them and a deep link to open the Nightlight app. Firebase remains available.
+
 ## [0.9.0] - 2026-08-04
 
 ### Added
@@ -479,7 +503,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
 
-[Unreleased]: https://github.com/sauso/nightlight/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/sauso/nightlight/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/sauso/nightlight/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/sauso/nightlight/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/sauso/nightlight/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/sauso/nightlight/compare/v0.7.0...v0.7.1
