@@ -14,6 +14,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   connect handshake (to tolerate minimal cameras), which also skipped the WS-Security clock sync — so
   authenticated moves carried a stale ~1970 timestamp that cameras enforcing auth rejected. PTZ now
   seeds the clock (from the camera's own time, falling back to the server's) before each move.
+- **PTZ no longer "runs away" past a tap on some password-protected cameras.** Each nudge's Stop was
+  best-effort with no retry, so a single dropped/rejected Stop let the move coast to its ~3s failsafe.
+  The Stop is now retried and logged, and the move failsafe was shortened, so a tap stops promptly.
 
 ### Added
 - **Per-camera alert schedule ("only alert during set hours").** In a camera's Motion detection
