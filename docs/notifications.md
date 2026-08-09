@@ -4,7 +4,41 @@ Nightlight can send a **push notification to your phone** when a camera with mot
 movement — so you're alerted even when the app is closed. This is **optional** and **off by
 default**. Everything else (including the in-app **Settings → Recent alerts** list) works without it.
 
-Because Nightlight is **self-hosted**, notifications go through **your own Firebase project**, not a
+There are **two ways** to do this — pick one:
+
+- **Pushover (recommended, simplest, works on iOS)** — a small third-party notification service that
+  Sonarr/Radarr-style self-hosted apps use. No Firebase project, no Apple Developer account. See
+  **[Option A: Pushover](#option-a-pushover)** below.
+- **Firebase / FCM (Android app only)** — delivers straight to the Nightlight Android app using your
+  own Firebase project. See **[Option B: Firebase](#option-b-firebase)**.
+
+---
+
+## Option A: Pushover
+
+[Pushover](https://pushover.net) delivers notifications to its own app on **iOS, Android, and
+desktop** (a one-time ~US$5 per platform, with a 30-day free trial). Your server just makes one HTTPS
+call to Pushover — nothing to bake into an app.
+
+1. On your phone, install the **Pushover** app and sign in. Note your **User Key** (on the main
+   screen). For alerting several caregivers, create a **Delivery Group** instead and use its group key.
+2. At [pushover.net/apps/build](https://pushover.net/apps/build), create an application (name it
+   "Nightlight"). Copy its **API Token/Key**.
+3. In Nightlight, go to **Settings → Push notifications → Pushover**: paste the **application API
+   token** and your **user/group key**, tick **Enable Pushover notifications**, and **Save** (it
+   verifies the tokens with Pushover). Use **Send test** to confirm it reaches your phone.
+4. Enable **Motion detection** on a camera (**Cameras → edit**, or on Add). Motion alerts arrive in
+   the Pushover app with a **snapshot** of what triggered them, and tapping one deep-links back into
+   the Nightlight app.
+
+> **Privacy note.** Only a short *"motion on \<camera\>"* message plus a small snapshot image pass
+> through Pushover — **never your live video or audio**, which stay on your own server.
+
+---
+
+## Option B: Firebase
+
+Because Nightlight is **self-hosted**, this route goes through **your own Firebase project**, not a
 shared Nightlight cloud. The app you install is generic — it reads its Firebase config from *your*
 server at runtime. Setting it up is a one-time job.
 

@@ -9,6 +9,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **Pushover notifications** as an alternative to Firebase — much simpler to set up and it **works on
+  iOS** (the recipient installs the Pushover app; no Firebase project, no Apple Developer account).
+  Configure an application token + user/group key in **Settings → Push notifications**; it validates
+  with Pushover on save and has a **Send test** button. Motion alerts include a **snapshot** of the
+  frame that triggered them and a deep link to open the Nightlight app. Firebase remains available.
+
 ## [0.9.0] - 2026-08-04
 
 ### Added
