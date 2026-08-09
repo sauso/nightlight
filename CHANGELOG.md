@@ -9,6 +9,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **In-app banner for push alerts while the app is open.** Android doesn't show a system-tray
+  notification for a Firebase push that arrives while the app is in the foreground, so those alerts
+  were previously invisible until you backgrounded the app. A motion alert now shows a tappable
+  in-app banner (tap → nursery) when it arrives with the app open. (Pushover already shows its own,
+  as a separate app.)
+
 ## [0.10.0] - 2026-08-09
 
 ### Fixed
