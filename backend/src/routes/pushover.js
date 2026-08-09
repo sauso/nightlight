@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import db from '../db.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { logger } from '../lib/logger.js';
 import { getPushoverConfig, pushoverConfigured, validatePushover, sendPushover } from '../lib/pushover.js';
 
 const router = Router();
@@ -22,12 +23,16 @@ router.put('/config', requireAuth, requireAdmin, async (req, res) => {
 
   if (enabled) {
     const check = await validatePushover(appToken, userKey);
-    if (!check.ok) return res.status(400).json({ error: check.error });
+    if (!check.ok) {
+      logger.info(`[pushover] enable rejected: ${check.error}`);
+      return res.status(400).json({ error: check.error });
+    }
   }
 
   db.prepare(
     'UPDATE settings SET pushover_enabled = ?, pushover_app_token = ?, pushover_user_key = ? WHERE id = ?'
   ).run(enabled ? 1 : 0, appToken || null, userKey || null, 'app');
+  logger.info(`[pushover] config saved — notifications ${enabled ? 'ENABLED' : 'disabled'}`);
 
   const c = getPushoverConfig();
   res.json({ enabled: c.enabled, configured: pushoverConfigured(), app_token: c.appToken, user_key: c.userKey });

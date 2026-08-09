@@ -9,6 +9,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+- **PTZ now works on cameras whose ONVIF user is password-protected.** PTZ commands skip the ONVIF
+  connect handshake (to tolerate minimal cameras), which also skipped the WS-Security clock sync — so
+  authenticated moves carried a stale ~1970 timestamp that cameras enforcing auth rejected. PTZ now
+  seeds the clock (from the camera's own time, falling back to the server's) before each move.
+
 ### Added
 - **Pushover notifications** as an alternative to Firebase — much simpler to set up and it **works on
   iOS** (the recipient installs the Pushover app; no Firebase project, no Apple Developer account).

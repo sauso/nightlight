@@ -286,12 +286,40 @@ function makeControlCam({ host, port, username, password }) {
   return cam;
 }
 
+// Seed the WS-Security clock before an AUTHENTICATED PTZ command. We deliberately skip the ONVIF
+// connect() handshake (the Sonoff faults on GetCapabilities), but that also skips the lib's clock
+// sync — leaving `timeShift` unset, so _passwordDigest emits a ~1970 "Created" timestamp (epoch +
+// process uptime). A camera that enforces auth rejects that stale timestamp, so PTZ fails whenever
+// the ONVIF user has a password (an unauthenticated camera never sees a digest, so it's unaffected).
+// Fix: ask the camera its own time via the unauthenticated GetSystemDateAndTime (also corrects a
+// camera whose clock is skewed from ours); if it doesn't answer (minimal servers), fall back to our
+// wall clock so the timestamp is at least "now". Best-effort and never throws.
+function ensureAuthClock(cam) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      // The lib only sets timeShift if unset; seed from our wall clock when the camera didn't answer.
+      if (!cam.timeShift) cam.timeShift = Date.now() - process.uptime() * 1000;
+      resolve();
+    };
+    try {
+      cam.getSystemDateAndTime(() => done());
+    } catch {
+      done();
+    }
+    setTimeout(done, REQUEST_TIMEOUT_MS); // guard against a hung callback
+  });
+}
+
 /**
  * Continuous PTZ move at the given velocities (each -1..1). The camera auto-stops after
  * PTZ_MOVE_TIMEOUT_MS as a failsafe; the client should still send ptzStop on release.
  */
-export function ptzContinuousMove({ host, port, username, password, profileToken, pan = 0, tilt = 0, zoom = 0 }) {
+export async function ptzContinuousMove({ host, port, username, password, profileToken, pan = 0, tilt = 0, zoom = 0 }) {
   const cam = makeControlCam({ host, port, username, password });
+  await ensureAuthClock(cam);
   return new Promise((resolve, reject) => {
     cam.continuousMove(
       {
@@ -307,8 +335,9 @@ export function ptzContinuousMove({ host, port, username, password, profileToken
 }
 
 /** Stop any ongoing PTZ movement. */
-export function ptzStop({ host, port, username, password, profileToken }) {
+export async function ptzStop({ host, port, username, password, profileToken }) {
   const cam = makeControlCam({ host, port, username, password });
+  await ensureAuthClock(cam);
   return new Promise((resolve, reject) => {
     cam.stop({ profileToken, panTilt: true, zoom: true }, (err) => (err ? reject(err) : resolve()));
   });
@@ -319,10 +348,19 @@ export function ptzStop({ host, port, username, password, profileToken }) {
  * duration is a server-side constant, every press travels the same amount regardless of how
  * briefly the button was tapped or of network latency - which is what makes the D-pad feel
  * consistent. The continuousMove still carries its own auto-stop timeout, so even if the
- * stop below is lost the camera won't run away.
+ * stop below is lost the camera won't run away. Uses ONE control cam (clock synced once) for
+ * both the move and the stop.
  */
-export async function ptzNudge(conn) {
-  await ptzContinuousMove(conn);
+export async function ptzNudge({ host, port, username, password, profileToken, pan = 0, tilt = 0, zoom = 0 }) {
+  const cam = makeControlCam({ host, port, username, password });
+  await ensureAuthClock(cam);
+  await new Promise((resolve, reject) => {
+    cam.continuousMove(
+      { x: clampVelocity(pan), y: clampVelocity(tilt), zoom: clampVelocity(zoom), profileToken, timeout: PTZ_MOVE_TIMEOUT_MS },
+      (err) => (err ? reject(err) : resolve())
+    );
+  });
   await new Promise((r) => setTimeout(r, PTZ_NUDGE_MS));
-  await ptzStop(conn).catch(() => {}); // best-effort; auto-stop timeout is the backstop
+  // best-effort; the continuousMove auto-stop timeout is the backstop
+  await new Promise((resolve) => cam.stop({ profileToken, panTilt: true, zoom: true }, () => resolve()));
 }

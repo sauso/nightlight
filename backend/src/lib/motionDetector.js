@@ -168,15 +168,19 @@ export async function startMotionDetector(camera) {
             if (pushoverEnabled()) {
               // Grab the triggering frame (best-effort) and deep-link so tapping opens the app on
               // this camera. Snapshot + send are async and fire-and-forget — never block the loop.
+              logger.info(`[detect] sending Pushover alert for "${camera.name}"`);
               captureSnapshot(path)
-                .then((image) => sendPushover({
-                  title: `${camera.name} — motion`,
-                  message: 'Motion detected',
-                  url: `nightlight://camera/${camera.id}`,
-                  urlTitle: 'Open in Nightlight',
-                  image,
-                }))
-                .catch(() => {});
+                .then((image) => {
+                  if (!image) logger.info(`[detect] no snapshot for "${camera.name}" (grab failed/timed out) — sending without image`);
+                  return sendPushover({
+                    title: `${camera.name} — motion`,
+                    message: 'Motion detected',
+                    url: `nightlight://camera/${camera.id}`,
+                    urlTitle: 'Open in Nightlight',
+                    image,
+                  });
+                })
+                .catch((e) => logger.error(`[pushover] alert failed for "${camera.name}": ${e.message}`));
             }
           }
         } else if (activeSince && now - lastActive > ACTIVE_GRACE_MS) {
