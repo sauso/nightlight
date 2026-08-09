@@ -27,6 +27,8 @@ export default function Cameras() {
     // after the camera exists (see doSave).
     detect_motion_enabled: false, detect_sensitivity: 50, detect_cooldown_s: 60, detect_confirm_s: 3,
     detect_schedule_enabled: false, detect_start: '20:00', detect_end: '07:00',
+    // Detection source ('framediff' | 'mqtt') + MQTT motion topic/value + optional camera snapshot URL.
+    detect_source: 'framediff', motion_mqtt_topic: '', motion_mqtt_value: '', snapshot_url: '',
   };
   const [form, setForm] = useState(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
@@ -79,6 +81,10 @@ export default function Cameras() {
       // Show a sensible default window if none was ever set (start == end).
       detect_start: minToHHMM(cam.detect_start !== cam.detect_end ? cam.detect_start : 20 * 60),
       detect_end: minToHHMM(cam.detect_start !== cam.detect_end ? cam.detect_end : 7 * 60),
+      detect_source: cam.detect_source === 'mqtt' ? 'mqtt' : 'framediff',
+      motion_mqtt_topic: cam.motion_mqtt_topic || '',
+      motion_mqtt_value: cam.motion_mqtt_value || '',
+      snapshot_url: cam.snapshot_url || '',
     });
     setOnvifMsg('');
     setConfirmMsg('');
@@ -178,6 +184,10 @@ export default function Cameras() {
           schedule_enabled: !!form.detect_schedule_enabled,
           start: hhmmToMin(form.detect_start),
           end: hhmmToMin(form.detect_end),
+          source: form.detect_source,
+          motion_mqtt_topic: form.motion_mqtt_topic,
+          motion_mqtt_value: form.motion_mqtt_value,
+          snapshot_url: form.snapshot_url,
         });
       }
       setEditing(null);
@@ -509,31 +519,83 @@ export default function Cameras() {
                 {form.detect_motion_enabled && (
                   <>
                     <div className="field" style={{ marginTop: 12, marginBottom: 8 }}>
-                      <label htmlFor="detect-sensitivity">Sensitivity: {form.detect_sensitivity}</label>
-                      <input
-                        id="detect-sensitivity"
-                        type="range"
-                        min="1"
-                        max="100"
-                        value={form.detect_sensitivity}
-                        onChange={(e) => setForm({ ...form, detect_sensitivity: Number(e.target.value) })}
-                      />
+                      <label htmlFor="detect-source">Detection source</label>
+                      <select
+                        id="detect-source"
+                        value={form.detect_source}
+                        onChange={(e) => setForm({ ...form, detect_source: e.target.value })}
+                      >
+                        <option value="framediff">Nightlight (frame difference)</option>
+                        <option value="mqtt">Camera via MQTT</option>
+                      </select>
                       <div className="camera-tile__sub">
-                        Higher triggers on smaller movements (and more false alarms).
+                        {form.detect_source === 'mqtt'
+                          ? 'The camera detects motion itself and publishes it over MQTT (needs Settings → MQTT connected). Uses ~no server CPU for this camera.'
+                          : 'Nightlight watches the stream and diffs frames. Works on any camera; uses some server CPU.'}
                       </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 10 }}>
-                      <div className="field" style={{ flex: 1 }}>
-                        <label htmlFor="detect-confirm">Confirm for (seconds)</label>
+
+                    {form.detect_source === 'framediff' && (
+                      <div className="field" style={{ marginBottom: 8 }}>
+                        <label htmlFor="detect-sensitivity">Sensitivity: {form.detect_sensitivity}</label>
                         <input
-                          id="detect-confirm"
-                          type="number"
-                          min="0"
-                          max="30"
-                          value={form.detect_confirm_s}
-                          onChange={(e) => setForm({ ...form, detect_confirm_s: e.target.value })}
+                          id="detect-sensitivity"
+                          type="range"
+                          min="1"
+                          max="100"
+                          value={form.detect_sensitivity}
+                          onChange={(e) => setForm({ ...form, detect_sensitivity: Number(e.target.value) })}
                         />
+                        <div className="camera-tile__sub">
+                          Higher triggers on smaller movements (and more false alarms).
+                        </div>
                       </div>
+                    )}
+
+                    {form.detect_source === 'mqtt' && (
+                      <>
+                        <div className="field" style={{ marginBottom: 8 }}>
+                          <label htmlFor="motion-topic">Motion MQTT topic</label>
+                          <input
+                            id="motion-topic"
+                            type="text"
+                            placeholder="e.g. thingino/livingroom/motion"
+                            value={form.motion_mqtt_topic}
+                            onChange={(e) => setForm({ ...form, motion_mqtt_topic: e.target.value })}
+                          />
+                        </div>
+                        <div className="field" style={{ marginBottom: 8 }}>
+                          <label htmlFor="motion-value">Motion value (optional)</label>
+                          <input
+                            id="motion-value"
+                            type="text"
+                            placeholder={'auto: ON / true / {"motion":true}'}
+                            value={form.motion_mqtt_value}
+                            onChange={(e) => setForm({ ...form, motion_mqtt_value: e.target.value })}
+                          />
+                          <div className="camera-tile__sub">
+                            Leave blank to auto-recognise common payloads (ON/true/1/"motion",
+                            <code>{' {"motion":true}'}</code>, etc.). Set it only if your camera sends
+                            an unusual value that should count as motion.
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      {form.detect_source === 'framediff' && (
+                        <div className="field" style={{ flex: 1 }}>
+                          <label htmlFor="detect-confirm">Confirm for (seconds)</label>
+                          <input
+                            id="detect-confirm"
+                            type="number"
+                            min="0"
+                            max="30"
+                            value={form.detect_confirm_s}
+                            onChange={(e) => setForm({ ...form, detect_confirm_s: e.target.value })}
+                          />
+                        </div>
+                      )}
                       <div className="field" style={{ flex: 1 }}>
                         <label htmlFor="detect-cooldown">Cooldown (seconds)</label>
                         <input
@@ -547,9 +609,34 @@ export default function Cameras() {
                       </div>
                     </div>
                     <div className="camera-tile__sub">
-                      <strong>Confirm</strong> = movement must persist this long before it counts
-                      (filters brief blips). <strong>Cooldown</strong> = the minimum gap between
-                      alerts from this camera.
+                      {form.detect_source === 'framediff' ? (
+                        <>
+                          <strong>Confirm</strong> = movement must persist this long before it counts
+                          (filters brief blips). <strong>Cooldown</strong> = the minimum gap between
+                          alerts from this camera.
+                        </>
+                      ) : (
+                        <>
+                          <strong>Cooldown</strong> = the minimum gap between alerts from this camera
+                          (the camera has already confirmed the motion, so there's no confirm delay).
+                        </>
+                      )}
+                    </div>
+
+                    <div className="field" style={{ marginTop: 12, marginBottom: 8 }}>
+                      <label htmlFor="snapshot-url">Camera snapshot URL (optional)</label>
+                      <input
+                        id="snapshot-url"
+                        type="text"
+                        placeholder="http://camera/snapshot.jpg"
+                        value={form.snapshot_url}
+                        onChange={(e) => setForm({ ...form, snapshot_url: e.target.value })}
+                      />
+                      <div className="camera-tile__sub">
+                        If your camera has an HTTP snapshot endpoint, alert images are grabbed from it —
+                        instant and clearer than pulling a frame from the stream. Basic-auth in the URL
+                        works (http://user:pass@camera/…). Blank = grab from the stream.
+                      </div>
                     </div>
 
                     <label className="log-viewer__toggle" style={{ marginTop: 14 }}>

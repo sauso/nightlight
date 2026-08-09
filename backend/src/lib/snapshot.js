@@ -1,6 +1,45 @@
 import { spawn } from 'child_process';
 import { logger } from './logger.js';
 
+// Fetch a JPEG straight from a camera's own HTTP snapshot endpoint (thingino, sonoff-hack, and most
+// IP cameras expose one). Preferred over the ffmpeg stream grab when configured: it returns a full
+// frame instantly with no keyframe wait. Best-effort — resolves to a Buffer or null, never throws.
+// Supports HTTP Basic auth embedded in the URL (http://user:pass@host/...), which WHATWG fetch
+// rejects if left in the URL, so we strip the credentials into an Authorization header. Digest auth
+// is not supported (use a snapshot URL that accepts Basic or no auth).
+export async function fetchHttpSnapshot(rawUrl, { timeoutMs = 5000 } = {}) {
+  let url;
+  try {
+    url = new URL(String(rawUrl).trim());
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+  const headers = {};
+  if (url.username || url.password) {
+    const creds = `${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`;
+    headers.Authorization = `Basic ${Buffer.from(creds).toString('base64')}`;
+    url.username = '';
+    url.password = '';
+  }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { headers, signal: ctrl.signal, redirect: 'follow' });
+    if (!res.ok) {
+      logger.info(`[snapshot] camera URL returned HTTP ${res.status}`);
+      return null;
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    return buf.length ? buf : null;
+  } catch (e) {
+    logger.info(`[snapshot] camera URL fetch failed: ${e.name === 'AbortError' ? 'timed out' : e.message}`);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Grab a single JPEG frame from an already-published MediaMTX path (the same local stream the
 // detector/viewer use, so no extra hit on the camera). Used to attach the triggering frame to a
 // motion notification, and reusable for a future snapshot endpoint / crib-zone picker.
