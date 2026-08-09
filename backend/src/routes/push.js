@@ -4,16 +4,31 @@ import {
   registerToken, removeToken, pushEnabled, pushConfigured, getClientConfig,
   validatePushSetup, initPush,
 } from '../lib/push.js';
+import { getSnapshot } from '../lib/pushSnapshots.js';
 import db from '../db.js';
 
 const router = Router();
 
+// The picture for an FCM image alert. Deliberately UNAUTHENTICATED: the phone downloads a push
+// image in the Android system layer, which can't attach the app's bearer token. Safe because the
+// :id is 256 bits of randomness and the frame expires after a few minutes (see pushSnapshots.js) —
+// a single transient snapshot behind an unguessable, short-lived URL. Mounted before requireAuth.
+router.get('/snapshot/:id', (req, res) => {
+  const buf = /^[a-f0-9]{64}$/.test(req.params.id || '') ? getSnapshot(req.params.id) : null;
+  if (!buf) return res.status(404).end();
+  res.set('Content-Type', 'image/jpeg');
+  res.set('Cache-Control', 'private, max-age=180');
+  res.send(buf);
+});
+
 // The mobile app registers its FCM device token here after the user grants notification
 // permission. Idempotent (token is the key), so it's safe to call on every launch / token refresh.
+// baseUrl is the origin the app reaches this server through, used to build a device-fetchable
+// snapshot URL for image alerts (see lib/push.js sendToAll).
 router.post('/register', requireAuth, (req, res) => {
-  const { token, platform } = req.body || {};
+  const { token, platform, baseUrl } = req.body || {};
   if (!token || typeof token !== 'string') return res.status(400).json({ error: 'token is required' });
-  registerToken(token, platform, req.user.id);
+  registerToken(token, platform, req.user.id, typeof baseUrl === 'string' ? baseUrl : null);
   res.json({ ok: true, push_enabled: pushEnabled() });
 });
 

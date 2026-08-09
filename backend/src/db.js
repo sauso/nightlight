@@ -274,6 +274,15 @@ if (!camerasColumns.includes('detect_schedule_enabled')) {
   db.exec('ALTER TABLE cameras ADD COLUMN detect_end INTEGER NOT NULL DEFAULT 0');
 }
 
+// base_url: the origin the app reaches this server through (window.location.origin), reported on
+// push registration. Used to build a device-fetchable snapshot URL for FCM image alerts — FCM
+// downloads the picture by URL (unlike Pushover, which takes the bytes), so it must be a base the
+// phone can actually reach (LAN IP or public domain, whichever that device used).
+const pushTokenColumns = db.prepare('PRAGMA table_info(push_tokens)').all().map((c) => c.name);
+if (!pushTokenColumns.includes('base_url')) {
+  db.exec('ALTER TABLE push_tokens ADD COLUMN base_url TEXT');
+}
+
 // Ensure the single settings row always exists.
 db.prepare(
   `INSERT OR IGNORE INTO settings (id, app_name, accent_color, live_color, offline_color, timezone, font_choice, temp_unit)
