@@ -9,6 +9,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+- **Motion-alert snapshots grab more reliably.** The one-shot frame grab has to wait for the
+  camera's next keyframe, so on cameras with a long keyframe interval it occasionally hit the 5s
+  timeout and the alert (both channels) went out text-only. Startup buffering is trimmed and the
+  timeout raised to 8s so almost all grabs land; a rare miss still falls back to text cleanly.
+
 ## [0.11.0] - 2026-08-09
 
 ### Added
