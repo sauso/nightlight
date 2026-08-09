@@ -6,6 +6,14 @@ import Modal from '../components/Modal.jsx';
 import BreathingDot from '../components/BreathingDot.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 
+// Motion-alert schedule times move between the backend's minutes-since-midnight and the
+// <input type="time"> "HH:MM" the form uses.
+const minToHHMM = (m) => `${String(Math.floor((m || 0) / 60)).padStart(2, '0')}:${String((m || 0) % 60).padStart(2, '0')}`;
+const hhmmToMin = (s) => {
+  const [h, mm] = String(s || '0:0').split(':').map(Number);
+  return (h || 0) * 60 + (mm || 0);
+};
+
 export default function Cameras() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -18,6 +26,7 @@ export default function Cameras() {
     // Motion detection — settable on both add and edit; applied via the /detection endpoint
     // after the camera exists (see doSave).
     detect_motion_enabled: false, detect_sensitivity: 50, detect_cooldown_s: 60, detect_confirm_s: 3,
+    detect_schedule_enabled: false, detect_start: '20:00', detect_end: '07:00',
   };
   const [form, setForm] = useState(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
@@ -66,6 +75,10 @@ export default function Cameras() {
       detect_sensitivity: cam.detect_sensitivity ?? 50,
       detect_cooldown_s: cam.detect_cooldown_s ?? 60,
       detect_confirm_s: cam.detect_confirm_s ?? 3,
+      detect_schedule_enabled: !!cam.detect_schedule_enabled,
+      // Show a sensible default window if none was ever set (start == end).
+      detect_start: minToHHMM(cam.detect_start !== cam.detect_end ? cam.detect_start : 20 * 60),
+      detect_end: minToHHMM(cam.detect_start !== cam.detect_end ? cam.detect_end : 7 * 60),
     });
     setOnvifMsg('');
     setConfirmMsg('');
@@ -162,6 +175,9 @@ export default function Cameras() {
           sensitivity: Number(form.detect_sensitivity),
           cooldown_s: Number(form.detect_cooldown_s),
           confirm_s: Number(form.detect_confirm_s),
+          schedule_enabled: !!form.detect_schedule_enabled,
+          start: hhmmToMin(form.detect_start),
+          end: hhmmToMin(form.detect_end),
         });
       }
       setEditing(null);
@@ -534,6 +550,43 @@ export default function Cameras() {
                       <strong>Confirm</strong> = movement must persist this long before it counts
                       (filters brief blips). <strong>Cooldown</strong> = the minimum gap between
                       alerts from this camera.
+                    </div>
+
+                    <label className="log-viewer__toggle" style={{ marginTop: 14 }}>
+                      <input
+                        type="checkbox"
+                        style={{ width: 'auto', margin: 0 }}
+                        checked={form.detect_schedule_enabled}
+                        onChange={(e) => setForm({ ...form, detect_schedule_enabled: e.target.checked })}
+                      />
+                      Only alert during set hours
+                    </label>
+                    {form.detect_schedule_enabled && (
+                      <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+                        <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+                          <label htmlFor="detect-start">From</label>
+                          <input
+                            id="detect-start"
+                            type="time"
+                            value={form.detect_start}
+                            onChange={(e) => setForm({ ...form, detect_start: e.target.value })}
+                          />
+                        </div>
+                        <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+                          <label htmlFor="detect-end">To</label>
+                          <input
+                            id="detect-end"
+                            type="time"
+                            value={form.detect_end}
+                            onChange={(e) => setForm({ ...form, detect_end: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                    )}
+                    <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                      When on, motion outside these hours is ignored completely — no push and no
+                      Recent-alerts entry. Overnight windows are fine (e.g. 20:00 to 07:00). Uses the
+                      app timezone from Settings.
                     </div>
                   </>
                 )}

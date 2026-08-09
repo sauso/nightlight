@@ -498,7 +498,7 @@ router.put('/:id/enabled', requireAdmin, async (req, res) => {
 router.put('/:id/detection', requireAdmin, async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
-  const { motion_enabled, zone, sensitivity, cooldown_s, confirm_s } = req.body || {};
+  const { motion_enabled, zone, sensitivity, cooldown_s, confirm_s, schedule_enabled, start, end } = req.body || {};
 
   const enabled = motion_enabled ? 1 : 0;
   const zoneJson = zone === undefined ? existing.detect_zone : serializeZone(zone);
@@ -510,11 +510,18 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
     cooldown_s === undefined ? existing.detect_cooldown_s : Math.max(1, Math.round(Number(cooldown_s)) || 60);
   const confirm =
     confirm_s === undefined ? existing.detect_confirm_s : Math.max(0, Math.round(Number(confirm_s)) || 0);
+  // Alert-window schedule. start/end are minutes since midnight (0..1439) in the app timezone; the
+  // frontend converts to/from HH:MM. start > end means the window wraps midnight.
+  const clampMin = (v, fb) => (v === undefined ? fb : Math.min(1439, Math.max(0, Math.round(Number(v)) || 0)));
+  const schedEnabled = schedule_enabled === undefined ? existing.detect_schedule_enabled : schedule_enabled ? 1 : 0;
+  const startMin = clampMin(start, existing.detect_start);
+  const endMin = clampMin(end, existing.detect_end);
 
   db.prepare(
     `UPDATE cameras SET detect_motion_enabled = ?, detect_zone = ?, detect_sensitivity = ?,
-       detect_cooldown_s = ?, detect_confirm_s = ? WHERE id = ?`
-  ).run(enabled, zoneJson, sens, cooldown, confirm, req.params.id);
+       detect_cooldown_s = ?, detect_confirm_s = ?, detect_schedule_enabled = ?, detect_start = ?,
+       detect_end = ? WHERE id = ?`
+  ).run(enabled, zoneJson, sens, cooldown, confirm, schedEnabled, startMin, endMin, req.params.id);
 
   const updated = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   // Apply to the live detector now (a disabled camera's detector starts when it's re-enabled).

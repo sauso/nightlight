@@ -264,6 +264,16 @@ if (!camerasColumns.includes('detect_confirm_s')) {
   db.exec('ALTER TABLE cameras ADD COLUMN detect_confirm_s INTEGER NOT NULL DEFAULT 3');
 }
 
+// Optional per-camera active window for motion alerts ("quiet hours"): when enabled, motion outside
+// the window is fully ignored (no push, no in-app alert). detect_start/detect_end are minutes since
+// midnight (0..1439) in the app's configured timezone; start > end means the window wraps midnight
+// (e.g. 20:00–07:00). Off by default = alert 24/7.
+if (!camerasColumns.includes('detect_schedule_enabled')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN detect_schedule_enabled INTEGER NOT NULL DEFAULT 0');
+  db.exec('ALTER TABLE cameras ADD COLUMN detect_start INTEGER NOT NULL DEFAULT 0');
+  db.exec('ALTER TABLE cameras ADD COLUMN detect_end INTEGER NOT NULL DEFAULT 0');
+}
+
 // Ensure the single settings row always exists.
 db.prepare(
   `INSERT OR IGNORE INTO settings (id, app_name, accent_color, live_color, offline_color, timezone, font_choice, temp_unit)
