@@ -329,14 +329,14 @@ async function reliableStop(cam, profileToken, { attempts = 3, label = 'ptz' } =
     lastErr = await new Promise((resolve) => {
       cam.stop({ profileToken, panTilt: true, zoom: true }, (err) => resolve(err || null));
     });
-    if (!lastErr) return true;
+    if (!lastErr) return { ok: true, tries: i + 1 };
     await new Promise((r) => setTimeout(r, 120));
   }
   logger.info(
     `[ptz] Stop not acknowledged after ${attempts} attempts (${label}): ` +
       `${lastErr?.message || 'unknown error'}. Falling back to the ${PTZ_MOVE_TIMEOUT_MS}ms move failsafe.`
   );
-  return false;
+  return { ok: false, tries: attempts, error: lastErr?.message || 'unknown error' };
 }
 
 /**
@@ -364,7 +364,8 @@ export async function ptzContinuousMove({ host, port, username, password, profil
 export async function ptzStop({ host, port, username, password, profileToken }) {
   const cam = makeControlCam({ host, port, username, password });
   await ensureAuthClock(cam);
-  await reliableStop(cam, profileToken, { label: 'ptzStop' });
+  const stop = await reliableStop(cam, profileToken, { label: 'ptzStop' });
+  logger.info(`[ptz] ptzStop stop=${stop.ok ? `ok(tries=${stop.tries})` : 'FAILED'}`);
 }
 
 /**
@@ -377,15 +378,25 @@ export async function ptzStop({ host, port, username, password, profileToken }) 
  */
 export async function ptzNudge({ host, port, username, password, profileToken, pan = 0, tilt = 0, zoom = 0 }) {
   const cam = makeControlCam({ host, port, username, password });
+  const t0 = Date.now();
   await ensureAuthClock(cam);
+  const tMove = Date.now();
   await new Promise((resolve, reject) => {
     cam.continuousMove(
       { x: clampVelocity(pan), y: clampVelocity(tilt), zoom: clampVelocity(zoom), profileToken, timeout: PTZ_MOVE_TIMEOUT_MS },
       (err) => (err ? reject(err) : resolve())
     );
   });
+  const tMoved = Date.now();
   await new Promise((r) => setTimeout(r, PTZ_NUDGE_MS));
   // Reliable stop (retries) so a single dropped/rejected Stop doesn't let the nudge run to the
   // move failsafe; the continuousMove auto-stop timeout remains the ultimate backstop.
-  await reliableStop(cam, profileToken, { label: 'ptzNudge' });
+  const stop = await reliableStop(cam, profileToken, { label: 'ptzNudge' });
+  // Per-nudge diagnostics: shows the request arrived, the requested velocity, how long the auth
+  // clock + move calls took, and whether the Stop was acknowledged (and after how many tries).
+  logger.info(
+    `[ptz] nudge x=${clampVelocity(pan)} y=${clampVelocity(tilt)} z=${clampVelocity(zoom)} ` +
+      `clockMs=${tMove - t0} moveMs=${tMoved - tMove} hold=${PTZ_NUDGE_MS}ms ` +
+      `stop=${stop.ok ? `ok(tries=${stop.tries})` : `FAILED(${stop.error})`}`
+  );
 }
