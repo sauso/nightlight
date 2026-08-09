@@ -3,6 +3,8 @@ import { logger } from './logger.js';
 import { subPathName, getPathStatus } from './mediamtx.js';
 import { recordDetectionEvent, ALERT } from './detectionEvents.js';
 import { sendToAll, pushEnabled } from './push.js';
+import { pushoverEnabled, sendPushover } from './pushover.js';
+import { captureSnapshot } from './snapshot.js';
 
 // Server-side motion detection. Per camera with detection enabled, a cheap FFmpeg leg reads
 // the already-published MediaMTX stream (the sub-stream when there is one — far cheaper to
@@ -162,6 +164,19 @@ export async function startMotionDetector(camera) {
             logger.info(`[detect] motion on "${camera.name}" (${pct}% of zone)`);
             if (pushEnabled()) {
               sendToAll(camera.name, 'Motion detected', { cameraId: camera.id, type: ALERT.MOTION }).catch(() => {});
+            }
+            if (pushoverEnabled()) {
+              // Grab the triggering frame (best-effort) and deep-link so tapping opens the app on
+              // this camera. Snapshot + send are async and fire-and-forget — never block the loop.
+              captureSnapshot(path)
+                .then((image) => sendPushover({
+                  title: `${camera.name} — motion`,
+                  message: 'Motion detected',
+                  url: `nightlight://camera/${camera.id}`,
+                  urlTitle: 'Open in Nightlight',
+                  image,
+                }))
+                .catch(() => {});
             }
           }
         } else if (activeSince && now - lastActive > ACTIVE_GRACE_MS) {

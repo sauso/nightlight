@@ -158,6 +158,15 @@ if (!settingsColumns.includes('push_enabled')) {
   db.exec('ALTER TABLE settings ADD COLUMN push_enabled INTEGER NOT NULL DEFAULT 0');
 }
 
+// Pushover notifications — an alternative to the Firebase/FCM path that needs no Firebase project
+// and works on iOS (the recipient installs the Pushover app). The server just POSTs to Pushover's
+// API with an application token + a user/group key. Off until configured + enabled.
+if (!settingsColumns.includes('pushover_enabled')) {
+  db.exec('ALTER TABLE settings ADD COLUMN pushover_enabled INTEGER NOT NULL DEFAULT 0');
+  db.exec('ALTER TABLE settings ADD COLUMN pushover_app_token TEXT');
+  db.exec('ALTER TABLE settings ADD COLUMN pushover_user_key TEXT');
+}
+
 if (!camerasColumns.includes('mqtt_topic')) {
   db.exec('ALTER TABLE cameras ADD COLUMN mqtt_topic TEXT');
 }

@@ -13,6 +13,7 @@ import logsRoutes from './routes/logs.js';
 import eventsRoutes from './routes/events.js';
 import aboutRoutes from './routes/about.js';
 import pushRoutes from './routes/push.js';
+import pushoverRoutes from './routes/pushover.js';
 import { requireAuth, requireAuthQueryOrHeader, verifyToken } from './middleware/auth.js';
 import { startTalkSession, talkConfigured } from './lib/twoWayAudio.js';
 import { subConfigured, isSubRunning, startSubStream } from './lib/subStream.js';
@@ -132,6 +133,7 @@ app.use('/api/logs', logsRoutes);
 app.use('/api/events', eventsRoutes);
 app.use('/api/about', aboutRoutes);
 app.use('/api/push', pushRoutes);
+app.use('/api/pushover', pushoverRoutes);
 app.use('/manifest.webmanifest', manifestRoutes);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
