@@ -15,6 +15,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   were previously invisible until you backgrounded the app. A motion alert now shows a tappable
   in-app banner (tap → nursery) when it arrives with the app open. (Pushover already shows its own,
   as a separate app.)
+- **Firebase motion alerts now include the snapshot too** (previously Pushover-only). FCM can't
+  carry image bytes, so the triggering frame is served from a short-lived, unguessable URL that the
+  phone fetches — built on the address each device reaches the server through (works on the LAN or
+  remotely). The URL holds a single frame for a few minutes, then expires. The frame is captured
+  once and shared by both channels.
 
 ## [0.10.0] - 2026-08-09
 

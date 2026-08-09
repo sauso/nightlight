@@ -54,7 +54,9 @@ async function ensureListeners(PN) {
     currentToken = t?.value || null;
     if (!currentToken) return;
     try {
-      await api.post('/push/register', { token: currentToken, platform: 'android' });
+      // baseUrl = the origin this app reaches the server through, so image alerts can build a
+      // snapshot URL this device can actually fetch (LAN IP or public domain — whichever it used).
+      await api.post('/push/register', { token: currentToken, platform: 'android', baseUrl: window.location.origin });
     } catch {
       // Non-fatal — re-registers next launch.
     }

@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { logger } from './logger.js';
 import db from '../db.js';
+import { storeSnapshot } from './pushSnapshots.js';
 
 // Push notifications via Firebase Cloud Messaging. The service-account credential is a secret,
 // so it is NEVER baked into the (public) image — it's mounted as a file into the data dir. If
@@ -108,14 +109,17 @@ export function getClientConfig() {
   }
 }
 
-export function registerToken(token, platform, userId) {
+export function registerToken(token, platform, userId, baseUrl) {
   if (!token) return;
+  // COALESCE on base_url so a re-register from an older app that doesn't send it keeps the last
+  // known good value rather than nulling out the device's snapshot-fetch base.
   db.prepare(
-    `INSERT INTO push_tokens (token, user_id, platform, updated_at)
-       VALUES (?, ?, ?, datetime('now'))
+    `INSERT INTO push_tokens (token, user_id, platform, base_url, updated_at)
+       VALUES (?, ?, ?, ?, datetime('now'))
      ON CONFLICT(token) DO UPDATE SET
-       user_id = excluded.user_id, platform = excluded.platform, updated_at = datetime('now')`
-  ).run(token, userId || null, platform || null);
+       user_id = excluded.user_id, platform = excluded.platform,
+       base_url = COALESCE(excluded.base_url, push_tokens.base_url), updated_at = datetime('now')`
+  ).run(token, userId || null, platform || null, baseUrl || null);
 }
 
 export function removeToken(token) {
@@ -123,20 +127,34 @@ export function removeToken(token) {
 }
 
 // Fire-and-forget push to every registered device. Never throws into the caller (a push failure
-// must not disrupt detection). Prunes tokens FCM reports as permanently dead.
-export async function sendToAll(title, body, data = {}) {
+// must not disrupt detection). Prunes tokens FCM reports as permanently dead. An optional JPEG
+// buffer is attached as a picture: FCM downloads it by URL (it can't carry the bytes like Pushover),
+// so we stash the frame behind a short-lived unguessable URL built on each device's own reported
+// base (see pushSnapshots.js). A device that never reported a base, or the whole thing when no image
+// is given, simply gets the text-only alert.
+export async function sendToAll(title, body, data = {}, imageBuffer = null) {
   if (!pushEnabled()) return;
-  const tokens = db.prepare('SELECT token FROM push_tokens').all().map((r) => r.token);
-  if (tokens.length === 0) return;
+  const rows = db.prepare('SELECT token, base_url FROM push_tokens').all();
+  if (rows.length === 0) return;
   // FCM data payload values must all be strings.
   const stringData = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)]));
-  try {
-    const res = await messaging.sendEachForMulticast({
-      tokens,
+  const snapshotId = imageBuffer ? storeSnapshot(imageBuffer) : null;
+  const messages = rows.map(({ token, base_url }) => {
+    const msg = {
+      token,
       notification: { title, body },
       data: stringData,
       android: { priority: 'high', notification: { channelId: ANDROID_CHANNEL } },
-    });
+    };
+    if (snapshotId && base_url) {
+      const url = `${base_url.replace(/\/+$/, '')}/api/push/snapshot/${snapshotId}`;
+      msg.notification.image = url;
+      msg.android.notification.imageUrl = url;
+    }
+    return msg;
+  });
+  try {
+    const res = await messaging.sendEach(messages);
     res.responses.forEach((r, i) => {
       if (r.success) return;
       const code = r.error?.code || '';
@@ -145,10 +163,11 @@ export async function sendToAll(title, body, data = {}) {
         code.includes('invalid-registration-token') ||
         code.includes('invalid-argument')
       ) {
-        removeToken(tokens[i]);
+        removeToken(rows[i].token);
       }
     });
-    logger.info(`[push] alert sent to ${res.successCount}/${tokens.length} device(s)`);
+    const withImg = snapshotId ? (rows.some((r) => r.base_url) ? ' with image' : ' (image skipped — no device base URL)') : '';
+    logger.info(`[push] alert sent to ${res.successCount}/${rows.length} device(s)${withImg}`);
   } catch (e) {
     logger.error('[push] send failed:', e.message);
   }
