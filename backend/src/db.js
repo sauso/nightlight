@@ -274,6 +274,19 @@ if (!camerasColumns.includes('detect_schedule_enabled')) {
   db.exec('ALTER TABLE cameras ADD COLUMN detect_end INTEGER NOT NULL DEFAULT 0');
 }
 
+// Detection source: 'framediff' (the server-side frame-diff detector, the universal default) or
+// 'mqtt' (the camera detects motion itself and publishes it — thingino/sonoff-hack etc. — which
+// costs the server ~nothing). For 'mqtt', motion_mqtt_topic is the topic the camera publishes to,
+// and motion_mqtt_value is an optional payload matcher override (blank = the built-in smart matcher).
+// snapshot_url is an optional camera HTTP snapshot endpoint used for the alert image (avoids the
+// stream keyframe-wait); it benefits BOTH sources. See lib/mqttClient.js + lib/motionAlert.js.
+if (!camerasColumns.includes('detect_source')) {
+  db.exec("ALTER TABLE cameras ADD COLUMN detect_source TEXT NOT NULL DEFAULT 'framediff'");
+  db.exec('ALTER TABLE cameras ADD COLUMN motion_mqtt_topic TEXT');
+  db.exec('ALTER TABLE cameras ADD COLUMN motion_mqtt_value TEXT');
+  db.exec('ALTER TABLE cameras ADD COLUMN snapshot_url TEXT');
+}
+
 // base_url: the origin the app reaches this server through (window.location.origin), reported on
 // push registration. Used to build a device-fetchable snapshot URL for FCM image alerts — FCM
 // downloads the picture by URL (unlike Pushover, which takes the bytes), so it must be a base the

@@ -9,6 +9,19 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **MQTT motion source — let the camera detect motion.** Each camera now has a **Detection source**:
+  *Nightlight (frame difference)* — the existing, works-on-any-camera default — or **Camera via
+  MQTT**, where the camera detects motion on its own hardware (thingino, sonoff-hack, etc.) and
+  publishes it; Nightlight just consumes the event. That uses **~no server CPU** for that camera and
+  is usually more accurate. Set the camera's **motion topic** (and, only if needed, a payload value —
+  it auto-recognises `ON`/`true`/`1`/`motion`/`{"motion":true}` and similar). Same downstream as
+  frame-diff: Recent-alerts entry + Firebase/Pushover push, same per-camera cooldown and quiet-hours.
+- **Optional camera snapshot URL.** If a camera exposes an HTTP snapshot endpoint, set it and alert
+  images are grabbed from it — instant and clearer than pulling a frame from the stream (no keyframe
+  wait). Basic-auth in the URL is supported; blank falls back to the stream grab. Works for both
+  detection sources.
+
 ### Fixed
 - **Motion-alert snapshots grab more reliably.** The one-shot frame grab has to wait for the
   camera's next keyframe, so on cameras with a long keyframe interval it occasionally hit the 5s
