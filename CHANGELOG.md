@@ -10,6 +10,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Added
+- **Sound detection (crying / loud noise).** A new per-camera **Sound detection** toggle listens to
+  the camera's audio and alerts when sound stays **above the room's ambient level** for a set time.
+  It **learns the ambient continuously** — a white-noise machine or fan (even switched on hours after
+  boot) is absorbed into the baseline, so only a sustained rise above it (like crying) triggers.
+  Per-camera **sensitivity / confirm / cooldown**, shares the same quiet-hours schedule as motion,
+  same Recent-alerts + Firebase/Pushover push (with snapshot). Needs a camera with a microphone;
+  off by default. (Cry-*classification* is a possible later add-on if loudness proves too noisy.)
 - **MQTT motion source — let the camera detect motion.** Each camera now has a **Detection source**:
   *Nightlight (frame difference)* — the existing, works-on-any-camera default — or **Camera via
   MQTT**, where the camera detects motion on its own hardware (thingino, sonoff-hack, etc.) and

@@ -2,7 +2,8 @@ import mqtt from 'mqtt';
 import db from '../db.js';
 import { logger } from './logger.js';
 import { inActiveWindow } from './detectSchedule.js';
-import { fireMotionAlert } from './motionAlert.js';
+import { fireDetectionAlert } from './detectionAlert.js';
+import { ALERT } from './detectionEvents.js';
 
 let client = null;
 let currentConfigKey = null;
@@ -112,7 +113,7 @@ function handleMotionMessage(topic, str) {
     if (now - (motionLastAlert.get(cam.id) || 0) < cooldownMs) continue;
     motionLastAlert.set(cam.id, now);
     logger.info(`[detect] MQTT motion on "${cam.name}" (topic ${topic})`);
-    fireMotionAlert(cam, 'camera-reported motion (MQTT)').catch(() => {});
+    fireDetectionAlert(cam, ALERT.MOTION, 'camera-reported (MQTT)').catch(() => {});
   }
 }
 

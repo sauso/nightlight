@@ -274,12 +274,24 @@ if (!camerasColumns.includes('detect_schedule_enabled')) {
   db.exec('ALTER TABLE cameras ADD COLUMN detect_end INTEGER NOT NULL DEFAULT 0');
 }
 
+// Sound detection: a separate audio-loudness detector (lib/soundDetector.js), parallel to motion.
+// It tracks each camera's rolling ambient level (so a white-noise machine/fan is learned, not a
+// one-time boot calibration) and fires when the level stays a sensitivity-controlled margin above
+// that ambient for sound_confirm_s, rate-limited by sound_cooldown_s. Shares the per-camera
+// quiet-hours schedule with motion. Off by default.
+if (!camerasColumns.includes('detect_sound_enabled')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN detect_sound_enabled INTEGER NOT NULL DEFAULT 0');
+  db.exec('ALTER TABLE cameras ADD COLUMN sound_sensitivity INTEGER NOT NULL DEFAULT 50');
+  db.exec('ALTER TABLE cameras ADD COLUMN sound_confirm_s INTEGER NOT NULL DEFAULT 4');
+  db.exec('ALTER TABLE cameras ADD COLUMN sound_cooldown_s INTEGER NOT NULL DEFAULT 120');
+}
+
 // Detection source: 'framediff' (the server-side frame-diff detector, the universal default) or
 // 'mqtt' (the camera detects motion itself and publishes it — thingino/sonoff-hack etc. — which
 // costs the server ~nothing). For 'mqtt', motion_mqtt_topic is the topic the camera publishes to,
 // and motion_mqtt_value is an optional payload matcher override (blank = the built-in smart matcher).
 // snapshot_url is an optional camera HTTP snapshot endpoint used for the alert image (avoids the
-// stream keyframe-wait); it benefits BOTH sources. See lib/mqttClient.js + lib/motionAlert.js.
+// stream keyframe-wait); it benefits BOTH sources. See lib/mqttClient.js + lib/detectionAlert.js.
 if (!camerasColumns.includes('detect_source')) {
   db.exec("ALTER TABLE cameras ADD COLUMN detect_source TEXT NOT NULL DEFAULT 'framediff'");
   db.exec('ALTER TABLE cameras ADD COLUMN motion_mqtt_topic TEXT');
