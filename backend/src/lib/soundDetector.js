@@ -97,6 +97,7 @@ export async function startSoundDetector(camera) {
     const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     entry.proc = proc;
     const startedAt = Date.now();
+    logger.info(`[sound] watching "${camera.name}" — fires at +${Math.round(margin)} dB over ambient, sustained ${Math.round(confirmMs / 1000)}s`);
 
     let baseline = null; // rolling ambient level (dBFS)
     let loudSince = 0; // start of the current sustained-loud run (0 = not currently loud)
@@ -104,11 +105,25 @@ export async function startSoundDetector(camera) {
     let lastAlert = 0;
     let sawReading = false;
     let stdoutBuf = '';
+    // Periodic level line (throttled) so the ambient baseline + recent peak are visible for tuning
+    // without needing an actual alert — e.g. "ambient=-32.1 peak=-18.3 (fires at +15)".
+    let windowPeak = -Infinity;
+    let lastLevelLog = Date.now();
+    const LEVEL_LOG_MS = 15000;
 
     function handleReading(rms) {
       if (!Number.isFinite(rms)) return; // -inf / nan (true digital silence) — ignore
       sawReading = true;
       const now = Date.now();
+      if (rms > windowPeak) windowPeak = rms;
+      if (now - lastLevelLog >= LEVEL_LOG_MS) {
+        logger.info(
+          `[sound] "${camera.name}" ambient=${baseline === null ? '?' : baseline.toFixed(1)}dB ` +
+            `peak=${windowPeak === -Infinity ? '?' : windowPeak.toFixed(1)}dB (fires at +${Math.round(margin)})`
+        );
+        windowPeak = -Infinity;
+        lastLevelLog = now;
+      }
       if (baseline === null) {
         baseline = rms;
         return;

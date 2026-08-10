@@ -638,6 +638,25 @@ export default function Cameras() {
                 )}
               </div>
 
+              {(form.detect_motion_enabled || form.detect_sound_enabled) && (
+                <div className="field" style={{ marginBottom: 14 }}>
+                  <label htmlFor="snapshot-url">Camera snapshot URL (optional)</label>
+                  <input
+                    id="snapshot-url"
+                    type="text"
+                    placeholder="http://camera/snapshot.jpg"
+                    value={form.snapshot_url}
+                    onChange={(e) => setForm({ ...form, snapshot_url: e.target.value })}
+                  />
+                  <div className="camera-tile__sub">
+                    If your camera has an HTTP snapshot endpoint, alert images are grabbed from it —
+                    instant and clearer than pulling a frame from the stream. Basic-auth in the URL
+                    works (http://user:pass@camera/…). Blank = grab from the stream. Applies to both
+                    motion and sound alerts.
+                  </div>
+                </div>
+              )}
+
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>
                   Sound detection
@@ -706,22 +725,6 @@ export default function Cameras() {
 
               {(form.detect_motion_enabled || form.detect_sound_enabled) && (
                 <div style={{ marginBottom: 14 }}>
-                  <div className="field" style={{ marginBottom: 8 }}>
-                    <label htmlFor="snapshot-url">Camera snapshot URL (optional)</label>
-                    <input
-                      id="snapshot-url"
-                      type="text"
-                      placeholder="http://camera/snapshot.jpg"
-                      value={form.snapshot_url}
-                      onChange={(e) => setForm({ ...form, snapshot_url: e.target.value })}
-                    />
-                    <div className="camera-tile__sub">
-                      If your camera has an HTTP snapshot endpoint, alert images are grabbed from it —
-                      instant and clearer than pulling a frame from the stream. Basic-auth in the URL
-                      works (http://user:pass@camera/…). Blank = grab from the stream.
-                    </div>
-                  </div>
-
                   <label className="log-viewer__toggle" style={{ marginTop: 6 }}>
                     <input
                       type="checkbox"
