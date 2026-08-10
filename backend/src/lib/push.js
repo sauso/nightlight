@@ -132,12 +132,21 @@ export function registerToken(token, platform, userId, baseUrl) {
   }
 }
 
-// This server's own public URL as last reported by a registering app (null until one registers).
-// Used to stamp deep links so a tapped alert opens the server that sent it, not whichever server
-// the app last had open.
+// This server's own public URL, used to stamp deep links so a tapped alert opens the server that
+// sent it, not whichever server the app last had open. Prefer the value learned on push-register
+// (settings.public_base_url), but fall back to the most recently registered device's base_url — that
+// too is an address a real app used to reach us, so it's a valid "open this server" URL. The
+// fallback matters right after upgrading to this version: a server registered by an older app has a
+// token base_url but no settings value yet, and would otherwise emit server-less links until the
+// next fresh registration. Null only if nothing has ever registered.
 export function getPublicBaseUrl() {
   try {
-    return db.prepare('SELECT public_base_url FROM settings WHERE id = ?').get('app')?.public_base_url || null;
+    const explicit = db.prepare('SELECT public_base_url FROM settings WHERE id = ?').get('app')?.public_base_url;
+    if (explicit) return explicit.replace(/\/+$/, '');
+    const row = db
+      .prepare("SELECT base_url FROM push_tokens WHERE base_url IS NOT NULL AND base_url != '' ORDER BY updated_at DESC LIMIT 1")
+      .get();
+    return row?.base_url ? row.base_url.replace(/\/+$/, '') : null;
   } catch {
     return null;
   }
