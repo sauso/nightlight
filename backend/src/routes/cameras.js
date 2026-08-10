@@ -10,7 +10,7 @@ import { startSoundDetector, stopSoundDetector } from '../lib/soundDetector.js';
 import { getRecentDetectionEvents, clearDetectionEvents } from '../lib/detectionEvents.js';
 import { verifyTalkCreds } from '../lib/twoWayAudio.js';
 import { getReading, subscribeAllCameraTopics, refreshMqttConnection } from '../lib/mqttClient.js';
-import { probeOnvifCamera, ptzNudge } from '../lib/onvif.js';
+import { probeOnvifCamera, ptzNudge, ptzRelativeStep, probePtzRelativeSupport } from '../lib/onvif.js';
 import { validateRtspStream } from '../lib/rtspProbe.js';
 import { logger } from '../lib/logger.js';
 
@@ -150,6 +150,7 @@ router.post('/onvif-probe', requireAdmin, async (req, res) => {
 // PTZ control. Any signed-in user can reposition a camera (day-to-day, like reordering) -
 // not admin-only. The camera auto-stops a few seconds after a move server-side (runaway
 // failsafe in ptzContinuousMove); the client also calls /stop on release.
+// Returns { cam, conn } for a PTZ-capable camera, or null after having sent the error response.
 function ptzConnForCamera(id, res) {
   const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(id);
   if (!cam) {
@@ -163,11 +164,14 @@ function ptzConnForCamera(id, res) {
   try {
     const u = new URL(cam.onvif_device_url);
     return {
-      host: u.hostname,
-      port: u.port || 80,
-      username: cam.onvif_username,
-      password: cam.onvif_password,
-      profileToken: cam.onvif_profile_token,
+      cam,
+      conn: {
+        host: u.hostname,
+        port: u.port || 80,
+        username: cam.onvif_username,
+        password: cam.onvif_password,
+        profileToken: cam.onvif_profile_token,
+      },
     };
   } catch {
     res.status(500).json({ error: 'Stored ONVIF address for this camera is invalid' });
@@ -175,14 +179,33 @@ function ptzConnForCamera(id, res) {
   }
 }
 
-// One fixed-distance nudge per call (start -> hold -> stop, server-side), so each press of
-// a D-pad arrow travels a consistent amount. The client sends one per tap, and repeats while
-// a button is held for continued movement.
+// One fixed-distance step per call, so each press of a D-pad arrow travels a consistent amount. The
+// client sends one per tap and repeats while a button is held. Prefer ONVIF RelativeMove (the camera
+// moves a set distance and stops itself — deterministic) when the camera supports it; fall back to
+// the continuous start->hold->stop nudge otherwise. Relative support is probed once on first PTZ and
+// cached in cameras.ptz_relative (null = unprobed).
 router.post('/:id/ptz/nudge', async (req, res) => {
-  const conn = ptzConnForCamera(req.params.id, res);
-  if (!conn) return;
+  const ctx = ptzConnForCamera(req.params.id, res);
+  if (!ctx) return;
+  const { cam, conn } = ctx;
   const { pan, tilt, zoom } = req.body || {};
   try {
+    let relative = cam.ptz_relative;
+    if (relative === null || relative === undefined) {
+      relative = (await probePtzRelativeSupport(conn)) ? 1 : 0;
+      db.prepare('UPDATE cameras SET ptz_relative = ? WHERE id = ?').run(relative, cam.id);
+      logger.info(`[ptz] ${cam.name}: RelativeMove support = ${relative ? 'yes' : 'no'} (probed)`);
+    }
+    if (relative) {
+      try {
+        await ptzRelativeStep({ ...conn, pan, tilt, zoom });
+        return res.json({ ok: true });
+      } catch (e) {
+        // Advertised but this move failed — fall back to the continuous nudge for THIS call. Left
+        // as still-supported (a transient failure shouldn't permanently downgrade the camera).
+        logger.info(`[ptz] ${cam.name}: RelativeMove failed (${e.message}); falling back to continuous nudge`);
+      }
+    }
     await ptzNudge({ ...conn, pan, tilt, zoom });
     res.json({ ok: true });
   } catch (e) {

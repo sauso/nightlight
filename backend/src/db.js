@@ -214,6 +214,13 @@ if (!camerasColumns.includes('onvif_password')) {
 if (!camerasColumns.includes('onvif_profile_token')) {
   db.exec('ALTER TABLE cameras ADD COLUMN onvif_profile_token TEXT');
 }
+// Whether this camera supports ONVIF RelativeMove — a single fixed-distance PTZ command the camera
+// stops itself, which is far more predictable than start→hold→stop continuous moves on cameras whose
+// ContinuousMove latency swings wildly (cheap Sonoff/thingino cams). null = not yet probed, 1 = yes
+// (use RelativeMove), 0 = no (fall back to continuous+stop nudge). Probed lazily on first PTZ.
+if (!camerasColumns.includes('ptz_relative')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN ptz_relative INTEGER');
+}
 
 // Admin can turn a camera off entirely (server-side): its transcoder is stopped and its
 // MediaMTX path dropped, so it consumes no camera/server/network resources and disappears
