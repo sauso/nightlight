@@ -9,6 +9,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **Adjustable PTZ step size** (Settings → General → Camera controls). Sets how far a camera moves
+  per tap of the pan/tilt D-pad, for cameras using precise RelativeMove positioning. Defaults to 12
+  (suits the common Sonoff pan/tilt cams); tune to taste.
+
 ### Fixed
 - **PTZ steps are consistent on cameras with erratic ONVIF timing.** Cheap pan/tilt cams (Sonoff/
   thingino) answer the ONVIF *ContinuousMove* call with wildly variable latency (0.3–2.2 s) and move

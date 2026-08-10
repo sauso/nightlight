@@ -39,6 +39,7 @@ export default function SettingsGeneral() {
         timezone: form.timezone,
         font_choice: form.font_choice,
         temp_unit: form.temp_unit,
+        ptz_step: form.ptz_step,
       });
       await refresh();
       setSaved(true);
@@ -192,6 +193,27 @@ export default function SettingsGeneral() {
             >
               <span className="font-btn__label">°F</span>
             </button>
+          </div>
+
+          <div className="section-title">Camera controls</div>
+          <div className="card">
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label htmlFor="ptz-step">PTZ step size</label>
+              <input
+                id="ptz-step"
+                type="number"
+                min="1"
+                max="100"
+                value={form.ptz_step ?? 12}
+                onChange={(e) => setForm({ ...form, ptz_step: e.target.value })}
+              />
+              <div className="camera-tile__sub">
+                How far a camera moves per tap of the pan/tilt controls. Larger = bigger jumps.
+                Only affects cameras that support precise (RelativeMove) positioning; others move a
+                fixed amount. The right value depends on the camera — around 12 suits the common
+                Sonoff pan/tilt cameras.
+              </div>
+            </div>
           </div>
 
           <button className="btn btn-primary" type="submit" disabled={busy} style={{ marginTop: 20 }}>

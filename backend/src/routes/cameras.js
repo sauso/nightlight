@@ -198,7 +198,8 @@ router.post('/:id/ptz/nudge', async (req, res) => {
     }
     if (relative) {
       try {
-        await ptzRelativeStep({ ...conn, pan, tilt, zoom });
+        const step = db.prepare('SELECT ptz_step FROM settings WHERE id = ?').get('app')?.ptz_step;
+        await ptzRelativeStep({ ...conn, pan, tilt, zoom, step });
         return res.json({ ok: true });
       } catch (e) {
         // Advertised but this move failed — fall back to the continuous nudge for THIS call. Left
