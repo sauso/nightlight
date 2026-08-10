@@ -33,8 +33,6 @@ const WIN_BYTES = WIN_SAMPLES * 2; // s16le = 2 bytes/sample, mono
 // Ambient baseline EMA. At ~5 readings/s, alpha 0.01 gives a ~20 s time constant — slow enough that
 // a cry doesn't get absorbed before it alerts, fast enough to track a fan/AC/white-noise change.
 const BASELINE_ALPHA = 0.01;
-// A brief dip below the loud threshold shouldn't end a sustained run — real crying pulses.
-const SOUND_GRACE_MS = 2500;
 // A level that stays elevated far longer than any cry burst is treated as a NEW ambient floor (the
 // white-noise machine was switched on, a fan, a running tap, the TV) and folded into the baseline so
 // it stops alerting. A cry alerts well before this.
@@ -44,12 +42,14 @@ const REBASELINE_MS = 45000;
 // camera almost certainly has no audio track — stop trying (and say so) instead of restart-looping.
 const NO_AUDIO_MAX_STRIKES = 3;
 
-// Map 1..100 sensitivity to the dB margin a sound must exceed the ambient baseline by. Higher
-// sensitivity => smaller margin => easier to trigger. ~24 dB (needs a loud, clear sound) at 1,
-// ~6 dB (quite sensitive) at 100; ~15 dB at the 50 default (a cry is typically well above that).
+// Map 1..100 sensitivity to how many dB the trailing-average loudness must exceed the ambient
+// baseline by. Higher sensitivity => smaller margin => easier to trigger. ~18 dB (needs a clearly
+// loud sound) at 1, ~4 dB (quite sensitive) at 100, ~11 dB at the 50 default. This is compared
+// against the AVERAGE over the confirm window, so a pulsing cry (loud on average) clears it even
+// though its quiet moments dip below.
 function marginDb(sensitivity) {
   const s = Math.min(100, Math.max(1, sensitivity || 50));
-  return 6 + (24 - 6) * ((100 - s) / 99);
+  return 4 + (18 - 4) * ((100 - s) / 99);
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -77,6 +77,9 @@ export async function startSoundDetector(camera) {
   const margin = marginDb(camera.sound_sensitivity);
   const confirmMs = Math.max(0, (camera.sound_confirm_s ?? 4) * 1000);
   const cooldownMs = Math.max(1, camera.sound_cooldown_s ?? 120) * 1000;
+  // Number of ~200 ms readings to average over = the confirm window (min ~0.6 s of context).
+  const READING_MS = (WIN_SAMPLES / WIN_RATE) * 1000;
+  const trailN = Math.max(3, Math.round(confirmMs / READING_MS));
   let noAudioStrikes = 0;
 
   async function launch() {
@@ -103,14 +106,15 @@ export async function startSoundDetector(camera) {
     logger.info(`[sound] watching "${camera.name}" — fires at +${Math.round(margin)} dB over ambient, sustained ${Math.round(confirmMs / 1000)}s`);
 
     let baseline = null; // rolling ambient level (dBFS)
-    let loudSince = 0; // start of the current sustained-loud run (0 = not currently loud)
-    let lastLoud = 0;
+    let loudSince = 0; // start of the current elevated run (0 = not currently elevated)
     let lastAlert = 0;
+    const recent = []; // last trailN readings, for the trailing average
     let sawReading = false;
     let pcm = Buffer.alloc(0);
     // Periodic level line (throttled) so the ambient baseline + recent peak are visible for tuning
     // without needing an actual alert — e.g. "ambient=-32.1 peak=-18.3 (fires at +15)".
     let windowPeak = -Infinity;
+    let windowMaxOver = -Infinity; // max trailing-avg-over-ambient in the window (what actually triggers)
     let lastLevelLog = Date.now();
     const LEVEL_LOG_MS = 15000;
 
@@ -122,35 +126,44 @@ export async function startSoundDetector(camera) {
       if (now - lastLevelLog >= LEVEL_LOG_MS) {
         logger.info(
           `[sound] "${camera.name}" ambient=${baseline === null ? '?' : baseline.toFixed(1)}dB ` +
-            `peak=${windowPeak === -Infinity ? '?' : windowPeak.toFixed(1)}dB (fires at +${Math.round(margin)})`
+            `peak=${windowPeak === -Infinity ? '?' : windowPeak.toFixed(1)}dB ` +
+            `maxAvgOver=${windowMaxOver === -Infinity ? '?' : `+${windowMaxOver.toFixed(1)}`} (fires at +${Math.round(margin)})`
         );
         windowPeak = -Infinity;
+        windowMaxOver = -Infinity;
         lastLevelLog = now;
       }
       if (baseline === null) {
         baseline = rms;
         return;
       }
-      const delta = rms - baseline;
-      if (delta >= margin) {
+
+      // Trailing average over the confirm window. A cry is loud ON AVERAGE across those seconds even
+      // as it pulses, so averaging is far more robust than requiring every instant to clear the bar.
+      recent.push(rms);
+      if (recent.length > trailN) recent.shift();
+      const over = recent.reduce((a, b) => a + b, 0) / recent.length - baseline;
+      if (recent.length >= trailN && over > windowMaxOver) windowMaxOver = over;
+
+      if (recent.length >= trailN && over >= margin) {
         if (!loudSince) loudSince = now;
-        lastLoud = now;
-        // Steady elevated source: adopt it as the new ambient so it doesn't alert forever.
+        // A steady elevated source held far longer than a cry burst becomes the new ambient (the
+        // white-noise machine was switched on, a fan, the TV) so it stops alerting.
         if (now - loudSince >= REBASELINE_MS) {
-          baseline = rms;
+          baseline += over; // absorb the elevation into the ambient
           loudSince = 0;
+          recent.length = 0;
           return;
         }
-        if (now - loudSince >= confirmMs && now - lastAlert >= cooldownMs && inActiveWindow(camera)) {
+        if (now - lastAlert >= cooldownMs && inActiveWindow(camera)) {
           lastAlert = now;
-          fireDetectionAlert(camera, ALERT.SOUND, `+${Math.round(delta)} dB over ambient`, { snapshotPath: path }).catch(() => {});
+          fireDetectionAlert(camera, ALERT.SOUND, `+${Math.round(over)} dB over ambient`, { snapshotPath: path }).catch(() => {});
         }
       } else {
-        // Quiet: track the ambient floor. (We deliberately DON'T adapt while loud, so a cry can't
-        // raise its own baseline before the confirm delay — the re-baseline valve handles the
-        // legitimately-steady case above.)
-        baseline += BASELINE_ALPHA * (rms - baseline);
-        if (loudSince && now - lastLoud > SOUND_GRACE_MS) loudSince = 0;
+        loudSince = 0;
+        // Track the ambient floor, but freeze while the average is already creeping up toward a
+        // trigger, so a cry's ramp-up can't quietly raise its own baseline and desensitise itself.
+        if (over < margin * 0.5) baseline += BASELINE_ALPHA * (rms - baseline);
       }
     }
 
