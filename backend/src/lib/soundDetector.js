@@ -23,9 +23,12 @@ const PATH_GRACE_MS = 45000;
 const READY_POLL_MS = 2000;
 
 // 200 ms loudness windows at 8 kHz mono — smooth enough to be stable, frequent enough (~5/s) to be
-// responsive. Audio is downsampled first so the window size is rate-independent.
-const WIN_SAMPLES = 1600;
+// responsive. We read RAW PCM and compute RMS in JS (like motionDetector reads raw frames) rather
+// than parsing ffmpeg's astats text: ffmpeg block-buffers its stdout text output, so the level lines
+// don't stream in real time, whereas the raw audio byte stream is delivered promptly.
 const WIN_RATE = 8000;
+const WIN_SAMPLES = 1600;
+const WIN_BYTES = WIN_SAMPLES * 2; // s16le = 2 bytes/sample, mono
 
 // Ambient baseline EMA. At ~5 readings/s, alpha 0.01 gives a ~20 s time constant — slow enough that
 // a cry doesn't get absorbed before it alerts, fast enough to track a fan/AC/white-noise change.
@@ -90,9 +93,9 @@ export async function startSoundDetector(camera) {
       '-rtsp_transport', 'tcp',
       '-i', `rtsp://127.0.0.1:8554/${path}`,
       '-vn',
-      // downsample -> fixed-size windows -> per-window RMS -> print just the RMS_level metadata.
-      '-af', `aresample=${WIN_RATE},asetnsamples=${WIN_SAMPLES}:p=0,astats=metadata=1:reset=1,ametadata=mode=print:key=lavfi.astats.Overall.RMS_level:file=-`,
-      '-f', 'null', '-',
+      '-ac', '1', // mono
+      '-ar', String(WIN_RATE),
+      '-f', 's16le', '-', // raw 16-bit PCM to stdout — streamed promptly, RMS computed below
     ];
     const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     entry.proc = proc;
@@ -104,7 +107,7 @@ export async function startSoundDetector(camera) {
     let lastLoud = 0;
     let lastAlert = 0;
     let sawReading = false;
-    let stdoutBuf = '';
+    let pcm = Buffer.alloc(0);
     // Periodic level line (throttled) so the ambient baseline + recent peak are visible for tuning
     // without needing an actual alert — e.g. "ambient=-32.1 peak=-18.3 (fires at +15)".
     let windowPeak = -Infinity;
@@ -152,13 +155,18 @@ export async function startSoundDetector(camera) {
     }
 
     proc.stdout.on('data', (chunk) => {
-      stdoutBuf += chunk.toString();
-      let nl;
-      while ((nl = stdoutBuf.indexOf('\n')) !== -1) {
-        const line = stdoutBuf.slice(0, nl);
-        stdoutBuf = stdoutBuf.slice(nl + 1);
-        const m = /RMS_level=(-?\d+(?:\.\d+)?|-?inf|nan)/i.exec(line);
-        if (m) handleReading(m[1].toLowerCase() === '-inf' || m[1].toLowerCase() === 'nan' ? -Infinity : parseFloat(m[1]));
+      pcm = pcm.length ? Buffer.concat([pcm, chunk]) : chunk;
+      while (pcm.length >= WIN_BYTES) {
+        const win = pcm.subarray(0, WIN_BYTES);
+        pcm = pcm.subarray(WIN_BYTES);
+        let sumSq = 0;
+        for (let i = 0; i < WIN_BYTES; i += 2) {
+          const s = win.readInt16LE(i);
+          sumSq += s * s;
+        }
+        const rms = Math.sqrt(sumSq / WIN_SAMPLES);
+        // dBFS: 0 dB = full scale (32768). True silence (rms 0) -> -Infinity, ignored upstream.
+        handleReading(rms > 0 ? 20 * Math.log10(rms / 32768) : -Infinity);
       }
     });
 
