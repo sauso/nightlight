@@ -28,6 +28,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   images are grabbed from it — instant and clearer than pulling a frame from the stream (no keyframe
   wait). Basic-auth in the URL is supported; blank falls back to the stream grab. Works for both
   detection sources.
+- **Alerts open the server that sent them (multi-server deep links).** If you use the app against
+  more than one Nightlight server (e.g. production and a staging box), tapping an alert now opens the
+  **server the alert came from** instead of whichever server the app happened to be showing. Each
+  server learns its own public address automatically (zero-config, from the app on registration) and
+  stamps it onto its alerts — Pushover via the deep link, Firebase via the notification payload. If a
+  server hasn't learned its address yet, alerts open in place as before. (Needs app **v0.7.0+** for
+  the switch to take effect.)
 
 ### Fixed
 - **Motion-alert snapshots grab more reliably.** The one-shot frame grab has to wait for the

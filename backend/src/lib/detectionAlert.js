@@ -1,6 +1,6 @@
 import { logger } from './logger.js';
 import { recordDetectionEvent, ALERT } from './detectionEvents.js';
-import { sendToAll, pushEnabled } from './push.js';
+import { sendToAll, pushEnabled, getPublicBaseUrl } from './push.js';
 import { pushoverEnabled, sendPushover } from './pushover.js';
 import { captureSnapshot, fetchHttpSnapshot } from './snapshot.js';
 
@@ -46,10 +46,17 @@ export async function fireDetectionAlert(camera, type, detail, { snapshotPath = 
   }
   if (firePushover) {
     logger.info(`[detect] sending Pushover alert for "${camera.name}"`);
+    // Stamp the sending server onto the deep link (?server=…) so tapping it opens THIS server in the
+    // app even if it was last showing a different one. Omitted until a registering app has taught us
+    // our public URL, in which case it degrades to the plain nightlight://camera/:id (open in place).
+    const server = getPublicBaseUrl();
+    const url = server
+      ? `nightlight://camera/${camera.id}?server=${encodeURIComponent(server)}`
+      : `nightlight://camera/${camera.id}`;
     sendPushover({
       title: `${camera.name} — ${w.suffix}`,
       message: w.body,
-      url: `nightlight://camera/${camera.id}`,
+      url,
       urlTitle: 'Open in Nightlight',
       image,
     }).catch((e) => logger.error(`[pushover] alert failed for "${camera.name}": ${e.message}`));

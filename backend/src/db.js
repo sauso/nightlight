@@ -167,6 +167,14 @@ if (!settingsColumns.includes('pushover_enabled')) {
   db.exec('ALTER TABLE settings ADD COLUMN pushover_user_key TEXT');
 }
 
+// The server's own public URL, learned zero-config from the origin the mobile app reports on
+// push-register (last writer wins — each server only ever hears its own address from its own app).
+// Embedded in deep links so tapping an alert from THIS server opens THIS server in the app, even if
+// the app was last pointed at a different one (e.g. a prod alert while the app is showing dev).
+if (!settingsColumns.includes('public_base_url')) {
+  db.exec('ALTER TABLE settings ADD COLUMN public_base_url TEXT');
+}
+
 if (!camerasColumns.includes('mqtt_topic')) {
   db.exec('ALTER TABLE cameras ADD COLUMN mqtt_topic TEXT');
 }
