@@ -29,6 +29,8 @@ export default function Cameras() {
     detect_schedule_enabled: false, detect_start: '20:00', detect_end: '07:00',
     // Detection source ('framediff' | 'mqtt') + MQTT motion topic/value + optional camera snapshot URL.
     detect_source: 'framediff', motion_mqtt_topic: '', motion_mqtt_value: '', snapshot_url: '',
+    // Sound detection (loudness above ambient) — its own enable + sensitivity/confirm/cooldown.
+    detect_sound_enabled: false, sound_sensitivity: 50, sound_confirm_s: 4, sound_cooldown_s: 120,
   };
   const [form, setForm] = useState(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
@@ -85,6 +87,10 @@ export default function Cameras() {
       motion_mqtt_topic: cam.motion_mqtt_topic || '',
       motion_mqtt_value: cam.motion_mqtt_value || '',
       snapshot_url: cam.snapshot_url || '',
+      detect_sound_enabled: !!cam.detect_sound_enabled,
+      sound_sensitivity: cam.sound_sensitivity ?? 50,
+      sound_confirm_s: cam.sound_confirm_s ?? 4,
+      sound_cooldown_s: cam.sound_cooldown_s ?? 120,
     });
     setOnvifMsg('');
     setConfirmMsg('');
@@ -188,6 +194,10 @@ export default function Cameras() {
           motion_mqtt_topic: form.motion_mqtt_topic,
           motion_mqtt_value: form.motion_mqtt_value,
           snapshot_url: form.snapshot_url,
+          sound_enabled: !!form.detect_sound_enabled,
+          sound_sensitivity: Number(form.sound_sensitivity),
+          sound_confirm_s: Number(form.sound_confirm_s),
+          sound_cooldown_s: Number(form.sound_cooldown_s),
         });
       }
       setEditing(null);
@@ -499,6 +509,7 @@ export default function Cameras() {
             </div>
 
             {(
+              <>
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>
                   Motion detection
@@ -623,61 +634,133 @@ export default function Cameras() {
                       )}
                     </div>
 
+                  </>
+                )}
+              </div>
+
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                  Sound detection
+                </label>
+                <label className="log-viewer__toggle" style={{ margin: 0 }}>
+                  <input
+                    type="checkbox"
+                    style={{ width: 'auto', margin: 0 }}
+                    checked={form.detect_sound_enabled}
+                    onChange={(e) => setForm({ ...form, detect_sound_enabled: e.target.checked })}
+                  />
+                  Enable
+                </label>
+                <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                  Alerts on sound that stays louder than the room's ambient level. It learns the
+                  background (white-noise machine, fan) continuously, so only a sustained rise above
+                  it — like crying — triggers. Needs a camera with a microphone. Off by default.
+                </div>
+                {form.detect_sound_enabled && (
+                  <>
                     <div className="field" style={{ marginTop: 12, marginBottom: 8 }}>
-                      <label htmlFor="snapshot-url">Camera snapshot URL (optional)</label>
+                      <label htmlFor="sound-sensitivity">Sensitivity: {form.sound_sensitivity}</label>
                       <input
-                        id="snapshot-url"
-                        type="text"
-                        placeholder="http://camera/snapshot.jpg"
-                        value={form.snapshot_url}
-                        onChange={(e) => setForm({ ...form, snapshot_url: e.target.value })}
+                        id="sound-sensitivity"
+                        type="range"
+                        min="1"
+                        max="100"
+                        value={form.sound_sensitivity}
+                        onChange={(e) => setForm({ ...form, sound_sensitivity: Number(e.target.value) })}
                       />
                       <div className="camera-tile__sub">
-                        If your camera has an HTTP snapshot endpoint, alert images are grabbed from it —
-                        instant and clearer than pulling a frame from the stream. Basic-auth in the URL
-                        works (http://user:pass@camera/…). Blank = grab from the stream.
+                        Higher triggers on smaller rises above the ambient (and more false alarms).
                       </div>
                     </div>
-
-                    <label className="log-viewer__toggle" style={{ marginTop: 14 }}>
-                      <input
-                        type="checkbox"
-                        style={{ width: 'auto', margin: 0 }}
-                        checked={form.detect_schedule_enabled}
-                        onChange={(e) => setForm({ ...form, detect_schedule_enabled: e.target.checked })}
-                      />
-                      Only alert during set hours
-                    </label>
-                    {form.detect_schedule_enabled && (
-                      <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
-                        <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-                          <label htmlFor="detect-start">From</label>
-                          <input
-                            id="detect-start"
-                            type="time"
-                            value={form.detect_start}
-                            onChange={(e) => setForm({ ...form, detect_start: e.target.value })}
-                          />
-                        </div>
-                        <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-                          <label htmlFor="detect-end">To</label>
-                          <input
-                            id="detect-end"
-                            type="time"
-                            value={form.detect_end}
-                            onChange={(e) => setForm({ ...form, detect_end: e.target.value })}
-                          />
-                        </div>
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <div className="field" style={{ flex: 1 }}>
+                        <label htmlFor="sound-confirm">Confirm for (seconds)</label>
+                        <input
+                          id="sound-confirm"
+                          type="number"
+                          min="0"
+                          max="30"
+                          value={form.sound_confirm_s}
+                          onChange={(e) => setForm({ ...form, sound_confirm_s: e.target.value })}
+                        />
                       </div>
-                    )}
-                    <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-                      When on, motion outside these hours is ignored completely — no push and no
-                      Recent-alerts entry. Overnight windows are fine (e.g. 20:00 to 07:00). Uses the
-                      app timezone from Settings.
+                      <div className="field" style={{ flex: 1 }}>
+                        <label htmlFor="sound-cooldown">Cooldown (seconds)</label>
+                        <input
+                          id="sound-cooldown"
+                          type="number"
+                          min="1"
+                          max="3600"
+                          value={form.sound_cooldown_s}
+                          onChange={(e) => setForm({ ...form, sound_cooldown_s: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                    <div className="camera-tile__sub">
+                      <strong>Confirm</strong> = sound must persist this long before it counts (filters
+                      a door slam or cough). <strong>Cooldown</strong> = the minimum gap between alerts.
                     </div>
                   </>
                 )}
               </div>
+
+              {(form.detect_motion_enabled || form.detect_sound_enabled) && (
+                <div style={{ marginBottom: 14 }}>
+                  <div className="field" style={{ marginBottom: 8 }}>
+                    <label htmlFor="snapshot-url">Camera snapshot URL (optional)</label>
+                    <input
+                      id="snapshot-url"
+                      type="text"
+                      placeholder="http://camera/snapshot.jpg"
+                      value={form.snapshot_url}
+                      onChange={(e) => setForm({ ...form, snapshot_url: e.target.value })}
+                    />
+                    <div className="camera-tile__sub">
+                      If your camera has an HTTP snapshot endpoint, alert images are grabbed from it —
+                      instant and clearer than pulling a frame from the stream. Basic-auth in the URL
+                      works (http://user:pass@camera/…). Blank = grab from the stream.
+                    </div>
+                  </div>
+
+                  <label className="log-viewer__toggle" style={{ marginTop: 6 }}>
+                    <input
+                      type="checkbox"
+                      style={{ width: 'auto', margin: 0 }}
+                      checked={form.detect_schedule_enabled}
+                      onChange={(e) => setForm({ ...form, detect_schedule_enabled: e.target.checked })}
+                    />
+                    Only alert during set hours
+                  </label>
+                  {form.detect_schedule_enabled && (
+                    <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+                      <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+                        <label htmlFor="detect-start">From</label>
+                        <input
+                          id="detect-start"
+                          type="time"
+                          value={form.detect_start}
+                          onChange={(e) => setForm({ ...form, detect_start: e.target.value })}
+                        />
+                      </div>
+                      <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+                        <label htmlFor="detect-end">To</label>
+                        <input
+                          id="detect-end"
+                          type="time"
+                          value={form.detect_end}
+                          onChange={(e) => setForm({ ...form, detect_end: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                    When on, motion and sound outside these hours are ignored completely — no push and
+                    no Recent-alerts entry. Overnight windows are fine (e.g. 20:00 to 07:00). Uses the
+                    app timezone from Settings.
+                  </div>
+                </div>
+              )}
+              </>
             )}
 
             {modalError && <div className="error-banner" style={{ marginBottom: 12 }}>{modalError}</div>}

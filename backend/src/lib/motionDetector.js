@@ -3,7 +3,8 @@ import db from '../db.js';
 import { logger } from './logger.js';
 import { subPathName, getPathStatus } from './mediamtx.js';
 import { inActiveWindow } from './detectSchedule.js';
-import { fireMotionAlert } from './motionAlert.js';
+import { fireDetectionAlert } from './detectionAlert.js';
+import { ALERT } from './detectionEvents.js';
 
 // Server-side motion detection. Per camera with detection enabled, a cheap FFmpeg leg reads
 // the already-published MediaMTX stream (the sub-stream when there is one — far cheaper to
@@ -167,7 +168,7 @@ export async function startMotionDetector(camera) {
             const pct = (fraction * 100).toFixed(1);
             // Shared downstream (record event + push both channels); pass the exact path we're
             // analysing so a stream-grab snapshot uses the same (cheap) sub-stream. Fire-and-forget.
-            fireMotionAlert(camera, `motion (${pct}% of zone)`, { snapshotPath: path }).catch(() => {});
+            fireDetectionAlert(camera, ALERT.MOTION, `${pct}% of zone`, { snapshotPath: path }).catch(() => {});
           }
         } else if (activeSince && now - lastActive > ACTIVE_GRACE_MS) {
           activeSince = 0; // the run ended (gap exceeded the grace window)
