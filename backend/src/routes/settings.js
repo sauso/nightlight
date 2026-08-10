@@ -55,6 +55,7 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
   const {
     app_name, accent_color, live_color, offline_color, timezone, font_choice,
     temp_unit, mqtt_enabled, mqtt_host, mqtt_port, mqtt_username, mqtt_password,
+    ptz_step,
   } = req.body || {};
 
   if (app_name !== undefined && !app_name.trim()) {
@@ -78,11 +79,20 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
   if (temp_unit !== undefined && !VALID_TEMP_UNITS.includes(temp_unit)) {
     return res.status(400).json({ error: 'Temperature unit must be C or F' });
   }
+  let ptzStepVal = existing.ptz_step;
+  if (ptz_step !== undefined) {
+    const n = parseInt(ptz_step, 10);
+    if (!Number.isFinite(n) || n < 1 || n > 100) {
+      return res.status(400).json({ error: 'PTZ step size must be a whole number between 1 and 100' });
+    }
+    ptzStepVal = n;
+  }
 
   db.prepare(
     `UPDATE settings
      SET app_name = ?, accent_color = ?, live_color = ?, offline_color = ?, timezone = ?, font_choice = ?,
-         temp_unit = ?, mqtt_enabled = ?, mqtt_host = ?, mqtt_port = ?, mqtt_username = ?, mqtt_password = ?
+         temp_unit = ?, mqtt_enabled = ?, mqtt_host = ?, mqtt_port = ?, mqtt_username = ?, mqtt_password = ?,
+         ptz_step = ?
      WHERE id = ?`
   ).run(
     app_name?.trim() || existing.app_name,
@@ -97,6 +107,7 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     mqtt_port !== undefined ? (mqtt_port ? parseInt(mqtt_port, 10) : null) : existing.mqtt_port,
     mqtt_username !== undefined ? (mqtt_username || '').trim() || null : existing.mqtt_username,
     mqtt_password ? mqtt_password : existing.mqtt_password, // blank submission keeps the existing one
+    ptzStepVal,
     'app'
   );
   refreshMqttConnection();

@@ -9,6 +9,22 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-10
+
+### Added
+- **Adjustable PTZ step size** (Settings → General → Camera controls). Sets how far a camera moves
+  per tap of the pan/tilt D-pad, for cameras using precise RelativeMove positioning. Defaults to 12
+  (suits the common Sonoff pan/tilt cams); tune to taste.
+
+### Fixed
+- **PTZ steps are consistent on cameras with erratic ONVIF timing.** Cheap pan/tilt cams (Sonoff/
+  thingino) answer the ONVIF *ContinuousMove* call with wildly variable latency (0.3–2.2 s) and move
+  the whole time, so a fixed "start → hold 200 ms → stop" nudge travelled a different distance every
+  press — the camera felt like it ran on unpredictably. Nightlight now uses ONVIF **RelativeMove**
+  (the camera moves a fixed distance and stops itself — no timing race) on cameras that support it,
+  falling back to the old continuous-move nudge on those that don't. Support is detected once per
+  camera and cached.
+
 ## [0.12.0] - 2026-08-10
 
 ### Added

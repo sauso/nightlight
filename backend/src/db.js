@@ -175,6 +175,14 @@ if (!settingsColumns.includes('public_base_url')) {
   db.exec('ALTER TABLE settings ADD COLUMN public_base_url TEXT');
 }
 
+// Global PTZ step size for cameras driven by ONVIF RelativeMove (see lib/onvif.js ptzRelativeStep):
+// how far one D-pad tap moves, in the camera's own relative-translation units. Adjustable because
+// the right value depends on the camera's ONVIF space (12 suits the Sonoff pan/tilt cams). Cameras
+// that fall back to continuous-move nudges ignore this.
+if (!settingsColumns.includes('ptz_step')) {
+  db.exec('ALTER TABLE settings ADD COLUMN ptz_step INTEGER NOT NULL DEFAULT 12');
+}
+
 if (!camerasColumns.includes('mqtt_topic')) {
   db.exec('ALTER TABLE cameras ADD COLUMN mqtt_topic TEXT');
 }
@@ -213,6 +221,13 @@ if (!camerasColumns.includes('onvif_password')) {
 }
 if (!camerasColumns.includes('onvif_profile_token')) {
   db.exec('ALTER TABLE cameras ADD COLUMN onvif_profile_token TEXT');
+}
+// Whether this camera supports ONVIF RelativeMove — a single fixed-distance PTZ command the camera
+// stops itself, which is far more predictable than start→hold→stop continuous moves on cameras whose
+// ContinuousMove latency swings wildly (cheap Sonoff/thingino cams). null = not yet probed, 1 = yes
+// (use RelativeMove), 0 = no (fall back to continuous+stop nudge). Probed lazily on first PTZ.
+if (!camerasColumns.includes('ptz_relative')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN ptz_relative INTEGER');
 }
 
 // Admin can turn a camera off entirely (server-side): its transcoder is stopped and its
