@@ -175,6 +175,14 @@ if (!settingsColumns.includes('public_base_url')) {
   db.exec('ALTER TABLE settings ADD COLUMN public_base_url TEXT');
 }
 
+// Global PTZ step size for cameras driven by ONVIF RelativeMove (see lib/onvif.js ptzRelativeStep):
+// how far one D-pad tap moves, in the camera's own relative-translation units. Adjustable because
+// the right value depends on the camera's ONVIF space (12 suits the Sonoff pan/tilt cams). Cameras
+// that fall back to continuous-move nudges ignore this.
+if (!settingsColumns.includes('ptz_step')) {
+  db.exec('ALTER TABLE settings ADD COLUMN ptz_step INTEGER NOT NULL DEFAULT 12');
+}
+
 if (!camerasColumns.includes('mqtt_topic')) {
   db.exec('ALTER TABLE cameras ADD COLUMN mqtt_topic TEXT');
 }
