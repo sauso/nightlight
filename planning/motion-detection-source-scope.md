@@ -1,6 +1,13 @@
 # Nightlight: Motion Detection Source (frame-diff vs camera-native/MQTT) — Scope Document
 
-Status: **Design only — not built.** Current motion detection is the server-side **frame-diff**
+Status: **Built (on dev, 2026-08-10).** Implemented per this design: per-camera `detect_source`
+(`framediff` default | `mqtt`), a `motion_mqtt_topic` + optional `motion_mqtt_value` matcher, and a
+shared alert path (`lib/motionAlert.js`) reused by both sources. Also added an optional per-camera
+`snapshot_url` (camera HTTP snapshot endpoint) for the alert image. MQTT handling lives in
+`lib/mqttClient.js` (`isMotionPayload` + `handleMotionMessage`), gated by the same per-camera cooldown
+and quiet-hours as frame-diff. The notes below are the original design.
+
+Current motion detection is the server-side **frame-diff**
 detector shipped in 0.8.0 (see `motion-sound-push-notifications-scope.md` and
 `backend/src/lib/motionDetector.js`). This document captures the decision to **keep frame-diff as the
 universal default and add MQTT camera-native events as an optional per-camera source**, most likely in

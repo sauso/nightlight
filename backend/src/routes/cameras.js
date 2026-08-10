@@ -6,9 +6,10 @@ import { upsertPath, removePath, getPathStatus, toPathName } from '../lib/mediam
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
 import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.js';
 import { startMotionDetector, stopMotionDetector } from '../lib/motionDetector.js';
+import { startSoundDetector, stopSoundDetector } from '../lib/soundDetector.js';
 import { getRecentDetectionEvents, clearDetectionEvents } from '../lib/detectionEvents.js';
 import { verifyTalkCreds } from '../lib/twoWayAudio.js';
-import { getReading, subscribeAllCameraTopics } from '../lib/mqttClient.js';
+import { getReading, subscribeAllCameraTopics, refreshMqttConnection } from '../lib/mqttClient.js';
 import { probeOnvifCamera, ptzNudge } from '../lib/onvif.js';
 import { validateRtspStream } from '../lib/rtspProbe.js';
 import { logger } from '../lib/logger.js';
@@ -76,7 +77,8 @@ function serializeZone(z) {
 }
 
 function publicCamera(cam, isAdmin) {
-  const { rtsp_url, onvif_username, onvif_password, talk_username, talk_password, sub_rtsp_url, ...rest } = cam;
+  // snapshot_url can carry Basic-auth creds, so keep it admin-only (like the RTSP/ONVIF secrets).
+  const { rtsp_url, onvif_username, onvif_password, talk_username, talk_password, sub_rtsp_url, snapshot_url, ...rest } = cam;
   // talk_configured / has_sub (safe for everyone) drive the tile's talk button + quality selector.
   const base = {
     ...rest,
@@ -102,6 +104,8 @@ function publicCamera(cam, isAdmin) {
     talk_has_password: !!talk_password,
     // Low-quality sub-stream: only the path is edited (it reuses the main stream's host/creds).
     sub_rtsp_path: subParts.path || '',
+    // Camera HTTP snapshot endpoint (admin-only — may embed Basic-auth creds), edited as-is.
+    snapshot_url: snapshot_url || '',
   };
 }
 
@@ -455,6 +459,8 @@ router.put('/:id', requireAdmin, async (req, res) => {
     // motion detector so it re-attaches to the current stream. No-op if detection is off.
     if (updated.detect_motion_enabled) await startMotionDetector(updated).catch(() => {});
     else await stopMotionDetector(updated.id).catch(() => {});
+    if (updated.detect_sound_enabled) await startSoundDetector(updated).catch(() => {});
+    else await stopSoundDetector(updated.id).catch(() => {});
   }
   subscribeAllCameraTopics();
   res.json(publicCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id), true));
@@ -477,10 +483,12 @@ router.put('/:id/enabled', requireAdmin, async (req, res) => {
     await startTranscoder(req.params.id, existing.rtsp_url, existing.mediamtx_path, existing.name);
     if (subConfigured(existing)) await startSubStream(existing).catch((e) => logger.error(`[substream] enable failed: ${e.message}`));
     if (existing.detect_motion_enabled) await startMotionDetector(existing).catch(() => {});
+    if (existing.detect_sound_enabled) await startSoundDetector(existing).catch(() => {});
   } else {
     await stopTranscoder(req.params.id);
     await stopSubStream(existing).catch(() => {});
     await stopMotionDetector(req.params.id).catch(() => {});
+    await stopSoundDetector(req.params.id).catch(() => {});
     try {
       await removePath(existing.mediamtx_path);
     } catch (e) {
@@ -498,10 +506,23 @@ router.put('/:id/enabled', requireAdmin, async (req, res) => {
 router.put('/:id/detection', requireAdmin, async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
-  const { motion_enabled, zone, sensitivity, cooldown_s, confirm_s, schedule_enabled, start, end } = req.body || {};
+  const {
+    motion_enabled, zone, sensitivity, cooldown_s, confirm_s, schedule_enabled, start, end,
+    source, motion_mqtt_topic, motion_mqtt_value, snapshot_url,
+    sound_enabled, sound_sensitivity, sound_confirm_s, sound_cooldown_s,
+  } = req.body || {};
 
   const enabled = motion_enabled ? 1 : 0;
   const zoneJson = zone === undefined ? existing.detect_zone : serializeZone(zone);
+  // Detection source: only the two known values; anything else falls back to the current value.
+  const detectSource =
+    source === undefined ? existing.detect_source : source === 'mqtt' ? 'mqtt' : 'framediff';
+  const motionTopic =
+    motion_mqtt_topic === undefined ? existing.motion_mqtt_topic : (motion_mqtt_topic?.trim() || null);
+  const motionValue =
+    motion_mqtt_value === undefined ? existing.motion_mqtt_value : (motion_mqtt_value?.trim() || null);
+  const snapUrl =
+    snapshot_url === undefined ? existing.snapshot_url : (snapshot_url?.trim() || null);
   const sens =
     sensitivity === undefined
       ? existing.detect_sensitivity
@@ -516,22 +537,47 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
   const schedEnabled = schedule_enabled === undefined ? existing.detect_schedule_enabled : schedule_enabled ? 1 : 0;
   const startMin = clampMin(start, existing.detect_start);
   const endMin = clampMin(end, existing.detect_end);
+  // Sound detection (its own enable + sensitivity/confirm/cooldown; shares the schedule above).
+  const soundEnabled = sound_enabled === undefined ? existing.detect_sound_enabled : sound_enabled ? 1 : 0;
+  const soundSens =
+    sound_sensitivity === undefined
+      ? existing.sound_sensitivity
+      : Math.min(100, Math.max(1, Math.round(Number(sound_sensitivity)) || 50));
+  const soundConfirm =
+    sound_confirm_s === undefined ? existing.sound_confirm_s : Math.max(0, Math.round(Number(sound_confirm_s)) || 0);
+  const soundCooldown =
+    sound_cooldown_s === undefined ? existing.sound_cooldown_s : Math.max(1, Math.round(Number(sound_cooldown_s)) || 120);
 
   db.prepare(
     `UPDATE cameras SET detect_motion_enabled = ?, detect_zone = ?, detect_sensitivity = ?,
        detect_cooldown_s = ?, detect_confirm_s = ?, detect_schedule_enabled = ?, detect_start = ?,
-       detect_end = ? WHERE id = ?`
-  ).run(enabled, zoneJson, sens, cooldown, confirm, schedEnabled, startMin, endMin, req.params.id);
+       detect_end = ?, detect_source = ?, motion_mqtt_topic = ?, motion_mqtt_value = ?,
+       snapshot_url = ?, detect_sound_enabled = ?, sound_sensitivity = ?, sound_confirm_s = ?,
+       sound_cooldown_s = ? WHERE id = ?`
+  ).run(
+    enabled, zoneJson, sens, cooldown, confirm, schedEnabled, startMin, endMin,
+    detectSource, motionTopic, motionValue, snapUrl,
+    soundEnabled, soundSens, soundConfirm, soundCooldown, req.params.id
+  );
 
   const updated = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
-  // Apply to the live detector now (a disabled camera's detector starts when it's re-enabled).
+  // Apply to the live frame-diff detector now (a disabled camera's detector starts when it's
+  // re-enabled). startMotionDetector itself no-ops for the 'mqtt' source, so switching a camera to
+  // MQTT here stops any running frame-diff leg; switching back to frame-diff starts it.
   if (!updated.disabled) {
     if (updated.detect_motion_enabled) {
       await startMotionDetector(updated).catch((e) => logger.error(`[detect] start failed: ${e.message}`));
     } else {
       await stopMotionDetector(updated.id).catch(() => {});
     }
+    if (updated.detect_sound_enabled) {
+      await startSoundDetector(updated).catch((e) => logger.error(`[sound] start failed: ${e.message}`));
+    } else {
+      await stopSoundDetector(updated.id).catch(() => {});
+    }
   }
+  // Re-subscribe MQTT so a new/changed/removed motion topic takes effect immediately.
+  refreshMqttConnection();
   res.json(publicCamera(updated, true));
 });
 
@@ -554,6 +600,7 @@ router.delete('/:id', requireAdmin, async (req, res) => {
   await stopTranscoder(req.params.id);
   await stopSubStream(existing).catch(() => {});
   await stopMotionDetector(req.params.id).catch(() => {});
+  await stopSoundDetector(req.params.id).catch(() => {});
   try {
     await removePath(existing.mediamtx_path);
   } catch (e) {
