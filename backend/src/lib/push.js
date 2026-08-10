@@ -120,6 +120,36 @@ export function registerToken(token, platform, userId, baseUrl) {
        user_id = excluded.user_id, platform = excluded.platform,
        base_url = COALESCE(excluded.base_url, push_tokens.base_url), updated_at = datetime('now')`
   ).run(token, userId || null, platform || null, baseUrl || null);
+  // Zero-config learning of THIS server's own public URL: the origin the app reaches us through is,
+  // by definition, an address that opens us in that app. Stash it so deep links can carry it and a
+  // tap always lands on the sending server (see getPublicBaseUrl / detectionAlert.js).
+  if (baseUrl) {
+    try {
+      db.prepare('UPDATE settings SET public_base_url = ? WHERE id = ?').run(baseUrl.replace(/\/+$/, ''), 'app');
+    } catch {
+      // Non-fatal — deep links just fall back to the server-less scheme.
+    }
+  }
+}
+
+// This server's own public URL, used to stamp deep links so a tapped alert opens the server that
+// sent it, not whichever server the app last had open. Prefer the value learned on push-register
+// (settings.public_base_url), but fall back to the most recently registered device's base_url — that
+// too is an address a real app used to reach us, so it's a valid "open this server" URL. The
+// fallback matters right after upgrading to this version: a server registered by an older app has a
+// token base_url but no settings value yet, and would otherwise emit server-less links until the
+// next fresh registration. Null only if nothing has ever registered.
+export function getPublicBaseUrl() {
+  try {
+    const explicit = db.prepare('SELECT public_base_url FROM settings WHERE id = ?').get('app')?.public_base_url;
+    if (explicit) return explicit.replace(/\/+$/, '');
+    const row = db
+      .prepare("SELECT base_url FROM push_tokens WHERE base_url IS NOT NULL AND base_url != '' ORDER BY updated_at DESC LIMIT 1")
+      .get();
+    return row?.base_url ? row.base_url.replace(/\/+$/, '') : null;
+  } catch {
+    return null;
+  }
 }
 
 export function removeToken(token) {
@@ -140,10 +170,14 @@ export async function sendToAll(title, body, data = {}, imageBuffer = null) {
   const stringData = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)]));
   const snapshotId = imageBuffer ? storeSnapshot(imageBuffer) : null;
   const messages = rows.map(({ token, base_url }) => {
+    // Carry the server this alert came from so a tap can switch the app to it if it's showing a
+    // different one. Per-device base_url is exactly the address THIS device uses to reach us, so
+    // it's the right thing for this device to point at.
+    const data = base_url ? { ...stringData, server: base_url.replace(/\/+$/, '') } : stringData;
     const msg = {
       token,
       notification: { title, body },
-      data: stringData,
+      data,
       android: { priority: 'high', notification: { channelId: ANDROID_CHANNEL } },
     };
     if (snapshotId && base_url) {

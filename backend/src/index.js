@@ -21,6 +21,7 @@ import db from './db.js';
 import { upsertPath, isPathConfiguredCorrectly, getPathStatus } from './lib/mediamtx.js';
 import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder.js';
 import { startMotionDetector, isDetecting, stopAllMotionDetectors } from './lib/motionDetector.js';
+import { startSoundDetector, isSoundDetecting, stopAllSoundDetectors } from './lib/soundDetector.js';
 import { initPush } from './lib/push.js';
 import { startMediaMTX, stopMediaMTX } from './lib/mediamtxProcess.js';
 import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
@@ -363,9 +364,15 @@ async function reconcileCameraPaths(attempt = 1) {
       if (subConfigured(cam) && !isSubRunning(cam.id)) {
         await startSubStream(cam);
       }
-      // Keep the optional motion detector alive the same way (reads the stream above).
-      if (cam.detect_motion_enabled && !isDetecting(cam.id)) {
+      // Keep the optional motion detector alive the same way (reads the stream above). The MQTT
+      // source detects on the camera, so only frame-diff cameras run a detector here — the guard is
+      // inside startMotionDetector (it no-ops for the 'mqtt' source).
+      if (cam.detect_motion_enabled && cam.detect_source !== 'mqtt' && !isDetecting(cam.id)) {
         await startMotionDetector(cam).catch((e) => logger.error(`[detect] start failed: ${e.message}`));
+      }
+      // Keep the optional sound detector alive the same way (audio-only leg off the same stream).
+      if (cam.detect_sound_enabled && !isSoundDetecting(cam.id)) {
+        await startSoundDetector(cam).catch((e) => logger.error(`[sound] start failed: ${e.message}`));
       }
     }
     if (fixedCount > 0) {
@@ -386,6 +393,7 @@ async function reconcileCameraPaths(attempt = 1) {
 async function shutdown() {
   logger.info('Shutting down - stopping transcoders and MediaMTX.');
   await stopAllMotionDetectors();
+  await stopAllSoundDetectors();
   await stopAllTranscoders();
   stopMediaMTX();
   stopMqtt();

@@ -167,6 +167,14 @@ if (!settingsColumns.includes('pushover_enabled')) {
   db.exec('ALTER TABLE settings ADD COLUMN pushover_user_key TEXT');
 }
 
+// The server's own public URL, learned zero-config from the origin the mobile app reports on
+// push-register (last writer wins — each server only ever hears its own address from its own app).
+// Embedded in deep links so tapping an alert from THIS server opens THIS server in the app, even if
+// the app was last pointed at a different one (e.g. a prod alert while the app is showing dev).
+if (!settingsColumns.includes('public_base_url')) {
+  db.exec('ALTER TABLE settings ADD COLUMN public_base_url TEXT');
+}
+
 if (!camerasColumns.includes('mqtt_topic')) {
   db.exec('ALTER TABLE cameras ADD COLUMN mqtt_topic TEXT');
 }
@@ -272,6 +280,31 @@ if (!camerasColumns.includes('detect_schedule_enabled')) {
   db.exec('ALTER TABLE cameras ADD COLUMN detect_schedule_enabled INTEGER NOT NULL DEFAULT 0');
   db.exec('ALTER TABLE cameras ADD COLUMN detect_start INTEGER NOT NULL DEFAULT 0');
   db.exec('ALTER TABLE cameras ADD COLUMN detect_end INTEGER NOT NULL DEFAULT 0');
+}
+
+// Sound detection: a separate audio-loudness detector (lib/soundDetector.js), parallel to motion.
+// It tracks each camera's rolling ambient level (so a white-noise machine/fan is learned, not a
+// one-time boot calibration) and fires when the level stays a sensitivity-controlled margin above
+// that ambient for sound_confirm_s, rate-limited by sound_cooldown_s. Shares the per-camera
+// quiet-hours schedule with motion. Off by default.
+if (!camerasColumns.includes('detect_sound_enabled')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN detect_sound_enabled INTEGER NOT NULL DEFAULT 0');
+  db.exec('ALTER TABLE cameras ADD COLUMN sound_sensitivity INTEGER NOT NULL DEFAULT 50');
+  db.exec('ALTER TABLE cameras ADD COLUMN sound_confirm_s INTEGER NOT NULL DEFAULT 4');
+  db.exec('ALTER TABLE cameras ADD COLUMN sound_cooldown_s INTEGER NOT NULL DEFAULT 120');
+}
+
+// Detection source: 'framediff' (the server-side frame-diff detector, the universal default) or
+// 'mqtt' (the camera detects motion itself and publishes it — thingino/sonoff-hack etc. — which
+// costs the server ~nothing). For 'mqtt', motion_mqtt_topic is the topic the camera publishes to,
+// and motion_mqtt_value is an optional payload matcher override (blank = the built-in smart matcher).
+// snapshot_url is an optional camera HTTP snapshot endpoint used for the alert image (avoids the
+// stream keyframe-wait); it benefits BOTH sources. See lib/mqttClient.js + lib/detectionAlert.js.
+if (!camerasColumns.includes('detect_source')) {
+  db.exec("ALTER TABLE cameras ADD COLUMN detect_source TEXT NOT NULL DEFAULT 'framediff'");
+  db.exec('ALTER TABLE cameras ADD COLUMN motion_mqtt_topic TEXT');
+  db.exec('ALTER TABLE cameras ADD COLUMN motion_mqtt_value TEXT');
+  db.exec('ALTER TABLE cameras ADD COLUMN snapshot_url TEXT');
 }
 
 // base_url: the origin the app reaches this server through (window.location.origin), reported on

@@ -9,6 +9,41 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-10
+
+### Added
+- **Sound detection (crying / loud noise).** A new per-camera **Sound detection** toggle listens to
+  the camera's audio and alerts when sound stays **above the room's ambient level** for a set time.
+  It **learns the ambient continuously** — a white-noise machine or fan (even switched on hours after
+  boot) is absorbed into the baseline, so only a sustained rise above it (like crying) triggers.
+  Per-camera **sensitivity / confirm / cooldown**, shares the same quiet-hours schedule as motion,
+  same Recent-alerts + Firebase/Pushover push (with snapshot). Needs a camera with a microphone;
+  off by default. (Cry-*classification* is a possible later add-on if loudness proves too noisy.)
+- **MQTT motion source — let the camera detect motion.** Each camera now has a **Detection source**:
+  *Nightlight (frame difference)* — the existing, works-on-any-camera default — or **Camera via
+  MQTT**, where the camera detects motion on its own hardware (thingino, sonoff-hack, etc.) and
+  publishes it; Nightlight just consumes the event. That uses **~no server CPU** for that camera and
+  is usually more accurate. Set the camera's **motion topic** (and, only if needed, a payload value —
+  it auto-recognises `ON`/`true`/`1`/`motion`/`{"motion":true}` and similar). Same downstream as
+  frame-diff: Recent-alerts entry + Firebase/Pushover push, same per-camera cooldown and quiet-hours.
+- **Optional camera snapshot URL.** If a camera exposes an HTTP snapshot endpoint, set it and alert
+  images are grabbed from it — instant and clearer than pulling a frame from the stream (no keyframe
+  wait). Basic-auth in the URL is supported; blank falls back to the stream grab. Works for both
+  detection sources.
+- **Alerts open the server that sent them (multi-server deep links).** If you use the app against
+  more than one Nightlight server (e.g. production and a staging box), tapping an alert now opens the
+  **server the alert came from** instead of whichever server the app happened to be showing. Each
+  server learns its own public address automatically (zero-config, from the app on registration) and
+  stamps it onto its alerts — Pushover via the deep link, Firebase via the notification payload. If a
+  server hasn't learned its address yet, alerts open in place as before. (Needs app **v0.7.0+** for
+  the switch to take effect.)
+
+### Fixed
+- **Motion-alert snapshots grab more reliably.** The one-shot frame grab has to wait for the
+  camera's next keyframe, so on cameras with a long keyframe interval it occasionally hit the 5s
+  timeout and the alert (both channels) went out text-only. Startup buffering is trimmed and the
+  timeout raised to 8s so almost all grabs land; a rare miss still falls back to text cleanly.
+
 ## [0.11.0] - 2026-08-09
 
 ### Added

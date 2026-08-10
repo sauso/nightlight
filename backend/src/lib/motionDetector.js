@@ -2,10 +2,9 @@ import { spawn } from 'child_process';
 import db from '../db.js';
 import { logger } from './logger.js';
 import { subPathName, getPathStatus } from './mediamtx.js';
-import { recordDetectionEvent, ALERT } from './detectionEvents.js';
-import { sendToAll, pushEnabled } from './push.js';
-import { pushoverEnabled, sendPushover } from './pushover.js';
-import { captureSnapshot } from './snapshot.js';
+import { inActiveWindow } from './detectSchedule.js';
+import { fireDetectionAlert } from './detectionAlert.js';
+import { ALERT } from './detectionEvents.js';
 
 // Server-side motion detection. Per camera with detection enabled, a cheap FFmpeg leg reads
 // the already-published MediaMTX stream (the sub-stream when there is one — far cheaper to
@@ -75,38 +74,6 @@ function zoneBounds(camera) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Current minutes-since-midnight (0..1439) in the app's configured timezone — the reference clock for
-// each camera's motion-alert window. Falls back to UTC if the timezone lookup/format ever fails.
-function nowMinutesInAppTz() {
-  let tz = 'UTC';
-  try {
-    tz = db.prepare('SELECT timezone FROM settings WHERE id = ?').get('app')?.timezone || 'UTC';
-  } catch { /* keep UTC */ }
-  try {
-    const parts = new Intl.DateTimeFormat('en-GB', {
-      timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-    }).formatToParts(new Date());
-    const h = Number(parts.find((p) => p.type === 'hour').value);
-    const m = Number(parts.find((p) => p.type === 'minute').value);
-    return (h % 24) * 60 + m;
-  } catch {
-    const d = new Date();
-    return d.getUTCHours() * 60 + d.getUTCMinutes();
-  }
-}
-
-// Is this camera inside its motion-alert window right now? True when no schedule is set. Handles
-// windows that wrap midnight (start > end, e.g. 20:00–07:00). A zero-length window (start == end) is
-// treated as "always on" rather than "never".
-function inActiveWindow(camera) {
-  if (!camera.detect_schedule_enabled) return true;
-  const start = camera.detect_start | 0;
-  const end = camera.detect_end | 0;
-  if (start === end) return true;
-  const now = nowMinutesInAppTz();
-  return start < end ? now >= start && now < end : now >= start || now < end;
-}
-
 // Resolve to the path to analyse once one is actually publishing, preferring the sub-stream
 // (cheap to decode). Polls MediaMTX readiness rather than spawning ffmpeg speculatively, so we
 // never hit a 404 (at startup, or after a blip took both streams down): it waits up to
@@ -138,7 +105,10 @@ export function isDetecting(cameraId) {
 
 export async function startMotionDetector(camera) {
   await stopMotionDetector(camera.id);
-  if (!camera.detect_motion_enabled || camera.disabled) return;
+  // The frame-diff detector only runs when this camera is set to the frame-diff source. A camera on
+  // the 'mqtt' source detects motion itself and is handled in mqttClient.js — running the frame-diff
+  // leg for it would just waste CPU (the whole point of the MQTT source).
+  if (!camera.detect_motion_enabled || camera.disabled || camera.detect_source === 'mqtt') return;
 
   const { x0, y0, x1, y1 } = zoneBounds(camera);
   const zonePixels = (x1 - x0) * (y1 - y0);
@@ -196,35 +166,9 @@ export async function startMotionDetector(camera) {
             // the moment the window opens.
             lastAlert = now; // cooldown gates re-fire; a continuing run alerts once per cooldown
             const pct = (fraction * 100).toFixed(1);
-            recordDetectionEvent(camera.id, camera.name, ALERT.MOTION, `motion (${pct}% of zone)`);
-            logger.info(`[detect] motion on "${camera.name}" (${pct}% of zone)`);
-            const firePush = pushEnabled();
-            const firePushover = pushoverEnabled();
-            if (firePush || firePushover) {
-              // Capture the triggering frame ONCE (best-effort) and share it across both channels —
-              // Firebase and Pushover both attach the same picture. Snapshot + sends are async and
-              // fire-and-forget so the detection loop is never blocked.
-              captureSnapshot(path)
-                .then((image) => {
-                  if (!image) logger.info(`[detect] no snapshot for "${camera.name}" (grab failed/timed out) — sending without image`);
-                  if (firePush) {
-                    logger.info(`[detect] sending Firebase alert for "${camera.name}"`);
-                    sendToAll(camera.name, 'Motion detected', { cameraId: camera.id, type: ALERT.MOTION }, image).catch(() => {});
-                  }
-                  if (firePushover) {
-                    // Deep-link so tapping opens the app on this camera.
-                    logger.info(`[detect] sending Pushover alert for "${camera.name}"`);
-                    sendPushover({
-                      title: `${camera.name} — motion`,
-                      message: 'Motion detected',
-                      url: `nightlight://camera/${camera.id}`,
-                      urlTitle: 'Open in Nightlight',
-                      image,
-                    }).catch((e) => logger.error(`[pushover] alert failed for "${camera.name}": ${e.message}`));
-                  }
-                })
-                .catch(() => {});
-            }
+            // Shared downstream (record event + push both channels); pass the exact path we're
+            // analysing so a stream-grab snapshot uses the same (cheap) sub-stream. Fire-and-forget.
+            fireDetectionAlert(camera, ALERT.MOTION, `${pct}% of zone`, { snapshotPath: path }).catch(() => {});
           }
         } else if (activeSince && now - lastActive > ACTIVE_GRACE_MS) {
           activeSince = 0; // the run ended (gap exceeded the grace window)
