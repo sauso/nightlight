@@ -64,6 +64,50 @@ export async function changeServer() {
   }
 }
 
+// The origin the app is currently pointed at, normalised (no trailing slash) for comparison against
+// a server address carried in a deep link / push. In the native shell this is the loaded server URL.
+export function currentServerOrigin() {
+  try {
+    return window.location.origin.replace(/\/+$/, '');
+  } catch {
+    return null;
+  }
+}
+
+// Switch the native shell to a DIFFERENT already-known-good server and reboot into it (used when a
+// push/deep link from another Nightlight server than the one on screen is tapped — e.g. a prod alert
+// while the app is showing dev). Like changeServer, tears down all playback + the background-audio
+// service first so the old server's audio doesn't survive the switch. save() re-validates the
+// address (/api/health) and rejects if unreachable, in which case we stay put. Returns whether the
+// switch was initiated (false if not native, no URL, same server, or validation failed).
+export async function switchServer(rawUrl) {
+  const p = window.Capacitor?.Plugins?.ServerConfig;
+  if (!p || !rawUrl) return false;
+  const target = String(rawUrl).replace(/\/+$/, '');
+  if (!/^https?:\/\//i.test(target)) return false; // only absolute http(s) origins
+  if (target === currentServerOrigin()) return false; // already here — caller navigates in place
+  try {
+    document.querySelectorAll('audio, video').forEach((el) => {
+      try { el.pause(); } catch { /* ignore */ }
+      el.srcObject = null;
+      el.removeAttribute('src');
+      try { el.load(); } catch { /* ignore */ }
+    });
+  } catch { /* ignore */ }
+  try {
+    activeCameras.clear();
+    await plugin()?.stop();
+  } catch { /* ignore */ }
+  try {
+    await p.save({ url: target }); // rejects if unreachable — leaves the active server untouched
+    await p.restart();
+    return true;
+  } catch (err) {
+    console.warn('switchServer failed', err);
+    return false;
+  }
+}
+
 // True if this JS context has already run once before in this browsing session -
 // i.e. this load came from our own location.reload() (see useReloadAfterBackground
 // in App.jsx, which reloads after a long spell backgrounded to clear up half-broken
