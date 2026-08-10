@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-10
+
 ### Added
 - **Sound detection (crying / loud noise).** A new per-camera **Sound detection** toggle listens to
   the camera's audio and alerts when sound stays **above the room's ambient level** for a set time.
