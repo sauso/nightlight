@@ -46,18 +46,22 @@ function subscribeAllCameraTopics() {
 // or a JSON field equals it); otherwise a smart default recognises the common shapes cameras emit —
 // plain ON/1/true/"motion", and JSON like {"motion":true} / {"event":"motion"} / {"state":"ON"} —
 // while treating an explicit OFF/false/clear as "no motion" (cameras publish both edges).
-const MOTION_ON = /^(on|1|true|motion|active|detected|yes|start(ed)?|open)$/i;
-const MOTION_OFF = /^(off|0|false|no|clear(ed)?|inactive|idle|stop(ped)?|end(ed)?|closed|none)$/i;
+// Tokens that mean motion has ENDED vs STARTED. Compared per word so a compound payload like
+// "motion_stop" (which contains "motion") is correctly read as OFF, not ON — the sonoff-hack
+// firmware emits exactly motion_start / motion_stop.
+const OFF_TOKENS = new Set(['off', '0', 'false', 'no', 'clear', 'cleared', 'inactive', 'idle', 'stop', 'stopped', 'end', 'ended', 'closed', 'none', 'normal']);
+const ON_TOKENS = new Set(['on', '1', 'true', 'yes', 'motion', 'active', 'detected', 'start', 'started', 'open', 'alarm', 'detect']);
 
 function valueLooksLikeMotion(v) {
   if (v === true) return true;
   if (typeof v === 'number') return v > 0;
-  if (typeof v === 'string') {
-    const s = v.trim();
-    if (MOTION_OFF.test(s)) return false;
-    return MOTION_ON.test(s) || /motion|detect|alarm/i.test(s);
-  }
-  return false;
+  if (typeof v !== 'string') return false;
+  const s = v.trim().toLowerCase();
+  if (!s) return false;
+  const tokens = s.split(/[^a-z0-9]+/).filter(Boolean);
+  if (tokens.some((t) => OFF_TOKENS.has(t))) return false; // an OFF word wins (e.g. "motion_stop")
+  if (tokens.some((t) => ON_TOKENS.has(t))) return true;
+  return /motion|detect|alarm/.test(s);
 }
 
 export function isMotionPayload(payloadStr, override) {
