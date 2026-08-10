@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-10
+
 ### Added
 - **Adjustable PTZ step size** (Settings → General → Camera controls). Sets how far a camera moves
   per tap of the pan/tilt D-pad, for cameras using precise RelativeMove positioning. Defaults to 12
