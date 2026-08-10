@@ -34,6 +34,14 @@ const PTZ_MOVE_TIMEOUT_MS = 1500;
 // same amount (see ptzNudge). Tune here if steps feel too big/small.
 const PTZ_NUDGE_MS = 200;
 
+// Default fixed-distance step for ONVIF RelativeMove (the preferred nudge path when the camera
+// supports it). The camera moves this much in its own relative-translation units and stops itself,
+// so there's no hold/Stop timing — every press travels the same amount regardless of the camera's
+// ContinuousMove latency. 12 suits the Sonoff pan/tilt cams; the admin can override it globally
+// (settings.ptz_step, passed in as `step`). Units are camera-space-specific, not a normalised -1..1.
+const PTZ_RELATIVE_STEP = 12;
+const PTZ_RELATIVE_ZOOM_STEP = 12;
+
 function clampVelocity(n) {
   const v = Number(n) || 0;
   return Math.max(-1, Math.min(1, v));
@@ -399,4 +407,47 @@ export async function ptzNudge({ host, port, username, password, profileToken, p
       `clockMs=${tMove - t0} moveMs=${tMoved - tMove} hold=${PTZ_NUDGE_MS}ms ` +
       `stop=${stop.ok ? `ok(tries=${stop.tries})` : `FAILED(${stop.error})`}`
   );
+}
+
+// Does this camera advertise ONVIF RelativeMove (a relative pan/tilt or zoom translation space)?
+// Asked once via GetNodes and cached by the caller (see the /ptz/nudge route). Best-effort: any
+// failure (minimal server, no PTZ node, auth) resolves false so we simply keep using the continuous
+// nudge. Never throws.
+export async function probePtzRelativeSupport({ host, port, username, password }) {
+  const cam = makeControlCam({ host, port, username, password });
+  await ensureAuthClock(cam);
+  const nodes = await new Promise((resolve) => {
+    try {
+      cam.getNodes((err, data) => resolve(err ? null : data));
+    } catch {
+      resolve(null);
+    }
+  });
+  if (!nodes) return false;
+  return Object.values(nodes).some((n) => {
+    const sp = n?.supportedPTZSpaces || {};
+    return !!sp.relativePanTiltTranslationSpace || !!sp.relativeZoomTranslationSpace;
+  });
+}
+
+/**
+ * One fixed-distance PTZ step via ONVIF RelativeMove. The camera itself moves PTZ_RELATIVE_STEP in
+ * the requested direction(s) and stops — no server-side hold or Stop, so unlike ptzNudge the travel
+ * is unaffected by the camera's (often wildly variable) ContinuousMove latency. Direction only is
+ * taken from pan/tilt/zoom (sign); magnitude is the fixed step. Throws on error so the caller can
+ * fall back to ptzNudge.
+ */
+export async function ptzRelativeStep({ host, port, username, password, profileToken, pan = 0, tilt = 0, zoom = 0, step, zoomStep }) {
+  const cam = makeControlCam({ host, port, username, password });
+  await ensureAuthClock(cam);
+  const s = Number(step) > 0 ? Number(step) : PTZ_RELATIVE_STEP;
+  const zs = Number(zoomStep) > 0 ? Number(zoomStep) : (Number(step) > 0 ? Number(step) : PTZ_RELATIVE_ZOOM_STEP);
+  const x = pan ? Math.sign(pan) * s : 0;
+  const y = tilt ? Math.sign(tilt) * s : 0;
+  const z = zoom ? Math.sign(zoom) * zs : 0;
+  const t0 = Date.now();
+  await new Promise((resolve, reject) => {
+    cam.relativeMove({ x, y, zoom: z, profileToken }, (err) => (err ? reject(err) : resolve()));
+  });
+  logger.info(`[ptz] relStep x=${x} y=${y} z=${z} ms=${Date.now() - t0}`);
 }
