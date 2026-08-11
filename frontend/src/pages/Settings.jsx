@@ -2,25 +2,24 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   SlidersHorizontal, Thermometer, Bell, ScrollText,
-  UserCog, Info, Server, LogOut, ChevronRight,
+  Info, Server, LogOut, ChevronRight,
 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { isNativeApp, changeServer } from '../lib/nativeBridge.js';
 import AppHeader from '../components/AppHeader.jsx';
+import Avatar from '../components/Avatar.jsx';
 
-// Settings is a hub. System configuration (General / MQTT / Push / Logs) is admin-only, so
-// those rows only render for admins. Everyone gets Account and About. The actions that used
-// to live in the header's hamburger (Change server on native, Sign out) live here now too.
-// Rows that stay inside Settings pass state.from so their back button returns here.
+// Settings is a hub. Account sits at the top in its own card (like the mockup); system config
+// (General / MQTT / Push / Logs) is admin-only; About + Change server share a card; Sign out is
+// last. Rows that stay under Settings pass state.from so their back button returns here.
 const BACK = { state: { from: { to: '/settings', label: 'Settings' } } };
+const PERI = 'var(--peri)';
 
-const ADMIN_ITEMS = [
-  { to: '/settings/general', Icon: SlidersHorizontal, label: 'General', desc: 'App name, timezone, theme, font, colours, temperature unit' },
-  { to: '/settings/mqtt', Icon: Thermometer, label: 'MQTT', desc: 'Broker for room temperature / humidity' },
-  { to: '/settings/push', Icon: Bell, label: 'Push notifications', desc: 'Enable phone alerts for motion detection' },
-  { to: '/settings/logs', Icon: ScrollText, label: 'Logs', desc: 'Camera history and server logs' },
-];
+function displayName(u) {
+  const name = [u?.first_name, u?.last_name].filter(Boolean).join(' ').trim();
+  return name || u?.username || 'You';
+}
 
 function Row({ Icon, label, desc, trailing, onClick }) {
   return (
@@ -33,7 +32,7 @@ function Row({ Icon, label, desc, trailing, onClick }) {
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <Icon size={20} color="var(--peri)" aria-hidden="true" />
+        <Icon size={20} color={PERI} aria-hidden="true" />
         <div>
           <div>{label}</div>
           {desc && <div className="camera-tile__sub">{desc}</div>}
@@ -47,34 +46,68 @@ function Row({ Icon, label, desc, trailing, onClick }) {
   );
 }
 
+const ADMIN_ITEMS = [
+  { key: 'general', to: '/settings/general', Icon: SlidersHorizontal, label: 'General', desc: 'App name, timezone, theme, font, colours, temperature unit' },
+  { key: 'mqtt', to: '/settings/mqtt', Icon: Thermometer, label: 'MQTT', desc: 'Broker for room temperature / humidity' },
+  { key: 'push', to: '/settings/push', Icon: Bell, label: 'Push notifications', desc: 'Enable phone alerts for motion detection' },
+  { key: 'logs', to: '/settings/logs', Icon: ScrollText, label: 'Logs', desc: 'Camera history and server logs' },
+];
+
 export default function Settings() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [version, setVersion] = useState(null);
+  const [mqtt, setMqtt] = useState(null);
 
   useEffect(() => {
     api.get('/about').then((info) => setVersion(info?.version)).catch(() => {});
-  }, []);
+    if (isAdmin) api.get('/settings/mqtt/status').then(setMqtt).catch(() => {});
+  }, [isAdmin]);
+
+  const mqttLabel = mqtt
+    ? (mqtt.connected ? 'Connected' : mqtt.enabled ? 'Connecting…' : 'Off')
+    : null;
 
   return (
     <>
       <AppHeader title="Settings" />
       <main className="app-main">
-        {user?.role === 'admin' && (
+        {/* Account — top of the list, in its own card. */}
+        <div className="card">
+          <div
+            className="list-row"
+            role="button"
+            tabIndex={0}
+            style={{ cursor: 'pointer' }}
+            onClick={() => navigate('/account', BACK)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/account', BACK); } }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Avatar name={displayName(user)} size={40} />
+              <div>
+                <div style={{ fontWeight: 600 }}>{displayName(user)}</div>
+                <div className="camera-tile__sub" style={{ textTransform: 'capitalize' }}>{user?.role} · Account</div>
+              </div>
+            </div>
+            <ChevronRight size={18} style={{ opacity: 0.5, flexShrink: 0 }} aria-hidden="true" />
+          </div>
+        </div>
+
+        {isAdmin && (
           <div className="card">
             {ADMIN_ITEMS.map((it) => (
-              <Row key={it.to} {...it} onClick={() => navigate(it.to, BACK)} />
+              <Row
+                key={it.key}
+                {...it}
+                trailing={it.key === 'mqtt' && mqttLabel ? <span className="camera-tile__sub">{mqttLabel}</span> : undefined}
+                onClick={() => navigate(it.to, BACK)}
+              />
             ))}
           </div>
         )}
 
         <div className="card">
-          <Row
-            Icon={UserCog}
-            label="Account"
-            desc="Password, sessions, notifications on this device"
-            onClick={() => navigate('/account', BACK)}
-          />
           <Row
             Icon={Info}
             label="About"

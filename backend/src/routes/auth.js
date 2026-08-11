@@ -234,6 +234,20 @@ router.put('/users/:id', requireAuth, requireAdmin, (req, res) => {
   res.json(toPublicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id)));
 });
 
+// Self-service: any logged-in user can change their own display name (first/last). The
+// username (login id) is deliberately not editable here — that stays an admin action.
+router.put('/me', requireAuth, (req, res) => {
+  const { first_name, last_name } = req.body || {};
+  const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  if (!existing) return res.status(404).json({ error: 'User not found' });
+  db.prepare('UPDATE users SET first_name = ?, last_name = ? WHERE id = ?').run(
+    first_name !== undefined ? first_name?.trim() || null : existing.first_name,
+    last_name !== undefined ? last_name?.trim() || null : existing.last_name,
+    req.user.id
+  );
+  res.json(toPublicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id)));
+});
+
 // Self-service: any logged-in user can change their own password, given their
 // current one - unlike the admin reset above, this doesn't skip verification.
 router.put('/me/password', requireAuth, loginLimiter, (req, res) => {

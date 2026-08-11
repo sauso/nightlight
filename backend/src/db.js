@@ -341,7 +341,12 @@ if (!detectionEventsColumns.includes('snapshot')) {
 // Ensure the single settings row always exists.
 db.prepare(
   `INSERT OR IGNORE INTO settings (id, app_name, accent_color, live_color, offline_color, timezone, font_choice, temp_unit)
-   VALUES ('app', 'Nightlight', '#F5D9A8', '#7FBFA3', '#E08585', 'UTC', 'warm-serif', 'C')`
+   VALUES ('app', 'Nightlight', '#f4c56a', '#7FBFA3', '#E08585', 'UTC', 'warm-serif', 'C')`
 ).run();
+
+// The default accent moved from the old pale gold (#F5D9A8) to the deeper gold (#f4c56a) that
+// the refreshed UI uses. Migrate installs still on the exact old default to the new one; a value
+// that isn't the old default means the user picked their own colour, so leave it untouched.
+db.prepare("UPDATE settings SET accent_color = '#f4c56a' WHERE accent_color = '#F5D9A8'").run();
 
 export default db;

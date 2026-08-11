@@ -6,7 +6,7 @@ const SettingsContext = createContext(null);
 
 const DEFAULTS = {
   app_name: 'Nightlight',
-  accent_color: '#F5D9A8',
+  accent_color: '#f4c56a',
   live_color: '#7FBFA3',
   offline_color: '#E08585',
   timezone: 'UTC',

@@ -13,7 +13,7 @@ import PushBanner from './components/PushBanner.jsx';
 import Login from './pages/Login.jsx';
 import Alerts from './pages/Alerts.jsx';
 import Family from './pages/Family.jsx';
-import Children from './pages/Children.jsx';
+import ChildSettings from './pages/ChildSettings.jsx';
 import Cameras from './pages/Cameras.jsx';
 import CameraSettings from './pages/CameraSettings.jsx';
 import DetectionSettings from './pages/DetectionSettings.jsx';
@@ -23,6 +23,7 @@ import SettingsGeneral from './pages/SettingsGeneral.jsx';
 import SettingsMqtt from './pages/SettingsMqtt.jsx';
 import SettingsPush from './pages/SettingsPush.jsx';
 import SettingsUsers from './pages/SettingsUsers.jsx';
+import UserSettings from './pages/UserSettings.jsx';
 import SettingsLogs from './pages/SettingsLogs.jsx';
 import About from './pages/About.jsx';
 
@@ -113,7 +114,11 @@ function Shell() {
                     <Route path="/" element={null} />
                     <Route path="/alerts" element={<Alerts />} />
                     <Route path="/family" element={<Family />} />
-                    <Route path="/children" element={<Children />} />
+                    {/* Children are managed inline from the Family hub; the old list route just
+                        forwards there. Add/edit a child on its own screen (any signed-in user). */}
+                    <Route path="/children" element={<Navigate to="/family" replace />} />
+                    <Route path="/children/new" element={<ChildSettings />} />
+                    <Route path="/children/:id" element={<ChildSettings />} />
                     <Route path="/cameras" element={<Cameras />} />
                     {/* Per-camera settings + split detection screens are admin-only (camera
                         management). /cameras/new and /cameras/:id/:kind are more specific than
@@ -129,6 +134,8 @@ function Shell() {
                     <Route path="/settings/mqtt" element={<AdminProtected><SettingsMqtt /></AdminProtected>} />
                     <Route path="/settings/push" element={<AdminProtected><SettingsPush /></AdminProtected>} />
                     <Route path="/settings/users" element={<AdminProtected><SettingsUsers /></AdminProtected>} />
+                    <Route path="/settings/users/new" element={<AdminProtected><UserSettings /></AdminProtected>} />
+                    <Route path="/settings/users/:id" element={<AdminProtected><UserSettings /></AdminProtected>} />
                     <Route path="/settings/logs" element={<AdminProtected><SettingsLogs /></AdminProtected>} />
                     <Route path="/account" element={<Account />} />
                     <Route path="/about" element={<About />} />
