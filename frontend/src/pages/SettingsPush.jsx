@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import AppHeader from '../components/AppHeader.jsx';
 import SettingsBack from '../components/SettingsBack.jsx';
+import Switch from '../components/Switch.jsx';
 
 export default function SettingsPush() {
   // --- Firebase / FCM (Android app) ---
@@ -88,8 +89,7 @@ export default function SettingsPush() {
               alerts include a snapshot of what triggered them.
             </div>
             <label className="log-viewer__toggle" style={{ marginBottom: 14 }}>
-              <input
-                type="checkbox"
+              <Switch
                 checked={!!po.enabled}
                 disabled={poBusy || !poLoaded}
                 onChange={(e) => setPo({ ...po, enabled: e.target.checked })}
@@ -149,8 +149,7 @@ export default function SettingsPush() {
               into the data directory first (see <strong>docs/notifications.md</strong>). Android only.
             </div>
             <label className="log-viewer__toggle" style={{ margin: 0 }}>
-              <input
-                type="checkbox"
+              <Switch
                 checked={fbEnabled}
                 disabled={fbBusy || !pushStatus}
                 onChange={(e) => setFbEnabled(e.target.checked)}

@@ -11,6 +11,8 @@ import LiveMonitor from './components/LiveMonitor.jsx';
 import InstallPrompt from './components/InstallPrompt.jsx';
 import PushBanner from './components/PushBanner.jsx';
 import Login from './pages/Login.jsx';
+import Alerts from './pages/Alerts.jsx';
+import Family from './pages/Family.jsx';
 import Children from './pages/Children.jsx';
 import Cameras from './pages/Cameras.jsx';
 import Account from './pages/Account.jsx';
@@ -107,9 +109,14 @@ function Shell() {
                   <LiveMonitor />
                   <Routes>
                     <Route path="/" element={null} />
+                    <Route path="/alerts" element={<Alerts />} />
+                    <Route path="/family" element={<Family />} />
                     <Route path="/children" element={<Children />} />
                     <Route path="/cameras" element={<Cameras />} />
-                    <Route path="/settings" element={<AdminProtected><Settings /></AdminProtected>} />
+                    {/* Settings hub is role-aware internally (admin-only rows are hidden for
+                        caregivers), so the hub route itself is open to any signed-in user;
+                        the config sub-pages stay admin-gated. */}
+                    <Route path="/settings" element={<Settings />} />
                     <Route path="/settings/general" element={<AdminProtected><SettingsGeneral /></AdminProtected>} />
                     <Route path="/settings/mqtt" element={<AdminProtected><SettingsMqtt /></AdminProtected>} />
                     <Route path="/settings/push" element={<AdminProtected><SettingsPush /></AdminProtected>} />

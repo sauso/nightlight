@@ -63,7 +63,7 @@ export default function Children() {
 
   return (
     <>
-      <AppHeader title="Children" />
+      <AppHeader title="Children" back={{ to: '/family', label: 'Family' }} />
       <main className="app-main">
         {error && <div className="error-banner">{error}</div>}
 

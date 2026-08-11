@@ -262,7 +262,7 @@ export default function Cameras() {
 
   return (
     <>
-      <AppHeader title="Cameras" />
+      <AppHeader title="Cameras" back={{ to: '/family', label: 'Family' }} />
       <main className="app-main">
         {(error || contextError) && <div className="error-banner">{error || contextError}</div>}
 
