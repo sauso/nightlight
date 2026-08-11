@@ -1383,6 +1383,33 @@ body.in-pip .tile-menu-backdrop {
 
 .list-row:last-child { border-bottom: none; }
 
+/* Detection rows (Motion / Sound / Alert schedule) with a tinted periwinkle icon chip — shared
+   between Camera settings (drill-in) and the camera cog sheet (quick toggle) so they match. */
+.det-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.det-row:last-child { border-bottom: none; }
+.det-row--clickable { cursor: pointer; }
+.det-row__left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.det-row__label { font-size: 16px; font-weight: 500; }
+.det-row__right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; color: var(--text-secondary); }
+.det-chip {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: rgba(124, 131, 219, 0.15);
+  color: var(--peri);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
 .tag {
   display: inline-block;
   font-size: 11px;

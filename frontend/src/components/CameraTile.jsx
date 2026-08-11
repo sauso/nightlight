@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet } from 'lucide-react';
+import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet, Zap, AudioLines, Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { startTalk } from '../lib/twoWayTalk.js';
@@ -11,6 +11,7 @@ import WhepPlayer from './WhepPlayer.jsx';
 import HlsPlayer from './HlsPlayer.jsx';
 import BreathingDot from './BreathingDot.jsx';
 import Switch from './Switch.jsx';
+import DetectionRow from './DetectionRow.jsx';
 
 // The /detection endpoint replaces the whole detection config at once, so a quick motion/sound
 // toggle from the tile must resend every field (from the camera row) with just its flag flipped —
@@ -219,13 +220,23 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
     setModeMenuOpen(false);
   }
 
-  // Quick-toggle motion or sound from the tile (admin only) without opening full camera settings.
+  // Quick-toggle motion / sound / schedule from the tile (admin only) without opening full settings.
+  function togglePatch(kind) {
+    if (kind === 'motion') return { motion_enabled: !camera.detect_motion_enabled };
+    if (kind === 'sound') return { sound_enabled: !camera.detect_sound_enabled };
+    // Schedule: if it's never had a real window (start === end), enabling it seeds the same
+    // overnight default the full settings screen uses, so it doesn't come on as an empty window.
+    const enabling = !camera.detect_schedule_enabled;
+    const noWindow = (camera.detect_start ?? 0) === (camera.detect_end ?? 0);
+    return enabling && noWindow
+      ? { schedule_enabled: true, start: 1200, end: 420 }
+      : { schedule_enabled: enabling };
+  }
+
   async function toggleDetection(kind) {
     if (detBusy) return;
     setDetBusy(true);
-    const patch = kind === 'motion'
-      ? { motion_enabled: !camera.detect_motion_enabled }
-      : { sound_enabled: !camera.detect_sound_enabled };
+    const patch = togglePatch(kind);
     try {
       await api.put(`/cameras/${camera.id}/detection`, detectionPayload(camera, patch));
       await refreshCameras();
@@ -601,7 +612,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
                   className={`segmented__btn${mode === 'compat' ? ' segmented__btn--active' : ''}`}
                   onClick={() => selectMode('compat')}
                 >
-                  Compat
+                  Compatibility
                 </button>
               </div>
 
@@ -629,36 +640,31 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
 
               {isAdmin && (
                 <>
-                  <div className="tile-menu__label">Detection</div>
-                  <div className="tile-menu__section" style={{ display: 'grid', gap: 8, background: 'none', padding: 0 }}>
-                    <label className="tgl-row">
-                      <div>Motion detection</div>
-                      <Switch checked={!!camera.detect_motion_enabled} disabled={detBusy}
-                        onChange={() => toggleDetection('motion')} />
-                    </label>
-                    <label className="tgl-row">
-                      <div>Sound detection</div>
-                      <Switch checked={!!camera.detect_sound_enabled} disabled={detBusy}
-                        onChange={() => toggleDetection('sound')} />
-                    </label>
+                  <div className="tile-menu__label">Detection · quick toggle</div>
+                  <div className="card" style={{ padding: 0, marginBottom: 12 }}>
+                    <DetectionRow as="label" Icon={Zap} label="Motion detection"
+                      right={<Switch checked={!!camera.detect_motion_enabled} disabled={detBusy} onChange={() => toggleDetection('motion')} />} />
+                    <DetectionRow as="label" Icon={AudioLines} label="Sound detection"
+                      right={<Switch checked={!!camera.detect_sound_enabled} disabled={detBusy} onChange={() => toggleDetection('sound')} />} />
+                    <DetectionRow as="label" Icon={Clock} label="Alert schedule"
+                      right={<Switch checked={!!camera.detect_schedule_enabled} disabled={detBusy} onChange={() => toggleDetection('schedule')} />} />
                   </div>
                 </>
               )}
 
-              <div className="tile-menu__section">
-                <button
-                  className="tile-menu__item"
-                  onClick={() => { setStopped(!stopped); closeMenu(); }}
-                >
-                  {stopped ? 'Start camera' : 'Stop camera'}
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ marginBottom: 8 }}
+                onClick={() => { setStopped(!stopped); closeMenu(); }}
+              >
+                {stopped ? 'Start camera' : 'Stop camera'}
+              </button>
+              {isAdmin && (
+                <button type="button" className="btn btn-secondary" style={{ marginBottom: 8 }} onClick={openCameraSettings}>
+                  Camera settings
                 </button>
-                {isAdmin && (
-                  <button className="tile-menu__item tile-menu__item--submenu" onClick={openCameraSettings}>
-                    <span>Camera settings</span>
-                    <span className="tile-menu__value">›</span>
-                  </button>
-                )}
-              </div>
+              )}
 
               <button className="tile-menu__done" onClick={closeMenu}>Done</button>
             </div>
