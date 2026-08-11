@@ -36,8 +36,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   is cropped to fill its space like the other icons; and list/menu labels (Pushover, Firebase,
   children, cameras…) are larger and easier to read.
 - **More light-mode polish:** the MQTT settings icon is aligned and sized to match the others; the
-  ONVIF "Fetch" and "Verify login" buttons now have a visible outline in light mode instead of
-  near-invisible plain text.
+  ONVIF "Fetch" and "Verify login" buttons are now a filled periwinkle (matching an active toggle)
+  so they read clearly in light mode.
 
 ### Added
 - **Per-camera settings are now their own screen.** Editing or adding a camera opens a full page
