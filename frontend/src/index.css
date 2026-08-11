@@ -1200,6 +1200,13 @@ body.in-pip .tile-menu-backdrop {
   color: var(--text-primary);
 }
 
+/* Periwinkle fill (same shade as an active segmented toggle / switch) — for secondary actions
+   that still need to read clearly in light mode, e.g. the ONVIF fetch / verify buttons. */
+.btn-peri {
+  background: var(--peri);
+  color: #fff;
+}
+
 .btn-danger {
   background: var(--offline);
   color: #2a0f0f;
