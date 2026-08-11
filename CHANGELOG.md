@@ -10,6 +10,18 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Added
+- **Per-camera settings are now their own screen.** Editing or adding a camera opens a full page
+  (instead of a modal), reached from a camera's tile gear ("Camera settings") or the Family hub.
+- **Motion, Sound and Schedule are now separate screens** under each camera, replacing the single
+  long detection form. Changes apply immediately (no Save button) — toggles are switches, and the
+  alert snapshot URL lives with the motion settings.
+- **Family screen redesigned** to list your children (with camera counts), cameras (each showing
+  MOTION / SOUND / PTZ / TALK capability badges), and — for admins — caregivers, all inline.
+
+### Changed
+- **New visual theme.** A lighter, calmer look: periwinkle for interactive elements (tabs, switches,
+  sliders), your accent colour (gold by default) for primary buttons and the camera glow, and a navy
+  top bar. Light is now the default; Dark and System are still under Settings → Account → Appearance.
 - **New bottom navigation: Live · Alerts · Family · Settings.** The old Nursery/Children/Cameras
   tabs are reorganised into two hubs — **Family** (Children, Cameras, and — for admins — Caregivers)
   and **Settings** — plus a dedicated **Alerts** tab (feed built out separately). Sub-pages now have
