@@ -22,7 +22,7 @@ function displayName(u) {
   return name || u?.username || 'You';
 }
 
-function Row({ Icon, label, desc, trailing, onClick }) {
+function Row({ Icon, iconSize = 20, label, desc, trailing, onClick }) {
   return (
     <div
       className="list-row"
@@ -33,7 +33,11 @@ function Row({ Icon, label, desc, trailing, onClick }) {
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <Icon size={20} color={PERI} aria-hidden="true" />
+        {/* Fixed 20px centred slot so every row's label starts at the same x, while an icon
+            (e.g. the sparse MQTT logo) can render a little larger without shifting its label. */}
+        <span style={{ width: 20, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <Icon size={iconSize} color={PERI} aria-hidden="true" />
+        </span>
         <div>
           <div>{label}</div>
           {desc && <div className="camera-tile__sub">{desc}</div>}
@@ -49,7 +53,7 @@ function Row({ Icon, label, desc, trailing, onClick }) {
 
 const ADMIN_ITEMS = [
   { key: 'general', to: '/settings/general', Icon: SlidersHorizontal, label: 'General', desc: 'App name, timezone, theme, font, colours, temperature unit' },
-  { key: 'mqtt', to: '/settings/mqtt', Icon: MqttIcon, label: 'MQTT', desc: 'Connect your broker — room temperature/humidity and camera-side motion detection' },
+  { key: 'mqtt', to: '/settings/mqtt', Icon: MqttIcon, iconSize: 22, label: 'MQTT', desc: 'Connect your broker — room temperature/humidity and camera-side motion detection' },
   { key: 'push', to: '/settings/push', Icon: Bell, label: 'Push notifications', desc: 'Enable phone alerts for motion detection' },
   { key: 'logs', to: '/settings/logs', Icon: ScrollText, label: 'Logs', desc: 'Camera history and server logs' },
 ];

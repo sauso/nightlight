@@ -10,6 +10,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Added
+- **The camera cog sheet now has quick controls.** *Connection mode* (Low / Compat) and *Quality*
+  (High / Low) are segmented buttons, and admins get **quick Motion / Sound toggles** right there —
+  no need to open full camera settings just to arm or silence detection.
 - **Children and caregivers now open their own screens** (like cameras) instead of pop-up modals —
   reached from the Family hub. Each shows an avatar (initials for now) with room for a photo later.
 - **Edit your own name.** Settings → Account now lets any user set their First/Last name (the login
@@ -29,6 +32,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - **Light-mode polish:** form fields are now white (not pale lavender) in light mode; the MQTT icon
   is cropped to fill its space like the other icons; and list/menu labels (Pushover, Firebase,
   children, cameras…) are larger and easier to read.
+- **More light-mode polish:** the MQTT settings icon is aligned and sized to match the others; the
+  ONVIF "Fetch" and "Verify login" buttons now have a visible outline in light mode instead of
+  near-invisible plain text.
 
 ### Added
 - **Per-camera settings are now their own screen.** Editing or adding a camera opens a full page
