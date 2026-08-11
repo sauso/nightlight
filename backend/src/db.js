@@ -331,6 +331,13 @@ if (!pushTokenColumns.includes('base_url')) {
   db.exec('ALTER TABLE push_tokens ADD COLUMN base_url TEXT');
 }
 
+// snapshot: 1 when the alert-time image was captured and saved to disk (DATA_DIR/detection-snapshots/
+// <id>.jpg), so the in-app Alerts feed knows to show a thumbnail. See lib/detectionEvents.js.
+const detectionEventsColumns = db.prepare('PRAGMA table_info(detection_events)').all().map((c) => c.name);
+if (!detectionEventsColumns.includes('snapshot')) {
+  db.exec('ALTER TABLE detection_events ADD COLUMN snapshot INTEGER NOT NULL DEFAULT 0');
+}
+
 // Ensure the single settings row always exists.
 db.prepare(
   `INSERT OR IGNORE INTO settings (id, app_name, accent_color, live_color, offline_color, timezone, font_choice, temp_unit)
