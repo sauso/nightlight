@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
-import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { requireAuth, requireAdmin, requireAuthQueryOrHeader } from '../middleware/auth.js';
 import { upsertPath, removePath, getPathStatus, toPathName } from '../lib/mediamtx.js';
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
 import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.js';
 import { startMotionDetector, stopMotionDetector } from '../lib/motionDetector.js';
 import { startSoundDetector, stopSoundDetector } from '../lib/soundDetector.js';
-import { getRecentDetectionEvents, clearDetectionEvents } from '../lib/detectionEvents.js';
+import { getRecentDetectionEvents, clearDetectionEvents, getEventSnapshotFile } from '../lib/detectionEvents.js';
 import { verifyTalkCreds } from '../lib/twoWayAudio.js';
 import { getReading, subscribeAllCameraTopics, refreshMqttConnection } from '../lib/mqttClient.js';
 import { probeOnvifCamera, ptzNudge, ptzRelativeStep, probePtzRelativeSupport } from '../lib/onvif.js';
@@ -15,6 +15,17 @@ import { validateRtspStream } from '../lib/rtspProbe.js';
 import { logger } from '../lib/logger.js';
 
 const router = Router();
+
+// Alert snapshot image — any authenticated user. Registered BEFORE the router-wide requireAuth
+// so it can accept a ?token= query param: an <img> can't attach an Authorization header (same
+// reason HLS uses query-token auth). The literal "/alerts/" prefix keeps it clear of the /:id
+// routes further down.
+router.get('/alerts/:id/snapshot', requireAuthQueryOrHeader, (req, res) => {
+  const file = getEventSnapshotFile(req.params.id);
+  if (!file) return res.status(404).json({ error: 'No snapshot for this alert' });
+  res.sendFile(file);
+});
+
 router.use(requireAuth);
 
 function isValidRtsp(url) {

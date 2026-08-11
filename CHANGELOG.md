@@ -21,9 +21,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   — for admins — adds a **Camera settings** shortcut that opens that camera's full settings directly.
 - **Light theme.** Settings → Account → Appearance now offers Light / Dark / System (follows your
   phone). The choice is per-device, like mute and stream quality.
-- **Alerts tab feed.** The Alerts tab now shows the motion/sound detection feed to any signed-in
-  user (previously it was buried in the admin-only Logs screen) — auto-refreshing, with clear-history
-  kept admin-only. Each row leaves room for the triggering snapshot (image persistence is a follow-up).
+- **Alerts tab feed, with snapshots.** The Alerts tab now shows the motion/sound detection feed to
+  any signed-in user (previously it was buried in the admin-only Logs screen) — auto-refreshing, with
+  clear-history kept admin-only. Each detection's snapshot is now **saved and shown as a thumbnail**,
+  so the feed is a useful record even with no push notifications set up. The image is captured on
+  every detection (not just when push is enabled), stored one file per alert, and pruned along with
+  the alert history (kept up to 30 days).
 
 ### Changed
 - **Settings that apply the moment you flip them now use a pill toggle switch** instead of a

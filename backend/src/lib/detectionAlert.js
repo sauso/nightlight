@@ -1,5 +1,5 @@
 import { logger } from './logger.js';
-import { recordDetectionEvent, ALERT } from './detectionEvents.js';
+import { recordDetectionEvent, saveEventSnapshot, ALERT } from './detectionEvents.js';
 import { sendToAll, pushEnabled, getPublicBaseUrl } from './push.js';
 import { pushoverEnabled, sendPushover } from './pushover.js';
 import { captureSnapshot, fetchHttpSnapshot } from './snapshot.js';
@@ -29,16 +29,22 @@ async function resolveSnapshot(camera, snapshotPath) {
 
 export async function fireDetectionAlert(camera, type, detail, { snapshotPath = null } = {}) {
   const w = WORDING[type] || { body: 'Alert', suffix: 'alert' };
-  recordDetectionEvent(camera.id, camera.name, type, detail);
+  const eventId = recordDetectionEvent(camera.id, camera.name, type, detail);
   logger.info(`[detect] ${type} on "${camera.name}" (${detail})`);
 
   const firePush = pushEnabled();
   const firePushover = pushoverEnabled();
-  if (!firePush && !firePushover) return;
 
-  // Capture ONCE and share across both channels.
+  // Capture ONCE and reuse everywhere: the in-app Alerts feed thumbnail plus both push channels.
+  // Done even when no push is configured, so the feed stays useful for push-less setups (best-effort).
   const image = await resolveSnapshot(camera, snapshotPath);
-  if (!image) logger.info(`[detect] no snapshot for "${camera.name}" (grab failed/timed out) — sending without image`);
+  if (image) {
+    if (eventId) saveEventSnapshot(eventId, image);
+  } else {
+    logger.info(`[detect] no snapshot for "${camera.name}" (grab failed/timed out) — feed/alert without image`);
+  }
+
+  if (!firePush && !firePushover) return;
 
   if (firePush) {
     logger.info(`[detect] sending Firebase alert for "${camera.name}"`);
