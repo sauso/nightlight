@@ -3,6 +3,7 @@ import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import Modal from '../components/Modal.jsx';
 import AppHeader from '../components/AppHeader.jsx';
+import Switch from '../components/Switch.jsx';
 import {
   notificationsSupported,
   notificationsEnabled,
@@ -109,7 +110,7 @@ export default function Account() {
 
   return (
     <>
-      <AppHeader title={displayName(user || {})} />
+      <AppHeader title={displayName(user || {})} back={{ to: '/settings', label: 'Settings' }} />
       <main className="app-main">
         {error && <div className="error-banner">{error}</div>}
 
@@ -161,9 +162,7 @@ export default function Account() {
               ) : (
                 <>
                   <label className="log-viewer__toggle" style={{ padding: 12, margin: 0 }}>
-                    <input
-                      type="checkbox"
-                      style={{ width: 'auto', margin: 0 }}
+                    <Switch
                       checked={notifEnabled}
                       disabled={notifBusy || !serverPush}
                       onChange={(e) => toggleNotifications(e.target.checked)}

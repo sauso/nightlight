@@ -34,7 +34,7 @@ export default function About() {
 
   return (
     <>
-      <AppHeader title="About" />
+      <AppHeader title="About" back={{ to: '/settings', label: 'Settings' }} />
       <main className="app-main">
         <div className="card about-hero">
           <img src="/icons/icon-192.png" alt="" className="about-hero__icon" />

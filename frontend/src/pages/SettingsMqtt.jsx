@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import AppHeader from '../components/AppHeader.jsx';
 import SettingsBack from '../components/SettingsBack.jsx';
+import Switch from '../components/Switch.jsx';
 
 export default function SettingsMqtt() {
   const [form, setForm] = useState({ mqtt_enabled: false, mqtt_host: '', mqtt_port: '', mqtt_username: '', mqtt_password: '' });
@@ -64,8 +65,7 @@ export default function SettingsMqtt() {
               Zigbee2MQTT) to show temperature and humidity on each camera.
             </div>
             <label className="log-viewer__toggle" style={{ marginBottom: 14 }}>
-              <input
-                type="checkbox"
+              <Switch
                 checked={!!form.mqtt_enabled}
                 onChange={(e) => setForm({ ...form, mqtt_enabled: e.target.checked })}
               />

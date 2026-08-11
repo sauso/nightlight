@@ -9,6 +9,22 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **New bottom navigation: Live · Alerts · Family · Settings.** The old Nursery/Children/Cameras
+  tabs are reorganised into two hubs — **Family** (Children, Cameras, and — for admins — Caregivers)
+  and **Settings** — plus a dedicated **Alerts** tab (feed built out separately). Sub-pages now have
+  a labelled back button ("‹ Family", "‹ Settings") that returns you to where you came from.
+
+### Changed
+- **Settings that apply the moment you flip them now use a pill toggle switch** instead of a
+  checkbox — "Send motion alerts to this device", Enable MQTT, Enable Pushover / Firebase
+  notifications, and the Logs auto-refresh. Checkboxes are kept for settings that only take effect
+  when you press Save, so the control's shape tells you whether a change is instant or pending.
+- **Account, About, Change server and Sign out moved out of the header menu into the Settings tab.**
+  The header's hamburger menu is gone — everything it held now lives under Settings, with the app
+  version shown inline on the About row. Caregivers see a slimmed Settings (Account + About);
+  admins additionally see General, MQTT, Push and Logs.
+
 ## [0.13.0] - 2026-08-10
 
 ### Added
