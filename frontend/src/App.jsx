@@ -15,6 +15,8 @@ import Alerts from './pages/Alerts.jsx';
 import Family from './pages/Family.jsx';
 import Children from './pages/Children.jsx';
 import Cameras from './pages/Cameras.jsx';
+import CameraSettings from './pages/CameraSettings.jsx';
+import DetectionSettings from './pages/DetectionSettings.jsx';
 import Account from './pages/Account.jsx';
 import Settings from './pages/Settings.jsx';
 import SettingsGeneral from './pages/SettingsGeneral.jsx';
@@ -113,6 +115,12 @@ function Shell() {
                     <Route path="/family" element={<Family />} />
                     <Route path="/children" element={<Children />} />
                     <Route path="/cameras" element={<Cameras />} />
+                    {/* Per-camera settings + split detection screens are admin-only (camera
+                        management). /cameras/new and /cameras/:id/:kind are more specific than
+                        /cameras/:id, so react-router matches them first regardless of order. */}
+                    <Route path="/cameras/new" element={<AdminProtected><CameraSettings /></AdminProtected>} />
+                    <Route path="/cameras/:id" element={<AdminProtected><CameraSettings /></AdminProtected>} />
+                    <Route path="/cameras/:id/:kind" element={<AdminProtected><DetectionSettings /></AdminProtected>} />
                     {/* Settings hub is role-aware internally (admin-only rows are hidden for
                         caregivers), so the hub route itself is open to any signed-in user;
                         the config sub-pages stay admin-gated. */}

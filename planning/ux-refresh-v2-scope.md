@@ -18,6 +18,16 @@ data model are listed explicitly in §6.
 
 ## 0. The v1 cut (what we build first)
 
+> **Status update (2026-08-11): v1 is BUILT and deployed to staging** (`dev`, through commit
+> `4c71512`). Shipped: Phases 0, 1, 2, 3, 6, 7, and 8 (Alerts feed **with** per-event snapshot
+> persistence — the "images already exist" assumption below was wrong; snapshots are now captured
+> on every detection and stored one file per alert). Notable correction found during the build:
+> `GET /cameras/alerts` was **already** caregiver-accessible, so Q3 needed no new endpoint — the
+> feed was only ever hidden by living under admin-only Logs. **Deferred to v2:** Phase 4 (per-camera
+> settings as real routes), Phase 5 (split Motion/Sound/Schedule screens), and the Alerts unread
+> badge. Awaiting prod-release go-ahead.
+
+
 All six decisions are made (§5). With dark mode landing **per-device** (zero backend) and the Alerts
 feed needing only **one small read endpoint**, v1 is everything except the per-camera **routing
 refactor** and the **split detection screens**. Concretely:

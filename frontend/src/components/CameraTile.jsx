@@ -192,13 +192,11 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
     setModeMenuOpen(false);
     setQualityMenuOpen(false);
   }
-  // "Camera settings" from the gear sheet (admin only). For v1 this opens the existing
-  // edit modal on the Cameras page by deep-linking with the camera id; the per-camera
-  // settings screens (and split Motion/Sound/Schedule) come in a later phase. `from`
-  // makes that page's back button return to Live, where the gear sheet was opened.
+  // "Camera settings" from the gear sheet (admin only) → that camera's routed settings screen.
+  // `from` makes its back button return to Live, where the gear sheet was opened.
   function openCameraSettings() {
     closeMenu();
-    navigate('/cameras', { state: { editCameraId: camera.id, from: { to: '/', label: 'Live' } } });
+    navigate(`/cameras/${camera.id}`, { state: { from: { to: '/', label: 'Live' } } });
   }
   const manualModeRef = useRef(false);
   const videoWrapRef = useRef(null);

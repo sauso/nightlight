@@ -33,7 +33,7 @@ function Row({ Icon, label, desc, trailing, onClick }) {
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <Icon size={20} aria-hidden="true" />
+        <Icon size={20} color="var(--peri)" aria-hidden="true" />
         <div>
           <div>{label}</div>
           {desc && <div className="camera-tile__sub">{desc}</div>}

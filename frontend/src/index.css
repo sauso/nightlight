@@ -1,14 +1,24 @@
 :root {
-  --bg: #12172b;
-  --bg-elevated: #1b2140;
-  --bg-elevated-2: #242c52;
-  --text-primary: #edeef5;
-  --text-secondary: #8a8fb0;
-  --accent: #f5d9a8;
-  --accent-dim: #c9ad7a;
-  --live: #7fbfa3;
-  --offline: #e08585;
-  --border: rgba(245, 217, 168, 0.12);
+  /* Light is the default palette. Two accent roles, matching the design mockup:
+     --peri (periwinkle, fixed) is the interactive "chrome" colour — active tab, switches,
+     sliders, row icons, back link, drill-in accents. --accent (gold by default, and the one
+     the user can recolour in Settings → General) is the call-to-action colour — primary
+     buttons, the camera-tile glow, temperature/humidity icons. --bar is the navy top bar,
+     the same in both themes. Only the neutrals below flip between light and dark. */
+  --bg: #f0eff5;
+  --bg-elevated: #ffffff;
+  --bg-elevated-2: #eeedfa;
+  --text-primary: #1b1c33;
+  --text-secondary: #70718f;
+  --accent: #f4c56a;
+  --accent-dim: #cda94f;
+  --peri: #7c83db;
+  --peri-soft: #cfd2f5;
+  --bar: #12143a;
+  --bar-text: #f4f4fb;
+  --live: #6fae90;
+  --offline: #d9707a;
+  --border: #e6e4f0;
   --radius: 16px;
 
   --font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
@@ -16,22 +26,26 @@
   --font-mono: 'SF Mono', 'IBM Plex Mono', Menlo, Consolas, monospace;
 }
 
-/* Per-device light theme (see lib/theme.js). The base :root above is the dark palette; the
-   'system' choice is resolved to a concrete light/dark in JS, so we only ever need explicit
-   [data-theme='light']. Only the background/text/border tokens flip — the accent, live and
-   offline colours are the user's own choice (applied inline by SettingsContext) and are kept
-   across both themes. The bottom nav and the over-video surfaces are deliberately left dark. */
-:root[data-theme='light'] {
-  --bg: #f3efe6;
-  --bg-elevated: #ffffff;
-  --bg-elevated-2: #ece6d8;
-  --text-primary: #21243a;
-  --text-secondary: #6b6f88;
-  --border: rgba(40, 40, 70, 0.14);
-}
-
-[data-theme='light'] body {
-  background: radial-gradient(ellipse at top, #ffffff 0%, var(--bg) 60%);
+/* Dark palette. Theme choice is per-device (see lib/theme.js), which resolves 'system' to a
+   concrete light/dark in JS and stamps it on <html>, so we only need explicit light (:root
+   above) + dark here. --accent / --live / --offline are also set inline by SettingsContext
+   from the user's saved colours, so the values here are just the fallback. --peri and --bar
+   are fixed across both themes. */
+:root[data-theme='dark'] {
+  --bg: #0f1124;
+  --bg-elevated: #181a33;
+  --bg-elevated-2: #1e2140;
+  --text-primary: #eceaf6;
+  --text-secondary: #8d8fb4;
+  --accent: #f4c56a;
+  --accent-dim: #cda94f;
+  --peri: #7c83db;
+  --peri-soft: #cfd2f5;
+  --bar: #12143a;
+  --bar-text: #f4f4fb;
+  --live: #7fc9a3;
+  --offline: #e08585;
+  --border: #282a48;
 }
 
 * { box-sizing: border-box; }
@@ -60,7 +74,7 @@ html, body, #root {
 
 body {
   margin: 0;
-  background: radial-gradient(ellipse at top, #171d38 0%, var(--bg) 55%);
+  background: var(--bg);
   color: var(--text-primary);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
@@ -94,8 +108,10 @@ button {
   display: flex;
   align-items: center;
   padding: calc(8px + env(safe-area-inset-top)) 20px 8px;
-  background: var(--bg-elevated);
-  border-bottom: 1px solid var(--border);
+  /* Navy bar in both themes (matches the mockup). */
+  background: var(--bar);
+  color: var(--bar-text);
+  border-bottom: none;
 }
 
 .app-header__top-row {
@@ -124,7 +140,7 @@ button {
 
 .app-header h1 {
   font-size: 22px;
-  color: var(--text-primary);
+  color: var(--bar-text);
 }
 
 /* Labelled back affordance in the header's left slot on sub-pages (see BackLink.jsx). */
@@ -138,7 +154,7 @@ button {
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--accent);
+  color: var(--peri-soft);
   font-size: 15px;
   font-family: inherit;
 }
@@ -339,8 +355,7 @@ body.in-pip .tile-menu-backdrop {
   right: 0;
   display: flex;
   justify-content: space-around;
-  background: rgba(18, 23, 43, 0.92);
-  backdrop-filter: blur(10px);
+  background: var(--bg-elevated);
   border-top: 1px solid var(--border);
   padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
   z-index: 20;
@@ -359,7 +374,7 @@ body.in-pip .tile-menu-backdrop {
 }
 
 .bottom-nav a.active {
-  color: var(--accent);
+  color: var(--peri);
 }
 
 .bottom-nav__icon {
@@ -710,7 +725,7 @@ body.in-pip .tile-menu-backdrop {
 }
 
 .tile-menu__item--active {
-  color: var(--accent);
+  color: var(--peri);
   font-weight: 600;
 }
 
@@ -1118,7 +1133,7 @@ body.in-pip .tile-menu-backdrop {
 }
 
 .camera-tile__reading-icon {
-  color: var(--accent-dim);
+  color: var(--accent);
   flex-shrink: 0;
 }
 
@@ -1413,6 +1428,42 @@ body.in-pip .tile-menu-backdrop {
   color: var(--text-secondary);
 }
 
+/* Detection screens (DetectionSettings.jsx): enable-toggle row, slider legend, save flag. */
+.tgl-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.slider-legend {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 6px;
+}
+
+.save-flag {
+  min-height: 16px;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--peri);
+  margin-bottom: 4px;
+}
+
+input[type='range'] {
+  width: 100%;
+  accent-color: var(--peri);
+}
+
 /* Segmented control (e.g. the Light / Dark / System theme picker in Account). */
 .segmented {
   display: flex;
@@ -1441,8 +1492,8 @@ body.in-pip .tile-menu-backdrop {
 }
 
 .segmented__btn--active {
-  background: var(--accent);
-  color: var(--bg);
+  background: var(--peri);
+  color: #fff;
   font-weight: 600;
 }
 
@@ -1491,13 +1542,13 @@ body.in-pip .tile-menu-backdrop {
 }
 
 .switch input:checked ~ .switch__track {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--peri);
+  border-color: var(--peri);
 }
 
 .switch input:checked ~ .switch__track .switch__thumb {
   transform: translateX(18px);
-  background: var(--bg);
+  background: #fff;
 }
 
 .switch input:focus-visible ~ .switch__track {
