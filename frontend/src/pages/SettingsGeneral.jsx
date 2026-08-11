@@ -4,7 +4,6 @@ import { useSettings } from '../lib/SettingsContext.jsx';
 import { getCommonTimezones } from '../lib/greeting.js';
 import { FONT_PRESETS } from '../lib/fonts.js';
 import AppHeader from '../components/AppHeader.jsx';
-import SettingsBack from '../components/SettingsBack.jsx';
 
 const PRESETS = [
   { label: 'Nursery (default)', accent: '#f4c56a', live: '#7FBFA3', offline: '#E08585' },
@@ -61,9 +60,8 @@ export default function SettingsGeneral() {
 
   return (
     <>
-      <AppHeader title="General" />
+      <AppHeader title="General" back={{ to: '/settings', label: 'Settings' }} />
       <main className="app-main">
-        <SettingsBack />
         {error && <div className="error-banner">{error}</div>}
         {saved && <div className="saved-banner">Saved ✓</div>}
 

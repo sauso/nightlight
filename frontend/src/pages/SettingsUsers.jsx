@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
-import SettingsBack from '../components/SettingsBack.jsx';
 
 function timeAgo(iso) {
   const seconds = Math.floor((Date.now() - new Date(iso + 'Z').getTime()) / 1000);
@@ -49,9 +48,8 @@ export default function SettingsUsers() {
 
   return (
     <>
-      <AppHeader title="User management" />
+      <AppHeader title="User management" back={{ to: '/settings', label: 'Settings' }} />
       <main className="app-main">
-        <SettingsBack />
         {error && <div className="error-banner">{error}</div>}
 
         <div className="section-title">Caregiver accounts</div>

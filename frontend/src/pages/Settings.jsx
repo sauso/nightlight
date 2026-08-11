@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  SlidersHorizontal, Thermometer, Bell, ScrollText,
+  SlidersHorizontal, Bell, ScrollText,
   Info, Server, LogOut, ChevronRight,
 } from 'lucide-react';
 import { api } from '../lib/api.js';
@@ -9,6 +9,7 @@ import { useAuth } from '../lib/AuthContext.jsx';
 import { isNativeApp, changeServer } from '../lib/nativeBridge.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Avatar from '../components/Avatar.jsx';
+import MqttIcon from '../components/icons/MqttIcon.jsx';
 
 // Settings is a hub. Account sits at the top in its own card (like the mockup); system config
 // (General / MQTT / Push / Logs) is admin-only; About + Change server share a card; Sign out is
@@ -48,7 +49,7 @@ function Row({ Icon, label, desc, trailing, onClick }) {
 
 const ADMIN_ITEMS = [
   { key: 'general', to: '/settings/general', Icon: SlidersHorizontal, label: 'General', desc: 'App name, timezone, theme, font, colours, temperature unit' },
-  { key: 'mqtt', to: '/settings/mqtt', Icon: Thermometer, label: 'MQTT', desc: 'Broker for room temperature / humidity' },
+  { key: 'mqtt', to: '/settings/mqtt', Icon: MqttIcon, label: 'MQTT', desc: 'Connect your broker — room temperature/humidity and camera-side motion detection' },
   { key: 'push', to: '/settings/push', Icon: Bell, label: 'Push notifications', desc: 'Enable phone alerts for motion detection' },
   { key: 'logs', to: '/settings/logs', Icon: ScrollText, label: 'Logs', desc: 'Camera history and server logs' },
 ];

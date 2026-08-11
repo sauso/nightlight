@@ -78,7 +78,7 @@ export default function ChildSettings() {
             <div className="field">
               <label htmlFor="child-name">Name</label>
               <input id="child-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required autoFocus placeholder="e.g. Renz" />
+                required placeholder="e.g. Renz" />
             </div>
 
             <div className="field">

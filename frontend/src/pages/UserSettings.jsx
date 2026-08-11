@@ -87,7 +87,7 @@ export default function UserSettings() {
             <div className="onvif-box__row">
               <div className="field">
                 <label htmlFor="u-first">First name</label>
-                <input id="u-first" value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} autoFocus />
+                <input id="u-first" value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} />
               </div>
               <div className="field">
                 <label htmlFor="u-last">Last name</label>

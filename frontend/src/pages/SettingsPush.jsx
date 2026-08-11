@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import AppHeader from '../components/AppHeader.jsx';
-import SettingsBack from '../components/SettingsBack.jsx';
 import Switch from '../components/Switch.jsx';
 
 export default function SettingsPush() {
@@ -64,9 +63,8 @@ export default function SettingsPush() {
 
   return (
     <>
-      <AppHeader title="Push notifications" />
+      <AppHeader title="Push notifications" back={{ to: '/settings', label: 'Settings' }} />
       <main className="app-main">
-        <SettingsBack />
 
         <div className="camera-tile__sub" style={{ marginBottom: 12 }}>
           Get alerted on your phone when a camera with motion detection sees movement, even when the

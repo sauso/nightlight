@@ -21,6 +21,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - **PTZ no longer dims the video or eats arrow taps.** The pan/tilt pad reused the new gear-sheet's
   dimmed backdrop, which sat over the arrows — it now has its own transparent layer, so the D-pad
   works again.
+- **Settings sub-pages (General / MQTT / Push / Logs / Users) put their back button in the nav bar**
+  like every other page, instead of a stray link below it.
+- **Opening a camera, child or caregiver form no longer pops up the keyboard** automatically.
+- **MQTT** has its own logo icon in Settings, and its description now reflects that it's used for
+  both room sensor readings and camera-side motion detection (not just temperature/humidity).
 
 ### Added
 - **Per-camera settings are now their own screen.** Editing or adding a camera opens a full page
