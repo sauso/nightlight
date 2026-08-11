@@ -199,7 +199,7 @@ export default function CameraSettings() {
             </div>
 
             <div className="onvif-fetch">
-              <button type="button" className="btn" onClick={fetchFromOnvif} disabled={onvifBusy}>
+              <button type="button" className="btn btn-secondary" onClick={fetchFromOnvif} disabled={onvifBusy}>
                 {onvifBusy ? 'Fetching…' : '↻ Fetch port, path & capabilities from ONVIF'}
               </button>
               <div className="camera-tile__sub" style={{ marginTop: 6 }}>
@@ -244,7 +244,7 @@ export default function CameraSettings() {
                       placeholder={caps.talk_has_password ? '•••••• (unchanged)' : ''} />
                   </div>
                 </div>
-                <button type="button" className="btn" onClick={verifyTalk} disabled={talkVerifyBusy} style={{ marginTop: 4 }}>
+                <button type="button" className="btn btn-secondary" onClick={verifyTalk} disabled={talkVerifyBusy} style={{ marginTop: 4 }}>
                   {talkVerifyBusy ? 'Verifying…' : 'Verify login'}
                 </button>
                 {talkVerifyMsg && <div className={talkVerifyMsg.ok ? 'onvif-box__ok' : 'onvif-box__err'}>{talkVerifyMsg.text}</div>}
