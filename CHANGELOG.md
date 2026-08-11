@@ -14,6 +14,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   tabs are reorganised into two hubs — **Family** (Children, Cameras, and — for admins — Caregivers)
   and **Settings** — plus a dedicated **Alerts** tab (feed built out separately). Sub-pages now have
   a labelled back button ("‹ Family", "‹ Settings") that returns you to where you came from.
+- **Room temperature and humidity now show with thermometer / droplet icons** on each camera tile,
+  so the two readings read at a glance instead of running together in one line.
+- **The camera tile's gear opens a bottom sheet** (grabber, grouped Stream / camera rows, Done)
+  instead of a small pop-up menu. It keeps Low latency / Compatibility, quality and Stop camera, and
+  — for admins — adds a **Camera settings** shortcut that opens that camera's full settings directly.
+- **Light theme.** Settings → Account → Appearance now offers Light / Dark / System (follows your
+  phone). The choice is per-device, like mute and stream quality.
+- **Alerts tab feed.** The Alerts tab now shows the motion/sound detection feed to any signed-in
+  user (previously it was buried in the admin-only Logs screen) — auto-refreshing, with clear-history
+  kept admin-only. Each row leaves room for the triggering snapshot (image persistence is a follow-up).
 
 ### Changed
 - **Settings that apply the moment you flip them now use a pill toggle switch** instead of a

@@ -16,6 +16,24 @@
   --font-mono: 'SF Mono', 'IBM Plex Mono', Menlo, Consolas, monospace;
 }
 
+/* Per-device light theme (see lib/theme.js). The base :root above is the dark palette; the
+   'system' choice is resolved to a concrete light/dark in JS, so we only ever need explicit
+   [data-theme='light']. Only the background/text/border tokens flip — the accent, live and
+   offline colours are the user's own choice (applied inline by SettingsContext) and are kept
+   across both themes. The bottom nav and the over-video surfaces are deliberately left dark. */
+:root[data-theme='light'] {
+  --bg: #f3efe6;
+  --bg-elevated: #ffffff;
+  --bg-elevated-2: #ece6d8;
+  --text-primary: #21243a;
+  --text-secondary: #6b6f88;
+  --border: rgba(40, 40, 70, 0.14);
+}
+
+[data-theme='light'] body {
+  background: radial-gradient(ellipse at top, #ffffff 0%, var(--bg) 60%);
+}
+
 * { box-sizing: border-box; }
 
 html, body, #root {
@@ -601,29 +619,77 @@ body.in-pip .tile-menu-backdrop {
   backdrop-filter: blur(4px);
 }
 
+/* The gear opens a bottom sheet (see CameraTile.jsx). The backdrop dims the whole screen
+   and dismisses on tap; the sheet itself is fixed to the bottom, so the tile's overflow
+   clipping no longer constrains it the way the old in-tile popover was. */
 .tile-menu-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 3;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.45);
+  animation: sheet-fade 0.16s ease;
 }
 
 .tile-menu {
-  position: absolute;
-  bottom: 46px;
-  left: 10px;
-  min-width: 150px;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 51;
+  max-width: 520px;
+  margin: 0 auto;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 4px;
-  z-index: 4;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-  /* The tile clips overflow (overflow:hidden for rounded corners/zoom), and this menu grows upward.
-     With the quality options it can be taller than a short tile - cap it and scroll so the top item
-     (Low latency) is never clipped out of reach. */
-  max-height: calc(100% - 56px);
+  border-bottom: none;
+  border-radius: 18px 18px 0 0;
+  padding: 8px 14px calc(14px + env(safe-area-inset-bottom));
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.5);
+  max-height: 80vh;
   overflow-y: auto;
   overscroll-behavior: contain;
+  animation: sheet-up 0.2s ease;
+}
+
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes sheet-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.tile-menu__grabber {
+  width: 38px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--text-secondary);
+  opacity: 0.4;
+  margin: 4px auto 10px;
+}
+
+.tile-menu__title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+/* A labelled group of rows, visually separated by a soft panel. */
+.tile-menu__label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  margin: 2px 4px 6px;
+}
+
+.tile-menu__section {
+  background: var(--bg-elevated-2);
+  border-radius: 12px;
+  padding: 4px;
+  margin-bottom: 12px;
 }
 
 .tile-menu__item {
@@ -632,15 +698,15 @@ body.in-pip .tile-menu-backdrop {
   text-align: left;
   background: none;
   border: none;
-  color: var(--text-secondary);
-  font-size: 13px;
-  padding: 9px 10px;
-  border-radius: 7px;
+  color: var(--text-primary);
+  font-size: 15px;
+  padding: 12px 12px;
+  border-radius: 9px;
   cursor: pointer;
 }
 
 .tile-menu__item:hover {
-  background: var(--bg-elevated-2);
+  background: var(--bg-elevated);
 }
 
 .tile-menu__item--active {
@@ -648,12 +714,7 @@ body.in-pip .tile-menu-backdrop {
   font-weight: 600;
 }
 
-.tile-menu__divider {
-  height: 1px;
-  background: var(--border);
-  margin: 4px 6px;
-}
-/* "Quality" row that drills into the High/Low submenu: label left, current value + chevron right. */
+/* A row that drills in / navigates: label left, current value + chevron right. */
 .tile-menu__item--submenu {
   display: flex;
   align-items: center;
@@ -663,11 +724,25 @@ body.in-pip .tile-menu-backdrop {
 .tile-menu__value {
   color: var(--text-secondary);
   opacity: 0.75;
-  font-size: 12px;
+  font-size: 14px;
 }
 .tile-menu__item--back {
   font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.tile-menu__done {
+  display: block;
+  width: 100%;
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border);
   color: var(--text-primary);
+  font-size: 15px;
+  font-family: inherit;
+  font-weight: 600;
+  padding: 12px;
+  border-radius: 12px;
+  cursor: pointer;
 }
 
 /* Shown over a tile the user has stopped (per-device playback off, stream torn down). */
@@ -1034,9 +1109,17 @@ body.in-pip .tile-menu-backdrop {
 }
 
 .camera-tile__reading {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12px;
   color: var(--text-secondary);
   white-space: nowrap;
+}
+
+.camera-tile__reading-icon {
+  color: var(--accent-dim);
+  flex-shrink: 0;
 }
 
 /* --- Forms --- */
@@ -1330,6 +1413,39 @@ body.in-pip .tile-menu-backdrop {
   color: var(--text-secondary);
 }
 
+/* Segmented control (e.g. the Light / Dark / System theme picker in Account). */
+.segmented {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 4px;
+}
+
+.segmented__btn {
+  flex: 1;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  border-radius: 9px;
+  padding: 10px 6px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.segmented__btn--active {
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+}
+
 /* Pill toggle switch (see components/Switch.jsx) — for immediate-apply settings only.
    The real checkbox is stretched over the track and made invisible so it stays the hit
    target and keeps native label/keyboard behaviour; the track + thumb are the visuals. */
@@ -1441,6 +1557,60 @@ body.in-pip .tile-menu-backdrop {
 }
 
 /* Camera history (event log) */
+/* Top-level Alerts feed (pages/Alerts.jsx) — one card per detection, with room for a
+   snapshot thumbnail on the left (falls back to the type dot until images are persisted). */
+.alert-feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.alert-feed__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  margin: 0;
+}
+
+.alert-feed__thumb {
+  flex-shrink: 0;
+  width: 64px;
+  height: 48px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #0a0d1c;
+}
+
+.alert-feed__dot {
+  margin-top: 0;
+}
+
+.alert-feed__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.alert-feed__line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.alert-feed__camera {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.alert-feed__time {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 .event-log__list {
   list-style: none;
   margin: 0;

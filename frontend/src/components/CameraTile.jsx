@@ -1,28 +1,36 @@
 import { useEffect, useRef, useState } from 'react';
-import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic } from 'lucide-react';
+import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { startTalk } from '../lib/twoWayTalk.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
+import { useAuth } from '../lib/AuthContext.jsx';
 import { isNativeApp, isIOS, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip, hasNativePip, subscribeBackgroundPaused, isBackgroundPaused, setBackgroundPaused, setPipAutoEnteredFullscreen } from '../lib/nativeBridge.js';
 import WhepPlayer from './WhepPlayer.jsx';
 import HlsPlayer from './HlsPlayer.jsx';
 import BreathingDot from './BreathingDot.jsx';
 
-function formatReading(mqtt, tempUnit) {
-  if (!mqtt) return null;
+// Room temperature / humidity from MQTT, one entry per available reading, each with its own
+// icon (thermometer / droplet) so the two values read at a glance instead of running together
+// as a "22.5°C · 45%" string.
+function readingParts(mqtt, tempUnit) {
+  if (!mqtt) return [];
   const parts = [];
   if (typeof mqtt.temperature === 'number') {
     const value = tempUnit === 'F' ? (mqtt.temperature * 9) / 5 + 32 : mqtt.temperature;
-    parts.push(`${value.toFixed(1)}°${tempUnit}`);
+    parts.push({ key: 'temp', Icon: Thermometer, text: `${value.toFixed(1)}°${tempUnit}` });
   }
   if (typeof mqtt.humidity === 'number') {
-    parts.push(`${Math.round(mqtt.humidity)}%`);
+    parts.push({ key: 'humidity', Icon: Droplet, text: `${Math.round(mqtt.humidity)}%` });
   }
-  return parts.length > 0 ? parts.join(' · ') : null;
+  return parts;
 }
 
 export default function CameraTile({ camera, childName, dragHandleProps, refreshNonce = 0 }) {
   const { settings } = useSettings();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const navigate = useNavigate();
   // Per-device, not synced through the backend - deliberately so a phone sitting next
   // to you can stay muted while a tablet mounted in the nursery stays unmuted, rather
   // than muting on one device silently muting it everywhere.
@@ -183,6 +191,14 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   function closeMenu() {
     setModeMenuOpen(false);
     setQualityMenuOpen(false);
+  }
+  // "Camera settings" from the gear sheet (admin only). For v1 this opens the existing
+  // edit modal on the Cameras page by deep-linking with the camera id; the per-camera
+  // settings screens (and split Motion/Sound/Schedule) come in a later phase. `from`
+  // makes that page's back button return to Live, where the gear sheet was opened.
+  function openCameraSettings() {
+    closeMenu();
+    navigate('/cameras', { state: { editCameraId: camera.id, from: { to: '/', label: 'Live' } } });
   }
   const manualModeRef = useRef(false);
   const videoWrapRef = useRef(null);
@@ -526,17 +542,18 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
         {modeMenuOpen && (
           <>
             <div className="tile-menu-backdrop" onClick={closeMenu} />
-            <div className="tile-menu">
+            <div className="tile-menu" role="dialog" aria-label={`${camera.name} settings`}>
+              <div className="tile-menu__grabber" aria-hidden="true" />
+              <div className="tile-menu__title">{camera.name}</div>
               {qualityMenuOpen ? (
-                // Quality submenu (drill-in) - keeps the main menu short so it never needs scrolling.
-                <>
+                // Quality submenu (drill-in) - keeps the main sheet short.
+                <div className="tile-menu__section">
                   <button
                     className="tile-menu__item tile-menu__item--back"
                     onClick={() => setQualityMenuOpen(false)}
                   >
                     ‹ Quality
                   </button>
-                  <div className="tile-menu__divider" />
                   <button
                     className={`tile-menu__item${quality === 'high' ? ' tile-menu__item--active' : ''}`}
                     onClick={() => { setQuality('high'); closeMenu(); }}
@@ -549,24 +566,24 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
                   >
                     Low
                   </button>
-                </>
+                </div>
               ) : (
                 <>
-                  <button
-                    className={`tile-menu__item${mode === 'live' ? ' tile-menu__item--active' : ''}`}
-                    onClick={() => selectMode('live')}
-                  >
-                    Low latency
-                  </button>
-                  <button
-                    className={`tile-menu__item${mode === 'compat' ? ' tile-menu__item--active' : ''}`}
-                    onClick={() => selectMode('compat')}
-                  >
-                    Compatibility
-                  </button>
-                  {camera.has_sub && (
-                    <>
-                      <div className="tile-menu__divider" />
+                  <div className="tile-menu__label">Stream</div>
+                  <div className="tile-menu__section">
+                    <button
+                      className={`tile-menu__item${mode === 'live' ? ' tile-menu__item--active' : ''}`}
+                      onClick={() => selectMode('live')}
+                    >
+                      Low latency
+                    </button>
+                    <button
+                      className={`tile-menu__item${mode === 'compat' ? ' tile-menu__item--active' : ''}`}
+                      onClick={() => selectMode('compat')}
+                    >
+                      Compatibility
+                    </button>
+                    {camera.has_sub && (
                       <button
                         className="tile-menu__item tile-menu__item--submenu"
                         onClick={() => setQualityMenuOpen(true)}
@@ -574,17 +591,25 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
                         <span>Quality</span>
                         <span className="tile-menu__value">{quality === 'low' ? 'Low ›' : 'High ›'}</span>
                       </button>
-                    </>
-                  )}
-                  <div className="tile-menu__divider" />
-                  <button
-                    className="tile-menu__item"
-                    onClick={() => { setStopped(!stopped); closeMenu(); }}
-                  >
-                    {stopped ? 'Start camera' : 'Stop camera'}
-                  </button>
+                    )}
+                  </div>
+                  <div className="tile-menu__section">
+                    <button
+                      className="tile-menu__item"
+                      onClick={() => { setStopped(!stopped); closeMenu(); }}
+                    >
+                      {stopped ? 'Start camera' : 'Stop camera'}
+                    </button>
+                    {isAdmin && (
+                      <button className="tile-menu__item tile-menu__item--submenu" onClick={openCameraSettings}>
+                        <span>Camera settings</span>
+                        <span className="tile-menu__value">›</span>
+                      </button>
+                    )}
+                  </div>
                 </>
               )}
+              <button className="tile-menu__done" onClick={closeMenu}>Done</button>
             </div>
           </>
         )}
@@ -688,9 +713,12 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
           </div>
         </div>
         <div className="status-row">
-          {formatReading(camera.mqtt, settings.temp_unit) && (
-            <span className="camera-tile__reading">{formatReading(camera.mqtt, settings.temp_unit)}</span>
-          )}
+          {readingParts(camera.mqtt, settings.temp_unit).map(({ key, Icon, text }) => (
+            <span key={key} className="camera-tile__reading">
+              <Icon size={13} className="camera-tile__reading-icon" aria-hidden="true" />
+              {text}
+            </span>
+          ))}
           <BreathingDot status={camera.statusLevel || 'connecting'} />
         </div>
       </div>
