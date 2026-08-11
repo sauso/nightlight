@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import AppHeader from '../components/AppHeader.jsx';
-import SettingsBack from '../components/SettingsBack.jsx';
 import Switch from '../components/Switch.jsx';
 
 export default function SettingsMqtt() {
@@ -52,9 +51,8 @@ export default function SettingsMqtt() {
 
   return (
     <>
-      <AppHeader title="MQTT" />
+      <AppHeader title="MQTT" back={{ to: '/settings', label: 'Settings' }} />
       <main className="app-main">
-        <SettingsBack />
         {error && <div className="error-banner">{error}</div>}
         {saved && <div className="saved-banner">Saved ✓</div>}
 

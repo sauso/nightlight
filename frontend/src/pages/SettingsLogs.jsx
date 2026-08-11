@@ -1,5 +1,4 @@
 import AppHeader from '../components/AppHeader.jsx';
-import SettingsBack from '../components/SettingsBack.jsx';
 import LogViewer from '../components/LogViewer.jsx';
 import EventLog from '../components/EventLog.jsx';
 import RecentAlerts from '../components/RecentAlerts.jsx';
@@ -7,9 +6,8 @@ import RecentAlerts from '../components/RecentAlerts.jsx';
 export default function SettingsLogs() {
   return (
     <>
-      <AppHeader title="Logs" />
+      <AppHeader title="Logs" back={{ to: '/settings', label: 'Settings' }} />
       <main className="app-main">
-        <SettingsBack />
 
         <div className="section-title">Recent alerts</div>
         <RecentAlerts />
