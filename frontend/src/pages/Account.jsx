@@ -1,9 +1,17 @@
 import { useEffect, useState } from 'react';
+import { Sun, Moon, Monitor } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
+import { getTheme, setTheme } from '../lib/theme.js';
 import Modal from '../components/Modal.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
+
+const THEME_OPTIONS = [
+  { value: 'light', label: 'Light', Icon: Sun },
+  { value: 'dark', label: 'Dark', Icon: Moon },
+  { value: 'system', label: 'System', Icon: Monitor },
+];
 import {
   notificationsSupported,
   notificationsEnabled,
@@ -28,6 +36,12 @@ export default function Account() {
   const { user, logout } = useAuth();
   const [sessions, setSessions] = useState([]);
   const [error, setError] = useState('');
+  const [theme, setThemeState] = useState(getTheme());
+
+  function chooseTheme(value) {
+    setThemeState(value);
+    setTheme(value); // per-device; applies immediately (see lib/theme.js)
+  }
   const [busy, setBusy] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
   const [passwordForm, setPasswordForm] = useState(BLANK_PASSWORD_FORM);
@@ -118,6 +132,27 @@ export default function Account() {
           <div className="list-row">
             <span>Role</span>
             <span className="tag">{user?.role}</span>
+          </div>
+        </div>
+
+        <div className="section-title">Appearance</div>
+        <div className="card" style={{ marginBottom: 14 }}>
+          <div className="segmented" role="group" aria-label="Theme">
+            {THEME_OPTIONS.map(({ value, label, Icon }) => (
+              <button
+                key={value}
+                type="button"
+                className={`segmented__btn${theme === value ? ' segmented__btn--active' : ''}`}
+                aria-pressed={theme === value}
+                onClick={() => chooseTheme(value)}
+              >
+                <Icon size={18} aria-hidden="true" />
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="camera-tile__sub" style={{ marginTop: 8 }}>
+            Applies to this device only. System follows your phone's light / dark setting.
           </div>
         </div>
 

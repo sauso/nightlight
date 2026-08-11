@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useCameras } from '../lib/CamerasContext.jsx';
@@ -18,6 +19,8 @@ export default function Cameras() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const { kids: children, cameras, error: contextError, refresh } = useCameras();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(null);
   const EMPTY_FORM = {
@@ -50,6 +53,22 @@ export default function Cameras() {
   const [removeBusy, setRemoveBusy] = useState(false);
   // Camera whose enable/disable toggle is in flight, so we can disable just that button.
   const [togglingId, setTogglingId] = useState(null);
+
+  // Deep-link from a camera tile's gear sheet ("Camera settings"): open that camera's edit
+  // modal, then strip editCameraId from history state (keeping any `from` origin for the back
+  // button) so a refresh or back-navigation doesn't reopen it. Waits for the cameras list.
+  const deepLinkHandledRef = useRef(false);
+  useEffect(() => {
+    const id = location.state?.editCameraId;
+    if (!id || deepLinkHandledRef.current || !isAdmin) return;
+    const cam = cameras.find((c) => c.id === id);
+    if (!cam) return; // cameras not loaded yet — try again when they are
+    deepLinkHandledRef.current = true;
+    openEdit(cam);
+    navigate(location.pathname, { replace: true, state: { from: location.state?.from } });
+    // openEdit is a stable in-component function; intentionally not a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location, cameras, isAdmin, navigate]);
 
   function openNew() {
     setForm(EMPTY_FORM);
