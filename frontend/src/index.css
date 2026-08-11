@@ -645,6 +645,14 @@ body.in-pip .tile-menu-backdrop {
   animation: sheet-fade 0.16s ease;
 }
 
+/* The PTZ pad's tap-to-close layer is transparent and sits BELOW the pad (z-index 4) so the
+   arrows stay clickable — unlike the gear sheet's dimmed backdrop above. */
+.ptz-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+}
+
 .tile-menu {
   position: fixed;
   left: 0;

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Baby, Video, Users, Plus, ChevronRight } from 'lucide-react';
+import { Video, Plus, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
+import Avatar from '../components/Avatar.jsx';
 
 // Family is the "who and what we're monitoring" hub. It lists the children, the cameras (with
 // their capability badges), and — for admins — the caregivers, inline like the design mockup,
@@ -83,16 +84,16 @@ export default function Family() {
           {kids.map((kid) => (
             <Row
               key={kid.id}
-              leading={<span style={{ width: 22, height: 22, borderRadius: '50%', background: kid.color || PERI, flexShrink: 0 }} />}
+              leading={<Avatar name={kid.name} color={kid.color} size={30} />}
               title={kid.name}
               sub={`${camCount(kid.id)} camera${camCount(kid.id) === 1 ? '' : 's'}`}
-              onClick={() => navigate('/children', BACK)}
+              onClick={() => navigate(`/children/${kid.id}`, BACK)}
             />
           ))}
           <Row
             leading={<Plus size={20} color={PERI} aria-hidden="true" />}
             title="Add child"
-            onClick={() => navigate('/children', BACK)}
+            onClick={() => navigate('/children/new', BACK)}
           />
         </div>
 
@@ -124,16 +125,16 @@ export default function Family() {
               {caregivers.map((u) => (
                 <Row
                   key={u.id}
-                  leading={<Users size={20} color={PERI} aria-hidden="true" />}
+                  leading={<Avatar name={displayName(u)} size={30} />}
                   title={displayName(u)}
                   trailing={<span className="camera-tile__sub" style={{ textTransform: 'capitalize' }}>{u.role}</span>}
-                  onClick={() => navigate('/settings/users', BACK)}
+                  onClick={() => navigate(`/settings/users/${u.id}`, BACK)}
                 />
               ))}
               <Row
                 leading={<Plus size={20} color={PERI} aria-hidden="true" />}
                 title="Add caregiver"
-                onClick={() => navigate('/settings/users', BACK)}
+                onClick={() => navigate('/settings/users/new', BACK)}
               />
             </div>
           </>

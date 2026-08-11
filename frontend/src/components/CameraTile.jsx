@@ -627,7 +627,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
         {ptzOpen && (
           <>
             <div
-              className="tile-menu-backdrop"
+              className="ptz-backdrop"
               onClick={() => {
                 ptzEndHold();
                 setPtzOpen(false);

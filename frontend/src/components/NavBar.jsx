@@ -1,14 +1,14 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Moon, Bell, Users, SlidersHorizontal } from 'lucide-react';
+import { Video, Bell, Users, Settings } from 'lucide-react';
 
 // The four primary destinations. Family and Settings are hubs, so they stay highlighted
 // while you're on any of the sub-pages they own (`match`) — e.g. Family is lit on
 // /children and /cameras, Settings on /account and /about. Live matches only "/" exactly.
 const TABS = [
-  { to: '/', Icon: Moon, label: 'Live', match: ['/'], exact: true },
+  { to: '/', Icon: Video, label: 'Live', match: ['/'], exact: true },
   { to: '/alerts', Icon: Bell, label: 'Alerts', match: ['/alerts'] },
   { to: '/family', Icon: Users, label: 'Family', match: ['/family', '/children', '/cameras'] },
-  { to: '/settings', Icon: SlidersHorizontal, label: 'Settings', match: ['/settings', '/account', '/about'] },
+  { to: '/settings', Icon: Settings, label: 'Settings', match: ['/settings', '/account', '/about'] },
 ];
 
 function isActive(pathname, tab) {

@@ -10,6 +10,19 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Added
+- **Children and caregivers now open their own screens** (like cameras) instead of pop-up modals —
+  reached from the Family hub. Each shows an avatar (initials for now) with room for a photo later.
+- **Edit your own name.** Settings → Account now lets any user set their First/Last name (the login
+  username stays admin-managed).
+- **Settings hub tidied:** your Account sits at the top in its own card; About and Change server
+  share a card; and the **MQTT row shows its live connection status** (Connected / Off) for admins.
+
+### Fixed
+- **PTZ no longer dims the video or eats arrow taps.** The pan/tilt pad reused the new gear-sheet's
+  dimmed backdrop, which sat over the arrows — it now has its own transparent layer, so the D-pad
+  works again.
+
+### Added
 - **Per-camera settings are now their own screen.** Editing or adding a camera opens a full page
   (instead of a modal), reached from a camera's tile gear ("Camera settings") or the Family hub.
 - **Motion, Sound and Schedule are now separate screens** under each camera, replacing the single
