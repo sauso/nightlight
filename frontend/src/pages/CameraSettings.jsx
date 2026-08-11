@@ -5,8 +5,8 @@ import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Modal from '../components/Modal.jsx';
+import DetectionRow from '../components/DetectionRow.jsx';
 
-const PERI = 'var(--peri)';
 const minToHHMM = (m) => `${String(Math.floor((m || 0) / 60)).padStart(2, '0')}:${String((m || 0) % 60).padStart(2, '0')}`;
 
 const EMPTY_FORM = {
@@ -270,12 +270,14 @@ export default function CameraSettings() {
               <>
                 <div className="section-title">Detection</div>
                 <div className="card" style={{ padding: 0 }}>
-                  <DetRow Icon={Zap} label="Motion detection" value={cam.detect_motion_enabled ? 'On' : 'Off'}
+                  <DetectionRow Icon={Zap} label="Motion detection"
+                    right={<><span className="camera-tile__sub">{cam.detect_motion_enabled ? 'On' : 'Off'}</span><ChevronRight size={18} style={{ opacity: 0.45 }} aria-hidden="true" /></>}
                     onClick={() => navigate(`/cameras/${id}/motion`, detFrom)} />
-                  <DetRow Icon={AudioLines} label="Sound detection" value={cam.detect_sound_enabled ? 'On' : 'Off'}
+                  <DetectionRow Icon={AudioLines} label="Sound detection"
+                    right={<><span className="camera-tile__sub">{cam.detect_sound_enabled ? 'On' : 'Off'}</span><ChevronRight size={18} style={{ opacity: 0.45 }} aria-hidden="true" /></>}
                     onClick={() => navigate(`/cameras/${id}/sound`, detFrom)} />
-                  <DetRow Icon={Clock} label="Alert schedule"
-                    value={cam.detect_schedule_enabled ? `${minToHHMM(cam.detect_start)}–${minToHHMM(cam.detect_end)}` : 'Always'}
+                  <DetectionRow Icon={Clock} label="Alert schedule"
+                    right={<><span className="camera-tile__sub">{cam.detect_schedule_enabled ? `${minToHHMM(cam.detect_start)}–${minToHHMM(cam.detect_end)}` : 'Always'}</span><ChevronRight size={18} style={{ opacity: 0.45 }} aria-hidden="true" /></>}
                     onClick={() => navigate(`/cameras/${id}/schedule`, detFrom)} />
                 </div>
               </>
@@ -323,21 +325,5 @@ export default function CameraSettings() {
         </Modal>
       )}
     </>
-  );
-}
-
-function DetRow({ Icon, label, value, onClick }) {
-  return (
-    <div className="list-row" role="button" tabIndex={0} style={{ cursor: 'pointer', padding: '12px 14px' }}
-      onClick={onClick} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <Icon size={19} color={PERI} aria-hidden="true" />
-        <span>{label}</span>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-        <span className="camera-tile__sub">{value}</span>
-        <ChevronRight size={18} style={{ opacity: 0.45 }} aria-hidden="true" />
-      </div>
-    </div>
   );
 }
