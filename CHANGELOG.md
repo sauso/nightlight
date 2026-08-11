@@ -26,6 +26,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - **Opening a camera, child or caregiver form no longer pops up the keyboard** automatically.
 - **MQTT** has its own logo icon in Settings, and its description now reflects that it's used for
   both room sensor readings and camera-side motion detection (not just temperature/humidity).
+- **Light-mode polish:** form fields are now white (not pale lavender) in light mode; the MQTT icon
+  is cropped to fill its space like the other icons; and list/menu labels (Pushover, Firebase,
+  children, cameras…) are larger and easier to read.
 
 ### Added
 - **Per-camera settings are now their own screen.** Editing or adding a camera opens a full page
