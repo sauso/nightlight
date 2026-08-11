@@ -19,6 +19,7 @@
   --live: #6fae90;
   --offline: #d9707a;
   --border: #e6e4f0;
+  --field-bg: #ffffff;
   --radius: 16px;
 
   --font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
@@ -46,6 +47,7 @@
   --live: #7fc9a3;
   --offline: #e08585;
   --border: #282a48;
+  --field-bg: #1e2140;
 }
 
 * { box-sizing: border-box; }
@@ -1120,7 +1122,8 @@ body.in-pip .tile-menu-backdrop {
 }
 
 .camera-tile__sub {
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 400;
   color: var(--text-secondary);
   margin-top: 2px;
 }
@@ -1159,7 +1162,7 @@ body.in-pip .tile-menu-backdrop {
 
 .field input, .field select {
   width: 100%;
-  background: var(--bg-elevated-2);
+  background: var(--field-bg);
   border: 1px solid var(--border);
   color: var(--text-primary);
   border-radius: 10px;
@@ -1372,8 +1375,10 @@ body.in-pip .tile-menu-backdrop {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 0;
+  padding: 12px 0;
   border-bottom: 1px solid var(--border);
+  font-size: 16px;
+  font-weight: 500;
 }
 
 .list-row:last-child { border-bottom: none; }
