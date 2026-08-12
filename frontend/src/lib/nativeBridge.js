@@ -14,6 +14,34 @@ export function isNativeApp() {
   return !!window.Capacitor?.isNativePlatform?.();
 }
 
+// Save a text file out of the app and hand it to the OS share sheet (Save to Files, email, etc.).
+// The Android WebView can't do a browser-style blob/<a download> download — those silently do
+// nothing — so exports like the diagnostics bundle have to go through the native Filesystem +
+// Share plugins. Returns true if the native app handled it (so the caller does NOT also attempt a
+// web download that can't work here), false in a browser / when the plugins aren't present so the
+// caller can fall back to a normal blob download.
+export async function saveTextFile(filename, text) {
+  const Filesystem = window.Capacitor?.Plugins?.Filesystem;
+  const Share = window.Capacitor?.Plugins?.Share;
+  if (!isNativeApp() || !Filesystem || !Share) return false;
+  try {
+    // Cache dir needs no permission; the Share plugin exposes it via its own FileProvider.
+    await Filesystem.writeFile({ path: filename, data: text, directory: 'CACHE', encoding: 'utf8' });
+    const { uri } = await Filesystem.getUri({ path: filename, directory: 'CACHE' });
+    try {
+      await Share.share({ title: filename, files: [uri], dialogTitle: 'Save or share diagnostics' });
+    } catch (shareErr) {
+      // User dismissed the share sheet (or a benign share error) — the file was still written and
+      // offered, so treat it as handled rather than falling back to a download that can't work.
+      console.warn('Share dismissed/failed', shareErr);
+    }
+    return true;
+  } catch (err) {
+    console.warn('saveTextFile (native) failed', err);
+    return false;
+  }
+}
+
 // True only in the native iOS app. Used to hide options that can't work there - e.g. Background
 // audio in Compatibility (HLS) mode, which iOS suspends in the background (only Low latency's
 // dedicated audio element survives). Returns false in a browser and in the Android app.

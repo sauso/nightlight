@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Download, ExternalLink } from 'lucide-react';
 import { api } from '../lib/api.js';
+import { saveTextFile } from '../lib/nativeBridge.js';
 
 // Where self-hosters file bugs. Prefilled with the bundle reminder so the attachment isn't forgotten.
 const ISSUE_URL =
@@ -31,15 +32,22 @@ export default function DiagnosticsCard() {
     try {
       const bundle = await api.get('/diagnostics');
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `nightlight-diagnostics-${stamp}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const filename = `nightlight-diagnostics-${stamp}.json`;
+      const text = JSON.stringify(bundle, null, 2);
+      // Native app: write the file + open the OS share sheet (the WebView can't do a blob download).
+      // Browser: fall back to a normal blob download.
+      const handledNatively = await saveTextFile(filename, text);
+      if (!handledNatively) {
+        const blob = new Blob([text], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
       // Stay disabled and show a confirmation for a few seconds, so a slow save on mobile doesn't
       // look like nothing happened and invite repeat taps.
       setState('done');
@@ -63,12 +71,12 @@ export default function DiagnosticsCard() {
         before sharing.
       </div>
       {error && <div className="error-banner" style={{ marginBottom: 12 }}>{error}</div>}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button className="btn btn-primary" style={{ width: 'auto' }} onClick={download} disabled={state !== 'idle'}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <button className="btn btn-primary" onClick={download} disabled={state !== 'idle'}>
           <Download size={16} aria-hidden="true" />
           {label}
         </button>
-        <a className="btn btn-secondary" style={{ width: 'auto' }} href={ISSUE_URL} target="_blank" rel="noreferrer">
+        <a className="btn btn-secondary" href={ISSUE_URL} target="_blank" rel="noreferrer">
           <ExternalLink size={16} aria-hidden="true" />
           Report an issue
         </a>
