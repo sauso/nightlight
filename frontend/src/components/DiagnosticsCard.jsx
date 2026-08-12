@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Download, ExternalLink } from 'lucide-react';
 import { api } from '../lib/api.js';
 
@@ -14,11 +14,19 @@ const ISSUE_URL =
 // server and saves it as a file the user can attach to a GitHub issue. Nothing is uploaded from
 // here — the download stays on their device so they can review it before sharing.
 export default function DiagnosticsCard() {
-  const [busy, setBusy] = useState(false);
+  // idle → building the bundle → 'done' (held briefly so it can't be re-tapped while the phone is
+  // still saving/opening the file — the flash-and-retry that produced several downloads before).
+  const [state, setState] = useState('idle'); // 'idle' | 'busy' | 'done'
   const [error, setError] = useState('');
+  const busyRef = useRef(false); // hard guard against double-submits regardless of render timing
+  const doneTimer = useRef(null);
+
+  useEffect(() => () => clearTimeout(doneTimer.current), []);
 
   async function download() {
-    setBusy(true);
+    if (busyRef.current) return; // already preparing — ignore extra taps
+    busyRef.current = true;
+    setState('busy');
     setError('');
     try {
       const bundle = await api.get('/diagnostics');
@@ -32,12 +40,18 @@ export default function DiagnosticsCard() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
+      // Stay disabled and show a confirmation for a few seconds, so a slow save on mobile doesn't
+      // look like nothing happened and invite repeat taps.
+      setState('done');
+      doneTimer.current = setTimeout(() => { setState('idle'); busyRef.current = false; }, 4000);
     } catch (err) {
       setError(err.message || 'Failed to build diagnostics');
-    } finally {
-      setBusy(false);
+      setState('idle');
+      busyRef.current = false;
     }
   }
+
+  const label = state === 'busy' ? 'Preparing…' : state === 'done' ? 'Downloaded ✓' : 'Download diagnostics';
 
   return (
     <div className="card">
@@ -50,9 +64,9 @@ export default function DiagnosticsCard() {
       </div>
       {error && <div className="error-banner" style={{ marginBottom: 12 }}>{error}</div>}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button className="btn btn-primary" style={{ width: 'auto' }} onClick={download} disabled={busy}>
+        <button className="btn btn-primary" style={{ width: 'auto' }} onClick={download} disabled={state !== 'idle'}>
           <Download size={16} aria-hidden="true" />
-          {busy ? 'Preparing…' : 'Download diagnostics'}
+          {label}
         </button>
         <a className="btn btn-secondary" style={{ width: 'auto' }} href={ISSUE_URL} target="_blank" rel="noreferrer">
           <ExternalLink size={16} aria-hidden="true" />
