@@ -53,7 +53,7 @@ function Row({ Icon, iconSize = 20, label, desc, trailing, onClick }) {
 
 const ADMIN_ITEMS = [
   { key: 'general', to: '/settings/general', Icon: SlidersHorizontal, label: 'General', desc: 'App name, timezone, theme, font, colours, temperature unit' },
-  { key: 'mqtt', to: '/settings/mqtt', Icon: MqttIcon, iconSize: 22, label: 'MQTT', desc: 'Connect your broker — room temperature/humidity and camera-side motion detection' },
+  { key: 'mqtt', to: '/settings/mqtt', Icon: MqttIcon, iconSize: 22, label: 'MQTT', desc: 'Connect your MQTT broker' },
   { key: 'push', to: '/settings/push', Icon: Bell, label: 'Push notifications', desc: 'Enable phone alerts for motion detection' },
   { key: 'logs', to: '/settings/logs', Icon: ScrollText, label: 'Logs', desc: 'Camera history and server logs' },
 ];
@@ -70,8 +70,14 @@ export default function Settings() {
     if (isAdmin) api.get('/settings/mqtt/status').then(setMqtt).catch(() => {});
   }, [isAdmin]);
 
-  const mqttLabel = mqtt
-    ? (mqtt.connected ? 'Connected' : mqtt.enabled ? 'Connecting…' : 'Off')
+  // Filled status badge: green when the broker is connected, red when it's enabled but not
+  // connected, grey when MQTT is switched off entirely.
+  const mqttBadge = mqtt
+    ? (mqtt.connected
+        ? { text: 'Connected', cls: 'status-badge--ok' }
+        : mqtt.enabled
+          ? { text: 'Disconnected', cls: 'status-badge--bad' }
+          : { text: 'Off', cls: 'status-badge--off' })
     : null;
 
   return (
@@ -105,7 +111,7 @@ export default function Settings() {
               <Row
                 key={it.key}
                 {...it}
-                trailing={it.key === 'mqtt' && mqttLabel ? <span className="camera-tile__sub">{mqttLabel}</span> : undefined}
+                trailing={it.key === 'mqtt' && mqttBadge ? <span className={`status-badge ${mqttBadge.cls}`}>{mqttBadge.text}</span> : undefined}
                 onClick={() => navigate(it.to, BACK)}
               />
             ))}

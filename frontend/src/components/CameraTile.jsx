@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet, Zap, AudioLines, Clock } from 'lucide-react';
+import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet, Zap, AudioLines, Clock, Square, Play } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { startTalk } from '../lib/twoWayTalk.js';
@@ -218,6 +218,29 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   const [detBusy, setDetBusy] = useState(false); // guards the quick motion/sound toggles
   function closeMenu() {
     setModeMenuOpen(false);
+    setSheetDragY(0);
+  }
+
+  // Swipe-down-to-dismiss for the cog bottom sheet (mobile). Only starts a drag when the sheet is
+  // scrolled to the top and the finger moves down, so it never fights the sheet's own scrolling or
+  // the buttons/toggles inside it. Past a threshold on release, the sheet closes; otherwise it snaps
+  // back. Follows the finger 1:1 while dragging.
+  const sheetRef = useRef(null);
+  const sheetDragRef = useRef(null); // { y, atTop } | null
+  const [sheetDragY, setSheetDragY] = useState(0);
+  function onSheetTouchStart(e) {
+    sheetDragRef.current = { y: e.touches[0].clientY, atTop: (sheetRef.current?.scrollTop ?? 0) <= 0 };
+  }
+  function onSheetTouchMove(e) {
+    const start = sheetDragRef.current;
+    if (!start || !start.atTop) return;
+    const dy = e.touches[0].clientY - start.y;
+    setSheetDragY(dy > 0 ? dy : 0);
+  }
+  function onSheetTouchEnd() {
+    if (sheetDragY > 90) { closeMenu(); return; }
+    setSheetDragY(0);
+    sheetDragRef.current = null;
   }
 
   // Quick-toggle motion / sound / schedule from the tile (admin only) without opening full settings.
@@ -594,7 +617,16 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
         {modeMenuOpen && (
           <>
             <div className="tile-menu-backdrop" onClick={closeMenu} />
-            <div className="tile-menu" role="dialog" aria-label={`${camera.name} settings`}>
+            <div
+              className="tile-menu"
+              role="dialog"
+              aria-label={`${camera.name} settings`}
+              ref={sheetRef}
+              onTouchStart={onSheetTouchStart}
+              onTouchMove={onSheetTouchMove}
+              onTouchEnd={onSheetTouchEnd}
+              style={sheetDragY ? { transform: `translateY(${sheetDragY}px)`, transition: 'none' } : undefined}
+            >
               <div className="tile-menu__grabber" aria-hidden="true" />
               <div className="tile-menu__title">{camera.name}</div>
 
@@ -654,14 +686,16 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
 
               <button
                 type="button"
-                className="btn btn-secondary"
+                className="btn btn-danger"
                 style={{ marginBottom: 8 }}
                 onClick={() => { setStopped(!stopped); closeMenu(); }}
               >
+                {stopped ? <Play size={16} /> : <Square size={16} />}
                 {stopped ? 'Start camera' : 'Stop camera'}
               </button>
               {isAdmin && (
                 <button type="button" className="btn btn-secondary" style={{ marginBottom: 8 }} onClick={openCameraSettings}>
+                  <Settings size={16} />
                   Camera settings
                 </button>
               )}

@@ -947,6 +947,19 @@ body.in-pip .tile-menu-backdrop {
   color: var(--offline);
   border-color: var(--offline);
 }
+
+/* Filled status pill (e.g. MQTT connection state in Settings): green = ok, red = bad, grey = off. */
+.status-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+}
+.status-badge--ok { background: var(--live); }
+.status-badge--bad { background: var(--offline); }
+.status-badge--off { background: var(--text-secondary); }
 /* Full-screen fallback shown by ErrorBoundary when a render throw would otherwise blank
    the app. Kept dependency-free (no context/theme hooks) so it renders even if those broke. */
 .crash-screen {
@@ -1207,11 +1220,7 @@ body.in-pip .tile-menu-backdrop {
   color: #fff;
 }
 
-.btn-danger {
-  background: var(--offline);
-  color: #2a0f0f;
-}
-
+/* Red "box outline" — transparent fill, red border + text. Used for destructive/stop actions. */
 .btn-danger {
   background: transparent;
   border: 1px solid var(--offline);
