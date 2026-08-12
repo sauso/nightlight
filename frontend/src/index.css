@@ -1220,6 +1220,12 @@ body.in-pip .tile-menu-backdrop {
   color: #fff;
 }
 
+/* Disabled buttons read as greyed-out and unclickable (e.g. while a diagnostics bundle builds). */
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 /* Red "box outline" — transparent fill, red border + text. Used for destructive/stop actions. */
 .btn-danger {
   background: transparent;
