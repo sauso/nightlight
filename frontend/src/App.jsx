@@ -6,6 +6,7 @@ import { CamerasProvider } from './lib/CamerasContext.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import { isNativeApp, hasActiveBackgroundAudio } from './lib/nativeBridge.js';
 import { initPushNotifications } from './lib/pushNotifications.js';
+import { useSwipeBack } from './lib/useSwipeBack.js';
 import NavBar from './components/NavBar.jsx';
 import LiveMonitor from './components/LiveMonitor.jsx';
 import InstallPrompt from './components/InstallPrompt.jsx';
@@ -88,6 +89,7 @@ function AdminProtected({ children }) {
 function Shell() {
   const { user, loading } = useAuth();
   useReloadAfterBackground();
+  useSwipeBack();
 
   // Once signed in (native app only), register for push notifications so detection alerts can
   // reach the phone when the app is backgrounded/closed. No-op in a browser.
