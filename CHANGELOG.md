@@ -15,7 +15,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   detection settings, live stream/MQTT/push status, and recent detection + camera-history events +
   server logs — to attach to a GitHub issue. Secrets (all passwords/tokens, credential-bearing
   URLs) are reduced to "is it set?" booleans, never their values, so it's safe to share. In the
-  Android app it saves via the system share sheet (the WebView can't do a browser download).
+  Android app it saves straight to the phone's Downloads folder (falling back to the share sheet on
+  older devices), since the WebView can't do a browser-style download.
 - **Swipe right to go back a screen.** A horizontal swipe from the left half of the screen pops one
   step back (Settings → MQTT, Family → Camera, etc.), like the nav-bar back button. Not active on
   the Live dashboard, where the tiles own their own gestures.

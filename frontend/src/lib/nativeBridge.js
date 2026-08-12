@@ -14,6 +14,27 @@ export function isNativeApp() {
   return !!window.Capacitor?.isNativePlatform?.();
 }
 
+// Base64-encode a UTF-8 string safely (btoa alone mangles multi-byte characters).
+function utf8ToBase64(str) {
+  return btoa(unescape(encodeURIComponent(str)));
+}
+
+// Save a text file straight into the phone's public Downloads folder (native Download plugin) so
+// it's easy to then upload to GitHub etc. On Android 10+ this needs no permission. Returns true on
+// success, false in a browser / when the plugin is missing / on failure — so the caller can fall
+// back to the share sheet (saveTextFile) or a web download.
+export async function saveToDownloads(filename, text, mimeType = 'application/octet-stream') {
+  const Download = window.Capacitor?.Plugins?.Download;
+  if (!isNativeApp() || !Download) return false;
+  try {
+    await Download.saveToDownloads({ filename, data: utf8ToBase64(text), mimeType });
+    return true;
+  } catch (err) {
+    console.warn('saveToDownloads (native) failed', err);
+    return false;
+  }
+}
+
 // Save a text file out of the app and hand it to the OS share sheet (Save to Files, email, etc.).
 // The Android WebView can't do a browser-style blob/<a download> download — those silently do
 // nothing — so exports like the diagnostics bundle have to go through the native Filesystem +
