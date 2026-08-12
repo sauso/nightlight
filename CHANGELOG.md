@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+- **Temperature & humidity on camera tiles are larger and bolder** (~20%) so the readings are easier
+  to see at a glance.
+
 ### Added
 - **Download a diagnostics bundle for bug reports** (Settings → Logs → "Report a problem", admin
   only). One click saves a redacted JSON snapshot — version/build, host + runtime info, camera &
