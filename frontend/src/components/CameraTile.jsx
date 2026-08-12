@@ -684,21 +684,23 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
                 </>
               )}
 
-              <button
-                type="button"
-                className="btn btn-danger"
-                style={{ marginBottom: 8 }}
-                onClick={() => { setStopped(!stopped); closeMenu(); }}
-              >
-                {stopped ? <Play size={16} /> : <Square size={16} />}
-                {stopped ? 'Start camera' : 'Stop camera'}
-              </button>
-              {isAdmin && (
-                <button type="button" className="btn btn-secondary" style={{ marginBottom: 8 }} onClick={openCameraSettings}>
-                  <Settings size={16} />
-                  Camera settings
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  style={{ flex: 1 }}
+                  onClick={() => { setStopped(!stopped); closeMenu(); }}
+                >
+                  {stopped ? <Play size={16} /> : <Square size={16} />}
+                  {stopped ? 'Start' : 'Stop'}
                 </button>
-              )}
+                {isAdmin && (
+                  <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={openCameraSettings}>
+                    <Settings size={16} />
+                    Camera settings
+                  </button>
+                )}
+              </div>
 
               <button className="tile-menu__done" onClick={closeMenu}>Done</button>
             </div>
