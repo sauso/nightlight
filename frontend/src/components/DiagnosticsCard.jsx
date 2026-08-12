@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Download, ExternalLink } from 'lucide-react';
 import { api } from '../lib/api.js';
-import { saveTextFile } from '../lib/nativeBridge.js';
+import { isNativeApp, saveToDownloads, saveTextFile } from '../lib/nativeBridge.js';
 
 // Where self-hosters file bugs. Prefilled with the bundle reminder so the attachment isn't forgotten.
 const ISSUE_URL =
@@ -19,6 +19,7 @@ export default function DiagnosticsCard() {
   // still saving/opening the file — the flash-and-retry that produced several downloads before).
   const [state, setState] = useState('idle'); // 'idle' | 'busy' | 'done'
   const [error, setError] = useState('');
+  const [savedMsg, setSavedMsg] = useState('');
   const busyRef = useRef(false); // hard guard against double-submits regardless of render timing
   const doneTimer = useRef(null);
 
@@ -34,10 +35,19 @@ export default function DiagnosticsCard() {
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const filename = `nightlight-diagnostics-${stamp}.json`;
       const text = JSON.stringify(bundle, null, 2);
-      // Native app: write the file + open the OS share sheet (the WebView can't do a blob download).
-      // Browser: fall back to a normal blob download.
-      const handledNatively = await saveTextFile(filename, text);
-      if (!handledNatively) {
+      let msg = '';
+      if (isNativeApp()) {
+        // Native app: save straight into the phone's Downloads folder so it's easy to attach to a
+        // GitHub issue. If that fails (e.g. older Android), fall back to the OS share sheet.
+        if (await saveToDownloads(filename, text, 'application/json')) {
+          msg = 'Saved to your Downloads folder.';
+        } else if (await saveTextFile(filename, text)) {
+          msg = 'Shared — pick "Save to Files" to keep a copy.';
+        } else {
+          throw new Error("Couldn't save the file on this device.");
+        }
+      } else {
+        // Browser: a normal blob download.
         const blob = new Blob([text], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -50,8 +60,9 @@ export default function DiagnosticsCard() {
       }
       // Stay disabled and show a confirmation for a few seconds, so a slow save on mobile doesn't
       // look like nothing happened and invite repeat taps.
+      setSavedMsg(msg);
       setState('done');
-      doneTimer.current = setTimeout(() => { setState('idle'); busyRef.current = false; }, 4000);
+      doneTimer.current = setTimeout(() => { setState('idle'); setSavedMsg(''); busyRef.current = false; }, 4000);
     } catch (err) {
       setError(err.message || 'Failed to build diagnostics');
       setState('idle');
@@ -81,6 +92,9 @@ export default function DiagnosticsCard() {
           Report an issue
         </a>
       </div>
+      {savedMsg && (
+        <div className="camera-tile__sub" style={{ marginTop: 10, color: 'var(--live)' }}>{savedMsg}</div>
+      )}
     </div>
   );
 }
