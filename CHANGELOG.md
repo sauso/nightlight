@@ -10,6 +10,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Added
+- **Download a diagnostics bundle for bug reports** (Settings → Logs → "Report a problem", admin
+  only). One click saves a redacted JSON snapshot — version/build, host + runtime info, camera &
+  detection settings, live stream/MQTT/push status, and recent detection + camera-history events +
+  server logs — to attach to a GitHub issue. Secrets (all passwords/tokens, credential-bearing
+  URLs) are reduced to "is it set?" booleans, never their values, so it's safe to share.
 - **Swipe right to go back a screen.** A horizontal swipe from the left half of the screen pops one
   step back (Settings → MQTT, Family → Camera, etc.), like the nav-bar back button. Not active on
   the Live dashboard, where the tiles own their own gestures.
