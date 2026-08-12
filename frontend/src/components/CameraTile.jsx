@@ -808,7 +808,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
         <div className="status-row">
           {readingParts(camera.mqtt, settings.temp_unit).map(({ key, Icon, text }) => (
             <span key={key} className="camera-tile__reading">
-              <Icon size={13} className="camera-tile__reading-icon" aria-hidden="true" />
+              <Icon size={16} className="camera-tile__reading-icon" aria-hidden="true" />
               {text}
             </span>
           ))}

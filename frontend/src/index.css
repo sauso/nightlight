@@ -1150,8 +1150,9 @@ body.in-pip .tile-menu-backdrop {
 .camera-tile__reading {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 12px;
+  gap: 5px;
+  font-size: 14.5px;
+  font-weight: 600;
   color: var(--text-secondary);
   white-space: nowrap;
 }
