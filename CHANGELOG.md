@@ -25,6 +25,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   admins — green Connected, red Disconnected, grey Off.
 - **Swipe the camera cog sheet down to dismiss it** on touch devices (in addition to the backdrop
   tap / Done button). Stop camera now has a stop icon and a red outline; Camera settings has a cog.
+  Stop and Camera settings share a row to save space, and swiping the sheet down no longer also
+  triggers the dashboard's pull-to-refresh.
 
 ### Fixed
 - **PTZ no longer dims the video or eats arrow taps.** The pan/tilt pad reused the new gear-sheet's
