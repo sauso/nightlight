@@ -13,6 +13,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - **Swipe right to go back a screen.** A horizontal swipe from the left half of the screen pops one
   step back (Settings → MQTT, Family → Camera, etc.), like the nav-bar back button. Not active on
   the Live dashboard, where the tiles own their own gestures.
+- **Android hardware Back / edge back-gesture steps back through screens** (via the native app's new
+  `@capacitor/app` plugin) instead of exiting on the first press.
 - **The camera cog sheet now has quick controls.** *Connection mode* (Low / Compatibility) and
   *Quality* (High / Low) are segmented buttons, and admins get **quick Motion / Sound / Alert
   schedule toggles** — each with its icon, matching the camera-settings styling — right there,
