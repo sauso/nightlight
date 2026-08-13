@@ -14,6 +14,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   to see at a glance.
 
 ### Added
+- **Two-factor authentication (TOTP).** Optional, per-account: Settings → Account → Two-factor sets it
+  up from an authenticator app (QR or manual key) and issues 10 one-time backup codes. Login then asks
+  for the 6-digit code after the password. Recovery is covered by backup codes, an admin "Reset
+  two-factor" action on a caregiver, and a console failsafe (`src/scripts/reset-mfa.js`) for a locked-out
+  admin — see `docs/mfa.md`. Works over LAN http, remote HTTPS, and in the app (no secure-context needed).
 - **Download a diagnostics bundle for bug reports** (Settings → Logs → "Report a problem", admin
   only). One click saves a redacted JSON snapshot — version/build, host + runtime info, camera &
   detection settings, live stream/MQTT/push status, and recent detection + camera-history events +

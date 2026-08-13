@@ -118,6 +118,18 @@ if (!usersColumns.includes('first_name')) {
 if (!usersColumns.includes('last_name')) {
   db.exec('ALTER TABLE users ADD COLUMN last_name TEXT');
 }
+// Optional TOTP two-factor auth (added later). mfa_secret is the base32 shared secret (kept while a
+// setup is pending AND once enabled); mfa_backup_codes is a JSON array of bcrypt-hashed one-time
+// recovery codes. mfa_enabled gates whether login requires the second step.
+if (!usersColumns.includes('mfa_enabled')) {
+  db.exec('ALTER TABLE users ADD COLUMN mfa_enabled INTEGER NOT NULL DEFAULT 0');
+}
+if (!usersColumns.includes('mfa_secret')) {
+  db.exec('ALTER TABLE users ADD COLUMN mfa_secret TEXT');
+}
+if (!usersColumns.includes('mfa_backup_codes')) {
+  db.exec('ALTER TABLE users ADD COLUMN mfa_backup_codes TEXT');
+}
 
 const camerasColumns = db.prepare('PRAGMA table_info(cameras)').all().map((c) => c.name);
 if (!camerasColumns.includes('sort_order')) {

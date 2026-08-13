@@ -23,6 +23,9 @@ export default function UserSettings() {
   const [error, setError] = useState('');
   const [removing, setRemoving] = useState(false);
   const [removeBusy, setRemoveBusy] = useState(false);
+  const [mfaEnabled, setMfaEnabled] = useState(false);
+  const [resettingMfa, setResettingMfa] = useState(false);
+  const [mfaResetBusy, setMfaResetBusy] = useState(false);
 
   const back = { to: '/settings/users', label: 'Caregivers' };
 
@@ -30,7 +33,10 @@ export default function UserSettings() {
     if (isNew) return;
     api.get('/auth/users').then((users) => {
       const u = users.find((x) => x.id === id);
-      if (u) setForm({ username: u.username, password: '', role: u.role, first_name: u.first_name || '', last_name: u.last_name || '' });
+      if (u) {
+        setForm({ username: u.username, password: '', role: u.role, first_name: u.first_name || '', last_name: u.last_name || '' });
+        setMfaEnabled(!!u.mfa_enabled);
+      }
       setLoaded(true);
     }).catch((err) => { setError(err.message); setLoaded(true); });
   }, [id, isNew]);
@@ -53,6 +59,20 @@ export default function UserSettings() {
       setError(err.message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function confirmResetMfa() {
+    setMfaResetBusy(true);
+    setError('');
+    try {
+      await api.del(`/auth/users/${id}/mfa`);
+      setMfaEnabled(false);
+      setResettingMfa(false);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setMfaResetBusy(false);
     }
   }
 
@@ -122,6 +142,20 @@ export default function UserSettings() {
             <button className="btn btn-primary" type="submit" disabled={busy} style={{ marginTop: 8 }}>
               {busy ? 'Saving…' : isNew ? 'Add caregiver' : 'Save changes'}
             </button>
+            {!isNew && mfaEnabled && (
+              <>
+                <div className="section-title">Two-factor</div>
+                <div className="card">
+                  <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
+                    This account has two-factor enabled. If they've lost their authenticator and backup
+                    codes, reset it so they can sign in with just their password and set it up again.
+                  </div>
+                  <button className="btn btn-secondary" type="button" onClick={() => setResettingMfa(true)}>
+                    Reset two-factor
+                  </button>
+                </div>
+              </>
+            )}
             {!isNew && id !== me?.id && (
               <button className="btn btn-danger" type="button" style={{ marginTop: 10 }} onClick={() => setRemoving(true)}>
                 Remove caregiver
@@ -130,6 +164,21 @@ export default function UserSettings() {
           </form>
         )}
       </main>
+
+      {resettingMfa && (
+        <Modal title="Reset two-factor" placement="top" onClose={() => (mfaResetBusy ? null : setResettingMfa(false))}>
+          <p style={{ marginTop: 0 }}>
+            Turn off two-factor for <strong>{fullName}</strong>? They'll be able to sign in with just their
+            password and will need to set two-factor up again.
+          </p>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button className="btn" type="button" onClick={() => setResettingMfa(false)} disabled={mfaResetBusy}>Cancel</button>
+            <button className="btn btn-danger" type="button" onClick={confirmResetMfa} disabled={mfaResetBusy}>
+              {mfaResetBusy ? 'Resetting…' : 'Reset two-factor'}
+            </button>
+          </div>
+        </Modal>
+      )}
 
       {removing && (
         <Modal title="Remove caregiver" placement="top" onClose={() => (removeBusy ? null : setRemoving(false))}>
