@@ -4,6 +4,7 @@ import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import Modal from '../components/Modal.jsx';
+import BreathingDot from '../components/BreathingDot.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 
 // Cameras management (its own top-level tab). Editing/adding a camera happens on its own routed
@@ -66,22 +67,12 @@ export default function Cameras() {
 
         {cameras.length === 0 && <div className="empty-state">No cameras added yet.</div>}
 
-        {cameras.map((cam) => {
-          const online = cam.statusLevel === 'live' && !cam.disabled;
-          const pill = cam.disabled
-            ? { cls: 'off', text: 'Disabled' }
-            : online
-              ? { cls: 'ok', text: 'Online' }
-              : cam.statusLevel === 'connecting'
-                ? { cls: 'off', text: 'Connecting' }
-                : { cls: 'bad', text: 'Offline' };
-          return (
+        {cameras.map((cam) => (
           <div className={`card cam-card${cam.disabled ? ' cam-card--off' : ''}`} key={cam.id}>
             <div className="cam-card__head">
               <div className="cam-card__title">
-                <span className={`cam-thumb sm${online ? '' : ' off'}`}>{online && <span className="cam-thumb__dot" aria-hidden="true" />}</span>
+                <BreathingDot status={cam.disabled ? 'offline' : cam.statusLevel || 'connecting'} />
                 <span className="cam-card__name">{cam.name}</span>
-                <span className={`status-badge status-badge--${pill.cls} status-badge--sm`}>{pill.text}</span>
               </div>
               {isAdmin && (
                 <div className="cam-card__actions">
@@ -107,8 +98,7 @@ export default function Cameras() {
               </select>
             </div>
           </div>
-          );
-        })}
+        ))}
 
         {isAdmin && (
           <button className="btn btn-primary" onClick={() => navigate('/cameras/new', BACK)}>+ Add camera</button>
