@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import db from '../db.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
-import { refreshMqttConnection } from '../lib/mqttClient.js';
+import { refreshMqttConnection, mqttStatus } from '../lib/mqttClient.js';
 
 const router = Router();
 
@@ -39,6 +39,11 @@ router.get('/mqtt', requireAuth, requireAdmin, (req, res) => {
     mqtt_username: s.mqtt_username || '',
     mqtt_password_set: !!s.mqtt_password,
   });
+});
+
+// Admin-only: live broker connection state, for the "Connected" indicator on the Settings hub.
+router.get('/mqtt/status', requireAuth, requireAdmin, (req, res) => {
+  res.json(mqttStatus());
 });
 
 function isValidTimezone(tz) {

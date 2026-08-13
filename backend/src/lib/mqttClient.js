@@ -121,6 +121,16 @@ function handleMotionMessage(topic, str) {
 // touches an MQTT topic - cheap to call liberally, since it no-ops if nothing actually
 // changed (aside from re-subscribing, which is itself a no-op for already-subscribed
 // topics).
+// Live connection state for the Settings UI. `connected` reflects the mqtt.js client's own
+// flag (true once the broker handshake completes, false while retrying/down).
+export function mqttStatus() {
+  const cfg = getMqttSettings();
+  return {
+    enabled: !!(cfg.mqtt_enabled && cfg.mqtt_host),
+    connected: !!(client && client.connected),
+  };
+}
+
 export function refreshMqttConnection() {
   const cfg = getMqttSettings();
 

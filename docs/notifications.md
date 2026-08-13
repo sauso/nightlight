@@ -4,13 +4,17 @@ Nightlight can send a **push notification to your phone** when a camera with mot
 movement — so you're alerted even when the app is closed. This is **optional** and **off by
 default**. Everything else (including the in-app **Settings → Recent alerts** list) works without it.
 
-There are **two ways** to do this — pick one:
+There are **several providers** — set up one or more; an alert is sent to **every** provider you
+enable, all managed under **Settings → Push notifications** (a row per provider):
 
-- **Pushover (recommended, simplest, works on iOS)** — a small third-party notification service that
-  Sonarr/Radarr-style self-hosted apps use. No Firebase project, no Apple Developer account. See
-  **[Option A: Pushover](#option-a-pushover)** below.
+- **Pushover (simplest, works on iOS)** — a small paid third-party app. No Firebase project, no Apple
+  Developer account. See **[Option A: Pushover](#option-a-pushover)**.
 - **Firebase / FCM (Android app only)** — delivers straight to the Nightlight Android app using your
   own Firebase project. See **[Option B: Firebase](#option-b-firebase)**.
+- **ntfy (self-hostable, free, works on iOS/Android)** — a simple pub/sub notification server
+  ([ntfy.sh](https://ntfy.sh) or your own). Snapshots included. See **[Option C: ntfy](#option-c-ntfy)**.
+- **Gotify (self-hosted)** — a lightweight self-hosted push server. Text alerts. See
+  **[Option D: Gotify](#option-d-gotify)**.
 
 ---
 
@@ -114,6 +118,37 @@ server expects it.
 - **Cameras → edit** a camera → **Motion detection** → **Enable**. Tune sensitivity/cooldown to taste.
 - Move in front of that camera — you should get a notification, and it also appears under
   **Settings → Recent alerts**.
+
+## Option C: ntfy
+
+[ntfy](https://ntfy.sh) is a simple pub/sub notification service. You publish to a **topic** and
+subscribe to it in the ntfy app (iOS/Android) or a browser. Use the free hosted **ntfy.sh** or run
+your own server (e.g. on the same NAS).
+
+1. Pick a **topic** name. On the public ntfy.sh, **anyone who knows the topic can read your alerts**,
+   so choose a long, hard-to-guess name (e.g. `nightlight-alerts-3f9a2c`). On your own server you can
+   also require auth.
+2. Subscribe to that topic in the **ntfy** app (or `https://ntfy.sh/<topic>` in a browser).
+3. In Nightlight: **Settings → Push notifications → ntfy**. Set the **Server URL** (`https://ntfy.sh`
+   or your own), the **Topic**, and — if your server requires it — an **access token** *or*
+   **username/password**. Tick **Enable**, **Save**, and **Send test**.
+
+Motion/sound alerts arrive with the **snapshot attached inline**, and tapping one deep-links into the
+Nightlight app. Only the short message + snapshot pass through ntfy — never your live video/audio.
+
+## Option D: Gotify
+
+[Gotify](https://gotify.net) is a lightweight **self-hosted** push server with its own Android app.
+
+1. Run a Gotify server and open its web UI. Under **Apps**, create an **application** (name it
+   "Nightlight") and copy its **application token**.
+2. Install the **Gotify** Android app and point it at your server (or use the web UI).
+3. In Nightlight: **Settings → Push notifications → Gotify**. Set the **Server URL**, paste the
+   **application token**, optionally adjust **Priority** (0–10), tick **Enable**, **Save**, and
+   **Send test**.
+
+Gotify alerts are **text only** (no image — Gotify has no native attachments); tapping one opens the
+camera. Only the short message passes through your Gotify server.
 
 ## Troubleshooting
 

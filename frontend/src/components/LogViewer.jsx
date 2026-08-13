@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import Modal from './Modal.jsx';
+import Switch from './Switch.jsx';
 
 export default function LogViewer() {
   const [lines, setLines] = useState([]);
@@ -54,8 +55,7 @@ export default function LogViewer() {
     <div className="log-viewer">
       <div className="log-viewer__toolbar">
         <label className="log-viewer__toggle">
-          <input
-            type="checkbox"
+          <Switch
             checked={autoRefresh}
             onChange={(e) => setAutoRefresh(e.target.checked)}
           />

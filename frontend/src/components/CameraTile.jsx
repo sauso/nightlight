@@ -1,28 +1,64 @@
 import { useEffect, useRef, useState } from 'react';
-import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic } from 'lucide-react';
+import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet, Zap, AudioLines, Clock, Square, Play } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { startTalk } from '../lib/twoWayTalk.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
+import { useAuth } from '../lib/AuthContext.jsx';
+import { useCameras } from '../lib/CamerasContext.jsx';
 import { isNativeApp, isIOS, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip, hasNativePip, subscribeBackgroundPaused, isBackgroundPaused, setBackgroundPaused, setPipAutoEnteredFullscreen } from '../lib/nativeBridge.js';
 import WhepPlayer from './WhepPlayer.jsx';
 import HlsPlayer from './HlsPlayer.jsx';
 import BreathingDot from './BreathingDot.jsx';
+import Switch from './Switch.jsx';
+import DetectionRow from './DetectionRow.jsx';
 
-function formatReading(mqtt, tempUnit) {
-  if (!mqtt) return null;
+// The /detection endpoint replaces the whole detection config at once, so a quick motion/sound
+// toggle from the tile must resend every field (from the camera row) with just its flag flipped —
+// the same full-payload shape DetectionSettings uses. start/end are stored minutes; pass through.
+function detectionPayload(cam, patch) {
+  return {
+    motion_enabled: !!cam.detect_motion_enabled,
+    sensitivity: cam.detect_sensitivity ?? 50,
+    cooldown_s: cam.detect_cooldown_s ?? 60,
+    confirm_s: cam.detect_confirm_s ?? 3,
+    schedule_enabled: !!cam.detect_schedule_enabled,
+    start: cam.detect_start ?? 1200,
+    end: cam.detect_end ?? 420,
+    source: cam.detect_source === 'mqtt' ? 'mqtt' : 'framediff',
+    motion_mqtt_topic: cam.motion_mqtt_topic || '',
+    motion_mqtt_value: cam.motion_mqtt_value || '',
+    snapshot_url: cam.snapshot_url || '',
+    sound_enabled: !!cam.detect_sound_enabled,
+    sound_sensitivity: cam.sound_sensitivity ?? 50,
+    sound_confirm_s: cam.sound_confirm_s ?? 4,
+    sound_cooldown_s: cam.sound_cooldown_s ?? 120,
+    ...patch,
+  };
+}
+
+// Room temperature / humidity from MQTT, one entry per available reading, each with its own
+// icon (thermometer / droplet) so the two values read at a glance instead of running together
+// as a "22.5°C · 45%" string.
+function readingParts(mqtt, tempUnit) {
+  if (!mqtt) return [];
   const parts = [];
   if (typeof mqtt.temperature === 'number') {
     const value = tempUnit === 'F' ? (mqtt.temperature * 9) / 5 + 32 : mqtt.temperature;
-    parts.push(`${value.toFixed(1)}°${tempUnit}`);
+    parts.push({ key: 'temp', Icon: Thermometer, text: `${value.toFixed(1)}°${tempUnit}` });
   }
   if (typeof mqtt.humidity === 'number') {
-    parts.push(`${Math.round(mqtt.humidity)}%`);
+    parts.push({ key: 'humidity', Icon: Droplet, text: `${Math.round(mqtt.humidity)}%` });
   }
-  return parts.length > 0 ? parts.join(' · ') : null;
+  return parts;
 }
 
 export default function CameraTile({ camera, childName, dragHandleProps, refreshNonce = 0 }) {
   const { settings } = useSettings();
+  const { user } = useAuth();
+  const { refresh: refreshCameras } = useCameras();
+  const isAdmin = user?.role === 'admin';
+  const navigate = useNavigate();
   // Per-device, not synced through the backend - deliberately so a phone sitting next
   // to you can stay muted while a tablet mounted in the nursery stays unmuted, rather
   // than muting on one device silently muting it everywhere.
@@ -179,10 +215,65 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   const canBackgroundAudio = isNativeApp() && !(isIOS() && mode === 'compat');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
-  const [qualityMenuOpen, setQualityMenuOpen] = useState(false); // drill-in submenu for High/Low
+  const [detBusy, setDetBusy] = useState(false); // guards the quick motion/sound toggles
   function closeMenu() {
     setModeMenuOpen(false);
-    setQualityMenuOpen(false);
+    setSheetDragY(0);
+  }
+
+  // Swipe-down-to-dismiss for the cog bottom sheet (mobile). Only starts a drag when the sheet is
+  // scrolled to the top and the finger moves down, so it never fights the sheet's own scrolling or
+  // the buttons/toggles inside it. Past a threshold on release, the sheet closes; otherwise it snaps
+  // back. Follows the finger 1:1 while dragging.
+  const sheetRef = useRef(null);
+  const sheetDragRef = useRef(null); // { y, atTop } | null
+  const [sheetDragY, setSheetDragY] = useState(0);
+  function onSheetTouchStart(e) {
+    sheetDragRef.current = { y: e.touches[0].clientY, atTop: (sheetRef.current?.scrollTop ?? 0) <= 0 };
+  }
+  function onSheetTouchMove(e) {
+    const start = sheetDragRef.current;
+    if (!start || !start.atTop) return;
+    const dy = e.touches[0].clientY - start.y;
+    setSheetDragY(dy > 0 ? dy : 0);
+  }
+  function onSheetTouchEnd() {
+    if (sheetDragY > 90) { closeMenu(); return; }
+    setSheetDragY(0);
+    sheetDragRef.current = null;
+  }
+
+  // Quick-toggle motion / sound / schedule from the tile (admin only) without opening full settings.
+  function togglePatch(kind) {
+    if (kind === 'motion') return { motion_enabled: !camera.detect_motion_enabled };
+    if (kind === 'sound') return { sound_enabled: !camera.detect_sound_enabled };
+    // Schedule: if it's never had a real window (start === end), enabling it seeds the same
+    // overnight default the full settings screen uses, so it doesn't come on as an empty window.
+    const enabling = !camera.detect_schedule_enabled;
+    const noWindow = (camera.detect_start ?? 0) === (camera.detect_end ?? 0);
+    return enabling && noWindow
+      ? { schedule_enabled: true, start: 1200, end: 420 }
+      : { schedule_enabled: enabling };
+  }
+
+  async function toggleDetection(kind) {
+    if (detBusy) return;
+    setDetBusy(true);
+    const patch = togglePatch(kind);
+    try {
+      await api.put(`/cameras/${camera.id}/detection`, detectionPayload(camera, patch));
+      await refreshCameras();
+    } catch {
+      // Leave the switch as-is on failure; the next refresh reflects the real state.
+    } finally {
+      setDetBusy(false);
+    }
+  }
+  // "Camera settings" from the gear sheet (admin only) → that camera's routed settings screen.
+  // `from` makes its back button return to Live, where the gear sheet was opened.
+  function openCameraSettings() {
+    closeMenu();
+    navigate(`/cameras/${camera.id}`, { state: { from: { to: '/', label: 'Live' } } });
   }
   const manualModeRef = useRef(false);
   const videoWrapRef = useRef(null);
@@ -254,7 +345,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   function selectMode(newMode) {
     manualModeRef.current = true;
     setMode(newMode);
-    setModeMenuOpen(false);
+    // Sheet stays open so connection mode, quality and detection can all be tweaked before Done.
   }
 
   async function toggleFullscreen() {
@@ -516,8 +607,8 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
 
         <button
           className="settings-btn"
-          onClick={() => { setModeMenuOpen((o) => !o); setQualityMenuOpen(false); }}
-          aria-label="Stream quality settings"
+          onClick={() => setModeMenuOpen((o) => !o)}
+          aria-label="Camera settings"
           aria-expanded={modeMenuOpen}
         >
           <Settings size={16} />
@@ -526,65 +617,92 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
         {modeMenuOpen && (
           <>
             <div className="tile-menu-backdrop" onClick={closeMenu} />
-            <div className="tile-menu">
-              {qualityMenuOpen ? (
-                // Quality submenu (drill-in) - keeps the main menu short so it never needs scrolling.
+            <div
+              className="tile-menu"
+              role="dialog"
+              aria-label={`${camera.name} settings`}
+              ref={sheetRef}
+              onTouchStart={onSheetTouchStart}
+              onTouchMove={onSheetTouchMove}
+              onTouchEnd={onSheetTouchEnd}
+              style={sheetDragY ? { transform: `translateY(${sheetDragY}px)`, transition: 'none' } : undefined}
+            >
+              <div className="tile-menu__grabber" aria-hidden="true" />
+              <div className="tile-menu__title">{camera.name}</div>
+
+              <div className="tile-menu__label">Connection mode</div>
+              <div className="segmented" role="group" aria-label="Connection mode" style={{ marginBottom: 12 }}>
+                <button
+                  type="button"
+                  className={`segmented__btn${mode === 'live' ? ' segmented__btn--active' : ''}`}
+                  onClick={() => selectMode('live')}
+                >
+                  Low
+                </button>
+                <button
+                  type="button"
+                  className={`segmented__btn${mode === 'compat' ? ' segmented__btn--active' : ''}`}
+                  onClick={() => selectMode('compat')}
+                >
+                  Compatibility
+                </button>
+              </div>
+
+              {camera.has_sub && (
                 <>
-                  <button
-                    className="tile-menu__item tile-menu__item--back"
-                    onClick={() => setQualityMenuOpen(false)}
-                  >
-                    ‹ Quality
-                  </button>
-                  <div className="tile-menu__divider" />
-                  <button
-                    className={`tile-menu__item${quality === 'high' ? ' tile-menu__item--active' : ''}`}
-                    onClick={() => { setQuality('high'); closeMenu(); }}
-                  >
-                    High
-                  </button>
-                  <button
-                    className={`tile-menu__item${quality === 'low' ? ' tile-menu__item--active' : ''}`}
-                    onClick={() => { setQuality('low'); closeMenu(); }}
-                  >
-                    Low
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    className={`tile-menu__item${mode === 'live' ? ' tile-menu__item--active' : ''}`}
-                    onClick={() => selectMode('live')}
-                  >
-                    Low latency
-                  </button>
-                  <button
-                    className={`tile-menu__item${mode === 'compat' ? ' tile-menu__item--active' : ''}`}
-                    onClick={() => selectMode('compat')}
-                  >
-                    Compatibility
-                  </button>
-                  {camera.has_sub && (
-                    <>
-                      <div className="tile-menu__divider" />
-                      <button
-                        className="tile-menu__item tile-menu__item--submenu"
-                        onClick={() => setQualityMenuOpen(true)}
-                      >
-                        <span>Quality</span>
-                        <span className="tile-menu__value">{quality === 'low' ? 'Low ›' : 'High ›'}</span>
-                      </button>
-                    </>
-                  )}
-                  <div className="tile-menu__divider" />
-                  <button
-                    className="tile-menu__item"
-                    onClick={() => { setStopped(!stopped); closeMenu(); }}
-                  >
-                    {stopped ? 'Start camera' : 'Stop camera'}
-                  </button>
+                  <div className="tile-menu__label">Quality</div>
+                  <div className="segmented" role="group" aria-label="Stream quality" style={{ marginBottom: 12 }}>
+                    <button
+                      type="button"
+                      className={`segmented__btn${quality === 'high' ? ' segmented__btn--active' : ''}`}
+                      onClick={() => setQuality('high')}
+                    >
+                      High
+                    </button>
+                    <button
+                      type="button"
+                      className={`segmented__btn${quality === 'low' ? ' segmented__btn--active' : ''}`}
+                      onClick={() => setQuality('low')}
+                    >
+                      Low
+                    </button>
+                  </div>
                 </>
               )}
+
+              {isAdmin && (
+                <>
+                  <div className="tile-menu__label">Detection · quick toggle</div>
+                  <div className="card" style={{ padding: 0, marginBottom: 12 }}>
+                    <DetectionRow as="label" Icon={Zap} label="Motion detection"
+                      right={<Switch checked={!!camera.detect_motion_enabled} disabled={detBusy} onChange={() => toggleDetection('motion')} />} />
+                    <DetectionRow as="label" Icon={AudioLines} label="Sound detection"
+                      right={<Switch checked={!!camera.detect_sound_enabled} disabled={detBusy} onChange={() => toggleDetection('sound')} />} />
+                    <DetectionRow as="label" Icon={Clock} label="Alert schedule"
+                      right={<Switch checked={!!camera.detect_schedule_enabled} disabled={detBusy} onChange={() => toggleDetection('schedule')} />} />
+                  </div>
+                </>
+              )}
+
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  style={{ flex: 1 }}
+                  onClick={() => { setStopped(!stopped); closeMenu(); }}
+                >
+                  {stopped ? <Play size={16} /> : <Square size={16} />}
+                  {stopped ? 'Start' : 'Stop'}
+                </button>
+                {isAdmin && (
+                  <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={openCameraSettings}>
+                    <Settings size={16} />
+                    Camera settings
+                  </button>
+                )}
+              </div>
+
+              <button className="tile-menu__done" onClick={closeMenu}>Done</button>
             </div>
           </>
         )}
@@ -604,7 +722,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
         {ptzOpen && (
           <>
             <div
-              className="tile-menu-backdrop"
+              className="ptz-backdrop"
               onClick={() => {
                 ptzEndHold();
                 setPtzOpen(false);
@@ -688,9 +806,12 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
           </div>
         </div>
         <div className="status-row">
-          {formatReading(camera.mqtt, settings.temp_unit) && (
-            <span className="camera-tile__reading">{formatReading(camera.mqtt, settings.temp_unit)}</span>
-          )}
+          {readingParts(camera.mqtt, settings.temp_unit).map(({ key, Icon, text }) => (
+            <span key={key} className="camera-tile__reading">
+              <Icon size={16} className="camera-tile__reading-icon" aria-hidden="true" />
+              {text}
+            </span>
+          ))}
           <BreathingDot status={camera.statusLevel || 'connecting'} />
         </div>
       </div>

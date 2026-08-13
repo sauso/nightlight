@@ -1,8 +1,20 @@
 import { useEffect, useState } from 'react';
+import { Sun, Moon, Monitor } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
+import { getTheme, setTheme } from '../lib/theme.js';
 import Modal from '../components/Modal.jsx';
 import AppHeader from '../components/AppHeader.jsx';
+import Switch from '../components/Switch.jsx';
+import Avatar from '../components/Avatar.jsx';
+import TwoFactorSection from '../components/TwoFactorSection.jsx';
+import { fileToAvatarDataUrl } from '../lib/imageResize.js';
+
+const THEME_OPTIONS = [
+  { value: 'light', label: 'Light', Icon: Sun },
+  { value: 'dark', label: 'Dark', Icon: Moon },
+  { value: 'system', label: 'System', Icon: Monitor },
+];
 import {
   notificationsSupported,
   notificationsEnabled,
@@ -24,9 +36,65 @@ function timeAgo(iso) {
 }
 
 export default function Account() {
-  const { user, logout } = useAuth();
+  const { user, logout, refresh } = useAuth();
   const [sessions, setSessions] = useState([]);
   const [error, setError] = useState('');
+  const [photoStatus, setPhotoStatus] = useState(''); // '' | 'saving' | 'saved'
+  const [theme, setThemeState] = useState(getTheme());
+
+  async function savePhoto(photo) {
+    setError('');
+    setPhotoStatus('saving');
+    try {
+      await api.put('/auth/me', { photo });
+      await refresh();
+      setPhotoStatus('saved');
+      setTimeout(() => setPhotoStatus(''), 2000);
+    } catch (err) {
+      setError(err.message);
+      setPhotoStatus('');
+    }
+  }
+  async function onPhoto(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const dataUrl = await fileToAvatarDataUrl(file);
+      await savePhoto(dataUrl);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  function chooseTheme(value) {
+    setThemeState(value);
+    setTheme(value); // per-device; applies immediately (see lib/theme.js)
+  }
+
+  // Display name (first/last) — self-service; the username/login id stays admin-managed.
+  const [nameForm, setNameForm] = useState({ first_name: '', last_name: '' });
+  const [nameBusy, setNameBusy] = useState(false);
+  const [nameSaved, setNameSaved] = useState(false);
+  useEffect(() => {
+    setNameForm({ first_name: user?.first_name || '', last_name: user?.last_name || '' });
+  }, [user?.first_name, user?.last_name]);
+
+  async function saveName(e) {
+    e.preventDefault();
+    setNameBusy(true);
+    setError('');
+    try {
+      await api.put('/auth/me', { first_name: nameForm.first_name, last_name: nameForm.last_name });
+      await refresh();
+      setNameSaved(true);
+      setTimeout(() => setNameSaved(false), 2000);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setNameBusy(false);
+    }
+  }
   const [busy, setBusy] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
   const [passwordForm, setPasswordForm] = useState(BLANK_PASSWORD_FORM);
@@ -109,14 +177,64 @@ export default function Account() {
 
   return (
     <>
-      <AppHeader title={displayName(user || {})} />
+      <AppHeader title={displayName(user || {})} back={{ to: '/settings', label: 'Settings' }} />
       <main className="app-main">
         {error && <div className="error-banner">{error}</div>}
 
         <div className="card">
-          <div className="list-row">
-            <span>Role</span>
-            <span className="tag">{user?.role}</span>
+          <form onSubmit={saveName}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
+              <Avatar name={[nameForm.first_name, nameForm.last_name].filter(Boolean).join(' ') || user?.username} src={user?.photo} size={56} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 600 }}>{user?.username}</div>
+                <div className="camera-tile__sub" style={{ textTransform: 'capitalize' }}>{user?.role}</div>
+                <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
+                  <label className="icon-btn" style={{ padding: 0, cursor: 'pointer' }}>
+                    {photoStatus === 'saving' ? 'Saving…' : photoStatus === 'saved' ? 'Saved ✓' : (user?.photo ? 'Change photo' : 'Add photo')}
+                    <input type="file" accept="image/*" onChange={onPhoto} style={{ display: 'none' }} />
+                  </label>
+                  {user?.photo && (
+                    <button type="button" className="icon-btn" style={{ padding: 0 }} onClick={() => savePhoto(null)}>Remove</button>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="onvif-box__row">
+              <div className="field" style={{ marginBottom: 10 }}>
+                <label htmlFor="first-name">First name</label>
+                <input id="first-name" value={nameForm.first_name}
+                  onChange={(e) => setNameForm({ ...nameForm, first_name: e.target.value })} placeholder="First" />
+              </div>
+              <div className="field" style={{ marginBottom: 10 }}>
+                <label htmlFor="last-name">Last name</label>
+                <input id="last-name" value={nameForm.last_name}
+                  onChange={(e) => setNameForm({ ...nameForm, last_name: e.target.value })} placeholder="Last" />
+              </div>
+            </div>
+            <button className="btn btn-secondary" type="submit" disabled={nameBusy}>
+              {nameBusy ? 'Saving…' : nameSaved ? 'Saved ✓' : 'Save name'}
+            </button>
+          </form>
+        </div>
+
+        <div className="section-title">Appearance</div>
+        <div className="card" style={{ marginBottom: 14 }}>
+          <div className="segmented" role="group" aria-label="Theme">
+            {THEME_OPTIONS.map(({ value, label, Icon }) => (
+              <button
+                key={value}
+                type="button"
+                className={`segmented__btn${theme === value ? ' segmented__btn--active' : ''}`}
+                aria-pressed={theme === value}
+                onClick={() => chooseTheme(value)}
+              >
+                <Icon size={18} aria-hidden="true" />
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="camera-tile__sub" style={{ marginTop: 8 }}>
+            Applies to this device only. System follows your phone's light / dark setting.
           </div>
         </div>
 
@@ -128,6 +246,8 @@ export default function Account() {
         >
           Change my password
         </button>
+
+        <TwoFactorSection />
 
         <div className="section-title">Signed in on</div>
         <div className="card" style={{ marginBottom: 14 }}>
@@ -161,9 +281,7 @@ export default function Account() {
               ) : (
                 <>
                   <label className="log-viewer__toggle" style={{ padding: 12, margin: 0 }}>
-                    <input
-                      type="checkbox"
-                      style={{ width: 'auto', margin: 0 }}
+                    <Switch
                       checked={notifEnabled}
                       disabled={notifBusy || !serverPush}
                       onChange={(e) => toggleNotifications(e.target.checked)}

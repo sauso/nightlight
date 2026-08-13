@@ -55,6 +55,13 @@ export function usePullToRefresh({ enabled, onRefresh }) {
         startYRef.current = null;
         return;
       }
+      // Don't hijack a pull that starts inside an overlay sheet — the camera cog sheet has its own
+      // swipe-down-to-dismiss, and its touchmove bubbles up to this (non-passive) listener, which
+      // would otherwise also trigger a dashboard refresh.
+      if (e.target?.closest?.('.tile-menu')) {
+        startYRef.current = null;
+        return;
+      }
       startYRef.current = e.touches[0].clientY;
       activeRef.current = false;
     }

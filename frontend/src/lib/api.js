@@ -48,4 +48,12 @@ export const api = {
   post: (url, body) => request('POST', url, body),
   put: (url, body) => request('PUT', url, body),
   del: (url) => request('DELETE', url),
+  // Absolute, token-carrying URL for media the browser fetches itself (<img>/<video>,
+  // which can't attach an Authorization header) — same ?token= approach HLS uses. The
+  // matching route must accept the query token (requireAuthQueryOrHeader).
+  url: (path) => {
+    const token = getToken();
+    if (!token) return `/api${path}`;
+    return `/api${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
+  },
 };
