@@ -249,12 +249,22 @@ export async function extractClip(
 
   const outFile = path.join(outDir, `${outBase}.mp4`);
   try {
-    // ts -> mp4, copy. ffmpeg auto-applies the h264_mp4toannexb (reverse) + aac_adtstoasc bitstream
-    // filters this remux needs. +faststart puts moov up front for progressive <video> playback.
+    // ts -> mp4. VIDEO is a pure copy (cheap, no re-encode; ffmpeg auto-applies h264_mp4toannexb).
+    // AUDIO is re-encoded ONCE over the whole concatenated clip with aresample=async=1. A plain
+    // `-c copy` of the AAC across the 2s segment joins left audible gaps at every boundary (encoder
+    // priming + tiny timestamp discontinuities from -reset_timestamps) — "extremely choppy" sound.
+    // aresample=async=1 rebuilds a single continuous, monotonic audio clock over the full 20s
+    // (padding gaps with silence, absorbing backward jumps) — the same fix transcoder.js applies to
+    // the AAC track for the same reason. Done once over the whole clip, so no per-segment re-priming;
+    // 20s of mono audio is trivial to encode. +faststart puts moov up front for progressive <video>.
     await runFfmpeg([
       '-nostdin', '-loglevel', 'error',
       '-f', 'concat', '-safe', '0', '-i', listFile,
-      '-c', 'copy', '-movflags', '+faststart',
+      '-c:v', 'copy',
+      '-af', 'aresample=async=1:first_pts=0',
+      '-c:a', 'aac', '-b:a', '128k',
+      '-avoid_negative_ts', 'make_zero',
+      '-movflags', '+faststart',
       '-y', outFile,
     ]);
   } finally {
