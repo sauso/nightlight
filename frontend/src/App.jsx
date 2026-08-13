@@ -6,19 +6,30 @@ import { CamerasProvider } from './lib/CamerasContext.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import { isNativeApp, hasActiveBackgroundAudio } from './lib/nativeBridge.js';
 import { initPushNotifications } from './lib/pushNotifications.js';
+import { useSwipeBack } from './lib/useSwipeBack.js';
+import { useHardwareBack } from './lib/useHardwareBack.js';
 import NavBar from './components/NavBar.jsx';
 import LiveMonitor from './components/LiveMonitor.jsx';
 import InstallPrompt from './components/InstallPrompt.jsx';
 import PushBanner from './components/PushBanner.jsx';
 import Login from './pages/Login.jsx';
 import Children from './pages/Children.jsx';
+import ChildDetail from './pages/ChildDetail.jsx';
+import ChildSettings from './pages/ChildSettings.jsx';
 import Cameras from './pages/Cameras.jsx';
+import CameraSettings from './pages/CameraSettings.jsx';
+import DetectionSettings from './pages/DetectionSettings.jsx';
 import Account from './pages/Account.jsx';
 import Settings from './pages/Settings.jsx';
 import SettingsGeneral from './pages/SettingsGeneral.jsx';
 import SettingsMqtt from './pages/SettingsMqtt.jsx';
 import SettingsPush from './pages/SettingsPush.jsx';
+import SettingsPushPushover from './pages/SettingsPushPushover.jsx';
+import SettingsPushFirebase from './pages/SettingsPushFirebase.jsx';
+import SettingsPushGotify from './pages/SettingsPushGotify.jsx';
+import SettingsPushNtfy from './pages/SettingsPushNtfy.jsx';
 import SettingsUsers from './pages/SettingsUsers.jsx';
+import UserSettings from './pages/UserSettings.jsx';
 import SettingsLogs from './pages/SettingsLogs.jsx';
 import About from './pages/About.jsx';
 
@@ -83,6 +94,8 @@ function AdminProtected({ children }) {
 function Shell() {
   const { user, loading } = useAuth();
   useReloadAfterBackground();
+  useSwipeBack();
+  useHardwareBack();
 
   // Once signed in (native app only), register for push notifications so detection alerts can
   // reach the phone when the app is backgrounded/closed. No-op in a browser.
@@ -107,13 +120,35 @@ function Shell() {
                   <LiveMonitor />
                   <Routes>
                     <Route path="/" element={null} />
+                    {/* Retired tabs redirect to the new child-centred structure. */}
+                    <Route path="/family" element={<Navigate to="/children" replace />} />
+                    <Route path="/alerts" element={<Navigate to="/children" replace />} />
+                    {/* Children tab: list → child detail (cameras + alerts + sleep); avatar → settings. */}
                     <Route path="/children" element={<Children />} />
+                    <Route path="/children/new" element={<ChildSettings />} />
+                    <Route path="/children/:id" element={<ChildDetail />} />
+                    <Route path="/children/:id/edit" element={<ChildSettings />} />
                     <Route path="/cameras" element={<Cameras />} />
-                    <Route path="/settings" element={<AdminProtected><Settings /></AdminProtected>} />
+                    {/* Per-camera settings + split detection screens are admin-only (camera
+                        management). /cameras/new and /cameras/:id/:kind are more specific than
+                        /cameras/:id, so react-router matches them first regardless of order. */}
+                    <Route path="/cameras/new" element={<AdminProtected><CameraSettings /></AdminProtected>} />
+                    <Route path="/cameras/:id" element={<AdminProtected><CameraSettings /></AdminProtected>} />
+                    <Route path="/cameras/:id/:kind" element={<AdminProtected><DetectionSettings /></AdminProtected>} />
+                    {/* Settings hub is role-aware internally (admin-only rows are hidden for
+                        caregivers), so the hub route itself is open to any signed-in user;
+                        the config sub-pages stay admin-gated. */}
+                    <Route path="/settings" element={<Settings />} />
                     <Route path="/settings/general" element={<AdminProtected><SettingsGeneral /></AdminProtected>} />
                     <Route path="/settings/mqtt" element={<AdminProtected><SettingsMqtt /></AdminProtected>} />
                     <Route path="/settings/push" element={<AdminProtected><SettingsPush /></AdminProtected>} />
+                    <Route path="/settings/push/pushover" element={<AdminProtected><SettingsPushPushover /></AdminProtected>} />
+                    <Route path="/settings/push/firebase" element={<AdminProtected><SettingsPushFirebase /></AdminProtected>} />
+                    <Route path="/settings/push/gotify" element={<AdminProtected><SettingsPushGotify /></AdminProtected>} />
+                    <Route path="/settings/push/ntfy" element={<AdminProtected><SettingsPushNtfy /></AdminProtected>} />
                     <Route path="/settings/users" element={<AdminProtected><SettingsUsers /></AdminProtected>} />
+                    <Route path="/settings/users/new" element={<AdminProtected><UserSettings /></AdminProtected>} />
+                    <Route path="/settings/users/:id" element={<AdminProtected><UserSettings /></AdminProtected>} />
                     <Route path="/settings/logs" element={<AdminProtected><SettingsLogs /></AdminProtected>} />
                     <Route path="/account" element={<Account />} />
                     <Route path="/about" element={<About />} />

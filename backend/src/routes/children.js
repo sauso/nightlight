@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { normalizePhoto } from '../lib/photo.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -21,12 +22,15 @@ router.get('/', (req, res) => {
 router.post('/', (req, res) => {
   const { name, birthday, color } = req.body || {};
   if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
+  let photo;
+  try { photo = normalizePhoto(req.body?.photo, null); } catch (e) { return res.status(400).json({ error: e.message }); }
   const id = uuid();
-  db.prepare('INSERT INTO children (id, name, birthday, color) VALUES (?, ?, ?, ?)').run(
+  db.prepare('INSERT INTO children (id, name, birthday, color, photo) VALUES (?, ?, ?, ?, ?)').run(
     id,
     name.trim(),
     birthday || null,
-    color || '#F5D9A8'
+    color || '#F5D9A8',
+    photo
   );
   res.status(201).json(withCameras(db.prepare('SELECT * FROM children WHERE id = ?').get(id)));
 });
@@ -35,10 +39,13 @@ router.put('/:id', (req, res) => {
   const existing = db.prepare('SELECT * FROM children WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Child not found' });
   const { name, birthday, color } = req.body || {};
-  db.prepare('UPDATE children SET name = ?, birthday = ?, color = ? WHERE id = ?').run(
+  let photo;
+  try { photo = normalizePhoto(req.body?.photo, existing.photo); } catch (e) { return res.status(400).json({ error: e.message }); }
+  db.prepare('UPDATE children SET name = ?, birthday = ?, color = ?, photo = ? WHERE id = ?').run(
     name?.trim() || existing.name,
     birthday !== undefined ? birthday : existing.birthday,
     color || existing.color,
+    photo,
     req.params.id
   );
   res.json(withCameras(db.prepare('SELECT * FROM children WHERE id = ?').get(req.params.id)));

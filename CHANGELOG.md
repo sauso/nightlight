@@ -9,6 +9,121 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-14
+
+### Changed
+- **Temperature & humidity on camera tiles are larger and bolder** (~20%) so the readings are easier
+  to see at a glance.
+
+### Changed
+- **Child-centred navigation.** Four bottom tabs — **Live · Children · Cameras · Settings** (the
+  Alerts and Family tabs are gone). **Children** is now its own tab that opens each child's page
+  (their cameras, their alerts, and — soon — their sleep summary); tap a child's **avatar** to edit
+  them. **Cameras** is its own tab with richer rows (live thumbnail + Online/Offline pill). Caregiver
+  management moved into **Settings** (admin). Alerts now live on each child's page (filtered to their
+  cameras).
+
+### Added
+- **Avatar photos for children, caregivers and your own account.** Add a photo (child → avatar →
+  Add photo; a caregiver's settings; Settings → Account). It's resized in your browser and saves
+  immediately; the coloured initials remain the fallback everywhere an avatar shows.
+- **ntfy and Gotify notifications.** Push notifications is now a hub (a row per provider, like the
+  Settings screen) covering **Pushover, Firebase, Gotify, and ntfy** — enable any combination and an
+  alert goes to all of them. ntfy (ntfy.sh or self-hosted) carries the snapshot inline and works on
+  iOS; Gotify is self-hosted, text-only. Each provider has its own config page with a Send-test button.
+  See `docs/notifications.md`.
+- **Two-factor authentication (TOTP).** Optional, per-account: Settings → Account → Two-factor sets it
+  up from an authenticator app (QR or manual key) and issues 10 one-time backup codes. Login then asks
+  for the 6-digit code after the password. Recovery is covered by backup codes, an admin "Reset
+  two-factor" action on a caregiver, and a console failsafe (`src/scripts/reset-mfa.js`) for a locked-out
+  admin — see `docs/mfa.md`. Works over LAN http, remote HTTPS, and in the app (no secure-context needed).
+- **Download a diagnostics bundle for bug reports** (Settings → Logs → "Report a problem", admin
+  only). One click saves a redacted JSON snapshot — version/build, host + runtime info, camera &
+  detection settings, live stream/MQTT/push status, and recent detection + camera-history events +
+  server logs — to attach to a GitHub issue. Secrets (all passwords/tokens, credential-bearing
+  URLs) are reduced to "is it set?" booleans, never their values, so it's safe to share. In the
+  Android app it saves straight to the phone's Downloads folder (falling back to the share sheet on
+  older devices), since the WebView can't do a browser-style download.
+- **Swipe right to go back a screen.** A horizontal swipe from the left half of the screen pops one
+  step back (Settings → MQTT, Family → Camera, etc.), like the nav-bar back button. Not active on
+  the Live dashboard, where the tiles own their own gestures.
+- **Android hardware Back / edge back-gesture steps back through screens** (via the native app's new
+  `@capacitor/app` plugin) instead of exiting on the first press.
+- **The camera cog sheet now has quick controls.** *Connection mode* (Low / Compatibility) and
+  *Quality* (High / Low) are segmented buttons, and admins get **quick Motion / Sound / Alert
+  schedule toggles** — each with its icon, matching the camera-settings styling — right there,
+  no need to open full camera settings just to arm or silence detection. Stop/Start camera is now
+  its own button. (Enabling the schedule for the first time seeds a 20:00–07:00 window you can
+  refine in full settings.)
+- **Children and caregivers now open their own screens** (like cameras) instead of pop-up modals —
+  reached from the Family hub. Each shows an avatar (initials for now) with room for a photo later.
+- **Edit your own name.** Settings → Account now lets any user set their First/Last name (the login
+  username stays admin-managed).
+- **Settings hub tidied:** your Account sits at the top in its own card; About and Change server
+  share a card; and the **MQTT row shows its live connection status as a coloured badge** for
+  admins — green Connected, red Disconnected, grey Off.
+- **Swipe the camera cog sheet down to dismiss it** on touch devices (in addition to the backdrop
+  tap / Done button). Stop camera now has a stop icon and a red outline; Camera settings has a cog.
+  Stop and Camera settings share a row to save space, and swiping the sheet down no longer also
+  triggers the dashboard's pull-to-refresh.
+
+### Fixed
+- **PTZ no longer dims the video or eats arrow taps.** The pan/tilt pad reused the new gear-sheet's
+  dimmed backdrop, which sat over the arrows — it now has its own transparent layer, so the D-pad
+  works again.
+- **Settings sub-pages (General / MQTT / Push / Logs / Users) put their back button in the nav bar**
+  like every other page, instead of a stray link below it.
+- **Opening a camera, child or caregiver form no longer pops up the keyboard** automatically.
+- **MQTT** has its own logo icon in Settings, and its description now reflects that it's used for
+  both room sensor readings and camera-side motion detection (not just temperature/humidity).
+- **Light-mode polish:** form fields are now white (not pale lavender) in light mode; the MQTT icon
+  is cropped to fill its space like the other icons; and list/menu labels (Pushover, Firebase,
+  children, cameras…) are larger and easier to read.
+- **More light-mode polish:** the MQTT settings icon is aligned and sized to match the others; the
+  ONVIF "Fetch" and "Verify login" buttons are now a filled periwinkle (matching an active toggle)
+  so they read clearly in light mode.
+
+### Added
+- **Per-camera settings are now their own screen.** Editing or adding a camera opens a full page
+  (instead of a modal), reached from a camera's tile gear ("Camera settings") or the Family hub.
+- **Motion, Sound and Schedule are now separate screens** under each camera, replacing the single
+  long detection form. Changes apply immediately (no Save button) — toggles are switches, and the
+  alert snapshot URL lives with the motion settings.
+- **Family screen redesigned** to list your children (with camera counts), cameras (each showing
+  MOTION / SOUND / PTZ / TALK capability badges), and — for admins — caregivers, all inline.
+
+### Changed
+- **New visual theme.** A lighter, calmer look: periwinkle for interactive elements (tabs, switches,
+  sliders), your accent colour (gold by default) for primary buttons and the camera glow, and a navy
+  top bar. Light is now the default; Dark and System are still under Settings → Account → Appearance.
+- **New bottom navigation: Live · Alerts · Family · Settings.** The old Nursery/Children/Cameras
+  tabs are reorganised into two hubs — **Family** (Children, Cameras, and — for admins — Caregivers)
+  and **Settings** — plus a dedicated **Alerts** tab (feed built out separately). Sub-pages now have
+  a labelled back button ("‹ Family", "‹ Settings") that returns you to where you came from.
+- **Room temperature and humidity now show with thermometer / droplet icons** on each camera tile,
+  so the two readings read at a glance instead of running together in one line.
+- **The camera tile's gear opens a bottom sheet** (grabber, grouped Stream / camera rows, Done)
+  instead of a small pop-up menu. It keeps Low latency / Compatibility, quality and Stop camera, and
+  — for admins — adds a **Camera settings** shortcut that opens that camera's full settings directly.
+- **Light theme.** Settings → Account → Appearance now offers Light / Dark / System (follows your
+  phone). The choice is per-device, like mute and stream quality.
+- **Alerts tab feed, with snapshots.** The Alerts tab now shows the motion/sound detection feed to
+  any signed-in user (previously it was buried in the admin-only Logs screen) — auto-refreshing, with
+  clear-history kept admin-only. Each detection's snapshot is now **saved and shown as a thumbnail**,
+  so the feed is a useful record even with no push notifications set up. The image is captured on
+  every detection (not just when push is enabled), stored one file per alert, and pruned along with
+  the alert history (kept up to 30 days).
+
+### Changed
+- **Settings that apply the moment you flip them now use a pill toggle switch** instead of a
+  checkbox — "Send motion alerts to this device", Enable MQTT, Enable Pushover / Firebase
+  notifications, and the Logs auto-refresh. Checkboxes are kept for settings that only take effect
+  when you press Save, so the control's shape tells you whether a change is instant or pending.
+- **Account, About, Change server and Sign out moved out of the header menu into the Settings tab.**
+  The header's hamburger menu is gone — everything it held now lives under Settings, with the app
+  version shown inline on the About row. Caregivers see a slimmed Settings (Account + About);
+  admins additionally see General, MQTT, Push and Logs.
+
 ## [0.13.0] - 2026-08-10
 
 ### Added

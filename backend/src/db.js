@@ -118,6 +118,29 @@ if (!usersColumns.includes('first_name')) {
 if (!usersColumns.includes('last_name')) {
   db.exec('ALTER TABLE users ADD COLUMN last_name TEXT');
 }
+// Optional TOTP two-factor auth (added later). mfa_secret is the base32 shared secret (kept while a
+// setup is pending AND once enabled); mfa_backup_codes is a JSON array of bcrypt-hashed one-time
+// recovery codes. mfa_enabled gates whether login requires the second step.
+if (!usersColumns.includes('mfa_enabled')) {
+  db.exec('ALTER TABLE users ADD COLUMN mfa_enabled INTEGER NOT NULL DEFAULT 0');
+}
+if (!usersColumns.includes('mfa_secret')) {
+  db.exec('ALTER TABLE users ADD COLUMN mfa_secret TEXT');
+}
+if (!usersColumns.includes('mfa_backup_codes')) {
+  db.exec('ALTER TABLE users ADD COLUMN mfa_backup_codes TEXT');
+}
+// Optional caregiver/admin avatar photo — same browser-resized base64 data-URL as children.photo.
+if (!usersColumns.includes('photo')) {
+  db.exec('ALTER TABLE users ADD COLUMN photo TEXT');
+}
+
+// Optional child avatar photo — a browser-resized (~256px square) base64 data-URL, stored inline
+// (small; the frontend caps the size). Null = fall back to the coloured initials avatar.
+const childrenColumns = db.prepare('PRAGMA table_info(children)').all().map((c) => c.name);
+if (!childrenColumns.includes('photo')) {
+  db.exec('ALTER TABLE children ADD COLUMN photo TEXT');
+}
 
 const camerasColumns = db.prepare('PRAGMA table_info(cameras)').all().map((c) => c.name);
 if (!camerasColumns.includes('sort_order')) {
@@ -165,6 +188,28 @@ if (!settingsColumns.includes('pushover_enabled')) {
   db.exec('ALTER TABLE settings ADD COLUMN pushover_enabled INTEGER NOT NULL DEFAULT 0');
   db.exec('ALTER TABLE settings ADD COLUMN pushover_app_token TEXT');
   db.exec('ALTER TABLE settings ADD COLUMN pushover_user_key TEXT');
+}
+
+// ntfy notifications (https://ntfy.sh, or any self-hosted ntfy server) — the server POSTs the alert
+// to a topic; the recipient subscribes in the ntfy app/browser. Optional auth via an access token
+// (bearer) or username/password (basic). Off until configured + enabled.
+if (!settingsColumns.includes('ntfy_enabled')) {
+  db.exec('ALTER TABLE settings ADD COLUMN ntfy_enabled INTEGER NOT NULL DEFAULT 0');
+  db.exec("ALTER TABLE settings ADD COLUMN ntfy_server_url TEXT NOT NULL DEFAULT 'https://ntfy.sh'");
+  db.exec('ALTER TABLE settings ADD COLUMN ntfy_topic TEXT');
+  db.exec('ALTER TABLE settings ADD COLUMN ntfy_token TEXT');
+  db.exec('ALTER TABLE settings ADD COLUMN ntfy_username TEXT');
+  db.exec('ALTER TABLE settings ADD COLUMN ntfy_password TEXT');
+}
+
+// Gotify notifications (self-hosted https://gotify.net) — the server POSTs to a Gotify application's
+// message endpoint with its app token; the recipient runs the Gotify server + app. Text only (Gotify
+// has no native image attachments). Off until configured + enabled.
+if (!settingsColumns.includes('gotify_enabled')) {
+  db.exec('ALTER TABLE settings ADD COLUMN gotify_enabled INTEGER NOT NULL DEFAULT 0');
+  db.exec('ALTER TABLE settings ADD COLUMN gotify_server_url TEXT');
+  db.exec('ALTER TABLE settings ADD COLUMN gotify_app_token TEXT');
+  db.exec('ALTER TABLE settings ADD COLUMN gotify_priority INTEGER NOT NULL DEFAULT 5');
 }
 
 // The server's own public URL, learned zero-config from the origin the mobile app reports on
@@ -331,10 +376,22 @@ if (!pushTokenColumns.includes('base_url')) {
   db.exec('ALTER TABLE push_tokens ADD COLUMN base_url TEXT');
 }
 
+// snapshot: 1 when the alert-time image was captured and saved to disk (DATA_DIR/detection-snapshots/
+// <id>.jpg), so the in-app Alerts feed knows to show a thumbnail. See lib/detectionEvents.js.
+const detectionEventsColumns = db.prepare('PRAGMA table_info(detection_events)').all().map((c) => c.name);
+if (!detectionEventsColumns.includes('snapshot')) {
+  db.exec('ALTER TABLE detection_events ADD COLUMN snapshot INTEGER NOT NULL DEFAULT 0');
+}
+
 // Ensure the single settings row always exists.
 db.prepare(
   `INSERT OR IGNORE INTO settings (id, app_name, accent_color, live_color, offline_color, timezone, font_choice, temp_unit)
-   VALUES ('app', 'Nightlight', '#F5D9A8', '#7FBFA3', '#E08585', 'UTC', 'warm-serif', 'C')`
+   VALUES ('app', 'Nightlight', '#f4c56a', '#7FBFA3', '#E08585', 'UTC', 'warm-serif', 'C')`
 ).run();
+
+// The default accent moved from the old pale gold (#F5D9A8) to the deeper gold (#f4c56a) that
+// the refreshed UI uses. Migrate installs still on the exact old default to the new one; a value
+// that isn't the old default means the user picked their own colour, so leave it untouched.
+db.prepare("UPDATE settings SET accent_color = '#f4c56a' WHERE accent_color = '#F5D9A8'").run();
 
 export default db;
