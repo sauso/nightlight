@@ -5,8 +5,23 @@ import rateLimit from 'express-rate-limit';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
 import { requireAuth, requireAdmin, JWT_SECRET } from '../middleware/auth.js';
+import {
+  generateSecret, keyUri, verifyToken, qrDataUrl,
+  generateBackupCodes, verifyAndConsumeBackupCode, backupCodesRemaining,
+} from '../lib/mfa.js';
 
 const router = Router();
+
+function appName() {
+  return db.prepare("SELECT app_name FROM settings WHERE id = 'app'").get()?.app_name || 'Nightlight';
+}
+
+// A short-lived, single-purpose token bridging the two login steps: it proves the password was just
+// verified, but carries no session id, so it can never be used as an access token (requireAuth
+// rejects any token without a live session). Exchanged at /login/mfa for a real session token.
+function signMfaToken(userId) {
+  return jwt.sign({ id: userId, purpose: 'mfa' }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '5m' });
+}
 
 // Login has no other protection against repeated guessing (no account lockout, no
 // CAPTCHA) - this is the actual backstop against brute-forcing a password. Keyed by
@@ -32,6 +47,7 @@ function toPublicUser(u) {
     first_name: u.first_name || null,
     last_name: u.last_name || null,
     created_at: u.created_at,
+    mfa_enabled: !!u.mfa_enabled,
   };
 }
 
@@ -121,6 +137,40 @@ router.post('/login', loginLimiter, (req, res) => {
   if (!bcrypt.compareSync(String(password || ''), hashToCheck) || !user) {
     return res.status(401).json({ error: 'Incorrect username or password' });
   }
+  // Password is correct. If the account has two-factor on, don't issue a session yet — hand back a
+  // short-lived token the client exchanges at /login/mfa after the second step.
+  if (user.mfa_enabled) {
+    return res.json({ mfaRequired: true, mfaToken: signMfaToken(user.id) });
+  }
+  const sessionId = createSession(user.id, req.headers['user-agent']);
+  res.json({ token: sign(user, sessionId), user: toPublicUser(user) });
+});
+
+// Second login step for MFA accounts: verify the 6-digit authenticator code (or a one-time backup
+// code) against the token from /login, then issue the real session. Rate-limited like /login.
+router.post('/login/mfa', loginLimiter, (req, res) => {
+  const { mfaToken, code } = req.body || {};
+  let payload;
+  try {
+    payload = jwt.verify(mfaToken, JWT_SECRET, { algorithms: ['HS256'] });
+  } catch {
+    return res.status(401).json({ error: 'This verification step expired — please sign in again.' });
+  }
+  if (payload.purpose !== 'mfa') return res.status(401).json({ error: 'Invalid verification token' });
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.id);
+  if (!user || !user.mfa_enabled) return res.status(401).json({ error: 'Invalid verification token' });
+
+  // Try the authenticator code first, then fall back to consuming a one-time backup code.
+  let ok = verifyToken(user.mfa_secret, code);
+  if (!ok) {
+    const result = verifyAndConsumeBackupCode(user.mfa_backup_codes, code);
+    if (result.ok) {
+      ok = true;
+      db.prepare('UPDATE users SET mfa_backup_codes = ? WHERE id = ?').run(result.hashesJson, user.id);
+    }
+  }
+  if (!ok) return res.status(401).json({ error: 'Incorrect code' });
+
   const sessionId = createSession(user.id, req.headers['user-agent']);
   res.json({ token: sign(user, sessionId), user: toPublicUser(user) });
 });
@@ -265,6 +315,61 @@ router.put('/me/password', requireAuth, loginLimiter, (req, res) => {
   // makes when a logged-in device is lost or no longer trusted - leaving those
   // sessions valid for the rest of their 30 days would defeat the point.
   db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.user.id, req.user.sid);
+  res.json({ ok: true });
+});
+
+// --- Two-factor auth (TOTP), self-service ---
+
+// Current MFA state for the signed-in user (drives the Account toggle).
+router.get('/me/mfa', requireAuth, (req, res) => {
+  const u = db.prepare('SELECT mfa_enabled, mfa_backup_codes FROM users WHERE id = ?').get(req.user.id);
+  res.json({ enabled: !!u?.mfa_enabled, backup_codes_remaining: backupCodesRemaining(u?.mfa_backup_codes) });
+});
+
+// Begin enrolment: generate + stash a secret (still disabled) and return the QR + manual key. The
+// secret only becomes active once a code is confirmed at /me/mfa/enable.
+router.post('/me/mfa/setup', requireAuth, async (req, res) => {
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  if (user.mfa_enabled) return res.status(400).json({ error: 'Two-factor is already on. Turn it off first to re-enrol.' });
+  const secret = generateSecret();
+  db.prepare('UPDATE users SET mfa_secret = ? WHERE id = ?').run(secret, user.id);
+  const uri = keyUri(user.username, secret, appName());
+  res.json({ secret, otpauth_uri: uri, qr: await qrDataUrl(uri) });
+});
+
+// Confirm a code against the pending secret; on success, enable MFA and return one-time backup
+// codes to show the user once (only their hashes are kept).
+router.post('/me/mfa/enable', requireAuth, (req, res) => {
+  const { code } = req.body || {};
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  if (user.mfa_enabled) return res.status(400).json({ error: 'Two-factor is already on.' });
+  if (!user.mfa_secret) return res.status(400).json({ error: 'Start setup first.' });
+  if (!verifyToken(user.mfa_secret, code)) {
+    return res.status(400).json({ error: "That code didn't match — check your authenticator app and try again." });
+  }
+  const { codes, hashesJson } = generateBackupCodes();
+  db.prepare('UPDATE users SET mfa_enabled = 1, mfa_backup_codes = ? WHERE id = ?').run(hashesJson, user.id);
+  res.json({ backup_codes: codes });
+});
+
+// Turn MFA off. Requires the account password (not just the live session) so a borrowed unlocked
+// device can't quietly strip someone's second factor.
+router.post('/me/mfa/disable', requireAuth, loginLimiter, (req, res) => {
+  const { password } = req.body || {};
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  if (!user || !bcrypt.compareSync(String(password || ''), user.password_hash)) {
+    return res.status(401).json({ error: 'Password is incorrect' });
+  }
+  db.prepare('UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_backup_codes = NULL WHERE id = ?').run(user.id);
+  res.json({ ok: true });
+});
+
+// Admin: clear a locked-out user's MFA (lost authenticator + backup codes). The self-lockout case
+// for the last admin is handled out-of-band by the console reset script (see docs/mfa.md).
+router.delete('/users/:id/mfa', requireAuth, requireAdmin, (req, res) => {
+  const u = db.prepare('SELECT id FROM users WHERE id = ?').get(req.params.id);
+  if (!u) return res.status(404).json({ error: 'User not found' });
+  db.prepare('UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_backup_codes = NULL WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
 

@@ -7,6 +7,7 @@ import Modal from '../components/Modal.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
 import Avatar from '../components/Avatar.jsx';
+import TwoFactorSection from '../components/TwoFactorSection.jsx';
 
 const THEME_OPTIONS = [
   { value: 'light', label: 'Light', Icon: Sun },
@@ -209,6 +210,8 @@ export default function Account() {
         >
           Change my password
         </button>
+
+        <TwoFactorSection />
 
         <div className="section-title">Signed in on</div>
         <div className="card" style={{ marginBottom: 14 }}>
