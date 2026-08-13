@@ -179,6 +179,28 @@ if (!settingsColumns.includes('pushover_enabled')) {
   db.exec('ALTER TABLE settings ADD COLUMN pushover_user_key TEXT');
 }
 
+// ntfy notifications (https://ntfy.sh, or any self-hosted ntfy server) — the server POSTs the alert
+// to a topic; the recipient subscribes in the ntfy app/browser. Optional auth via an access token
+// (bearer) or username/password (basic). Off until configured + enabled.
+if (!settingsColumns.includes('ntfy_enabled')) {
+  db.exec('ALTER TABLE settings ADD COLUMN ntfy_enabled INTEGER NOT NULL DEFAULT 0');
+  db.exec("ALTER TABLE settings ADD COLUMN ntfy_server_url TEXT NOT NULL DEFAULT 'https://ntfy.sh'");
+  db.exec('ALTER TABLE settings ADD COLUMN ntfy_topic TEXT');
+  db.exec('ALTER TABLE settings ADD COLUMN ntfy_token TEXT');
+  db.exec('ALTER TABLE settings ADD COLUMN ntfy_username TEXT');
+  db.exec('ALTER TABLE settings ADD COLUMN ntfy_password TEXT');
+}
+
+// Gotify notifications (self-hosted https://gotify.net) — the server POSTs to a Gotify application's
+// message endpoint with its app token; the recipient runs the Gotify server + app. Text only (Gotify
+// has no native image attachments). Off until configured + enabled.
+if (!settingsColumns.includes('gotify_enabled')) {
+  db.exec('ALTER TABLE settings ADD COLUMN gotify_enabled INTEGER NOT NULL DEFAULT 0');
+  db.exec('ALTER TABLE settings ADD COLUMN gotify_server_url TEXT');
+  db.exec('ALTER TABLE settings ADD COLUMN gotify_app_token TEXT');
+  db.exec('ALTER TABLE settings ADD COLUMN gotify_priority INTEGER NOT NULL DEFAULT 5');
+}
+
 // The server's own public URL, learned zero-config from the origin the mobile app reports on
 // push-register (last writer wins — each server only ever hears its own address from its own app).
 // Embedded in deep links so tapping an alert from THIS server opens THIS server in the app, even if

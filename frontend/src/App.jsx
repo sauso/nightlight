@@ -24,6 +24,10 @@ import Settings from './pages/Settings.jsx';
 import SettingsGeneral from './pages/SettingsGeneral.jsx';
 import SettingsMqtt from './pages/SettingsMqtt.jsx';
 import SettingsPush from './pages/SettingsPush.jsx';
+import SettingsPushPushover from './pages/SettingsPushPushover.jsx';
+import SettingsPushFirebase from './pages/SettingsPushFirebase.jsx';
+import SettingsPushGotify from './pages/SettingsPushGotify.jsx';
+import SettingsPushNtfy from './pages/SettingsPushNtfy.jsx';
 import SettingsUsers from './pages/SettingsUsers.jsx';
 import UserSettings from './pages/UserSettings.jsx';
 import SettingsLogs from './pages/SettingsLogs.jsx';
@@ -137,6 +141,10 @@ function Shell() {
                     <Route path="/settings/general" element={<AdminProtected><SettingsGeneral /></AdminProtected>} />
                     <Route path="/settings/mqtt" element={<AdminProtected><SettingsMqtt /></AdminProtected>} />
                     <Route path="/settings/push" element={<AdminProtected><SettingsPush /></AdminProtected>} />
+                    <Route path="/settings/push/pushover" element={<AdminProtected><SettingsPushPushover /></AdminProtected>} />
+                    <Route path="/settings/push/firebase" element={<AdminProtected><SettingsPushFirebase /></AdminProtected>} />
+                    <Route path="/settings/push/gotify" element={<AdminProtected><SettingsPushGotify /></AdminProtected>} />
+                    <Route path="/settings/push/ntfy" element={<AdminProtected><SettingsPushNtfy /></AdminProtected>} />
                     <Route path="/settings/users" element={<AdminProtected><SettingsUsers /></AdminProtected>} />
                     <Route path="/settings/users/new" element={<AdminProtected><UserSettings /></AdminProtected>} />
                     <Route path="/settings/users/:id" element={<AdminProtected><UserSettings /></AdminProtected>} />
