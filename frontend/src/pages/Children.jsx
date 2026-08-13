@@ -31,7 +31,7 @@ export default function Children() {
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-                  <Avatar name={kid.name} src={kid.photo} color={kid.color} size={40} />
+                  <Avatar name={kid.name} src={kid.photo} color={kid.color} size={50} />
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 500 }}>{kid.name}</div>
                     <div className="camera-tile__sub">{n} camera{n === 1 ? '' : 's'}</div>
@@ -45,7 +45,7 @@ export default function Children() {
             <div className="camera-tile__sub" style={{ padding: 14 }}>No children yet.</div>
           )}
         </div>
-        <button className="btn btn-secondary" onClick={() => navigate('/children/new')}>
+        <button className="btn btn-primary" onClick={() => navigate('/children/new')}>
           <Plus size={16} aria-hidden="true" /> Add child
         </button>
       </main>
