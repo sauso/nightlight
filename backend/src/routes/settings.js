@@ -2,6 +2,7 @@ import { Router } from 'express';
 import db from '../db.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { refreshMqttConnection, mqttStatus } from '../lib/mqttClient.js';
+import { restartClipCapture } from '../lib/clipCapture.js';
 
 const router = Router();
 
@@ -60,7 +61,7 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
   const {
     app_name, accent_color, live_color, offline_color, timezone, font_choice,
     temp_unit, mqtt_enabled, mqtt_host, mqtt_port, mqtt_username, mqtt_password,
-    ptz_step,
+    ptz_step, clip_pre_roll_s, clip_post_roll_s,
   } = req.body || {};
 
   if (app_name !== undefined && !app_name.trim()) {
@@ -92,12 +93,30 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     }
     ptzStepVal = n;
   }
+  // Recording clip length. Bounds keep the segmenter ring sane and the disk safe.
+  let preRoll = existing.clip_pre_roll_s;
+  if (clip_pre_roll_s !== undefined) {
+    const n = parseInt(clip_pre_roll_s, 10);
+    if (!Number.isFinite(n) || n < 0 || n > 30) {
+      return res.status(400).json({ error: 'Pre-roll must be between 0 and 30 seconds' });
+    }
+    preRoll = n;
+  }
+  let postRoll = existing.clip_post_roll_s;
+  if (clip_post_roll_s !== undefined) {
+    const n = parseInt(clip_post_roll_s, 10);
+    if (!Number.isFinite(n) || n < 5 || n > 120) {
+      return res.status(400).json({ error: 'Post-roll must be between 5 and 120 seconds' });
+    }
+    postRoll = n;
+  }
+  const clipLenChanged = preRoll !== existing.clip_pre_roll_s || postRoll !== existing.clip_post_roll_s;
 
   db.prepare(
     `UPDATE settings
      SET app_name = ?, accent_color = ?, live_color = ?, offline_color = ?, timezone = ?, font_choice = ?,
          temp_unit = ?, mqtt_enabled = ?, mqtt_host = ?, mqtt_port = ?, mqtt_username = ?, mqtt_password = ?,
-         ptz_step = ?
+         ptz_step = ?, clip_pre_roll_s = ?, clip_post_roll_s = ?
      WHERE id = ?`
   ).run(
     app_name?.trim() || existing.app_name,
@@ -113,9 +132,17 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     mqtt_username !== undefined ? (mqtt_username || '').trim() || null : existing.mqtt_username,
     mqtt_password ? mqtt_password : existing.mqtt_password, // blank submission keeps the existing one
     ptzStepVal,
+    preRoll,
+    postRoll,
     'app'
   );
   refreshMqttConnection();
+  // New pre/post-roll changes the required ring depth, so re-arm any camera that's recording.
+  if (clipLenChanged) {
+    for (const cam of db.prepare('SELECT * FROM cameras WHERE detect_record_clips = 1 AND disabled = 0').all()) {
+      restartClipCapture(cam);
+    }
+  }
   res.json(toPublicSettings(getSettings()));
 });
 

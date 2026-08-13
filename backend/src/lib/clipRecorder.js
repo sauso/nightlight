@@ -179,6 +179,10 @@ export function stopSegmenter(cameraId) {
   }
 }
 
+export function stopAllSegmenters() {
+  for (const cameraId of [...segmenters.keys()]) stopSegmenter(cameraId);
+}
+
 function runFfmpeg(args, { tool = 'ffmpeg' } = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawn(tool, args, { stdio: ['ignore', 'pipe', 'pipe'] });

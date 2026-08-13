@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import db from '../db.js';
 import { logger } from './logger.js';
+import { CLIPS_DIR } from './clipRecorder.js';
 
 // One JPEG per detection event, named <id>.jpg, kept next to the DB. Stored on disk (not as a
 // DB blob) so the SQLite file stays small; pruned in lockstep with the rows below.
@@ -57,21 +58,47 @@ const overCountWithSnapshotStmt = db.prepare(
      SELECT id FROM detection_events ORDER BY id DESC LIMIT ?
    )`
 );
+// Same two prunes, restricted to rows that carry a recorded clip, so the (much larger) MP4 files are
+// removed alongside the rows and never orphaned on disk. This is the backstop retention for clips
+// until the configurable day/size caps land (Stage 1 phase 3).
+const agedWithClipStmt = db.prepare(
+  `SELECT clip_path FROM detection_events WHERE created_at < datetime('now', ?) AND clip_path IS NOT NULL`
+);
+const overCountWithClipStmt = db.prepare(
+  `SELECT clip_path FROM detection_events WHERE clip_path IS NOT NULL AND id NOT IN (
+     SELECT id FROM detection_events ORDER BY id DESC LIMIT ?
+   )`
+);
 
 function unlinkSnapshot(id) {
   const file = snapshotFile(id);
   if (file) fs.rm(file, { force: true }, () => {});
 }
 
+// Resolve+delete a clip MP4 (and its sibling thumbnail) from a stored relative clip_path. Guards
+// against path escape so a crafted row can't reach outside CLIPS_DIR.
+function unlinkClip(relPath) {
+  if (!relPath) return;
+  const abs = path.resolve(CLIPS_DIR, relPath);
+  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return;
+  fs.rm(abs, { force: true }, () => {});
+  fs.rm(abs.replace(/\.mp4$/i, '.jpg'), { force: true }, () => {});
+}
+
 function prune() {
-  // Collect the doomed rows' ids before deleting, then delete rows, then remove their files.
-  const doomed = [
+  // Collect the doomed rows' files before deleting the rows, then delete rows, then remove files.
+  const doomedSnaps = [
     ...agedWithSnapshotStmt.all(`-${MAX_AGE_DAYS} days`),
     ...overCountWithSnapshotStmt.all(MAX_ROWS),
   ];
+  const doomedClips = [
+    ...agedWithClipStmt.all(`-${MAX_AGE_DAYS} days`),
+    ...overCountWithClipStmt.all(MAX_ROWS),
+  ];
   pruneByAgeStmt.run(`-${MAX_AGE_DAYS} days`);
   pruneByCountStmt.run(MAX_ROWS);
-  for (const { id } of doomed) unlinkSnapshot(id);
+  for (const { id } of doomedSnaps) unlinkSnapshot(id);
+  for (const { clip_path } of doomedClips) unlinkClip(clip_path);
 }
 
 const markSnapshotStmt = db.prepare('UPDATE detection_events SET snapshot = 1 WHERE id = ?');
@@ -93,6 +120,38 @@ export function saveEventSnapshot(id, buffer) {
 export function getEventSnapshotFile(id) {
   const file = snapshotFile(id);
   return file && fs.existsSync(file) ? file : null;
+}
+
+// --- Clip status (Stage 1 recording). The clip lives on the same detection_events row; these just
+// move it through pending -> ready/failed as lib/clipCapture.js works the job. ---
+const markClipPendingStmt = db.prepare("UPDATE detection_events SET clip_status = 'pending' WHERE id = ?");
+const setClipReadyStmt = db.prepare(
+  "UPDATE detection_events SET clip_status = 'ready', clip_path = @clip_path, clip_duration_s = @dur, clip_bytes = @bytes WHERE id = ?"
+);
+const setClipFailedStmt = db.prepare("UPDATE detection_events SET clip_status = 'failed' WHERE id = ?");
+
+export function markClipPending(id) {
+  try { markClipPendingStmt.run(id); } catch (e) { logger.error(`clip pending mark failed (${id}):`, e.message); }
+}
+export function setClipReady(id, relPath, durationS, bytes) {
+  try {
+    setClipReadyStmt.run({ clip_path: relPath, dur: Math.round(durationS) || null, bytes: bytes || null }, id);
+  } catch (e) {
+    logger.error(`clip ready mark failed (${id}):`, e.message);
+  }
+}
+export function setClipFailed(id) {
+  try { setClipFailedStmt.run(id); } catch (e) { logger.error(`clip failed mark failed (${id}):`, e.message); }
+}
+
+// Absolute path to an event's ready clip MP4, or null (used by the serving route). Validates the
+// stored relative path stays under CLIPS_DIR.
+export function getEventClipFile(id) {
+  const row = db.prepare('SELECT clip_path, clip_status FROM detection_events WHERE id = ?').get(id);
+  if (!row || row.clip_status !== 'ready' || !row.clip_path) return null;
+  const abs = path.resolve(CLIPS_DIR, row.clip_path);
+  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;
+  return fs.existsSync(abs) ? abs : null;
 }
 
 // Fire-and-forget: a logging failure must never take down the detector loop. Returns the

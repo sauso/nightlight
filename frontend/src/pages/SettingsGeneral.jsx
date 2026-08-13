@@ -39,6 +39,8 @@ export default function SettingsGeneral() {
         font_choice: form.font_choice,
         temp_unit: form.temp_unit,
         ptz_step: form.ptz_step,
+        clip_pre_roll_s: form.clip_pre_roll_s,
+        clip_post_roll_s: form.clip_post_roll_s,
       });
       await refresh();
       setSaved(true);
@@ -211,6 +213,39 @@ export default function SettingsGeneral() {
                 fixed amount. The right value depends on the camera — around 12 suits the common
                 Sonoff pan/tilt cameras.
               </div>
+            </div>
+          </div>
+
+          <div className="section-title">Recording</div>
+          <div className="card">
+            <div style={{ display: 'flex', gap: 10 }}>
+              <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+                <label htmlFor="clip-pre">Pre-roll (seconds)</label>
+                <input
+                  id="clip-pre"
+                  type="number"
+                  min="0"
+                  max="30"
+                  value={form.clip_pre_roll_s ?? 5}
+                  onChange={(e) => setForm({ ...form, clip_pre_roll_s: e.target.value })}
+                />
+              </div>
+              <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+                <label htmlFor="clip-post">Post-roll (seconds)</label>
+                <input
+                  id="clip-post"
+                  type="number"
+                  min="5"
+                  max="120"
+                  value={form.clip_post_roll_s ?? 15}
+                  onChange={(e) => setForm({ ...form, clip_post_roll_s: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="camera-tile__sub" style={{ marginTop: 10 }}>
+              How much video to keep before and after a detection, for cameras with “Save a clip when
+              triggered” on (set per camera under its Motion/Sound settings). Clips are stored on the
+              server and shown on the alert they belong to.
             </div>
           </div>
 
