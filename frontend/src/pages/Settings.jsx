@@ -96,7 +96,7 @@ export default function Settings() {
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/account', BACK); } }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <Avatar name={displayName(user)} src={user?.photo} size={40} />
+              <Avatar name={displayName(user)} src={user?.photo} size={50} />
               <div>
                 <div style={{ fontWeight: 600 }}>{displayName(user)}</div>
                 <div className="camera-tile__sub" style={{ textTransform: 'capitalize' }}>{user?.role} · Account</div>
