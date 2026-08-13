@@ -130,6 +130,10 @@ if (!usersColumns.includes('mfa_secret')) {
 if (!usersColumns.includes('mfa_backup_codes')) {
   db.exec('ALTER TABLE users ADD COLUMN mfa_backup_codes TEXT');
 }
+// Optional caregiver/admin avatar photo — same browser-resized base64 data-URL as children.photo.
+if (!usersColumns.includes('photo')) {
+  db.exec('ALTER TABLE users ADD COLUMN photo TEXT');
+}
 
 // Optional child avatar photo — a browser-resized (~256px square) base64 data-URL, stored inline
 // (small; the frontend caps the size). Null = fall back to the coloured initials avatar.

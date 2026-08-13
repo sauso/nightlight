@@ -18,12 +18,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   Alerts and Family tabs are gone). **Children** is now its own tab that opens each child's page
   (their cameras, their alerts, and — soon — their sleep summary); tap a child's **avatar** to edit
   them. **Cameras** is its own tab with richer rows (live thumbnail + Online/Offline pill). Caregiver
-  management moved into **Settings** (admin). Live gains a **Recent activity** list so the dropped
-  Alerts tab isn't missed.
+  management moved into **Settings** (admin). Alerts now live on each child's page (filtered to their
+  cameras).
 
 ### Added
-- **Child photos.** Add a photo for each child (Children → child → avatar → Add photo). It's resized
-  in your browser and stored with the child; the coloured initials remain the fallback.
+- **Avatar photos for children, caregivers and your own account.** Add a photo (child → avatar →
+  Add photo; a caregiver's settings; Settings → Account). It's resized in your browser and saves
+  immediately; the coloured initials remain the fallback everywhere an avatar shows.
 - **ntfy and Gotify notifications.** Push notifications is now a hub (a row per provider, like the
   Settings screen) covering **Pushover, Firebase, Gotify, and ntfy** — enable any combination and an
   alert goes to all of them. ntfy (ntfy.sh or self-hosted) carries the snapshot inline and works on
