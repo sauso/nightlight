@@ -2,22 +2,10 @@ import { Router } from 'express';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { normalizePhoto } from '../lib/photo.js';
 
 const router = Router();
 router.use(requireAuth);
-
-// The photo is a base64 data-URL resized client-side; cap it so a bad/huge upload can't bloat the DB
-// (~700KB of base64 ≈ a 512px JPEG with headroom). Returns the value to store, or throws a message.
-const MAX_PHOTO_LEN = 700 * 1024;
-function normalizePhoto(photo, existing) {
-  if (photo === undefined) return existing; // field omitted → keep current
-  if (photo === null || photo === '') return null; // explicit clear
-  if (typeof photo !== 'string' || !photo.startsWith('data:image/')) {
-    throw new Error('Photo must be an image data URL');
-  }
-  if (photo.length > MAX_PHOTO_LEN) throw new Error('Photo is too large — try a smaller image');
-  return photo;
-}
 
 function withCameras(child) {
   const cameras = db

@@ -9,6 +9,7 @@ import {
   generateSecret, keyUri, verifyToken, qrDataUrl,
   generateBackupCodes, verifyAndConsumeBackupCode, backupCodesRemaining,
 } from '../lib/mfa.js';
+import { normalizePhoto } from '../lib/photo.js';
 
 const router = Router();
 
@@ -48,6 +49,7 @@ function toPublicUser(u) {
     last_name: u.last_name || null,
     created_at: u.created_at,
     mfa_enabled: !!u.mfa_enabled,
+    photo: u.photo || null,
   };
 }
 
@@ -231,17 +233,20 @@ router.post('/users', requireAuth, requireAdmin, (req, res) => {
   }
   const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
   if (existing) return res.status(400).json({ error: 'That username is already taken' });
+  let photo;
+  try { photo = normalizePhoto(req.body?.photo, null); } catch (e) { return res.status(400).json({ error: e.message }); }
   const id = uuid();
   const password_hash = bcrypt.hashSync(password, 10);
   db.prepare(
-    'INSERT INTO users (id, username, password_hash, role, first_name, last_name) VALUES (?, ?, ?, ?, ?, ?)'
+    'INSERT INTO users (id, username, password_hash, role, first_name, last_name, photo) VALUES (?, ?, ?, ?, ?, ?, ?)'
   ).run(
     id,
     username,
     password_hash,
     role === 'admin' ? 'admin' : 'caregiver',
     first_name?.trim() || null,
-    last_name?.trim() || null
+    last_name?.trim() || null,
+    photo
   );
   res.status(201).json(toPublicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id)));
 });
@@ -263,6 +268,8 @@ router.put('/users/:id', requireAuth, requireAdmin, (req, res) => {
   }
 
   const password_hash = password ? bcrypt.hashSync(password, 10) : existing.password_hash;
+  let photo;
+  try { photo = normalizePhoto(req.body?.photo, existing.photo); } catch (e) { return res.status(400).json({ error: e.message }); }
 
   // A password reset means the old credential can no longer be trusted - any session
   // opened under it shouldn't outlive it. Spares only the requesting admin's own
@@ -272,13 +279,14 @@ router.put('/users/:id', requireAuth, requireAdmin, (req, res) => {
   }
 
   db.prepare(
-    'UPDATE users SET username = ?, role = ?, first_name = ?, last_name = ?, password_hash = ? WHERE id = ?'
+    'UPDATE users SET username = ?, role = ?, first_name = ?, last_name = ?, password_hash = ?, photo = ? WHERE id = ?'
   ).run(
     username?.trim() || existing.username,
     role === 'admin' || role === 'caregiver' ? role : existing.role,
     first_name !== undefined ? first_name?.trim() || null : existing.first_name,
     last_name !== undefined ? last_name?.trim() || null : existing.last_name,
     password_hash,
+    photo,
     req.params.id
   );
   res.json(toPublicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id)));
@@ -290,9 +298,12 @@ router.put('/me', requireAuth, (req, res) => {
   const { first_name, last_name } = req.body || {};
   const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (!existing) return res.status(404).json({ error: 'User not found' });
-  db.prepare('UPDATE users SET first_name = ?, last_name = ? WHERE id = ?').run(
+  let photo;
+  try { photo = normalizePhoto(req.body?.photo, existing.photo); } catch (e) { return res.status(400).json({ error: e.message }); }
+  db.prepare('UPDATE users SET first_name = ?, last_name = ?, photo = ? WHERE id = ?').run(
     first_name !== undefined ? first_name?.trim() || null : existing.first_name,
     last_name !== undefined ? last_name?.trim() || null : existing.last_name,
+    photo,
     req.user.id
   );
   res.json(toPublicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id)));

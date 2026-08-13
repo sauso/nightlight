@@ -8,6 +8,7 @@ import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
 import Avatar from '../components/Avatar.jsx';
 import TwoFactorSection from '../components/TwoFactorSection.jsx';
+import { fileToAvatarDataUrl } from '../lib/imageResize.js';
 
 const THEME_OPTIONS = [
   { value: 'light', label: 'Light', Icon: Sun },
@@ -38,7 +39,33 @@ export default function Account() {
   const { user, logout, refresh } = useAuth();
   const [sessions, setSessions] = useState([]);
   const [error, setError] = useState('');
+  const [photoStatus, setPhotoStatus] = useState(''); // '' | 'saving' | 'saved'
   const [theme, setThemeState] = useState(getTheme());
+
+  async function savePhoto(photo) {
+    setError('');
+    setPhotoStatus('saving');
+    try {
+      await api.put('/auth/me', { photo });
+      await refresh();
+      setPhotoStatus('saved');
+      setTimeout(() => setPhotoStatus(''), 2000);
+    } catch (err) {
+      setError(err.message);
+      setPhotoStatus('');
+    }
+  }
+  async function onPhoto(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const dataUrl = await fileToAvatarDataUrl(file);
+      await savePhoto(dataUrl);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
 
   function chooseTheme(value) {
     setThemeState(value);
@@ -157,10 +184,19 @@ export default function Account() {
         <div className="card">
           <form onSubmit={saveName}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
-              <Avatar name={[nameForm.first_name, nameForm.last_name].filter(Boolean).join(' ') || user?.username} size={56} />
+              <Avatar name={[nameForm.first_name, nameForm.last_name].filter(Boolean).join(' ') || user?.username} src={user?.photo} size={56} />
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontWeight: 600 }}>{user?.username}</div>
                 <div className="camera-tile__sub" style={{ textTransform: 'capitalize' }}>{user?.role}</div>
+                <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
+                  <label className="icon-btn" style={{ padding: 0, cursor: 'pointer' }}>
+                    {photoStatus === 'saving' ? 'Saving…' : photoStatus === 'saved' ? 'Saved ✓' : (user?.photo ? 'Change photo' : 'Add photo')}
+                    <input type="file" accept="image/*" onChange={onPhoto} style={{ display: 'none' }} />
+                  </label>
+                  {user?.photo && (
+                    <button type="button" className="icon-btn" style={{ padding: 0 }} onClick={() => savePhoto(null)}>Remove</button>
+                  )}
+                </div>
               </div>
             </div>
             <div className="onvif-box__row">

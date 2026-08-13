@@ -5,8 +5,9 @@ import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Avatar from '../components/Avatar.jsx';
 import Modal from '../components/Modal.jsx';
+import { fileToAvatarDataUrl } from '../lib/imageResize.js';
 
-const BLANK = { username: '', password: '', role: 'caregiver', first_name: '', last_name: '' };
+const BLANK = { username: '', password: '', role: 'caregiver', first_name: '', last_name: '', photo: null };
 
 // Add / edit a caregiver on its own routed screen (replaces the modal), reached from the Family
 // hub or User management. Admin-only (gated by the route). The username stays editable here (an
@@ -26,6 +27,40 @@ export default function UserSettings() {
   const [mfaEnabled, setMfaEnabled] = useState(false);
   const [resettingMfa, setResettingMfa] = useState(false);
   const [mfaResetBusy, setMfaResetBusy] = useState(false);
+  const [photoStatus, setPhotoStatus] = useState(''); // '' | 'saving' | 'saved'
+
+  // Persist just the photo immediately for an existing caregiver (no Save press). A new caregiver
+  // has no record yet, so their photo rides along when the form is first saved.
+  async function persistPhoto(photo) {
+    if (isNew) return;
+    setPhotoStatus('saving');
+    try {
+      await api.put(`/auth/users/${id}`, { photo });
+      if (id === me?.id) await refreshMe();
+      setPhotoStatus('saved');
+      setTimeout(() => setPhotoStatus(''), 2000);
+    } catch (err) {
+      setError(err.message);
+      setPhotoStatus('');
+    }
+  }
+  async function onPhoto(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setError('');
+    try {
+      const dataUrl = await fileToAvatarDataUrl(file);
+      setForm((f) => ({ ...f, photo: dataUrl }));
+      await persistPhoto(dataUrl);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+  function removePhoto() {
+    setForm((f) => ({ ...f, photo: null }));
+    persistPhoto(null);
+  }
 
   const back = { to: '/settings/users', label: 'Caregivers' };
 
@@ -34,7 +69,7 @@ export default function UserSettings() {
     api.get('/auth/users').then((users) => {
       const u = users.find((x) => x.id === id);
       if (u) {
-        setForm({ username: u.username, password: '', role: u.role, first_name: u.first_name || '', last_name: u.last_name || '' });
+        setForm({ username: u.username, password: '', role: u.role, first_name: u.first_name || '', last_name: u.last_name || '', photo: u.photo || null });
         setMfaEnabled(!!u.mfa_enabled);
       }
       setLoaded(true);
@@ -100,8 +135,22 @@ export default function UserSettings() {
           <form onSubmit={save}>
             {error && <div className="error-banner">{error}</div>}
 
-            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
-              <Avatar name={fullName} size={72} />
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <Avatar name={fullName} src={form.photo} size={84} />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <label className="btn btn-secondary" style={{ width: 'auto', cursor: 'pointer' }}>
+                  {form.photo ? 'Change photo' : 'Add photo'}
+                  <input type="file" accept="image/*" onChange={onPhoto} style={{ display: 'none' }} />
+                </label>
+                {form.photo && (
+                  <button type="button" className="btn btn-secondary" style={{ width: 'auto' }} onClick={removePhoto}>Remove</button>
+                )}
+              </div>
+              {photoStatus && (
+                <div className="camera-tile__sub" style={{ color: 'var(--peri)' }}>
+                  {photoStatus === 'saving' ? 'Saving photo…' : 'Photo saved ✓'}
+                </div>
+              )}
             </div>
 
             <div className="onvif-box__row">
