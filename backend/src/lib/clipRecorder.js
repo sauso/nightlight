@@ -7,17 +7,27 @@ import { logger } from './logger.js';
 //
 // For every detection-enabled camera we run one continuous, cheap `-c copy` "segmenter" FFmpeg that
 // pulls the ALREADY-published local MediaMTX path (never a second RTSP session on the camera) and
-// writes short MPEG-TS segments into a rolling ring. Because we're always buffering, a trigger can
+// writes short Matroska segments into a rolling ring. Because we're always buffering, a trigger can
 // reach BACKWARD in time for pre-roll; the forward post-roll is captured by that same ongoing
 // segmenter. On a trigger, extractClip() concatenates the segments spanning [t-pre, t+post] into one
-// browser-safe MP4 (+ a thumbnail) with a second short `-c copy` FFmpeg. So: one long-lived copy
-// segmenter per recording camera, plus one short concat per event. No re-encode anywhere.
+// browser-safe MP4 (+ a thumbnail) with a second short FFmpeg. So: one long-lived copy segmenter per
+// recording camera, plus one short concat per event. Video is copied end to end (no video re-encode);
+// only the clip's ~20s of audio is re-encoded once, at extract (see the AUDIO note below).
 //
-// We map video + the AAC audio track only (`-map 0:v:0 -map 0:a:1?`). transcoder.js publishes two
-// audio tracks into MediaMTX — track 0 is the camera's original codec (often G711, which MP4/`<video>`
-// can't play) and track 1 is the AAC it transcodes for HLS. Grabbing track 1 means clips are born
-// clean and play in a plain <video> on iOS Safari + the Android WebView. `?` keeps audio optional so a
-// genuinely silent camera still records a video-only clip instead of failing.
+// AUDIO — we capture the camera's ORIGINAL audio track (`-map 0:a:0?`) and encode it to AAC ONCE at
+// extract time, rather than reusing transcoder.js's own AAC track. transcoder.js publishes two audio
+// tracks into MediaMTX: track 0 is the original codec (a clean `-c copy`, often G711) and track 1 is
+// an AAC re-encode for HLS. The Phase-1 spike found track 1 is riddled with dropouts (its
+// `aresample=async=1` drops/inserts samples on this camera's jittery timestamps — fine as background
+// HLS, but "extremely choppy" once isolated in a clip; the app's default WebRTC path uses the clean
+// track 0, which is why live sounds fine). Measured on staging: capturing track 1 → ~10 dropouts/12s;
+// capturing track 0 and encoding AAC ourselves → 0. So we take the clean original and do our own
+// single encode. `?` keeps audio optional so a genuinely silent camera still records a video-only clip.
+//
+// RING CONTAINER is Matroska (`.mkv`), not MPEG-TS: TS can't carry G711/pcm_alaw at all, and the
+// original audio can be any codec. Matroska holds video-copy + any audio-copy and concatenates
+// cleanly via the concat demuxer. Video is a pure `-c copy` everywhere; only the ~20s of audio is
+// (cheaply) re-encoded, once, over the whole finished clip — so no per-segment AAC priming gaps.
 //
 // NOTE: this file is the reusable core. The Phase-1 spike (scripts/clip-spike.js) drives it directly;
 // Phase 2 wires startSegmenter/stopSegmenter to the per-camera `detect_record_clips` toggle and
@@ -64,16 +74,16 @@ function segmenterArgs(pathName, ringDir) {
     '-rtsp_transport', 'tcp',
     '-i', `rtsp://127.0.0.1:8554/${pathName}`,
     '-map', '0:v:0',
-    '-map', '0:a:1?', // AAC (transcoder track 1); optional so a silent camera still records video-only
+    '-map', '0:a:0?', // the camera's ORIGINAL audio (clean copy); optional so a silent camera records video-only
     '-c', 'copy',
     '-f', 'segment',
     '-segment_time', String(SEGMENT_SEC),
-    '-segment_format', 'mpegts',
+    '-segment_format', 'matroska', // NOT mpegts — TS can't carry G711/pcm_alaw; mkv holds any audio codec
     '-reset_timestamps', '1',
     // Wall-clock-named segments: human-readable + chronological. Selection uses file mtime (below), so
     // this is only for readability/ordering and is immune to the container's timezone.
     '-strftime', '1',
-    path.join(ringDir, 'seg-%Y%m%d-%H%M%S.ts'),
+    path.join(ringDir, 'seg-%Y%m%d-%H%M%S.mkv'),
   ];
 }
 
@@ -81,7 +91,7 @@ function segmenterArgs(pathName, ringDir) {
 function pruneRing(ringDir, depthMs) {
   const cutoff = Date.now() - depthMs;
   for (const f of safeReaddir(ringDir)) {
-    if (!f.endsWith('.ts')) continue;
+    if (!f.endsWith('.mkv')) continue;
     const p = path.join(ringDir, f);
     const m = statMtime(p);
     if (m != null && m < cutoff) {
@@ -108,7 +118,7 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
   fs.mkdirSync(ringDir, { recursive: true });
   // Start clean so stale segments from a previous run can't leak into a fresh clip.
   for (const f of safeReaddir(ringDir)) {
-    if (f.endsWith('.ts') || f.startsWith('concat-')) {
+    if (f.endsWith('.mkv') || f.startsWith('concat-')) {
       try { fs.rmSync(path.join(ringDir, f), { force: true }); } catch { /* ignore */ }
     }
   }
@@ -224,12 +234,12 @@ export async function extractClip(
   const now = Date.now();
 
   const segs = safeReaddir(ringDir)
-    .filter((f) => f.endsWith('.ts'))
+    .filter((f) => f.endsWith('.mkv'))
     .map((f) => {
       const p = path.join(ringDir, f);
       return { f, p, m: statMtime(p) };
     })
-    // A .ts is finished ~SEGMENT_SEC after it starts; its mtime ≈ close time ≈ segment END. Keep any
+    // A segment is finished ~SEGMENT_SEC after it starts; its mtime ≈ close time ≈ segment END. Keep any
     // segment whose [end-SEGMENT, end] overlaps the window. Skip the one still being written (mtime
     // within ~700ms of now) so we never concat a partial tail.
     .filter((s) => s.m != null && s.m - SEGMENT_SEC * 1000 <= windowEnd && s.m >= windowStart && now - s.m > 700)
@@ -249,19 +259,16 @@ export async function extractClip(
 
   const outFile = path.join(outDir, `${outBase}.mp4`);
   try {
-    // ts -> mp4. VIDEO is a pure copy (cheap, no re-encode; ffmpeg auto-applies h264_mp4toannexb).
-    // AUDIO is re-encoded ONCE over the whole concatenated clip with aresample=async=1. A plain
-    // `-c copy` of the AAC across the 2s segment joins left audible gaps at every boundary (encoder
-    // priming + tiny timestamp discontinuities from -reset_timestamps) — "extremely choppy" sound.
-    // aresample=async=1 rebuilds a single continuous, monotonic audio clock over the full 20s
-    // (padding gaps with silence, absorbing backward jumps) — the same fix transcoder.js applies to
-    // the AAC track for the same reason. Done once over the whole clip, so no per-segment re-priming;
-    // 20s of mono audio is trivial to encode. +faststart puts moov up front for progressive <video>.
+    // mkv ring -> mp4. VIDEO is a pure copy (cheap, no re-encode; ffmpeg auto-applies h264_mp4toannexb).
+    // AUDIO is encoded to AAC ONCE over the whole concatenated clip — the ring holds the clean ORIGINAL
+    // audio (a `-c copy`, e.g. G711) so this single encode produces continuous, dropout-free AAC with
+    // no per-segment priming gaps. Deliberately NO aresample=async here: on this camera's already-clean
+    // original track it only dropped/inserted samples and made things choppier (measured — see the
+    // header note). +faststart puts moov up front for progressive <video> playback.
     await runFfmpeg([
       '-nostdin', '-loglevel', 'error',
       '-f', 'concat', '-safe', '0', '-i', listFile,
       '-c:v', 'copy',
-      '-af', 'aresample=async=1:first_pts=0',
       '-c:a', 'aac', '-b:a', '128k',
       '-avoid_negative_ts', 'make_zero',
       '-movflags', '+faststart',
