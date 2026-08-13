@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-14
+
 ### Changed
 - **Temperature & humidity on camera tiles are larger and bolder** (~20%) so the readings are easier
   to see at a glance.
