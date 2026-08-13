@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
@@ -8,29 +8,71 @@ import Modal from '../components/Modal.jsx';
 
 const COLORS = ['#f4c56a', '#7FBFA3', '#8A9FE0', '#E0A5C9', '#E0B27F', '#7c83db'];
 
-// Add / edit a child on its own routed screen (replaces the old modal), reached from the Family
-// hub. Open to any signed-in user, matching how children have always been managed.
+// Shrink a chosen image to a square ~256px JPEG data-URL, entirely in the browser — no upload
+// endpoint, no image library server-side. The result is stored in children.photo as-is.
+function fileToAvatarDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Couldn't read that image"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("That file isn't a readable image"));
+      img.onload = () => {
+        const size = 256;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const scale = Math.max(size / img.width, size / img.height); // cover
+        const w = img.width * scale;
+        const h = img.height * scale;
+        ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// Add / edit a child on its own routed screen, reached from the Children tab (or a child's detail
+// via its avatar). Open to any signed-in user, matching how children have always been managed.
 export default function ChildSettings() {
   const { id } = useParams();
   const isNew = !id || id === 'new';
   const navigate = useNavigate();
+  const location = useLocation();
   const { kids, refresh } = useCameras();
   const kid = isNew ? null : kids.find((k) => k.id === id);
 
-  const [form, setForm] = useState({ name: '', birthday: '', color: COLORS[0] });
+  const [form, setForm] = useState({ name: '', birthday: '', color: COLORS[0], photo: null });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [removing, setRemoving] = useState(false);
   const [removeBusy, setRemoveBusy] = useState(false);
   const initedRef = useRef(false);
 
-  const back = { to: '/family', label: 'Family' };
+  const back = location.state?.from || { to: '/children', label: 'Children' };
 
   useEffect(() => {
     if (isNew || initedRef.current || !kid) return;
     initedRef.current = true;
-    setForm({ name: kid.name, birthday: kid.birthday || '', color: kid.color || COLORS[0] });
+    setForm({ name: kid.name, birthday: kid.birthday || '', color: kid.color || COLORS[0], photo: kid.photo || null });
   }, [kid, isNew]);
+
+  async function onPhoto(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setError('');
+    try {
+      setForm((f) => ({ ...f, photo: null }));
+      const dataUrl = await fileToAvatarDataUrl(file);
+      setForm((f) => ({ ...f, photo: dataUrl }));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
 
   async function save(e) {
     e.preventDefault();
@@ -71,8 +113,20 @@ export default function ChildSettings() {
           <form onSubmit={save}>
             {error && <div className="error-banner">{error}</div>}
 
-            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
-              <Avatar name={form.name || 'Child'} color={form.color} size={72} />
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 18 }}>
+              <Avatar name={form.name || 'Child'} src={form.photo} color={form.color} size={88} />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <label className="btn btn-secondary" style={{ width: 'auto', cursor: 'pointer' }}>
+                  {form.photo ? 'Change photo' : 'Add photo'}
+                  <input type="file" accept="image/*" onChange={onPhoto} style={{ display: 'none' }} />
+                </label>
+                {form.photo && (
+                  <button type="button" className="btn btn-secondary" style={{ width: 'auto' }}
+                    onClick={() => setForm((f) => ({ ...f, photo: null }))}>
+                    Remove
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="field">
@@ -99,7 +153,7 @@ export default function ChildSettings() {
                 ))}
               </div>
               <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-                Avatar photo upload is coming — for now this colour is used for the child's initials.
+                Used for the child's initials when no photo is set.
               </div>
             </div>
 
