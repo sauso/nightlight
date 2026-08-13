@@ -7,6 +7,7 @@ import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Avatar from '../components/Avatar.jsx';
 import CameraRow from '../components/CameraRow.jsx';
+import AlertList from '../components/AlertList.jsx';
 
 // A child's hub: their identity + (later) last night's sleep, then their cameras and their alerts.
 // Tapping the avatar opens Child settings (name / birthday / colour / photo). Alerts are filtered
@@ -21,18 +22,6 @@ function ageLabel(birthday) {
   if (months < 0) return null;
   if (months < 24) return `${months} month${months === 1 ? '' : 's'}`;
   return `${Math.floor(months / 12)} year${Math.floor(months / 12) === 1 ? '' : 's'}`;
-}
-
-const TYPE_LABEL = { motion: 'Motion', sound: 'Sound' };
-const parseUtc = (s) => new Date(String(s).replace(' ', 'T') + 'Z');
-function relTime(d) {
-  const s = Math.round((Date.now() - d.getTime()) / 1000);
-  if (s < 60) return 'just now';
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.round(h / 24)}d ago`;
 }
 
 export default function ChildDetail() {
@@ -107,30 +96,9 @@ export default function ChildDetail() {
         </div>
 
         <div className="section-title">Recent alerts</div>
-        {alerts.length === 0 ? (
-          <div className="empty-state" style={{ padding: 20 }}>No alerts for {kid.name} yet.</div>
-        ) : (
-          <ul className="alert-feed">
-            {alerts.map((ev) => {
-              const when = parseUtc(ev.created_at);
-              return (
-                <li key={ev.id} className="alert-feed__row card">
-                  {ev.snapshot
-                    ? <img className="alert-feed__thumb" src={api.url(`/cameras/alerts/${ev.id}/snapshot`)} alt="" loading="lazy" />
-                    : <span className="alert-feed__dot event-log__dot" aria-hidden="true" />}
-                  <div className="alert-feed__body">
-                    <div className="alert-feed__line">
-                      <span className="alert-feed__camera">{ev.camera_name}</span>
-                      <span className="event-log__type">{TYPE_LABEL[ev.type] || ev.type}</span>
-                    </div>
-                    {ev.detail && <div className="event-log__detail">{ev.detail}</div>}
-                  </div>
-                  <time className="alert-feed__time" dateTime={when.toISOString()} title={when.toLocaleString()}>{relTime(when)}</time>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        {alerts.length === 0
+          ? <div className="empty-state" style={{ padding: 20 }}>No alerts for {kid.name} yet.</div>
+          : <AlertList alerts={alerts} />}
       </main>
     </>
   );
