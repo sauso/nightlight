@@ -1007,6 +1007,24 @@ body.in-pip .tile-menu-backdrop {
 .alert-item__meta { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary); margin-top: 2px; }
 .alert-item__ico { color: var(--peri); flex-shrink: 0; }
 .alert-item__time { font-size: 12px; color: var(--text-secondary); flex-shrink: 0; white-space: nowrap; }
+/* Thumbnail wrapper carries the play/recording overlay. As a <button> (clip ready) it's a bare,
+   tappable frame. */
+.alert-item__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; padding: 0; border: none; background: none; cursor: default; line-height: 0; }
+button.alert-item__thumbwrap { cursor: pointer; border-radius: 9px; }
+button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); outline-offset: 2px; }
+.alert-item__play {
+  position: absolute; inset: 0; margin: auto; width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; background: rgba(10, 13, 28, 0.62); color: #fff;
+}
+.alert-item__play--pending { background: rgba(10, 13, 28, 0.5); color: var(--peri-soft); }
+.alert-item__clipflag { color: var(--peri); }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+/* Modal clip player */
+.clip-player { width: 100%; border-radius: 12px; background: #000; display: block; max-height: 60vh; }
+.clip-player__meta { font-size: 12.5px; color: var(--text-secondary); margin: 10px 0 14px; text-align: center; }
+.btn-block { display: block; width: 100%; text-align: center; }
 /* Full-screen fallback shown by ErrorBoundary when a render throw would otherwise blank
    the app. Kept dependency-free (no context/theme hooks) so it renders even if those broke. */
 .crash-screen {

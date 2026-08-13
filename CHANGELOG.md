@@ -9,6 +9,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **Event recording — short video clips of detections.** Turn on “Save a clip when triggered” under a
+  camera’s Motion or Sound settings and Nightlight keeps a rolling buffer of that camera, so each
+  alert gets a short video (a few seconds before the trigger through the moments after) attached to
+  it. Alerts with a clip show a play button on their thumbnail; tapping opens the clip in a player
+  (with a download button). Clip length is set globally under Settings → General → Recording
+  (pre-roll and post-roll). Off by default and opt-in per camera, so a camera only uses disk when you
+  ask it to. Clips are captured with no extra load on the camera (they come off the stream Nightlight
+  already pulls) and are stored on the server alongside the alert history. *(This first cut has no
+  size/retention cap yet beyond the existing alert-history limit — that lands next.)*
+
 ### Fixed
 - **Compatibility-mode (HLS) audio is no longer choppy.** For cameras that send jittery audio
   timestamps (e.g. the Sonoff), the fix that kept HLS from dropping to "No signal" was itself

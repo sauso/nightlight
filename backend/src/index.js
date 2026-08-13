@@ -26,6 +26,7 @@ import { upsertPath, isPathConfiguredCorrectly, getPathStatus } from './lib/medi
 import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder.js';
 import { startMotionDetector, isDetecting, stopAllMotionDetectors } from './lib/motionDetector.js';
 import { startSoundDetector, isSoundDetecting, stopAllSoundDetectors } from './lib/soundDetector.js';
+import { startClipCapture, isClipCapturing, stopAllClipCapture } from './lib/clipCapture.js';
 import { initPush } from './lib/push.js';
 import { startMediaMTX, stopMediaMTX } from './lib/mediamtxProcess.js';
 import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
@@ -382,6 +383,10 @@ async function reconcileCameraPaths(attempt = 1) {
       if (cam.detect_sound_enabled && !isSoundDetecting(cam.id)) {
         await startSoundDetector(cam).catch((e) => logger.error(`[sound] start failed: ${e.message}`));
       }
+      // Keep the optional clip-recording segmenter alive the same way (its own ring off the same path).
+      if (cam.detect_record_clips && !isClipCapturing(cam.id)) {
+        startClipCapture(cam);
+      }
     }
     if (fixedCount > 0) {
       logger.info(`Reconciled ${fixedCount} of ${cameras.length} camera path(s) with MediaMTX.`);
@@ -402,6 +407,7 @@ async function shutdown() {
   logger.info('Shutting down - stopping transcoders and MediaMTX.');
   await stopAllMotionDetectors();
   await stopAllSoundDetectors();
+  stopAllClipCapture();
   await stopAllTranscoders();
   stopMediaMTX();
   stopMqtt();
