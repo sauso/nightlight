@@ -14,6 +14,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   to see at a glance.
 
 ### Added
+- **ntfy and Gotify notifications.** Push notifications is now a hub (a row per provider, like the
+  Settings screen) covering **Pushover, Firebase, Gotify, and ntfy** — enable any combination and an
+  alert goes to all of them. ntfy (ntfy.sh or self-hosted) carries the snapshot inline and works on
+  iOS; Gotify is self-hosted, text-only. Each provider has its own config page with a Send-test button.
+  See `docs/notifications.md`.
 - **Two-factor authentication (TOTP).** Optional, per-account: Settings → Account → Two-factor sets it
   up from an authenticator app (QR or manual key) and issues 10 one-time backup codes. Login then asks
   for the 6-digit code after the password. Recovery is covered by backup codes, an admin "Reset
