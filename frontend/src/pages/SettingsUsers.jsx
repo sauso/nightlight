@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Plus, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
+import Avatar from '../components/Avatar.jsx';
 
 function timeAgo(iso) {
   const seconds = Math.floor((Date.now() - new Date(iso + 'Z').getTime()) / 1000);
@@ -53,27 +55,33 @@ export default function SettingsUsers() {
         {error && <div className="error-banner">{error}</div>}
 
         <div className="section-title">Caregiver accounts</div>
-        <div className="card">
-          {users.map((u) => (
-            <div
-              className="list-row"
-              key={u.id}
-              role="button"
-              tabIndex={0}
-              style={{ cursor: 'pointer' }}
-              onClick={() => navigate(`/settings/users/${u.id}`)}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`/settings/users/${u.id}`); } }}
-            >
-              <div>
-                <div>{displayName(u)}</div>
-                <div className="camera-tile__sub">{u.username} · {u.role}</div>
+        <div className="card tight">
+          {users.map((u) => {
+            const open = () => navigate(`/settings/users/${u.id}`);
+            return (
+              <div
+                className="list-row"
+                key={u.id}
+                role="button"
+                tabIndex={0}
+                style={{ cursor: 'pointer', padding: '12px 14px' }}
+                onClick={open}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                  <Avatar name={displayName(u)} src={u.photo} size={50} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 500 }}>{displayName(u)}</div>
+                    <div className="camera-tile__sub">{u.username} · {u.role}</div>
+                  </div>
+                </div>
+                <ChevronRight size={18} style={{ opacity: 0.45, flexShrink: 0 }} aria-hidden="true" />
               </div>
-              <span className="camera-tile__sub">›</span>
-            </div>
-          ))}
+            );
+          })}
         </div>
-        <button className="btn btn-secondary" onClick={() => navigate('/settings/users/new')} style={{ marginBottom: 14 }}>
-          + Add caregiver
+        <button className="btn btn-primary" onClick={() => navigate('/settings/users/new')} style={{ marginBottom: 14 }}>
+          <Plus size={16} aria-hidden="true" /> Add caregiver
         </button>
 
         <div className="section-title">All active sessions</div>
