@@ -41,17 +41,22 @@ function buildArgs(rtspUrl, mediamtxPath) {
     // protocol picks whichever of these two tracks it actually supports and ignores the
     // other - the same way MediaMTX already silently skips incompatible tracks per protocol.
     '-c:a:0', 'copy',
-    // Track 1 (AAC, for HLS/Compatibility mode) gets an async resampler. Some cameras
-    // send audio with jittery, occasionally-backward RTP timestamps (logged as "Queue
-    // input is backward in time"); fed straight to the AAC encoder that poisons the HLS
-    // muxer's timeline and shows up as "No signal" in Compatibility mode. aresample with
-    // async=1 rebuilds a continuous, monotonic output clock - padding gaps with silence
-    // and absorbing backward jumps - so HLS stays playable through the camera's audio
-    // glitches. This is a camera-side fault (see KNOWN-ISSUES.md); this just stops it
-    // taking Compatibility mode down with it. Only track 1 - the WebRTC copy track (a:0)
-    // can't be filtered and tolerates the jitter anyway.
-    '-filter:a:1', 'aresample=async=1:first_pts=0',
-    '-c:a:1', 'aac', '-b:a:1', '64k', '-ar:1', '48000',
+    // Track 1 (AAC, for HLS/Compatibility mode). Some cameras send audio with jittery,
+    // occasionally-backward RTP timestamps (logged as "Queue input is backward in time");
+    // fed straight to the AAC encoder those poison the HLS muxer's timeline and show up as
+    // "No signal" in Compatibility mode. We used to fix this with aresample=async=1, but that
+    // "fix" DROPS/inserts samples on every jitter event and made Compatibility-mode audio
+    // audibly choppy (measured on the Sonoff test cam: ~15 dropouts in 15s). Instead we
+    // resample to 48k and then REBUILD the audio PTS purely from the sample count
+    // (asetpts=N/SR/TB): the output clock is perfectly monotonic — so the HLS muxer never
+    // sees a backward jump ("No signal" stays gone) — while no samples are dropped, so the
+    // audio is clean (measured: 0 dropouts, 0 backward-time warnings). Trade-off: a genuine
+    // audio gap collapses (isn't silence-padded) rather than holding A/V sync, so lip-sync can
+    // drift slightly on a bad camera — already an accepted trade here (see the wallclock note
+    // above) and far better than choppy. Only track 1 — the WebRTC copy track (a:0) is
+    // untouched and tolerates the jitter anyway. See KNOWN-ISSUES.md.
+    '-filter:a:1', 'aresample=48000,asetpts=N/SR/TB',
+    '-c:a:1', 'aac', '-b:a:1', '64k',
     '-avoid_negative_ts', 'make_zero',
     '-f', 'rtsp',
     '-rtsp_transport', 'tcp',
