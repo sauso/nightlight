@@ -50,6 +50,7 @@ export default function ChildSettings() {
   const [error, setError] = useState('');
   const [removing, setRemoving] = useState(false);
   const [removeBusy, setRemoveBusy] = useState(false);
+  const [photoStatus, setPhotoStatus] = useState(''); // '' | 'saving' | 'saved'
   const initedRef = useRef(false);
 
   const back = location.state?.from || { to: '/children', label: 'Children' };
@@ -60,18 +61,39 @@ export default function ChildSettings() {
     setForm({ name: kid.name, birthday: kid.birthday || '', color: kid.color || COLORS[0], photo: kid.photo || null });
   }, [kid, isNew]);
 
+  // Persist just the photo immediately for an existing child (no Save press needed). On a new child
+  // there's no record yet, so it rides along when the form is first saved.
+  async function persistPhoto(photo) {
+    if (isNew) return;
+    setPhotoStatus('saving');
+    try {
+      await api.put(`/children/${id}`, { name: form.name, birthday: form.birthday, color: form.color, photo });
+      await refresh();
+      setPhotoStatus('saved');
+      setTimeout(() => setPhotoStatus(''), 2000);
+    } catch (err) {
+      setError(err.message);
+      setPhotoStatus('');
+    }
+  }
+
   async function onPhoto(e) {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
     setError('');
     try {
-      setForm((f) => ({ ...f, photo: null }));
       const dataUrl = await fileToAvatarDataUrl(file);
       setForm((f) => ({ ...f, photo: dataUrl }));
+      await persistPhoto(dataUrl);
     } catch (err) {
       setError(err.message);
     }
+  }
+
+  function removePhoto() {
+    setForm((f) => ({ ...f, photo: null }));
+    persistPhoto(null);
   }
 
   async function save(e) {
@@ -121,12 +143,16 @@ export default function ChildSettings() {
                   <input type="file" accept="image/*" onChange={onPhoto} style={{ display: 'none' }} />
                 </label>
                 {form.photo && (
-                  <button type="button" className="btn btn-secondary" style={{ width: 'auto' }}
-                    onClick={() => setForm((f) => ({ ...f, photo: null }))}>
+                  <button type="button" className="btn btn-secondary" style={{ width: 'auto' }} onClick={removePhoto}>
                     Remove
                   </button>
                 )}
               </div>
+              {photoStatus && (
+                <div className="camera-tile__sub" style={{ color: 'var(--peri)' }}>
+                  {photoStatus === 'saving' ? 'Saving photo…' : 'Photo saved ✓'}
+                </div>
+              )}
             </div>
 
             <div className="field">
