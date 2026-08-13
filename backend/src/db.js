@@ -131,6 +131,13 @@ if (!usersColumns.includes('mfa_backup_codes')) {
   db.exec('ALTER TABLE users ADD COLUMN mfa_backup_codes TEXT');
 }
 
+// Optional child avatar photo — a browser-resized (~256px square) base64 data-URL, stored inline
+// (small; the frontend caps the size). Null = fall back to the coloured initials avatar.
+const childrenColumns = db.prepare('PRAGMA table_info(children)').all().map((c) => c.name);
+if (!childrenColumns.includes('photo')) {
+  db.exec('ALTER TABLE children ADD COLUMN photo TEXT');
+}
+
 const camerasColumns = db.prepare('PRAGMA table_info(cameras)').all().map((c) => c.name);
 if (!camerasColumns.includes('sort_order')) {
   db.exec('ALTER TABLE cameras ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0');

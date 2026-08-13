@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  SlidersHorizontal, Bell, ScrollText,
+  SlidersHorizontal, Bell, ScrollText, Users,
   Info, Server, LogOut, ChevronRight,
 } from 'lucide-react';
 import { api } from '../lib/api.js';
@@ -53,6 +53,7 @@ function Row({ Icon, iconSize = 20, label, desc, trailing, onClick }) {
 
 const ADMIN_ITEMS = [
   { key: 'general', to: '/settings/general', Icon: SlidersHorizontal, label: 'General', desc: 'App name, timezone, theme, font, colours, temperature unit' },
+  { key: 'caregivers', to: '/settings/users', Icon: Users, label: 'Caregivers', desc: 'Manage caregiver logins and active sessions' },
   { key: 'mqtt', to: '/settings/mqtt', Icon: MqttIcon, iconSize: 22, label: 'MQTT', desc: 'Connect your MQTT broker' },
   { key: 'push', to: '/settings/push', Icon: Bell, label: 'Push notifications', desc: 'Enable phone alerts for motion detection' },
   { key: 'logs', to: '/settings/logs', Icon: ScrollText, label: 'Logs', desc: 'Camera history and server logs' },

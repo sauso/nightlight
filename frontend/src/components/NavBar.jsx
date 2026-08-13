@@ -1,13 +1,12 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Video, Bell, Users, Settings } from 'lucide-react';
+import { Video, Baby, Cctv, Settings } from 'lucide-react';
 
-// The four primary destinations. Family and Settings are hubs, so they stay highlighted
-// while you're on any of the sub-pages they own (`match`) — e.g. Family is lit on
-// /children and /cameras, Settings on /account and /about. Live matches only "/" exactly.
+// Four primary destinations, child-centred. Children, Cameras and Settings are hubs, so each stays
+// highlighted while you're on any sub-page it owns (`match` prefix). Live matches "/" exactly.
 const TABS = [
   { to: '/', Icon: Video, label: 'Live', match: ['/'], exact: true },
-  { to: '/alerts', Icon: Bell, label: 'Alerts', match: ['/alerts'] },
-  { to: '/family', Icon: Users, label: 'Family', match: ['/family', '/children', '/cameras'] },
+  { to: '/children', Icon: Baby, label: 'Children', match: ['/children'] },
+  { to: '/cameras', Icon: Cctv, label: 'Cameras', match: ['/cameras'] },
   { to: '/settings', Icon: Settings, label: 'Settings', match: ['/settings', '/account', '/about'] },
 ];
 

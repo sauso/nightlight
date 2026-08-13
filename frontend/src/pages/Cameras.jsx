@@ -4,14 +4,12 @@ import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import Modal from '../components/Modal.jsx';
-import BreathingDot from '../components/BreathingDot.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 
-// Cameras management list. Editing/adding a camera now happens on its own routed screen
-// (CameraSettings.jsx) rather than a modal — this page keeps the at-a-glance list plus the
-// quick inline actions (assign to a child, enable/disable, remove). Reachable from the Family
-// hub's camera rows (which deep-link straight into a camera's settings).
-const BACK = { state: { from: { to: '/family', label: 'Family' } } };
+// Cameras management (its own top-level tab). Editing/adding a camera happens on its own routed
+// screen (CameraSettings.jsx); this page keeps the at-a-glance list plus quick inline actions
+// (assign to a child, enable/disable, remove).
+const BACK = { state: { from: { to: '/cameras', label: 'Cameras' } } };
 
 export default function Cameras() {
   const { user } = useAuth();
@@ -62,18 +60,28 @@ export default function Cameras() {
 
   return (
     <>
-      <AppHeader title="Cameras" back={{ to: '/family', label: 'Family' }} />
+      <AppHeader title="Cameras" />
       <main className="app-main">
         {(error || contextError) && <div className="error-banner">{error || contextError}</div>}
 
         {cameras.length === 0 && <div className="empty-state">No cameras added yet.</div>}
 
-        {cameras.map((cam) => (
+        {cameras.map((cam) => {
+          const online = cam.statusLevel === 'live' && !cam.disabled;
+          const pill = cam.disabled
+            ? { cls: 'off', text: 'Disabled' }
+            : online
+              ? { cls: 'ok', text: 'Online' }
+              : cam.statusLevel === 'connecting'
+                ? { cls: 'off', text: 'Connecting' }
+                : { cls: 'bad', text: 'Offline' };
+          return (
           <div className={`card cam-card${cam.disabled ? ' cam-card--off' : ''}`} key={cam.id}>
             <div className="cam-card__head">
               <div className="cam-card__title">
-                <BreathingDot status={cam.disabled ? 'offline' : cam.statusLevel || 'connecting'} />
+                <span className={`cam-thumb sm${online ? '' : ' off'}`}>{online && <span className="cam-thumb__dot" aria-hidden="true" />}</span>
                 <span className="cam-card__name">{cam.name}</span>
+                <span className={`status-badge status-badge--${pill.cls} status-badge--sm`}>{pill.text}</span>
               </div>
               {isAdmin && (
                 <div className="cam-card__actions">
@@ -99,7 +107,8 @@ export default function Cameras() {
               </select>
             </div>
           </div>
-        ))}
+          );
+        })}
 
         {isAdmin && (
           <button className="btn btn-primary" onClick={() => navigate('/cameras/new', BACK)}>+ Add camera</button>

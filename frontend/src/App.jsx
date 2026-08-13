@@ -13,8 +13,8 @@ import LiveMonitor from './components/LiveMonitor.jsx';
 import InstallPrompt from './components/InstallPrompt.jsx';
 import PushBanner from './components/PushBanner.jsx';
 import Login from './pages/Login.jsx';
-import Alerts from './pages/Alerts.jsx';
-import Family from './pages/Family.jsx';
+import Children from './pages/Children.jsx';
+import ChildDetail from './pages/ChildDetail.jsx';
 import ChildSettings from './pages/ChildSettings.jsx';
 import Cameras from './pages/Cameras.jsx';
 import CameraSettings from './pages/CameraSettings.jsx';
@@ -120,13 +120,14 @@ function Shell() {
                   <LiveMonitor />
                   <Routes>
                     <Route path="/" element={null} />
-                    <Route path="/alerts" element={<Alerts />} />
-                    <Route path="/family" element={<Family />} />
-                    {/* Children are managed inline from the Family hub; the old list route just
-                        forwards there. Add/edit a child on its own screen (any signed-in user). */}
-                    <Route path="/children" element={<Navigate to="/family" replace />} />
+                    {/* Retired tabs redirect to the new child-centred structure. */}
+                    <Route path="/family" element={<Navigate to="/children" replace />} />
+                    <Route path="/alerts" element={<Navigate to="/children" replace />} />
+                    {/* Children tab: list → child detail (cameras + alerts + sleep); avatar → settings. */}
+                    <Route path="/children" element={<Children />} />
                     <Route path="/children/new" element={<ChildSettings />} />
-                    <Route path="/children/:id" element={<ChildSettings />} />
+                    <Route path="/children/:id" element={<ChildDetail />} />
+                    <Route path="/children/:id/edit" element={<ChildSettings />} />
                     <Route path="/cameras" element={<Cameras />} />
                     {/* Per-camera settings + split detection screens are admin-only (camera
                         management). /cameras/new and /cameras/:id/:kind are more specific than

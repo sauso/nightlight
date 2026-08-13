@@ -24,6 +24,7 @@ import { usePullToRefresh } from '../lib/usePullToRefresh.js';
 import { api } from '../lib/api.js';
 import AppHeader from './AppHeader.jsx';
 import SortableCameraTile from './SortableCameraTile.jsx';
+import RecentActivity from './RecentActivity.jsx';
 
 // This component is mounted once for the entire logged-in session (see App.jsx) so that
 // switching to Settings/Children/Cameras/Account never tears down the WebRTC connections
@@ -217,6 +218,8 @@ export default function LiveMonitor() {
             </SortableContext>
           </DndContext>
         )}
+
+        <RecentActivity active={isActive} />
       </main>
     </div>
   );
