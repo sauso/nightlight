@@ -9,6 +9,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+- **Compatibility-mode (HLS) audio is no longer choppy.** For cameras that send jittery audio
+  timestamps (e.g. the Sonoff), the fix that kept HLS from dropping to "No signal" was itself
+  dropping/inserting audio samples, so the sound stuttered constantly. The audio timeline is now
+  rebuilt from the sample count instead, which stays perfectly in order for the player **without**
+  discarding samples — so Compatibility mode sounds clean. Low-latency (WebRTC) audio was never
+  affected. (On a badly glitching camera, audio may now drift slightly out of lip-sync rather than
+  stutter — a deliberate trade.)
+
 ## [0.14.0] - 2026-08-14
 
 ### Changed
