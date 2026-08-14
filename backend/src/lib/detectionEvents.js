@@ -77,7 +77,7 @@ function unlinkSnapshot(id) {
 
 // Resolve+delete a clip MP4 (and its sibling thumbnail) from a stored relative clip_path. Guards
 // against path escape so a crafted row can't reach outside CLIPS_DIR.
-function unlinkClip(relPath) {
+export function unlinkClip(relPath) {
   if (!relPath) return;
   const abs = path.resolve(CLIPS_DIR, relPath);
   if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return;
@@ -152,6 +152,40 @@ export function getEventClipFile(id) {
   const abs = path.resolve(CLIPS_DIR, row.clip_path);
   if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;
   return fs.existsSync(abs) ? abs : null;
+}
+
+// --- Retention accounting (lib/clipStorage.js sweeps against these). Deleting a clip clears its
+// clip_* columns but KEEPS the alert row + snapshot — the event history is preserved, only the video
+// goes. ---
+const clearClipRowStmt = db.prepare(
+  'UPDATE detection_events SET clip_status = NULL, clip_path = NULL, clip_duration_s = NULL, clip_bytes = NULL WHERE id = ?'
+);
+const expiredClipsStmt = db.prepare(
+  "SELECT id, clip_path FROM detection_events WHERE clip_path IS NOT NULL AND created_at < datetime('now', ?)"
+);
+const readyClipsOldestFirstStmt = db.prepare(
+  "SELECT id, clip_path, clip_bytes FROM detection_events WHERE clip_status = 'ready' AND clip_path IS NOT NULL ORDER BY id ASC"
+);
+const clipTotalsStmt = db.prepare(
+  "SELECT COUNT(*) AS count, COALESCE(SUM(clip_bytes), 0) AS bytes FROM detection_events WHERE clip_status = 'ready' AND clip_path IS NOT NULL"
+);
+
+// Clips whose event is older than `days`, for age-based retention. Returns [{id, clip_path}].
+export function getExpiredClips(days) {
+  return expiredClipsStmt.all(`-${days} days`);
+}
+// Every ready clip, oldest first — for size-cap retention (delete oldest until under). [{id, clip_path, clip_bytes}].
+export function getReadyClipsOldestFirst() {
+  return readyClipsOldestFirstStmt.all();
+}
+// { count, bytes } of ready clips — for the used-storage display.
+export function getClipStorageTotals() {
+  return clipTotalsStmt.get();
+}
+// Delete a clip's file(s) and clear its clip_* columns (keeps the alert row + snapshot).
+export function deleteClip(id, relPath) {
+  unlinkClip(relPath);
+  try { clearClipRowStmt.run(id); } catch (e) { logger.error(`clear clip row failed (${id}):`, e.message); }
 }
 
 // Fire-and-forget: a logging failure must never take down the detector loop. Returns the

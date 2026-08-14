@@ -17,10 +17,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   (with a download button). Clip length is set globally under Settings → General → Recording
   (pre-roll and post-roll). Off by default and opt-in per camera, so a camera only uses disk when you
   ask it to. Clips are captured with no extra load on the camera (they come off the stream Nightlight
-  already pulls) and are stored on the server alongside the alert history. *(This first cut has no
-  size/retention cap yet beyond the existing alert-history limit — that lands next.)* In the mobile
-  app, **Download clip** saves the video into your phone's Downloads folder (the same native path the
+  already pulls) and are stored on the server alongside the alert history. In the mobile app,
+  **Download clip** saves the video into your phone's Downloads folder (the same native path the
   diagnostics bundle uses), since the in-app WebView can't do a browser download.
+- **Recording retention & storage controls.** Under Settings → General → Recording you can now set how
+  long to keep clips (days) and a total storage cap (GB) — oldest clips are deleted first once either
+  limit is passed (0 turns a limit off), while the alert and its snapshot are kept. The section also
+  shows how much space clips are using and where they're saved. By default clips live under your data
+  directory; set a `/recordings` mount + `CLIPS_DIR` to store them on a separate disk (e.g. an Unraid
+  array) — see [docs/recording.md](docs/recording.md). Nightlight refuses to write clips to an unmapped
+  container path (they'd be lost on recreate), and skips recording if the disk is nearly full.
 
 ### Fixed
 - **Compatibility-mode (HLS) audio is no longer choppy.** For cameras that send jittery audio
