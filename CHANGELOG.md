@@ -18,7 +18,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   (pre-roll and post-roll). Off by default and opt-in per camera, so a camera only uses disk when you
   ask it to. Clips are captured with no extra load on the camera (they come off the stream Nightlight
   already pulls) and are stored on the server alongside the alert history. *(This first cut has no
-  size/retention cap yet beyond the existing alert-history limit — that lands next.)*
+  size/retention cap yet beyond the existing alert-history limit — that lands next.)* In the mobile
+  app, **Download clip** saves the video into your phone's Downloads folder (the same native path the
+  diagnostics bundle uses), since the in-app WebView can't do a browser download.
 
 ### Fixed
 - **Compatibility-mode (HLS) audio is no longer choppy.** For cameras that send jittery audio

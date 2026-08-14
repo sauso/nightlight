@@ -35,6 +35,58 @@ export async function saveToDownloads(filename, text, mimeType = 'application/oc
   }
 }
 
+// Base64-encode a Blob's raw bytes (for binary files — a recorded clip — where utf8ToBase64 would
+// corrupt the data). Reads via a data: URL and strips the "data:...;base64," prefix.
+function base64FromBlob(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const res = String(reader.result || '');
+      const comma = res.indexOf(',');
+      resolve(comma >= 0 ? res.slice(comma + 1) : res);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+// Save arbitrary BINARY data (e.g. a recorded video clip) straight into the phone's public Downloads
+// folder via the native Download plugin, falling back to the Filesystem + Share sheet on older
+// devices. Same reason as saveTextFile: the Android WebView can't do a browser-style <a download>.
+// Returns true if the native app handled it, false in a browser so the caller can fall back to a
+// normal blob/anchor download (which does work outside the WebView).
+export async function saveBlobToDownloads(filename, blob, mimeType = 'application/octet-stream') {
+  if (!isNativeApp()) return false;
+  const data = await base64FromBlob(blob);
+  const Download = window.Capacitor?.Plugins?.Download;
+  if (Download) {
+    try {
+      await Download.saveToDownloads({ filename, data, mimeType });
+      return true;
+    } catch (err) {
+      console.warn('saveBlobToDownloads (native download) failed', err);
+    }
+  }
+  const Filesystem = window.Capacitor?.Plugins?.Filesystem;
+  const Share = window.Capacitor?.Plugins?.Share;
+  if (Filesystem && Share) {
+    try {
+      // No encoding => Capacitor writes the base64 as raw bytes. CACHE needs no permission.
+      await Filesystem.writeFile({ path: filename, data, directory: 'CACHE' });
+      const { uri } = await Filesystem.getUri({ path: filename, directory: 'CACHE' });
+      try {
+        await Share.share({ title: filename, files: [uri], dialogTitle: 'Save or share clip' });
+      } catch (shareErr) {
+        console.warn('Share dismissed/failed', shareErr);
+      }
+      return true;
+    } catch (err) {
+      console.warn('saveBlobToDownloads (share) failed', err);
+    }
+  }
+  return false;
+}
+
 // Save a text file out of the app and hand it to the OS share sheet (Save to Files, email, etc.).
 // The Android WebView can't do a browser-style blob/<a download> download — those silently do
 // nothing — so exports like the diagnostics bundle have to go through the native Filesystem +
