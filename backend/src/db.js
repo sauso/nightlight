@@ -228,6 +228,23 @@ if (!settingsColumns.includes('ptz_step')) {
   db.exec('ALTER TABLE settings ADD COLUMN ptz_step INTEGER NOT NULL DEFAULT 12');
 }
 
+// Event recording (Stage 1): how much of the stream to keep around each detection. clip_pre_roll_s
+// is seconds BEFORE the trigger (drives how deep the segmenter ring must be), clip_post_roll_s is
+// seconds after. Global defaults 5s/15s; bounds enforced in routes/settings.js. See lib/clipCapture.js.
+if (!settingsColumns.includes('clip_pre_roll_s')) {
+  db.exec('ALTER TABLE settings ADD COLUMN clip_pre_roll_s INTEGER NOT NULL DEFAULT 5');
+  db.exec('ALTER TABLE settings ADD COLUMN clip_post_roll_s INTEGER NOT NULL DEFAULT 15');
+}
+
+// Clip retention (Stage 1 phase 3): clips are deleted when EITHER bound is exceeded — older than
+// clip_retention_days, OR total clip size over clip_retention_max_gb (oldest deleted first). 0 =
+// that bound is off. Defaults 14 days / 5 GB. The cap is what makes sharing the SSD safe by default.
+// See lib/clipStorage.js.
+if (!settingsColumns.includes('clip_retention_days')) {
+  db.exec('ALTER TABLE settings ADD COLUMN clip_retention_days INTEGER NOT NULL DEFAULT 14');
+  db.exec('ALTER TABLE settings ADD COLUMN clip_retention_max_gb INTEGER NOT NULL DEFAULT 5');
+}
+
 if (!camerasColumns.includes('mqtt_topic')) {
   db.exec('ALTER TABLE cameras ADD COLUMN mqtt_topic TEXT');
 }
@@ -376,11 +393,30 @@ if (!pushTokenColumns.includes('base_url')) {
   db.exec('ALTER TABLE push_tokens ADD COLUMN base_url TEXT');
 }
 
+// Event-recording opt-in, per camera (separate from alerts — every detection still logs an event +
+// snapshot; a video clip is only captured when this is on). Turning it on starts that camera's
+// segmenter (lib/clipCapture.js). Off by default so a camera costs no disk unless asked. See
+// planning/recording-and-sleep-tracking-scope.md.
+if (!camerasColumns.includes('detect_record_clips')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN detect_record_clips INTEGER NOT NULL DEFAULT 0');
+}
+
 // snapshot: 1 when the alert-time image was captured and saved to disk (DATA_DIR/detection-snapshots/
 // <id>.jpg), so the in-app Alerts feed knows to show a thumbnail. See lib/detectionEvents.js.
 const detectionEventsColumns = db.prepare('PRAGMA table_info(detection_events)').all().map((c) => c.name);
 if (!detectionEventsColumns.includes('snapshot')) {
   db.exec('ALTER TABLE detection_events ADD COLUMN snapshot INTEGER NOT NULL DEFAULT 0');
+}
+
+// Clip columns on the same detection_events row (Stage 1 recording). clip_status: NULL = no clip for
+// this event (recording was off), 'pending' = capture enqueued/in progress, 'ready' = clip_path is a
+// playable MP4, 'failed' = capture errored. clip_path is relative to CLIPS_DIR. The event's existing
+// JPEG snapshot doubles as the clip thumbnail. See lib/clipCapture.js + lib/clipRecorder.js.
+if (!detectionEventsColumns.includes('clip_status')) {
+  db.exec('ALTER TABLE detection_events ADD COLUMN clip_status TEXT');
+  db.exec('ALTER TABLE detection_events ADD COLUMN clip_path TEXT');
+  db.exec('ALTER TABLE detection_events ADD COLUMN clip_duration_s INTEGER');
+  db.exec('ALTER TABLE detection_events ADD COLUMN clip_bytes INTEGER');
 }
 
 // Ensure the single settings row always exists.

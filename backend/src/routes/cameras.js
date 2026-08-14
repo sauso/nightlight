@@ -7,7 +7,15 @@ import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
 import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.js';
 import { startMotionDetector, stopMotionDetector } from '../lib/motionDetector.js';
 import { startSoundDetector, stopSoundDetector } from '../lib/soundDetector.js';
-import { getRecentDetectionEvents, clearDetectionEvents, getEventSnapshotFile } from '../lib/detectionEvents.js';
+import { startClipCapture, stopClipCapture } from '../lib/clipCapture.js';
+import {
+  getRecentDetectionEvents,
+  clearDetectionEvents,
+  getEventSnapshotFile,
+  getEventClipFile,
+  deleteClipForEvent,
+  getClips,
+} from '../lib/detectionEvents.js';
 import { verifyTalkCreds } from '../lib/twoWayAudio.js';
 import { getReading, subscribeAllCameraTopics, refreshMqttConnection } from '../lib/mqttClient.js';
 import { probeOnvifCamera, ptzNudge, ptzRelativeStep, probePtzRelativeSupport } from '../lib/onvif.js';
@@ -23,6 +31,15 @@ const router = Router();
 router.get('/alerts/:id/snapshot', requireAuthQueryOrHeader, (req, res) => {
   const file = getEventSnapshotFile(req.params.id);
   if (!file) return res.status(404).json({ error: 'No snapshot for this alert' });
+  res.sendFile(file);
+});
+
+// Recorded clip for an alert — same query-token auth as the snapshot above (a <video> element
+// fetches the URL itself and can't attach an Authorization header). res.sendFile honours Range
+// requests, so seeking/scrubbing works out of the box. 404 until the clip is 'ready'.
+router.get('/alerts/:id/clip', requireAuthQueryOrHeader, (req, res) => {
+  const file = getEventClipFile(req.params.id);
+  if (!file) return res.status(404).json({ error: 'No clip for this alert' });
   res.sendFile(file);
 });
 
@@ -248,6 +265,29 @@ router.get('/alerts', requireAuth, (req, res) => {
 // Clear the whole Recent alerts history (admin only). Mounted before /:id like the GET above.
 router.delete('/alerts', requireAuth, requireAdmin, (req, res) => {
   res.json({ cleared: clearDetectionEvents() });
+});
+
+// Delete just the recorded clip for one alert (any signed-in user — it's a contextual action on an
+// alert they can already see). Removes the video file; the alert row + snapshot stay.
+router.delete('/alerts/:id/clip', requireAuth, (req, res) => {
+  const had = deleteClipForEvent(req.params.id);
+  if (!had) return res.status(404).json({ error: 'No clip for this alert' });
+  res.status(204).end();
+});
+
+// List every alert that has a playable clip, for the Clip Management screen. Metadata only.
+router.get('/clips', requireAuth, (req, res) => {
+  res.json(getClips());
+});
+
+// Bulk-delete clips (admin — this lives on the admin Settings screen). Body: { ids: [eventId, ...] }.
+router.post('/clips/delete', requireAdmin, (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  let deleted = 0;
+  for (const id of ids) {
+    if (deleteClipForEvent(id)) deleted++;
+  }
+  res.json({ deleted });
 });
 
 // Persists a custom drag-and-drop order for the Nursery page. Mounted before /:id so
@@ -496,6 +536,9 @@ router.put('/:id', requireAdmin, async (req, res) => {
     else await stopMotionDetector(updated.id).catch(() => {});
     if (updated.detect_sound_enabled) await startSoundDetector(updated).catch(() => {});
     else await stopSoundDetector(updated.id).catch(() => {});
+    // Restart the clip segmenter too so it re-attaches to the (possibly changed) path. No-op if off.
+    stopClipCapture(updated.id);
+    startClipCapture(updated);
   }
   subscribeAllCameraTopics();
   res.json(publicCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id), true));
@@ -519,11 +562,13 @@ router.put('/:id/enabled', requireAdmin, async (req, res) => {
     if (subConfigured(existing)) await startSubStream(existing).catch((e) => logger.error(`[substream] enable failed: ${e.message}`));
     if (existing.detect_motion_enabled) await startMotionDetector(existing).catch(() => {});
     if (existing.detect_sound_enabled) await startSoundDetector(existing).catch(() => {});
+    if (existing.detect_record_clips) startClipCapture(existing);
   } else {
     await stopTranscoder(req.params.id);
     await stopSubStream(existing).catch(() => {});
     await stopMotionDetector(req.params.id).catch(() => {});
     await stopSoundDetector(req.params.id).catch(() => {});
+    stopClipCapture(req.params.id);
     try {
       await removePath(existing.mediamtx_path);
     } catch (e) {
@@ -545,9 +590,11 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
     motion_enabled, zone, sensitivity, cooldown_s, confirm_s, schedule_enabled, start, end,
     source, motion_mqtt_topic, motion_mqtt_value, snapshot_url,
     sound_enabled, sound_sensitivity, sound_confirm_s, sound_cooldown_s,
+    record_clips,
   } = req.body || {};
 
   const enabled = motion_enabled ? 1 : 0;
+  const recordClips = record_clips === undefined ? existing.detect_record_clips : record_clips ? 1 : 0;
   const zoneJson = zone === undefined ? existing.detect_zone : serializeZone(zone);
   // Detection source: only the two known values; anything else falls back to the current value.
   const detectSource =
@@ -588,11 +635,11 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
        detect_cooldown_s = ?, detect_confirm_s = ?, detect_schedule_enabled = ?, detect_start = ?,
        detect_end = ?, detect_source = ?, motion_mqtt_topic = ?, motion_mqtt_value = ?,
        snapshot_url = ?, detect_sound_enabled = ?, sound_sensitivity = ?, sound_confirm_s = ?,
-       sound_cooldown_s = ? WHERE id = ?`
+       sound_cooldown_s = ?, detect_record_clips = ? WHERE id = ?`
   ).run(
     enabled, zoneJson, sens, cooldown, confirm, schedEnabled, startMin, endMin,
     detectSource, motionTopic, motionValue, snapUrl,
-    soundEnabled, soundSens, soundConfirm, soundCooldown, req.params.id
+    soundEnabled, soundSens, soundConfirm, soundCooldown, recordClips, req.params.id
   );
 
   const updated = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
@@ -610,6 +657,9 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
     } else {
       await stopSoundDetector(updated.id).catch(() => {});
     }
+    // Clip-recording segmenter follows its own opt-in.
+    if (updated.detect_record_clips) startClipCapture(updated);
+    else stopClipCapture(updated.id);
   }
   // Re-subscribe MQTT so a new/changed/removed motion topic takes effect immediately.
   refreshMqttConnection();
@@ -636,6 +686,7 @@ router.delete('/:id', requireAdmin, async (req, res) => {
   await stopSubStream(existing).catch(() => {});
   await stopMotionDetector(req.params.id).catch(() => {});
   await stopSoundDetector(req.params.id).catch(() => {});
+  stopClipCapture(req.params.id);
   try {
     await removePath(existing.mediamtx_path);
   } catch (e) {

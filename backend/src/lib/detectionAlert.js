@@ -5,6 +5,7 @@ import { pushoverEnabled, sendPushover } from './pushover.js';
 import { ntfyEnabled, sendNtfy } from './ntfy.js';
 import { gotifyEnabled, sendGotify } from './gotify.js';
 import { captureSnapshot, fetchHttpSnapshot } from './snapshot.js';
+import { enqueueClip } from './clipCapture.js';
 
 // The single downstream shared by every detector — frame-diff motion (motionDetector.js),
 // camera-native MQTT motion (mqttClient.js), and audio-loudness sound (soundDetector.js). Whatever
@@ -30,9 +31,14 @@ async function resolveSnapshot(camera, snapshotPath) {
 }
 
 export async function fireDetectionAlert(camera, type, detail, { snapshotPath = null } = {}) {
+  const at = Date.now(); // trigger time the recorded clip centres on
   const w = WORDING[type] || { body: 'Alert', suffix: 'alert' };
   const eventId = recordDetectionEvent(camera.id, camera.name, type, detail);
   logger.info(`[detect] ${type} on "${camera.name}" (${detail})`);
+
+  // If this camera records clips, kick the capture off now (before the snapshot await below) so the
+  // post-roll wait overlaps snapshot work. No-op unless detect_record_clips is on. Never throws.
+  enqueueClip(camera, eventId, at);
 
   const firePush = pushEnabled();
   const firePushover = pushoverEnabled();

@@ -31,6 +31,7 @@ import SettingsPushNtfy from './pages/SettingsPushNtfy.jsx';
 import SettingsUsers from './pages/SettingsUsers.jsx';
 import UserSettings from './pages/UserSettings.jsx';
 import SettingsLogs from './pages/SettingsLogs.jsx';
+import ClipManagement from './pages/ClipManagement.jsx';
 import About from './pages/About.jsx';
 
 // How long the app needs to have been backgrounded before we reload on return. Short
@@ -150,6 +151,7 @@ function Shell() {
                     <Route path="/settings/users/new" element={<AdminProtected><UserSettings /></AdminProtected>} />
                     <Route path="/settings/users/:id" element={<AdminProtected><UserSettings /></AdminProtected>} />
                     <Route path="/settings/logs" element={<AdminProtected><SettingsLogs /></AdminProtected>} />
+                    <Route path="/settings/clips" element={<AdminProtected><ClipManagement /></AdminProtected>} />
                     <Route path="/account" element={<Account />} />
                     <Route path="/about" element={<About />} />
                   </Routes>
