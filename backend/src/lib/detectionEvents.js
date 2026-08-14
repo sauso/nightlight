@@ -81,8 +81,11 @@ export function unlinkClip(relPath) {
   if (!relPath) return;
   const abs = path.resolve(CLIPS_DIR, relPath);
   if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return;
-  fs.rm(abs, { force: true }, () => {});
-  fs.rm(abs.replace(/\.mp4$/i, '.jpg'), { force: true }, () => {});
+  // Synchronous: a retention sweep must actually finish deleting before it moves on / the process
+  // can exit, otherwise a crash right after would leave the file behind while its row is already
+  // cleared (orphaned on disk, uncounted by the size cap). A handful of files per sweep — cheap.
+  try { fs.rmSync(abs, { force: true }); } catch { /* ignore */ }
+  try { fs.rmSync(abs.replace(/\.mp4$/i, '.jpg'), { force: true }); } catch { /* ignore */ }
 }
 
 function prune() {
