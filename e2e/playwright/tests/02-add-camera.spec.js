@@ -12,7 +12,8 @@ test('add a camera through the UI and see it go live on the grid', async ({ page
   await page.getByLabel('Camera IP address').fill(CAMERA.rtsp_host);
   await page.getByLabel('RTSP port').fill(CAMERA.rtsp_port);
   await page.getByLabel('Stream path', { exact: true }).fill(CAMERA.rtsp_path);
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  // Add/edit is a full page now; the submit button reads "Add camera" when adding.
+  await page.getByRole('button', { name: 'Add camera', exact: true }).click();
 
   // The on-demand source can be cold on the very first connect, tripping the pre-save
   // stream validation; the UI then offers "Save anyway". Take it if it shows up —
@@ -25,7 +26,7 @@ test('add a camera through the UI and see it go live on the grid', async ({ page
     /* validated on the first try */
   }
 
-  // Modal closes on a successful save.
+  // On a successful save the form page navigates away, so its fields are gone.
   await expect(page.getByLabel('Camera IP address')).toBeHidden();
 
   // The tile renders on the dashboard with a mounted player.
