@@ -191,6 +191,28 @@ export function deleteClip(id, relPath) {
   try { clearClipRowStmt.run(id); } catch (e) { logger.error(`clear clip row failed (${id}):`, e.message); }
 }
 
+// Delete the clip belonging to a single event (looks up its path). Returns true if there was one.
+// Used by the per-clip delete button and bulk clip management.
+export function deleteClipForEvent(id) {
+  const row = db.prepare('SELECT clip_path FROM detection_events WHERE id = ? AND clip_path IS NOT NULL').get(id);
+  if (!row) return false;
+  deleteClip(id, row.clip_path);
+  return true;
+}
+
+// All events that currently have a playable clip, newest first — for the Clip Management screen.
+// Metadata only (the clip itself streams from the serving route); capped so it can't balloon.
+export function getClips(limit = 2000) {
+  return db
+    .prepare(
+      `SELECT id, camera_id, camera_name, type, detail, created_at, snapshot, clip_duration_s, clip_bytes
+       FROM detection_events
+       WHERE clip_status = 'ready' AND clip_path IS NOT NULL
+       ORDER BY id DESC LIMIT ?`
+    )
+    .all(Math.min(limit, 5000));
+}
+
 // Fire-and-forget: a logging failure must never take down the detector loop. Returns the
 // inserted row's id (or null) so callers can hang a push notification off a real event.
 export function recordDetectionEvent(cameraId, cameraName, type, detail = null) {

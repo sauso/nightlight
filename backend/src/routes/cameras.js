@@ -13,6 +13,8 @@ import {
   clearDetectionEvents,
   getEventSnapshotFile,
   getEventClipFile,
+  deleteClipForEvent,
+  getClips,
 } from '../lib/detectionEvents.js';
 import { verifyTalkCreds } from '../lib/twoWayAudio.js';
 import { getReading, subscribeAllCameraTopics, refreshMqttConnection } from '../lib/mqttClient.js';
@@ -263,6 +265,29 @@ router.get('/alerts', requireAuth, (req, res) => {
 // Clear the whole Recent alerts history (admin only). Mounted before /:id like the GET above.
 router.delete('/alerts', requireAuth, requireAdmin, (req, res) => {
   res.json({ cleared: clearDetectionEvents() });
+});
+
+// Delete just the recorded clip for one alert (any signed-in user — it's a contextual action on an
+// alert they can already see). Removes the video file; the alert row + snapshot stay.
+router.delete('/alerts/:id/clip', requireAuth, (req, res) => {
+  const had = deleteClipForEvent(req.params.id);
+  if (!had) return res.status(404).json({ error: 'No clip for this alert' });
+  res.status(204).end();
+});
+
+// List every alert that has a playable clip, for the Clip Management screen. Metadata only.
+router.get('/clips', requireAuth, (req, res) => {
+  res.json(getClips());
+});
+
+// Bulk-delete clips (admin — this lives on the admin Settings screen). Body: { ids: [eventId, ...] }.
+router.post('/clips/delete', requireAdmin, (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  let deleted = 0;
+  for (const id of ids) {
+    if (deleteClipForEvent(id)) deleted++;
+  }
+  res.json({ deleted });
 });
 
 // Persists a custom drag-and-drop order for the Nursery page. Mounted before /:id so

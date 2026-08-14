@@ -14,6 +14,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   and the avatar on a child's page is larger and easier to see. Tapping that photo opens it full-size.
 
 ### Added
+- **Manage recorded clips.** In the clip player there's now a delete button (with an “are you sure?”
+  confirm) to remove a single clip — the alert and its snapshot stay. And **Settings → Clip management**
+  (admin) lists every clip, lets you filter by date, and bulk-select clips to delete in one go.
 - **Event recording — short video clips of detections.** Turn on “Save a clip when triggered” under a
   camera’s Motion or Sound settings and Nightlight keeps a rolling buffer of that camera, so each
   alert gets a short video (a few seconds before the trigger through the moments after) attached to

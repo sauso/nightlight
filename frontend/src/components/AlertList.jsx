@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Zap, AudioLines, Play } from 'lucide-react';
+import { Zap, AudioLines, Play, Trash2 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { isNativeApp, saveBlobToDownloads } from '../lib/nativeBridge.js';
 import Modal from './Modal.jsx';
@@ -23,9 +23,28 @@ function relTime(d) {
   return `${Math.round(h / 24)}d ago`;
 }
 
-export default function AlertList({ alerts }) {
+export default function AlertList({ alerts, onChanged }) {
   const [clipFor, setClipFor] = useState(null); // the alert whose clip is open in the player
   const [dl, setDl] = useState(''); // '' | 'saving' | 'saved' | 'shared' | 'error'
+  const [del, setDel] = useState(''); // '' | 'confirm' | 'deleting' | 'error'
+
+  function closePlayer() {
+    setClipFor(null);
+    setDl('');
+    setDel('');
+  }
+
+  // Delete the open clip (video only — the alert + snapshot stay). In-app confirm, never a browser one.
+  async function deleteClipNow(ev) {
+    setDel('deleting');
+    try {
+      await api.del(`/cameras/alerts/${ev.id}/clip`);
+      closePlayer();
+      onChanged?.();
+    } catch {
+      setDel('error');
+    }
+  }
 
   // Download the open clip. In the Android/iOS shell a browser-style <a download> silently does
   // nothing (WebView limitation), so fetch the bytes and hand them to the native Download plugin
@@ -104,8 +123,16 @@ export default function AlertList({ alerts }) {
       </div>
 
       {clipFor && (
-        <Modal title={`${clipFor.camera_name} · ${(TYPE[clipFor.type] || {}).label || clipFor.type}`}
-          onClose={() => setClipFor(null)}>
+        <Modal
+          title={`${clipFor.camera_name} · ${(TYPE[clipFor.type] || {}).label || clipFor.type}`}
+          onClose={closePlayer}
+          headerAction={
+            <button type="button" className="icon-btn icon-btn--danger" aria-label="Delete clip"
+              onClick={() => setDel('confirm')} disabled={del === 'deleting'}>
+              <Trash2 size={17} />
+            </button>
+          }
+        >
           <video
             className="clip-player"
             src={api.url(`/cameras/alerts/${clipFor.id}/clip`)}
@@ -118,14 +145,26 @@ export default function AlertList({ alerts }) {
             {parseUtc(clipFor.created_at).toLocaleString()}
             {clipFor.clip_duration_s ? ` · ${clipFor.clip_duration_s}s` : ''}
           </div>
-          <button type="button" className="btn btn-block" onClick={() => downloadClip(clipFor)}
-            disabled={dl === 'saving'}>
-            {dl === 'saving' ? 'Saving…'
-              : dl === 'saved' ? 'Saved to Downloads ✓'
-              : dl === 'shared' ? 'Shared ✓'
-              : dl === 'error' ? 'Couldn’t save — try again'
-              : 'Download clip'}
-          </button>
+          {del === 'confirm' || del === 'deleting' || del === 'error' ? (
+            <div className="clip-confirm">
+              <span>{del === 'error' ? 'Couldn’t delete — try again.' : 'Delete this clip? The alert stays.'}</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" className="btn" onClick={() => setDel('')} disabled={del === 'deleting'}>Cancel</button>
+                <button type="button" className="btn btn-danger" onClick={() => deleteClipNow(clipFor)} disabled={del === 'deleting'}>
+                  {del === 'deleting' ? 'Deleting…' : 'Delete'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button type="button" className="btn btn-block" onClick={() => downloadClip(clipFor)}
+              disabled={dl === 'saving'}>
+              {dl === 'saving' ? 'Saving…'
+                : dl === 'saved' ? 'Saved to Downloads ✓'
+                : dl === 'shared' ? 'Shared ✓'
+                : dl === 'error' ? 'Couldn’t save — try again'
+                : 'Download clip'}
+            </button>
+          )}
         </Modal>
       )}
     </>

@@ -26,18 +26,18 @@ export default function ChildDetail() {
   const [alerts, setAlerts] = useState([]);
   const [photoOpen, setPhotoOpen] = useState(false);
 
-  useEffect(() => {
+  async function loadAlerts() {
     const camIds = new Set(cameras.filter((c) => c.child_id === id).map((c) => c.id));
-    let live = true;
-    async function load() {
-      try {
-        const all = await api.get('/cameras/alerts');
-        if (live) setAlerts((Array.isArray(all) ? all : []).filter((ev) => camIds.has(ev.camera_id)).slice(0, 20));
-      } catch { /* ignore — feed just stays as-is */ }
-    }
-    load();
-    const t = setInterval(load, 15000);
-    return () => { live = false; clearInterval(t); };
+    try {
+      const all = await api.get('/cameras/alerts');
+      setAlerts((Array.isArray(all) ? all : []).filter((ev) => camIds.has(ev.camera_id)).slice(0, 20));
+    } catch { /* ignore — feed just stays as-is */ }
+  }
+
+  useEffect(() => {
+    loadAlerts();
+    const t = setInterval(loadAlerts, 15000);
+    return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, cameras.length]);
 
@@ -97,7 +97,7 @@ export default function ChildDetail() {
         <div className="section-title">Recent alerts</div>
         {alerts.length === 0
           ? <div className="empty-state" style={{ padding: 20 }}>No alerts for {kid.name} yet.</div>
-          : <AlertList alerts={alerts} />}
+          : <AlertList alerts={alerts} onChanged={loadAlerts} />}
       </main>
 
       {photoOpen && kid.photo && (
