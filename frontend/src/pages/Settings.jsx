@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   SlidersHorizontal, Bell, ScrollText, Users,
-  Info, Server, LogOut, ChevronRight,
+  Info, Server, LogOut, ChevronRight, Clapperboard,
 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
@@ -56,6 +56,7 @@ const ADMIN_ITEMS = [
   { key: 'caregivers', to: '/settings/users', Icon: Users, label: 'Caregivers', desc: 'Manage caregiver logins and active sessions' },
   { key: 'mqtt', to: '/settings/mqtt', Icon: MqttIcon, iconSize: 22, label: 'MQTT', desc: 'Connect your MQTT broker' },
   { key: 'push', to: '/settings/push', Icon: Bell, label: 'Push notifications', desc: 'Enable phone alerts for motion detection' },
+  { key: 'clips', to: '/settings/clips', Icon: Clapperboard, label: 'Clip management', desc: 'Browse recorded clips by date; bulk-delete' },
   { key: 'logs', to: '/settings/logs', Icon: ScrollText, label: 'Logs', desc: 'Camera history and server logs' },
 ];
 
