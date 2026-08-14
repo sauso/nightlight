@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Zap, AudioLines, Play, Loader } from 'lucide-react';
 import { api } from '../lib/api.js';
+import { isNativeApp, saveBlobToDownloads } from '../lib/nativeBridge.js';
 import Modal from './Modal.jsx';
 
 // A single-card alert list (matching the design mockup): one row per alert — snapshot thumbnail,
@@ -24,6 +25,36 @@ function relTime(d) {
 
 export default function AlertList({ alerts }) {
   const [clipFor, setClipFor] = useState(null); // the alert whose clip is open in the player
+  const [dl, setDl] = useState(''); // '' | 'saving' | 'saved' | 'shared' | 'error'
+
+  // Download the open clip. In the Android/iOS shell a browser-style <a download> silently does
+  // nothing (WebView limitation), so fetch the bytes and hand them to the native Download plugin
+  // (Downloads folder) with a share-sheet fallback. In a real browser, a plain anchor download works.
+  async function downloadClip(ev) {
+    const filename = `${ev.camera_name}-${ev.id}.mp4`.replace(/[^\w.-]+/g, '_');
+    const url = api.url(`/cameras/alerts/${ev.id}/clip`);
+    if (!isNativeApp()) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      return;
+    }
+    setDl('saving');
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const handled = await saveBlobToDownloads(filename, blob, 'video/mp4');
+      setDl(handled ? 'saved' : 'error');
+    } catch {
+      setDl('error');
+    }
+    setTimeout(() => setDl(''), 3000);
+  }
+
   if (!alerts || alerts.length === 0) return null;
   return (
     <>
@@ -88,10 +119,14 @@ export default function AlertList({ alerts }) {
             {parseUtc(clipFor.created_at).toLocaleString()}
             {clipFor.clip_duration_s ? ` · ${clipFor.clip_duration_s}s` : ''}
           </div>
-          <a className="btn btn-block" href={api.url(`/cameras/alerts/${clipFor.id}/clip`)}
-            download={`${clipFor.camera_name}-${clipFor.id}.mp4`}>
-            Download clip
-          </a>
+          <button type="button" className="btn btn-block" onClick={() => downloadClip(clipFor)}
+            disabled={dl === 'saving'}>
+            {dl === 'saving' ? 'Saving…'
+              : dl === 'saved' ? 'Saved to Downloads ✓'
+              : dl === 'shared' ? 'Shared ✓'
+              : dl === 'error' ? 'Couldn’t save — try again'
+              : 'Download clip'}
+          </button>
         </Modal>
       )}
     </>
