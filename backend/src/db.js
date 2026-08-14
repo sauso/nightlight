@@ -236,6 +236,15 @@ if (!settingsColumns.includes('clip_pre_roll_s')) {
   db.exec('ALTER TABLE settings ADD COLUMN clip_post_roll_s INTEGER NOT NULL DEFAULT 15');
 }
 
+// Clip retention (Stage 1 phase 3): clips are deleted when EITHER bound is exceeded — older than
+// clip_retention_days, OR total clip size over clip_retention_max_gb (oldest deleted first). 0 =
+// that bound is off. Defaults 14 days / 5 GB. The cap is what makes sharing the SSD safe by default.
+// See lib/clipStorage.js.
+if (!settingsColumns.includes('clip_retention_days')) {
+  db.exec('ALTER TABLE settings ADD COLUMN clip_retention_days INTEGER NOT NULL DEFAULT 14');
+  db.exec('ALTER TABLE settings ADD COLUMN clip_retention_max_gb INTEGER NOT NULL DEFAULT 5');
+}
+
 if (!camerasColumns.includes('mqtt_topic')) {
   db.exec('ALTER TABLE cameras ADD COLUMN mqtt_topic TEXT');
 }

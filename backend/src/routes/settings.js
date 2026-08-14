@@ -3,6 +3,7 @@ import db from '../db.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { refreshMqttConnection, mqttStatus } from '../lib/mqttClient.js';
 import { restartClipCapture } from '../lib/clipCapture.js';
+import { clipStorageStats, sweepClips } from '../lib/clipStorage.js';
 
 const router = Router();
 
@@ -47,6 +48,11 @@ router.get('/mqtt/status', requireAuth, requireAdmin, (req, res) => {
   res.json(mqttStatus());
 });
 
+// Admin-only: recording storage usage + where clips live, for the Settings → Recording display.
+router.get('/clip-storage', requireAuth, requireAdmin, (req, res) => {
+  res.json(clipStorageStats());
+});
+
 function isValidTimezone(tz) {
   try {
     Intl.DateTimeFormat(undefined, { timeZone: tz });
@@ -61,7 +67,7 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
   const {
     app_name, accent_color, live_color, offline_color, timezone, font_choice,
     temp_unit, mqtt_enabled, mqtt_host, mqtt_port, mqtt_username, mqtt_password,
-    ptz_step, clip_pre_roll_s, clip_post_roll_s,
+    ptz_step, clip_pre_roll_s, clip_post_roll_s, clip_retention_days, clip_retention_max_gb,
   } = req.body || {};
 
   if (app_name !== undefined && !app_name.trim()) {
@@ -111,12 +117,31 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     postRoll = n;
   }
   const clipLenChanged = preRoll !== existing.clip_pre_roll_s || postRoll !== existing.clip_post_roll_s;
+  // Retention. 0 disables a bound; otherwise days 1-365, cap 1-2000 GB.
+  let retentionDays = existing.clip_retention_days;
+  if (clip_retention_days !== undefined) {
+    const n = parseInt(clip_retention_days, 10);
+    if (!Number.isFinite(n) || n < 0 || n > 365) {
+      return res.status(400).json({ error: 'Keep clips for must be between 0 and 365 days (0 = no day limit)' });
+    }
+    retentionDays = n;
+  }
+  let retentionGb = existing.clip_retention_max_gb;
+  if (clip_retention_max_gb !== undefined) {
+    const n = parseInt(clip_retention_max_gb, 10);
+    if (!Number.isFinite(n) || n < 0 || n > 2000) {
+      return res.status(400).json({ error: 'Storage cap must be between 0 and 2000 GB (0 = no size limit)' });
+    }
+    retentionGb = n;
+  }
+  const retentionChanged =
+    retentionDays !== existing.clip_retention_days || retentionGb !== existing.clip_retention_max_gb;
 
   db.prepare(
     `UPDATE settings
      SET app_name = ?, accent_color = ?, live_color = ?, offline_color = ?, timezone = ?, font_choice = ?,
          temp_unit = ?, mqtt_enabled = ?, mqtt_host = ?, mqtt_port = ?, mqtt_username = ?, mqtt_password = ?,
-         ptz_step = ?, clip_pre_roll_s = ?, clip_post_roll_s = ?
+         ptz_step = ?, clip_pre_roll_s = ?, clip_post_roll_s = ?, clip_retention_days = ?, clip_retention_max_gb = ?
      WHERE id = ?`
   ).run(
     app_name?.trim() || existing.app_name,
@@ -134,6 +159,8 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     ptzStepVal,
     preRoll,
     postRoll,
+    retentionDays,
+    retentionGb,
     'app'
   );
   refreshMqttConnection();
@@ -142,6 +169,10 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     for (const cam of db.prepare('SELECT * FROM cameras WHERE detect_record_clips = 1 AND disabled = 0').all()) {
       restartClipCapture(cam);
     }
+  }
+  // Tighter retention should apply now, not just at the next 15-min sweep.
+  if (retentionChanged) {
+    try { sweepClips(); } catch { /* logged inside */ }
   }
   res.json(toPublicSettings(getSettings()));
 });

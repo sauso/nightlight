@@ -8,6 +8,7 @@ import {
   extractClip,
 } from './clipRecorder.js';
 import { markClipPending, setClipReady, setClipFailed } from './detectionEvents.js';
+import { clipStorageReady, hasMinFreeSpace } from './clipStorage.js';
 
 // Stage 1 recording — the glue between the capture core (clipRecorder.js) and the app:
 //   * lifecycle: start/stop a camera's segmenter to match its `detect_record_clips` opt-in,
@@ -53,6 +54,8 @@ function pump() {
 // so a reconcile tick never drops the ring. Mirrors startMotionDetector's guard.
 export function startClipCapture(camera) {
   if (!camera.detect_record_clips || camera.disabled) return;
+  // Storage unusable (unmapped/unwritable CLIPS_DIR) — don't run a segmenter that can't produce clips.
+  if (!clipStorageReady()) return;
   if (isSegmenterRunning(camera.id)) return;
   const { preRollSec, postRollSec } = getClipSettings();
   startSegmenter(camera.id, camera.mediamtx_path, { preRollSec, postRollSec });
@@ -87,6 +90,11 @@ export function enqueueClip(camera, eventId, at = Date.now()) {
   }
   if (busyCameras.has(camera.id)) {
     logger.info(`[clip] "${camera.name}" already capturing — event ${eventId} folded into the active clip`);
+    return;
+  }
+  if (!hasMinFreeSpace()) {
+    // Disk nearly full — never let recording be what fills it. Skip this clip (alert row still stands).
+    logger.error(`[clip] low free space — skipping clip for "${camera.name}" event ${eventId}`);
     return;
   }
 

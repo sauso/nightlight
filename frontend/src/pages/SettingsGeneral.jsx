@@ -5,6 +5,13 @@ import { getCommonTimezones } from '../lib/greeting.js';
 import { FONT_PRESETS } from '../lib/fonts.js';
 import AppHeader from '../components/AppHeader.jsx';
 
+function fmtBytes(b) {
+  if (b == null || !isFinite(b)) return '—';
+  if (b >= 1024 ** 3) return `${(b / 1024 ** 3).toFixed(2)} GB`;
+  if (b >= 1024 ** 2) return `${(b / 1024 ** 2).toFixed(0)} MB`;
+  return `${(b / 1024).toFixed(0)} KB`;
+}
+
 const PRESETS = [
   { label: 'Nursery (default)', accent: '#f4c56a', live: '#7FBFA3', offline: '#E08585' },
   { label: 'Dusk lavender', accent: '#C9B6F5', live: '#7FBFA3', offline: '#E08585' },
@@ -19,8 +26,11 @@ export default function SettingsGeneral() {
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [timezones] = useState(getCommonTimezones);
+  const [storage, setStorage] = useState(null);
 
   useEffect(() => setForm((f) => ({ ...f, ...settings })), [settings]);
+  const loadStorage = () => api.get('/settings/clip-storage').then(setStorage).catch(() => {});
+  useEffect(() => { loadStorage(); }, []);
 
   async function save(e) {
     e.preventDefault();
@@ -41,8 +51,11 @@ export default function SettingsGeneral() {
         ptz_step: form.ptz_step,
         clip_pre_roll_s: form.clip_pre_roll_s,
         clip_post_roll_s: form.clip_post_roll_s,
+        clip_retention_days: form.clip_retention_days,
+        clip_retention_max_gb: form.clip_retention_max_gb,
       });
       await refresh();
+      loadStorage();
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
@@ -247,6 +260,49 @@ export default function SettingsGeneral() {
               triggered” on (set per camera under its Motion/Sound settings). Clips are stored on the
               server and shown on the alert they belong to.
             </div>
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+              <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+                <label htmlFor="clip-days">Keep clips for (days)</label>
+                <input
+                  id="clip-days"
+                  type="number"
+                  min="0"
+                  max="365"
+                  value={form.clip_retention_days ?? 14}
+                  onChange={(e) => setForm({ ...form, clip_retention_days: e.target.value })}
+                />
+              </div>
+              <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+                <label htmlFor="clip-gb">Storage cap (GB)</label>
+                <input
+                  id="clip-gb"
+                  type="number"
+                  min="0"
+                  max="2000"
+                  value={form.clip_retention_max_gb ?? 5}
+                  onChange={(e) => setForm({ ...form, clip_retention_max_gb: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="camera-tile__sub" style={{ marginTop: 10 }}>
+              Oldest clips are deleted once either limit is passed (0 turns that limit off). The alert
+              and its snapshot stay — only the video is removed.
+            </div>
+
+            {storage && (
+              <div className="storage-readout">
+                <div>
+                  <strong>{fmtBytes(storage.usedBytes)}</strong> used
+                  {typeof storage.clipCount === 'number' ? ` · ${storage.clipCount} clip${storage.clipCount === 1 ? '' : 's'}` : ''}
+                  {typeof storage.freeBytes === 'number' && isFinite(storage.freeBytes) ? ` · ${fmtBytes(storage.freeBytes)} free` : ''}
+                </div>
+                <div className="camera-tile__sub" style={{ wordBreak: 'break-all' }}>
+                  Saving to <code>{storage.path}</code>
+                  {storage.ok ? '' : ' — ⚠ not a mapped volume; recording is disabled until this path is mounted'}
+                </div>
+              </div>
+            )}
           </div>
 
           <button className="btn btn-primary" type="submit" disabled={busy} style={{ marginTop: 20 }}>

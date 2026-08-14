@@ -27,6 +27,7 @@ import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder
 import { startMotionDetector, isDetecting, stopAllMotionDetectors } from './lib/motionDetector.js';
 import { startSoundDetector, isSoundDetecting, stopAllSoundDetectors } from './lib/soundDetector.js';
 import { startClipCapture, isClipCapturing, stopAllClipCapture } from './lib/clipCapture.js';
+import { startClipStorage } from './lib/clipStorage.js';
 import { initPush } from './lib/push.js';
 import { startMediaMTX, stopMediaMTX } from './lib/mediamtxProcess.js';
 import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
@@ -159,6 +160,9 @@ app.get('*', (req, res) => {
 const PORT = process.env.PORT || 4000;
 const server = app.listen(PORT, () => {
   logger.info(`Baby monitor backend listening on port ${PORT}`);
+  // Run the clip-storage guard + retention sweeper BEFORE reconcile, so reconcile only starts
+  // segmenters once storage is known usable (startClipCapture gates on it).
+  startClipStorage();
   reconcileCameraPaths();
   initPush();
 });

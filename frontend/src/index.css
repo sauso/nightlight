@@ -1025,6 +1025,9 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
 .clip-player { width: 100%; border-radius: 12px; background: #000; display: block; max-height: 60vh; }
 .clip-player__meta { font-size: 12.5px; color: var(--text-secondary); margin: 10px 0 14px; text-align: center; }
 .btn-block { display: block; width: 100%; text-align: center; }
+/* Recording storage readout (Settings → Recording) */
+.storage-readout { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+.storage-readout code { font-size: 12px; background: var(--field-bg); padding: 1px 5px; border-radius: 5px; }
 /* Full-screen fallback shown by ErrorBoundary when a render throw would otherwise blank
    the app. Kept dependency-free (no context/theme hooks) so it renders even if those broke. */
 .crash-screen {

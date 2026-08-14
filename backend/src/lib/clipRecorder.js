@@ -233,8 +233,10 @@ export async function extractClip(
   // fresh one opened — otherwise we'd concat a half-written tail segment and truncate the clip.
   await sleep(postRollSec * 1000 + 2 * SEGMENT_SEC * 1000 + 500);
 
-  const windowStart = at - (preRollSec + SEGMENT_SEC) * 1000;
-  const windowEnd = at + (postRollSec + SEGMENT_SEC) * 1000;
+  // Exact requested bounds; whole-segment overlap (below) still keeps the segments straddling each
+  // edge, so pre/post-roll is never cut short — we just don't over-capture an extra segment each side.
+  const windowStart = at - preRollSec * 1000;
+  const windowEnd = at + postRollSec * 1000;
   const now = Date.now();
 
   const segs = safeReaddir(ringDir)
