@@ -34,8 +34,9 @@ test('add a camera through the UI and see it go live on the grid', async ({ page
   await expect(tile).toBeVisible();
   await expect(tile.locator('video')).toBeAttached();
 
-  // Exercise the mode menu (Low latency <-> Compatibility) — real UI interaction.
-  await tile.getByRole('button', { name: 'Stream quality settings' }).click();
+  // Exercise the mode menu (Low <-> Compatibility) — real UI interaction. The tile's gear opens the
+  // cog bottom sheet (aria-label "Camera settings"); it holds the Connection mode segmented buttons.
+  await tile.getByRole('button', { name: 'Camera settings', exact: true }).click();
   await page.getByRole('button', { name: 'Compatibility', exact: true }).click();
 
   // Confirm the tile is wired to a genuinely LIVE stream: the camera's HLS manifest
