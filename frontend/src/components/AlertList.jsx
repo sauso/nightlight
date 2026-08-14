@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Zap, AudioLines, Play, Loader } from 'lucide-react';
+import { Zap, AudioLines, Play } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { isNativeApp, saveBlobToDownloads } from '../lib/nativeBridge.js';
 import Modal from './Modal.jsx';
@@ -79,21 +79,20 @@ export default function AlertList({ alerts }) {
                   <span className="alert-item__play" aria-hidden="true"><Play size={16} fill="currentColor" /></span>
                 </button>
               ) : (
-                <span className="alert-item__thumbwrap">
-                  {Thumb}
-                  {clipPending && (
-                    <span className="alert-item__play alert-item__play--pending" aria-hidden="true">
-                      <Loader size={14} className="spin" />
-                    </span>
-                  )}
-                </span>
+                <span className="alert-item__thumbwrap">{Thumb}</span>
               )}
               <div className="alert-item__body">
-                <div className="alert-item__name">{ev.camera_name}</div>
+                <div className="alert-item__name">
+                  <span className="alert-item__nametext">{ev.camera_name}</span>
+                  {clipPending && (
+                    <span className="rec-badge" title="Recording clip…">
+                      <span className="rec-dot" aria-hidden="true" />REC
+                    </span>
+                  )}
+                </div>
                 <div className="alert-item__meta">
                   <Icon size={14} className="alert-item__ico" aria-hidden="true" />
                   {t.label}{ev.detail ? ` · ${ev.detail}` : ''}
-                  {clipPending && <span className="alert-item__clipflag"> · recording…</span>}
                 </div>
               </div>
               <time className="alert-item__time" dateTime={when.toISOString()} title={when.toLocaleString()}>

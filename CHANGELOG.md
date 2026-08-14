@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+- **The Children tab looks nicer.** Each child now has their own card (echoing their detail screen)
+  instead of a plain list row, and the avatar on a child's page is larger and easier to see.
+
 ### Added
 - **Event recording — short video clips of detections.** Turn on “Save a clip when triggered” under a
   camera’s Motion or Sound settings and Nightlight keeps a rolling buffer of that camera, so each

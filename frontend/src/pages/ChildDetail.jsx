@@ -8,21 +8,11 @@ import AppHeader from '../components/AppHeader.jsx';
 import Avatar from '../components/Avatar.jsx';
 import CameraRow from '../components/CameraRow.jsx';
 import AlertList from '../components/AlertList.jsx';
+import { ageLabel } from '../lib/age.js';
 
 // A child's hub: their identity + (later) last night's sleep, then their cameras and their alerts.
 // Tapping the avatar opens Child settings (name / birthday / colour / photo). Alerts are filtered
 // to this child's cameras client-side via each event's camera_id.
-function ageLabel(birthday) {
-  if (!birthday) return null;
-  const b = new Date(birthday + 'T00:00:00');
-  if (Number.isNaN(b.getTime())) return null;
-  const now = new Date();
-  let months = (now.getFullYear() - b.getFullYear()) * 12 + (now.getMonth() - b.getMonth());
-  if (now.getDate() < b.getDate()) months -= 1;
-  if (months < 0) return null;
-  if (months < 24) return `${months} month${months === 1 ? '' : 's'}`;
-  return `${Math.floor(months / 12)} year${Math.floor(months / 12) === 1 ? '' : 's'}`;
-}
 
 export default function ChildDetail() {
   const { id } = useParams();
@@ -65,7 +55,7 @@ export default function ChildDetail() {
       <main className="app-main">
         <div className="night">
           <button className="night__head" onClick={() => navigate(`/children/${id}/edit`)} aria-label={`Edit ${kid.name}`}>
-            <Avatar name={kid.name} src={kid.photo} color={kid.color} size={64} />
+            <Avatar name={kid.name} src={kid.photo} color={kid.color} size={100} />
             <span className="night__id">
               <span className="night__name">{kid.name}</span>
               <span className="night__age">{age || 'Tap to add birthday & photo'}</span>

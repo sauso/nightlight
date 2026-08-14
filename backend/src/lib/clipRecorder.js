@@ -9,10 +9,11 @@ import { logger } from './logger.js';
 // pulls the ALREADY-published local MediaMTX path (never a second RTSP session on the camera) and
 // writes short Matroska segments into a rolling ring. Because we're always buffering, a trigger can
 // reach BACKWARD in time for pre-roll; the forward post-roll is captured by that same ongoing
-// segmenter. On a trigger, extractClip() concatenates the segments spanning [t-pre, t+post] into one
-// browser-safe MP4 (+ a thumbnail) with a second short FFmpeg. So: one long-lived copy segmenter per
-// recording camera, plus one short concat per event. Video is copied end to end (no video re-encode);
-// only the clip's ~20s of audio is re-encoded once, at extract (see the AUDIO note below).
+// segmenter. On a trigger, extractClip() concatenates the segments spanning [t-pre, t+post] and trims
+// them to EXACTLY the pre+post length (a second short FFmpeg). So: one long-lived cheap `-c copy`
+// segmenter per recording camera, plus one short re-encode of just the ~20s clip per event — the
+// re-encode is what lets the clip be an exact, admin-set length rather than rounding to the camera's
+// keyframe spacing (see the trim note in extractClip). Nothing re-encodes the continuous stream.
 //
 // AUDIO — we capture the camera's ORIGINAL audio track (`-map 0:a:0?`) and encode it to AAC ONCE at
 // extract time, rather than reusing transcoder.js's own AAC track. transcoder.js publishes two audio
@@ -233,10 +234,11 @@ export async function extractClip(
   // fresh one opened — otherwise we'd concat a half-written tail segment and truncate the clip.
   await sleep(postRollSec * 1000 + 2 * SEGMENT_SEC * 1000 + 500);
 
-  // Exact requested bounds; whole-segment overlap (below) still keeps the segments straddling each
-  // edge, so pre/post-roll is never cut short — we just don't over-capture an extra segment each side.
-  const windowStart = at - preRollSec * 1000;
-  const windowEnd = at + postRollSec * 1000;
+  // Select GENEROUSLY — every segment that could touch [at-pre, at+post] plus a couple-segment margin
+  // each side — so the concatenated source is guaranteed to fully contain the requested window. The
+  // exact bounds are then cut by the precise trim below, so this doesn't need to be tight.
+  const coverStart = at - (preRollSec + 2 * SEGMENT_SEC) * 1000;
+  const coverEnd = at + (postRollSec + 2 * SEGMENT_SEC) * 1000;
   const now = Date.now();
 
   const segs = safeReaddir(ringDir)
@@ -246,9 +248,9 @@ export async function extractClip(
       return { f, p, m: statMtime(p) };
     })
     // A segment is finished ~SEGMENT_SEC after it starts; its mtime ≈ close time ≈ segment END. Keep any
-    // segment whose [end-SEGMENT, end] overlaps the window. Skip the one still being written (mtime
-    // within ~700ms of now) so we never concat a partial tail.
-    .filter((s) => s.m != null && s.m - SEGMENT_SEC * 1000 <= windowEnd && s.m >= windowStart && now - s.m > 700)
+    // segment whose [end-SEGMENT, end] overlaps the cover window. Skip the one still being written
+    // (mtime within ~700ms of now) so we never concat a partial tail.
+    .filter((s) => s.m != null && s.m - SEGMENT_SEC * 1000 <= coverEnd && s.m >= coverStart && now - s.m > 700)
     .sort((a, b) => a.m - b.m);
 
   if (!segs.length) throw new Error('no ring segments covered the requested window');
@@ -263,20 +265,30 @@ export async function extractClip(
     segs.map((s) => `file '${s.p.replace(/'/g, "'\\''")}'`).join('\n') + '\n'
   );
 
+  // Where the requested window starts within the concatenated timeline. The first segment's content
+  // began ~SEGMENT_SEC before its close-time (mtime), so that's wall-clock position 0 of the concat;
+  // seek forward from there to (at - pre). Clamped to 0 in case the ring didn't reach far enough back.
+  const clipStartWallMs = segs[0].m - SEGMENT_SEC * 1000;
+  const offsetSec = Math.max(0, (at - preRollSec * 1000 - clipStartWallMs) / 1000);
+  const durSec = preRollSec + postRollSec;
+
   const outFile = path.join(outDir, `${outBase}.mp4`);
   try {
-    // mkv ring -> mp4. VIDEO is a pure copy (cheap, no re-encode; ffmpeg auto-applies h264_mp4toannexb).
-    // AUDIO is encoded to AAC ONCE over the whole concatenated clip — the ring holds the clean ORIGINAL
-    // audio (a `-c copy`, e.g. G711) so this single encode produces continuous, dropout-free AAC with
-    // no per-segment priming gaps. Deliberately NO aresample=async here: on this camera's already-clean
-    // original track it only dropped/inserted samples and made things choppier (measured — see the
-    // header note). +faststart puts moov up front for progressive <video> playback.
+    // Concatenate the ring segments, then trim to EXACTLY [pre+post] seconds. Because a `-c copy` cut
+    // can only land on a keyframe (~2s GOP here), an exact, admin-set duration requires re-encoding
+    // this one short clip: the frame-accurate `-ss`/`-t` (output-side) guarantees the clip is exactly
+    // as long as the pre-roll + post-roll settings say — otherwise people rightly ask why a "5s + 15s"
+    // clip is 27s. Only this ~20s clip is re-encoded (veryfast), once per event; the continuous ring
+    // segmenter stays a cheap copy. AUDIO is re-encoded to AAC in the same pass (the ring holds the
+    // clean ORIGINAL track — often G711 — which <video> can't play); no aresample=async (it dropped
+    // samples and made this camera choppier — see the header note). yuv420p + faststart for browsers.
     await runFfmpeg([
       '-nostdin', '-loglevel', 'error',
       '-f', 'concat', '-safe', '0', '-i', listFile,
-      '-c:v', 'copy',
+      '-ss', offsetSec.toFixed(3),
+      '-t', String(durSec),
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p',
       '-c:a', 'aac', '-b:a', '128k',
-      '-avoid_negative_ts', 'make_zero',
       '-movflags', '+faststart',
       '-y', outFile,
     ]);
