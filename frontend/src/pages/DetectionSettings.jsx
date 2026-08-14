@@ -34,6 +34,7 @@ function fromCam(cam) {
     sound_sensitivity: cam.sound_sensitivity ?? 50,
     sound_confirm_s: cam.sound_confirm_s ?? 4,
     sound_cooldown_s: cam.sound_cooldown_s ?? 120,
+    record_clips: !!cam.detect_record_clips,
   };
 }
 
@@ -54,7 +55,21 @@ function toPayload(d) {
     sound_sensitivity: Number(d.sound_sensitivity),
     sound_confirm_s: Number(d.sound_confirm_s),
     sound_cooldown_s: Number(d.sound_cooldown_s),
+    record_clips: !!d.record_clips,
   };
+}
+
+// Shared "record a clip" opt-in, shown on both the motion and sound screens (a clip is captured on
+// any detection). Writes the per-camera detect_record_clips flag via the same /detection payload.
+function RecordClipsToggle({ d, apply }) {
+  return (
+    <>
+      <div className="section-title">Recording</div>
+      <EnableToggle checked={d.record_clips} onChange={(v) => apply({ record_clips: v })}
+        label="Save a clip when triggered"
+        sub="Records a short video around each alert (uses the pre/post-roll in Settings → Recording). Off by default." />
+    </>
+  );
 }
 
 // Motion / Sound / Schedule as their own routed screens (/cameras/:id/:kind). Changes apply
@@ -214,6 +229,7 @@ function MotionForm({ d, apply }) {
               a stream frame. Basic-auth in the URL works. Applies to both motion and sound alerts.
             </div>
           </div>
+          <RecordClipsToggle d={d} apply={apply} />
         </>
       )}
     </>
@@ -252,6 +268,7 @@ function SoundForm({ d, apply }) {
             Sound must persist for the confirm delay before it counts (filters a door slam or cough); cooldown is the
             minimum gap between alerts. Longer than motion by default.
           </div>
+          <RecordClipsToggle d={d} apply={apply} />
         </>
       )}
     </>

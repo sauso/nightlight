@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import db from '../db.js';
 import { logger } from './logger.js';
+import { CLIPS_DIR } from './clipRecorder.js';
 
 // One JPEG per detection event, named <id>.jpg, kept next to the DB. Stored on disk (not as a
 // DB blob) so the SQLite file stays small; pruned in lockstep with the rows below.
@@ -57,21 +58,50 @@ const overCountWithSnapshotStmt = db.prepare(
      SELECT id FROM detection_events ORDER BY id DESC LIMIT ?
    )`
 );
+// Same two prunes, restricted to rows that carry a recorded clip, so the (much larger) MP4 files are
+// removed alongside the rows and never orphaned on disk. This is the backstop retention for clips
+// until the configurable day/size caps land (Stage 1 phase 3).
+const agedWithClipStmt = db.prepare(
+  `SELECT clip_path FROM detection_events WHERE created_at < datetime('now', ?) AND clip_path IS NOT NULL`
+);
+const overCountWithClipStmt = db.prepare(
+  `SELECT clip_path FROM detection_events WHERE clip_path IS NOT NULL AND id NOT IN (
+     SELECT id FROM detection_events ORDER BY id DESC LIMIT ?
+   )`
+);
 
 function unlinkSnapshot(id) {
   const file = snapshotFile(id);
   if (file) fs.rm(file, { force: true }, () => {});
 }
 
+// Resolve+delete a clip MP4 (and its sibling thumbnail) from a stored relative clip_path. Guards
+// against path escape so a crafted row can't reach outside CLIPS_DIR.
+export function unlinkClip(relPath) {
+  if (!relPath) return;
+  const abs = path.resolve(CLIPS_DIR, relPath);
+  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return;
+  // Synchronous: a retention sweep must actually finish deleting before it moves on / the process
+  // can exit, otherwise a crash right after would leave the file behind while its row is already
+  // cleared (orphaned on disk, uncounted by the size cap). A handful of files per sweep — cheap.
+  try { fs.rmSync(abs, { force: true }); } catch { /* ignore */ }
+  try { fs.rmSync(abs.replace(/\.mp4$/i, '.jpg'), { force: true }); } catch { /* ignore */ }
+}
+
 function prune() {
-  // Collect the doomed rows' ids before deleting, then delete rows, then remove their files.
-  const doomed = [
+  // Collect the doomed rows' files before deleting the rows, then delete rows, then remove files.
+  const doomedSnaps = [
     ...agedWithSnapshotStmt.all(`-${MAX_AGE_DAYS} days`),
     ...overCountWithSnapshotStmt.all(MAX_ROWS),
   ];
+  const doomedClips = [
+    ...agedWithClipStmt.all(`-${MAX_AGE_DAYS} days`),
+    ...overCountWithClipStmt.all(MAX_ROWS),
+  ];
   pruneByAgeStmt.run(`-${MAX_AGE_DAYS} days`);
   pruneByCountStmt.run(MAX_ROWS);
-  for (const { id } of doomed) unlinkSnapshot(id);
+  for (const { id } of doomedSnaps) unlinkSnapshot(id);
+  for (const { clip_path } of doomedClips) unlinkClip(clip_path);
 }
 
 const markSnapshotStmt = db.prepare('UPDATE detection_events SET snapshot = 1 WHERE id = ?');
@@ -93,6 +123,94 @@ export function saveEventSnapshot(id, buffer) {
 export function getEventSnapshotFile(id) {
   const file = snapshotFile(id);
   return file && fs.existsSync(file) ? file : null;
+}
+
+// --- Clip status (Stage 1 recording). The clip lives on the same detection_events row; these just
+// move it through pending -> ready/failed as lib/clipCapture.js works the job. ---
+const markClipPendingStmt = db.prepare("UPDATE detection_events SET clip_status = 'pending' WHERE id = ?");
+const setClipReadyStmt = db.prepare(
+  "UPDATE detection_events SET clip_status = 'ready', clip_path = @clip_path, clip_duration_s = @dur, clip_bytes = @bytes WHERE id = ?"
+);
+const setClipFailedStmt = db.prepare("UPDATE detection_events SET clip_status = 'failed' WHERE id = ?");
+
+export function markClipPending(id) {
+  try { markClipPendingStmt.run(id); } catch (e) { logger.error(`clip pending mark failed (${id}):`, e.message); }
+}
+export function setClipReady(id, relPath, durationS, bytes) {
+  try {
+    setClipReadyStmt.run({ clip_path: relPath, dur: Math.round(durationS) || null, bytes: bytes || null }, id);
+  } catch (e) {
+    logger.error(`clip ready mark failed (${id}):`, e.message);
+  }
+}
+export function setClipFailed(id) {
+  try { setClipFailedStmt.run(id); } catch (e) { logger.error(`clip failed mark failed (${id}):`, e.message); }
+}
+
+// Absolute path to an event's ready clip MP4, or null (used by the serving route). Validates the
+// stored relative path stays under CLIPS_DIR.
+export function getEventClipFile(id) {
+  const row = db.prepare('SELECT clip_path, clip_status FROM detection_events WHERE id = ?').get(id);
+  if (!row || row.clip_status !== 'ready' || !row.clip_path) return null;
+  const abs = path.resolve(CLIPS_DIR, row.clip_path);
+  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;
+  return fs.existsSync(abs) ? abs : null;
+}
+
+// --- Retention accounting (lib/clipStorage.js sweeps against these). Deleting a clip clears its
+// clip_* columns but KEEPS the alert row + snapshot — the event history is preserved, only the video
+// goes. ---
+const clearClipRowStmt = db.prepare(
+  'UPDATE detection_events SET clip_status = NULL, clip_path = NULL, clip_duration_s = NULL, clip_bytes = NULL WHERE id = ?'
+);
+const expiredClipsStmt = db.prepare(
+  "SELECT id, clip_path FROM detection_events WHERE clip_path IS NOT NULL AND created_at < datetime('now', ?)"
+);
+const readyClipsOldestFirstStmt = db.prepare(
+  "SELECT id, clip_path, clip_bytes FROM detection_events WHERE clip_status = 'ready' AND clip_path IS NOT NULL ORDER BY id ASC"
+);
+const clipTotalsStmt = db.prepare(
+  "SELECT COUNT(*) AS count, COALESCE(SUM(clip_bytes), 0) AS bytes FROM detection_events WHERE clip_status = 'ready' AND clip_path IS NOT NULL"
+);
+
+// Clips whose event is older than `days`, for age-based retention. Returns [{id, clip_path}].
+export function getExpiredClips(days) {
+  return expiredClipsStmt.all(`-${days} days`);
+}
+// Every ready clip, oldest first — for size-cap retention (delete oldest until under). [{id, clip_path, clip_bytes}].
+export function getReadyClipsOldestFirst() {
+  return readyClipsOldestFirstStmt.all();
+}
+// { count, bytes } of ready clips — for the used-storage display.
+export function getClipStorageTotals() {
+  return clipTotalsStmt.get();
+}
+// Delete a clip's file(s) and clear its clip_* columns (keeps the alert row + snapshot).
+export function deleteClip(id, relPath) {
+  unlinkClip(relPath);
+  try { clearClipRowStmt.run(id); } catch (e) { logger.error(`clear clip row failed (${id}):`, e.message); }
+}
+
+// Delete the clip belonging to a single event (looks up its path). Returns true if there was one.
+// Used by the per-clip delete button and bulk clip management.
+export function deleteClipForEvent(id) {
+  const row = db.prepare('SELECT clip_path FROM detection_events WHERE id = ? AND clip_path IS NOT NULL').get(id);
+  if (!row) return false;
+  deleteClip(id, row.clip_path);
+  return true;
+}
+
+// All events that currently have a playable clip, newest first — for the Clip Management screen.
+// Metadata only (the clip itself streams from the serving route); capped so it can't balloon.
+export function getClips(limit = 2000) {
+  return db
+    .prepare(
+      `SELECT id, camera_id, camera_name, type, detail, created_at, snapshot, clip_duration_s, clip_bytes
+       FROM detection_events
+       WHERE clip_status = 'ready' AND clip_path IS NOT NULL
+       ORDER BY id DESC LIMIT ?`
+    )
+    .all(Math.min(limit, 5000));
 }
 
 // Fire-and-forget: a logging failure must never take down the detector loop. Returns the

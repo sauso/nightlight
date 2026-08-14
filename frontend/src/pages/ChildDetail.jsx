@@ -6,23 +6,14 @@ import { useCameras } from '../lib/CamerasContext.jsx';
 import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Avatar from '../components/Avatar.jsx';
+import Modal from '../components/Modal.jsx';
 import CameraRow from '../components/CameraRow.jsx';
 import AlertList from '../components/AlertList.jsx';
+import { ageLabel } from '../lib/age.js';
 
 // A child's hub: their identity + (later) last night's sleep, then their cameras and their alerts.
 // Tapping the avatar opens Child settings (name / birthday / colour / photo). Alerts are filtered
 // to this child's cameras client-side via each event's camera_id.
-function ageLabel(birthday) {
-  if (!birthday) return null;
-  const b = new Date(birthday + 'T00:00:00');
-  if (Number.isNaN(b.getTime())) return null;
-  const now = new Date();
-  let months = (now.getFullYear() - b.getFullYear()) * 12 + (now.getMonth() - b.getMonth());
-  if (now.getDate() < b.getDate()) months -= 1;
-  if (months < 0) return null;
-  if (months < 24) return `${months} month${months === 1 ? '' : 's'}`;
-  return `${Math.floor(months / 12)} year${Math.floor(months / 12) === 1 ? '' : 's'}`;
-}
 
 export default function ChildDetail() {
   const { id } = useParams();
@@ -33,19 +24,20 @@ export default function ChildDetail() {
   const kid = kids.find((k) => k.id === id);
   const childCams = cameras.filter((c) => c.child_id === id);
   const [alerts, setAlerts] = useState([]);
+  const [photoOpen, setPhotoOpen] = useState(false);
+
+  async function loadAlerts() {
+    const camIds = new Set(cameras.filter((c) => c.child_id === id).map((c) => c.id));
+    try {
+      const all = await api.get('/cameras/alerts');
+      setAlerts((Array.isArray(all) ? all : []).filter((ev) => camIds.has(ev.camera_id)).slice(0, 20));
+    } catch { /* ignore — feed just stays as-is */ }
+  }
 
   useEffect(() => {
-    const camIds = new Set(cameras.filter((c) => c.child_id === id).map((c) => c.id));
-    let live = true;
-    async function load() {
-      try {
-        const all = await api.get('/cameras/alerts');
-        if (live) setAlerts((Array.isArray(all) ? all : []).filter((ev) => camIds.has(ev.camera_id)).slice(0, 20));
-      } catch { /* ignore — feed just stays as-is */ }
-    }
-    load();
-    const t = setInterval(load, 15000);
-    return () => { live = false; clearInterval(t); };
+    loadAlerts();
+    const t = setInterval(loadAlerts, 15000);
+    return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, cameras.length]);
 
@@ -64,14 +56,21 @@ export default function ChildDetail() {
       <AppHeader title={kid.name} back={{ to: '/children', label: 'Children' }} />
       <main className="app-main">
         <div className="night">
-          <button className="night__head" onClick={() => navigate(`/children/${id}/edit`)} aria-label={`Edit ${kid.name}`}>
-            <Avatar name={kid.name} src={kid.photo} color={kid.color} size={64} />
-            <span className="night__id">
+          <div className="night__head">
+            <button
+              type="button"
+              className="night__avatar-btn"
+              onClick={() => (kid.photo ? setPhotoOpen(true) : navigate(`/children/${id}/edit`))}
+              aria-label={kid.photo ? `View ${kid.name}'s photo` : `Add a photo for ${kid.name}`}
+            >
+              <Avatar name={kid.name} src={kid.photo} color={kid.color} size={100} />
+            </button>
+            <button type="button" className="night__id-btn" onClick={() => navigate(`/children/${id}/edit`)}>
               <span className="night__name">{kid.name}</span>
               <span className="night__age">{age || 'Tap to add birthday & photo'}</span>
-            </span>
-            <span className="night__edit">Edit ›</span>
-          </button>
+            </button>
+            <button type="button" className="night__edit" onClick={() => navigate(`/children/${id}/edit`)}>Edit ›</button>
+          </div>
           <div className="night__sleep">
             <Moon size={18} aria-hidden="true" />
             <div>
@@ -98,8 +97,14 @@ export default function ChildDetail() {
         <div className="section-title">Recent alerts</div>
         {alerts.length === 0
           ? <div className="empty-state" style={{ padding: 20 }}>No alerts for {kid.name} yet.</div>
-          : <AlertList alerts={alerts} />}
+          : <AlertList alerts={alerts} onChanged={loadAlerts} />}
       </main>
+
+      {photoOpen && kid.photo && (
+        <Modal title={kid.name} onClose={() => setPhotoOpen(false)}>
+          <img className="photo-full" src={kid.photo} alt={kid.name} />
+        </Modal>
+      )}
     </>
   );
 }

@@ -988,13 +988,36 @@ body.in-pip .tile-menu-backdrop {
 
 /* Child hero ("night") card — identity now, last night's sleep later. */
 .night { background: linear-gradient(165deg, #2c2f63 0%, #191b38 100%); color: #eef0ff; border-radius: 18px; padding: 16px; margin-bottom: 14px; box-shadow: 0 18px 42px -26px rgba(18, 20, 58, 0.8); }
-.night__head { display: flex; align-items: center; gap: 13px; width: 100%; background: none; border: none; padding: 0; cursor: pointer; color: inherit; font: inherit; text-align: left; }
+.night__head { display: flex; align-items: center; gap: 13px; width: 100%; }
+.night__avatar-btn { background: none; border: none; padding: 0; cursor: pointer; flex-shrink: 0; border-radius: 50%; line-height: 0; }
+.night__avatar-btn:focus-visible { outline: 2px solid #c7caff; outline-offset: 3px; }
+.night__id-btn { flex: 1; min-width: 0; display: block; background: none; border: none; padding: 0; cursor: pointer; color: inherit; font: inherit; text-align: left; }
+.night__edit { background: none; border: none; cursor: pointer; font-family: inherit; }
+/* Enlarged child photo in a modal (tapped from the detail hero). */
+.photo-full { display: block; width: 100%; border-radius: 12px; }
 .night__id { flex: 1; min-width: 0; }
 .night__name { display: block; font-family: var(--font-display); font-size: 22px; font-weight: 600; line-height: 1.1; }
 .night__age { display: block; font-size: 12.5px; color: #b9bdf0; margin-top: 3px; }
 .night__edit { font-size: 12.5px; color: #c7caff; opacity: 0.85; flex-shrink: 0; }
 .night__sleep { display: flex; align-items: center; gap: 11px; margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.1); color: #cdd0ff; }
 .night__soon { font-size: 12px; color: #9fa3e0; margin-top: 2px; }
+
+/* Children tab — one card per child. Light mode: a clean white card (the dark hero gradient of the
+   detail screen reads too heavy repeated down a list on a light background). Dark mode: the same
+   gradient as the detail hero, so the two feel of a piece there. */
+.child-card { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; cursor: pointer; font: inherit; border: 1px solid var(--border); color: var(--text-primary); background: var(--bg-elevated); border-radius: 18px; padding: 15px 16px; margin-bottom: 12px; box-shadow: 0 10px 26px -22px rgba(30, 30, 70, 0.35); transition: transform 0.12s ease, box-shadow 0.12s ease; }
+.child-card:hover { transform: translateY(-1px); box-shadow: 0 14px 32px -22px rgba(30, 30, 70, 0.45); }
+.child-card:active { transform: translateY(0); }
+.child-card:focus-visible { outline: 2px solid var(--peri); outline-offset: 2px; }
+.child-card__id { flex: 1; min-width: 0; }
+.child-card__name { display: block; font-family: var(--font-display); font-size: 20px; font-weight: 600; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.child-card__meta { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary); margin-top: 4px; }
+.child-card__chev { color: var(--peri); opacity: 0.6; flex-shrink: 0; }
+
+:root[data-theme='dark'] .child-card { border: none; color: #eef0ff; background: linear-gradient(165deg, #2c2f63 0%, #191b38 100%); box-shadow: 0 14px 34px -24px rgba(18, 20, 58, 0.8); }
+:root[data-theme='dark'] .child-card:hover { box-shadow: 0 18px 40px -24px rgba(18, 20, 58, 0.9); }
+:root[data-theme='dark'] .child-card__meta { color: #b9bdf0; }
+:root[data-theme='dark'] .child-card__chev { color: #c7caff; }
 
 /* Alert list — one card, one row per alert: thumbnail, camera name, motion/sound icon + label, time.
    Shared by the Live "Recent activity" list and each child's detail screen. */
@@ -1003,10 +1026,58 @@ body.in-pip .tile-menu-backdrop {
 .alert-item__thumb { width: 64px; height: 46px; border-radius: 9px; object-fit: cover; flex-shrink: 0; background: linear-gradient(135deg, #23264d, #14162f); }
 .alert-item__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--peri-soft); }
 .alert-item__body { flex: 1; min-width: 0; }
-.alert-item__name { font-weight: 600; font-size: 14.5px; }
+.alert-item__name { font-weight: 600; font-size: 14.5px; display: flex; align-items: center; gap: 7px; }
+.alert-item__nametext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* "REC" badge shown to the right of the camera name while a clip is being captured. */
+.rec-badge { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; color: #e0556b; background: rgba(224, 85, 107, 0.13); padding: 1px 6px 1px 5px; border-radius: 20px; }
+.rec-dot { width: 7px; height: 7px; border-radius: 50%; background: #e0556b; animation: recpulse 1.2s ease-in-out infinite; }
+@keyframes recpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+@media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }
 .alert-item__meta { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary); margin-top: 2px; }
 .alert-item__ico { color: var(--peri); flex-shrink: 0; }
 .alert-item__time { font-size: 12px; color: var(--text-secondary); flex-shrink: 0; white-space: nowrap; }
+/* Thumbnail wrapper carries the play/recording overlay. As a <button> (clip ready) it's a bare,
+   tappable frame. */
+.alert-item__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; padding: 0; border: none; background: none; cursor: default; line-height: 0; }
+button.alert-item__thumbwrap { cursor: pointer; border-radius: 9px; }
+button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); outline-offset: 2px; }
+.alert-item__play {
+  position: absolute; inset: 0; margin: auto; width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; background: rgba(10, 13, 28, 0.62); color: #fff;
+}
+.alert-item__play--pending { background: rgba(10, 13, 28, 0.5); color: var(--peri-soft); }
+.alert-item__clipflag { color: var(--peri); }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+/* Modal clip player */
+.clip-player { width: 100%; border-radius: 12px; background: #000; display: block; max-height: 60vh; }
+.clip-player__meta { font-size: 12.5px; color: var(--text-secondary); margin: 10px 0 14px; text-align: center; }
+.btn-block { display: block; width: 100%; text-align: center; }
+.icon-btn--danger { color: var(--offline); }
+/* Clip Management (Settings) */
+.clip-day-select { width: auto; min-width: 140px; padding: 7px 10px; font-size: 13px; }
+.clip-selectall { background: none; border: none; color: var(--peri); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; padding: 2px 4px; margin: 0 0 8px 2px; }
+.clip-row { display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+.clip-row:last-child { border-bottom: none; }
+.clip-row--sel { background: color-mix(in srgb, var(--peri) 12%, transparent); }
+.clip-row__check { display: inline-flex; flex-shrink: 0; }
+.clip-row__check input { width: 18px; height: 18px; accent-color: var(--peri); }
+.clip-row__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; padding: 0; border: none; background: none; cursor: pointer; line-height: 0; border-radius: 8px; }
+.clip-row__thumbwrap:focus-visible { outline: 2px solid var(--peri); outline-offset: 2px; }
+.clip-row__thumb { width: 56px; height: 40px; border-radius: 8px; object-fit: cover; background: linear-gradient(135deg, #23264d, #14162f); }
+.clip-row__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--peri-soft); }
+.clip-row__body { flex: 1; min-width: 0; cursor: pointer; }
+.clip-row__name { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clip-row__meta { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+.clip-actionbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); background: var(--bg-elevated); border-top: 1px solid var(--border); box-shadow: 0 -8px 24px -18px rgba(0, 0, 0, 0.4); }
+.clip-actionbar > span { font-weight: 600; font-size: 14px; }
+/* In-player "delete this clip?" confirm row */
+.clip-confirm { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 13.5px; }
+.clip-confirm > span { color: var(--text-secondary); }
+/* Recording storage readout (Settings → Recording) */
+.storage-readout { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+.storage-readout code { font-size: 12px; background: var(--field-bg); padding: 1px 5px; border-radius: 5px; }
 /* Full-screen fallback shown by ErrorBoundary when a render throw would otherwise blank
    the app. Kept dependency-free (no context/theme hooks) so it renders even if those broke. */
 .crash-screen {

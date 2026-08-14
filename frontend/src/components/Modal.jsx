@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-export default function Modal({ title, onClose, children, placement = 'bottom' }) {
+export default function Modal({ title, onClose, children, placement = 'bottom', headerAction = null }) {
   const top = placement === 'top';
   const overlayRef = useRef(null);
 
@@ -73,7 +73,10 @@ export default function Modal({ title, onClose, children, placement = 'bottom' }
           }}
         >
           <h2 style={{ fontSize: 18 }}>{title}</h2>
-          <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {headerAction}
+            <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
+          </div>
         </div>
         {children}
       </div>
