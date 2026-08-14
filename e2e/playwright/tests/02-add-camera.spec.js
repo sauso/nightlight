@@ -26,8 +26,9 @@ test('add a camera through the UI and see it go live on the grid', async ({ page
     /* validated on the first try */
   }
 
-  // On a successful save the form page navigates away, so its fields are gone.
-  await expect(page.getByLabel('Camera IP address')).toBeHidden();
+  // Adding a camera lands on the new camera's own settings page (edit mode) so detection can be set
+  // up next; its submit button reads "Save changes". That's the signal the save went through.
+  await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeVisible();
 
   // The tile renders on the dashboard with a mounted player.
   await page.goto('/');
