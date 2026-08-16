@@ -15,6 +15,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   back online. Off by default. Uses whatever push channels you already have set up (Firebase, Pushover,
   ntfy, Gotify) — handy for catching a camera that's quietly dropped off, like an MQTT camera that
   stops reporting.
+- **Quick filters in the log viewer.** Settings → Logs now has one-tap chips (Errors, Warnings, Motion,
+  Sound, MQTT, WebRTC, HLS, Recording) to narrow the log to one subsystem, on top of the existing
+  free-text filter.
+- **MQTT motion is now logged.** The server logs each inbound message on a camera's motion topic and how
+  it was read (motion / no motion / skipped for cooldown or quiet hours), plus a one-off note the first
+  time a topic delivers — so a camera that silently stops reporting motion (or a mistyped topic) shows
+  up in the logs instead of just going quiet.
 
 ### Changed
 - **Camera controls now have their own Settings page.** PTZ step size (previously under General) moved

@@ -1746,6 +1746,35 @@ input[type='range'] {
   opacity: 0.5;
 }
 
+.log-viewer__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.log-chip {
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.log-chip:hover {
+  color: var(--text-primary);
+  border-color: var(--peri-soft);
+}
+
+.log-chip--active {
+  background: var(--peri);
+  border-color: var(--peri);
+  color: #fff;
+}
+
 .log-viewer__filter-row {
   display: flex;
   align-items: center;

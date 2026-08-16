@@ -9,6 +9,13 @@ let client = null;
 let currentConfigKey = null;
 const readings = new Map(); // topic -> { temperature?, humidity?, receivedAt }
 const motionLastAlert = new Map(); // camera_id -> last MQTT-motion alert time (ms), for per-camera cooldown
+const seenTopics = new Set(); // topics we've logged a first message for (so "receiving on X" logs once)
+
+// Keep log lines readable — MQTT payloads can be long JSON; show enough to recognise the shape.
+function shortPayload(str) {
+  const s = String(str).replace(/\s+/g, ' ').trim();
+  return s.length > 80 ? `${s.slice(0, 80)}…` : s;
+}
 
 function getMqttSettings() {
   return db
@@ -106,11 +113,23 @@ function handleMotionMessage(topic, str) {
     return;
   }
   for (const cam of cams) {
-    if (!isMotionPayload(str, cam.motion_mqtt_value)) continue;
-    if (!inActiveWindow(cam)) continue; // outside quiet-hours window: fully ignored
+    // Log every inbound motion-topic message with how it was read, so the log shows a camera is still
+    // reporting (and when it last did) — the thing that would've made a silently-stopped camera obvious.
+    const isMotion = isMotionPayload(str, cam.motion_mqtt_value);
+    if (!isMotion) {
+      logger.info(`[mqtt] "${cam.name}" motion topic ${topic}: ${shortPayload(str)} → no motion`);
+      continue;
+    }
+    if (!inActiveWindow(cam)) {
+      logger.info(`[mqtt] "${cam.name}" motion (${topic}) ignored — outside its active/quiet-hours window`);
+      continue; // outside quiet-hours window: fully ignored
+    }
     const now = Date.now();
     const cooldownMs = Math.max(1, cam.detect_cooldown_s ?? 60) * 1000;
-    if (now - (motionLastAlert.get(cam.id) || 0) < cooldownMs) continue;
+    if (now - (motionLastAlert.get(cam.id) || 0) < cooldownMs) {
+      logger.info(`[mqtt] "${cam.name}" motion (${topic}) within cooldown — not re-alerting`);
+      continue;
+    }
     motionLastAlert.set(cam.id, now);
     logger.info(`[detect] MQTT motion on "${cam.name}" (topic ${topic})`);
     fireDetectionAlert(cam, ALERT.MOTION, 'camera-reported (MQTT)').catch(() => {});
@@ -143,6 +162,7 @@ export function refreshMqttConnection() {
       client = null;
       currentConfigKey = null;
       readings.clear();
+    seenTopics.clear();
       logger.info('[mqtt] Disconnected (disabled or unconfigured).');
     }
     return;
@@ -179,6 +199,12 @@ export function refreshMqttConnection() {
 
   client.on('message', (topic, payload) => {
     const str = payload.toString();
+    // Log the first message seen on each topic (once), so it's visible that the broker is actually
+    // delivering on a subscribed topic — invaluable when a topic is mistyped and nothing arrives.
+    if (!seenTopics.has(topic)) {
+      seenTopics.add(topic);
+      logger.info(`[mqtt] receiving on topic "${topic}" — first message: ${shortPayload(str)}`);
+    }
     // A topic may be a motion topic, a temp/humidity topic, or (rarely) both — try both handlers.
     handleMotionMessage(topic, str);
     // Fails silently on anything unexpected (not JSON, no recognizable fields) - this is meant to
