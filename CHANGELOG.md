@@ -27,6 +27,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   it was read (motion / no motion / skipped for cooldown or quiet hours), plus a one-off note the first
   time a topic delivers — so a camera that silently stops reporting motion (or a mistyped topic) shows
   up in the logs instead of just going quiet.
+- **Clip management date filter is now a popup calendar.** Settings → Clip management — the day filter is
+  a calendar; days that have clips are marked with a dot, and picking one filters to that day.
 
 ### Changed
 - **Camera controls now have their own Settings page.** PTZ step size (previously under General) moved
