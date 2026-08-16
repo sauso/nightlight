@@ -98,6 +98,20 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_detection_events_created_at ON detection_events(created_at);
 
+  -- Historical temperature/humidity samples, one row per camera per sample tick (see
+  -- lib/sensorSampler.js). MQTT temp/humidity is otherwise live-only (getReading in mqttClient);
+  -- this persists it over time so the app can chart trends and (Stage 2) correlate overnight
+  -- warmth with wake-ups. Same denormalized, FK-free, pruned shape as the event tables above -
+  -- camera_id is a loose reference, not a foreign key, so history survives a camera being removed.
+  CREATE TABLE IF NOT EXISTS sensor_readings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    camera_id TEXT NOT NULL,
+    temperature REAL,
+    humidity REAL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_sensor_readings_cam_time ON sensor_readings(camera_id, created_at);
+
   -- FCM device tokens for push notifications (one row per app install that registered). The
   -- token is the primary key so re-registering the same device is idempotent; user_id is who
   -- was logged in when it registered (informational). Tokens FCM reports as dead are pruned by
