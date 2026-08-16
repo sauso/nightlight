@@ -5,6 +5,7 @@ import { subPathName, getPathStatus } from './mediamtx.js';
 import { inActiveWindow } from './detectSchedule.js';
 import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
+import { recordMotion } from './activityTracker.js';
 
 // Server-side motion detection. Per camera with detection enabled, a cheap FFmpeg leg reads
 // the already-published MediaMTX stream (the sub-stream when there is one — far cheaper to
@@ -157,6 +158,9 @@ export async function startMotionDetector(camera) {
         }
         const fraction = changed / zonePixels;
         const now = Date.now();
+        // Feed the raw per-frame movement into the per-minute activity timeline (independent of the
+        // alert threshold/cooldown below), so sleep tracking sees continuous motion, not just alerts.
+        recordMotion(camera.id, fraction);
         if (fraction >= threshold) {
           if (!activeSince) activeSince = now;
           lastActive = now;
