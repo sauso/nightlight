@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Download, ExternalLink } from 'lucide-react';
 import { api } from '../lib/api.js';
-import { isNativeApp, saveToDownloads, saveTextFile } from '../lib/nativeBridge.js';
+import { isNativeApp, hasFileExport, saveToDownloads, saveTextFile } from '../lib/nativeBridge.js';
 
 // Where self-hosters file bugs. Prefilled with the bundle reminder so the attachment isn't forgotten.
 const ISSUE_URL =
@@ -37,6 +37,11 @@ export default function DiagnosticsCard() {
       const text = JSON.stringify(bundle, null, 2);
       let msg = '';
       if (isNativeApp()) {
+        // An old installed app (running this newer web UI) may predate the file-export plugins — say
+        // so plainly instead of a mystery "couldn't save".
+        if (!hasFileExport()) {
+          throw new Error('This version of the app can’t export files. Update to the latest app version and try again.');
+        }
         // Native app: save straight into the phone's Downloads folder so it's easy to attach to a
         // GitHub issue. If that fails (e.g. older Android), fall back to the OS share sheet.
         if (await saveToDownloads(filename, text, 'application/json')) {
