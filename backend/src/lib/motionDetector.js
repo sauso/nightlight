@@ -104,12 +104,31 @@ export function isDetecting(cameraId) {
   return detectors.has(cameraId);
 }
 
+// Does this camera run the frame-diff leg to ALERT? Only a frame-diff-source camera with motion
+// detection on — a camera on the 'mqtt' source detects motion itself (mqttClient.js) and never alerts
+// from this leg.
+export function motionAlerting(camera) {
+  return !!camera?.detect_motion_enabled && camera.detect_source !== 'mqtt' && !camera.disabled;
+}
+
+// Should the pixel-diff leg run at all? Either to alert (above) OR "activity-only" for sleep tracking:
+// a child-assigned camera whose motion alerts come from MQTT (or has motion alerting off) still runs
+// the cheap leg to feed a continuous motion timeline (activityTracker) — but fires NO alerts, so it
+// doesn't reintroduce the false positives the MQTT source avoids. A camera with no child runs no leg.
+export function motionLegWanted(camera) {
+  if (!camera || camera.disabled) return false;
+  return motionAlerting(camera) || !!camera.child_id;
+}
+
 export async function startMotionDetector(camera) {
   await stopMotionDetector(camera.id);
-  // The frame-diff detector only runs when this camera is set to the frame-diff source. A camera on
-  // the 'mqtt' source detects motion itself and is handled in mqttClient.js — running the frame-diff
-  // leg for it would just waste CPU (the whole point of the MQTT source).
-  if (!camera.detect_motion_enabled || camera.disabled || camera.detect_source === 'mqtt') return;
+  if (!motionLegWanted(camera)) return;
+  // Activity-only when we want the leg but it isn't the alerting one (MQTT-source or motion-off, but
+  // child-assigned). In that mode we record the movement signal and skip all alert bookkeeping.
+  const activityOnly = !motionAlerting(camera);
+  if (activityOnly) {
+    logger.info(`[detect] activity-only motion leg for "${camera.name}" (sleep tracking; no alerts)`);
+  }
 
   const { x0, y0, x1, y1 } = zoneBounds(camera);
   const zonePixels = (x1 - x0) * (y1 - y0);
@@ -161,21 +180,24 @@ export async function startMotionDetector(camera) {
         // Feed the raw per-frame movement into the per-minute activity timeline (independent of the
         // alert threshold/cooldown below), so sleep tracking sees continuous motion, not just alerts.
         recordMotion(camera.id, fraction);
-        if (fraction >= threshold) {
-          if (!activeSince) activeSince = now;
-          lastActive = now;
-          if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs && inActiveWindow(camera)) {
-            // inActiveWindow gates the WHOLE alert: outside a camera's schedule, motion produces no
-            // in-app event and no push, and lastAlert is left untouched so an alert can fire promptly
-            // the moment the window opens.
-            lastAlert = now; // cooldown gates re-fire; a continuing run alerts once per cooldown
-            const pct = (fraction * 100).toFixed(1);
-            // Shared downstream (record event + push both channels); pass the exact path we're
-            // analysing so a stream-grab snapshot uses the same (cheap) sub-stream. Fire-and-forget.
-            fireDetectionAlert(camera, ALERT.MOTION, `${pct}% of zone`, { snapshotPath: path }).catch(() => {});
+        // Activity-only legs (MQTT-source / motion-off child cameras) stop here — no alert bookkeeping.
+        if (!activityOnly) {
+          if (fraction >= threshold) {
+            if (!activeSince) activeSince = now;
+            lastActive = now;
+            if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs && inActiveWindow(camera)) {
+              // inActiveWindow gates the WHOLE alert: outside a camera's schedule, motion produces no
+              // in-app event and no push, and lastAlert is left untouched so an alert can fire promptly
+              // the moment the window opens.
+              lastAlert = now; // cooldown gates re-fire; a continuing run alerts once per cooldown
+              const pct = (fraction * 100).toFixed(1);
+              // Shared downstream (record event + push both channels); pass the exact path we're
+              // analysing so a stream-grab snapshot uses the same (cheap) sub-stream. Fire-and-forget.
+              fireDetectionAlert(camera, ALERT.MOTION, `${pct}% of zone`, { snapshotPath: path }).catch(() => {});
+            }
+          } else if (activeSince && now - lastActive > ACTIVE_GRACE_MS) {
+            activeSince = 0; // the run ended (gap exceeded the grace window)
           }
-        } else if (activeSince && now - lastActive > ACTIVE_GRACE_MS) {
-          activeSince = 0; // the run ended (gap exceeded the grace window)
         }
       }
       prev = frame;
