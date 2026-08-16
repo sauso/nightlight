@@ -365,6 +365,21 @@ router.get('/clips', requireAuth, (req, res) => {
   res.json(getClips());
 });
 
+// Historical temperature/humidity for one camera, for charting on the Child detail page. Any signed-in
+// user. `hours` (default 24, capped at 7 days) selects the window; readings are ascending by time so
+// the client can plot them directly. Empty array if the camera has no sensor / no samples yet.
+router.get('/:id/sensor-history', requireAuth, (req, res) => {
+  const hours = Math.min(168, Math.max(1, parseInt(req.query.hours, 10) || 24));
+  const rows = db
+    .prepare(
+      `SELECT created_at AS t, temperature, humidity FROM sensor_readings
+         WHERE camera_id = ? AND created_at >= datetime('now', ?)
+         ORDER BY created_at ASC`
+    )
+    .all(req.params.id, `-${hours} hours`);
+  res.json({ hours, readings: rows });
+});
+
 // Bulk-delete clips (admin — this lives on the admin Settings screen). Body: { ids: [eventId, ...] }.
 router.post('/clips/delete', requireAdmin, (req, res) => {
   const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];

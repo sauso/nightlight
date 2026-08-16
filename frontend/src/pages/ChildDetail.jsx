@@ -9,6 +9,7 @@ import Avatar from '../components/Avatar.jsx';
 import Modal from '../components/Modal.jsx';
 import CameraRow from '../components/CameraRow.jsx';
 import AlertList from '../components/AlertList.jsx';
+import SensorHistoryCard from '../components/SensorHistoryCard.jsx';
 import { ageLabel } from '../lib/age.js';
 
 // A child's hub: their identity + (later) last night's sleep, then their cameras and their alerts.
@@ -79,6 +80,10 @@ export default function ChildDetail() {
             </div>
           </div>
         </div>
+
+        {childCams.filter((c) => c.mqtt_topic).map((c) => (
+          <SensorHistoryCard key={c.id} camera={c} />
+        ))}
 
         <div className="section-title">Cameras · {childCams.length}</div>
         <div className="card tight">

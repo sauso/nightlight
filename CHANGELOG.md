@@ -9,6 +9,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **Room climate history.** For a camera with an MQTT temperature/humidity topic, Nightlight now keeps
+  a rolling history of its readings (sampled every few minutes) and shows a **last-24h temperature &
+  humidity chart** on that child's page. Previously these readings were live-only. This is the first
+  piece of the upcoming sleep-tracking feature — the same overnight history it will build on — and is
+  useful on its own for spotting a room getting too warm or dry.
+
 ## [0.16.0] - 2026-08-17
 
 ### Added
