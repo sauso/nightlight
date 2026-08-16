@@ -1,12 +1,14 @@
-# Pin Node exactly. The floating node:24-alpine tag moved to 24.19.0, which aborts at startup
-# under our native modules + child-process spawns ("RemoveEnvironmentCleanupHook: Assertion
-# failed: (env) != nullptr"). Root cause: 24.19.0 added per-object environment cleanup hooks to
-# node::ObjectWrap (nodejs/node#63642); better-sqlite3 subclasses ObjectWrap, so its wrapped
-# objects now register a cleanup hook whose removal path asserts env != nullptr and hard-abort()s
-# during our teardown. No upstream fix as of the pin; still present on later 24.x. 24.18.1 is the
-# version prod runs on and is known-good. Before unpinning, test a newer Node on staging (or wait
-# for a better-sqlite3 / node-addon-api release that adapts to the new ObjectWrap contract) —
-# bump deliberately after testing, not implicitly on every rebuild.
+# Runtime Node tracks the 24 major again. It was previously pinned to 24.18.1 to dodge a hard
+# abort: 24.19.0 added per-object environment cleanup hooks to node::ObjectWrap
+# (nodejs/node#63642), and better-sqlite3 <= 11 subclassed ObjectWrap, so its wrapped objects
+# registered a cleanup hook whose removal path asserted env != nullptr and abort()ed during our
+# teardown ("RemoveEnvironmentCleanupHook: Assertion failed: (env) != nullptr"). better-sqlite3
+# 13's ground-up N-API rewrite no longer touches node::ObjectWrap, which removes the trigger
+# entirely — so the exact pin is no longer needed and the runtime follows node:24-alpine (patch/
+# minor within the 24 major), matching how the MediaMTX base is pinned to its major. Verified on
+# staging: clean graceful shutdown (exit 0, no abort assertion) on current 24.x with sqlite 13.
+# KEEP better-sqlite3 >= 13 while on this tag; if it's ever downgraded below 13, re-pin Node to
+# 24.18.1 or the abort at teardown returns.
 
 # --- Stage 1: build the React frontend ---
 FROM node:24.18.1-alpine AS frontend-build
@@ -28,7 +30,7 @@ RUN npm run build
 FROM bluenviron/mediamtx:1 AS mediamtx-binary
 
 # --- Stage 3: combined runtime (app + MediaMTX + FFmpeg) ---
-FROM node:24.18.1-alpine
+FROM node:24-alpine
 WORKDIR /app
 
 # python3/make/g++: needed to compile better-sqlite3's native addon.

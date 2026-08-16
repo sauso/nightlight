@@ -12,7 +12,8 @@ test('add a camera through the UI and see it go live on the grid', async ({ page
   await page.getByLabel('Camera IP address').fill(CAMERA.rtsp_host);
   await page.getByLabel('RTSP port').fill(CAMERA.rtsp_port);
   await page.getByLabel('Stream path', { exact: true }).fill(CAMERA.rtsp_path);
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  // Add/edit is a full page now; the submit button reads "Add camera" when adding.
+  await page.getByRole('button', { name: 'Add camera', exact: true }).click();
 
   // The on-demand source can be cold on the very first connect, tripping the pre-save
   // stream validation; the UI then offers "Save anyway". Take it if it shows up —
@@ -25,8 +26,9 @@ test('add a camera through the UI and see it go live on the grid', async ({ page
     /* validated on the first try */
   }
 
-  // Modal closes on a successful save.
-  await expect(page.getByLabel('Camera IP address')).toBeHidden();
+  // Adding a camera lands on the new camera's own settings page (edit mode) so detection can be set
+  // up next; its submit button reads "Save changes". That's the signal the save went through.
+  await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeVisible();
 
   // The tile renders on the dashboard with a mounted player.
   await page.goto('/');
@@ -34,8 +36,9 @@ test('add a camera through the UI and see it go live on the grid', async ({ page
   await expect(tile).toBeVisible();
   await expect(tile.locator('video')).toBeAttached();
 
-  // Exercise the mode menu (Low latency <-> Compatibility) — real UI interaction.
-  await tile.getByRole('button', { name: 'Stream quality settings' }).click();
+  // Exercise the mode menu (Low <-> Compatibility) — real UI interaction. The tile's gear opens the
+  // cog bottom sheet (aria-label "Camera settings"); it holds the Connection mode segmented buttons.
+  await tile.getByRole('button', { name: 'Camera settings', exact: true }).click();
   await page.getByRole('button', { name: 'Compatibility', exact: true }).click();
 
   // Confirm the tile is wired to a genuinely LIVE stream: the camera's HLS manifest
