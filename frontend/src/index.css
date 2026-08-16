@@ -392,18 +392,28 @@ body.in-pip .tile-menu-backdrop {
   margin: 0 auto 7px;
 }
 
-/* Brand row only appears in the desktop sidebar rail (below). */
-.bottom-nav__brand {
-  display: none;
-}
-
-/* --- Desktop: the bottom tab bar becomes a left sidebar rail ---
+/* --- Desktop: the bottom tab bar becomes a left sidebar rail, sitting BELOW the header ---
    Kicks in at 1200px so there's room for the 220px rail plus the camera grid's usual 2–3 columns;
-   narrower widths (phone, tablet, iPad landscape, small windows) keep the touch-friendly bottom bar. */
+   narrower widths (phone, tablet, iPad landscape, small windows) keep the touch-friendly bottom bar.
+   The header stays full-width across the top (its navy bar is extended over the rail's top-left
+   corner via ::before) and the rail's items are pushed down to start beneath it — no separate brand,
+   since the header already shows the logo + app name. */
 @media (min-width: 1200px) {
   .app-shell {
     padding-bottom: 0;
     padding-left: 220px;
+  }
+
+  /* Extend the navy header across the rail's top-left corner so it reads as one full-width bar with
+     the rail hanging beneath it. ::before auto-matches the header's height (top/bottom: 0). */
+  .app-header::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 100%;
+    width: 220px;
+    background: var(--bar);
   }
 
   .bottom-nav {
@@ -418,29 +428,7 @@ body.in-pip .tile-menu-backdrop {
     gap: 4px;
     border-top: none;
     border-right: 1px solid var(--border);
-    padding: 22px 14px;
-  }
-
-  .bottom-nav__brand {
-    display: flex;
-    align-items: center;
-    gap: 11px;
-    padding: 4px 10px 20px;
-    text-decoration: none;
-    color: var(--text-primary);
-  }
-
-  .bottom-nav__brand-icon {
-    width: 32px;
-    height: 32px;
-    border-radius: 9px;
-    flex-shrink: 0;
-  }
-
-  .bottom-nav__brand-name {
-    font-weight: 700;
-    font-size: 17px;
-    letter-spacing: -0.01em;
+    padding: 72px 14px 22px; /* top clears the 60px header, then a little breathing room */
   }
 
   .bottom-nav a {
