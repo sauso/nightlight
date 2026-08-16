@@ -6,6 +6,7 @@ import { useCameras } from '../lib/CamerasContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Modal from '../components/Modal.jsx';
 import DetectionRow from '../components/DetectionRow.jsx';
+import CameraReportButton from '../components/CameraReportButton.jsx';
 
 const minToHHMM = (m) => `${String(Math.floor((m || 0) / 60)).padStart(2, '0')}:${String((m || 0) % 60).padStart(2, '0')}`;
 
@@ -291,6 +292,23 @@ export default function CameraSettings() {
                   Check the IP, path, and login — or if the camera's just offline right now, save it anyway.
                 </div>
               </div>
+            )}
+
+            {/* When a probe or the stream check fails, offer a diagnostic report to add support for
+                the camera (your idea: probe fails → send a bug report with the details attached). */}
+            {(pageError || confirmMsg) && form.rtsp_host.trim() && (
+              <CameraReportButton
+                payload={{
+                  host: form.rtsp_host.trim(),
+                  port: form.rtsp_port,
+                  path: form.rtsp_path,
+                  sub_path: form.sub_rtsp_path,
+                  username: form.rtsp_username,
+                  password: form.rtsp_password || undefined,
+                  mqtt_topic: form.mqtt_topic,
+                  id: isNew ? undefined : id,
+                }}
+              />
             )}
 
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
