@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
+import SecretField from '../components/SecretField.jsx';
 
 const BACK = { to: '/settings/push', label: 'Push notifications' };
 
 export default function SettingsPushNtfy() {
-  const [form, setForm] = useState({ enabled: false, configured: false, server_url: 'https://ntfy.sh', topic: '', token: '', username: '', password_set: false });
+  const [form, setForm] = useState({ enabled: false, configured: false, server_url: 'https://ntfy.sh', topic: '', token_set: false, token_masked: '', username: '', password_set: false });
+  const [token, setToken] = useState(''); // secret — blank means keep the stored one
   const [password, setPassword] = useState(''); // separate — blank means keep the stored one
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -22,10 +24,10 @@ export default function SettingsPushNtfy() {
     e.preventDefault();
     setBusy(true); setError(''); setSaved(false); setTestMsg(null);
     try {
-      const payload = { enabled: form.enabled, server_url: form.server_url, topic: form.topic, token: form.token, username: form.username };
+      const payload = { enabled: form.enabled, server_url: form.server_url, topic: form.topic, token, username: form.username };
       if (password) payload.password = password;
       const next = await api.put('/ntfy/config', payload);
-      setForm(next); setPassword(''); setSaved(true); setTimeout(() => setSaved(false), 2500);
+      setForm(next); setToken(''); setPassword(''); setSaved(true); setTimeout(() => setSaved(false), 2500);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
 
@@ -63,9 +65,17 @@ export default function SettingsPushNtfy() {
                 placeholder="nightlight-alerts-x8k2" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
             </div>
             <div className="field">
-              <label htmlFor="ntfy-token">Access token (optional)</label>
-              <input id="ntfy-token" value={form.token || ''} onChange={(e) => setForm({ ...form, token: e.target.value })} placeholder="tk_…" autoComplete="off" />
-              <div className="camera-tile__sub">For a protected topic — or use username/password below instead.</div>
+              <SecretField
+                id="ntfy-token"
+                label="Access token (optional)"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                isSet={form.token_set}
+                masked={form.token_masked}
+                placeholder="tk_…"
+                disabled={busy || !loaded}
+                hint="For a protected topic — or use username/password below instead."
+              />
             </div>
             <div className="onvif-box__row">
               <div className="field">
