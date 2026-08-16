@@ -195,14 +195,17 @@ router.post('/probe-report', requireAdmin, async (req, res) => {
   const port = String(b.port || b.rtsp_port || '554').trim() || '554';
   const rtspPath = String(b.path || b.rtsp_path || '').trim();
   const subPath = String(b.sub_path || b.sub_rtsp_path || '').trim();
-  const username = String(b.username || b.rtsp_username || '').trim();
+  let username = String(b.username || b.rtsp_username || '').trim();
   let password = b.password || b.rtsp_password || '';
   const id = b.id;
   if (!host) return res.status(400).json({ error: 'Camera IP address is required to build a report.' });
-  // On edit with a blank password, fall back to the stored credential (never returned to the client).
-  if (!password && id) {
+  // On edit the password comes back blank (never returned); fall back to the stored credentials for
+  // whichever field the caller didn't supply, so the probe authenticates like the real camera does.
+  if (id && (!username || !password)) {
     const cam = db.prepare('SELECT rtsp_url, onvif_password FROM cameras WHERE id = ?').get(id);
-    password = parseRtspComponents(cam?.rtsp_url || '')?.password || cam?.onvif_password || '';
+    const parts = parseRtspComponents(cam?.rtsp_url || '') || {};
+    if (!username) username = parts.username || '';
+    if (!password) password = parts.password || cam?.onvif_password || '';
   }
 
   const withTimeout = (p, ms, onTimeout) =>
