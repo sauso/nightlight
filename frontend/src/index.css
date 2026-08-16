@@ -1073,6 +1073,17 @@ body.in-pip .tile-menu-backdrop {
 .night__sleep { display: flex; align-items: center; gap: 11px; margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.1); color: #cdd0ff; }
 .night__soon { font-size: 12px; color: #9fa3e0; margin-top: 2px; }
 
+/* Room-climate sensor history (Child detail). Temp + humidity sparklines from sensor_readings. */
+.sensor-card { margin-bottom: 14px; }
+.sensor-card__title { font-size: 13px; font-weight: 700; letter-spacing: 0.02em; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 12px; }
+.sensor-grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
+@media (min-width: 560px) { .sensor-grid { grid-template-columns: 1fr 1fr; } }
+.sensor-series__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.sensor-series__label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.sensor-series__now { font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.sensor-series .spark { display: block; }
+.sensor-series__range { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary); font-variant-numeric: tabular-nums; margin-top: 4px; }
+
 /* Children tab — one card per child. Light mode: a clean white card (the dark hero gradient of the
    detail screen reads too heavy repeated down a list on a light background). Dark mode: the same
    gradient as the detail hero, so the two feel of a piece there. */
