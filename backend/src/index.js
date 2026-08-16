@@ -24,7 +24,7 @@ import { subConfigured, isSubRunning, startSubStream } from './lib/subStream.js'
 import db from './db.js';
 import { upsertPath, isPathConfiguredCorrectly, getPathStatus } from './lib/mediamtx.js';
 import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder.js';
-import { startMotionDetector, isDetecting, stopAllMotionDetectors } from './lib/motionDetector.js';
+import { startMotionDetector, isDetecting, stopAllMotionDetectors, motionLegWanted } from './lib/motionDetector.js';
 import { startSoundDetector, isSoundDetecting, stopAllSoundDetectors } from './lib/soundDetector.js';
 import { startClipCapture, isClipCapturing, stopAllClipCapture } from './lib/clipCapture.js';
 import { startClipStorage } from './lib/clipStorage.js';
@@ -412,10 +412,10 @@ async function reconcileCameraPaths(attempt = 1) {
       if (subConfigured(cam) && !isSubRunning(cam.id)) {
         await startSubStream(cam);
       }
-      // Keep the optional motion detector alive the same way (reads the stream above). The MQTT
-      // source detects on the camera, so only frame-diff cameras run a detector here — the guard is
-      // inside startMotionDetector (it no-ops for the 'mqtt' source).
-      if (cam.detect_motion_enabled && cam.detect_source !== 'mqtt' && !isDetecting(cam.id)) {
+      // Keep the pixel-diff leg alive (reads the stream above). It runs to ALERT for frame-diff
+      // cameras, or ACTIVITY-ONLY for child-assigned cameras whose alerts come from MQTT (sleep
+      // tracking's motion signal) — motionLegWanted() decides; startMotionDetector picks the mode.
+      if (motionLegWanted(cam) && !isDetecting(cam.id)) {
         await startMotionDetector(cam).catch((e) => logger.error(`[detect] start failed: ${e.message}`));
       }
       // Keep the optional sound detector alive the same way (audio-only leg off the same stream).

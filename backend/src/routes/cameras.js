@@ -6,7 +6,7 @@ import { requireAuth, requireAdmin, requireAuthQueryOrHeader } from '../middlewa
 import { upsertPath, removePath, getPathStatus, toPathName } from '../lib/mediamtx.js';
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
 import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.js';
-import { startMotionDetector, stopMotionDetector } from '../lib/motionDetector.js';
+import { startMotionDetector, stopMotionDetector, motionLegWanted } from '../lib/motionDetector.js';
 import { startSoundDetector, stopSoundDetector } from '../lib/soundDetector.js';
 import { startClipCapture, stopClipCapture } from '../lib/clipCapture.js';
 import {
@@ -646,9 +646,10 @@ router.put('/:id', requireAdmin, async (req, res) => {
     } catch (e) {
       logger.error(`[substream] failed to apply for ${updated.name}: ${e.message}`);
     }
-    // The stream (or which path the detector should read) may have changed — restart the
-    // motion detector so it re-attaches to the current stream. No-op if detection is off.
-    if (updated.detect_motion_enabled) await startMotionDetector(updated).catch(() => {});
+    // The stream (or which path the detector should read) may have changed — restart the pixel-diff
+    // leg so it re-attaches to the current stream. motionLegWanted covers both the alerting leg and
+    // the activity-only sleep leg; no-op if neither applies.
+    if (motionLegWanted(updated)) await startMotionDetector(updated).catch(() => {});
     else await stopMotionDetector(updated.id).catch(() => {});
     if (updated.detect_sound_enabled) await startSoundDetector(updated).catch(() => {});
     else await stopSoundDetector(updated.id).catch(() => {});
@@ -676,7 +677,7 @@ router.put('/:id/enabled', requireAdmin, async (req, res) => {
     }
     await startTranscoder(req.params.id, existing.rtsp_url, existing.mediamtx_path, existing.name);
     if (subConfigured(existing)) await startSubStream(existing).catch((e) => logger.error(`[substream] enable failed: ${e.message}`));
-    if (existing.detect_motion_enabled) await startMotionDetector(existing).catch(() => {});
+    if (motionLegWanted(existing)) await startMotionDetector(existing).catch(() => {});
     if (existing.detect_sound_enabled) await startSoundDetector(existing).catch(() => {});
     if (existing.detect_record_clips) startClipCapture(existing);
   } else {
@@ -763,7 +764,7 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
   // re-enabled). startMotionDetector itself no-ops for the 'mqtt' source, so switching a camera to
   // MQTT here stops any running frame-diff leg; switching back to frame-diff starts it.
   if (!updated.disabled) {
-    if (updated.detect_motion_enabled) {
+    if (motionLegWanted(updated)) {
       await startMotionDetector(updated).catch((e) => logger.error(`[detect] start failed: ${e.message}`));
     } else {
       await stopMotionDetector(updated.id).catch(() => {});
@@ -783,7 +784,7 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
 });
 
 // Dedicated assignment endpoint: attach (or unattach with child_id: null) a camera to a child.
-router.put('/:id/assign', (req, res) => {
+router.put('/:id/assign', async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
   const { child_id } = req.body || {};
@@ -792,7 +793,14 @@ router.put('/:id/assign', (req, res) => {
     if (!child) return res.status(400).json({ error: 'Child not found' });
   }
   db.prepare('UPDATE cameras SET child_id = ? WHERE id = ?').run(child_id || null, req.params.id);
-  res.json(db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id));
+  const updated = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+  // Child assignment drives the activity-only sleep-motion leg (motionLegWanted keys off child_id), so
+  // (un)assigning may start or stop it. No-op for a camera already covered by the frame-diff alert leg.
+  if (!updated.disabled) {
+    if (motionLegWanted(updated)) await startMotionDetector(updated).catch(() => {});
+    else await stopMotionDetector(updated.id).catch(() => {});
+  }
+  res.json(updated);
 });
 
 router.delete('/:id', requireAdmin, async (req, res) => {
