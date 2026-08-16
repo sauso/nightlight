@@ -53,7 +53,7 @@ jobs:
 
       - name: Upload Playwright report + traces
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: |
@@ -65,7 +65,7 @@ jobs:
       # and commit the images under docs/screenshots/ to refresh the docs — see e2e/README.md.
       - name: Upload documentation screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: docs-screenshots
           path: e2e/playwright/screenshots
