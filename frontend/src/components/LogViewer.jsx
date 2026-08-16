@@ -3,6 +3,20 @@ import { api } from '../lib/api.js';
 import Modal from './Modal.jsx';
 import Switch from './Switch.jsx';
 
+// Quick-filter chips: each just sets the existing text filter to a substring that matches the log tag
+// for that subsystem, so they need no new API surface and compose with the free-text box. Kept to the
+// tags people actually reach for when something's off (a camera stream, an alert channel, MQTT).
+const LOG_FILTERS = [
+  { label: 'Errors', q: 'error' },
+  { label: 'Warnings', q: 'warn' },
+  { label: 'Motion', q: 'motion' },
+  { label: 'Sound', q: 'sound' },
+  { label: 'MQTT', q: 'mqtt' },
+  { label: 'WebRTC', q: 'webrtc' },
+  { label: 'HLS', q: 'hls' },
+  { label: 'Recording', q: 'clip' },
+];
+
 export default function LogViewer() {
   const [lines, setLines] = useState([]);
   const [error, setError] = useState('');
@@ -83,6 +97,18 @@ export default function LogViewer() {
           </div>
         </Modal>
       )}
+      <div className="log-viewer__chips">
+        {LOG_FILTERS.map((f) => (
+          <button
+            key={f.q}
+            type="button"
+            className={`log-chip${query === f.q ? ' log-chip--active' : ''}`}
+            onClick={() => setFilter(query === f.q ? '' : f.q)}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
       <div className="log-viewer__filter-row">
         <input
           type="search"
