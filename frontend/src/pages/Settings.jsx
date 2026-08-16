@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  SlidersHorizontal, Bell, ScrollText, Users,
-  Info, Server, LogOut, ChevronRight, Clapperboard,
+  SlidersHorizontal, Bell, ScrollText, Users, Camera,
+  Info, Server, ChevronRight, Clapperboard,
 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
@@ -12,8 +12,9 @@ import Avatar from '../components/Avatar.jsx';
 import MqttIcon from '../components/icons/MqttIcon.jsx';
 
 // Settings is a hub. Account sits at the top in its own card (like the mockup); system config
-// (General / MQTT / Push / Logs) is admin-only; About + Change server share a card; Sign out is
-// last. Rows that stay under Settings pass state.from so their back button returns here.
+// (General / Camera controls / MQTT / Push / Logs) is admin-only; About + Change server share the
+// last card. Sign out lives on the Account page, not here. Rows that stay under Settings pass
+// state.from so their back button returns here.
 const BACK = { state: { from: { to: '/settings', label: 'Settings' } } };
 const PERI = 'var(--peri)';
 
@@ -53,6 +54,7 @@ function Row({ Icon, iconSize = 20, label, desc, trailing, onClick }) {
 
 const ADMIN_ITEMS = [
   { key: 'general', to: '/settings/general', Icon: SlidersHorizontal, label: 'General', desc: 'App name, timezone, theme, font, colours, temperature unit' },
+  { key: 'camera', to: '/settings/camera', Icon: Camera, label: 'Camera controls', desc: 'PTZ step size and offline-camera alerts' },
   { key: 'caregivers', to: '/settings/users', Icon: Users, label: 'Caregivers', desc: 'Manage caregiver logins and active sessions' },
   { key: 'mqtt', to: '/settings/mqtt', Icon: MqttIcon, iconSize: 22, label: 'MQTT', desc: 'Connect your MQTT broker' },
   { key: 'push', to: '/settings/push', Icon: Bell, label: 'Push notifications', desc: 'Enable phone alerts for motion detection' },
@@ -62,7 +64,7 @@ const ADMIN_ITEMS = [
 
 export default function Settings() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [version, setVersion] = useState(null);
   const [mqtt, setMqtt] = useState(null);
@@ -131,22 +133,6 @@ export default function Settings() {
           {isNativeApp() && (
             <Row Icon={Server} label="Change server" onClick={changeServer} />
           )}
-        </div>
-
-        <div className="card">
-          <div
-            className="list-row"
-            role="button"
-            tabIndex={0}
-            style={{ cursor: 'pointer', color: 'var(--offline)' }}
-            onClick={logout}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); logout(); } }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <LogOut size={20} aria-hidden="true" />
-              <div>Sign out</div>
-            </div>
-          </div>
         </div>
       </main>
     </>
