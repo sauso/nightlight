@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-08-17
+
 ### Added
 - **Offline-camera alerts.** Settings → Camera controls can now send a push notification when a camera
   stops delivering video for longer than a threshold you set (in minutes), and another when it comes
