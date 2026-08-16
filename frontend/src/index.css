@@ -404,16 +404,11 @@ body.in-pip .tile-menu-backdrop {
     padding-left: 220px;
   }
 
-  /* Extend the navy header across the rail's top-left corner so it reads as one full-width bar with
-     the rail hanging beneath it. ::before auto-matches the header's height (top/bottom: 0). */
-  .app-header::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    right: 100%;
-    width: 220px;
-    background: var(--bar);
+  /* Header spans the full width across the top. Pulled left out of the app-shell's rail padding so
+     its logo + app name sit in the top-left OVER the sidebar rail, the rest of the bar over content. */
+  .app-header {
+    margin-left: -220px;
+    width: calc(100% + 220px);
   }
 
   .bottom-nav {
