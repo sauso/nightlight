@@ -32,6 +32,7 @@ import { initPush } from './lib/push.js';
 import { startMediaMTX, stopMediaMTX } from './lib/mediamtxProcess.js';
 import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
 import { startSensorSampler } from './lib/sensorSampler.js';
+import { startActivityTracker } from './lib/activityTracker.js';
 import { logger } from './lib/logger.js';
 import { recordCameraEvent, EVENT } from './lib/cameraEvents.js';
 import { probeAudioFlowing, tracksHaveAudio } from './lib/audioLiveness.js';
@@ -51,6 +52,7 @@ const mediamtxConfigPath = path.join(__dirname, '..', 'mediamtx.yml');
 startMediaMTX(mediamtxConfigPath);
 refreshMqttConnection(); // no-ops if no broker is configured
 startSensorSampler(); // persist MQTT temp/humidity over time (Stage-2 sleep-tracking groundwork)
+startActivityTracker(); // bucket motion/sound activity per minute (Stage-2 sleep-tracking timeline)
 
 const app = express();
 

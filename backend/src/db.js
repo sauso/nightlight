@@ -112,6 +112,27 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_sensor_readings_cam_time ON sensor_readings(camera_id, created_at);
 
+  -- Per-minute activity timeline for sleep tracking (see lib/activityTracker.js). The motion and
+  -- sound DETECTORS already compute a continuous signal each ~5/s (motion = fraction of the zone that
+  -- changed; sound = dB above a rolling ambient baseline), but detection_events are cooldown-throttled
+  -- and far too coarse to infer sleep. This buckets the raw signal into one row per camera per minute -
+  -- a real overnight movement/noise timeline the nightly sleep computation (Stage 2 phase 3) reads.
+  -- levels are null when that detector wasn't running; the *_frames/_windows counts are the coverage.
+  -- Same FK-free, denormalized, pruned shape as the event tables. bucket_start is a UTC minute.
+  CREATE TABLE IF NOT EXISTS activity_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    camera_id TEXT NOT NULL,
+    bucket_start TEXT NOT NULL,
+    motion_level REAL,
+    motion_peak REAL,
+    sound_level REAL,
+    sound_peak REAL,
+    motion_frames INTEGER NOT NULL DEFAULT 0,
+    sound_windows INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_activity_samples_cam_time ON activity_samples(camera_id, bucket_start);
+
   -- FCM device tokens for push notifications (one row per app install that registered). The
   -- token is the primary key so re-registering the same device is idempotent; user_id is who
   -- was logged in when it registered (informational). Tokens FCM reports as dead are pruned by
