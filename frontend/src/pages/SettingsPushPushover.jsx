@@ -2,11 +2,16 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
+import SecretField from '../components/SecretField.jsx';
 
 const BACK = { to: '/settings/push', label: 'Push notifications' };
 
 export default function SettingsPushPushover() {
-  const [po, setPo] = useState({ enabled: false, configured: false, app_token: '', user_key: '' });
+  const [po, setPo] = useState({ enabled: false, configured: false, app_token_set: false, app_token_masked: '', user_key_set: false, user_key_masked: '' });
+  // Secret inputs are separate and start empty; the server never sends the tokens back, so a blank
+  // field on save means "keep the saved one".
+  const [appToken, setAppToken] = useState('');
+  const [userKey, setUserKey] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -22,8 +27,9 @@ export default function SettingsPushPushover() {
     setBusy(true); setError(''); setSaved(false); setTestMsg(null);
     try {
       // Server validates the tokens with Pushover when enabling and 400s if they don't check out.
-      const next = await api.put('/pushover/config', { enabled: po.enabled, app_token: po.app_token, user_key: po.user_key });
-      setPo(next); setSaved(true); setTimeout(() => setSaved(false), 2500);
+      // Blank fields keep the saved secrets.
+      const next = await api.put('/pushover/config', { enabled: po.enabled, app_token: appToken, user_key: userKey });
+      setPo(next); setAppToken(''); setUserKey(''); setSaved(true); setTimeout(() => setSaved(false), 2500);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
 
@@ -51,13 +57,27 @@ export default function SettingsPushPushover() {
               Enable Pushover notifications
             </label>
             <div className="field">
-              <label htmlFor="po-token">Application API token</label>
-              <input id="po-token" value={po.app_token || ''} onChange={(e) => setPo({ ...po, app_token: e.target.value })} placeholder="a1b2c3…" autoComplete="off" />
+              <SecretField
+                id="po-token"
+                label="Application API token"
+                value={appToken}
+                onChange={(e) => setAppToken(e.target.value)}
+                isSet={po.app_token_set}
+                masked={po.app_token_masked}
+                placeholder="a1b2c3…"
+                disabled={busy || !loaded}
+              />
             </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label htmlFor="po-user">User or group key</label>
-              <input id="po-user" value={po.user_key || ''} onChange={(e) => setPo({ ...po, user_key: e.target.value })} placeholder="u1v2w3…" autoComplete="off" />
-            </div>
+            <SecretField
+              id="po-user"
+              label="User or group key"
+              value={userKey}
+              onChange={(e) => setUserKey(e.target.value)}
+              isSet={po.user_key_set}
+              masked={po.user_key_masked}
+              placeholder="u1v2w3…"
+              disabled={busy || !loaded}
+            />
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button className="btn btn-primary" type="submit" disabled={busy || !loaded}>{busy ? 'Working…' : 'Save changes'}</button>

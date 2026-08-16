@@ -9,6 +9,55 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-08-17
+
+### Added
+- **Offline-camera alerts.** Settings → Camera controls can now send a push notification when a camera
+  stops delivering video for longer than a threshold you set (in minutes), and another when it comes
+  back online. Off by default. Uses whatever push channels you already have set up (Firebase, Pushover,
+  ntfy, Gotify) — handy for catching a camera that's quietly dropped off, like an MQTT camera that
+  stops reporting.
+- **"Camera not connecting?" diagnostic report.** When adding a camera fails (the ONVIF fetch or the
+  stream check can't connect), the Add camera screen now offers to generate a redacted report — the
+  stream's codecs (via ffprobe), any ONVIF details, and the address (no password) — to download and
+  attach to a GitHub issue, so support can be added for that camera. Nothing is uploaded; the file
+  stays on your device to review first.
+- **Quick filters in the log viewer.** Settings → Logs now has one-tap chips (Errors, Warnings, Motion,
+  Sound, MQTT, WebRTC, HLS, Recording) to narrow the log to one subsystem, on top of the existing
+  free-text filter.
+- **MQTT motion is now logged.** The server logs each inbound message on a camera's motion topic and how
+  it was read (motion / no motion / skipped for cooldown or quiet hours), plus a one-off note the first
+  time a topic delivers — so a camera that silently stops reporting motion (or a mistyped topic) shows
+  up in the logs instead of just going quiet.
+- **Clip management date filter is now a popup calendar.** Settings → Clip management — the day filter is
+  a calendar; days that have clips are marked with a dot, and you can tap one or several days to filter
+  to just those (Clear resets to all).
+
+### Changed
+- **Camera controls now have their own Settings page.** PTZ step size (previously under General) moved
+  to **Settings → Camera controls**, alongside the new offline alerts.
+- **Sign out removed from the Settings list** — it already lives on the Account page (tap your name at
+  the top of Settings), so it was showing in two places.
+- **Push notification secrets are now masked.** Settings → Push notifications (Pushover, Gotify, ntfy)
+  no longer show your saved API tokens/keys in full — just a short masked preview (e.g. `a1b2••••••`)
+  so you can tell which one is set. Leave a field blank to keep the current secret; type a new value
+  only to replace it. The full tokens are no longer sent back to the browser at all.
+- **Bigger camera tiles on tablet and desktop.** The camera grid now uses the full width of larger
+  screens instead of a narrow centred column with wide empty margins, and tiles stretch to fill their
+  row — so there's far less wasted space and each camera is shown larger. Phone layout is unchanged.
+- **Desktop gets a left sidebar.** On wide screens the bottom tab bar becomes a vertical navigation
+  rail down the left (with the app name at the top) — a more natural desktop layout than a stretched
+  mobile bar. Phone and tablet keep the familiar bottom tabs.
+
+### Fixed
+- **Clearer camera-report error when a camera can't be reached.** An unreachable camera in the "Camera
+  not connecting?" report now reads "Timed out — no response from the camera (wrong IP/port, offline,
+  or blocked by a firewall)" instead of the meaningless "ffprobe exited null".
+- **Helpful message when an out-of-date mobile app can't export a file.** Downloading the diagnostics
+  bundle or a camera report from an old installed app (one built before the file-export support was
+  added) now says "Update to the latest app version and try again" instead of "Couldn't save the file
+  on this device".
+
 ## [0.15.1] - 2026-08-16
 
 ### Security

@@ -34,6 +34,7 @@ import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
 import { logger } from './lib/logger.js';
 import { recordCameraEvent, EVENT } from './lib/cameraEvents.js';
 import { probeAudioFlowing, tracksHaveAudio } from './lib/audioLiveness.js';
+import { notifyCameraOffline, notifyCameraRecovered } from './lib/cameraStatusAlert.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || '/app/data';
@@ -256,11 +257,20 @@ const notReadySince = new Map(); // camera_id -> timestamp
 // time we see a camera we adopt its current state silently (no event), so a restart of
 // the app doesn't log a phantom "came online" for every already-healthy camera.
 const onlineState = new Map(); // camera_id -> boolean
+// Offline-duration notification (separate from the 30s restart timer below, which resets on every
+// force-restart). offlineSince marks when a camera actually went down; offlineAlerted remembers we've
+// already pushed for the current outage so it's one alert per outage, not one every 15s.
+const offlineSince = new Map(); // camera_id -> timestamp it went offline
+const offlineAlerted = new Set(); // camera_ids already notified for the current outage
 const WATCHDOG_INTERVAL_MS = 15 * 1000;
 const STUCK_THRESHOLD_MS = 30 * 1000;
 
 setInterval(async () => {
   const cameras = db.prepare('SELECT * FROM cameras').all();
+  // Read the offline-alert config once per tick (not per camera).
+  const offlineCfg = db.prepare(
+    "SELECT camera_offline_alert_enabled AS enabled, camera_offline_alert_minutes AS minutes FROM settings WHERE id = 'app'"
+  ).get();
   for (const cam of cameras) {
     // A disabled camera intentionally has no path/transcoder - skip it entirely so the
     // watchdog doesn't read it as "unready", log phantom offline events, or try to restart
@@ -268,6 +278,8 @@ setInterval(async () => {
     if (cam.disabled) {
       notReadySince.delete(cam.id);
       onlineState.delete(cam.id);
+      offlineSince.delete(cam.id);
+      offlineAlerted.delete(cam.id);
       continue;
     }
     const status = await getPathStatus(cam.mediamtx_path);
@@ -284,6 +296,25 @@ setInterval(async () => {
     } else if (!status.ready && wasOnline) {
       onlineState.set(cam.id, false);
       recordCameraEvent(cam.id, cam.name, EVENT.OFFLINE, 'stream stopped delivering frames');
+    }
+
+    // Offline-duration notification (see offlineSince/offlineAlerted above). Independent of the 30s
+    // restart timer below. Fires one push once the outage passes the admin's threshold, and a "back
+    // online" push on recovery. Only notifies when enabled; recovery only fires if we actually alerted.
+    if (status.ready) {
+      if (offlineAlerted.has(cam.id)) notifyCameraRecovered(cam, offlineSince.get(cam.id));
+      offlineSince.delete(cam.id);
+      offlineAlerted.delete(cam.id);
+    } else {
+      if (!offlineSince.has(cam.id)) offlineSince.set(cam.id, Date.now());
+      if (
+        offlineCfg?.enabled &&
+        !offlineAlerted.has(cam.id) &&
+        Date.now() - offlineSince.get(cam.id) >= offlineCfg.minutes * 60 * 1000
+      ) {
+        offlineAlerted.add(cam.id);
+        notifyCameraOffline(cam, offlineCfg.minutes);
+      }
     }
 
     if (status.ready) {
