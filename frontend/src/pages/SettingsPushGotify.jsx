@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
+import SecretField from '../components/SecretField.jsx';
 
 const BACK = { to: '/settings/push', label: 'Push notifications' };
 
 export default function SettingsPushGotify() {
-  const [form, setForm] = useState({ enabled: false, configured: false, server_url: '', app_token: '', priority: 5 });
+  const [form, setForm] = useState({ enabled: false, configured: false, server_url: '', app_token_set: false, app_token_masked: '', priority: 5 });
+  const [appToken, setAppToken] = useState(''); // secret input, blank = keep saved
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -21,8 +23,8 @@ export default function SettingsPushGotify() {
     e.preventDefault();
     setBusy(true); setError(''); setSaved(false); setTestMsg(null);
     try {
-      const next = await api.put('/gotify/config', { enabled: form.enabled, server_url: form.server_url, app_token: form.app_token, priority: form.priority });
-      setForm(next); setSaved(true); setTimeout(() => setSaved(false), 2500);
+      const next = await api.put('/gotify/config', { enabled: form.enabled, server_url: form.server_url, app_token: appToken, priority: form.priority });
+      setForm(next); setAppToken(''); setSaved(true); setTimeout(() => setSaved(false), 2500);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
 
@@ -55,8 +57,16 @@ export default function SettingsPushGotify() {
                 placeholder="https://gotify.example.com" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
             </div>
             <div className="field">
-              <label htmlFor="gotify-token">Application token</label>
-              <input id="gotify-token" value={form.app_token || ''} onChange={(e) => setForm({ ...form, app_token: e.target.value })} placeholder="A…" autoComplete="off" />
+              <SecretField
+                id="gotify-token"
+                label="Application token"
+                value={appToken}
+                onChange={(e) => setAppToken(e.target.value)}
+                isSet={form.app_token_set}
+                masked={form.app_token_masked}
+                placeholder="A…"
+                disabled={busy || !loaded}
+              />
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
               <label htmlFor="gotify-priority">Priority (0–10)</label>

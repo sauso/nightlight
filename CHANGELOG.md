@@ -28,6 +28,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   to **Settings → Camera controls**, alongside the new offline alerts.
 - **Sign out removed from the Settings list** — it already lives on the Account page (tap your name at
   the top of Settings), so it was showing in two places.
+- **Push notification secrets are now masked.** Settings → Push notifications (Pushover, Gotify, ntfy)
+  no longer show your saved API tokens/keys in full — just a short masked preview (e.g. `a1b2••••••`)
+  so you can tell which one is set. Leave a field blank to keep the current secret; type a new value
+  only to replace it. The full tokens are no longer sent back to the browser at all.
 
 ## [0.15.1] - 2026-08-16
 
