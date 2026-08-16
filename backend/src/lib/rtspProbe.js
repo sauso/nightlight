@@ -47,9 +47,10 @@ export function probeRtspDetailed(rtspUrl) {
     }
     let out = '';
     let err = '';
+    let timedOut = false;
     proc.stdout.on('data', (d) => (out += d.toString()));
     proc.stderr.on('data', (d) => (err += d.toString()));
-    const killer = setTimeout(() => proc.kill('SIGKILL'), DETAILED_TIMEOUT_MS);
+    const killer = setTimeout(() => { timedOut = true; proc.kill('SIGKILL'); }, DETAILED_TIMEOUT_MS);
     proc.on('error', () => { clearTimeout(killer); resolve({ ok: false, error: 'Could not run ffprobe' }); });
     proc.on('exit', (code) => {
       clearTimeout(killer);
@@ -79,7 +80,12 @@ export function probeRtspDetailed(rtspUrl) {
         });
       } else {
         const lines = err.split('\n').map((l) => l.trim()).filter(Boolean);
-        resolve({ ok: false, error: lines[lines.length - 1] || `ffprobe exited ${code}`, stderr: lines.slice(-8) });
+        // A timeout kills ffprobe with SIGKILL, so `code` is null — report that as a reachability
+        // problem rather than the meaningless "ffprobe exited null".
+        const error = timedOut
+          ? `Timed out after ${DETAILED_TIMEOUT_MS / 1000}s — no response from the camera (wrong IP/port, offline, or blocked by a firewall)`
+          : (lines[lines.length - 1] || `ffprobe exited ${code}`);
+        resolve({ ok: false, error, stderr: lines.slice(-8) });
       }
     });
   });

@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { FileText, ExternalLink } from 'lucide-react';
 import { api } from '../lib/api.js';
-import { isNativeApp, saveToDownloads, saveTextFile } from '../lib/nativeBridge.js';
+import { isNativeApp, hasFileExport, saveToDownloads, saveTextFile } from '../lib/nativeBridge.js';
 
 // Where to send an unsupported-camera report. Title/body prefilled so the attachment + the one thing
 // we always need (make/model) aren't forgotten.
@@ -37,6 +37,9 @@ export default function CameraReportButton({ payload }) {
       const text = JSON.stringify(report, null, 2);
       let msg = '';
       if (isNativeApp()) {
+        if (!hasFileExport()) {
+          throw new Error('This version of the app can’t export files. Update to the latest app version and try again.');
+        }
         if (await saveToDownloads(filename, text, 'application/json')) {
           msg = 'Saved to your Downloads folder.';
         } else if (await saveTextFile(filename, text)) {

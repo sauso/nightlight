@@ -47,6 +47,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   rail down the left (with the app name at the top) — a more natural desktop layout than a stretched
   mobile bar. Phone and tablet keep the familiar bottom tabs.
 
+### Fixed
+- **Clearer camera-report error when a camera can't be reached.** An unreachable camera in the "Camera
+  not connecting?" report now reads "Timed out — no response from the camera (wrong IP/port, offline,
+  or blocked by a firewall)" instead of the meaningless "ffprobe exited null".
+- **Helpful message when an out-of-date mobile app can't export a file.** Downloading the diagnostics
+  bundle or a camera report from an old installed app (one built before the file-export support was
+  added) now says "Update to the latest app version and try again" instead of "Couldn't save the file
+  on this device".
+
 ## [0.15.1] - 2026-08-16
 
 ### Security
