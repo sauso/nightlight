@@ -9,6 +9,20 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-08-16
+
+### Security
+- Patched dependency security advisories surfaced by `npm audit`. **react-router → 7.18.2** clears a
+  client-side CSRF advisory (specific to server/RSC routing, which Nightlight's client-only routing
+  doesn't use — patched regardless). **ip-address → 10.5.0** clears SSRF/address-parsing advisories;
+  it's pulled in transitively by the login rate-limiter and the MQTT client.
+
+### Changed
+- Dependency and toolchain maintenance: **better-sqlite3 11 → 13** (a ground-up N-API rewrite), plus
+  lucide-react, vite, hls.js, express-rate-limit, @vitejs/plugin-react, ws, and CI action updates.
+- The container's Node runtime is no longer pinned to 24.18.1. better-sqlite3 13's rewrite resolves the
+  shutdown crash that forced the pin, so the image now tracks the Node 24 line (`node:24-alpine`).
+
 ## [0.15.0] - 2026-08-14
 
 ### Added
