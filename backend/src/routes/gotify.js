@@ -3,20 +3,33 @@ import db from '../db.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { logger } from '../lib/logger.js';
 import { getGotifyConfig, gotifyConfigured, sendGotify } from '../lib/gotify.js';
+import { maskSecret } from '../lib/secretMask.js';
 
 const router = Router();
 
-// Current Gotify config for the Settings form (admin only). The app token is shown (admin-gated, and
-// it's sent on every message).
-router.get('/config', requireAuth, requireAdmin, (req, res) => {
+// Never send the raw app token back — a masked preview + "set" flag only; blank-on-save keeps it.
+function publicConfig() {
   const c = getGotifyConfig();
-  res.json({ enabled: c.enabled, configured: gotifyConfigured(), server_url: c.serverUrl, app_token: c.appToken, priority: c.priority });
+  return {
+    enabled: c.enabled,
+    configured: gotifyConfigured(),
+    server_url: c.serverUrl,
+    app_token_masked: maskSecret(c.appToken),
+    app_token_set: !!c.appToken,
+    priority: c.priority,
+  };
+}
+
+// Current Gotify config for the Settings form (admin only) — masked token, see publicConfig.
+router.get('/config', requireAuth, requireAdmin, (req, res) => {
+  res.json(publicConfig());
 });
 
 router.put('/config', requireAuth, requireAdmin, (req, res) => {
   const enabled = !!(req.body && req.body.enabled);
   const serverUrl = (req.body?.server_url || '').trim().replace(/\/+$/, '');
-  const appToken = (req.body?.app_token || '').trim();
+  const existing = getGotifyConfig();
+  const appToken = (req.body?.app_token || '').trim() || existing.appToken; // blank = keep
   let priority = Number(req.body?.priority);
   if (!Number.isFinite(priority)) priority = 5;
   priority = Math.max(0, Math.min(10, Math.round(priority)));
@@ -30,8 +43,7 @@ router.put('/config', requireAuth, requireAdmin, (req, res) => {
   ).run(enabled ? 1 : 0, serverUrl || null, appToken || null, priority, 'app');
   logger.info(`[gotify] config saved — notifications ${enabled ? 'ENABLED' : 'disabled'}`);
 
-  const c = getGotifyConfig();
-  res.json({ enabled: c.enabled, configured: gotifyConfigured(), server_url: c.serverUrl, app_token: c.appToken, priority: c.priority });
+  res.json(publicConfig());
 });
 
 router.post('/test', requireAuth, requireAdmin, async (req, res) => {
