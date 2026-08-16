@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { readFileSync } from 'fs';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
 import { requireAuth, requireAdmin, requireAuthQueryOrHeader } from '../middleware/auth.js';
@@ -19,10 +20,17 @@ import {
 import { verifyTalkCreds } from '../lib/twoWayAudio.js';
 import { getReading, subscribeAllCameraTopics, refreshMqttConnection } from '../lib/mqttClient.js';
 import { probeOnvifCamera, ptzNudge, ptzRelativeStep, probePtzRelativeSupport } from '../lib/onvif.js';
-import { validateRtspStream } from '../lib/rtspProbe.js';
+import { validateRtspStream, probeRtspDetailed, ffprobeVersion } from '../lib/rtspProbe.js';
 import { logger } from '../lib/logger.js';
 
 const router = Router();
+
+// App version for the camera report (read once). Best-effort — matches routes/diagnostics.js.
+let appVersion = 'unknown';
+try {
+  const url = new URL('../../package.json', import.meta.url);
+  appVersion = JSON.parse(readFileSync(url, 'utf8')).version;
+} catch { /* leave as unknown */ }
 
 // Alert snapshot image — any authenticated user. Registered BEFORE the router-wide requireAuth
 // so it can accept a ?token= query param: an <img> can't attach an Authorization header (same
@@ -173,6 +181,83 @@ router.post('/onvif-probe', requireAdmin, async (req, res) => {
     logger.info(`[onvif] probe of ${host} failed: ${err.message}`);
     res.status(422).json({ error: err.message || 'ONVIF probe failed' });
   }
+});
+
+// "Unsupported camera" diagnostic report. When adding a camera fails (ONVIF probe or stream
+// validation), the add screen offers to build this — a redacted JSON bundle of exactly what's needed
+// to add support for a new camera: the address (no password), what ONVIF returned (or the fault), and
+// a full ffprobe stream/codec dump of the main + low streams. The user downloads it and attaches it
+// to a GitHub issue. Read-only; creates nothing. NEVER includes the password (only host/port/path/
+// user + a has_password flag) — same allow-list discipline as the diagnostics bundle.
+router.post('/probe-report', requireAdmin, async (req, res) => {
+  const b = req.body || {};
+  const host = String(b.host || b.rtsp_host || '').trim();
+  const port = String(b.port || b.rtsp_port || '554').trim() || '554';
+  const rtspPath = String(b.path || b.rtsp_path || '').trim();
+  const subPath = String(b.sub_path || b.sub_rtsp_path || '').trim();
+  let username = String(b.username || b.rtsp_username || '').trim();
+  let password = b.password || b.rtsp_password || '';
+  const id = b.id;
+  if (!host) return res.status(400).json({ error: 'Camera IP address is required to build a report.' });
+  // On edit the password comes back blank (never returned); fall back to the stored credentials for
+  // whichever field the caller didn't supply, so the probe authenticates like the real camera does.
+  if (id && (!username || !password)) {
+    const cam = db.prepare('SELECT rtsp_url, onvif_password FROM cameras WHERE id = ?').get(id);
+    const parts = parseRtspComponents(cam?.rtsp_url || '') || {};
+    if (!username) username = parts.username || '';
+    if (!password) password = parts.password || cam?.onvif_password || '';
+  }
+
+  const withTimeout = (p, ms, onTimeout) =>
+    Promise.race([p, new Promise((resolve) => setTimeout(() => resolve(onTimeout), ms))]);
+
+  // ONVIF: capture the result or the fault/error message — both are useful for adding support.
+  let onvif;
+  try {
+    const r = await withTimeout(
+      probeOnvifCamera({ host, port, username, password }),
+      18000,
+      { __timeout: true }
+    );
+    onvif = r && r.__timeout ? { ok: false, error: 'ONVIF probe timed out (no response in 18s)' } : { ok: true, ...r };
+  } catch (err) {
+    onvif = { ok: false, error: err.message || 'ONVIF probe failed' };
+  }
+
+  // Full stream/codec dump for the main and (if given) low-quality paths.
+  const mainStream = await probeRtspDetailed(assembleRtspUrl({ host, port, path: rtspPath, username, password }));
+  const subStream = subPath
+    ? await probeRtspDetailed(assembleRtspUrl({ host, port, path: subPath, username, password }))
+    : null;
+
+  const report = {
+    report: 'nightlight-camera-probe',
+    note: 'Redacted camera report for adding support — address, ONVIF result, and stream codecs, but NO password. Review before sharing.',
+    generated_at: new Date().toISOString(),
+    app: {
+      version: appVersion,
+      git_sha: process.env.NIGHTLIGHT_GIT_SHA || null,
+      node: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      ffprobe: await ffprobeVersion(),
+    },
+    camera: {
+      rtsp_host: host,
+      rtsp_port: port,
+      rtsp_path: rtspPath || null,
+      sub_rtsp_path: subPath || null,
+      rtsp_username: username || null,
+      rtsp_has_password: !!password,
+      mqtt_topic: (b.mqtt_topic || '').trim() || null,
+    },
+    onvif,
+    stream_main: mainStream,
+    stream_low: subStream,
+  };
+
+  logger.info(`[camera-report] built for ${host}:${port}${rtspPath} (onvif ${onvif.ok ? 'ok' : 'failed'}, main ${mainStream.ok ? 'ok' : 'failed'})`);
+  res.json(report);
 });
 
 // PTZ control. Any signed-in user can reposition a camera (day-to-day, like reordering) -

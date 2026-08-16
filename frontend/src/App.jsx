@@ -22,6 +22,7 @@ import DetectionSettings from './pages/DetectionSettings.jsx';
 import Account from './pages/Account.jsx';
 import Settings from './pages/Settings.jsx';
 import SettingsGeneral from './pages/SettingsGeneral.jsx';
+import SettingsCamera from './pages/SettingsCamera.jsx';
 import SettingsMqtt from './pages/SettingsMqtt.jsx';
 import SettingsPush from './pages/SettingsPush.jsx';
 import SettingsPushPushover from './pages/SettingsPushPushover.jsx';
@@ -141,6 +142,7 @@ function Shell() {
                         the config sub-pages stay admin-gated. */}
                     <Route path="/settings" element={<Settings />} />
                     <Route path="/settings/general" element={<AdminProtected><SettingsGeneral /></AdminProtected>} />
+                    <Route path="/settings/camera" element={<AdminProtected><SettingsCamera /></AdminProtected>} />
                     <Route path="/settings/mqtt" element={<AdminProtected><SettingsMqtt /></AdminProtected>} />
                     <Route path="/settings/push" element={<AdminProtected><SettingsPush /></AdminProtected>} />
                     <Route path="/settings/push/pushover" element={<AdminProtected><SettingsPushPushover /></AdminProtected>} />

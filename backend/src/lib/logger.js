@@ -47,6 +47,7 @@ const LEADING_TIMESTAMP = /^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}\s*/;
 
 export const logger = {
   info: (...args) => write(console.log, 'INFO', args),
+  warn: (...args) => write(console.warn, 'WARN', args),
   error: (...args) => write(console.error, 'ERROR', args),
   // For forwarding output from child processes (MediaMTX, FFmpeg) - normalized to the
   // same "timestamp [source] message" shape as our own lines above.

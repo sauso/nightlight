@@ -16,6 +16,9 @@ function isActive(pathname, tab) {
   );
 }
 
+// Same component renders as a bottom tab bar on phone/tablet and a left sidebar rail on desktop
+// (≥1200px) — see .bottom-nav in index.css. On desktop the rail sits below the app header (no
+// separate brand — the header already shows the logo + app name).
 export default function NavBar() {
   const { pathname } = useLocation();
   return (

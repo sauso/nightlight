@@ -3,6 +3,7 @@ import { Zap, AudioLines, Play, Trash2 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Modal from '../components/Modal.jsx';
+import ClipDatePicker from '../components/ClipDatePicker.jsx';
 
 // Admin Clip Management: browse every recorded clip, filter by day, and bulk-select + delete. Deleting
 // removes the video only — the alert and its snapshot stay. Reachable from Settings (admin).
@@ -11,6 +12,8 @@ const TYPE = {
   sound: { label: 'Sound', Icon: AudioLines },
 };
 const parseUtc = (s) => new Date(String(s).replace(' ', 'T') + 'Z');
+// Stable local day key 'YYYY-MM-DD' — shared by grouping, the filter, and the calendar picker.
+const dayKeyOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 function fmtBytes(b) {
   if (b == null || !isFinite(b)) return '';
@@ -22,7 +25,7 @@ function fmtBytes(b) {
 export default function ClipManagement() {
   const [clips, setClips] = useState(null);
   const [error, setError] = useState('');
-  const [day, setDay] = useState('all');
+  const [selectedDays, setSelectedDays] = useState(() => new Set()); // empty = all days
   const [selected, setSelected] = useState(() => new Set());
   const [playing, setPlaying] = useState(null);
   const [confirming, setConfirming] = useState(false);
@@ -39,22 +42,29 @@ export default function ClipManagement() {
   }
   useEffect(() => { load(); }, []);
 
-  // Group by local calendar day (clips come newest-first, so groups stay in order).
+  // Group by local calendar day (clips come newest-first, so groups stay in order). Keyed by the
+  // stable 'YYYY-MM-DD' day key, carrying a display label for the section heading.
   const groups = useMemo(() => {
     const map = new Map();
     for (const c of clips || []) {
-      const key = parseUtc(c.created_at).toLocaleDateString();
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(c);
+      const dt = parseUtc(c.created_at);
+      const k = dayKeyOf(dt);
+      if (!map.has(k)) map.set(k, { label: dt.toLocaleDateString(), rows: [] });
+      map.get(k).rows.push(c);
     }
     return map;
   }, [clips]);
 
-  const days = useMemo(() => [...groups.keys()], [groups]);
+  const availableDays = useMemo(() => new Set(groups.keys()), [groups]);
+  const filterActive = selectedDays.size > 0;
   const visible = useMemo(
-    () => (clips || []).filter((c) => day === 'all' || parseUtc(c.created_at).toLocaleDateString() === day),
-    [clips, day]
+    () => (clips || []).filter((c) => !filterActive || selectedDays.has(dayKeyOf(parseUtc(c.created_at)))),
+    [clips, selectedDays, filterActive]
   );
+  function toggleDay(k) {
+    setSelectedDays((prev) => { const next = new Set(prev); if (next.has(k)) next.delete(k); else next.add(k); return next; });
+  }
+  const clearDays = () => setSelectedDays(new Set());
   const totalBytes = (clips || []).reduce((n, c) => n + (c.clip_bytes || 0), 0);
 
   const allVisibleSelected = visible.length > 0 && visible.every((c) => selected.has(c.id));
@@ -101,11 +111,14 @@ export default function ClipManagement() {
           <div className="camera-tile__sub">
             {clips == null ? 'Loading…' : `${clips.length} clip${clips.length === 1 ? '' : 's'}${totalBytes ? ` · ${fmtBytes(totalBytes)}` : ''}`}
           </div>
-          {days.length > 0 && (
-            <select className="clip-day-select" value={day} onChange={(e) => setDay(e.target.value)} aria-label="Filter by date">
-              <option value="all">All dates</option>
-              {days.map((d) => <option key={d} value={d}>{d}</option>)}
-            </select>
+          {availableDays.size > 0 && (
+            <ClipDatePicker
+              selected={selectedDays}
+              onToggle={toggleDay}
+              onClear={clearDays}
+              availableDays={availableDays}
+              labelFor={(k) => groups.get(k)?.label || k}
+            />
           )}
         </div>
 
@@ -117,17 +130,17 @@ export default function ClipManagement() {
 
         {visible.length > 0 && (
           <button type="button" className="clip-selectall" onClick={toggleAllVisible}>
-            {allVisibleSelected ? 'Clear selection' : `Select all${day === 'all' ? '' : ' on this day'}`}
+            {allVisibleSelected ? 'Clear selection' : `Select all${filterActive ? ' shown' : ''}`}
           </button>
         )}
 
         {[...groups.entries()]
-          .filter(([d]) => day === 'all' || d === day)
-          .map(([d, rows]) => (
-            <div key={d}>
-              <div className="section-title">{d}</div>
+          .filter(([k]) => !filterActive || selectedDays.has(k))
+          .map(([k, g]) => (
+            <div key={k}>
+              <div className="section-title">{g.label}</div>
               <div className="card tight">
-                {rows.map((c) => {
+                {g.rows.map((c) => {
                   const t = TYPE[c.type] || { label: c.type, Icon: Zap };
                   const Icon = t.Icon;
                   const when = parseUtc(c.created_at);

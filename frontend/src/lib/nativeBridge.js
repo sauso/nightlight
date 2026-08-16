@@ -14,6 +14,18 @@ export function isNativeApp() {
   return !!window.Capacitor?.isNativePlatform?.();
 }
 
+// Whether this native build can actually export a file at all — true if either the Android Download
+// plugin OR the Filesystem+Share pair is registered. The web UI loads live from the server, so an old
+// installed app can be running newer web code that calls an export the app was built without: iOS
+// sideloads from before @capacitor/filesystem + @capacitor/share were added (≤ v0.7.2) have neither,
+// so nothing here can save a file until the app itself is updated. Lets callers say "update the app"
+// instead of a generic "couldn't save". Always true in a browser (it uses a normal blob download).
+export function hasFileExport() {
+  if (!isNativeApp()) return true;
+  const P = window.Capacitor?.Plugins || {};
+  return !!P.Download || (!!P.Filesystem && !!P.Share);
+}
+
 // Base64-encode a UTF-8 string safely (btoa alone mangles multi-byte characters).
 function utf8ToBase64(str) {
   return btoa(unescape(encodeURIComponent(str)));

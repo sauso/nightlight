@@ -68,6 +68,7 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     app_name, accent_color, live_color, offline_color, timezone, font_choice,
     temp_unit, mqtt_enabled, mqtt_host, mqtt_port, mqtt_username, mqtt_password,
     ptz_step, clip_pre_roll_s, clip_post_roll_s, clip_retention_days, clip_retention_max_gb,
+    camera_offline_alert_enabled, camera_offline_alert_minutes,
   } = req.body || {};
 
   if (app_name !== undefined && !app_name.trim()) {
@@ -137,11 +138,26 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
   const retentionChanged =
     retentionDays !== existing.clip_retention_days || retentionGb !== existing.clip_retention_max_gb;
 
+  // Offline-camera alert: enable flag + threshold in whole minutes (1–1440).
+  let offlineAlertEnabled = existing.camera_offline_alert_enabled;
+  if (camera_offline_alert_enabled !== undefined) {
+    offlineAlertEnabled = camera_offline_alert_enabled ? 1 : 0;
+  }
+  let offlineAlertMinutes = existing.camera_offline_alert_minutes;
+  if (camera_offline_alert_minutes !== undefined) {
+    const n = parseInt(camera_offline_alert_minutes, 10);
+    if (!Number.isFinite(n) || n < 1 || n > 1440) {
+      return res.status(400).json({ error: 'Offline alert threshold must be between 1 and 1440 minutes' });
+    }
+    offlineAlertMinutes = n;
+  }
+
   db.prepare(
     `UPDATE settings
      SET app_name = ?, accent_color = ?, live_color = ?, offline_color = ?, timezone = ?, font_choice = ?,
          temp_unit = ?, mqtt_enabled = ?, mqtt_host = ?, mqtt_port = ?, mqtt_username = ?, mqtt_password = ?,
-         ptz_step = ?, clip_pre_roll_s = ?, clip_post_roll_s = ?, clip_retention_days = ?, clip_retention_max_gb = ?
+         ptz_step = ?, clip_pre_roll_s = ?, clip_post_roll_s = ?, clip_retention_days = ?, clip_retention_max_gb = ?,
+         camera_offline_alert_enabled = ?, camera_offline_alert_minutes = ?
      WHERE id = ?`
   ).run(
     app_name?.trim() || existing.app_name,
@@ -161,6 +177,8 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     postRoll,
     retentionDays,
     retentionGb,
+    offlineAlertEnabled,
+    offlineAlertMinutes,
     'app'
   );
   refreshMqttConnection();
