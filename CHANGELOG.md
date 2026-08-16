@@ -9,6 +9,19 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **Offline-camera alerts.** Settings → Camera controls can now send a push notification when a camera
+  stops delivering video for longer than a threshold you set (in minutes), and another when it comes
+  back online. Off by default. Uses whatever push channels you already have set up (Firebase, Pushover,
+  ntfy, Gotify) — handy for catching a camera that's quietly dropped off, like an MQTT camera that
+  stops reporting.
+
+### Changed
+- **Camera controls now have their own Settings page.** PTZ step size (previously under General) moved
+  to **Settings → Camera controls**, alongside the new offline alerts.
+- **Sign out removed from the Settings list** — it already lives on the Account page (tap your name at
+  the top of Settings), so it was showing in two places.
+
 ## [0.15.1] - 2026-08-16
 
 ### Security

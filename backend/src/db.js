@@ -245,6 +245,15 @@ if (!settingsColumns.includes('clip_retention_days')) {
   db.exec('ALTER TABLE settings ADD COLUMN clip_retention_max_gb INTEGER NOT NULL DEFAULT 5');
 }
 
+// Offline-camera notification: push an alert when a camera stops delivering frames for longer than
+// camera_offline_alert_minutes (one push per outage, plus a "back online" push on recovery). The
+// watchdog in index.js already tracks per-camera up/down; this just gates a notification off that.
+// Off by default; threshold in whole minutes (bounds enforced in routes/settings.js).
+if (!settingsColumns.includes('camera_offline_alert_enabled')) {
+  db.exec('ALTER TABLE settings ADD COLUMN camera_offline_alert_enabled INTEGER NOT NULL DEFAULT 0');
+  db.exec('ALTER TABLE settings ADD COLUMN camera_offline_alert_minutes INTEGER NOT NULL DEFAULT 5');
+}
+
 if (!camerasColumns.includes('mqtt_topic')) {
   db.exec('ALTER TABLE cameras ADD COLUMN mqtt_topic TEXT');
 }
