@@ -180,7 +180,7 @@ button {
    below the base column width. */
 @media (min-width: 768px) {
   .app-main--wide {
-    max-width: min(94vw, 1600px);
+    max-width: min(94vw, 1800px);
   }
 }
 
@@ -433,9 +433,9 @@ body.in-pip .tile-menu-backdrop {
     align-items: center;
     gap: 13px;
     text-align: left;
-    font-size: 14px;
+    font-size: 15px;
     letter-spacing: 0;
-    padding: 11px 12px;
+    padding: 12px 12px;
     border-radius: 12px;
     transition: background 0.15s ease, color 0.15s ease;
   }
@@ -1328,6 +1328,17 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   font-weight: 400;
   color: var(--text-secondary);
   margin-top: 2px;
+}
+
+/* Desktop: nudge the tile text up a notch — on a large monitor the phone-sized labels read small. */
+@media (min-width: 1200px) {
+  .camera-tile__name {
+    font-size: 17px;
+  }
+
+  .camera-tile__sub {
+    font-size: 14px;
+  }
 }
 
 .status-row {
