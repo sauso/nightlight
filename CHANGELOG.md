@@ -32,6 +32,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   no longer show your saved API tokens/keys in full — just a short masked preview (e.g. `a1b2••••••`)
   so you can tell which one is set. Leave a field blank to keep the current secret; type a new value
   only to replace it. The full tokens are no longer sent back to the browser at all.
+- **Bigger camera tiles on tablet and desktop.** The camera grid now uses the full width of larger
+  screens instead of a narrow centred column with wide empty margins, and tiles stretch to fill their
+  row — so there's far less wasted space and each camera is shown larger. Phone layout is unchanged.
 
 ## [0.15.1] - 2026-08-16
 

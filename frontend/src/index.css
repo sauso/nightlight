@@ -173,11 +173,19 @@ button {
   margin: 0 auto;
 }
 
-/* Only the Nursery page (camera grid) gets extra width on desktop - forms/settings
-   pages stay at a comfortable reading width instead of stretching uncomfortably wide. */
+/* Only the Nursery page (camera grid) gets extra width - forms/settings pages stay at a
+   comfortable reading width instead of stretching uncomfortably wide. From tablet up it scales
+   with the viewport so the screen is actually used (instead of a narrow centred column with big
+   empty margins), capped so it never gets absurd on 4K. 94vw ≈ 720px at 768px, so it never drops
+   below the base column width. */
+@media (min-width: 768px) {
+  .app-main--wide {
+    max-width: min(94vw, 1600px);
+  }
+}
+
 @media (min-width: 1024px) {
   .app-main--wide {
-    max-width: 1160px;
     padding: 24px 32px 40px;
   }
 }
@@ -459,25 +467,23 @@ body.in-pip .tile-menu-backdrop {
   width: 100%;
 }
 
+/* Tablet+: tiles stretch to fill their column (minmax(..., 1fr)) instead of capping at a fixed
+   width, so the row is used fully and tiles are as big as the space allows rather than leaving
+   wide gutters. A generous min keeps the columns few and the tiles large. */
 @media (min-width: 540px) {
   .card-grid {
-    grid-template-columns: repeat(auto-fit, minmax(260px, 320px));
-    justify-content: center;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   }
 
   .card-grid .sortable-camera-tile {
-    max-width: 320px;
+    max-width: none;
   }
 }
 
 @media (min-width: 1024px) {
   .card-grid {
     gap: 32px;
-    grid-template-columns: repeat(auto-fit, minmax(340px, 420px));
-  }
-
-  .card-grid .sortable-camera-tile {
-    max-width: 420px;
+    grid-template-columns: repeat(auto-fill, minmax(440px, 1fr));
   }
 }
 
