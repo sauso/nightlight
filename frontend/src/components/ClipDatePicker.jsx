@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 
-// Popup calendar for filtering clips by day. Only days that actually have clips are enabled (shown
-// with a dot); picking one filters to that day, "All dates" clears it. Emits/accepts a stable local
-// day key 'YYYY-MM-DD' (or 'all'); the parent maps that back to a display label.
+// Popup calendar for filtering clips by day — multi-select. Only days that actually have clips are
+// enabled (shown with a dot); tapping days toggles them in/out of the filter (the list shows clips
+// from every selected day), and "Clear" resets to all. Works in stable local day keys 'YYYY-MM-DD';
+// the parent maps a key back to a display label.
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const pad = (n) => String(n).padStart(2, '0');
 const keyOf = (y, m, d) => `${y}-${pad(m + 1)}-${pad(d)}`;
 const monthNum = (k) => { const d = new Date(k + 'T00:00'); return d.getFullYear() * 12 + d.getMonth(); };
 
-export default function ClipDatePicker({ value, onChange, availableDays, labelFor }) {
+export default function ClipDatePicker({ selected, onToggle, onClear, availableDays, labelFor }) {
   const [open, setOpen] = useState(false);
+  const [ym, setYm] = useState(() => ({ y: new Date().getFullYear(), m: new Date().getMonth() }));
   const ref = useRef(null);
 
   const bounds = useMemo(() => {
@@ -18,19 +20,14 @@ export default function ClipDatePicker({ value, onChange, availableDays, labelFo
     return { min: sorted[0], max: sorted[sorted.length - 1] };
   }, [availableDays]);
 
-  const [ym, setYm] = useState(() => {
-    const base = value !== 'all' ? value : bounds.max;
-    const d = base ? new Date(base + 'T00:00') : new Date();
-    return { y: d.getFullYear(), m: d.getMonth() };
-  });
-
-  // On open, jump to the selected day's month (or the most recent month with clips).
-  useEffect(() => {
-    if (!open) return;
-    const base = value !== 'all' ? value : bounds.max;
+  // Jump the shown month to the latest selected day (or the most recent month with clips) when opening.
+  function openPicker() {
+    const sel = [...selected].sort();
+    const base = sel[sel.length - 1] || bounds.max;
     const d = base ? new Date(base + 'T00:00') : new Date();
     setYm({ y: d.getFullYear(), m: d.getMonth() });
-  }, [open, value, bounds.max]);
+    setOpen(true);
+  }
 
   // Close on outside click / Escape.
   useEffect(() => {
@@ -55,16 +52,15 @@ export default function ClipDatePicker({ value, onChange, availableDays, labelFo
   const canPrev = bounds.min ? cur > monthNum(bounds.min) : false;
   const canNext = bounds.max ? cur < monthNum(bounds.max) : false;
   const monthLabel = new Date(ym.y, ym.m, 1).toLocaleDateString([], { month: 'long', year: 'numeric' });
-  const triggerLabel = value === 'all' ? 'All dates' : (labelFor(value) || value);
 
-  function pick(d) {
-    onChange(keyOf(ym.y, ym.m, d));
-    setOpen(false);
-  }
+  const triggerLabel =
+    selected.size === 0 ? 'All dates'
+      : selected.size === 1 ? (labelFor([...selected][0]) || [...selected][0])
+        : `${selected.size} days`;
 
   return (
     <div className="clip-datepicker" ref={ref}>
-      <button type="button" className="clip-datepicker__trigger" onClick={() => setOpen((o) => !o)} aria-haspopup="dialog" aria-expanded={open}>
+      <button type="button" className="clip-datepicker__trigger" onClick={() => (open ? setOpen(false) : openPicker())} aria-haspopup="dialog" aria-expanded={open}>
         <CalendarDays size={16} aria-hidden="true" />
         <span>{triggerLabel}</span>
       </button>
@@ -90,14 +86,15 @@ export default function ClipDatePicker({ value, onChange, availableDays, labelFo
               if (d == null) return <span key={i} className="clip-cal__day is-blank" />;
               const k = keyOf(ym.y, ym.m, d);
               const has = availableDays.has(k);
-              const isSel = value === k;
+              const isSel = selected.has(k);
               return (
                 <button
                   key={i}
                   type="button"
                   className={`clip-cal__day${has ? ' has-clips' : ''}${isSel ? ' is-sel' : ''}`}
                   disabled={!has}
-                  onClick={() => pick(d)}
+                  aria-pressed={has ? isSel : undefined}
+                  onClick={() => onToggle(k)}
                   aria-label={has ? `${new Date(ym.y, ym.m, d).toLocaleDateString()} — clips available` : undefined}
                 >
                   {d}
@@ -106,9 +103,14 @@ export default function ClipDatePicker({ value, onChange, availableDays, labelFo
             })}
           </div>
 
-          <button type="button" className="clip-cal__all" onClick={() => { onChange('all'); setOpen(false); }}>
-            All dates
-          </button>
+          <div className="clip-cal__foot">
+            <button type="button" className="clip-cal__all" onClick={onClear} disabled={selected.size === 0}>
+              Clear
+            </button>
+            <button type="button" className="clip-cal__done" onClick={() => setOpen(false)}>
+              Done
+            </button>
+          </div>
         </div>
       )}
     </div>
