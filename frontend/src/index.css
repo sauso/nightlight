@@ -1168,12 +1168,14 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
 .clip-cal__day.has-clips:hover { background: var(--bg-elevated-2); }
 .clip-cal__day.is-sel { background: var(--peri); color: #fff; }
 .clip-cal__day.is-sel::after { background: #fff; }
-.clip-cal__all {
-  width: 100%; margin-top: 10px; padding: 8px; border-radius: 9px;
-  border: 1px solid var(--border); background: none; color: var(--peri);
-  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+.clip-cal__foot { display: flex; gap: 8px; margin-top: 10px; }
+.clip-cal__all, .clip-cal__done {
+  flex: 1; padding: 8px; border-radius: 9px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
 }
-.clip-cal__all:hover { background: var(--bg-elevated-2); }
+.clip-cal__all { border: 1px solid var(--border); background: none; color: var(--peri); }
+.clip-cal__all:hover:not(:disabled) { background: var(--bg-elevated-2); }
+.clip-cal__all:disabled { opacity: 0.4; cursor: default; }
+.clip-cal__done { border: none; background: var(--peri); color: #fff; }
 .clip-selectall { background: none; border: none; color: var(--peri); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; padding: 2px 4px; margin: 0 0 8px 2px; }
 .clip-row { display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-bottom: 1px solid var(--border); }
 .clip-row:last-child { border-bottom: none; }

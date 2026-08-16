@@ -25,7 +25,7 @@ function fmtBytes(b) {
 export default function ClipManagement() {
   const [clips, setClips] = useState(null);
   const [error, setError] = useState('');
-  const [day, setDay] = useState('all');
+  const [selectedDays, setSelectedDays] = useState(() => new Set()); // empty = all days
   const [selected, setSelected] = useState(() => new Set());
   const [playing, setPlaying] = useState(null);
   const [confirming, setConfirming] = useState(false);
@@ -56,10 +56,15 @@ export default function ClipManagement() {
   }, [clips]);
 
   const availableDays = useMemo(() => new Set(groups.keys()), [groups]);
+  const filterActive = selectedDays.size > 0;
   const visible = useMemo(
-    () => (clips || []).filter((c) => day === 'all' || dayKeyOf(parseUtc(c.created_at)) === day),
-    [clips, day]
+    () => (clips || []).filter((c) => !filterActive || selectedDays.has(dayKeyOf(parseUtc(c.created_at)))),
+    [clips, selectedDays, filterActive]
   );
+  function toggleDay(k) {
+    setSelectedDays((prev) => { const next = new Set(prev); if (next.has(k)) next.delete(k); else next.add(k); return next; });
+  }
+  const clearDays = () => setSelectedDays(new Set());
   const totalBytes = (clips || []).reduce((n, c) => n + (c.clip_bytes || 0), 0);
 
   const allVisibleSelected = visible.length > 0 && visible.every((c) => selected.has(c.id));
@@ -108,8 +113,9 @@ export default function ClipManagement() {
           </div>
           {availableDays.size > 0 && (
             <ClipDatePicker
-              value={day}
-              onChange={setDay}
+              selected={selectedDays}
+              onToggle={toggleDay}
+              onClear={clearDays}
               availableDays={availableDays}
               labelFor={(k) => groups.get(k)?.label || k}
             />
@@ -124,12 +130,12 @@ export default function ClipManagement() {
 
         {visible.length > 0 && (
           <button type="button" className="clip-selectall" onClick={toggleAllVisible}>
-            {allVisibleSelected ? 'Clear selection' : `Select all${day === 'all' ? '' : ' on this day'}`}
+            {allVisibleSelected ? 'Clear selection' : `Select all${filterActive ? ' shown' : ''}`}
           </button>
         )}
 
         {[...groups.entries()]
-          .filter(([k]) => day === 'all' || k === day)
+          .filter(([k]) => !filterActive || selectedDays.has(k))
           .map(([k, g]) => (
             <div key={k}>
               <div className="section-title">{g.label}</div>
