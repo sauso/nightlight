@@ -15,6 +15,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   back online. Off by default. Uses whatever push channels you already have set up (Firebase, Pushover,
   ntfy, Gotify) — handy for catching a camera that's quietly dropped off, like an MQTT camera that
   stops reporting.
+- **"Camera not connecting?" diagnostic report.** When adding a camera fails (the ONVIF fetch or the
+  stream check can't connect), the Add camera screen now offers to generate a redacted report — the
+  stream's codecs (via ffprobe), any ONVIF details, and the address (no password) — to download and
+  attach to a GitHub issue, so support can be added for that camera. Nothing is uploaded; the file
+  stays on your device to review first.
 - **Quick filters in the log viewer.** Settings → Logs now has one-tap chips (Errors, Warnings, Motion,
   Sound, MQTT, WebRTC, HLS, Recording) to narrow the log to one subsystem, on top of the existing
   free-text filter.
