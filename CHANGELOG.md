@@ -35,6 +35,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - **Bigger camera tiles on tablet and desktop.** The camera grid now uses the full width of larger
   screens instead of a narrow centred column with wide empty margins, and tiles stretch to fill their
   row — so there's far less wasted space and each camera is shown larger. Phone layout is unchanged.
+- **Desktop gets a left sidebar.** On wide screens the bottom tab bar becomes a vertical navigation
+  rail down the left (with the app name at the top) — a more natural desktop layout than a stretched
+  mobile bar. Phone and tablet keep the familiar bottom tabs.
 
 ## [0.15.1] - 2026-08-16
 

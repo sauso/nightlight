@@ -392,6 +392,88 @@ body.in-pip .tile-menu-backdrop {
   margin: 0 auto 7px;
 }
 
+/* Brand row only appears in the desktop sidebar rail (below). */
+.bottom-nav__brand {
+  display: none;
+}
+
+/* --- Desktop: the bottom tab bar becomes a left sidebar rail ---
+   Kicks in at 1200px so there's room for the 220px rail plus the camera grid's usual 2–3 columns;
+   narrower widths (phone, tablet, iPad landscape, small windows) keep the touch-friendly bottom bar. */
+@media (min-width: 1200px) {
+  .app-shell {
+    padding-bottom: 0;
+    padding-left: 220px;
+  }
+
+  .bottom-nav {
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: auto;
+    width: 220px;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: stretch;
+    gap: 4px;
+    border-top: none;
+    border-right: 1px solid var(--border);
+    padding: 22px 14px;
+  }
+
+  .bottom-nav__brand {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 4px 10px 20px;
+    text-decoration: none;
+    color: var(--text-primary);
+  }
+
+  .bottom-nav__brand-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    flex-shrink: 0;
+  }
+
+  .bottom-nav__brand-name {
+    font-weight: 700;
+    font-size: 17px;
+    letter-spacing: -0.01em;
+  }
+
+  .bottom-nav a {
+    flex: none;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 13px;
+    text-align: left;
+    font-size: 14px;
+    letter-spacing: 0;
+    padding: 11px 12px;
+    border-radius: 12px;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+
+  .bottom-nav a:hover {
+    background: var(--bg-elevated-2);
+    color: var(--text-primary);
+  }
+
+  .bottom-nav a.active {
+    background: var(--bg-elevated-2);
+    color: var(--peri);
+    font-weight: 600;
+  }
+
+  .bottom-nav__icon {
+    margin: 0;
+    flex-shrink: 0;
+  }
+}
+
 /* --- Breathing status dot (signature element) --- */
 .breathing {
   position: relative;
