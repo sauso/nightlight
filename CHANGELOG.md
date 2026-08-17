@@ -10,6 +10,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Added
+- **Two-way audio now works on ONVIF cameras (not just Hikvision).** Talk-back previously only supported
+  Hikvision's ISAPI protocol; cameras that do two-way audio over the ONVIF/RTSP audio backchannel (e.g.
+  Thingino/Sonoff) silently did nothing. Nightlight now speaks the RTSP backchannel too — added ONVIF
+  cameras that report an audio backchannel get talk-back automatically, reusing the stream credentials
+  (no separate login). Existing ONVIF cameras can enable it by re-running the ONVIF probe from the edit
+  screen.
 - **Sleep tracking (estimated).** Each child's page now shows a **"last night" sleep summary** — time
   asleep, when they fell asleep and woke, number of wake-ups, and longest unbroken stretch — inferred
   from overnight movement and sound (no wearable, nothing to start; it's a sleep-*pattern* estimate,
