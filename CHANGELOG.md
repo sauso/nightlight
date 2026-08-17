@@ -10,6 +10,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Changed
+- **Lower Compatibility-mode latency.** HLS segments are now 1s (was 2s), so Compatibility (HLS) mode
+  runs closer to live on cameras with a short keyframe interval. For the lowest lag, set the camera's
+  keyframe interval / GOP to about 1 second (≈ its frame rate) — Nightlight can't make a segment shorter
+  than the camera's keyframe spacing.
 - **The crib area can be more than one box.** The crib-zone picker (Camera → Motion detection) now
   supports **multiple rectangles**, so a crib on a diagonal (or an awkward corner) can be covered by a
   few boxes instead of one loose one — motion detection and sleep tracking count movement inside any of
