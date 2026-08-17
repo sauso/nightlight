@@ -89,8 +89,8 @@ export function flushActivity() {
 export function pruneActivitySamples() {
   try {
     const { changes } = db
-      .prepare(`DELETE FROM activity_samples WHERE created_at < datetime('now', '-${RETENTION_DAYS} days')`)
-      .run();
+      .prepare("DELETE FROM activity_samples WHERE created_at < datetime('now', ?)")
+      .run(`-${RETENTION_DAYS} days`);
     if (changes > 0) logger.info(`[activity] Pruned ${changes} sample(s) older than ${RETENTION_DAYS} days.`);
   } catch {
     /* ignore */
