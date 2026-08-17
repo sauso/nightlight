@@ -16,7 +16,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   required, and almost no server CPU. The option appears only for cameras that actually advertise a
   motion event topic (detected during the ONVIF probe); existing ONVIF cameras can enable it by
   re-running the ONVIF probe from the edit screen. Sleep tracking is unaffected — a child's camera still
-  keeps its own in-app movement timeline regardless of which source fires alerts.
+  keeps its own in-app movement timeline regardless of which source fires alerts. The log viewer
+  (Settings → Logs) gains an **ONVIF motion** filter chip for watching this source.
 
 ### Changed
 - **Lower Compatibility-mode latency.** HLS segments are now 1s (was 2s), so Compatibility (HLS) mode

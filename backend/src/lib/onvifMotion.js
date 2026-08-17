@@ -94,7 +94,7 @@ function handleMotion(cameraId) {
     return;
   }
   lastAlert.set(cam.id, now);
-  logger.info(`[detect] ONVIF motion on "${cam.name}"`);
+  logger.info(`[onvif-motion] "${cam.name}" motion — firing alert`);
   fireDetectionAlert(cam, ALERT.MOTION, 'camera-reported (ONVIF)').catch(() => {});
 }
 
