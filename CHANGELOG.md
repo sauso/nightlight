@@ -41,6 +41,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   into the query text — the queries are now fully static with values bound as parameters. The
   interpolated pieces were all hardcoded constants (retention days) or fixed literals (never user
   input), so no SQL injection was possible; this removes the pattern a security scan flagged.
+- **Guarded clip-recording file paths against traversal.** The clip recorder now validates the camera
+  id and clip basename are safe single path segments before they're used to build ring/clip directory
+  and file names. Both are always server-generated (a camera UUID and an integer event id), so no
+  traversal was reachable; the guard fails closed against any future caller passing an unchecked value.
 
 ## [0.17.0] - 2026-08-17
 
