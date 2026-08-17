@@ -9,6 +9,56 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-08-18
+
+### Added
+- **Camera-native motion over ONVIF.** Motion detection has a third source (Camera → Motion detection),
+  alongside Nightlight's own frame-diff and "Camera via MQTT": **Camera via ONVIF**, where the camera
+  reports motion over its ONVIF Event service and Nightlight subscribes directly — no MQTT broker
+  required, and almost no server CPU. The option appears only for cameras that actually advertise a
+  motion event topic (detected during the ONVIF probe); existing ONVIF cameras can enable it by
+  re-running the ONVIF probe from the edit screen. Sleep tracking is unaffected — a child's camera still
+  keeps its own in-app movement timeline regardless of which source fires alerts. The log viewer
+  (Settings → Logs) gains an **ONVIF motion** filter chip for watching this source.
+
+### Changed
+- **Lower Compatibility-mode latency.** HLS segments are now 1s (was 2s), so Compatibility (HLS) mode
+  runs closer to live on cameras with a short keyframe interval. For the lowest lag, set the camera's
+  keyframe interval / GOP to about 1 second (≈ its frame rate) — Nightlight can't make a segment shorter
+  than the camera's keyframe spacing.
+- **The crib area can be more than one box.** The crib-zone picker (Camera → Motion detection) now
+  supports **multiple rectangles**, so a crib on a diagonal (or an awkward corner) can be covered by a
+  few boxes instead of one loose one — motion detection and sleep tracking count movement inside any of
+  them. Tap a box to move or resize it, "Remove box" deletes the selected one, "Whole frame" clears all.
+  Existing single-box zones keep working. (Also: the picker's buttons no longer wrap onto two lines.)
+
+### Fixed
+- **Talk-back now picks — and self-corrects — the right protocol.** Two-way audio has two backends
+  (Hikvision ISAPI over HTTP, and the ONVIF/RTSP audio backchannel used by Thingino/Sonoff and most
+  ONVIF cams). Previously the backend was chosen once and never revisited, so a camera that was
+  re-pointed at a different device, or added before the ONVIF backchannel existed, could keep talking
+  the wrong protocol — you'd press talk and nothing came out of the speaker. Now, whenever a camera is
+  added or its ONVIF details are re-fetched, Nightlight actively verifies which protocol the camera
+  really answers and stores that one, correcting a stale/mismatched backend. Re-fetch ONVIF on an
+  affected camera's edit screen to fix it. (A genuine Hikvision won't answer the backchannel and stays
+  on ISAPI.)
+
+### Security
+- **Hardened alert snapshot/clip serving against path traversal.** The routes that serve an alert's
+  snapshot and recorded clip now hand `res.sendFile` a jailed `root` so Express itself rejects any
+  attempt to escape the snapshot/clip directory, in addition to the existing integer-id and
+  under-directory validation. No exploitable path existed (the flag from a security scan was a false
+  positive), but the extra layer makes containment enforced by Express and clears the finding.
+- **Removed string interpolation from SQL statements.** The retention-prune queries (activity samples,
+  sensor readings) and the MFA-reset console script no longer build their SQL by interpolating values
+  into the query text — the queries are now fully static with values bound as parameters. The
+  interpolated pieces were all hardcoded constants (retention days) or fixed literals (never user
+  input), so no SQL injection was possible; this removes the pattern a security scan flagged.
+- **Guarded clip-recording file paths against traversal.** The clip recorder now validates the camera
+  id and clip basename are safe single path segments before they're used to build ring/clip directory
+  and file names. Both are always server-generated (a camera UUID and an integer event id), so no
+  traversal was reachable; the guard fails closed against any future caller passing an unchecked value.
+
 ## [0.17.0] - 2026-08-17
 
 ### Added

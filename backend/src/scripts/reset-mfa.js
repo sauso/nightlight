@@ -17,11 +17,15 @@ db.pragma('busy_timeout = 5000');
 
 const arg = process.argv[2];
 
-function clearFor(where, params) {
-  return db
-    .prepare(`UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_backup_codes = NULL ${where}`)
-    .run(...params).changes;
-}
+// Two fully-literal statements rather than one with an interpolated WHERE clause — the query text is
+// static, and the only variable (a user id) is bound as a parameter. (The clause was always a
+// hardcoded literal, never user input, but keeping the SQL constant leaves no room for doubt.)
+const clearAllStmt = db.prepare(
+  'UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_backup_codes = NULL WHERE mfa_enabled = 1'
+);
+const clearOneStmt = db.prepare(
+  'UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_backup_codes = NULL WHERE id = ?'
+);
 
 if (!arg || arg === '--help' || arg === '-h') {
   console.log('Usage:');
@@ -44,7 +48,7 @@ if (arg === '--list') {
 }
 
 if (arg === '--all') {
-  const n = clearFor('WHERE mfa_enabled = 1', []);
+  const n = clearAllStmt.run().changes;
   console.log(`Cleared two-factor for ${n} user(s).`);
   process.exit(0);
 }
@@ -55,7 +59,7 @@ if (!user) {
   console.error(`No user named "${arg}". Use --list to see accounts.`);
   process.exit(1);
 }
-clearFor('WHERE id = ?', [user.id]);
+clearOneStmt.run(user.id);
 console.log(
   user.mfa_enabled
     ? `Two-factor turned off for "${arg}". They can sign in with just their password now.`

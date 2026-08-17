@@ -119,10 +119,14 @@ export function saveEventSnapshot(id, buffer) {
   }
 }
 
-// Absolute path to an event's stored JPEG, or null if there isn't one (used by the serving route).
+// A jailed { root, path } for an event's stored JPEG, or null if there isn't one (used by the
+// serving route). Returning the dir + a bare filename lets the route hand res.sendFile a `root`
+// option so Express itself enforces containment, on top of the integer-only id validation.
 export function getEventSnapshotFile(id) {
-  const file = snapshotFile(id);
-  return file && fs.existsSync(file) ? file : null;
+  const n = Number(id);
+  if (!Number.isInteger(n) || n <= 0) return null;
+  const file = path.join(SNAPSHOT_DIR, `${n}.jpg`);
+  return fs.existsSync(file) ? { root: SNAPSHOT_DIR, path: `${n}.jpg` } : null;
 }
 
 // --- Clip status (Stage 1 recording). The clip lives on the same detection_events row; these just
@@ -147,14 +151,15 @@ export function setClipFailed(id) {
   try { setClipFailedStmt.run(id); } catch (e) { logger.error(`clip failed mark failed (${id}):`, e.message); }
 }
 
-// Absolute path to an event's ready clip MP4, or null (used by the serving route). Validates the
-// stored relative path stays under CLIPS_DIR.
+// A jailed { root, path } for an event's ready clip MP4, or null (used by the serving route).
+// Validates the stored relative path stays under CLIPS_DIR, then returns CLIPS_DIR + that relative
+// path so the route can pass res.sendFile a `root` option and let Express re-enforce containment.
 export function getEventClipFile(id) {
   const row = db.prepare('SELECT clip_path, clip_status FROM detection_events WHERE id = ?').get(id);
   if (!row || row.clip_status !== 'ready' || !row.clip_path) return null;
   const abs = path.resolve(CLIPS_DIR, row.clip_path);
   if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;
-  return fs.existsSync(abs) ? abs : null;
+  return fs.existsSync(abs) ? { root: CLIPS_DIR, path: path.relative(CLIPS_DIR, abs) } : null;
 }
 
 // --- Retention accounting (lib/clipStorage.js sweeps against these). Deleting a clip clears its

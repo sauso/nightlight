@@ -333,6 +333,12 @@ if (!camerasColumns.includes('discovery_source')) {
 if (!camerasColumns.includes('onvif_capable')) {
   db.exec('ALTER TABLE cameras ADD COLUMN onvif_capable INTEGER NOT NULL DEFAULT 0');
 }
+// Whether the camera advertises a motion event topic over its ONVIF Event service (captured at
+// ONVIF add/re-probe time). Gates the "Camera via ONVIF" motion source — a camera can speak ONVIF
+// for streaming/PTZ yet expose no event service, where an ONVIF motion subscription would sit idle.
+if (!camerasColumns.includes('onvif_motion_capable')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN onvif_motion_capable INTEGER NOT NULL DEFAULT 0');
+}
 if (!camerasColumns.includes('onvif_device_url')) {
   db.exec('ALTER TABLE cameras ADD COLUMN onvif_device_url TEXT');
 }

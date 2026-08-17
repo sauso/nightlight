@@ -7,6 +7,7 @@ import { upsertPath, removePath, getPathStatus, toPathName } from '../lib/mediam
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
 import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.js';
 import { startMotionDetector, stopMotionDetector, motionLegWanted } from '../lib/motionDetector.js';
+import { startOnvifMotion, stopOnvifMotion, onvifMotionWanted } from '../lib/onvifMotion.js';
 import { startSoundDetector, stopSoundDetector } from '../lib/soundDetector.js';
 import { startClipCapture, stopClipCapture } from '../lib/clipCapture.js';
 import {
@@ -17,7 +18,7 @@ import {
   deleteClipForEvent,
   getClips,
 } from '../lib/detectionEvents.js';
-import { verifyTalkCreds, talkConfigured } from '../lib/twoWayAudio.js';
+import { verifyTalkCreds, talkConfigured, verifyBackchannel } from '../lib/twoWayAudio.js';
 import { getReading, subscribeAllCameraTopics, refreshMqttConnection } from '../lib/mqttClient.js';
 import { probeOnvifCamera, ptzNudge, ptzRelativeStep, probePtzRelativeSupport } from '../lib/onvif.js';
 import { validateRtspStream, probeRtspDetailed, ffprobeVersion } from '../lib/rtspProbe.js';
@@ -40,7 +41,9 @@ try {
 router.get('/alerts/:id/snapshot', requireAuthQueryOrHeader, (req, res) => {
   const file = getEventSnapshotFile(req.params.id);
   if (!file) return res.status(404).json({ error: 'No snapshot for this alert' });
-  res.sendFile(file);
+  // { root, path } form: Express jails the send under root and rejects any `..`, on top of the
+  // integer-only id validation upstream (belt-and-suspenders against path traversal).
+  res.sendFile(file.path, { root: file.root, dotfiles: 'deny' });
 });
 
 // Recorded clip for an alert — same query-token auth as the snapshot above (a <video> element
@@ -49,7 +52,8 @@ router.get('/alerts/:id/snapshot', requireAuthQueryOrHeader, (req, res) => {
 router.get('/alerts/:id/clip', requireAuthQueryOrHeader, (req, res) => {
   const file = getEventClipFile(req.params.id);
   if (!file) return res.status(404).json({ error: 'No clip for this alert' });
-  res.sendFile(file);
+  // { root, path } form (see snapshot route): Express re-enforces containment under CLIPS_DIR.
+  res.sendFile(file.path, { root: file.root, dotfiles: 'deny' });
 });
 
 // Live still frame — the backdrop for the crib-zone picker. Query-token auth so an <img> can load it
@@ -106,27 +110,38 @@ function parseRtspComponents(url) {
 // Admins additionally get the address broken into fields (for the edit form) plus a
 // credential-free display URL and a flag for whether a password is set. ONVIF credentials
 // (used server-side for PTZ) are always stripped.
-// The crib zone is stored as a JSON string {x,y,w,h} in 0..1 frame fractions (null = whole
-// frame). Parse leniently for output; null on anything malformed.
+// The crib zone is stored as a JSON string — a LIST of rectangles [{x,y,w,h}, ...] in 0..1 frame
+// fractions (null/empty = whole frame). Multiple rectangles let a crib on a diagonal be covered by a
+// few boxes. A legacy single-object `{x,y,w,h}` still reads correctly (treated as a one-item list).
+// Parse leniently for output; null on anything malformed.
 function parseZone(raw) {
   if (!raw) return null;
   try {
     const z = JSON.parse(raw);
-    if (z && ['x', 'y', 'w', 'h'].every((k) => typeof z[k] === 'number')) return z;
+    const rects = (Array.isArray(z) ? z : [z]).filter(
+      (r) => r && ['x', 'y', 'w', 'h'].every((k) => typeof r[k] === 'number')
+    );
+    return rects.length ? rects : null;
   } catch {
     /* fall through */
   }
   return null;
 }
 
-// Validate + clamp a zone from the client into a storable JSON string (or null = whole frame).
+// Validate + clamp a zone (single rect or a list) from the client into a storable JSON list string
+// (or null = whole frame). Degenerate rectangles are dropped.
 function serializeZone(z) {
   if (!z) return null;
-  const nums = ['x', 'y', 'w', 'h'].map((k) => Number(z[k]));
-  if (nums.some((n) => !Number.isFinite(n))) return null;
-  const [x, y, w, h] = nums.map((n) => Math.min(1, Math.max(0, n)));
-  if (w <= 0 || h <= 0) return null;
-  return JSON.stringify({ x, y, w, h });
+  const rects = Array.isArray(z) ? z : [z];
+  const clean = [];
+  for (const r of rects) {
+    const nums = ['x', 'y', 'w', 'h'].map((k) => Number(r?.[k]));
+    if (nums.some((n) => !Number.isFinite(n))) continue;
+    const [x, y, w, h] = nums.map((n) => Math.min(1, Math.max(0, n)));
+    if (w <= 0.02 || h <= 0.02) continue;
+    clean.push({ x, y, w, h });
+  }
+  return clean.length ? JSON.stringify(clean) : null;
 }
 
 function publicCamera(cam, isAdmin) {
@@ -457,7 +472,7 @@ router.post('/', requireAdmin, async (req, res) => {
   const {
     name, rtsp_host, rtsp_port, rtsp_path, rtsp_username, rtsp_password,
     child_id, mqtt_topic, force,
-    discovery_source, onvif_device_url, backchannel_supported,
+    discovery_source, onvif_device_url, backchannel_supported, motion_events_supported,
     ptz_supported, onvif_profile_token,
     talk_username, talk_password, sub_rtsp_path,
   } = req.body || {};
@@ -495,6 +510,9 @@ router.post('/', requireAdmin, async (req, res) => {
   const isOnvif = source === 'onvif';
   const onvifUrl = isOnvif && onvif_device_url ? onvif_device_url.trim() : null;
   const backchannel = ['yes', 'no'].includes(backchannel_supported) ? backchannel_supported : 'unknown';
+  // Motion-over-ONVIF capability, from the probe — gates whether the "Camera via ONVIF" motion
+  // source is offered for this camera. Only meaningful for an ONVIF-added camera.
+  const onvifMotionCapable = isOnvif && motion_events_supported === 'yes' ? 1 : 0;
   // PTZ control needs the ONVIF credentials + profile token later - only meaningful for
   // ONVIF-added cameras. ptz_supported gates whether the UI ever shows PTZ controls.
   const ptz = isOnvif && ptz_supported ? 1 : 0;
@@ -503,13 +521,18 @@ router.post('/', requireAdmin, async (req, res) => {
   const onvifUser = isOnvif ? rtsp_username || null : null;
   const onvifPass = isOnvif ? rtsp_password || null : null;
   const profileToken = isOnvif ? onvif_profile_token || null : null;
-  // Two-way audio backend: explicit talk creds enable the Hikvision ISAPI sink; otherwise an ONVIF
-  // camera that reports an audio backchannel gets the RTSP-backchannel sink, which reuses the stream
-  // credentials (no separate login to enter).
-  const talkUser = talk_username && talk_username.trim() ? talk_username.trim() : null;
+  // Two-way audio backend, chosen by what the camera actually answers (not just what was typed):
+  // if the ONVIF/RTSP audio backchannel verifies live, use it (reuses the stream creds, right protocol
+  // for Thingino/Sonoff & most ONVIF cams); else explicit talk creds enable the Hikvision ISAPI sink
+  // (a real Hikvision won't answer the backchannel); else fall back to the capability-based default if
+  // the camera was unreachable at add time. Picking by verification is what keeps the protocol correct.
+  let talkUser = talk_username && talk_username.trim() ? talk_username.trim() : null;
   let talkBackend = null;
   let talkPass = null;
-  if (talkUser) {
+  if (isOnvif && backchannel === 'yes' && (await verifyBackchannel(rtsp_url))) {
+    talkBackend = 'onvif-backchannel';
+    talkUser = null; // creds come from the stream URL
+  } else if (talkUser) {
     talkBackend = 'hikvision-isapi';
     talkPass = talk_password || null;
   } else if (isOnvif && backchannel === 'yes') {
@@ -522,13 +545,13 @@ router.post('/', requireAdmin, async (req, res) => {
   const { maxOrder } = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS maxOrder FROM cameras').get();
   db.prepare(
     `INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path, sort_order, mqtt_topic,
-       discovery_source, onvif_capable, onvif_device_url, backchannel_supported,
+       discovery_source, onvif_capable, onvif_motion_capable, onvif_device_url, backchannel_supported,
        ptz_supported, onvif_username, onvif_password, onvif_profile_token,
        talk_backend, talk_username, talk_password, sub_rtsp_url)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id, name.trim(), rtsp_url.trim(), child_id || null, mediamtx_path, maxOrder + 1, mqtt_topic?.trim() || null,
-    source, isOnvif ? 1 : 0, onvifUrl, backchannel,
+    source, isOnvif ? 1 : 0, onvifMotionCapable, onvifUrl, backchannel,
     ptz, onvifUser, onvifPass, profileToken,
     talkBackend, talkUser, talkPass, subUrl
   );
@@ -548,7 +571,7 @@ router.put('/:id', requireAdmin, async (req, res) => {
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
   const { name, rtsp_host, rtsp_port, rtsp_path, rtsp_username, rtsp_password, child_id, mqtt_topic, force,
     talk_username, talk_password, sub_rtsp_path,
-    discovery_source, onvif_device_url, backchannel_supported, ptz_supported, onvif_profile_token } = req.body || {};
+    discovery_source, onvif_device_url, backchannel_supported, motion_events_supported, ptz_supported, onvif_profile_token } = req.body || {};
 
   // Reassemble the RTSP URL from the edited fields. A field not sent keeps its current
   // value; a blank password specifically means "keep the existing one" (the browser never
@@ -621,6 +644,7 @@ router.put('/:id', requireAdmin, async (req, res) => {
   // A plain edit doesn't send these, so everything stays as-is.
   let discSource = existing.discovery_source;
   let onvifCapable = existing.onvif_capable;
+  let onvifMotionCapable = existing.onvif_motion_capable;
   let onvifUrl = existing.onvif_device_url;
   let backchannel = existing.backchannel_supported;
   let ptz = existing.ptz_supported;
@@ -632,21 +656,31 @@ router.put('/:id', requireAdmin, async (req, res) => {
     onvifCapable = 1;
     if (onvif_device_url !== undefined) onvifUrl = onvif_device_url ? onvif_device_url.trim() : null;
     if (backchannel_supported !== undefined) backchannel = ['yes', 'no'].includes(backchannel_supported) ? backchannel_supported : 'unknown';
+    if (motion_events_supported !== undefined) onvifMotionCapable = motion_events_supported === 'yes' ? 1 : 0;
     if (ptz_supported !== undefined) ptz = ptz_supported ? 1 : 0;
     if (onvif_profile_token !== undefined) profileToken = onvif_profile_token || null;
     // ONVIF control (PTZ) reuses the RTSP credentials the user entered.
     if (rtsp_username !== undefined) onvifUser = rtsp_username || null;
     if (rtsp_password) onvifPass = rtsp_password; // blank keeps the stored one
-    // If the (re-)probe reports an audio backchannel and there's no talk backend configured yet,
-    // enable the ONVIF/RTSP backchannel sink (reuses the stream credentials). Won't touch an existing
-    // Hikvision or already-set backend, and won't fire when talk creds are being edited above.
-    if (talk_username === undefined && talkBackend == null && backchannel === 'yes') {
+    // Self-correct the talk backend on a re-probe: if the camera actually answers the ONVIF/RTSP audio
+    // backchannel (verified live with the stream creds), switch to it — even over a stale/mismatched
+    // stored backend (e.g. legacy hikvision-isapi from before this protocol existed, or left behind when
+    // the camera was re-pointed at a different device). This is the "check and update to the correct
+    // protocol on change" behaviour: a real Hikvision won't answer the backchannel and stays on ISAPI.
+    // Skip when the user is explicitly disabling talk in this same request.
+    const disablingTalk = talk_username !== undefined && !String(talk_username).trim();
+    if (!disablingTalk && backchannel === 'yes' && (await verifyBackchannel(newRtsp))) {
+      talkBackend = 'onvif-backchannel';
+      talkUser = null; talkPass = null; // backchannel uses the stream creds
+    } else if (talk_username === undefined && talkBackend == null && backchannel === 'yes') {
+      // Couldn't verify (camera momentarily unreachable) but capability says yes — keep the old
+      // set-if-none default so we don't regress.
       talkBackend = 'onvif-backchannel';
     }
   }
   db.prepare(`UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?,
       talk_backend = ?, talk_username = ?, talk_password = ?, sub_rtsp_url = ?,
-      discovery_source = ?, onvif_capable = ?, onvif_device_url = ?, backchannel_supported = ?,
+      discovery_source = ?, onvif_capable = ?, onvif_motion_capable = ?, onvif_device_url = ?, backchannel_supported = ?,
       ptz_supported = ?, onvif_profile_token = ?, onvif_username = ?, onvif_password = ?
     WHERE id = ?`).run(
     name?.trim() || existing.name,
@@ -659,6 +693,7 @@ router.put('/:id', requireAdmin, async (req, res) => {
     subUrl,
     discSource,
     onvifCapable,
+    onvifMotionCapable,
     onvifUrl,
     backchannel,
     ptz,
@@ -682,6 +717,9 @@ router.put('/:id', requireAdmin, async (req, res) => {
     // the activity-only sleep leg; no-op if neither applies.
     if (motionLegWanted(updated)) await startMotionDetector(updated).catch(() => {});
     else await stopMotionDetector(updated.id).catch(() => {});
+    // ONVIF motion subscription follows the same restart (its endpoint/creds may have changed).
+    if (onvifMotionWanted(updated)) await startOnvifMotion(updated).catch(() => {});
+    else await stopOnvifMotion(updated.id).catch(() => {});
     if (updated.detect_sound_enabled) await startSoundDetector(updated).catch(() => {});
     else await stopSoundDetector(updated.id).catch(() => {});
     // Restart the clip segmenter too so it re-attaches to the (possibly changed) path. No-op if off.
@@ -709,12 +747,14 @@ router.put('/:id/enabled', requireAdmin, async (req, res) => {
     await startTranscoder(req.params.id, existing.rtsp_url, existing.mediamtx_path, existing.name);
     if (subConfigured(existing)) await startSubStream(existing).catch((e) => logger.error(`[substream] enable failed: ${e.message}`));
     if (motionLegWanted(existing)) await startMotionDetector(existing).catch(() => {});
+    if (onvifMotionWanted(existing)) await startOnvifMotion(existing).catch(() => {});
     if (existing.detect_sound_enabled) await startSoundDetector(existing).catch(() => {});
     if (existing.detect_record_clips) startClipCapture(existing);
   } else {
     await stopTranscoder(req.params.id);
     await stopSubStream(existing).catch(() => {});
     await stopMotionDetector(req.params.id).catch(() => {});
+    await stopOnvifMotion(req.params.id).catch(() => {});
     await stopSoundDetector(req.params.id).catch(() => {});
     stopClipCapture(req.params.id);
     try {
@@ -744,9 +784,17 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
   const enabled = motion_enabled ? 1 : 0;
   const recordClips = record_clips === undefined ? existing.detect_record_clips : record_clips ? 1 : 0;
   const zoneJson = zone === undefined ? existing.detect_zone : serializeZone(zone);
-  // Detection source: only the two known values; anything else falls back to the current value.
+  // Detection source: only the known values; anything else falls back to the current value. 'onvif'
+  // is only honoured for a camera that advertised a motion topic (onvif_motion_capable) — otherwise
+  // it degrades to frame-diff so a stale/forged request can't leave the camera on a dead source.
   const detectSource =
-    source === undefined ? existing.detect_source : source === 'mqtt' ? 'mqtt' : 'framediff';
+    source === undefined
+      ? existing.detect_source
+      : source === 'mqtt'
+      ? 'mqtt'
+      : source === 'onvif' && existing.onvif_motion_capable
+      ? 'onvif'
+      : 'framediff';
   const motionTopic =
     motion_mqtt_topic === undefined ? existing.motion_mqtt_topic : (motion_mqtt_topic?.trim() || null);
   const motionValue =
@@ -800,6 +848,13 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
     } else {
       await stopMotionDetector(updated.id).catch(() => {});
     }
+    // ONVIF motion subscription: start when the camera is on the 'onvif' source, stop otherwise
+    // (e.g. switching to/from ONVIF here). startOnvifMotion itself no-ops for other sources.
+    if (onvifMotionWanted(updated)) {
+      await startOnvifMotion(updated).catch((e) => logger.error(`[onvif-motion] start failed: ${e.message}`));
+    } else {
+      await stopOnvifMotion(updated.id).catch(() => {});
+    }
     if (updated.detect_sound_enabled) {
       await startSoundDetector(updated).catch((e) => logger.error(`[sound] start failed: ${e.message}`));
     } else {
@@ -840,6 +895,7 @@ router.delete('/:id', requireAdmin, async (req, res) => {
   await stopTranscoder(req.params.id);
   await stopSubStream(existing).catch(() => {});
   await stopMotionDetector(req.params.id).catch(() => {});
+  await stopOnvifMotion(req.params.id).catch(() => {});
   await stopSoundDetector(req.params.id).catch(() => {});
   stopClipCapture(req.params.id);
   try {
