@@ -21,6 +21,7 @@ import { verifyTalkCreds } from '../lib/twoWayAudio.js';
 import { getReading, subscribeAllCameraTopics, refreshMqttConnection } from '../lib/mqttClient.js';
 import { probeOnvifCamera, ptzNudge, ptzRelativeStep, probePtzRelativeSupport } from '../lib/onvif.js';
 import { validateRtspStream, probeRtspDetailed, ffprobeVersion } from '../lib/rtspProbe.js';
+import { captureSnapshot, fetchHttpSnapshot } from '../lib/snapshot.js';
 import { logger } from '../lib/logger.js';
 
 const router = Router();
@@ -49,6 +50,22 @@ router.get('/alerts/:id/clip', requireAuthQueryOrHeader, (req, res) => {
   const file = getEventClipFile(req.params.id);
   if (!file) return res.status(404).json({ error: 'No clip for this alert' });
   res.sendFile(file);
+});
+
+// Live still frame — the backdrop for the crib-zone picker. Query-token auth so an <img> can load it
+// (same reason as the alert snapshot). Prefers the camera's HTTP snapshot URL, else grabs one frame
+// off the local MediaMTX stream. Registered before requireAuth; the literal "snapshot" segment keeps
+// it clear of the other /:id routes.
+router.get('/:id/snapshot', requireAuthQueryOrHeader, async (req, res) => {
+  const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+  if (!cam) return res.status(404).json({ error: 'Camera not found' });
+  let img = null;
+  if (cam.snapshot_url && String(cam.snapshot_url).trim()) img = await fetchHttpSnapshot(cam.snapshot_url).catch(() => null);
+  if (!img) img = await captureSnapshot(cam.mediamtx_path).catch(() => null);
+  if (!img) return res.status(503).json({ error: 'Could not grab a frame right now' });
+  res.set('Content-Type', 'image/jpeg');
+  res.set('Cache-Control', 'no-store');
+  res.send(img);
 });
 
 router.use(requireAuth);
