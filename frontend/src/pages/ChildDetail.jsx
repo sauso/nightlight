@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Moon } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useAuth } from '../lib/AuthContext.jsx';
@@ -9,6 +8,8 @@ import Avatar from '../components/Avatar.jsx';
 import Modal from '../components/Modal.jsx';
 import CameraRow from '../components/CameraRow.jsx';
 import AlertList from '../components/AlertList.jsx';
+import SensorHistoryCard from '../components/SensorHistoryCard.jsx';
+import SleepSummaryCard from '../components/SleepSummaryCard.jsx';
 import { ageLabel } from '../lib/age.js';
 
 // A child's hub: their identity + (later) last night's sleep, then their cameras and their alerts.
@@ -71,14 +72,12 @@ export default function ChildDetail() {
             </button>
             <button type="button" className="night__edit" onClick={() => navigate(`/children/${id}/edit`)}>Edit ›</button>
           </div>
-          <div className="night__sleep">
-            <Moon size={18} aria-hidden="true" />
-            <div>
-              <div style={{ fontWeight: 600 }}>Sleep summary</div>
-              <div className="night__soon">Coming soon — once sleep tracking is on, last night's sleep shows here.</div>
-            </div>
-          </div>
+          <SleepSummaryCard childId={id} />
         </div>
+
+        {childCams.filter((c) => c.mqtt_topic).map((c) => (
+          <SensorHistoryCard key={c.id} camera={c} />
+        ))}
 
         <div className="section-title">Cameras · {childCams.length}</div>
         <div className="card tight">

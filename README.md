@@ -127,6 +127,14 @@ entered as separate fields — **IP address**, **RTSP port** (usually 554), **st
 and the camera's **username / password**. Nightlight assembles the `rtsp://` URL from those
 itself, so the password never appears in a URL on screen.
 
+**Supported cameras** — Nightlight works with **ONVIF / RTSP** cameras in general: video, audio, and —
+on ONVIF cameras — pan/tilt and two-way audio. The fully tested and **recommended** option is
+**open-firmware [Thingino](https://thingino.com/) cameras** (inexpensive, ONVIF, pan/tilt, two-way
+audio); on those, set the camera's audio codec to **G711 (a-law)** for reliable sound (some builds
+default to AAC, which not all of them stream well — see `KNOWN-ISSUES.md`). Most other ONVIF cameras
+work too, and Hikvision two-way audio (ISAPI) is supported. If a camera won't connect, the **Add
+camera** screen can generate a redacted **camera report** to help add support for it.
+
 **Adding a camera**
 
 - **Via ONVIF (easiest):** type the camera's IP and press **Fetch port & path from ONVIF**.
@@ -147,7 +155,12 @@ since their capabilities aren't probed.)
 **Pan/tilt (PTZ)** — on cameras that report PTZ, a move button appears on the camera tile
 (next to the stream-quality gear). Tap it for an on-screen D-pad: each press nudges the
 camera a fixed amount, and holding an arrow keeps it moving; it stops on release and can't
-run past the limit. (Two-way audio isn't wired up yet — the badge is groundwork for it.)
+run past the limit.
+
+**Two-way audio (talk-back)** — on cameras that support it, a talk button appears on the tile: hold it
+to speak through the camera's speaker. Works with **Hikvision** (over ISAPI — enter the camera's *web*
+login when adding) and with **any ONVIF camera that has an audio backchannel** (e.g. Thingino/Sonoff),
+which is set up automatically from the ONVIF probe using the camera's own stream login.
 
 **Editing** — Edit shows the same fields. Leave the **password blank to keep the existing
 one** — it's never sent back to your browser. Changing the address re-tests the stream, the

@@ -24,6 +24,32 @@ export function ffprobeVersion() {
   });
 }
 
+// The codec of an RTSP source's first audio stream (e.g. 'aac', 'pcm_alaw'), or null if it has no
+// audio / can't be probed. The transcoder uses this to decide how to build the WebRTC audio track:
+// an AAC source needs track 0 re-encoded to G711 (WebRTC can't carry AAC, and two AAC tracks crash
+// MediaMTX's MPEG-TS HLS muxer). Best-effort, short timeout; null on any failure = "leave as copy".
+export function ffprobeAudioCodec(rtspUrl) {
+  return new Promise((resolve) => {
+    const args = [
+      '-v', 'error', '-rtsp_transport', 'tcp', '-rw_timeout', '6000000',
+      '-select_streams', 'a:0', '-show_entries', 'stream=codec_name', '-of', 'default=nw=1:nk=1',
+      '-i', rtspUrl,
+    ];
+    let proc;
+    try {
+      proc = spawn('ffprobe', args, { stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch {
+      resolve(null);
+      return;
+    }
+    let out = '';
+    proc.stdout.on('data', (d) => (out += d.toString()));
+    const killer = setTimeout(() => proc.kill('SIGKILL'), 9000);
+    proc.on('error', () => { clearTimeout(killer); resolve(null); });
+    proc.on('exit', () => { clearTimeout(killer); resolve((out.trim().split('\n')[0] || '').trim() || null); });
+  });
+}
+
 // Full stream/codec dump of an RTSP URL for the "unsupported camera" report — the details needed to
 // add support (video codec/profile/resolution/pixel format, audio codec/sample-rate/channels). Never
 // throws; on failure returns { ok:false, error, stderr } with the last ffprobe error lines.

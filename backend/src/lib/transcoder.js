@@ -1,9 +1,22 @@
 import { spawn } from 'child_process';
 import { logger } from './logger.js';
 import { recordCameraEvent, EVENT } from './cameraEvents.js';
+import { ffprobeAudioCodec } from './rtspProbe.js';
 
 // camera_id -> { proc, stopped }
 const processes = new Map();
+
+// rtsp_url -> source audio codec (probed once, reused across restarts — the codec doesn't change while
+// a camera stays put). Lets buildArgs pick the right WebRTC audio track without an ffprobe per restart.
+const audioCodecCache = new Map();
+async function sourceIsAac(rtspUrl) {
+  if (!audioCodecCache.has(rtspUrl)) {
+    const codec = await ffprobeAudioCodec(rtspUrl);
+    if (!codec) return false; // couldn't probe (camera momentarily down?) — safe default, retry next start
+    audioCodecCache.set(rtspUrl, codec);
+  }
+  return audioCodecCache.get(rtspUrl) === 'aac';
+}
 
 const RESTART_DELAY_MS = 5000;
 // If SIGTERM hasn't actually stopped the process within this long, escalate to
@@ -11,7 +24,17 @@ const RESTART_DELAY_MS = 5000;
 // able to block a restart forever.
 const FORCE_KILL_TIMEOUT_MS = 3000;
 
-function buildArgs(rtspUrl, mediamtxPath) {
+function buildArgs(rtspUrl, mediamtxPath, aacSource) {
+  // Track 0 = the WebRTC (Low-latency) audio track. WebRTC can't carry AAC, and MediaMTX's MPEG-TS HLS
+  // muxer refuses more than one carriable audio track — so if the SOURCE is AAC, copying it here gives
+  // WebRTC an unusable track AND leaves two AAC tracks that crash HLS ("single audio track only" → no
+  // stream in Compatibility mode). For an AAC source we instead down-convert track 0 to G711 (µ-law,
+  // 8 kHz mono): WebRTC carries G711 natively, and MPEG-TS HLS can't carry G711 so it skips it, leaving
+  // the AAC track 1 as HLS's single audio track — exactly how a native-G711 camera already behaves. For
+  // a non-AAC source (G711 etc.) we keep the cheap passthrough copy, so those cameras are unchanged.
+  const track0 = aacSource
+    ? ['-ac:a:0', '1', '-ar:a:0', '8000', '-c:a:0', 'pcm_mulaw']
+    : ['-c:a:0', 'copy'];
   return [
     '-nostdin',
     '-loglevel', 'warning',
@@ -36,11 +59,10 @@ function buildArgs(rtspUrl, mediamtxPath) {
     '-map', '0:a:0?', // "?" makes these optional, in case a camera has no audio track at all
     '-map', '0:a:0?',
     '-c:v', 'copy',
-    // Two audio tracks, not one: WebRTC (Low Latency mode) can't decode AAC at all, and
-    // HLS (Compatibility mode) can't carry the original codec (often G711) at all. Each
-    // protocol picks whichever of these two tracks it actually supports and ignores the
-    // other - the same way MediaMTX already silently skips incompatible tracks per protocol.
-    '-c:a:0', 'copy',
+    // Two audio tracks, not one: WebRTC (Low Latency mode) and HLS (Compatibility mode) each carry a
+    // different codec, and MediaMTX silently hands each protocol whichever track it supports. Track 0
+    // is the WebRTC track (see the buildArgs note above for the AAC-source special case).
+    ...track0,
     // Track 1 (AAC, for HLS/Compatibility mode). Some cameras send audio with jittery,
     // occasionally-backward RTP timestamps (logged as "Queue input is backward in time");
     // fed straight to the AAC encoder those poison the HLS muxer's timeline and show up as
@@ -77,8 +99,13 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraNam
   // restart, causing repeated "broken pipe" failures rather than a single clean blip.
   await stopTranscoder(cameraId);
 
+  // Probe the source audio codec once (cached) so we can build the right WebRTC audio track. A probe
+  // failure/timeout returns false → the current passthrough-copy behaviour, so nothing regresses.
+  const aacSource = await sourceIsAac(rtspUrl);
+  if (aacSource) logger.info(`[ffmpeg:${mediamtxPath}] AAC-audio source — using G711 for the WebRTC track so HLS stays valid`);
+
   function launch() {
-    const proc = spawn('ffmpeg', buildArgs(rtspUrl, mediamtxPath), { stdio: ['ignore', 'ignore', 'pipe'] });
+    const proc = spawn('ffmpeg', buildArgs(rtspUrl, mediamtxPath, aacSource), { stdio: ['ignore', 'ignore', 'pipe'] });
     const entry = { proc, stopped: false };
     processes.set(cameraId, entry);
 
