@@ -4,6 +4,7 @@ import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
+import CribZonePicker from '../components/CribZonePicker.jsx';
 
 const minToHHMM = (m) => `${String(Math.floor((m || 0) / 60)).padStart(2, '0')}:${String((m || 0) % 60).padStart(2, '0')}`;
 const hhmmToMin = (s) => {
@@ -27,6 +28,7 @@ function fromCam(cam) {
     start: minToHHMM(hasWindow ? cam.detect_start : 20 * 60),
     end: minToHHMM(hasWindow ? cam.detect_end : 7 * 60),
     source: cam.detect_source === 'mqtt' ? 'mqtt' : 'framediff',
+    zone: cam.detect_zone || null,
     motion_mqtt_topic: cam.motion_mqtt_topic || '',
     motion_mqtt_value: cam.motion_mqtt_value || '',
     snapshot_url: cam.snapshot_url || '',
@@ -48,6 +50,7 @@ function toPayload(d) {
     start: hhmmToMin(d.start),
     end: hhmmToMin(d.end),
     source: d.source,
+    zone: d.zone ?? null,
     motion_mqtt_topic: d.motion_mqtt_topic,
     motion_mqtt_value: d.motion_mqtt_value,
     snapshot_url: d.snapshot_url,
@@ -128,7 +131,7 @@ export default function DetectionSettings() {
       <AppHeader title={TITLES[kind] || 'Detection'} back={back} />
       <main className="app-main">
         <div className="save-flag">{status === 'saving' ? 'Saving…' : status === 'saved' ? 'Saved ✓' : ''}</div>
-        {kind === 'motion' && <MotionForm d={d} apply={apply} />}
+        {kind === 'motion' && <MotionForm d={d} apply={apply} cameraId={id} />}
         {kind === 'sound' && <SoundForm d={d} apply={apply} />}
         {kind === 'schedule' && <ScheduleForm d={d} apply={apply} />}
       </main>
@@ -158,7 +161,7 @@ function Slider({ label, value, onChange, lowLabel, highLabel }) {
   );
 }
 
-function MotionForm({ d, apply }) {
+function MotionForm({ d, apply, cameraId }) {
   return (
     <>
       <EnableToggle checked={d.motion_enabled} onChange={(v) => apply({ motion_enabled: v })}
@@ -229,6 +232,15 @@ function MotionForm({ d, apply }) {
               a stream frame. Basic-auth in the URL works. Applies to both motion and sound alerts.
             </div>
           </div>
+
+          <div className="section-title">Crib area</div>
+          <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
+            {d.source === 'framediff'
+              ? 'Limit motion detection — and sleep tracking — to the crib, so movement elsewhere in the room isn’t counted. Leave as the whole frame to watch everything.'
+              : 'For sleep tracking: limit the movement signal to the crib so a fan or someone walking past isn’t counted as the baby stirring. (Motion alerts still come from the camera over MQTT.)'}
+          </div>
+          <CribZonePicker cameraId={cameraId} zone={d.zone} onChange={(zoneVal) => apply({ zone: zoneVal })} />
+
           <RecordClipsToggle d={d} apply={apply} />
         </>
       )}

@@ -9,6 +9,28 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-08-17
+
+### Added
+- **Two-way audio now works on ONVIF cameras (not just Hikvision).** Talk-back previously only supported
+  Hikvision's ISAPI protocol; cameras that do two-way audio over the ONVIF/RTSP audio backchannel (e.g.
+  Thingino/Sonoff) silently did nothing. Nightlight now speaks the RTSP backchannel too — added ONVIF
+  cameras that report an audio backchannel get talk-back automatically, reusing the stream credentials
+  (no separate login). Existing ONVIF cameras can enable it by re-running the ONVIF probe from the edit
+  screen.
+- **Sleep tracking (estimated).** Each child's page now shows a **"last night" sleep summary** — time
+  asleep, when they fell asleep and woke, number of wake-ups, and longest unbroken stretch — inferred
+  from overnight movement and sound (no wearable, nothing to start; it's a sleep-*pattern* estimate,
+  not a medical measurement). Works from any camera assigned to the child that runs motion or sound
+  detection; the nightly window is set under Settings. Paired with a new **crib-area picker** on a
+  camera's Motion detection screen: draw a box over the live view to focus motion detection and sleep
+  tracking on the crib, so a fan or someone walking past isn't counted.
+- **Room climate history.** For a camera with an MQTT temperature/humidity topic, Nightlight now keeps
+  a rolling history of its readings (sampled every few minutes) and shows a **last-24h temperature &
+  humidity chart** on that child's page. Previously these readings were live-only. This is the first
+  piece of the upcoming sleep-tracking feature — the same overnight history it will build on — and is
+  useful on its own for spotting a room getting too warm or dry.
+
 ## [0.16.0] - 2026-08-17
 
 ### Added
@@ -50,6 +72,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   mobile bar. Phone and tablet keep the familiar bottom tabs.
 
 ### Fixed
+- **Cameras that send AAC audio now work in Compatibility mode (and have Low-latency audio).** A camera
+  whose stream carries AAC audio (e.g. some Thingino builds) previously broke Compatibility (HLS) mode
+  entirely — MediaMTX's HLS muxer rejects two AAC audio tracks — and had no sound in Low-latency
+  (WebRTC can't carry AAC). Nightlight now detects an AAC source and builds the WebRTC audio track as
+  G711, so HLS gets a single valid audio track (video + sound in Compatibility) and Low-latency has
+  sound too. G711-audio cameras are unchanged.
 - **Clearer camera-report error when a camera can't be reached.** An unreachable camera in the "Camera
   not connecting?" report now reads "Timed out — no response from the camera (wrong IP/port, offline,
   or blocked by a firewall)" instead of the meaningless "ffprobe exited null".

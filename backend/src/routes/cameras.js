@@ -6,7 +6,7 @@ import { requireAuth, requireAdmin, requireAuthQueryOrHeader } from '../middlewa
 import { upsertPath, removePath, getPathStatus, toPathName } from '../lib/mediamtx.js';
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
 import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.js';
-import { startMotionDetector, stopMotionDetector } from '../lib/motionDetector.js';
+import { startMotionDetector, stopMotionDetector, motionLegWanted } from '../lib/motionDetector.js';
 import { startSoundDetector, stopSoundDetector } from '../lib/soundDetector.js';
 import { startClipCapture, stopClipCapture } from '../lib/clipCapture.js';
 import {
@@ -17,10 +17,11 @@ import {
   deleteClipForEvent,
   getClips,
 } from '../lib/detectionEvents.js';
-import { verifyTalkCreds } from '../lib/twoWayAudio.js';
+import { verifyTalkCreds, talkConfigured } from '../lib/twoWayAudio.js';
 import { getReading, subscribeAllCameraTopics, refreshMqttConnection } from '../lib/mqttClient.js';
 import { probeOnvifCamera, ptzNudge, ptzRelativeStep, probePtzRelativeSupport } from '../lib/onvif.js';
 import { validateRtspStream, probeRtspDetailed, ffprobeVersion } from '../lib/rtspProbe.js';
+import { captureSnapshot, fetchHttpSnapshot } from '../lib/snapshot.js';
 import { logger } from '../lib/logger.js';
 
 const router = Router();
@@ -49,6 +50,22 @@ router.get('/alerts/:id/clip', requireAuthQueryOrHeader, (req, res) => {
   const file = getEventClipFile(req.params.id);
   if (!file) return res.status(404).json({ error: 'No clip for this alert' });
   res.sendFile(file);
+});
+
+// Live still frame — the backdrop for the crib-zone picker. Query-token auth so an <img> can load it
+// (same reason as the alert snapshot). Prefers the camera's HTTP snapshot URL, else grabs one frame
+// off the local MediaMTX stream. Registered before requireAuth; the literal "snapshot" segment keeps
+// it clear of the other /:id routes.
+router.get('/:id/snapshot', requireAuthQueryOrHeader, async (req, res) => {
+  const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+  if (!cam) return res.status(404).json({ error: 'Camera not found' });
+  let img = null;
+  if (cam.snapshot_url && String(cam.snapshot_url).trim()) img = await fetchHttpSnapshot(cam.snapshot_url).catch(() => null);
+  if (!img) img = await captureSnapshot(cam.mediamtx_path).catch(() => null);
+  if (!img) return res.status(503).json({ error: 'Could not grab a frame right now' });
+  res.set('Content-Type', 'image/jpeg');
+  res.set('Cache-Control', 'no-store');
+  res.send(img);
 });
 
 router.use(requireAuth);
@@ -118,7 +135,7 @@ function publicCamera(cam, isAdmin) {
   // talk_configured / has_sub (safe for everyone) drive the tile's talk button + quality selector.
   const base = {
     ...rest,
-    talk_configured: !!(cam.talk_backend && talk_username && talk_password),
+    talk_configured: talkConfigured(cam),
     has_sub: !!(sub_rtsp_url && sub_rtsp_url.trim()),
     // Parse the crib zone (stored as a JSON string) into an object for the client.
     detect_zone: parseZone(cam.detect_zone),
@@ -365,6 +382,37 @@ router.get('/clips', requireAuth, (req, res) => {
   res.json(getClips());
 });
 
+// Historical temperature/humidity for one camera, for charting on the Child detail page. Any signed-in
+// user. `hours` (default 24, capped at 7 days) selects the window; readings are ascending by time so
+// the client can plot them directly. Empty array if the camera has no sensor / no samples yet.
+router.get('/:id/sensor-history', requireAuth, (req, res) => {
+  const hours = Math.min(168, Math.max(1, parseInt(req.query.hours, 10) || 24));
+  const rows = db
+    .prepare(
+      `SELECT created_at AS t, temperature, humidity FROM sensor_readings
+         WHERE camera_id = ? AND created_at >= datetime('now', ?)
+         ORDER BY created_at ASC`
+    )
+    .all(req.params.id, `-${hours} hours`);
+  res.json({ hours, readings: rows });
+});
+
+// Per-minute motion/sound activity timeline for one camera (the raw signal sleep tracking is built
+// on). Any signed-in user. `hours` (default 24, capped at 7 days); ascending by minute. Empty until
+// the camera has run a detector for a while.
+router.get('/:id/activity-history', requireAuth, (req, res) => {
+  const hours = Math.min(168, Math.max(1, parseInt(req.query.hours, 10) || 24));
+  const rows = db
+    .prepare(
+      `SELECT bucket_start AS t, motion_level, motion_peak, sound_level, sound_peak, motion_frames, sound_windows
+         FROM activity_samples
+         WHERE camera_id = ? AND bucket_start >= datetime('now', ?)
+         ORDER BY bucket_start ASC`
+    )
+    .all(req.params.id, `-${hours} hours`);
+  res.json({ hours, samples: rows });
+});
+
 // Bulk-delete clips (admin — this lives on the admin Settings screen). Body: { ids: [eventId, ...] }.
 router.post('/clips/delete', requireAdmin, (req, res) => {
   const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
@@ -455,10 +503,18 @@ router.post('/', requireAdmin, async (req, res) => {
   const onvifUser = isOnvif ? rtsp_username || null : null;
   const onvifPass = isOnvif ? rtsp_password || null : null;
   const profileToken = isOnvif ? onvif_profile_token || null : null;
-  // Two-way audio creds (optional at add time - a username enables the Hikvision ISAPI sink).
+  // Two-way audio backend: explicit talk creds enable the Hikvision ISAPI sink; otherwise an ONVIF
+  // camera that reports an audio backchannel gets the RTSP-backchannel sink, which reuses the stream
+  // credentials (no separate login to enter).
   const talkUser = talk_username && talk_username.trim() ? talk_username.trim() : null;
-  const talkBackend = talkUser ? 'hikvision-isapi' : null;
-  const talkPass = talkUser ? talk_password || null : null;
+  let talkBackend = null;
+  let talkPass = null;
+  if (talkUser) {
+    talkBackend = 'hikvision-isapi';
+    talkPass = talk_password || null;
+  } else if (isOnvif && backchannel === 'yes') {
+    talkBackend = 'onvif-backchannel';
+  }
   // Low-quality sub-stream: a path on the same camera (reuses the main host/port/creds).
   const subUrl = sub_rtsp_path && sub_rtsp_path.trim()
     ? assembleRtspUrl({ host: rtsp_host, port: rtsp_port, path: sub_rtsp_path.trim(), username: rtsp_username, password: rtsp_password })
@@ -581,6 +637,12 @@ router.put('/:id', requireAdmin, async (req, res) => {
     // ONVIF control (PTZ) reuses the RTSP credentials the user entered.
     if (rtsp_username !== undefined) onvifUser = rtsp_username || null;
     if (rtsp_password) onvifPass = rtsp_password; // blank keeps the stored one
+    // If the (re-)probe reports an audio backchannel and there's no talk backend configured yet,
+    // enable the ONVIF/RTSP backchannel sink (reuses the stream credentials). Won't touch an existing
+    // Hikvision or already-set backend, and won't fire when talk creds are being edited above.
+    if (talk_username === undefined && talkBackend == null && backchannel === 'yes') {
+      talkBackend = 'onvif-backchannel';
+    }
   }
   db.prepare(`UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?,
       talk_backend = ?, talk_username = ?, talk_password = ?, sub_rtsp_url = ?,
@@ -615,9 +677,10 @@ router.put('/:id', requireAdmin, async (req, res) => {
     } catch (e) {
       logger.error(`[substream] failed to apply for ${updated.name}: ${e.message}`);
     }
-    // The stream (or which path the detector should read) may have changed — restart the
-    // motion detector so it re-attaches to the current stream. No-op if detection is off.
-    if (updated.detect_motion_enabled) await startMotionDetector(updated).catch(() => {});
+    // The stream (or which path the detector should read) may have changed — restart the pixel-diff
+    // leg so it re-attaches to the current stream. motionLegWanted covers both the alerting leg and
+    // the activity-only sleep leg; no-op if neither applies.
+    if (motionLegWanted(updated)) await startMotionDetector(updated).catch(() => {});
     else await stopMotionDetector(updated.id).catch(() => {});
     if (updated.detect_sound_enabled) await startSoundDetector(updated).catch(() => {});
     else await stopSoundDetector(updated.id).catch(() => {});
@@ -645,7 +708,7 @@ router.put('/:id/enabled', requireAdmin, async (req, res) => {
     }
     await startTranscoder(req.params.id, existing.rtsp_url, existing.mediamtx_path, existing.name);
     if (subConfigured(existing)) await startSubStream(existing).catch((e) => logger.error(`[substream] enable failed: ${e.message}`));
-    if (existing.detect_motion_enabled) await startMotionDetector(existing).catch(() => {});
+    if (motionLegWanted(existing)) await startMotionDetector(existing).catch(() => {});
     if (existing.detect_sound_enabled) await startSoundDetector(existing).catch(() => {});
     if (existing.detect_record_clips) startClipCapture(existing);
   } else {
@@ -732,7 +795,7 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
   // re-enabled). startMotionDetector itself no-ops for the 'mqtt' source, so switching a camera to
   // MQTT here stops any running frame-diff leg; switching back to frame-diff starts it.
   if (!updated.disabled) {
-    if (updated.detect_motion_enabled) {
+    if (motionLegWanted(updated)) {
       await startMotionDetector(updated).catch((e) => logger.error(`[detect] start failed: ${e.message}`));
     } else {
       await stopMotionDetector(updated.id).catch(() => {});
@@ -752,7 +815,7 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
 });
 
 // Dedicated assignment endpoint: attach (or unattach with child_id: null) a camera to a child.
-router.put('/:id/assign', (req, res) => {
+router.put('/:id/assign', async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
   const { child_id } = req.body || {};
@@ -761,7 +824,14 @@ router.put('/:id/assign', (req, res) => {
     if (!child) return res.status(400).json({ error: 'Child not found' });
   }
   db.prepare('UPDATE cameras SET child_id = ? WHERE id = ?').run(child_id || null, req.params.id);
-  res.json(db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id));
+  const updated = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+  // Child assignment drives the activity-only sleep-motion leg (motionLegWanted keys off child_id), so
+  // (un)assigning may start or stop it. No-op for a camera already covered by the frame-diff alert leg.
+  if (!updated.disabled) {
+    if (motionLegWanted(updated)) await startMotionDetector(updated).catch(() => {});
+    else await stopMotionDetector(updated.id).catch(() => {});
+  }
+  res.json(updated);
 });
 
 router.delete('/:id', requireAdmin, async (req, res) => {

@@ -4,6 +4,7 @@ import { getPathStatus } from './mediamtx.js';
 import { inActiveWindow } from './detectSchedule.js';
 import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
+import { recordSound } from './activityTracker.js';
 
 // Server-side SOUND detection, parallel to motionDetector.js. Per camera with sound detection
 // enabled, a cheap audio-only FFmpeg leg reads the already-published MediaMTX stream and reports a
@@ -137,6 +138,10 @@ export async function startSoundDetector(camera) {
         baseline = rms;
         return;
       }
+
+      // Feed loudness-above-ambient into the per-minute activity timeline (independent of the alert
+      // margin/cooldown), so sleep tracking sees continuous noise level, not just cry alerts.
+      recordSound(camera.id, Math.max(0, rms - baseline));
 
       // Trailing average over the confirm window. A cry is loud ON AVERAGE across those seconds even
       // as it pulses, so averaging is far more robust than requiring every instant to clear the bar.
