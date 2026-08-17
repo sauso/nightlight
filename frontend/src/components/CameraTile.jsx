@@ -25,7 +25,7 @@ function detectionPayload(cam, patch) {
     schedule_enabled: !!cam.detect_schedule_enabled,
     start: cam.detect_start ?? 1200,
     end: cam.detect_end ?? 420,
-    source: cam.detect_source === 'mqtt' ? 'mqtt' : 'framediff',
+    source: cam.detect_source === 'mqtt' ? 'mqtt' : cam.detect_source === 'onvif' ? 'onvif' : 'framediff',
     motion_mqtt_topic: cam.motion_mqtt_topic || '',
     motion_mqtt_value: cam.motion_mqtt_value || '',
     snapshot_url: cam.snapshot_url || '',

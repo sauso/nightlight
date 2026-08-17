@@ -118,11 +118,12 @@ export function isDetecting(cameraId) {
   return detectors.has(cameraId);
 }
 
-// Does this camera run the frame-diff leg to ALERT? Only a frame-diff-source camera with motion
-// detection on — a camera on the 'mqtt' source detects motion itself (mqttClient.js) and never alerts
-// from this leg.
+// Does this camera run the frame-diff leg to ALERT? Only a 'framediff'-source camera with motion
+// detection on. A camera on the 'mqtt' source detects motion itself (mqttClient.js) and one on the
+// 'onvif' source subscribes to camera events (onvifMotion.js) — both alert elsewhere, so this leg
+// must be explicit ('=== framediff'), not "anything but mqtt", or an ONVIF camera would double-alert.
 export function motionAlerting(camera) {
-  return !!camera?.detect_motion_enabled && camera.detect_source !== 'mqtt' && !camera.disabled;
+  return !!camera?.detect_motion_enabled && camera.detect_source === 'framediff' && !camera.disabled;
 }
 
 // Should the pixel-diff leg run at all? Either to alert (above) OR "activity-only" for sleep tracking:

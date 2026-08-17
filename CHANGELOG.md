@@ -9,6 +9,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **Camera-native motion over ONVIF.** Motion detection has a third source (Camera → Motion detection),
+  alongside Nightlight's own frame-diff and "Camera via MQTT": **Camera via ONVIF**, where the camera
+  reports motion over its ONVIF Event service and Nightlight subscribes directly — no MQTT broker
+  required, and almost no server CPU. The option appears only for cameras that actually advertise a
+  motion event topic (detected during the ONVIF probe); existing ONVIF cameras can enable it by
+  re-running the ONVIF probe from the edit screen. Sleep tracking is unaffected — a child's camera still
+  keeps its own in-app movement timeline regardless of which source fires alerts.
+
 ### Changed
 - **Lower Compatibility-mode latency.** HLS segments are now 1s (was 2s), so Compatibility (HLS) mode
   runs closer to live on cameras with a short keyframe interval. For the lowest lag, set the camera's
