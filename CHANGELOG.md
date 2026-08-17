@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-08-18
+
 ### Added
 - **Camera-native motion over ONVIF.** Motion detection has a third source (Camera → Motion detection),
   alongside Nightlight's own frame-diff and "Camera via MQTT": **Camera via ONVIF**, where the camera
