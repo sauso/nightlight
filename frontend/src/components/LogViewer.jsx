@@ -10,6 +10,7 @@ const LOG_FILTERS = [
   { label: 'Errors', q: 'error' },
   { label: 'Warnings', q: 'warn' },
   { label: 'Motion', q: 'motion' },
+  { label: 'ONVIF motion', q: 'onvif-motion' },
   { label: 'Sound', q: 'sound' },
   { label: 'MQTT', q: 'mqtt' },
   { label: 'WebRTC', q: 'webrtc' },
