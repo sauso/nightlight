@@ -88,6 +88,7 @@ export default function CameraSettings() {
         discovery_source: 'onvif',
         onvif_device_url: r.onvifDeviceUrl,
         backchannel_supported: r.backchannel,
+        motion_events_supported: r.motionEvents,
         ptz_supported: r.ptz ? 1 : 0,
         onvif_profile_token: r.profileToken || null,
       };
@@ -95,8 +96,9 @@ export default function CameraSettings() {
       const res = r.video?.width ? `${r.video.codec || ''} ${r.video.width}×${r.video.height}`.trim() : r.video?.codec || '';
       const talk = r.backchannel === 'yes' ? ' · two-way audio' : r.backchannel === 'no' ? ' · no two-way audio' : '';
       const ptz = r.ptz ? ' · PTZ' : '';
+      const motion = r.motionEvents === 'yes' ? ' · ONVIF motion' : '';
       const low = r.subRtspPath ? ' · low-quality stream' : '';
-      setOnvifMsg(`Found stream${res ? ` — ${res}` : ''}${talk}${ptz}${low}. Port & path filled in.`);
+      setOnvifMsg(`Found stream${res ? ` — ${res}` : ''}${talk}${ptz}${motion}${low}. Port & path filled in.`);
     } catch (err) {
       setPageError(err.message);
     } finally {
