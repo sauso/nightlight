@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-08-17
+
 ### Added
 - **Two-way audio now works on ONVIF cameras (not just Hikvision).** Talk-back previously only supported
   Hikvision's ISAPI protocol; cameras that do two-way audio over the ONVIF/RTSP audio backchannel (e.g.
