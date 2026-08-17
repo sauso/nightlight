@@ -36,6 +36,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   attempt to escape the snapshot/clip directory, in addition to the existing integer-id and
   under-directory validation. No exploitable path existed (the flag from a security scan was a false
   positive), but the extra layer makes containment enforced by Express and clears the finding.
+- **Removed string interpolation from SQL statements.** The retention-prune queries (activity samples,
+  sensor readings) and the MFA-reset console script no longer build their SQL by interpolating values
+  into the query text — the queries are now fully static with values bound as parameters. The
+  interpolated pieces were all hardcoded constants (retention days) or fixed literals (never user
+  input), so no SQL injection was possible; this removes the pattern a security scan flagged.
 
 ## [0.17.0] - 2026-08-17
 
