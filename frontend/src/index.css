@@ -1083,11 +1083,12 @@ body.in-pip .tile-menu-backdrop {
 .crib__stage.is-ready { cursor: crosshair; }
 .crib__img { display: block; width: 100%; height: auto; -webkit-user-drag: none; }
 .crib__msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 6px; color: #cdd0ff; font-size: 13px; text-align: center; padding: 12px; }
-.crib__zone { position: absolute; border: 2px solid var(--accent); background: rgba(244, 197, 106, 0.12); box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.42); cursor: move; }
+.crib__zone { position: absolute; border: 2px solid rgba(244, 197, 106, 0.75); background: rgba(244, 197, 106, 0.10); cursor: move; }
+.crib__zone.is-sel { border-color: var(--accent); background: rgba(244, 197, 106, 0.20); box-shadow: 0 0 0 1px var(--accent); }
 .crib__handle { position: absolute; width: 16px; height: 16px; background: #fff; border: 2px solid var(--accent); border-radius: 50%; transform: translate(-50%, -50%); touch-action: none; cursor: pointer; }
 .crib__row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
-.crib__btns { display: flex; gap: 8px; }
-.btn-sm { padding: 5px 11px; font-size: 12px; }
+.crib__btns { display: flex; gap: 8px; flex-shrink: 0; }
+.btn-sm { padding: 6px 14px; font-size: 12.5px; white-space: nowrap; }
 .linkbtn { background: none; border: none; color: var(--accent); text-decoration: underline; cursor: pointer; padding: 0; font: inherit; }
 
 /* Room-climate sensor history (Child detail). Temp + humidity sparklines from sensor_readings. */
