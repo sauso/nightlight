@@ -18,7 +18,7 @@ import {
   deleteClipForEvent,
   getClips,
 } from '../lib/detectionEvents.js';
-import { verifyTalkCreds, talkConfigured } from '../lib/twoWayAudio.js';
+import { verifyTalkCreds, talkConfigured, verifyBackchannel } from '../lib/twoWayAudio.js';
 import { getReading, subscribeAllCameraTopics, refreshMqttConnection } from '../lib/mqttClient.js';
 import { probeOnvifCamera, ptzNudge, ptzRelativeStep, probePtzRelativeSupport } from '../lib/onvif.js';
 import { validateRtspStream, probeRtspDetailed, ffprobeVersion } from '../lib/rtspProbe.js';
@@ -521,13 +521,18 @@ router.post('/', requireAdmin, async (req, res) => {
   const onvifUser = isOnvif ? rtsp_username || null : null;
   const onvifPass = isOnvif ? rtsp_password || null : null;
   const profileToken = isOnvif ? onvif_profile_token || null : null;
-  // Two-way audio backend: explicit talk creds enable the Hikvision ISAPI sink; otherwise an ONVIF
-  // camera that reports an audio backchannel gets the RTSP-backchannel sink, which reuses the stream
-  // credentials (no separate login to enter).
-  const talkUser = talk_username && talk_username.trim() ? talk_username.trim() : null;
+  // Two-way audio backend, chosen by what the camera actually answers (not just what was typed):
+  // if the ONVIF/RTSP audio backchannel verifies live, use it (reuses the stream creds, right protocol
+  // for Thingino/Sonoff & most ONVIF cams); else explicit talk creds enable the Hikvision ISAPI sink
+  // (a real Hikvision won't answer the backchannel); else fall back to the capability-based default if
+  // the camera was unreachable at add time. Picking by verification is what keeps the protocol correct.
+  let talkUser = talk_username && talk_username.trim() ? talk_username.trim() : null;
   let talkBackend = null;
   let talkPass = null;
-  if (talkUser) {
+  if (isOnvif && backchannel === 'yes' && (await verifyBackchannel(rtsp_url))) {
+    talkBackend = 'onvif-backchannel';
+    talkUser = null; // creds come from the stream URL
+  } else if (talkUser) {
     talkBackend = 'hikvision-isapi';
     talkPass = talk_password || null;
   } else if (isOnvif && backchannel === 'yes') {
@@ -657,10 +662,19 @@ router.put('/:id', requireAdmin, async (req, res) => {
     // ONVIF control (PTZ) reuses the RTSP credentials the user entered.
     if (rtsp_username !== undefined) onvifUser = rtsp_username || null;
     if (rtsp_password) onvifPass = rtsp_password; // blank keeps the stored one
-    // If the (re-)probe reports an audio backchannel and there's no talk backend configured yet,
-    // enable the ONVIF/RTSP backchannel sink (reuses the stream credentials). Won't touch an existing
-    // Hikvision or already-set backend, and won't fire when talk creds are being edited above.
-    if (talk_username === undefined && talkBackend == null && backchannel === 'yes') {
+    // Self-correct the talk backend on a re-probe: if the camera actually answers the ONVIF/RTSP audio
+    // backchannel (verified live with the stream creds), switch to it — even over a stale/mismatched
+    // stored backend (e.g. legacy hikvision-isapi from before this protocol existed, or left behind when
+    // the camera was re-pointed at a different device). This is the "check and update to the correct
+    // protocol on change" behaviour: a real Hikvision won't answer the backchannel and stays on ISAPI.
+    // Skip when the user is explicitly disabling talk in this same request.
+    const disablingTalk = talk_username !== undefined && !String(talk_username).trim();
+    if (!disablingTalk && backchannel === 'yes' && (await verifyBackchannel(newRtsp))) {
+      talkBackend = 'onvif-backchannel';
+      talkUser = null; talkPass = null; // backchannel uses the stream creds
+    } else if (talk_username === undefined && talkBackend == null && backchannel === 'yes') {
+      // Couldn't verify (camera momentarily unreachable) but capability says yes — keep the old
+      // set-if-none default so we don't regress.
       talkBackend = 'onvif-backchannel';
     }
   }

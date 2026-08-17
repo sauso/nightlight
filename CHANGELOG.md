@@ -30,6 +30,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   them. Tap a box to move or resize it, "Remove box" deletes the selected one, "Whole frame" clears all.
   Existing single-box zones keep working. (Also: the picker's buttons no longer wrap onto two lines.)
 
+### Fixed
+- **Talk-back now picks — and self-corrects — the right protocol.** Two-way audio has two backends
+  (Hikvision ISAPI over HTTP, and the ONVIF/RTSP audio backchannel used by Thingino/Sonoff and most
+  ONVIF cams). Previously the backend was chosen once and never revisited, so a camera that was
+  re-pointed at a different device, or added before the ONVIF backchannel existed, could keep talking
+  the wrong protocol — you'd press talk and nothing came out of the speaker. Now, whenever a camera is
+  added or its ONVIF details are re-fetched, Nightlight actively verifies which protocol the camera
+  really answers and stores that one, correcting a stale/mismatched backend. Re-fetch ONVIF on an
+  affected camera's edit screen to fix it. (A genuine Hikvision won't answer the backchannel and stays
+  on ISAPI.)
+
 ### Security
 - **Hardened alert snapshot/clip serving against path traversal.** The routes that serve an alert's
   snapshot and recorded clip now hand `res.sendFile` a jailed `root` so Express itself rejects any
