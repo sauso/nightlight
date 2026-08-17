@@ -50,27 +50,41 @@ function activeFractionThreshold(sensitivity) {
   return 0.002 + (0.1 - 0.002) * ((100 - s) / 99);
 }
 
-// detect_zone JSON ({x,y,w,h} in 0..1 frame fractions) -> pixel bounds in the analysis frame.
-// Anything missing/degenerate falls back to the whole frame.
-function zoneBounds(camera) {
-  let z = null;
+// detect_zone JSON -> a per-pixel mask over the analysis frame. The zone is a LIST of rectangles
+// ({x,y,w,h} in 0..1 frame fractions); a pixel counts if it falls in ANY of them (so overlapping or
+// diagonal boxes are handled correctly, each pixel counted once). Returns { mask, zonePixels }: mask
+// is a Uint8Array(FW*FH) of 0/1, or null when the whole frame is used (no/degenerate zone), in which
+// case zonePixels is the full frame. A legacy single-object zone still works (treated as one rect).
+function buildZoneMask(camera) {
+  let rects = null;
   if (camera.detect_zone) {
     try {
-      z = JSON.parse(camera.detect_zone);
+      const z = JSON.parse(camera.detect_zone);
+      rects = Array.isArray(z) ? z : [z];
     } catch {
-      z = null;
+      rects = null;
     }
   }
-  if (!z || [z.x, z.y, z.w, z.h].some((v) => typeof v !== 'number')) {
-    return { x0: 0, y0: 0, x1: FW, y1: FH };
-  }
+  rects = (rects || []).filter((r) => r && [r.x, r.y, r.w, r.h].every((v) => typeof v === 'number'));
+  if (rects.length === 0) return { mask: null, zonePixels: FW * FH };
+
   const clamp = (v) => Math.min(1, Math.max(0, v));
-  const x0 = Math.floor(clamp(z.x) * FW);
-  const y0 = Math.floor(clamp(z.y) * FH);
-  const x1 = Math.min(FW, Math.ceil(clamp(z.x + z.w) * FW));
-  const y1 = Math.min(FH, Math.ceil(clamp(z.y + z.h) * FH));
-  if (x1 - x0 < 2 || y1 - y0 < 2) return { x0: 0, y0: 0, x1: FW, y1: FH };
-  return { x0, y0, x1, y1 };
+  const mask = new Uint8Array(FW * FH);
+  let count = 0;
+  for (const z of rects) {
+    const x0 = Math.floor(clamp(z.x) * FW);
+    const y0 = Math.floor(clamp(z.y) * FH);
+    const x1 = Math.min(FW, Math.ceil(clamp(z.x + z.w) * FW));
+    const y1 = Math.min(FH, Math.ceil(clamp(z.y + z.h) * FH));
+    for (let y = y0; y < y1; y++) {
+      let idx = y * FW + x0;
+      for (let x = x0; x < x1; x++, idx++) {
+        if (!mask[idx]) { mask[idx] = 1; count++; }
+      }
+    }
+  }
+  if (count < 4) return { mask: null, zonePixels: FW * FH };
+  return { mask, zonePixels: count };
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -130,8 +144,7 @@ export async function startMotionDetector(camera) {
     logger.info(`[detect] activity-only motion leg for "${camera.name}" (sleep tracking; no alerts)`);
   }
 
-  const { x0, y0, x1, y1 } = zoneBounds(camera);
-  const zonePixels = (x1 - x0) * (y1 - y0);
+  const { mask, zonePixels } = buildZoneMask(camera);
   const threshold = activeFractionThreshold(camera.detect_sensitivity);
   const confirmMs = Math.max(0, (camera.detect_confirm_s ?? 3) * 1000);
   const cooldownMs = Math.max(1, camera.detect_cooldown_s ?? 60) * 1000;
@@ -168,10 +181,18 @@ export async function startMotionDetector(camera) {
     function handleFrame(frame) {
       if (prev) {
         let changed = 0;
-        for (let y = y0; y < y1; y++) {
-          let idx = y * FW + x0;
-          for (let x = x0; x < x1; x++, idx++) {
-            const d = frame[idx] - prev[idx];
+        // Count changed pixels inside the crib mask (any of its rectangles), or the whole frame when
+        // there's no zone. The mask counts each pixel once, so overlapping/diagonal boxes are fine.
+        if (mask) {
+          for (let i = 0; i < FRAME_BYTES; i++) {
+            if (mask[i]) {
+              const d = frame[i] - prev[i];
+              if (d > PIXEL_DELTA || d < -PIXEL_DELTA) changed++;
+            }
+          }
+        } else {
+          for (let i = 0; i < FRAME_BYTES; i++) {
+            const d = frame[i] - prev[i];
             if (d > PIXEL_DELTA || d < -PIXEL_DELTA) changed++;
           }
         }

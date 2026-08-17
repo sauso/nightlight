@@ -9,6 +9,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+- **The crib area can be more than one box.** The crib-zone picker (Camera → Motion detection) now
+  supports **multiple rectangles**, so a crib on a diagonal (or an awkward corner) can be covered by a
+  few boxes instead of one loose one — motion detection and sleep tracking count movement inside any of
+  them. Tap a box to move or resize it, "Remove box" deletes the selected one, "Whole frame" clears all.
+  Existing single-box zones keep working. (Also: the picker's buttons no longer wrap onto two lines.)
+
 ## [0.17.0] - 2026-08-17
 
 ### Added

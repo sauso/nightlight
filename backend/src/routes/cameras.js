@@ -106,27 +106,38 @@ function parseRtspComponents(url) {
 // Admins additionally get the address broken into fields (for the edit form) plus a
 // credential-free display URL and a flag for whether a password is set. ONVIF credentials
 // (used server-side for PTZ) are always stripped.
-// The crib zone is stored as a JSON string {x,y,w,h} in 0..1 frame fractions (null = whole
-// frame). Parse leniently for output; null on anything malformed.
+// The crib zone is stored as a JSON string — a LIST of rectangles [{x,y,w,h}, ...] in 0..1 frame
+// fractions (null/empty = whole frame). Multiple rectangles let a crib on a diagonal be covered by a
+// few boxes. A legacy single-object `{x,y,w,h}` still reads correctly (treated as a one-item list).
+// Parse leniently for output; null on anything malformed.
 function parseZone(raw) {
   if (!raw) return null;
   try {
     const z = JSON.parse(raw);
-    if (z && ['x', 'y', 'w', 'h'].every((k) => typeof z[k] === 'number')) return z;
+    const rects = (Array.isArray(z) ? z : [z]).filter(
+      (r) => r && ['x', 'y', 'w', 'h'].every((k) => typeof r[k] === 'number')
+    );
+    return rects.length ? rects : null;
   } catch {
     /* fall through */
   }
   return null;
 }
 
-// Validate + clamp a zone from the client into a storable JSON string (or null = whole frame).
+// Validate + clamp a zone (single rect or a list) from the client into a storable JSON list string
+// (or null = whole frame). Degenerate rectangles are dropped.
 function serializeZone(z) {
   if (!z) return null;
-  const nums = ['x', 'y', 'w', 'h'].map((k) => Number(z[k]));
-  if (nums.some((n) => !Number.isFinite(n))) return null;
-  const [x, y, w, h] = nums.map((n) => Math.min(1, Math.max(0, n)));
-  if (w <= 0 || h <= 0) return null;
-  return JSON.stringify({ x, y, w, h });
+  const rects = Array.isArray(z) ? z : [z];
+  const clean = [];
+  for (const r of rects) {
+    const nums = ['x', 'y', 'w', 'h'].map((k) => Number(r?.[k]));
+    if (nums.some((n) => !Number.isFinite(n))) continue;
+    const [x, y, w, h] = nums.map((n) => Math.min(1, Math.max(0, n)));
+    if (w <= 0.02 || h <= 0.02) continue;
+    clean.push({ x, y, w, h });
+  }
+  return clean.length ? JSON.stringify(clean) : null;
 }
 
 function publicCamera(cam, isAdmin) {
