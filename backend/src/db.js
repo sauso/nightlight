@@ -133,6 +133,29 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_activity_samples_cam_time ON activity_samples(camera_id, bucket_start);
 
+  -- One computed sleep summary per child per night (see lib/sleepAnalysis.js). A nightly job reads the
+  -- child's cameras' activity_samples over the configured night window, infers asleep/awake per minute,
+  -- and stores the derived metrics here so the app shows "last night" without recomputing. night_date is
+  -- the LOCAL calendar date the night started (its evening). UNIQUE(child_id, night_date) so a recompute
+  -- (after tuning) overwrites rather than duplicates. Times are UTC; status: ok | no_sleep | no_data.
+  CREATE TABLE IF NOT EXISTS sleep_nights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    child_id TEXT NOT NULL,
+    night_date TEXT NOT NULL,
+    window_start TEXT NOT NULL,
+    window_end TEXT NOT NULL,
+    status TEXT NOT NULL,
+    onset_at TEXT,
+    wake_at TEXT,
+    asleep_minutes INTEGER,
+    awake_minutes INTEGER,
+    wake_count INTEGER,
+    longest_stretch_minutes INTEGER,
+    coverage_minutes INTEGER,
+    computed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (child_id, night_date)
+  );
+
   -- FCM device tokens for push notifications (one row per app install that registered). The
   -- token is the primary key so re-registering the same device is idempotent; user_id is who
   -- was logged in when it registered (informational). Tokens FCM reports as dead are pruned by
@@ -287,6 +310,14 @@ if (!settingsColumns.includes('clip_retention_days')) {
 if (!settingsColumns.includes('camera_offline_alert_enabled')) {
   db.exec('ALTER TABLE settings ADD COLUMN camera_offline_alert_enabled INTEGER NOT NULL DEFAULT 0');
   db.exec('ALTER TABLE settings ADD COLUMN camera_offline_alert_minutes INTEGER NOT NULL DEFAULT 5');
+}
+
+// Sleep tracking (Stage 2): the nightly "night window" in the app timezone, as 'HH:MM' local times.
+// The window bounds where sleep is inferred from the per-minute activity timeline; it wraps midnight
+// when end <= start (the default 19:00–07:00). Global for now; a per-child override can come later.
+if (!settingsColumns.includes('sleep_window_start')) {
+  db.exec("ALTER TABLE settings ADD COLUMN sleep_window_start TEXT NOT NULL DEFAULT '19:00'");
+  db.exec("ALTER TABLE settings ADD COLUMN sleep_window_end TEXT NOT NULL DEFAULT '07:00'");
 }
 
 if (!camerasColumns.includes('mqtt_topic')) {
