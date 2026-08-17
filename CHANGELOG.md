@@ -24,6 +24,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   also now bridges short quiet gaps, so intermittent fussing reads as one awakening rather than several
   missed stirs. (Outside-crib tracking starts collecting from this release; it doesn't backfill past
   nights. Motion *alerts* are unchanged — still scoped to the crib zone.)
+- **Live "tonight so far" sleep.** The summary and detail no longer wait for the window to close in the
+  morning: while a night is in progress the child's tile shows **"Tonight · so far"** and updates as the
+  night goes, so an early-morning wake shows within a minute or two instead of only after the 7am window
+  close. The detail timeline marks "as of now" and refreshes live; the final stored summary is still
+  written when the window closes.
 
 ## [0.18.0] - 2026-08-18
 

@@ -50,16 +50,17 @@ export default function SleepDetail() {
     [tz]
   );
 
-  // Pick the initial date from the latest stored night (falls back to yesterday if none stored yet).
+  // Start on the live night — the one in progress if a window is open (so you land on "tonight · so
+  // far"), else the last completed night. That date is also the max the picker allows.
   useEffect(() => {
     let alive = true;
     const fallback = addDays(todayLocal, -1);
-    api.get(`/children/${id}/sleep?nights=1`)
+    api.get(`/children/${id}/sleep/live`)
       .then((r) => {
-        const latest = r?.nights?.[0]?.night_date || fallback;
+        const nd = r?.night?.night_date || fallback;
         if (!alive) return;
-        setMaxDate(latest > fallback ? latest : fallback);
-        setDate(latest);
+        setMaxDate(nd > fallback ? nd : fallback);
+        setDate(nd);
       })
       .catch(() => { if (alive) { setMaxDate(fallback); setDate(fallback); } });
     return () => { alive = false; };
@@ -69,11 +70,14 @@ export default function SleepDetail() {
     if (!date) return;
     let alive = true;
     setNight(undefined);
-    api.get(`/children/${id}/sleep/${date}?detail=1`)
+    const load = () => api.get(`/children/${id}/sleep/${date}?detail=1`)
       .then((r) => { if (alive) setNight(r || null); })
       .catch(() => { if (alive) setNight(null); });
-    return () => { alive = false; };
-  }, [id, date]);
+    load();
+    // Keep the live (in-progress) night fresh — only the latest night can still be changing.
+    const t = date === maxDate ? setInterval(load, 2 * 60 * 1000) : null;
+    return () => { alive = false; if (t) clearInterval(t); };
+  }, [id, date, maxDate]);
 
   const minDate = maxDate ? addDays(maxDate, -(HISTORY_DAYS - 1)) : null;
   const canPrev = date && minDate && date > minDate;
@@ -103,7 +107,10 @@ export default function SleepDetail() {
             <ChevronLeft size={20} />
           </button>
           <label className="sleep-nav__date">
-            <span className="sleep-nav__date-label">{date ? fmtDateLong(date) : '…'}</span>
+            <span className="sleep-nav__date-label">
+              {date ? fmtDateLong(date) : '…'}
+              {night?.in_progress && <span className="sleep-live-badge">so far</span>}
+            </span>
             <span className="sleep-nav__date-sub">night of</span>
             {date && (
               <input type="date" className="sleep-nav__date-input" value={date} min={minDate || undefined} max={maxDate || undefined}
@@ -143,21 +150,28 @@ function NightBody({ night, fmtTime, tz }) {
     return <div className="card"><div className="camera-tile__sub" style={{ padding: 14 }}>No clear sleep detected in this night’s window.</div></div>;
   }
 
-  const range = night.wake_at
-    ? `${fmtTime(night.onset_at)} – ${fmtTime(night.wake_at)}`
-    : `from ${fmtTime(night.onset_at)} · still asleep at ${fmtTime(night.window_end)}`;
+  const range = night.in_progress
+    ? night.wake_at
+      ? `${fmtTime(night.onset_at)} – awake since ${fmtTime(night.wake_at)}`
+      : `asleep since ${fmtTime(night.onset_at)} (ongoing)`
+    : night.wake_at
+      ? `${fmtTime(night.onset_at)} – ${fmtTime(night.wake_at)}`
+      : `from ${fmtTime(night.onset_at)} · still asleep at ${fmtTime(night.window_end)}`;
   const wakes = night.wakes || [];
   const visits = night.visits || [];
+  // Coverage is measured against elapsed time so far for a live night, not the full window.
+  const covEnd = night.in_progress && night.as_of ? night.as_of : night.window_end;
+  const covPct = Math.round((night.coverage_minutes / Math.max(1, Math.round((utcMs(covEnd) - utcMs(night.window_start)) / 60000))) * 100);
 
   return (
     <>
       <div className="card sleep-detail__summary">
-        <div className="sleep-detail__big">{fmtDurBig(night.asleep_minutes)}<span> asleep</span></div>
+        <div className="sleep-detail__big">{fmtDurBig(night.asleep_minutes)}<span> asleep{night.in_progress ? ' so far' : ''}</span></div>
         <div className="sleep-detail__stats">
-          <Stat label="Asleep from → to" value={range} />
+          <Stat label={night.in_progress ? 'Asleep' : 'Asleep from → to'} value={range} />
           <Stat label="Wake-ups" value={String(night.wake_count ?? 0)} />
           <Stat label="Longest stretch" value={fmtDurAbbr(night.longest_stretch_minutes)} />
-          <Stat label="Coverage" value={`${Math.round((night.coverage_minutes / windowMinutes(night)) * 100)}%`} />
+          <Stat label="Coverage" value={`${covPct}%`} />
         </div>
       </div>
 
@@ -238,6 +252,7 @@ function Timeline({ night, fmtTime, tz }) {
 
   const onsetPct = pctOf(night.onset_at, startMs, totalMs);
   const wakePct = night.wake_at ? pctOf(night.wake_at, startMs, totalMs) : null;
+  const nowPct = night.in_progress && night.as_of ? pctOf(night.as_of, startMs, totalMs) : null;
   const visits = night.visits || [];
 
   return (
@@ -259,6 +274,7 @@ function Timeline({ night, fmtTime, tz }) {
         ))}
         {onsetPct != null && <span className="sleep-tl__mark" style={{ left: `${onsetPct}%` }} />}
         {wakePct != null && <span className="sleep-tl__mark" style={{ left: `${wakePct}%` }} />}
+        {nowPct != null && <span className="sleep-tl__now" style={{ left: `${nowPct}%` }} title="as of now" />}
       </div>
       <div className="sleep-tl__axis">
         {ticks.map((t, i) => (
@@ -278,7 +294,6 @@ function Timeline({ night, fmtTime, tz }) {
 // --- small helpers ---
 const utcMs = (s) => new Date(String(s).replace(' ', 'T') + 'Z').getTime();
 const pctOf = (s, startMs, totalMs) => (s ? ((utcMs(s) - startMs) / totalMs) * 100 : null);
-const windowMinutes = (night) => Math.max(1, Math.round((utcMs(night.window_end) - utcMs(night.window_start)) / 60000));
 const labelFor = (state) => (state === 'asleep' ? 'asleep' : state === 'stir' ? 'stirring' : state === 'wake' ? 'awake' : 'before/after sleep');
 function shortHour(ms, tz) {
   const s = new Intl.DateTimeFormat([], { timeZone: tz, hour: 'numeric', hour12: true }).format(new Date(ms));
