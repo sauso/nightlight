@@ -23,6 +23,10 @@ const REQUEST_TIMEOUT_MS = 8000;
 const MEDIA_PATH_FALLBACKS = ['/onvif/media_service', '/onvif/media'];
 const DEVICE_PATH = '/onvif/device_service';
 const PTZ_PATH = '/onvif/ptz_service';
+// Event service path for the pull-point subscription. Minimal servers (onvif_simple_server /
+// Thingino) don't advertise it via GetCapabilities, so we inject a known path; the device_service
+// endpoint is a fallback since some cameras route every ONVIF service through the one URL.
+const EVENTS_PATH_FALLBACKS = ['/onvif/events_service', DEVICE_PATH];
 // Camera auto-stops a continuous move after this long even if the Stop command is lost
 // (dropped release, network blip) - the runaway-pan failsafe. Kept deliberately short: on a
 // camera that honours this timeout, a completely-lost Stop caps the overrun here instead of
@@ -247,6 +251,13 @@ export async function probeOnvifCamera({ host, port, username, password }) {
     }
   });
 
+  // Motion-over-ONVIF capability: does the camera expose a motion event topic? Best-effort — a
+  // camera can stream/PTZ over ONVIF yet have no Event service, in which case the ONVIF motion
+  // source would just sit idle, so we only offer it when a motion topic is actually advertised.
+  // Seed the WS-Security clock first (GetEventProperties is authenticated; the minimal-server
+  // fallback skipped connect()'s clock sync). Tries known event paths. Never fails the probe.
+  const motionEvents = await detectMotionEvents(cam);
+
   const info = await pcall(cam, 'getDeviceInformation').catch(() => null);
   const vid = best?.videoEncoderConfiguration || {};
   // Hikvision's ONVIF stream URIs carry a `?transportmode=…&profile=Profile_N` query that its own
@@ -270,6 +281,7 @@ export async function probeOnvifCamera({ host, port, username, password }) {
       height: vid.resolution?.height || null,
     },
     backchannel, // 'yes' | 'no' | 'unknown' — two-way-audio capability
+    motionEvents, // 'yes' | 'no' | 'unknown' — motion-over-ONVIF (Event service) capability
     // PTZ support: the media profile carries a PTZConfiguration when the camera is
     // pan/tilt/zoom-capable. profileToken is stored so later PTZ commands don't have to
     // re-fetch profiles on every move.
@@ -322,6 +334,96 @@ function ensureAuthClock(cam) {
     }
     setTimeout(done, REQUEST_TIMEOUT_MS); // guard against a hung callback
   });
+}
+
+// Does the camera advertise a motion event topic? Seeds the auth clock, then calls
+// GetEventProperties across the known event-service paths and scans the returned TopicSet for a
+// motion topic. Returns 'yes' | 'no' | 'unknown'. Best-effort — never throws.
+async function detectMotionEvents(cam) {
+  await ensureAuthClock(cam);
+  let sawResponse = false;
+  // Prefer the events path the camera advertised via GetCapabilities (well-behaved cameras), then
+  // fall back to the known paths for minimal servers that don't advertise one.
+  const discovered = cam.uri?.events?.path;
+  const paths = [...new Set([discovered, ...EVENTS_PATH_FALLBACKS].filter(Boolean))];
+  for (const path of paths) {
+    cam.uri = { ...(cam.uri || {}), events: { path } };
+    const verdict = await new Promise((resolve) => {
+      let settled = false;
+      const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+      try {
+        cam.getEventProperties((e, _props, xml) => done(classifyMotionEvents(e, xml)));
+      } catch { done('unknown'); }
+      setTimeout(() => done('unknown'), REQUEST_TIMEOUT_MS);
+    });
+    if (verdict === 'yes') return 'yes';
+    if (verdict === 'no') sawResponse = true; // valid TopicSet but no motion topic — try the next path anyway
+  }
+  return sawResponse ? 'no' : 'unknown';
+}
+
+// Classify a GetEventProperties response: 'yes' if its TopicSet names a motion topic, 'no' if we
+// got a valid TopicSet without one, 'unknown' if the call errored / didn't respond.
+function classifyMotionEvents(err, xml) {
+  if (err || !xml) return 'unknown';
+  const s = String(xml);
+  // Motion topic names as they appear in the TopicSet across brands: tns1:VideoSource/MotionAlarm,
+  // tns1:RuleEngine/CellMotionDetector/Motion, tt:MotionDetector, etc.
+  if (/MotionAlarm|CellMotionDetector|MotionDetector|<[^>]*Motion[\s/>]/i.test(s)) return 'yes';
+  if (/GetEventPropertiesResponse|TopicSet/i.test(s)) return 'no';
+  return 'unknown';
+}
+
+// Pull a motion signal out of an ONVIF NotificationMessage (as linerased by the onvif lib). Returns
+// { topic, state } where state is true (motion), false (clear), or null (motion topic but the
+// boolean couldn't be read), or null if this isn't a motion topic at all (e.g. tampering/analytics).
+function extractMotion(message) {
+  const topic = (message?.topic?._ ?? message?.topic ?? '').toString();
+  if (!/MotionAlarm|CellMotionDetector|(^|[:/])Motion([/]|$)|IsMotion/i.test(topic)) return null;
+  // Data lives under message.message (WS-Notification) → .data.simpleItem, with attributes on `$`.
+  const src = message?.message?.message ?? message?.message ?? {};
+  let items = src?.data?.simpleItem ?? src?.Data?.SimpleItem ?? src?.data?.SimpleItem;
+  if (items == null) return { topic, state: null };
+  if (!Array.isArray(items)) items = [items];
+  for (const it of items) {
+    const a = it?.$ ?? it ?? {};
+    const name = (a.Name ?? a.name ?? '').toString();
+    if (!/motion|state/i.test(name)) continue;
+    const v = String(a.Value ?? a.value ?? '').toLowerCase();
+    return { topic, state: v === 'true' || v === '1' };
+  }
+  return { topic, state: null };
+}
+
+// Subscribe to a camera's ONVIF motion events via a pull-point subscription. Returns a handle with
+// stop(). onMotion is called on a motion edge (true or indeterminate; a `false`/clear is dropped),
+// onLog per parsed motion message, onError on subscription/pull errors. All onvif-lib specifics
+// (auth-clock seeding, events path injection, the auto-managed pull loop) live here; callers deal
+// only in these callbacks. The high-level emitter starts pulling on the first 'event' listener and
+// stops (unsubscribing) when the last one is removed.
+export function subscribeMotionEvents({ host, port, username, password, onMotion, onLog, onError }) {
+  const cam = makeControlCam({ host, port, username, password });
+  cam.uri = { ...(cam.uri || {}), events: { path: EVENTS_PATH_FALLBACKS[0] } };
+  let stopped = false;
+  ensureAuthClock(cam).then(() => {
+    if (stopped) return;
+    cam.on('eventsError', (e) => { if (!stopped) onError?.(e); });
+    cam.on('event', (message) => {
+      if (stopped) return;
+      const m = extractMotion(message);
+      if (!m) return; // not a motion topic
+      onLog?.(m.topic, m.state);
+      if (m.state !== false) onMotion?.(m); // true or indeterminate → motion; false → clear (drop)
+    });
+  });
+  return {
+    stop() {
+      stopped = true;
+      try { cam.removeAllListeners('event'); } catch { /* ignore */ }
+      try { cam.removeAllListeners('eventsError'); } catch { /* ignore */ }
+      try { cam.unsubscribe(() => {}); } catch { /* ignore */ }
+    },
+  };
 }
 
 // Send a Stop, retrying briefly. A single dropped or auth-rejected Stop otherwise lets the

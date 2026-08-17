@@ -27,7 +27,7 @@ function fromCam(cam) {
     schedule_enabled: !!cam.detect_schedule_enabled,
     start: minToHHMM(hasWindow ? cam.detect_start : 20 * 60),
     end: minToHHMM(hasWindow ? cam.detect_end : 7 * 60),
-    source: cam.detect_source === 'mqtt' ? 'mqtt' : 'framediff',
+    source: cam.detect_source === 'mqtt' ? 'mqtt' : cam.detect_source === 'onvif' ? 'onvif' : 'framediff',
     zone: cam.detect_zone || null,
     motion_mqtt_topic: cam.motion_mqtt_topic || '',
     motion_mqtt_value: cam.motion_mqtt_value || '',
@@ -131,7 +131,7 @@ export default function DetectionSettings() {
       <AppHeader title={TITLES[kind] || 'Detection'} back={back} />
       <main className="app-main">
         <div className="save-flag">{status === 'saving' ? 'Saving…' : status === 'saved' ? 'Saved ✓' : ''}</div>
-        {kind === 'motion' && <MotionForm d={d} apply={apply} cameraId={id} />}
+        {kind === 'motion' && <MotionForm d={d} apply={apply} cameraId={id} cam={cam} />}
         {kind === 'sound' && <SoundForm d={d} apply={apply} />}
         {kind === 'schedule' && <ScheduleForm d={d} apply={apply} />}
       </main>
@@ -161,7 +161,11 @@ function Slider({ label, value, onChange, lowLabel, highLabel }) {
   );
 }
 
-function MotionForm({ d, apply, cameraId }) {
+function MotionForm({ d, apply, cameraId, cam }) {
+  // The "Camera via ONVIF" source is offered only when the camera advertised a motion event topic
+  // at ONVIF add/re-probe time — otherwise a subscription would just sit idle. (A camera stuck on
+  // the onvif source after losing capability still shows the button so it can be switched away.)
+  const showOnvif = !!cam?.onvif_motion_capable || d.source === 'onvif';
   return (
     <>
       <EnableToggle checked={d.motion_enabled} onChange={(v) => apply({ motion_enabled: v })}
@@ -176,17 +180,24 @@ function MotionForm({ d, apply, cameraId }) {
               onClick={() => apply({ source: 'framediff' })}>Nightlight</button>
             <button type="button" className={`segmented__btn${d.source === 'mqtt' ? ' segmented__btn--active' : ''}`}
               onClick={() => apply({ source: 'mqtt' })}>Camera via MQTT</button>
+            {showOnvif && (
+              <button type="button" className={`segmented__btn${d.source === 'onvif' ? ' segmented__btn--active' : ''}`}
+                onClick={() => apply({ source: 'onvif' })}>Camera via ONVIF</button>
+            )}
           </div>
           <div className="camera-tile__sub" style={{ marginTop: 6 }}>
             {d.source === 'mqtt'
               ? 'The camera detects motion itself and publishes it over MQTT (needs Settings → MQTT connected). Uses almost no server CPU.'
+              : d.source === 'onvif'
+              ? 'The camera detects motion itself and reports it over ONVIF — no MQTT broker needed. Uses almost no server CPU.'
               : 'Nightlight watches the stream and diffs frames. Works on any camera; uses some server CPU.'}
           </div>
 
-          {d.source === 'framediff' ? (
+          {d.source === 'framediff' && (
             <Slider label="Sensitivity" value={d.sensitivity} onChange={(v) => apply({ sensitivity: v })}
               lowLabel="Less sensitive" highLabel="More sensitive" />
-          ) : (
+          )}
+          {d.source === 'mqtt' && (
             <>
               <div className="field" style={{ marginTop: 12 }}>
                 <label htmlFor="motion-topic">Motion MQTT topic</label>
@@ -237,7 +248,7 @@ function MotionForm({ d, apply, cameraId }) {
           <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
             {d.source === 'framediff'
               ? 'Limit motion detection — and sleep tracking — to the crib, so movement elsewhere in the room isn’t counted. Leave as the whole frame to watch everything.'
-              : 'For sleep tracking: limit the movement signal to the crib so a fan or someone walking past isn’t counted as the baby stirring. (Motion alerts still come from the camera over MQTT.)'}
+              : 'For sleep tracking: limit the movement signal to the crib so a fan or someone walking past isn’t counted as the baby stirring. (Motion alerts still come from the camera.)'}
           </div>
           <CribZonePicker cameraId={cameraId} zone={d.zone} onChange={(zoneVal) => apply({ zone: zoneVal })} />
 
