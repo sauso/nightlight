@@ -17,7 +17,7 @@ import {
   deleteClipForEvent,
   getClips,
 } from '../lib/detectionEvents.js';
-import { verifyTalkCreds } from '../lib/twoWayAudio.js';
+import { verifyTalkCreds, talkConfigured } from '../lib/twoWayAudio.js';
 import { getReading, subscribeAllCameraTopics, refreshMqttConnection } from '../lib/mqttClient.js';
 import { probeOnvifCamera, ptzNudge, ptzRelativeStep, probePtzRelativeSupport } from '../lib/onvif.js';
 import { validateRtspStream, probeRtspDetailed, ffprobeVersion } from '../lib/rtspProbe.js';
@@ -135,7 +135,7 @@ function publicCamera(cam, isAdmin) {
   // talk_configured / has_sub (safe for everyone) drive the tile's talk button + quality selector.
   const base = {
     ...rest,
-    talk_configured: !!(cam.talk_backend && talk_username && talk_password),
+    talk_configured: talkConfigured(cam),
     has_sub: !!(sub_rtsp_url && sub_rtsp_url.trim()),
     // Parse the crib zone (stored as a JSON string) into an object for the client.
     detect_zone: parseZone(cam.detect_zone),
@@ -503,10 +503,18 @@ router.post('/', requireAdmin, async (req, res) => {
   const onvifUser = isOnvif ? rtsp_username || null : null;
   const onvifPass = isOnvif ? rtsp_password || null : null;
   const profileToken = isOnvif ? onvif_profile_token || null : null;
-  // Two-way audio creds (optional at add time - a username enables the Hikvision ISAPI sink).
+  // Two-way audio backend: explicit talk creds enable the Hikvision ISAPI sink; otherwise an ONVIF
+  // camera that reports an audio backchannel gets the RTSP-backchannel sink, which reuses the stream
+  // credentials (no separate login to enter).
   const talkUser = talk_username && talk_username.trim() ? talk_username.trim() : null;
-  const talkBackend = talkUser ? 'hikvision-isapi' : null;
-  const talkPass = talkUser ? talk_password || null : null;
+  let talkBackend = null;
+  let talkPass = null;
+  if (talkUser) {
+    talkBackend = 'hikvision-isapi';
+    talkPass = talk_password || null;
+  } else if (isOnvif && backchannel === 'yes') {
+    talkBackend = 'onvif-backchannel';
+  }
   // Low-quality sub-stream: a path on the same camera (reuses the main host/port/creds).
   const subUrl = sub_rtsp_path && sub_rtsp_path.trim()
     ? assembleRtspUrl({ host: rtsp_host, port: rtsp_port, path: sub_rtsp_path.trim(), username: rtsp_username, password: rtsp_password })
@@ -629,6 +637,12 @@ router.put('/:id', requireAdmin, async (req, res) => {
     // ONVIF control (PTZ) reuses the RTSP credentials the user entered.
     if (rtsp_username !== undefined) onvifUser = rtsp_username || null;
     if (rtsp_password) onvifPass = rtsp_password; // blank keeps the stored one
+    // If the (re-)probe reports an audio backchannel and there's no talk backend configured yet,
+    // enable the ONVIF/RTSP backchannel sink (reuses the stream credentials). Won't touch an existing
+    // Hikvision or already-set backend, and won't fire when talk creds are being edited above.
+    if (talk_username === undefined && talkBackend == null && backchannel === 'yes') {
+      talkBackend = 'onvif-backchannel';
+    }
   }
   db.prepare(`UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?,
       talk_backend = ?, talk_username = ?, talk_password = ?, sub_rtsp_url = ?,
