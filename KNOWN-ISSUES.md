@@ -100,6 +100,24 @@ correcting the timestamps in place and the stream keeps working. It's noisy but 
 **What to do:** Ignore it. It's log noise, not an error. (Docker's log rotation, set up in
 the README, keeps it from filling the disk.)
 
+## A camera set to AAC audio has no sound, or won't play in Compatibility mode
+
+**What you see:** On a camera configured to stream **AAC** audio, Compatibility (HLS) mode may not play
+at all, Low latency may have no sound, and the camera can flap (repeated ~30s "watchdog" restarts).
+This shows up on open-firmware cameras (**Thingino / sonoff-hack**) where you can pick the audio codec.
+
+**Why:** Two things. (1) Some camera firmwares advertise AAC but don't actually deliver it under a
+sustained pull — they send no audio packets and unstable video, which stalls the stream into the
+watchdog loop. (2) Nightlight emits two audio tracks (one for WebRTC/Low-latency, one for HLS); when
+the source is *already* AAC, both tracks are AAC and MediaMTX's HLS muxer rejects more than one audio
+track (`the MPEG-TS variant of HLS supports a single audio track only`). Nightlight now handles (2)
+automatically — for an AAC source it builds the Low-latency track as G711 so HLS gets a single valid
+track — but it can't fix (1), a camera that simply won't stream AAC.
+
+**What to do:** **If the camera supports it, set its audio codec to G711 (a-law / "G711A").** G711 is
+Nightlight's native path: it streams reliably and gives sound in both Low latency and Compatibility.
+This is how the Sonoff/Thingino cameras are happiest — flip AAC → G711A in the camera's web UI.
+
 ---
 
 ## Confirmed bugs (fix pending)
@@ -123,3 +141,22 @@ where the same thing broke in-browser HLS until the test stack was served over T
 reverse proxy such as SWAG — see the README's "Running behind a reverse proxy" section), after
 which Compatibility works. A proper fix (e.g. having the app strip `Secure` from that cookie when
 it's serving over HTTP) is not yet implemented.
+
+### Two-way audio (talk-back) only works on Hikvision (ISAPI) cameras
+
+**What you see:** The talk / two-way-audio control is offered on a camera (often because ONVIF reported
+it supports an audio backchannel), but talking does nothing — no sound comes out of the camera, and
+there's usually no visible error.
+
+**Why:** Nightlight's two-way audio is implemented only for **Hikvision's ISAPI** HTTP protocol. When a
+camera is added with talk credentials it's currently labelled as the Hikvision backend regardless of
+make. A non-Hikvision camera — e.g. a **Thingino/Sonoff**, which does two-way audio over the
+**ONVIF/RTSP audio backchannel** — doesn't implement ISAPI; and because its web server answers every
+path with `200` (Thingino does), Nightlight's ISAPI calls *appear* to succeed while the camera ignores
+them, so talk silently no-ops.
+
+**What to do:** Two-way audio currently works only on Hikvision (ISAPI) cameras. On other cameras it
+isn't supported yet — an **ONVIF/RTSP audio-backchannel** talk backend is the pending feature that would
+enable it. Until then, don't rely on talk-back on non-Hikvision cameras. (A related cleanup: the add
+flow should only label a camera `hikvision-isapi` when it's actually Hikvision, so the control isn't
+offered where it can't work.)
