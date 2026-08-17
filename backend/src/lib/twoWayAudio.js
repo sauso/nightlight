@@ -1,4 +1,5 @@
 import http from 'http';
+import net from 'net';
 import crypto from 'crypto';
 import { logger } from './logger.js';
 
@@ -147,9 +148,172 @@ class HikvisionTalk {
   }
 }
 
-// Whether a camera is set up for talk-back: a supported backend + credentials stored.
+// ONVIF/RTSP audio backchannel talk sink — for cameras (Thingino/Sonoff and most ONVIF cams) that
+// receive audio over RTSP instead of Hikvision's HTTP ISAPI. Flow (validated against a Thingino cam):
+//   DESCRIBE <url> with `Require: www.onvif.org/ver20/backchannel`  -> SDP gains a `a=sendonly` audio
+//     media section (the direction we send) offering PCMU (G711 µ-law, payload 0), among others.
+//   SETUP <track> Transport: RTP/AVP/TCP;interleaved=0-1  ->  PLAY  ->  stream RTP (PT 0) over the
+//   interleaved TCP channel. The browser already produces µ-law, so we packetise it straight through.
+// Uses the camera's STREAM credentials (embedded in rtsp_url), same as ONVIF/RTSP — no separate login.
+function parseRtspUrl(rtspUrl) {
+  try {
+    const u = new URL(rtspUrl);
+    return {
+      host: u.hostname,
+      port: u.port ? Number(u.port) : 554,
+      path: (u.pathname || '/') + (u.search || ''),
+      username: decodeURIComponent(u.username || ''),
+      password: decodeURIComponent(u.password || ''),
+    };
+  } catch {
+    return null;
+  }
+}
+
+const BACKCHANNEL_REQUIRE = 'Require: www.onvif.org/ver20/backchannel';
+
+class OnvifBackchannelTalk {
+  constructor({ host, port = 554, path = '/', username, password }) {
+    this.host = host;
+    this.port = port;
+    this.url = `rtsp://${host}:${port}${path}`;
+    this.username = username;
+    this.password = password;
+    this.sock = null;
+    this.cseq = 1;
+    this.session = null;
+    this.rtpCh = 0;
+    this.auth = null; // { scheme:'basic' } | { scheme:'digest', challenge }
+    this.seq = crypto.randomBytes(2).readUInt16BE(0);
+    this.ts = 0;
+    this.ssrc = crypto.randomBytes(4).readUInt32BE(0);
+    this.pending = Buffer.alloc(0);
+    this.closed = false;
+    this.keepalive = null;
+  }
+
+  _authHeader(method, uri) {
+    if (!this.auth) return null;
+    if (this.auth.scheme === 'basic') return 'Basic ' + Buffer.from(`${this.username}:${this.password}`).toString('base64');
+    return digestHeader(this.auth.challenge, method, uri, this.username, this.password, this.cseq);
+  }
+
+  // Send one RTSP request and resolve its parsed response (head + body). Only used during the
+  // handshake, before any interleaved RTP flows, so simple \r\n\r\n + Content-Length parsing is safe.
+  _send(method, uri, extra = []) {
+    return new Promise((resolve, reject) => {
+      const headers = [`${method} ${uri} RTSP/1.0`, `CSeq: ${this.cseq++}`];
+      const a = this._authHeader(method, uri);
+      if (a) headers.push(`Authorization: ${a}`);
+      headers.push(...extra);
+      let buf = '';
+      const onData = (d) => {
+        buf += d.toString('latin1');
+        const idx = buf.indexOf('\r\n\r\n');
+        if (idx < 0) return;
+        const head = buf.slice(0, idx);
+        const m = /Content-Length:\s*(\d+)/i.exec(head);
+        if (buf.length - (idx + 4) >= (m ? Number(m[1]) : 0)) {
+          this.sock.removeListener('data', onData);
+          resolve({ head, body: buf.slice(idx + 4), status: Number((/^\S+\s+(\d+)/.exec(head) || [])[1]) });
+        }
+      };
+      this.sock.on('data', onData);
+      this.sock.write(headers.join('\r\n') + '\r\n\r\n');
+    });
+  }
+
+  async start() {
+    await new Promise((resolve, reject) => {
+      this.sock = net.connect(this.port, this.host, resolve);
+      this.sock.setTimeout(8000, () => this.sock.destroy(new Error('RTSP connect timeout')));
+      this.sock.once('error', reject);
+    });
+    this.sock.setTimeout(0);
+    this.sock.on('error', () => {});
+
+    let d = await this._send('DESCRIBE', this.url, [BACKCHANNEL_REQUIRE, 'Accept: application/sdp']);
+    if (d.status === 401) {
+      const wa = /WWW-Authenticate:\s*(.+)/i.exec(d.head);
+      this.auth = wa && /^\s*Digest/i.test(wa[1]) ? { scheme: 'digest', challenge: parseChallenge(wa[1]) } : { scheme: 'basic' };
+      d = await this._send('DESCRIBE', this.url, [BACKCHANNEL_REQUIRE, 'Accept: application/sdp']);
+    }
+    if (d.status !== 200) throw new Error(`backchannel DESCRIBE failed (${d.status || d.head.split('\r\n')[0]})`);
+
+    // The send-only audio media section is the backchannel. Grab its control URL; confirm it offers
+    // PCMU (payload 0 = G711 µ-law), which is what the browser sends.
+    const block = d.body.split(/^m=/m).find((b) => /^audio/.test(b) && /a=sendonly/.test(b));
+    if (!block) throw new Error('camera did not offer an audio backchannel');
+    if (!/a=rtpmap:0\s+PCMU/i.test(block) && !/\bRTP\/AVP[^\r\n]*\b0\b/.test('m=' + block)) {
+      logger.info('[talk] backchannel does not advertise PCMU explicitly — sending µ-law as payload 0 anyway');
+    }
+    const ctl = (/a=control:(\S+)/.exec(block) || [])[1] || 'track0';
+    const setupUrl = /^rtsps?:\/\//i.test(ctl) ? ctl : `${this.url}/${ctl}`;
+
+    const s = await this._send('SETUP', setupUrl, [BACKCHANNEL_REQUIRE, 'Transport: RTP/AVP/TCP;unicast;interleaved=0-1']);
+    if (s.status !== 200) throw new Error(`backchannel SETUP failed (${s.status})`);
+    this.session = (/Session:\s*([^;\r\n]+)/i.exec(s.head) || [])[1]?.trim() || null;
+    const il = /interleaved=(\d+)/i.exec(s.head);
+    if (il) this.rtpCh = Number(il[1]);
+
+    const p = await this._send('PLAY', this.url, [BACKCHANNEL_REQUIRE, ...(this.session ? [`Session: ${this.session}`] : [])]);
+    if (p.status !== 200) throw new Error(`backchannel PLAY failed (${p.status})`);
+
+    // From here the socket may carry interleaved RTCP from the camera — discard it (we only send).
+    this.sock.on('data', () => {});
+    // RTSP session keepalive: a fire-and-forget OPTIONS well within the SETUP timeout so a longer talk
+    // isn't torn down mid-sentence. We don't parse the reply (it'd race the interleaved data).
+    this.keepalive = setInterval(() => {
+      if (this.closed) return;
+      const req = [`OPTIONS ${this.url} RTSP/1.0`, `CSeq: ${this.cseq++}`];
+      const a = this._authHeader('OPTIONS', this.url);
+      if (a) req.push(`Authorization: ${a}`);
+      if (this.session) req.push(`Session: ${this.session}`);
+      try { this.sock.write(req.join('\r\n') + '\r\n\r\n'); } catch { /* closing */ }
+    }, 20000);
+  }
+
+  // Packetise incoming µ-law bytes into 20 ms (160-byte) RTP packets (PT 0) framed over the RTSP TCP
+  // interleaved channel. The mic delivers ~8000 bytes/s in real time, so this paces itself.
+  write(buf) {
+    if (this.closed || !this.sock) return;
+    this.pending = this.pending.length ? Buffer.concat([this.pending, buf]) : Buffer.from(buf);
+    while (this.pending.length >= 160) {
+      const payload = this.pending.subarray(0, 160);
+      this.pending = this.pending.subarray(160);
+      const rtp = Buffer.allocUnsafe(172);
+      rtp[0] = 0x80;
+      rtp[1] = 0x00; // marker 0, payload type 0 (PCMU)
+      rtp.writeUInt16BE(this.seq & 0xffff, 2);
+      rtp.writeUInt32BE(this.ts >>> 0, 4);
+      rtp.writeUInt32BE(this.ssrc, 8);
+      payload.copy(rtp, 12);
+      const frame = Buffer.allocUnsafe(176);
+      frame[0] = 0x24; // '$' interleaved marker
+      frame[1] = this.rtpCh;
+      frame.writeUInt16BE(172, 2);
+      rtp.copy(frame, 4);
+      try { this.sock.write(frame); } catch { /* closing */ }
+      this.seq = (this.seq + 1) & 0xffff;
+      this.ts = (this.ts + 160) >>> 0;
+    }
+  }
+
+  async close() {
+    if (this.closed) return;
+    this.closed = true;
+    if (this.keepalive) clearInterval(this.keepalive);
+    try { if (this.session) await this._send('TEARDOWN', this.url, [`Session: ${this.session}`]); } catch { /* best-effort */ }
+    try { this.sock?.end(); } catch { /* ignore */ }
+    try { this.sock?.destroy(); } catch { /* ignore */ }
+  }
+}
+
+// Whether a camera is set up for talk-back: a supported backend + whatever creds that backend needs.
 export function talkConfigured(camera) {
-  return camera.talk_backend === 'hikvision-isapi' && !!camera.talk_username && !!camera.talk_password;
+  if (camera.talk_backend === 'hikvision-isapi') return !!camera.talk_username && !!camera.talk_password;
+  if (camera.talk_backend === 'onvif-backchannel') return !!camera.rtsp_url; // creds come from the stream URL
+  return false;
 }
 
 // Verify talk credentials without opening a session: an authenticated ISAPI read of the TwoWayAudio
@@ -191,6 +355,15 @@ export function verifyTalkCreds({ host, port = 80, username, password, channel =
 // Create (and start) a talk session for a camera. Resolves an object with write(buf) / close().
 export async function startTalkSession(camera) {
   if (!talkConfigured(camera)) throw new Error('Two-way audio is not configured for this camera');
+
+  if (camera.talk_backend === 'onvif-backchannel') {
+    const parts = parseRtspUrl(camera.rtsp_url);
+    if (!parts || !parts.host) throw new Error('Could not parse the camera stream URL for talk-back');
+    const session = new OnvifBackchannelTalk(parts);
+    await session.start();
+    return session;
+  }
+
   const host = hostFromCamera(camera);
   if (!host) throw new Error('Could not determine camera host for talk-back');
   const session = new HikvisionTalk({
