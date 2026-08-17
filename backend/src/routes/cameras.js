@@ -41,7 +41,9 @@ try {
 router.get('/alerts/:id/snapshot', requireAuthQueryOrHeader, (req, res) => {
   const file = getEventSnapshotFile(req.params.id);
   if (!file) return res.status(404).json({ error: 'No snapshot for this alert' });
-  res.sendFile(file);
+  // { root, path } form: Express jails the send under root and rejects any `..`, on top of the
+  // integer-only id validation upstream (belt-and-suspenders against path traversal).
+  res.sendFile(file.path, { root: file.root, dotfiles: 'deny' });
 });
 
 // Recorded clip for an alert — same query-token auth as the snapshot above (a <video> element
@@ -50,7 +52,8 @@ router.get('/alerts/:id/snapshot', requireAuthQueryOrHeader, (req, res) => {
 router.get('/alerts/:id/clip', requireAuthQueryOrHeader, (req, res) => {
   const file = getEventClipFile(req.params.id);
   if (!file) return res.status(404).json({ error: 'No clip for this alert' });
-  res.sendFile(file);
+  // { root, path } form (see snapshot route): Express re-enforces containment under CLIPS_DIR.
+  res.sendFile(file.path, { root: file.root, dotfiles: 'deny' });
 });
 
 // Live still frame — the backdrop for the crib-zone picker. Query-token auth so an <img> can load it

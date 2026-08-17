@@ -30,6 +30,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   them. Tap a box to move or resize it, "Remove box" deletes the selected one, "Whole frame" clears all.
   Existing single-box zones keep working. (Also: the picker's buttons no longer wrap onto two lines.)
 
+### Security
+- **Hardened alert snapshot/clip serving against path traversal.** The routes that serve an alert's
+  snapshot and recorded clip now hand `res.sendFile` a jailed `root` so Express itself rejects any
+  attempt to escape the snapshot/clip directory, in addition to the existing integer-id and
+  under-directory validation. No exploitable path existed (the flag from a security scan was a false
+  positive), but the extra layer makes containment enforced by Express and clears the finding.
+
 ## [0.17.0] - 2026-08-17
 
 ### Added
