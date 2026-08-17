@@ -3,7 +3,7 @@ import { v4 as uuid } from 'uuid';
 import db from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { normalizePhoto } from '../lib/photo.js';
-import { getStoredNights, computeNight, computeAndStoreNight } from '../lib/sleepAnalysis.js';
+import { getStoredNights, computeNight, computeAndStoreNight, currentNightDate } from '../lib/sleepAnalysis.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -50,6 +50,20 @@ router.put('/:id', (req, res) => {
     req.params.id
   );
   res.json(withCameras(db.prepare('SELECT * FROM children WHERE id = ?').get(req.params.id)));
+});
+
+// The night to show on the summary tile: the night IN PROGRESS computed live (capped at "now") if a
+// window is currently open, otherwise the latest stored completed night. `scope` tells the UI which it
+// is so it can say "Tonight · so far" vs "Last night". Computed on demand — cheap, always fresh.
+router.get('/:id/sleep/live', (req, res) => {
+  const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
+  if (!child) return res.status(404).json({ error: 'Child not found' });
+  const current = currentNightDate();
+  if (current) {
+    return res.json({ scope: 'tonight', night: computeNight(req.params.id, current) });
+  }
+  const nights = getStoredNights(req.params.id, 1);
+  return res.json({ scope: 'last', night: nights[0] || null });
 });
 
 // Recent stored sleep summaries for a child (newest first) — the "last night" card's data source.
