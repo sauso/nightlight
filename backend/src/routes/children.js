@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid';
 import db from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { normalizePhoto } from '../lib/photo.js';
+import { getStoredNights, computeNight, computeAndStoreNight } from '../lib/sleepAnalysis.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -51,9 +52,31 @@ router.put('/:id', (req, res) => {
   res.json(withCameras(db.prepare('SELECT * FROM children WHERE id = ?').get(req.params.id)));
 });
 
+// Recent stored sleep summaries for a child (newest first) — the "last night" card's data source.
+router.get('/:id/sleep', (req, res) => {
+  const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
+  if (!child) return res.status(404).json({ error: 'Child not found' });
+  const nights = Math.min(60, Math.max(1, parseInt(req.query.nights, 10) || 14));
+  res.json({ nights: getStoredNights(req.params.id, nights) });
+});
+
+// Compute one night on demand for a specific LOCAL start date ('YYYY-MM-DD'). Used for tuning: pass
+// ?debug=1 to include the per-minute timeline, ?store=1 (admin) to persist the recompute.
+router.get('/:id/sleep/:date', (req, res) => {
+  const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
+  if (!child) return res.status(404).json({ error: 'Child not found' });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(req.params.date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+  const wantStore = req.query.store === '1' && req.user?.role === 'admin';
+  const summary = wantStore
+    ? computeAndStoreNight(req.params.id, req.params.date)
+    : computeNight(req.params.id, req.params.date, { includeTimeline: req.query.debug === '1' });
+  res.json(summary);
+});
+
 router.delete('/:id', (req, res) => {
   db.prepare('UPDATE cameras SET child_id = NULL WHERE child_id = ?').run(req.params.id);
   db.prepare('DELETE FROM children WHERE id = ?').run(req.params.id);
+  db.prepare('DELETE FROM sleep_nights WHERE child_id = ?').run(req.params.id);
   res.status(204).end();
 });
 
