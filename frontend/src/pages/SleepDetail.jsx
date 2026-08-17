@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Moon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Moon, DoorOpen } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
@@ -28,7 +28,10 @@ function fmtDur(min) {
 }
 
 // Colours for the timeline segments — tuned to read on both themes (defined against tokens in CSS).
-const SEG_CLASS = { asleep: 'sleep-seg--asleep', wake: 'sleep-seg--wake', settling: 'sleep-seg--awake', awake: 'sleep-seg--awake' };
+const SEG_CLASS = {
+  asleep: 'sleep-seg--asleep', stir: 'sleep-seg--stir', wake: 'sleep-seg--wake',
+  settling: 'sleep-seg--awake', awake: 'sleep-seg--awake',
+};
 
 export default function SleepDetail() {
   const { id } = useParams();
@@ -144,6 +147,7 @@ function NightBody({ night, fmtTime, tz }) {
     ? `${fmtTime(night.onset_at)} – ${fmtTime(night.wake_at)}`
     : `from ${fmtTime(night.onset_at)} · still asleep at ${fmtTime(night.window_end)}`;
   const wakes = night.wakes || [];
+  const visits = night.visits || [];
 
   return (
     <>
@@ -162,8 +166,10 @@ function NightBody({ night, fmtTime, tz }) {
         <Timeline night={night} fmtTime={fmtTime} tz={tz} />
         <div className="sleep-legend">
           <span><i className="sleep-legend__sw sleep-seg--asleep" /> Asleep</span>
+          <span><i className="sleep-legend__sw sleep-seg--stir" /> Stirring</span>
           <span><i className="sleep-legend__sw sleep-seg--wake" /> Awake</span>
           <span><i className="sleep-legend__sw sleep-seg--awake" /> Before/after sleep</span>
+          {visits.length > 0 && <span><i className="sleep-legend__sw sleep-legend__sw--visit" /> In the room</span>}
         </div>
       </div>
 
@@ -182,6 +188,21 @@ function NightBody({ night, fmtTime, tz }) {
           </ul>
         )}
       </div>
+
+      {visits.length > 0 && (
+        <div className="card">
+          <div className="sleep-detail__section-title"><DoorOpen size={15} aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: 6 }} />Room activity · {visits.length}</div>
+          <div className="camera-tile__sub" style={{ margin: '-6px 0 10px' }}>Movement outside the crib — someone in the room, or the child out of bed.</div>
+          <ul className="sleep-wakes">
+            {visits.map((v, i) => (
+              <li key={i} className="sleep-wakes__row">
+                <span className="sleep-wakes__time">{fmtTime(v.start_at)}{v.minutes > 1 ? ` – ${fmtTime(v.end_at)}` : ''}</span>
+                <span className="sleep-wakes__dur sleep-wakes__dur--visit">{fmtDur(v.minutes)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </>
   );
 }
@@ -217,9 +238,19 @@ function Timeline({ night, fmtTime, tz }) {
 
   const onsetPct = pctOf(night.onset_at, startMs, totalMs);
   const wakePct = night.wake_at ? pctOf(night.wake_at, startMs, totalMs) : null;
+  const visits = night.visits || [];
 
   return (
     <div className="sleep-tl">
+      {/* Room-activity (outside-crib) markers sit above the bar so they read as events, not sleep state. */}
+      {visits.length > 0 && (
+        <div className="sleep-tl__visits">
+          {visits.map((v, i) => (
+            <span key={i} className="sleep-tl__visit" style={{ left: `${pctOf(v.start_at, startMs, totalMs)}%` }}
+              title={`In the room · ${fmtTime(v.start_at)}`} />
+          ))}
+        </div>
+      )}
       <div className="sleep-tl__bar">
         {segs.map((s, i) => (
           <div key={i} className={`sleep-seg ${SEG_CLASS[s.state] || 'sleep-seg--awake'}`}
@@ -248,7 +279,7 @@ function Timeline({ night, fmtTime, tz }) {
 const utcMs = (s) => new Date(String(s).replace(' ', 'T') + 'Z').getTime();
 const pctOf = (s, startMs, totalMs) => (s ? ((utcMs(s) - startMs) / totalMs) * 100 : null);
 const windowMinutes = (night) => Math.max(1, Math.round((utcMs(night.window_end) - utcMs(night.window_start)) / 60000));
-const labelFor = (state) => (state === 'asleep' ? 'asleep' : state === 'wake' ? 'awake' : 'before/after sleep');
+const labelFor = (state) => (state === 'asleep' ? 'asleep' : state === 'stir' ? 'stirring' : state === 'wake' ? 'awake' : 'before/after sleep');
 function shortHour(ms, tz) {
   const s = new Intl.DateTimeFormat([], { timeZone: tz, hour: 'numeric', hour12: true }).format(new Date(ms));
   return s.replace(/\s?AM/i, 'a').replace(/\s?PM/i, 'p');

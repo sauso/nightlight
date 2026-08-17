@@ -500,6 +500,17 @@ if (!detectionEventsColumns.includes('clip_status')) {
   db.exec('ALTER TABLE detection_events ADD COLUMN clip_bytes INTEGER');
 }
 
+// Outside-the-crib motion channel on activity_samples (sleep tracking). When a camera has a crib zone,
+// the motion detector now also measures movement OUTSIDE that zone — a parent coming in, or the child
+// out of bed — kept separate from the in-crib motion so the sleep timeline can distinguish stirring in
+// the crib from someone moving around the room. Null when there's no crib zone (whole-frame = no
+// "outside") or the detector wasn't running. See lib/activityTracker.js + lib/motionDetector.js.
+const activitySamplesColumns = db.prepare('PRAGMA table_info(activity_samples)').all().map((c) => c.name);
+if (!activitySamplesColumns.includes('motion_out_peak')) {
+  db.exec('ALTER TABLE activity_samples ADD COLUMN motion_out_level REAL');
+  db.exec('ALTER TABLE activity_samples ADD COLUMN motion_out_peak REAL');
+}
+
 // Ensure the single settings row always exists.
 db.prepare(
   `INSERT OR IGNORE INTO settings (id, app_name, accent_color, live_color, offline_color, timezone, font_choice, temp_unit)

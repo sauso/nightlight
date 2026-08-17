@@ -13,10 +13,12 @@ import { logger } from './logger.js';
 // All thresholds are deliberately conservative constants up here so we can tune against real nights
 // without schema/UI churn (they can graduate to settings later).
 
-const MOTION_ACTIVE = 0.01; // per-frame changed-fraction above this = real movement (sleeping room ~0)
+const MOTION_ACTIVE = 0.01; // in-crib per-frame changed-fraction above this = real movement (sleeping room ~0)
+const MOTION_OUT_ACTIVE = 0.01; // outside-crib changed-fraction above this = someone in the room / out of bed
 const SOUND_ACTIVE = 6; // dB over ambient above this = a clear noise/cry
 const ONSET_QUIET_MIN = 15; // continuous quiet minutes to call it "asleep"
-const WAKE_ACTIVE_MIN = 5; // continuous active minutes to count as an awakening (vs a brief stir)
+const WAKE_ACTIVE_MIN = 5; // active minutes (within a run) to count as an awakening (vs a brief stir)
+const WAKE_GAP_MIN = 3; // bridge quiet gaps up to this long inside one awakening (intermittent noise/movement)
 const MIN_COVERAGE_FRAC = 0.5; // need activity samples for at least this fraction of the window, else no_data
 
 // --- timezone helpers (no library; same Intl approach as detectSchedule.nowMinutesInAppTz) ---
@@ -120,7 +122,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   const placeholders = cams.map(() => '?').join(',');
   const rows = db
     .prepare(
-      `SELECT bucket_start AS t, motion_peak, sound_peak FROM activity_samples
+      `SELECT bucket_start AS t, motion_peak, sound_peak, motion_out_peak FROM activity_samples
          WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
     )
     .all(...cams, startSql, endSql);
@@ -129,15 +131,20 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   if (totalMin === 0) return { ...base, status: 'no_data' };
 
   // Per-minute state over the whole window: null = no sample (gap), false = quiet, true = active. A
-  // minute is active if ANY of the child's cameras saw movement or a clear noise in it.
+  // minute is active if ANY of the child's cameras saw in-crib movement, a clear noise, OR movement
+  // outside the crib (someone in the room / the child out of bed). outAt[] marks the outside-crib
+  // minutes so the timeline can surface them as room activity distinct from stirring in the crib.
   const state = new Array(totalMin).fill(null);
+  const outAt = new Array(totalMin).fill(false);
   const idxOf = (t) => Math.round((new Date(t.replace(' ', 'T') + 'Z').getTime() - startUtc.getTime()) / 60000);
   for (const r of rows) {
     const i = idxOf(r.t);
     if (i < 0 || i >= totalMin) continue;
-    const active = (r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) || (r.sound_peak != null && r.sound_peak > SOUND_ACTIVE);
+    const out = r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE;
+    const active = (r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) || (r.sound_peak != null && r.sound_peak > SOUND_ACTIVE) || out;
     if (state[i] === null) state[i] = active;
     else state[i] = state[i] || active;
+    if (out) outAt[i] = true;
   }
   const coverage = state.reduce((n, s) => n + (s !== null ? 1 : 0), 0);
   const result = { ...base, coverage_minutes: coverage };
@@ -156,14 +163,25 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   }
   if (onset === -1) return { ...result, status: 'no_sleep' };
 
-  // Mark minutes that belong to a qualifying wake run (>= WAKE_ACTIVE_MIN consecutive active) after onset.
+  // Mark minutes that belong to a qualifying awakening after onset. A run bridges short quiet gaps
+  // (<= WAKE_GAP_MIN) so intermittent noise/movement — a child fussing on and off, or moving in and out
+  // of view — reads as ONE wake rather than being split into sub-threshold stirs. A run qualifies when
+  // it contains >= WAKE_ACTIVE_MIN active minutes; it's trimmed to its first/last active minute.
   const inWake = new Array(totalMin).fill(false);
   for (let i = onset; i < totalMin; ) {
     if (!active[i]) { i++; continue; }
+    let last = i;
+    let count = 0;
     let k = i;
-    while (k < totalMin && active[k]) k++;
-    if (k - i >= WAKE_ACTIVE_MIN) for (let j = i; j < k; j++) inWake[j] = true;
-    i = k;
+    while (k < totalMin) {
+      if (active[k]) { last = k; count++; k++; continue; }
+      let g = k;
+      while (g < totalMin && !active[g]) g++;
+      if (g < totalMin && g - k <= WAKE_GAP_MIN) { k = g; continue; } // bridge a short quiet gap
+      break;
+    }
+    if (count >= WAKE_ACTIVE_MIN) for (let j = i; j <= last; j++) inWake[j] = true;
+    i = last + 1;
   }
 
   // Final (morning) wake = start of the wake run that reaches the window end; else still asleep at end.
@@ -206,7 +224,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     longest_stretch_minutes: longest,
   };
   if (includeTimeline) {
-    out.timeline = state.map((s, i) => ({ t: minuteTime(i), state: s === null ? 'gap' : s ? 'active' : 'quiet', inWake: inWake[i] }));
+    out.timeline = state.map((s, i) => ({ t: minuteTime(i), state: s === null ? 'gap' : s ? 'active' : 'quiet', inWake: inWake[i], out: outAt[i] }));
 
     // The counted awakenings, with clock times + duration — powers the "where the wake-ups were" list.
     const wakes = [];
@@ -219,10 +237,24 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     }
     out.wakes = wakes;
 
-    // Run-length segments across the WHOLE window, for drawing a to-scale timeline bar. Each minute is
-    // labelled: settling (awake before onset), asleep, wake (a counted awakening), or awake (morning,
-    // after the final wake). Gaps fold into asleep/awake via the same active[] the algorithm used.
-    const label = (i) => (i < onset ? 'settling' : i >= sleepEnd ? 'awake' : inWake[i] ? 'wake' : 'asleep');
+    // Outside-the-crib movement grouped into "room activity" events (someone came in / the child out of
+    // bed), bridging single-minute gaps. Shown distinctly from the child's own stirring/waking.
+    const visits = [];
+    for (let i = 0; i < totalMin; ) {
+      if (!outAt[i]) { i++; continue; }
+      let last = i;
+      let k = i + 1;
+      while (k < totalMin && (outAt[k] || (k + 1 < totalMin && outAt[k + 1]))) { if (outAt[k]) last = k; k++; }
+      visits.push({ start_at: minuteTime(i), end_at: minuteTime(last + 1), minutes: last - i + 1 });
+      i = last + 1;
+    }
+    out.visits = visits;
+
+    // Run-length segments across the WHOLE window for the to-scale bar. Each minute is labelled:
+    // settling (before onset), asleep (quiet), stir (brief in-crib movement/noise that didn't reach a
+    // full awakening), wake (a counted awakening), or awake (morning, after the final wake).
+    const label = (i) =>
+      i < onset ? 'settling' : i >= sleepEnd ? 'awake' : inWake[i] ? 'wake' : active[i] ? 'stir' : 'asleep';
     const segments = [];
     for (let i = 0; i < totalMin; ) {
       const l = label(i);
