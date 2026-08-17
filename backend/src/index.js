@@ -25,6 +25,7 @@ import db from './db.js';
 import { upsertPath, isPathConfiguredCorrectly, getPathStatus } from './lib/mediamtx.js';
 import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder.js';
 import { startMotionDetector, isDetecting, stopAllMotionDetectors, motionLegWanted } from './lib/motionDetector.js';
+import { startOnvifMotion, stopOnvifMotion, isOnvifMotion, onvifMotionWanted, stopAllOnvifMotion } from './lib/onvifMotion.js';
 import { startSoundDetector, isSoundDetecting, stopAllSoundDetectors } from './lib/soundDetector.js';
 import { startClipCapture, isClipCapturing, stopAllClipCapture } from './lib/clipCapture.js';
 import { startClipStorage } from './lib/clipStorage.js';
@@ -420,6 +421,14 @@ async function reconcileCameraPaths(attempt = 1) {
       if (motionLegWanted(cam) && !isDetecting(cam.id)) {
         await startMotionDetector(cam).catch((e) => logger.error(`[detect] start failed: ${e.message}`));
       }
+      // Keep the ONVIF motion subscription alive for cameras on the 'onvif' source (peer to the
+      // pixel-diff leg; the camera reports motion over its Event service). Tear one down if the
+      // camera has since switched away from ONVIF.
+      if (onvifMotionWanted(cam) && !isOnvifMotion(cam.id)) {
+        await startOnvifMotion(cam).catch((e) => logger.error(`[onvif-motion] start failed: ${e.message}`));
+      } else if (!onvifMotionWanted(cam) && isOnvifMotion(cam.id)) {
+        await stopOnvifMotion(cam.id).catch(() => {});
+      }
       // Keep the optional sound detector alive the same way (audio-only leg off the same stream).
       if (cam.detect_sound_enabled && !isSoundDetecting(cam.id)) {
         await startSoundDetector(cam).catch((e) => logger.error(`[sound] start failed: ${e.message}`));
@@ -447,6 +456,7 @@ async function reconcileCameraPaths(attempt = 1) {
 async function shutdown() {
   logger.info('Shutting down - stopping transcoders and MediaMTX.');
   await stopAllMotionDetectors();
+  await stopAllOnvifMotion();
   await stopAllSoundDetectors();
   stopAllClipCapture();
   await stopAllTranscoders();

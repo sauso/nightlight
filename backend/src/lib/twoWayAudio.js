@@ -309,6 +309,29 @@ class OnvifBackchannelTalk {
   }
 }
 
+// Actively confirm a camera really answers the ONVIF/RTSP audio backchannel, using the stream URL's
+// own credentials — a full DESCRIBE+SETUP+PLAY handshake, then teardown. Returns true/false (never
+// throws). Called at ONVIF probe/edit time to PICK and CORRECT the talk backend: a Thingino/Sonoff (or
+// any ONVIF cam that does the backchannel) verifies true and gets 'onvif-backchannel'; a real Hikvision
+// won't answer it and falls back to the ISAPI sink. This is what lets the backend self-heal when a
+// camera is re-pointed at a different device or was added before this protocol existed, instead of
+// latching onto whatever was stored first. `backchannel_supported` (from the ONVIF probe) only says the
+// device advertises an audio output — this proves the send path actually works.
+export async function verifyBackchannel(rtspUrl, { timeoutMs = 6000 } = {}) {
+  const parts = parseRtspUrl(rtspUrl);
+  if (!parts || !parts.host) return false;
+  const session = new OnvifBackchannelTalk(parts);
+  let timer;
+  const timeout = new Promise((res) => { timer = setTimeout(() => res('timeout'), timeoutMs); });
+  try {
+    const outcome = await Promise.race([session.start().then(() => 'ok', () => 'fail'), timeout]);
+    return outcome === 'ok';
+  } finally {
+    clearTimeout(timer);
+    try { await session.close(); } catch { /* ignore */ }
+  }
+}
+
 // Whether a camera is set up for talk-back: a supported backend + whatever creds that backend needs.
 export function talkConfigured(camera) {
   if (camera.talk_backend === 'hikvision-isapi') return !!camera.talk_username && !!camera.talk_password;

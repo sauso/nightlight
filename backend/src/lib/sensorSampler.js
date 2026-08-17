@@ -55,8 +55,8 @@ export function sampleSensorReadings() {
 export function pruneSensorReadings() {
   try {
     const { changes } = db
-      .prepare(`DELETE FROM sensor_readings WHERE created_at < datetime('now', '-${RETENTION_DAYS} days')`)
-      .run();
+      .prepare("DELETE FROM sensor_readings WHERE created_at < datetime('now', ?)")
+      .run(`-${RETENTION_DAYS} days`);
     if (changes > 0) logger.info(`[sensors] Pruned ${changes} reading(s) older than ${RETENTION_DAYS} days.`);
   } catch {
     /* ignore */

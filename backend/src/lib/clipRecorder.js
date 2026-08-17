@@ -52,6 +52,20 @@ const segmenters = new Map();
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// cameraId and outBase become filesystem path SEGMENTS (the per-camera ring/clip dir names and the
+// clip/thumb/concat-list basenames), and the concat list is then handed to ffmpeg to read. These are
+// always server-generated — a camera UUID and an integer event id (or a timestamp in the spike) — never
+// user input, so no traversal is reachable. Validate anyway, fail-closed: a value that isn't a single
+// safe segment (letters/digits/dot/dash/underscore, and not "." / "..") can never be coerced into a
+// path that escapes the clip tree. Cheap insurance against a future caller passing something unchecked.
+function safePathSegment(value, label) {
+  const s = String(value);
+  if (s === '.' || s === '..' || !/^[A-Za-z0-9._-]+$/.test(s)) {
+    throw new Error(`unsafe ${label} for clip path: ${JSON.stringify(s)}`);
+  }
+  return s;
+}
+
 function safeReaddir(dir) {
   try {
     return fs.readdirSync(dir);
@@ -115,7 +129,7 @@ export function isSegmenterRunning(cameraId) {
 export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec = 15 } = {}) {
   stopSegmenter(cameraId);
 
-  const ringDir = path.join(RING_ROOT, String(cameraId));
+  const ringDir = path.join(RING_ROOT, safePathSegment(cameraId, 'cameraId'));
   fs.mkdirSync(ringDir, { recursive: true });
   // Start clean so stale segments from a previous run can't leak into a fresh clip.
   for (const f of safeReaddir(ringDir)) {
@@ -255,11 +269,16 @@ export async function extractClip(
 
   if (!segs.length) throw new Error('no ring segments covered the requested window');
 
-  const outDir = path.join(CLIPS_DIR, String(cameraId));
+  // These two become path segments (the per-camera clip dir + the clip/thumb/list basenames); validate
+  // before they touch the filesystem, same guard as the ring dir at start time.
+  const safeId = safePathSegment(cameraId, 'cameraId');
+  const safeBase = safePathSegment(outBase, 'outBase');
+
+  const outDir = path.join(CLIPS_DIR, safeId);
   fs.mkdirSync(outDir, { recursive: true });
 
   // concat demuxer list. Absolute paths + `-safe 0`; single-quote-escape for safety.
-  const listFile = path.join(ringDir, `concat-${outBase}.txt`);
+  const listFile = path.join(ringDir, `concat-${safeBase}.txt`);
   fs.writeFileSync(
     listFile,
     segs.map((s) => `file '${s.p.replace(/'/g, "'\\''")}'`).join('\n') + '\n'
@@ -272,7 +291,7 @@ export async function extractClip(
   const offsetSec = Math.max(0, (at - preRollSec * 1000 - clipStartWallMs) / 1000);
   const durSec = preRollSec + postRollSec;
 
-  const outFile = path.join(outDir, `${outBase}.mp4`);
+  const outFile = path.join(outDir, `${safeBase}.mp4`);
   try {
     // Concatenate the ring segments, then trim to EXACTLY [pre+post] seconds. Because a `-c copy` cut
     // can only land on a keyframe (~2s GOP here), an exact, admin-set duration requires re-encoding
@@ -297,7 +316,7 @@ export async function extractClip(
   }
 
   // Thumbnail — one frame from the finished clip. Best-effort (Phase 2 reuses the event snapshot).
-  const thumbFile = path.join(outDir, `${outBase}.jpg`);
+  const thumbFile = path.join(outDir, `${safeBase}.jpg`);
   await runFfmpeg([
     '-nostdin', '-loglevel', 'error', '-i', outFile,
     '-frames:v', '1', '-q:v', '4', '-y', thumbFile,
