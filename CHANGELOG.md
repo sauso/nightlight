@@ -9,6 +9,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **Sleep detail view with a night timeline.** Tapping a child's "last night" sleep summary now opens a
+  full breakdown: a to-scale timeline of the night showing asleep vs awake stretches, each wake-up marked
+  against a real time axis, plus a list of every awakening with its time and length. A date picker lets
+  you step back through previous nights (about 30 days of history — the period the per-minute activity
+  data is kept, which is lightweight to store). No new data collection; existing nights are just rendered
+  in more detail on demand.
+
 ## [0.18.0] - 2026-08-18
 
 ### Added

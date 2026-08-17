@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Moon } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Moon, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
 
@@ -16,6 +17,7 @@ function fmtDur(min) {
 
 export default function SleepSummaryCard({ childId }) {
   const { settings } = useSettings();
+  const navigate = useNavigate();
   const tz = settings.timezone || 'UTC';
   const [night, setNight] = useState(undefined); // undefined = loading, null = none
 
@@ -71,10 +73,14 @@ export default function SleepSummaryCard({ childId }) {
     );
   }
 
+  // The whole card is a button into the Sleep detail page (timeline + wake breakdown + date picker).
+  // Clickable even with no data, so you can still browse other nights via the date picker there.
   return (
-    <div className="night__sleep">
+    <button type="button" className="night__sleep night__sleep--btn" onClick={() => navigate(`/children/${childId}/sleep`)}
+      aria-label="View sleep detail and history">
       <Moon size={18} aria-hidden="true" />
-      <div>{body}</div>
-    </div>
+      <div className="night__sleep-body">{body}</div>
+      <ChevronRight size={18} aria-hidden="true" className="night__sleep-chev" />
+    </button>
   );
 }
