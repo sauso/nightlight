@@ -55,14 +55,15 @@ hlsVariant: mpegts
 # first viewer request — avoids a startup race where an early request finds no
 # segments ready yet.
 hlsAlwaysRemux: yes
-# 1500ms was too aggressive for this camera's actual keyframe interval - MediaMTX can
-# only start a new segment at a keyframe, so an overly-short target just meant
-# segments fluctuated (2s, then 3s, etc.) waiting for whichever keyframe came next.
-# That inconsistency is specifically what triggers HLS playback errors on iOS. 2s is
-# a standard, widely-compatible target and much closer to what this camera naturally
-# produces, so segments should land consistently rather than drifting.
-hlsSegmentDuration: 2s
-hlsSegmentCount: 3
+# MediaMTX can only start a segment at a keyframe. With the target BELOW the camera's keyframe
+# interval, every segment is exactly one GOP — consistent, no fluctuation (the drift that used to
+# break iOS HLS only happens when the target straddles the GOP, e.g. 1.5s against 1s keyframes). So
+# 1s is safe here as long as cameras are set to ~1s keyframes (recommended); a camera with a longer
+# GOP simply gets longer, still-consistent segments. Shorter segments = lower Compatibility latency
+# (~7-8s at 2s/1s-GOP dropped toward ~3-4s at 1s/1s-GOP). Count bumped so the shorter segments still
+# give the player a few seconds of playlist to stay resilient without sitting further from live.
+hlsSegmentDuration: 1s
+hlsSegmentCount: 6
 hlsAllowOrigins: ["*"]
 
 # --- RTMP/SRT outputs not needed for this project ---
