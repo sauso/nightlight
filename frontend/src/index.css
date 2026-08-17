@@ -1076,6 +1076,57 @@ body.in-pip .tile-menu-backdrop {
 .night__sleep-big { font-size: 22px; font-weight: 700; color: #fff; margin: 1px 0 2px; line-height: 1.1; }
 .night__est { font-size: 10.5px; color: #8f93d0; margin-top: 5px; }
 
+/* Sleep summary card as a button into the detail page */
+.night__sleep--btn { width: 100%; background: none; border: none; border-top: 1px solid rgba(255, 255, 255, 0.1); text-align: left; cursor: pointer; font: inherit; }
+.night__sleep-body { flex: 1; min-width: 0; }
+.night__sleep-chev { flex: none; opacity: 0.6; transition: transform 0.15s ease, opacity 0.15s ease; }
+.night__sleep--btn:hover .night__sleep-chev, .night__sleep--btn:focus-visible .night__sleep-chev { opacity: 1; transform: translateX(2px); }
+
+/* --- Sleep detail page --- */
+/* Timeline segment colours (theme-aware) */
+:root { --sleep-asleep: #5b63c4; --sleep-wake: #e0894a; --sleep-awake: #d2d0e2; }
+:root[data-theme='dark'] { --sleep-asleep: #7c85e6; --sleep-wake: #e89a5c; --sleep-awake: #3c3f60; }
+
+.sleep-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.sleep-nav__arrow { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; }
+.sleep-nav__arrow:disabled { opacity: 0.35; cursor: default; }
+.sleep-nav__date { position: relative; flex: 1; text-align: center; display: flex; flex-direction: column; align-items: center; padding: 4px 0; }
+.sleep-nav__date-sub { order: -1; font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
+.sleep-nav__date-label { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+.sleep-nav__date-input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+
+.sleep-detail__summary { display: flex; flex-direction: column; gap: 12px; }
+.sleep-detail__big { font-size: 26px; font-weight: 700; color: var(--text-primary); line-height: 1.1; }
+.sleep-detail__big span { font-size: 15px; font-weight: 500; color: var(--text-secondary); }
+.sleep-detail__stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+.sleep-stat__label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; }
+.sleep-stat__value { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-top: 1px; }
+.sleep-detail__section-title { font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px; }
+
+.sleep-tl { padding-top: 2px; }
+.sleep-tl__bar { position: relative; display: flex; width: 100%; height: 30px; border-radius: 7px; overflow: hidden; background: var(--bg-elevated-2); }
+.sleep-seg { height: 100%; }
+.sleep-seg--asleep { background: var(--sleep-asleep); }
+.sleep-seg--wake { background: var(--sleep-wake); }
+.sleep-seg--awake { background: var(--sleep-awake); }
+.sleep-tl__mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text-primary); opacity: 0.55; transform: translateX(-1px); }
+.sleep-tl__axis { position: relative; height: 16px; margin-top: 4px; }
+.sleep-tl__tick { position: absolute; top: 0; width: 1px; height: 4px; background: var(--border); transform: translateX(-0.5px); }
+.sleep-tl__tick-label { position: absolute; top: 5px; left: 0; transform: translateX(-50%); font-size: 10px; color: var(--text-secondary); white-space: nowrap; }
+.sleep-tl__ends { display: flex; justify-content: space-between; margin-top: 2px; font-size: 11px; color: var(--text-secondary); }
+
+.sleep-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 14px; font-size: 12px; color: var(--text-secondary); }
+.sleep-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sleep-legend__sw { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+
+.sleep-wakes { list-style: none; margin: 0; padding: 0; }
+.sleep-wakes__row { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-top: 1px solid var(--border); }
+.sleep-wakes__row:first-child { border-top: none; }
+.sleep-wakes__time { font-size: 14px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.sleep-wakes__dur { font-size: 13px; color: var(--sleep-wake); font-weight: 600; }
+
+.sleep-detail__est { display: flex; align-items: center; gap: 6px; margin-top: 4px; padding: 0 4px; font-size: 11px; color: var(--text-secondary); }
+
 /* Crib-zone picker: a rectangle drawn over a live still to scope motion + sleep tracking to the crib. */
 .crib { margin-top: 4px; }
 .crib__stage { position: relative; width: 100%; max-width: 520px; background: #0b0b12; border-radius: 12px; overflow: hidden; touch-action: none; user-select: none; }

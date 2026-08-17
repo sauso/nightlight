@@ -207,6 +207,31 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   };
   if (includeTimeline) {
     out.timeline = state.map((s, i) => ({ t: minuteTime(i), state: s === null ? 'gap' : s ? 'active' : 'quiet', inWake: inWake[i] }));
+
+    // The counted awakenings, with clock times + duration — powers the "where the wake-ups were" list.
+    const wakes = [];
+    for (let i = onset; i < sleepEnd; ) {
+      if (!inWake[i]) { i++; continue; }
+      let k = i;
+      while (k < sleepEnd && inWake[k]) k++;
+      wakes.push({ start_at: minuteTime(i), end_at: minuteTime(k), minutes: k - i });
+      i = k;
+    }
+    out.wakes = wakes;
+
+    // Run-length segments across the WHOLE window, for drawing a to-scale timeline bar. Each minute is
+    // labelled: settling (awake before onset), asleep, wake (a counted awakening), or awake (morning,
+    // after the final wake). Gaps fold into asleep/awake via the same active[] the algorithm used.
+    const label = (i) => (i < onset ? 'settling' : i >= sleepEnd ? 'awake' : inWake[i] ? 'wake' : 'asleep');
+    const segments = [];
+    for (let i = 0; i < totalMin; ) {
+      const l = label(i);
+      let k = i;
+      while (k < totalMin && label(k) === l) k++;
+      segments.push({ state: l, from_at: minuteTime(i), to_at: minuteTime(k), minutes: k - i });
+      i = k;
+    }
+    out.segments = segments;
   }
   return out;
 }

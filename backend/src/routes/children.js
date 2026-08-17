@@ -60,8 +60,9 @@ router.get('/:id/sleep', (req, res) => {
   res.json({ nights: getStoredNights(req.params.id, nights) });
 });
 
-// Compute one night on demand for a specific LOCAL start date ('YYYY-MM-DD'). Used for tuning: pass
-// ?debug=1 to include the per-minute timeline, ?store=1 (admin) to persist the recompute.
+// Compute one night on demand for a specific LOCAL start date ('YYYY-MM-DD'). ?detail=1 includes the
+// timeline segments + wake list for the Sleep detail view; ?debug=1 also adds the raw per-minute
+// timeline (tuning); ?store=1 (admin) persists the recompute.
 router.get('/:id/sleep/:date', (req, res) => {
   const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
@@ -69,7 +70,7 @@ router.get('/:id/sleep/:date', (req, res) => {
   const wantStore = req.query.store === '1' && req.user?.role === 'admin';
   const summary = wantStore
     ? computeAndStoreNight(req.params.id, req.params.date)
-    : computeNight(req.params.id, req.params.date, { includeTimeline: req.query.debug === '1' });
+    : computeNight(req.params.id, req.params.date, { includeTimeline: req.query.debug === '1' || req.query.detail === '1' });
   res.json(summary);
 });
 
