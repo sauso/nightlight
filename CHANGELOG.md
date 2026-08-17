@@ -10,6 +10,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Added
+- **Sleep tracking (estimated).** Each child's page now shows a **"last night" sleep summary** — time
+  asleep, when they fell asleep and woke, number of wake-ups, and longest unbroken stretch — inferred
+  from overnight movement and sound (no wearable, nothing to start; it's a sleep-*pattern* estimate,
+  not a medical measurement). Works from any camera assigned to the child that runs motion or sound
+  detection; the nightly window is set under Settings. Paired with a new **crib-area picker** on a
+  camera's Motion detection screen: draw a box over the live view to focus motion detection and sleep
+  tracking on the crib, so a fan or someone walking past isn't counted.
 - **Room climate history.** For a camera with an MQTT temperature/humidity topic, Nightlight now keeps
   a rolling history of its readings (sampled every few minutes) and shows a **last-24h temperature &
   humidity chart** on that child's page. Previously these readings were live-only. This is the first
