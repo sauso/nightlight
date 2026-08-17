@@ -81,6 +81,19 @@ function localDateStr(tz, deltaDays = 0) {
   return `${p.year}-${p.month}-${p.day}`;
 }
 
+// The start date of the night currently IN PROGRESS (its window contains 'now'), or null in the daytime
+// gap between windows. Powers the live "tonight so far" view.
+export function currentNightDate(settings = appSettings()) {
+  const tz = settings.timezone || 'UTC';
+  const now = Date.now();
+  for (let delta = 0; delta >= -1; delta--) {
+    const date = localDateStr(tz, delta);
+    const { startUtc, endUtc } = windowBoundsUtc(date, tz, settings.sleep_window_start, settings.sleep_window_end);
+    if (startUtc.getTime() <= now && now < endUtc.getTime()) return date;
+  }
+  return null;
+}
+
 // The start date of the most recent night whose window has fully ended (so it's safe to compute).
 export function lastCompletedNightDate(settings = appSettings()) {
   const tz = settings.timezone || 'UTC';
@@ -104,11 +117,21 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   const startSql = toSqlUtc(startUtc);
   const endSql = toSqlUtc(endUtc);
 
+  // In-progress night: the window is still open. Cap the analysis at "now" so a morning wake that's
+  // happening right now resolves to a real wake time, instead of the not-yet-elapsed minutes reading as
+  // quiet (= "still asleep"). A completed night uses the full window unchanged.
+  const nowMs = Date.now();
+  const inProgress = nowMs >= startUtc.getTime() && nowMs < endUtc.getTime();
+  const effEndMs = inProgress ? nowMs : endUtc.getTime();
+  const asOfSql = toSqlUtc(new Date(effEndMs));
+
   const cams = db.prepare('SELECT id FROM cameras WHERE child_id = ?').all(childId).map((c) => c.id);
   const base = {
     night_date: nightDate,
     window_start: startSql,
     window_end: endSql,
+    in_progress: inProgress,
+    as_of: asOfSql,
     onset_at: null,
     wake_at: null,
     asleep_minutes: null,
@@ -127,7 +150,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     )
     .all(...cams, startSql, endSql);
 
-  const totalMin = Math.max(0, Math.round((endUtc.getTime() - startUtc.getTime()) / 60000));
+  const totalMin = Math.max(0, Math.floor((effEndMs - startUtc.getTime()) / 60000));
   if (totalMin === 0) return { ...base, status: 'no_data' };
 
   // Per-minute state over the whole window: null = no sample (gap), false = quiet, true = active. A
