@@ -64,6 +64,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   mobile bar. Phone and tablet keep the familiar bottom tabs.
 
 ### Fixed
+- **Cameras that send AAC audio now work in Compatibility mode (and have Low-latency audio).** A camera
+  whose stream carries AAC audio (e.g. some Thingino builds) previously broke Compatibility (HLS) mode
+  entirely — MediaMTX's HLS muxer rejects two AAC audio tracks — and had no sound in Low-latency
+  (WebRTC can't carry AAC). Nightlight now detects an AAC source and builds the WebRTC audio track as
+  G711, so HLS gets a single valid audio track (video + sound in Compatibility) and Low-latency has
+  sound too. G711-audio cameras are unchanged.
 - **Clearer camera-report error when a camera can't be reached.** An unreachable camera in the "Camera
   not connecting?" report now reads "Timed out — no response from the camera (wrong IP/port, offline,
   or blocked by a firewall)" instead of the meaningless "ffprobe exited null".
