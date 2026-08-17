@@ -14,8 +14,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   full breakdown: a to-scale timeline of the night showing asleep vs awake stretches, each wake-up marked
   against a real time axis, plus a list of every awakening with its time and length. A date picker lets
   you step back through previous nights (about 30 days of history — the period the per-minute activity
-  data is kept, which is lightweight to store). No new data collection; existing nights are just rendered
-  in more detail on demand.
+  data is kept, which is lightweight to store). The timeline also distinguishes light **stirring** from a
+  full **awake** stretch.
+- **Room activity (movement outside the crib).** For a camera with a crib zone set, Nightlight now also
+  tracks movement *outside* the crib — a parent coming in, or the child climbing out of bed — as a
+  separate signal from stirring in the crib. These show on the sleep timeline as distinct "in the room"
+  markers with a list of when they happened, and they help catch a morning wake where the child got out
+  of bed (previously invisible, since in-crib motion sees nothing once they leave the cot). Wake detection
+  also now bridges short quiet gaps, so intermittent fussing reads as one awakening rather than several
+  missed stirs. (Outside-crib tracking starts collecting from this release; it doesn't backfill past
+  nights. Motion *alerts* are unchanged — still scoped to the crib zone.)
 
 ## [0.18.0] - 2026-08-18
 

@@ -5,7 +5,7 @@ import { subPathName, getPathStatus } from './mediamtx.js';
 import { inActiveWindow } from './detectSchedule.js';
 import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
-import { recordMotion } from './activityTracker.js';
+import { recordMotion, recordMotionOut } from './activityTracker.js';
 
 // Server-side motion detection. Per camera with detection enabled, a cheap FFmpeg leg reads
 // the already-published MediaMTX stream (the sub-stream when there is one — far cheaper to
@@ -179,17 +179,19 @@ export async function startMotionDetector(camera) {
     let lastActive = 0; // last frame that was above the active threshold
     let lastAlert = 0;
 
+    const outPixels = mask ? FRAME_BYTES - zonePixels : 0; // area outside the crib zone (0 = whole frame)
+
     function handleFrame(frame) {
       if (prev) {
         let changed = 0;
+        let changedOut = 0;
         // Count changed pixels inside the crib mask (any of its rectangles), or the whole frame when
         // there's no zone. The mask counts each pixel once, so overlapping/diagonal boxes are fine.
+        // With a crib zone, also count changes OUTSIDE it (parent/child-out-of-bed) as a separate channel.
         if (mask) {
           for (let i = 0; i < FRAME_BYTES; i++) {
-            if (mask[i]) {
-              const d = frame[i] - prev[i];
-              if (d > PIXEL_DELTA || d < -PIXEL_DELTA) changed++;
-            }
+            const d = frame[i] - prev[i];
+            if (d > PIXEL_DELTA || d < -PIXEL_DELTA) { if (mask[i]) changed++; else changedOut++; }
           }
         } else {
           for (let i = 0; i < FRAME_BYTES; i++) {
@@ -202,6 +204,9 @@ export async function startMotionDetector(camera) {
         // Feed the raw per-frame movement into the per-minute activity timeline (independent of the
         // alert threshold/cooldown below), so sleep tracking sees continuous motion, not just alerts.
         recordMotion(camera.id, fraction);
+        // Outside-crib movement (only meaningful when a crib zone carves out an "outside") — a separate
+        // channel so sleep tracking can flag someone in the room vs stirring in the crib.
+        if (outPixels > 0) recordMotionOut(camera.id, changedOut / outPixels);
         // Activity-only legs (MQTT-source / motion-off child cameras) stop here — no alert bookkeeping.
         if (!activityOnly) {
           if (fraction >= threshold) {

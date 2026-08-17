@@ -1084,8 +1084,8 @@ body.in-pip .tile-menu-backdrop {
 
 /* --- Sleep detail page --- */
 /* Timeline segment colours (theme-aware) */
-:root { --sleep-asleep: #5b63c4; --sleep-wake: #e0894a; --sleep-awake: #d2d0e2; }
-:root[data-theme='dark'] { --sleep-asleep: #7c85e6; --sleep-wake: #e89a5c; --sleep-awake: #3c3f60; }
+:root { --sleep-asleep: #5b63c4; --sleep-stir: #a7ade4; --sleep-wake: #e0894a; --sleep-awake: #d2d0e2; --sleep-visit: #2fa39a; }
+:root[data-theme='dark'] { --sleep-asleep: #7c85e6; --sleep-stir: #4a4f86; --sleep-wake: #e89a5c; --sleep-awake: #3c3f60; --sleep-visit: #3ec4b8; }
 
 .sleep-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .sleep-nav__arrow { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; }
@@ -1104,11 +1104,16 @@ body.in-pip .tile-menu-backdrop {
 .sleep-detail__section-title { font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px; }
 
 .sleep-tl { padding-top: 2px; }
+.sleep-tl__visits { position: relative; height: 12px; margin-bottom: 3px; }
+.sleep-tl__visit { position: absolute; top: 2px; width: 9px; height: 9px; border-radius: 50%; background: var(--sleep-visit); border: 2px solid var(--bg-elevated); transform: translateX(-50%); box-shadow: 0 0 0 1px var(--sleep-visit); }
 .sleep-tl__bar { position: relative; display: flex; width: 100%; height: 30px; border-radius: 7px; overflow: hidden; background: var(--bg-elevated-2); }
 .sleep-seg { height: 100%; }
 .sleep-seg--asleep { background: var(--sleep-asleep); }
+.sleep-seg--stir { background: var(--sleep-stir); }
 .sleep-seg--wake { background: var(--sleep-wake); }
 .sleep-seg--awake { background: var(--sleep-awake); }
+.sleep-legend__sw--visit { background: var(--sleep-visit); border-radius: 50%; }
+.sleep-wakes__dur--visit { color: var(--sleep-visit); }
 .sleep-tl__mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text-primary); opacity: 0.55; transform: translateX(-1px); }
 .sleep-tl__axis { position: relative; height: 16px; margin-top: 4px; }
 .sleep-tl__tick { position: absolute; top: 0; width: 1px; height: 4px; background: var(--border); transform: translateX(-0.5px); }
