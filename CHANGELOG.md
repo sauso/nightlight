@@ -36,6 +36,21 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   close. The detail timeline marks "as of now" and refreshes live; the final stored summary is still
   written when the window closes.
 
+- **Room temperature on the sleep timeline, and a temperature-vs-sleep insight.** For a child whose
+  camera has an MQTT temperature/humidity sensor, the sleep detail view now draws the night's room
+  temperature as a line beneath the sleep timeline (on the same time axis, so you can see how warm the
+  room was around a wake-up), with the night's average and range. Once there are a handful of tracked
+  nights, a **"Sleep & room temperature"** card compares wake-ups on the child's warmer vs cooler nights
+  and calls out whether warmer nights tend to mean more waking — a pattern guide, not a cause. Builds on
+  the temperature/humidity history that was already being recorded; correlation strengthens as more nights
+  are tracked.
+
+### Changed
+- **Sleep tracking now only runs during each child's window.** The background movement sampler for sleep
+  tracking used to run around the clock; it now starts at each child's bedtime and stops after their wake
+  time, so it isn't using camera-decode CPU all day for no benefit. No change to what's recorded overnight,
+  and motion/sound *alerts* are unaffected — they still run whenever they're configured to.
+
 ## [0.18.0] - 2026-08-18
 
 ### Added

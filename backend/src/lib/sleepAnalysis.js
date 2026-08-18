@@ -40,9 +40,33 @@ function childSleepConfig(childId) {
   };
 }
 
-// Does this child have sleep tracking turned on? Used to gate the activity leg + nightly compute.
+// Does this child have sleep tracking turned on? Used to gate the nightly compute + the "should this
+// child ever run an activity leg" question.
 export function childTracksSleep(childId) {
   return childSleepConfig(childId).track;
+}
+
+// A few minutes of slack on each side of the window so the 5-min reconcile that starts/stops the
+// activity leg never clips the window edges: the leg is running a touch before bedtime and lingers a
+// touch past wake, guaranteeing full coverage of [start, end) even with the reconcile's granularity.
+const WINDOW_MARGIN_MS = 5 * 60 * 1000;
+
+// Is this child's sleep window open RIGHT NOW (within the small margin above)? The activity-only motion
+// leg is gated on this so it only samples overnight, not all day — there's no point running it outside
+// each child's window. Returns false when the child doesn't track sleep. (Frame-diff ALERT legs are not
+// gated on this; they run 24/7 regardless — see motionDetector.motionLegWanted.)
+export function childWindowActiveNow(childId) {
+  const cfg = childSleepConfig(childId);
+  if (!cfg.track) return false;
+  const tz = appSettings().timezone || 'UTC';
+  const now = Date.now();
+  // Check today's window and yesterday's (a window that wraps midnight is still open in the small hours).
+  for (let delta = 0; delta >= -1; delta--) {
+    const date = localDateStr(tz, delta);
+    const { startUtc, endUtc } = windowBoundsUtc(date, tz, cfg.start, cfg.end);
+    if (now >= startUtc.getTime() - WINDOW_MARGIN_MS && now < endUtc.getTime() + WINDOW_MARGIN_MS) return true;
+  }
+  return false;
 }
 
 // Offset (localWallClock - UTC) in ms for a given instant in a tz.
@@ -124,6 +148,58 @@ export function lastCompletedNightDate(childId) {
   return localDateStr(tz, -3);
 }
 
+// --- room climate (temp/humidity) over the night, from sensor_readings ---
+
+// Overnight temperature/humidity for the child's cameras (those with an MQTT sensor) across
+// [startSql, asOfSql). Returns a summary (avg/min/max, Celsius + %) always, plus a downsampled
+// per-5-min series when includeSeries is set (for the detail chart). Null when there are no readings —
+// so a child without a temp/humidity sensor simply shows no climate. Times are the same UTC
+// 'YYYY-MM-DD HH:MM:SS' strings sensor_readings.created_at uses, so a lexical range works.
+function nightClimate(cams, startSql, asOfSql, { includeSeries = false } = {}) {
+  if (!cams.length) return null;
+  const ph = cams.map(() => '?').join(',');
+  const agg = db
+    .prepare(
+      `SELECT AVG(temperature) AS ta, MIN(temperature) AS tmin, MAX(temperature) AS tmax, COUNT(temperature) AS tn,
+              AVG(humidity) AS ha, MIN(humidity) AS hmin, MAX(humidity) AS hmax, COUNT(humidity) AS hn
+         FROM sensor_readings
+         WHERE camera_id IN (${ph}) AND created_at >= ? AND created_at < ?`
+    )
+    .get(...cams, startSql, asOfSql);
+  if (!agg || (!agg.tn && !agg.hn)) return null;
+  const r1 = (v) => (v == null ? null : Math.round(v * 10) / 10);
+  const r0 = (v) => (v == null ? null : Math.round(v));
+  const climate = {
+    temp_avg: r1(agg.ta), temp_min: r1(agg.tmin), temp_max: r1(agg.tmax), temp_samples: agg.tn,
+    humidity_avg: r0(agg.ha), humidity_min: r0(agg.hmin), humidity_max: r0(agg.hmax), humidity_samples: agg.hn,
+  };
+  if (includeSeries) {
+    const rows = db
+      .prepare(
+        `SELECT created_at AS t, temperature, humidity FROM sensor_readings
+           WHERE camera_id IN (${ph}) AND created_at >= ? AND created_at < ? ORDER BY created_at`
+      )
+      .all(...cams, startSql, asOfSql);
+    // Bucket to a 5-min grid and average across cameras, so multiple sensors (or jittery timestamps)
+    // give one clean line rather than a zig-zag between rooms.
+    const BUCKET_MS = 5 * 60000;
+    const buckets = new Map();
+    for (const row of rows) {
+      const ms = new Date(row.t.replace(' ', 'T') + 'Z').getTime();
+      const key = Math.floor(ms / BUCKET_MS);
+      let b = buckets.get(key);
+      if (!b) { b = { t: toSqlUtc(new Date(key * BUCKET_MS)), ts: [], hs: [] }; buckets.set(key, b); }
+      if (typeof row.temperature === 'number') b.ts.push(row.temperature);
+      if (typeof row.humidity === 'number') b.hs.push(row.humidity);
+    }
+    const avg = (a) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : null);
+    climate.series = [...buckets.values()]
+      .sort((a, b) => (a.t < b.t ? -1 : 1))
+      .map((b) => ({ t: b.t, temperature: r1(avg(b.ts)), humidity: r0(avg(b.hs)) }));
+  }
+  return climate;
+}
+
 // --- the inference itself ---
 
 // Compute (but do not store) a child's sleep summary for the night starting on local date `nightDate`.
@@ -144,6 +220,9 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   const asOfSql = toSqlUtc(new Date(effEndMs));
 
   const cams = db.prepare('SELECT id FROM cameras WHERE child_id = ?').all(childId).map((c) => c.id);
+  // Room climate over the window so far — present on every non-off status (independent of whether we
+  // detected sleep). The bigger per-5-min series only when a timeline is asked for (the detail view).
+  const climate = nightClimate(cams, startSql, asOfSql, { includeSeries: includeTimeline });
   const base = {
     night_date: nightDate,
     window_start: startSql,
@@ -157,6 +236,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     wake_count: null,
     longest_stretch_minutes: null,
     coverage_minutes: 0,
+    climate,
   };
   if (!cfg.track) return { ...base, status: 'off' };
   if (cams.length === 0) return { ...base, status: 'no_data' };
@@ -313,20 +393,28 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
 const upsertNight = db.prepare(
   `INSERT INTO sleep_nights
      (child_id, night_date, window_start, window_end, status, onset_at, wake_at,
-      asleep_minutes, awake_minutes, wake_count, longest_stretch_minutes, coverage_minutes, computed_at)
+      asleep_minutes, awake_minutes, wake_count, longest_stretch_minutes, coverage_minutes,
+      avg_temperature, avg_humidity, computed_at)
    VALUES (@child_id, @night_date, @window_start, @window_end, @status, @onset_at, @wake_at,
-           @asleep_minutes, @awake_minutes, @wake_count, @longest_stretch_minutes, @coverage_minutes, datetime('now'))
+           @asleep_minutes, @awake_minutes, @wake_count, @longest_stretch_minutes, @coverage_minutes,
+           @avg_temperature, @avg_humidity, datetime('now'))
    ON CONFLICT(child_id, night_date) DO UPDATE SET
      window_start=excluded.window_start, window_end=excluded.window_end, status=excluded.status,
      onset_at=excluded.onset_at, wake_at=excluded.wake_at, asleep_minutes=excluded.asleep_minutes,
      awake_minutes=excluded.awake_minutes, wake_count=excluded.wake_count,
      longest_stretch_minutes=excluded.longest_stretch_minutes, coverage_minutes=excluded.coverage_minutes,
+     avg_temperature=excluded.avg_temperature, avg_humidity=excluded.avg_humidity,
      computed_at=datetime('now')`
 );
 
 export function computeAndStoreNight(childId, nightDate) {
   const summary = computeNight(childId, nightDate);
-  upsertNight.run({ child_id: childId, ...summary });
+  upsertNight.run({
+    child_id: childId,
+    ...summary,
+    avg_temperature: summary.climate?.temp_avg ?? null,
+    avg_humidity: summary.climate?.humidity_avg ?? null,
+  });
   return summary;
 }
 
@@ -334,6 +422,96 @@ export function getStoredNights(childId, limit = 14) {
   return db
     .prepare('SELECT * FROM sleep_nights WHERE child_id = ? ORDER BY night_date DESC LIMIT ?')
     .all(childId, Math.min(60, Math.max(1, limit)));
+}
+
+// --- Phase 5: temperature ↔ sleep correlation ---
+
+const INSIGHT_MIN_NIGHTS = 5; // fewer than this and any correlation is noise — say "keep tracking"
+const INSIGHT_R = 0.35; // |Pearson r| at/above this counts as a real link (moderate)
+const INSIGHT_TEMP_SPREAD = 1; // need at least this much °C spread across nights, else "too flat to tell"
+
+function pearson(xs, ys) {
+  const n = xs.length;
+  if (n < 2) return null;
+  const mx = xs.reduce((s, x) => s + x, 0) / n;
+  const my = ys.reduce((s, y) => s + y, 0) / n;
+  let num = 0, dx = 0, dy = 0;
+  for (let i = 0; i < n; i++) {
+    const a = xs[i] - mx, b = ys[i] - my;
+    num += a * b; dx += a * a; dy += b * b;
+  }
+  if (dx === 0 || dy === 0) return null;
+  return num / Math.sqrt(dx * dy);
+}
+
+const mean = (a) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : null);
+
+// Does room temperature correlate with this child's sleep, across their recent stored nights? Uses the
+// per-night avg_temperature stored on each 'ok' night (so it needs no re-scan of sensor history). Splits
+// the nights at the median temperature into a warmer half and a cooler half and compares wake-ups + sleep
+// duration, and reports a Pearson r for temp↔wakes. All temperatures are Celsius (the client converts to
+// the user's unit). Returns { status }: 'off' | 'insufficient' | 'ok'. The client renders the wording.
+export function sleepInsights(childId, { nights = 30 } = {}) {
+  if (!childTracksSleep(childId)) return { status: 'off' };
+  const rows = db
+    .prepare(
+      `SELECT night_date, wake_count, asleep_minutes, avg_temperature, avg_humidity
+         FROM sleep_nights
+         WHERE child_id = ? AND status = 'ok' AND avg_temperature IS NOT NULL
+           AND wake_count IS NOT NULL AND asleep_minutes IS NOT NULL
+         ORDER BY night_date DESC LIMIT ?`
+    )
+    .all(childId, Math.min(60, Math.max(1, nights)));
+
+  if (rows.length < INSIGHT_MIN_NIGHTS) {
+    return { status: 'insufficient', nights_analyzed: rows.length, min_nights: INSIGHT_MIN_NIGHTS };
+  }
+
+  const temps = rows.map((r) => r.avg_temperature);
+  const wakes = rows.map((r) => r.wake_count);
+  const asleep = rows.map((r) => r.asleep_minutes);
+  const spread = Math.max(...temps) - Math.min(...temps);
+
+  const rWakes = pearson(temps, wakes);
+  const rAsleep = pearson(temps, asleep);
+
+  // Median split into cooler/warmer halves (the middle night, on an odd count, drops out of both).
+  const sorted = [...temps].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  const cool = rows.filter((r) => r.avg_temperature < median);
+  const warm = rows.filter((r) => r.avg_temperature > median);
+
+  const half = (set) => ({
+    nights: set.length,
+    avg_temp: Math.round(mean(set.map((r) => r.avg_temperature)) * 10) / 10,
+    avg_wakes: Math.round(mean(set.map((r) => r.wake_count)) * 10) / 10,
+    avg_asleep_minutes: Math.round(mean(set.map((r) => r.asleep_minutes))),
+  });
+
+  // Verdict the UI turns into a sentence. 'flat' = temperature barely varied, so we can't say anything.
+  let verdict = 'none';
+  if (spread < INSIGHT_TEMP_SPREAD) verdict = 'flat';
+  else if (rWakes != null && rWakes >= INSIGHT_R) verdict = 'warm_more_wakes';
+  else if (rWakes != null && rWakes <= -INSIGHT_R) verdict = 'warm_fewer_wakes';
+
+  return {
+    status: 'ok',
+    nights_analyzed: rows.length,
+    verdict,
+    temp_wake_r: rWakes == null ? null : Math.round(rWakes * 100) / 100,
+    temp_asleep_r: rAsleep == null ? null : Math.round(rAsleep * 100) / 100,
+    temp_spread: Math.round(spread * 10) / 10,
+    overall: {
+      avg_temp: Math.round(mean(temps) * 10) / 10,
+      min_temp: Math.round(Math.min(...temps) * 10) / 10,
+      max_temp: Math.round(Math.max(...temps) * 10) / 10,
+      avg_humidity: rows.some((r) => r.avg_humidity != null)
+        ? Math.round(mean(rows.filter((r) => r.avg_humidity != null).map((r) => r.avg_humidity)))
+        : null,
+    },
+    cooler: cool.length ? half(cool) : null,
+    warmer: warm.length ? half(warm) : null,
+  };
 }
 
 // Compute + store the most recent completed night for every child, if not already stored. Called from

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Moon, DoorOpen } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Moon, DoorOpen, Thermometer, Sparkles } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
@@ -123,7 +123,9 @@ export default function SleepDetail() {
           </button>
         </div>
 
-        <NightBody night={night} fmtTime={fmtTime} tz={tz} />
+        <NightBody night={night} fmtTime={fmtTime} tz={tz} tempUnit={settings.temp_unit} />
+
+        <SleepInsights childId={id} tempUnit={settings.temp_unit} childName={kid?.name} />
 
         <div className="sleep-detail__est">
           <Moon size={13} aria-hidden="true" /> Estimated from movement &amp; sound over the night window — a
@@ -134,7 +136,7 @@ export default function SleepDetail() {
   );
 }
 
-function NightBody({ night, fmtTime, tz }) {
+function NightBody({ night, fmtTime, tz, tempUnit }) {
   if (night === undefined) return <div className="card"><div className="empty-state" style={{ padding: 20 }}>Loading night…</div></div>;
   if (night && night.status === 'off') {
     return (
@@ -194,6 +196,7 @@ function NightBody({ night, fmtTime, tz }) {
           <span><i className="sleep-legend__sw sleep-seg--awake" /> Before/after sleep</span>
           {visits.length > 0 && <span><i className="sleep-legend__sw sleep-legend__sw--visit" /> In the room</span>}
         </div>
+        <ClimateTrack night={night} startMs={utcMs(night.window_start)} endMs={utcMs(night.window_end)} tempUnit={tempUnit} />
       </div>
 
       <div className="card">
@@ -295,6 +298,127 @@ function Timeline({ night, fmtTime, tz }) {
       <div className="sleep-tl__ends">
         <span>{fmtTime(night.window_start)}</span>
         <span>{fmtTime(night.window_end)}</span>
+      </div>
+    </div>
+  );
+}
+
+// A companion track under the sleep bar: room temperature across the same time axis, so you can read a
+// wake against how warm the room was. Line is positioned by each reading's real timestamp (not index),
+// keeping it aligned to the timeline above. Temperature is stored in Celsius; converted to the user's
+// unit here. Draws nothing when the child's cameras have no sensor (or too few readings).
+function ClimateTrack({ night, startMs, endMs, tempUnit }) {
+  const climate = night.climate;
+  const series = (climate?.series || []).filter((p) => p.temperature != null);
+  if (series.length < 2) return null;
+  const totalMs = Math.max(1, endMs - startMs);
+  const toF = tempUnit === 'F';
+  const conv = (c) => (toF ? (c * 9) / 5 + 32 : c);
+  const unit = `°${tempUnit || 'C'}`;
+  const vals = series.map((p) => conv(p.temperature));
+  let min = Math.min(...vals);
+  let max = Math.max(...vals);
+  if (max - min < 1) { min -= 0.5; max += 0.5; } // don't pin a near-flat night to the edges
+  const span = max - min;
+  const H = 46;
+  const coords = series.map((p) => {
+    const x = Math.max(0, Math.min(100, ((utcMs(p.t) - startMs) / totalMs) * 100));
+    const y = H - 5 - ((conv(p.temperature) - min) / span) * (H - 10);
+    return [x, y];
+  });
+  const d = coords.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(2)} ${y.toFixed(2)}`).join(' ');
+  const area = `${d} L${coords[coords.length - 1][0].toFixed(2)} ${H} L${coords[0][0].toFixed(2)} ${H} Z`;
+
+  const fmt1 = (c) => conv(c).toFixed(1);
+  const caption = [`avg ${fmt1(climate.temp_avg)}${unit}`];
+  if (climate.temp_min != null && climate.temp_max != null) caption.push(`${fmt1(climate.temp_min)}–${fmt1(climate.temp_max)}${unit}`);
+  if (climate.humidity_avg != null) caption.push(`${climate.humidity_avg}% humidity`);
+
+  return (
+    <div className="sleep-climate">
+      <div className="sleep-climate__head">
+        <span className="sleep-climate__label"><Thermometer size={13} aria-hidden="true" /> Room temperature</span>
+        <span className="sleep-climate__caption">{caption.join(' · ')}</span>
+      </div>
+      <div className="sleep-climate__chart">
+        <svg width="100%" height={H} viewBox={`0 0 100 ${H}`} preserveAspectRatio="none" aria-hidden="true">
+          <path d={area} fill="var(--sleep-temp)" opacity="0.12" />
+          <path d={d} fill="none" stroke="var(--sleep-temp)" strokeWidth="2" vectorEffect="non-scaling-stroke"
+            strokeLinejoin="round" strokeLinecap="round" />
+        </svg>
+        <span className="sleep-climate__hi">{max.toFixed(1)}{unit}</span>
+        <span className="sleep-climate__lo">{min.toFixed(1)}{unit}</span>
+      </div>
+    </div>
+  );
+}
+
+// Phase 5: temperature ↔ sleep correlation across this child's recent nights. Fetched once per child
+// (not per night). Only renders something meaningful once there are enough tracked nights; otherwise it
+// nudges to keep tracking (or stays hidden when tracking is off / there's no sensor data at all).
+function SleepInsights({ childId, tempUnit, childName }) {
+  const [ins, setIns] = useState(undefined); // undefined = loading
+
+  useEffect(() => {
+    let alive = true;
+    api.get(`/children/${childId}/sleep/insights`)
+      .then((r) => { if (alive) setIns(r || null); })
+      .catch(() => { if (alive) setIns(null); });
+    return () => { alive = false; };
+  }, [childId]);
+
+  if (ins === undefined || !ins || ins.status === 'off') return null;
+
+  const toF = tempUnit === 'F';
+  const unit = `°${tempUnit || 'C'}`;
+  const t = (c) => (c == null ? '' : `${(toF ? (c * 9) / 5 + 32 : c).toFixed(1)}${unit}`);
+  const name = childName || 'this child';
+
+  if (ins.status === 'insufficient') {
+    // Don't show the card at all until there's at least one tracked night — nothing useful to say yet.
+    if (!ins.nights_analyzed) return null;
+    return (
+      <div className="card sleep-insight">
+        <div className="sleep-insight__title"><Sparkles size={15} aria-hidden="true" /> Sleep &amp; room temperature</div>
+        <div className="sleep-insight__body">
+          Collecting nights — after about {ins.min_nights} tracked nights this will compare {name}’s wake-ups on
+          warmer vs cooler nights. {ins.nights_analyzed} so far.
+        </div>
+      </div>
+    );
+  }
+
+  const warm = ins.warmer;
+  const cool = ins.cooler;
+  let headline;
+  if (ins.verdict === 'warm_more_wakes') headline = `Warmer nights tend to mean more wake-ups for ${name}.`;
+  else if (ins.verdict === 'warm_fewer_wakes') headline = `Warmer nights actually saw fewer wake-ups for ${name}.`;
+  else if (ins.verdict === 'flat') headline = `Room temperature barely changed across these nights, so there’s no clear link to report yet.`;
+  else headline = `No clear link between room temperature and ${name}’s wake-ups over these ${ins.nights_analyzed} nights.`;
+
+  return (
+    <div className="card sleep-insight">
+      <div className="sleep-insight__title"><Sparkles size={15} aria-hidden="true" /> Sleep &amp; room temperature</div>
+      <div className="sleep-insight__headline">{headline}</div>
+      {warm && cool && ins.verdict !== 'flat' && (
+        <div className="sleep-insight__cmp">
+          <div className="sleep-insight__col">
+            <div className="sleep-insight__col-h"><Thermometer size={13} aria-hidden="true" /> Cooler nights</div>
+            <div className="sleep-insight__temp">{t(cool.avg_temp)}</div>
+            <div className="sleep-insight__metric">{cool.avg_wakes} wake-ups avg</div>
+            <div className="sleep-insight__sub">{fmtDur(cool.avg_asleep_minutes)} asleep · {cool.nights} night{cool.nights === 1 ? '' : 's'}</div>
+          </div>
+          <div className="sleep-insight__col">
+            <div className="sleep-insight__col-h sleep-insight__col-h--warm"><Thermometer size={13} aria-hidden="true" /> Warmer nights</div>
+            <div className="sleep-insight__temp">{t(warm.avg_temp)}</div>
+            <div className="sleep-insight__metric">{warm.avg_wakes} wake-ups avg</div>
+            <div className="sleep-insight__sub">{fmtDur(warm.avg_asleep_minutes)} asleep · {warm.nights} night{warm.nights === 1 ? '' : 's'}</div>
+          </div>
+        </div>
+      )}
+      <div className="sleep-insight__foot">
+        Based on {ins.nights_analyzed} tracked nights{ins.overall?.avg_humidity != null ? ` · ${ins.overall.avg_humidity}% avg humidity` : ''}.
+        A pattern, not a cause — lots of things affect sleep.
       </div>
     </div>
   );

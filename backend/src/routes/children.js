@@ -3,7 +3,7 @@ import { v4 as uuid } from 'uuid';
 import db from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { normalizePhoto } from '../lib/photo.js';
-import { getStoredNights, computeNight, computeAndStoreNight, currentNightDate, childTracksSleep } from '../lib/sleepAnalysis.js';
+import { getStoredNights, computeNight, computeAndStoreNight, currentNightDate, childTracksSleep, sleepInsights } from '../lib/sleepAnalysis.js';
 import { startMotionDetector } from '../lib/motionDetector.js';
 
 const router = Router();
@@ -18,9 +18,11 @@ function withCameras(child) {
   return { ...child, cameras };
 }
 
-// A child's sleep-tracking state changed — (re)evaluate the motion activity leg for each of their
-// cameras so turning tracking on/off actually starts/stops the work. startMotionDetector no-ops (after
-// stopping) when the leg isn't wanted, so calling it per camera handles both directions.
+// A child's sleep-tracking state or window changed — (re)evaluate the motion activity leg for each of
+// their cameras so it reflects the new setting immediately (rather than waiting up to 5 min for the
+// periodic reconcile). startMotionDetector stops then re-checks motionLegWanted, which is now window-
+// gated, so this handles both directions: tracking off (or a window that no longer contains now) stops
+// the leg; the leg (re)starts here only if the window is currently open, else at bedtime via reconcile.
 function reconcileChildLegs(childId) {
   for (const cam of db.prepare('SELECT * FROM cameras WHERE child_id = ?').all(childId)) {
     startMotionDetector(cam).catch(() => {});
@@ -78,8 +80,12 @@ router.put('/:id', (req, res) => {
     sleep_window_end !== undefined ? sleep_window_end : existing.sleep_window_end,
     req.params.id
   );
-  // Turning tracking on/off changes whether the activity leg should run for this child's cameras.
-  if (newTrack !== existing.track_sleep) reconcileChildLegs(req.params.id);
+  // Turning tracking on/off — or moving the window so it no longer contains "now" — changes whether the
+  // activity leg should run for this child's cameras right now, so re-evaluate immediately.
+  const windowChanged =
+    (sleep_window_start !== undefined && sleep_window_start !== existing.sleep_window_start) ||
+    (sleep_window_end !== undefined && sleep_window_end !== existing.sleep_window_end);
+  if (newTrack !== existing.track_sleep || windowChanged) reconcileChildLegs(req.params.id);
   res.json(withCameras(db.prepare('SELECT * FROM children WHERE id = ?').get(req.params.id)));
 });
 
@@ -96,6 +102,15 @@ router.get('/:id/sleep/live', (req, res) => {
   }
   const nights = getStoredNights(req.params.id, 1);
   return res.json({ scope: 'last', night: nights[0] || null });
+});
+
+// Phase 5: does room temperature correlate with this child's sleep across their recent nights? A
+// warmer-vs-cooler comparison + a correlation coefficient, or an "insufficient"/"off" status. Declared
+// before '/:id/sleep/:date' so "insights" isn't captured as a date. Computed on demand from stored nights.
+router.get('/:id/sleep/insights', (req, res) => {
+  const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
+  if (!child) return res.status(404).json({ error: 'Child not found' });
+  res.json(sleepInsights(req.params.id));
 });
 
 // Recent stored sleep summaries for a child (newest first) — the "last night" card's data source.
