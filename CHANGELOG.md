@@ -13,13 +13,18 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - **Watch a wake-up's clip right from the sleep breakdown.** In a child's sleep detail, each wake-up is now
   collapsed by default with a chip showing how many alerts fired; tap to expand it and see those alerts — and
   where a clip was recorded, play it inline (and download it) without leaving the page.
+- **Pushover: choose a target device.** Pushover settings now have an optional **Device** field, so you can
+  send alerts to just one device (or a comma-separated list). Leave it blank to alert all your devices as
+  before; a bad device name is caught when you enable it.
 
 ### Changed
 - **Tidier Account and Caregivers screens.** On your Account, **Change my password** now sits with your name
-  and photo, and **Appearance**, **Two-factor authentication**, **Signed in on**, and **Notifications** each
-  have their heading inside their own tile. On a caregiver's screen the identity fields are grouped under a
-  **Caregiver details** tile, **Save changes** moved below the two-factor tile, and the photo and reset/remove
-  actions are colour-coded (periwinkle for "Change photo", red for the destructive ones).
+  and photo, **Notifications** moved up above **Signed in on**, and **Appearance**, **Two-factor
+  authentication**, **Signed in on**, and **Notifications** each have their heading inside their own tile.
+  On a caregiver's screen the identity fields are grouped under a **Caregiver details** tile, **Save changes**
+  moved below the two-factor tile, and the photo and reset/remove actions are colour-coded (periwinkle for
+  "Change photo", red for the destructive ones). Session rows no longer wrap the **Sign out** button onto a
+  second line.
 
 ### Fixed
 - **Quieter logs.** Benign, high-frequency FFmpeg timestamp warnings (and a burst of repeated "path not ready"
