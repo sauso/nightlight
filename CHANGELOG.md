@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-08-18
+
 ### Added
 - **Per-child sleep tracking with its own bedtime & wake time.** Each child now has a **Track sleep**
   toggle in their settings; turn it on and set that child's **bedtime** and **wake time**, and their sleep
