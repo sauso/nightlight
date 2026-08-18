@@ -9,6 +9,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+- **Consistent section headings across the app.** Card and section titles now share one style — matching
+  the "Room climate" card — so headings read the same on every screen. On a child's page, **Cameras** and
+  **Recent alerts** are now titles inside their cards; the sleep detail sections and all Settings headings
+  match too. On **Settings → General**, the theme presets, font, colours, and temperature unit are each
+  grouped in their own tile.
+
 ## [0.19.0] - 2026-08-18
 
 ### Added
