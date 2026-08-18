@@ -637,7 +637,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
                   className={`segmented__btn${mode === 'live' ? ' segmented__btn--active' : ''}`}
                   onClick={() => selectMode('live')}
                 >
-                  Low
+                  Low latency
                 </button>
                 <button
                   type="button"
