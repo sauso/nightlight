@@ -193,7 +193,7 @@ advertised. Prototype against one known-good camera before generalizing.
   needed for Phase 3 (see the shopping note at the top).
 
 - **Hikvision DS-2CD2386G2-ISU/SL (firmware V5.7.19)** — acquired 2026-08-02, the **Phase 3
-  prototype camera.** On staging as "Test" at `192.168.5.11`. Live ONVIF probe confirmed a real
+  prototype camera.** On staging as "Test" (on the camera VLAN). Live ONVIF probe confirmed a real
   speaker: `GetAudioOutputConfigurations` returns one output with
   `sendPrimacy: www.onvif.org/ver20/HalfDuplex/Auto` (half-duplex = walkie-talkie, which matches
   the push-to-talk + duck-incoming UX). Full ONVIF service set (ver20 media, deviceIO). RTSP is the
@@ -247,7 +247,7 @@ transcode to G.711 μ-law → sink) is simpler and lower-latency than routing ou
 WHIP/MediaMTX. Keep MediaMTX for the downstream view only.
 
 **Revised recommendation:** build the shared browser→server→G.711 front end + the `TalkSink`
-abstraction, ship the **Hikvision-ISAPI sink first** against `192.168.5.11` to get talk-back working
+abstraction, ship the **Hikvision-ISAPI sink first** against the prototype camera to get talk-back working
 end-to-end on real hardware, then add `onvif-backchannel` / `thingino` sinks later as needed.
 
 ## Suggested order of work when starting
