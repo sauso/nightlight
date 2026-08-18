@@ -6,6 +6,7 @@ import { inActiveWindow } from './detectSchedule.js';
 import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
 import { recordMotion, recordMotionOut } from './activityTracker.js';
+import { childTracksSleep } from './sleepAnalysis.js';
 
 // Server-side motion detection. Per camera with detection enabled, a cheap FFmpeg leg reads
 // the already-published MediaMTX stream (the sub-stream when there is one — far cheaper to
@@ -129,10 +130,13 @@ export function motionAlerting(camera) {
 // Should the pixel-diff leg run at all? Either to alert (above) OR "activity-only" for sleep tracking:
 // a child-assigned camera whose motion alerts come from MQTT (or has motion alerting off) still runs
 // the cheap leg to feed a continuous motion timeline (activityTracker) — but fires NO alerts, so it
-// doesn't reintroduce the false positives the MQTT source avoids. A camera with no child runs no leg.
+// doesn't reintroduce the false positives the MQTT source avoids. The activity-only leg runs only when
+// the child has sleep tracking ON, so turning it off actually stops the work. A camera with no child
+// (or a child not tracking sleep) that also isn't a framediff alerter runs no leg.
 export function motionLegWanted(camera) {
   if (!camera || camera.disabled) return false;
-  return motionAlerting(camera) || !!camera.child_id;
+  if (motionAlerting(camera)) return true;
+  return !!camera.child_id && childTracksSleep(camera.child_id);
 }
 
 export async function startMotionDetector(camera) {
