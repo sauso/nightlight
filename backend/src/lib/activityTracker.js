@@ -18,7 +18,8 @@ const buckets = new Map();
 function slot(cameraId) {
   let s = buckets.get(cameraId);
   if (!s) {
-    s = { motionSum: 0, motionPeak: 0, motionFrames: 0, soundSum: 0, soundPeak: 0, soundWindows: 0 };
+    s = { motionSum: 0, motionPeak: 0, motionFrames: 0, soundSum: 0, soundPeak: 0, soundWindows: 0,
+      motionOutSum: 0, motionOutPeak: 0, motionOutFrames: 0 };
     buckets.set(cameraId, s);
   }
   return s;
@@ -31,6 +32,17 @@ export function recordMotion(cameraId, fraction) {
   s.motionSum += fraction;
   if (fraction > s.motionPeak) s.motionPeak = fraction;
   s.motionFrames++;
+}
+
+// Called by motionDetector for every frame when the camera has a crib zone — `fraction` = 0..1 of the
+// area OUTSIDE the crib that changed (someone moving in the room / the child out of bed). Kept separate
+// from in-crib motion so the sleep timeline can tell stirring-in-bed from room activity.
+export function recordMotionOut(cameraId, fraction) {
+  if (!(fraction >= 0)) return;
+  const s = slot(cameraId);
+  s.motionOutSum += fraction;
+  if (fraction > s.motionOutPeak) s.motionOutPeak = fraction;
+  s.motionOutFrames++;
 }
 
 // Called by soundDetector for every loudness window. `overDb` = dB above the rolling ambient baseline
@@ -51,8 +63,9 @@ function minuteBucketUtc(d = new Date()) {
 
 const insertSample = db.prepare(
   `INSERT INTO activity_samples
-     (camera_id, bucket_start, motion_level, motion_peak, sound_level, sound_peak, motion_frames, sound_windows)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+     (camera_id, bucket_start, motion_level, motion_peak, sound_level, sound_peak, motion_frames,
+      sound_windows, motion_out_level, motion_out_peak)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 
 // Write one row per camera that saw any signal in the last minute, then reset. Exported for tests /
@@ -76,7 +89,9 @@ export function flushActivity() {
         s.soundWindows ? s.soundSum / s.soundWindows : null,
         s.soundWindows ? s.soundPeak : null,
         s.motionFrames,
-        s.soundWindows
+        s.soundWindows,
+        s.motionOutFrames ? s.motionOutSum / s.motionOutFrames : null,
+        s.motionOutFrames ? s.motionOutPeak : null
       );
       written++;
     } catch {

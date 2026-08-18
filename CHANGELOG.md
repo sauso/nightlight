@@ -9,6 +9,50 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-08-18
+
+### Added
+- **Per-child sleep tracking with its own bedtime & wake time.** Each child now has a **Track sleep**
+  toggle in their settings; turn it on and set that child's **bedtime** and **wake time**, and their sleep
+  is estimated over exactly that overnight window. Turning it off stops the tracking (and the background
+  work) for that child and hides their sleep card. This replaces the single app-wide window — each child
+  can now have their own schedule. Existing children keep tracking on with the previous 19:00–07:00
+  window. A child can still have more than one camera; their movement/sound is combined across all of them.
+- **Sleep detail view with a night timeline.** Tapping a child's "last night" sleep summary now opens a
+  full breakdown: a to-scale timeline of the night showing asleep vs awake stretches, each wake-up marked
+  against a real time axis, plus a list of every awakening with its time and length. A date picker lets
+  you step back through previous nights (about 30 days of history — the period the per-minute activity
+  data is kept, which is lightweight to store). The timeline also distinguishes light **stirring** from a
+  full **awake** stretch.
+- **Room activity (movement outside the crib).** For a camera with a crib zone set, Nightlight now also
+  tracks movement *outside* the crib — a parent coming in, or the child climbing out of bed — as a
+  separate signal from stirring in the crib. These show on the sleep timeline as distinct "in the room"
+  markers with a list of when they happened, and they help catch a morning wake where the child got out
+  of bed (previously invisible, since in-crib motion sees nothing once they leave the cot). Wake detection
+  also now bridges short quiet gaps, so intermittent fussing reads as one awakening rather than several
+  missed stirs. (Outside-crib tracking starts collecting from this release; it doesn't backfill past
+  nights. Motion *alerts* are unchanged — still scoped to the crib zone.)
+- **Live "tonight so far" sleep.** The summary and detail no longer wait for the window to close in the
+  morning: while a night is in progress the child's tile shows **"Tonight · so far"** and updates as the
+  night goes, so an early-morning wake shows within a minute or two instead of only after the 7am window
+  close. The detail timeline marks "as of now" and refreshes live; the final stored summary is still
+  written when the window closes.
+
+- **Room temperature on the sleep timeline, and a temperature-vs-sleep insight.** For a child whose
+  camera has an MQTT temperature/humidity sensor, the sleep detail view now draws the night's room
+  temperature as a line beneath the sleep timeline (on the same time axis, so you can see how warm the
+  room was around a wake-up), with the night's average and range. Once there are a handful of tracked
+  nights, a **"Sleep & room temperature"** card compares wake-ups on the child's warmer vs cooler nights
+  and calls out whether warmer nights tend to mean more waking — a pattern guide, not a cause. Builds on
+  the temperature/humidity history that was already being recorded; correlation strengthens as more nights
+  are tracked.
+
+### Changed
+- **Sleep tracking now only runs during each child's window.** The background movement sampler for sleep
+  tracking used to run around the clock; it now starts at each child's bedtime and stops after their wake
+  time, so it isn't using camera-decode CPU all day for no benefit. No change to what's recorded overnight,
+  and motion/sound *alerts* are unaffected — they still run whenever they're configured to.
+
 ## [0.18.0] - 2026-08-18
 
 ### Added

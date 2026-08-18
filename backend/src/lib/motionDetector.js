@@ -5,7 +5,8 @@ import { subPathName, getPathStatus } from './mediamtx.js';
 import { inActiveWindow } from './detectSchedule.js';
 import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
-import { recordMotion } from './activityTracker.js';
+import { recordMotion, recordMotionOut } from './activityTracker.js';
+import { childWindowActiveNow } from './sleepAnalysis.js';
 
 // Server-side motion detection. Per camera with detection enabled, a cheap FFmpeg leg reads
 // the already-published MediaMTX stream (the sub-stream when there is one — far cheaper to
@@ -126,13 +127,18 @@ export function motionAlerting(camera) {
   return !!camera?.detect_motion_enabled && camera.detect_source === 'framediff' && !camera.disabled;
 }
 
-// Should the pixel-diff leg run at all? Either to alert (above) OR "activity-only" for sleep tracking:
+// Should the pixel-diff leg run RIGHT NOW? Either to alert (above) OR "activity-only" for sleep tracking:
 // a child-assigned camera whose motion alerts come from MQTT (or has motion alerting off) still runs
 // the cheap leg to feed a continuous motion timeline (activityTracker) — but fires NO alerts, so it
-// doesn't reintroduce the false positives the MQTT source avoids. A camera with no child runs no leg.
+// doesn't reintroduce the false positives the MQTT source avoids. The activity-only leg runs only when
+// the child has sleep tracking ON *and* their sleep window is currently open (childWindowActiveNow), so
+// it samples overnight instead of burning CPU all day; the 5-min reconcile starts it at bedtime and
+// stops it after wake. A camera with no child (or one outside its window) that isn't a framediff alerter
+// runs no leg. Frame-diff ALERT legs above are NOT window-gated — alerts run 24/7.
 export function motionLegWanted(camera) {
   if (!camera || camera.disabled) return false;
-  return motionAlerting(camera) || !!camera.child_id;
+  if (motionAlerting(camera)) return true;
+  return !!camera.child_id && childWindowActiveNow(camera.child_id);
 }
 
 export async function startMotionDetector(camera) {
@@ -179,17 +185,19 @@ export async function startMotionDetector(camera) {
     let lastActive = 0; // last frame that was above the active threshold
     let lastAlert = 0;
 
+    const outPixels = mask ? FRAME_BYTES - zonePixels : 0; // area outside the crib zone (0 = whole frame)
+
     function handleFrame(frame) {
       if (prev) {
         let changed = 0;
+        let changedOut = 0;
         // Count changed pixels inside the crib mask (any of its rectangles), or the whole frame when
         // there's no zone. The mask counts each pixel once, so overlapping/diagonal boxes are fine.
+        // With a crib zone, also count changes OUTSIDE it (parent/child-out-of-bed) as a separate channel.
         if (mask) {
           for (let i = 0; i < FRAME_BYTES; i++) {
-            if (mask[i]) {
-              const d = frame[i] - prev[i];
-              if (d > PIXEL_DELTA || d < -PIXEL_DELTA) changed++;
-            }
+            const d = frame[i] - prev[i];
+            if (d > PIXEL_DELTA || d < -PIXEL_DELTA) { if (mask[i]) changed++; else changedOut++; }
           }
         } else {
           for (let i = 0; i < FRAME_BYTES; i++) {
@@ -202,6 +210,9 @@ export async function startMotionDetector(camera) {
         // Feed the raw per-frame movement into the per-minute activity timeline (independent of the
         // alert threshold/cooldown below), so sleep tracking sees continuous motion, not just alerts.
         recordMotion(camera.id, fraction);
+        // Outside-crib movement (only meaningful when a crib zone carves out an "outside") — a separate
+        // channel so sleep tracking can flag someone in the room vs stirring in the crib.
+        if (outPixels > 0) recordMotionOut(camera.id, changedOut / outPixels);
         // Activity-only legs (MQTT-source / motion-off child cameras) stop here — no alert bookkeeping.
         if (!activityOnly) {
           if (fraction >= threshold) {

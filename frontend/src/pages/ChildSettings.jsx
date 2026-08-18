@@ -5,6 +5,7 @@ import { useCameras } from '../lib/CamerasContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Avatar from '../components/Avatar.jsx';
 import Modal from '../components/Modal.jsx';
+import Switch from '../components/Switch.jsx';
 import { fileToAvatarDataUrl } from '../lib/imageResize.js';
 
 const COLORS = ['#f4c56a', '#7FBFA3', '#8A9FE0', '#E0A5C9', '#E0B27F', '#7c83db'];
@@ -19,7 +20,10 @@ export default function ChildSettings() {
   const { kids, refresh } = useCameras();
   const kid = isNew ? null : kids.find((k) => k.id === id);
 
-  const [form, setForm] = useState({ name: '', birthday: '', color: COLORS[0], photo: null });
+  const [form, setForm] = useState({
+    name: '', birthday: '', color: COLORS[0], photo: null,
+    track_sleep: true, sleep_window_start: '19:00', sleep_window_end: '07:00',
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [removing, setRemoving] = useState(false);
@@ -32,7 +36,12 @@ export default function ChildSettings() {
   useEffect(() => {
     if (isNew || initedRef.current || !kid) return;
     initedRef.current = true;
-    setForm({ name: kid.name, birthday: kid.birthday || '', color: kid.color || COLORS[0], photo: kid.photo || null });
+    setForm({
+      name: kid.name, birthday: kid.birthday || '', color: kid.color || COLORS[0], photo: kid.photo || null,
+      track_sleep: kid.track_sleep == null ? true : !!kid.track_sleep,
+      sleep_window_start: kid.sleep_window_start || '19:00',
+      sleep_window_end: kid.sleep_window_end || '07:00',
+    });
   }, [kid, isNew]);
 
   // Persist just the photo immediately for an existing child (no Save press needed). On a new child
@@ -155,6 +164,35 @@ export default function ChildSettings() {
               <div className="camera-tile__sub" style={{ marginTop: 6 }}>
                 Used for the child's initials when no photo is set.
               </div>
+            </div>
+
+            <div className="field">
+              <label className="child-sleep-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>Track sleep</span>
+                <Switch checked={form.track_sleep} onChange={(e) => setForm({ ...form, track_sleep: e.target.checked })} />
+              </label>
+              <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                Estimate this child's nightly sleep from their cameras' movement &amp; sound.
+              </div>
+              {form.track_sleep && (
+                <>
+                  <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
+                    <div style={{ flex: 1 }}>
+                      <label htmlFor="child-bed">Bedtime</label>
+                      <input id="child-bed" type="time" value={form.sleep_window_start}
+                        onChange={(e) => setForm({ ...form, sleep_window_start: e.target.value })} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label htmlFor="child-wake">Wake time</label>
+                      <input id="child-wake" type="time" value={form.sleep_window_end}
+                        onChange={(e) => setForm({ ...form, sleep_window_end: e.target.value })} />
+                    </div>
+                  </div>
+                  <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                    The overnight window looked at for this child (it can run past midnight).
+                  </div>
+                </>
+              )}
             </div>
 
             <button className="btn btn-primary" type="submit" disabled={busy} style={{ marginTop: 8 }}>
