@@ -1789,6 +1789,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
   font-size: 16px;
@@ -1796,6 +1797,12 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
 }
 
 .list-row:last-child { border-bottom: none; }
+
+/* Session rows: the device/name text takes the slack and wraps within itself; the "Sign out" action
+   never shrinks or breaks to a second line. Text is a touch smaller so both fit on one row. */
+.list-row__main { min-width: 0; flex: 1; }
+.list-row__title { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.list-row .icon-btn { flex-shrink: 0; white-space: nowrap; }
 
 /* Detection rows (Motion / Sound / Alert schedule) with a tinted periwinkle icon chip — shared
    between Camera settings (drill-in) and the camera cog sheet (quick toggle) so they match. */
