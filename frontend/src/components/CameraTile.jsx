@@ -590,7 +590,9 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
           ) : (
             <HlsPlayer
               key={`compat-${refreshNonce}`}
-              mediamtxPath={effectivePath}
+              /* Compatibility (HLS) reads the sibling AAC path — MediaMTX's MPEG-TS HLS can't carry the
+                 camera's own audio (e.g. Opus) that the main path uses for WebRTC. See transcoder.js. */
+              mediamtxPath={`${effectivePath}-hls`}
               active={streamActive}
               muted={effectiveMuted}
             />

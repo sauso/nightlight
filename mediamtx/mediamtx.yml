@@ -51,10 +51,14 @@ hlsAddress: 127.0.0.1:8888
 # specifically requiring HTTPS to play it at all — the opposite of what
 # "Compatibility mode" is supposed to guarantee.
 hlsVariant: mpegts
-# Starts remuxing as soon as the camera source connects, rather than waiting for the
-# first viewer request — avoids a startup race where an early request finds no
-# segments ready yet.
-hlsAlwaysRemux: yes
+# On-demand remuxing: build an HLS muxer only when a viewer actually requests that path, not for
+# every source on connect. This is deliberate — HLS is served ONLY from the `<path>-hls` siblings
+# (video + AAC; see transcoder.js), never from the main/sub paths, which carry the camera's own audio
+# (e.g. Opus) that MPEG-TS HLS can't mux. With always-remux on, MediaMTX would spin up a doomed HLS
+# muxer for every main/sub path and crash-spam the log ("supports MPEG-4 Audio only"). On-demand means
+# only the AAC `-hls` paths (the ones the player requests) ever get a muxer. The frontend's hls.js
+# retries the brief first-segment gap, so nothing is lost by not pre-warming.
+hlsAlwaysRemux: no
 # MediaMTX can only start a segment at a keyframe. With the target BELOW the camera's keyframe
 # interval, every segment is exactly one GOP — consistent, no fluctuation (the drift that used to
 # break iOS HLS only happens when the target straddles the GOP, e.g. 1.5s against 1s keyframes). So
