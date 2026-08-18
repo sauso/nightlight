@@ -200,6 +200,16 @@ if (!childrenColumns.includes('photo')) {
   db.exec('ALTER TABLE children ADD COLUMN photo TEXT');
 }
 
+// Per-child sleep tracking (Stage 2). track_sleep gates whether we run the activity leg + compute a
+// nightly summary for this child; sleep_window_start/_end are that child's bedtime/wake window (local
+// HH:MM, wraps midnight) — replacing the old single global window. Existing children default to ON with
+// the previous 19:00-07:00 default so behaviour is unchanged. See lib/sleepAnalysis.js.
+if (!childrenColumns.includes('track_sleep')) {
+  db.exec('ALTER TABLE children ADD COLUMN track_sleep INTEGER NOT NULL DEFAULT 1');
+  db.exec("ALTER TABLE children ADD COLUMN sleep_window_start TEXT NOT NULL DEFAULT '19:00'");
+  db.exec("ALTER TABLE children ADD COLUMN sleep_window_end TEXT NOT NULL DEFAULT '07:00'");
+}
+
 const camerasColumns = db.prepare('PRAGMA table_info(cameras)').all().map((c) => c.name);
 if (!camerasColumns.includes('sort_order')) {
   db.exec('ALTER TABLE cameras ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0');
