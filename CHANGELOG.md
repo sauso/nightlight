@@ -27,6 +27,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   "Compatibility".
 
 ### Fixed
+- **A wedged "Low" (sub) stream now self-heals.** The low-resolution stream has its own background feed,
+  and it could get stuck (running but no longer delivering video — e.g. after a camera drop/reconnect or a
+  codec change) with nothing to recover it, so switching to **Low** quality showed no video until the whole
+  app restarted. The watchdog now watches the low stream too and restarts it automatically, the same way it
+  already does for the main stream.
 - **Cameras that send Opus audio now work in Compatibility mode too.** Opus gives noticeably clearer audio
   on Low latency (WebRTC), but it was crashing the HLS muxer, breaking Compatibility mode. The audio tracks
   are now ordered so HLS always picks the AAC track — so Low latency keeps the crisp Opus and Compatibility
