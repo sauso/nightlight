@@ -138,12 +138,12 @@ export default function UserSettings() {
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 16 }}>
               <Avatar name={fullName} src={form.photo} size={84} />
               <div style={{ display: 'flex', gap: 8 }}>
-                <label className="btn btn-secondary" style={{ width: 'auto', cursor: 'pointer' }}>
+                <label className="btn btn-peri" style={{ width: 'auto', cursor: 'pointer' }}>
                   {form.photo ? 'Change photo' : 'Add photo'}
                   <input type="file" accept="image/*" onChange={onPhoto} style={{ display: 'none' }} />
                 </label>
                 {form.photo && (
-                  <button type="button" className="btn btn-secondary" style={{ width: 'auto' }} onClick={removePhoto}>Remove</button>
+                  <button type="button" className="btn btn-danger" style={{ width: 'auto' }} onClick={removePhoto}>Remove</button>
                 )}
               </div>
               {photoStatus && (
@@ -153,58 +153,62 @@ export default function UserSettings() {
               )}
             </div>
 
-            <div className="onvif-box__row">
+            {/* Identity fields live in their own titled tile, matching the other settings pages. */}
+            <div className="card">
+              <div className="card-title">Caregiver details</div>
+              <div className="onvif-box__row">
+                <div className="field">
+                  <label htmlFor="u-first">First name</label>
+                  <input id="u-first" value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} />
+                </div>
+                <div className="field">
+                  <label htmlFor="u-last">Last name</label>
+                  <input id="u-last" value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })} />
+                </div>
+              </div>
+
               <div className="field">
-                <label htmlFor="u-first">First name</label>
-                <input id="u-first" value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} />
+                <label htmlFor="u-username">Username (login)</label>
+                <input id="u-username" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })}
+                  required autoCapitalize="none" autoCorrect="off" spellCheck={false} />
               </div>
+
               <div className="field">
-                <label htmlFor="u-last">Last name</label>
-                <input id="u-last" value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })} />
+                <label htmlFor="u-password">{isNew ? 'Password' : 'Reset password (optional)'}</label>
+                <input id="u-password" type="password" minLength={8} value={form.password}
+                  onChange={(e) => setForm({ ...form, password: e.target.value })}
+                  required={isNew} placeholder={isNew ? '' : 'Leave blank to keep current password'} />
+              </div>
+
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label htmlFor="u-role">Role</label>
+                <select id="u-role" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+                  <option value="caregiver">Caregiver</option>
+                  <option value="admin">Admin</option>
+                </select>
+                <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                  Caregivers can view cameras and manage children/cameras, but can't manage accounts or change app-wide settings.
+                </div>
               </div>
             </div>
 
-            <div className="field">
-              <label htmlFor="u-username">Username (login)</label>
-              <input id="u-username" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })}
-                required autoCapitalize="none" autoCorrect="off" spellCheck={false} />
-            </div>
-
-            <div className="field">
-              <label htmlFor="u-password">{isNew ? 'Password' : 'Reset password (optional)'}</label>
-              <input id="u-password" type="password" minLength={8} value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-                required={isNew} placeholder={isNew ? '' : 'Leave blank to keep current password'} />
-            </div>
-
-            <div className="field">
-              <label htmlFor="u-role">Role</label>
-              <select id="u-role" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-                <option value="caregiver">Caregiver</option>
-                <option value="admin">Admin</option>
-              </select>
-              <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-                Caregivers can view cameras and manage children/cameras, but can't manage accounts or change app-wide settings.
+            {!isNew && mfaEnabled && (
+              <div className="card">
+                <div className="card-title">Two-factor</div>
+                <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
+                  This account has two-factor enabled. If they've lost their authenticator and backup
+                  codes, reset it so they can sign in with just their password and set it up again.
+                </div>
+                <button className="btn btn-danger" type="button" onClick={() => setResettingMfa(true)}>
+                  Reset two-factor
+                </button>
               </div>
-            </div>
+            )}
 
-            <button className="btn btn-primary" type="submit" disabled={busy} style={{ marginTop: 8 }}>
+            {/* Save sits below the two-factor tile, per the settings layout. */}
+            <button className="btn btn-primary" type="submit" disabled={busy}>
               {busy ? 'Saving…' : isNew ? 'Add caregiver' : 'Save changes'}
             </button>
-            {!isNew && mfaEnabled && (
-              <>
-                <div className="section-title">Two-factor</div>
-                <div className="card">
-                  <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
-                    This account has two-factor enabled. If they've lost their authenticator and backup
-                    codes, reset it so they can sign in with just their password and set it up again.
-                  </div>
-                  <button className="btn btn-secondary" type="button" onClick={() => setResettingMfa(true)}>
-                    Reset two-factor
-                  </button>
-                </div>
-              </>
-            )}
             {!isNew && id !== me?.id && (
               <button className="btn btn-danger" type="button" style={{ marginTop: 10 }} onClick={() => setRemoving(true)}>
                 Remove caregiver

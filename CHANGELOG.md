@@ -9,6 +9,23 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **Watch a wake-up's clip right from the sleep breakdown.** In a child's sleep detail, each wake-up is now
+  collapsed by default with a chip showing how many alerts fired; tap to expand it and see those alerts — and
+  where a clip was recorded, play it inline (and download it) without leaving the page.
+
+### Changed
+- **Tidier Account and Caregivers screens.** On your Account, **Change my password** now sits with your name
+  and photo, and **Appearance**, **Two-factor authentication**, **Signed in on**, and **Notifications** each
+  have their heading inside their own tile. On a caregiver's screen the identity fields are grouped under a
+  **Caregiver details** tile, **Save changes** moved below the two-factor tile, and the photo and reset/remove
+  actions are colour-coded (periwinkle for "Change photo", red for the destructive ones).
+
+### Fixed
+- **Quieter logs.** Benign, high-frequency FFmpeg timestamp warnings (and a burst of repeated "path not ready"
+  messages while a camera briefly reconnects) no longer flood the logs, making the entries that actually matter
+  much easier to read.
+
 ## [0.20.0] - 2026-08-18
 
 ### Added
