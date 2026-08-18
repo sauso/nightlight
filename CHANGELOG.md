@@ -23,8 +23,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   **Logs**, and **About**. The **General** page's first tile is now headed **General Settings**.
 - **"Change my password" stands out.** On the Account screen it's now a filled periwinkle button instead of
   a plain outline, so it's easier to spot.
+- **The connection-mode toggle now reads "Low latency"** (was just "Low"), so it pairs clearly with
+  "Compatibility".
 
 ### Fixed
+- **Cameras that send Opus audio now work in Compatibility mode too.** Opus gives noticeably clearer audio
+  on Low latency (WebRTC), but it was crashing the HLS muxer, breaking Compatibility mode. The audio tracks
+  are now ordered so HLS always picks the AAC track — so Low latency keeps the crisp Opus and Compatibility
+  works again.
 - **A disabled camera no longer spams the logs.** Disabled cameras have no stream path, so the app no longer
   asks MediaMTX about them on every camera-list refresh — which had been logging a steady stream of
   "path not found" errors.

@@ -25,16 +25,20 @@ const RESTART_DELAY_MS = 5000;
 const FORCE_KILL_TIMEOUT_MS = 3000;
 
 function buildArgs(rtspUrl, mediamtxPath, aacSource) {
-  // Track 0 = the WebRTC (Low-latency) audio track. WebRTC can't carry AAC, and MediaMTX's MPEG-TS HLS
-  // muxer refuses more than one carriable audio track — so if the SOURCE is AAC, copying it here gives
-  // WebRTC an unusable track AND leaves two AAC tracks that crash HLS ("single audio track only" → no
-  // stream in Compatibility mode). For an AAC source we instead down-convert track 0 to G711 (µ-law,
-  // 8 kHz mono): WebRTC carries G711 natively, and MPEG-TS HLS can't carry G711 so it skips it, leaving
-  // the AAC track 1 as HLS's single audio track — exactly how a native-G711 camera already behaves. For
-  // a non-AAC source (G711 etc.) we keep the cheap passthrough copy, so those cameras are unchanged.
-  const track0 = aacSource
-    ? ['-ac:a:0', '1', '-ar:a:0', '8000', '-c:a:0', 'pcm_mulaw']
-    : ['-c:a:0', 'copy'];
+  // We publish two audio tracks: a:0 = AAC (for HLS/Compatibility) and a:1 = the camera's own audio
+  // for WebRTC (Low latency). ORDER MATTERS: MediaMTX's HLS muxer selects the FIRST audio track that
+  // HLS can carry, and the MPEG-TS variant only supports AAC. So AAC must come first — otherwise a copy
+  // track that HLS also "supports" (Opus) gets picked and the MPEG-TS muxer crashes ("the MPEG-TS
+  // variant of HLS supports MPEG-4 Audio only" → dead Compatibility mode). WebRTC, in turn, skips the
+  // AAC track (it can't carry AAC) and uses the copy track below — so a native Opus camera keeps its
+  // crisp Opus on Low latency while Compatibility still gets AAC.
+  //
+  // The a:1 (WebRTC) track: normally a cheap passthrough copy (G711 stays G711, Opus stays Opus). The
+  // exception is an AAC *source* — WebRTC can't carry AAC, so we down-convert that copy to G711 (µ-law,
+  // 8 kHz mono) which WebRTC does carry.
+  const webrtcTrack = aacSource
+    ? ['-ac:a:1', '1', '-ar:a:1', '8000', '-c:a:1', 'pcm_mulaw']
+    : ['-c:a:1', 'copy'];
   return [
     '-nostdin',
     '-loglevel', 'warning',
@@ -56,29 +60,25 @@ function buildArgs(rtspUrl, mediamtxPath, aacSource) {
     '-use_wallclock_as_timestamps', '1',
     '-i', rtspUrl,
     '-map', '0:v:0',
-    '-map', '0:a:0?', // "?" makes these optional, in case a camera has no audio track at all
-    '-map', '0:a:0?',
+    '-map', '0:a:0?', // a:0 output — the AAC/HLS track ("?" = optional, for cameras with no audio)
+    '-map', '0:a:0?', // a:1 output — the WebRTC/Low-latency copy track
     '-c:v', 'copy',
-    // Two audio tracks, not one: WebRTC (Low Latency mode) and HLS (Compatibility mode) each carry a
-    // different codec, and MediaMTX silently hands each protocol whichever track it supports. Track 0
-    // is the WebRTC track (see the buildArgs note above for the AAC-source special case).
-    ...track0,
-    // Track 1 (AAC, for HLS/Compatibility mode). Some cameras send audio with jittery,
-    // occasionally-backward RTP timestamps (logged as "Queue input is backward in time");
-    // fed straight to the AAC encoder those poison the HLS muxer's timeline and show up as
-    // "No signal" in Compatibility mode. We used to fix this with aresample=async=1, but that
-    // "fix" DROPS/inserts samples on every jitter event and made Compatibility-mode audio
-    // audibly choppy (measured on the Sonoff test cam: ~15 dropouts in 15s). Instead we
-    // resample to 48k and then REBUILD the audio PTS purely from the sample count
-    // (asetpts=N/SR/TB): the output clock is perfectly monotonic — so the HLS muxer never
-    // sees a backward jump ("No signal" stays gone) — while no samples are dropped, so the
-    // audio is clean (measured: 0 dropouts, 0 backward-time warnings). Trade-off: a genuine
-    // audio gap collapses (isn't silence-padded) rather than holding A/V sync, so lip-sync can
-    // drift slightly on a bad camera — already an accepted trade here (see the wallclock note
-    // above) and far better than choppy. Only track 1 — the WebRTC copy track (a:0) is
-    // untouched and tolerates the jitter anyway. See KNOWN-ISSUES.md.
-    '-filter:a:1', 'aresample=48000,asetpts=N/SR/TB',
-    '-c:a:1', 'aac', '-b:a:1', '64k',
+    // Track a:0 (AAC, for HLS/Compatibility mode) — FIRST so MediaMTX's HLS muxer selects it (see the
+    // buildArgs note above). Some cameras send audio with jittery, occasionally-backward RTP timestamps
+    // (logged as "Queue input is backward in time"); fed straight to the AAC encoder those poison the
+    // HLS muxer's timeline and show up as "No signal" in Compatibility mode. We used to fix this with
+    // aresample=async=1, but that DROPS/inserts samples on every jitter event and made Compatibility
+    // audio audibly choppy (~15 dropouts in 15s on the Sonoff test cam). Instead we resample to 48k and
+    // REBUILD the audio PTS purely from the sample count (asetpts=N/SR/TB): the output clock is perfectly
+    // monotonic — the HLS muxer never sees a backward jump — while no samples are dropped, so the audio
+    // is clean (0 dropouts, 0 backward-time warnings). Trade-off: a genuine audio gap collapses rather
+    // than silence-padding, so lip-sync can drift slightly on a bad camera — an accepted trade (see the
+    // wallclock note above), far better than choppy. See KNOWN-ISSUES.md.
+    '-filter:a:0', 'aresample=48000,asetpts=N/SR/TB',
+    '-c:a:0', 'aac', '-b:a:0', '64k',
+    // Track a:1 (WebRTC / Low latency) — the camera's own audio, untouched (or G711 for an AAC source).
+    // WebRTC skips the AAC track above and uses this one; it tolerates the source jitter fine.
+    ...webrtcTrack,
     '-avoid_negative_ts', 'make_zero',
     '-f', 'rtsp',
     '-rtsp_transport', 'tcp',
