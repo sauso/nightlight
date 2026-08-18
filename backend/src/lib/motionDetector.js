@@ -6,7 +6,7 @@ import { inActiveWindow } from './detectSchedule.js';
 import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
 import { recordMotion, recordMotionOut } from './activityTracker.js';
-import { childTracksSleep } from './sleepAnalysis.js';
+import { childWindowActiveNow } from './sleepAnalysis.js';
 
 // Server-side motion detection. Per camera with detection enabled, a cheap FFmpeg leg reads
 // the already-published MediaMTX stream (the sub-stream when there is one — far cheaper to
@@ -127,16 +127,18 @@ export function motionAlerting(camera) {
   return !!camera?.detect_motion_enabled && camera.detect_source === 'framediff' && !camera.disabled;
 }
 
-// Should the pixel-diff leg run at all? Either to alert (above) OR "activity-only" for sleep tracking:
+// Should the pixel-diff leg run RIGHT NOW? Either to alert (above) OR "activity-only" for sleep tracking:
 // a child-assigned camera whose motion alerts come from MQTT (or has motion alerting off) still runs
 // the cheap leg to feed a continuous motion timeline (activityTracker) — but fires NO alerts, so it
 // doesn't reintroduce the false positives the MQTT source avoids. The activity-only leg runs only when
-// the child has sleep tracking ON, so turning it off actually stops the work. A camera with no child
-// (or a child not tracking sleep) that also isn't a framediff alerter runs no leg.
+// the child has sleep tracking ON *and* their sleep window is currently open (childWindowActiveNow), so
+// it samples overnight instead of burning CPU all day; the 5-min reconcile starts it at bedtime and
+// stops it after wake. A camera with no child (or one outside its window) that isn't a framediff alerter
+// runs no leg. Frame-diff ALERT legs above are NOT window-gated — alerts run 24/7.
 export function motionLegWanted(camera) {
   if (!camera || camera.disabled) return false;
   if (motionAlerting(camera)) return true;
-  return !!camera.child_id && childTracksSleep(camera.child_id);
+  return !!camera.child_id && childWindowActiveNow(camera.child_id);
 }
 
 export async function startMotionDetector(camera) {

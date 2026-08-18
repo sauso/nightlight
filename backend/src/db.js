@@ -521,6 +521,16 @@ if (!activitySamplesColumns.includes('motion_out_peak')) {
   db.exec('ALTER TABLE activity_samples ADD COLUMN motion_out_peak REAL');
 }
 
+// Sleep Stage 2 phase 5 (temp/humidity correlation): store each computed night's average room
+// temperature (Celsius) and humidity (%), derived from the child's cameras' sensor_readings over the
+// window. Kept on the night row so the insights correlation reads them without re-scanning sensor
+// history. Null when the child's cameras have no MQTT sensor. See lib/sleepAnalysis.js (nightClimate).
+const sleepNightsColumns = db.prepare('PRAGMA table_info(sleep_nights)').all().map((c) => c.name);
+if (!sleepNightsColumns.includes('avg_temperature')) {
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN avg_temperature REAL');
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN avg_humidity REAL');
+}
+
 // Ensure the single settings row always exists.
 db.prepare(
   `INSERT OR IGNORE INTO settings (id, app_name, accent_color, live_color, offline_color, timezone, font_choice, temp_unit)
