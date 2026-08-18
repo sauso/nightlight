@@ -79,8 +79,8 @@ export default function TwoFactorSection() {
 
   return (
     <>
-      <div className="section-title">Two-factor authentication</div>
       <div className="card" style={{ marginBottom: 14 }}>
+        <div className="card-title">Two-factor authentication</div>
         {error && !setup && !disabling && <div className="error-banner" style={{ marginBottom: 10 }}>{error}</div>}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <ShieldCheck size={22} color={enabled ? 'var(--live)' : 'var(--text-secondary)'} aria-hidden="true" />

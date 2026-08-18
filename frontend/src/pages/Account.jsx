@@ -215,10 +215,21 @@ export default function Account() {
               {nameBusy ? 'Saving…' : nameSaved ? 'Saved ✓' : 'Save name'}
             </button>
           </form>
+          {/* Change-password lives in the identity card, right under Save name — same tile as the rest
+              of "who I am". type="button" so it opens the modal without submitting the name form. */}
+          {passwordSaved && <div className="saved-banner" style={{ marginTop: 12 }}>Password updated ✓</div>}
+          <button
+            type="button"
+            className="btn btn-peri"
+            style={{ marginTop: 12 }}
+            onClick={() => { setPasswordForm(BLANK_PASSWORD_FORM); setPasswordError(''); setChangingPassword(true); }}
+          >
+            Change my password
+          </button>
         </div>
 
-        <div className="section-title">Appearance</div>
         <div className="card" style={{ marginBottom: 14 }}>
+          <div className="card-title">Appearance</div>
           <div className="segmented" role="group" aria-label="Theme">
             {THEME_OPTIONS.map(({ value, label, Icon }) => (
               <button
@@ -238,19 +249,10 @@ export default function Account() {
           </div>
         </div>
 
-        {passwordSaved && <div className="saved-banner">Password updated ✓</div>}
-        <button
-          className="btn btn-peri"
-          onClick={() => { setPasswordForm(BLANK_PASSWORD_FORM); setPasswordError(''); setChangingPassword(true); }}
-          style={{ marginBottom: 14 }}
-        >
-          Change my password
-        </button>
-
         <TwoFactorSection />
 
-        <div className="section-title">Signed in on</div>
         <div className="card" style={{ marginBottom: 14 }}>
+          <div className="card-title">Signed in on</div>
           {sessions.map((s) => (
             <div className="list-row" key={s.id}>
               <div>
@@ -266,8 +268,8 @@ export default function Account() {
 
         {notificationsSupported() && (
           <>
-            <div className="section-title">Notifications</div>
             <div className="card" style={{ marginBottom: 14 }}>
+              <div className="card-title">Notifications</div>
               {serverPush && !serverPush.configured ? (
                 <div className="camera-tile__sub" style={{ padding: 12 }}>
                   Notifications aren't set up on this server yet. An admin needs to add a Firebase

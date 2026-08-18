@@ -1138,12 +1138,28 @@ body.in-pip .tile-menu-backdrop {
 /* Wake-up rows that carry their correlated alerts beneath them (the item wraps the head + alert list). */
 .sleep-wakes__item { padding: 9px 0; border-top: 1px solid var(--border); }
 .sleep-wakes__item:first-child { border-top: none; }
-.sleep-wakes__head { display: flex; justify-content: space-between; align-items: center; }
+.sleep-wakes__head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+/* The head is a <button> when the wake has correlated alerts — strip the native chrome so it reads as
+   a row, and give it a full-width tap target + a visible focus ring for keyboard users. */
+button.sleep-wakes__head { width: 100%; padding: 0; border: none; background: none; cursor: pointer; text-align: left; font: inherit; color: inherit; border-radius: 8px; }
+button.sleep-wakes__head:focus-visible { outline: 2px solid var(--peri); outline-offset: 3px; }
 .sleep-wakes__time { font-size: 14px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.sleep-wakes__headright { display: inline-flex; align-items: center; gap: 8px; flex: none; }
 .sleep-wakes__dur { font-size: 13px; color: var(--sleep-wake); font-weight: 600; }
-.sleep-wakes__alerts { list-style: none; margin: 8px 0 2px; padding: 6px 0 0 12px; border-top: 1px dashed var(--border); display: flex; flex-direction: column; gap: 5px; }
-.sleep-wakes__alert { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-secondary); flex-wrap: wrap; }
+.sleep-wakes__badge { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 700; letter-spacing: 0.02em; color: var(--sleep-wake); background: color-mix(in srgb, var(--sleep-wake) 14%, transparent); padding: 1px 7px 1px 5px; border-radius: 20px; }
+.sleep-wakes__chev { color: var(--text-secondary); transition: transform 0.18s ease; flex: none; }
+.sleep-wakes__chev.is-open { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .sleep-wakes__chev { transition: none; } }
+.sleep-wakes__alerts { list-style: none; margin: 8px 0 2px; padding: 8px 0 0 0; border-top: 1px dashed var(--border); display: flex; flex-direction: column; gap: 9px; }
+.sleep-wakes__alert { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-secondary); }
+.sleep-wakes__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; padding: 0; border: none; background: none; cursor: default; line-height: 0; }
+button.sleep-wakes__thumbwrap { cursor: pointer; border-radius: 8px; }
+button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--peri); outline-offset: 2px; }
+.sleep-wakes__thumb { width: 56px; height: 40px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: linear-gradient(135deg, #23264d, #14162f); }
+.sleep-wakes__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--peri-soft); }
+.sleep-wakes__play { position: absolute; inset: 0; margin: auto; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(10, 13, 28, 0.62); color: #fff; }
 .sleep-wakes__alert-ico { color: var(--sleep-wake); flex: none; }
+.sleep-wakes__alert-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .sleep-wakes__alert-label { font-weight: 600; color: var(--text-primary); }
 .sleep-wakes__alert-meta { font-variant-numeric: tabular-nums; }
 
