@@ -552,10 +552,12 @@ body.in-pip .tile-menu-backdrop {
   }
 }
 
+/* Section heading that sits ABOVE a card (bare, with spacing). Shares the canonical card-title
+   typography below so every heading in the app reads the same — matching the Room-climate card title. */
 .section-title {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.1em;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
   color: var(--text-secondary);
   margin: 22px 0 10px;
@@ -1101,7 +1103,11 @@ body.in-pip .tile-menu-backdrop {
 .sleep-detail__stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
 .sleep-stat__label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; }
 .sleep-stat__value { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-top: 1px; }
-.sleep-detail__section-title { font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px; }
+/* Canonical in-card title — the Room-climate card-title style, reused across cards, drill-down
+   sections, and settings tiles so titles are consistent everywhere. Sits as the first line inside a card. */
+.card-title,
+.sensor-card__title,
+.sleep-detail__section-title { font-size: 13px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-secondary); margin: 0 0 12px; }
 
 .sleep-tl { padding-top: 2px; }
 .sleep-tl__visits { position: relative; height: 12px; margin-bottom: 3px; }
@@ -1176,7 +1182,7 @@ body.in-pip .tile-menu-backdrop {
 
 /* Room-climate sensor history (Child detail). Temp + humidity sparklines from sensor_readings. */
 .sensor-card { margin-bottom: 14px; }
-.sensor-card__title { font-size: 13px; font-weight: 700; letter-spacing: 0.02em; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 12px; }
+/* .sensor-card__title styling is now the canonical .card-title rule above. */
 .sensor-grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
 @media (min-width: 560px) { .sensor-grid { grid-template-columns: 1fr 1fr; } }
 .sensor-series__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
