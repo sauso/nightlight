@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { logger } from './logger.js';
+import { logger, isNoisyMediaLine } from './logger.js';
 
 // Event-recording capture core (Stage 1, "Option A" — see planning/recording-and-sleep-tracking-scope.md).
 //
@@ -139,10 +139,16 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
   }
 
   const ringDepthMs = (preRollSec + postRollSec + 4 * SEGMENT_SEC + 10) * 1000;
-  const entry = { proc: null, stopped: false, ringDir, ringDepthMs, janitor: null };
+  // fastFails counts consecutive launches that died almost immediately (the classic case: the
+  // upstream MediaMTX path is momentarily gone during a transcoder restart, so ffmpeg gets a 404
+  // and exits within a second, every 5s). We used to log an ERROR on every one of those, which
+  // spammed ~30 identical lines per camera blip. Now we log the first, then go quiet, and log a
+  // recovery when it comes back — see the exit handler.
+  const entry = { proc: null, stopped: false, ringDir, ringDepthMs, janitor: null, fastFails: 0 };
   segmenters.set(cameraId, entry);
 
   function launch() {
+    const launchedAt = Date.now();
     const proc = spawn('ffmpeg', segmenterArgs(pathName, ringDir), {
       stdio: ['ignore', 'ignore', 'pipe'],
     });
@@ -155,6 +161,7 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
         .split('\n')
         .filter((line) => line.length > 0)
         .forEach((line) => {
+          if (isNoisyMediaLine(line)) return; // same benign per-packet spam as the transcoder
           lastLine = line;
           logger.raw(`clipseg:${pathName}`, line);
         });
@@ -164,9 +171,21 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
       // Only the tracked entry owns this camera; a superseded process must not resurrect itself
       // (same reasoning as transcoder.js).
       if (entry.stopped || segmenters.get(cameraId) !== entry) return;
-      logger.error(
-        `[clipseg:${pathName}] segmenter exited (code ${code}), restarting in 5s. Last output: ${lastLine}`
-      );
+
+      // A segmenter that ran a good while and then died is a real event — log it, and reset the
+      // fast-fail run so a later blip starts its own fresh (loud-then-quiet) cycle. One that dies
+      // almost instantly is the path-not-ready retry loop: log only the first, and periodically
+      // (~once/min) after that so a genuinely stuck one still surfaces, but without the flood.
+      const ranBriefly = Date.now() - launchedAt < 15000;
+      if (!ranBriefly) entry.fastFails = 0;
+      entry.fastFails += 1;
+      const shouldLog = !ranBriefly || entry.fastFails === 1 || entry.fastFails % 12 === 0;
+      if (shouldLog) {
+        const note = ranBriefly && entry.fastFails > 1 ? ` (${entry.fastFails}x, upstream path not ready)` : '';
+        logger.error(
+          `[clipseg:${pathName}] segmenter exited (code ${code})${note}, restarting in 5s. Last output: ${lastLine}`
+        );
+      }
       setTimeout(() => {
         if (!entry.stopped && segmenters.get(cameraId) === entry) launch();
       }, RESTART_DELAY_MS);

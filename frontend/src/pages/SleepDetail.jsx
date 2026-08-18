@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Moon, DoorOpen, Thermometer, Sparkles, Zap, AudioLines } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Moon, DoorOpen, Thermometer, Sparkles, Zap, AudioLines, Play } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
+import ClipPlayerModal from '../components/ClipPlayerModal.jsx';
 
 // Sleep detail: a to-scale timeline of one night for a child, with the wake-ups marked, plus a date
 // picker to browse back through the retained nights (~30 days of activity_samples). Reached by tapping
@@ -137,6 +138,9 @@ export default function SleepDetail() {
 }
 
 function NightBody({ night, fmtTime, tz, tempUnit }) {
+  // The wake↔alert clip currently open in the shared player (or null). Lives here so it survives a
+  // 2-min live refresh of `night` without tearing the modal down mid-watch.
+  const [clipFor, setClipFor] = useState(null);
   if (night === undefined) return <div className="card"><div className="empty-state" style={{ padding: 20 }}>Loading night…</div></div>;
   if (night && night.status === 'off') {
     return (
@@ -189,7 +193,7 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
 
       <div className="card">
         <div className="sleep-detail__section-title">Night timeline</div>
-        <Timeline night={night} fmtTime={fmtTime} tz={tz} />
+        <Timeline night={night} fmtTime={fmtTime} tz={tz} tempUnit={tempUnit} />
         <div className="sleep-legend">
           <span><i className="sleep-legend__sw sleep-seg--asleep" /> Asleep</span>
           <span><i className="sleep-legend__sw sleep-seg--stir" /> Stirring</span>
@@ -206,30 +210,10 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
           <div className="camera-tile__sub" style={{ padding: '2px 2px 4px' }}>No awakenings counted (a stir under 5 minutes doesn’t count).</div>
         ) : (
           <ul className="sleep-wakes">
-            {wakes.map((w, i) => {
-              const hits = alertsInRange(alerts, w.start_at, w.end_at);
-              return (
-                <li key={i} className="sleep-wakes__item">
-                  <div className="sleep-wakes__head">
-                    <span className="sleep-wakes__time">{fmtTime(w.start_at)} – {fmtTime(w.end_at)}</span>
-                    <span className="sleep-wakes__dur">{fmtDur(w.minutes)} awake</span>
-                  </div>
-                  {hits.length > 0 && (
-                    <ul className="sleep-wakes__alerts">
-                      {hits.map((a) => (
-                        <li key={a.id} className="sleep-wakes__alert">
-                          <AlertTypeIcon type={a.type} />
-                          <span className="sleep-wakes__alert-label">{alertLabel(a.type)}</span>
-                          <span className="sleep-wakes__alert-meta">
-                            {fmtTime(a.created_at)}{a.camera_name ? ` · ${a.camera_name}` : ''}{a.detail ? ` · ${a.detail}` : ''}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </li>
-              );
-            })}
+            {wakes.map((w, i) => (
+              <WakeItem key={i} wake={w} hits={alertsInRange(alerts, w.start_at, w.end_at)}
+                fmtTime={fmtTime} onPlay={setClipFor} />
+            ))}
           </ul>
         )}
       </div>
@@ -248,7 +232,78 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
           </ul>
         </div>
       )}
+
+      {clipFor && <ClipPlayerModal ev={clipFor} onClose={() => setClipFor(null)} />}
     </>
+  );
+}
+
+// One wake-up row. Collapsed by default (just time + duration + an alert-count chip); when it has
+// correlated alerts you can expand it to see them and play any recorded clip inline. A wake with no
+// alerts isn't expandable — it stays a plain row.
+function WakeItem({ wake, hits, fmtTime, onPlay }) {
+  const [open, setOpen] = useState(false);
+  const expandable = hits.length > 0;
+  const head = (
+    <>
+      <span className="sleep-wakes__time">{fmtTime(wake.start_at)} – {fmtTime(wake.end_at)}</span>
+      <span className="sleep-wakes__headright">
+        <span className="sleep-wakes__dur">{fmtDur(wake.minutes)} awake</span>
+        {expandable && (
+          <span className="sleep-wakes__badge">
+            <Zap size={11} aria-hidden="true" />{hits.length} alert{hits.length === 1 ? '' : 's'}
+          </span>
+        )}
+        {expandable && <ChevronDown size={16} className={`sleep-wakes__chev${open ? ' is-open' : ''}`} aria-hidden="true" />}
+      </span>
+    </>
+  );
+  return (
+    <li className={`sleep-wakes__item${expandable ? ' sleep-wakes__item--expandable' : ''}`}>
+      {expandable ? (
+        <button type="button" className="sleep-wakes__head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+          {head}
+        </button>
+      ) : (
+        <div className="sleep-wakes__head">{head}</div>
+      )}
+      {open && (
+        <ul className="sleep-wakes__alerts">
+          {hits.map((a) => <AlertRow key={a.id} a={a} fmtTime={fmtTime} onPlay={onPlay} />)}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+// A single correlated alert inside an expanded wake. Shows the snapshot thumbnail (falling back to a
+// type icon) + label + time/camera/detail; when a clip was recorded (clip_status === 'ready') the
+// thumbnail becomes a play button that opens the same clip player used in the alert feed.
+function AlertRow({ a, fmtTime, onPlay }) {
+  const hasClip = a.clip_status === 'ready';
+  const thumb = a.snapshot ? (
+    <img className="sleep-wakes__thumb" src={api.url(`/cameras/alerts/${a.id}/snapshot`)} alt="" loading="lazy" />
+  ) : (
+    <span className="sleep-wakes__thumb sleep-wakes__thumb--empty" aria-hidden="true"><AlertTypeIcon type={a.type} /></span>
+  );
+  return (
+    <li className="sleep-wakes__alert">
+      {hasClip ? (
+        <button type="button" className="sleep-wakes__thumbwrap" onClick={() => onPlay(a)}
+          aria-label={`Play clip from ${a.camera_name || 'camera'}`}>
+          {thumb}
+          <span className="sleep-wakes__play" aria-hidden="true"><Play size={13} fill="currentColor" /></span>
+        </button>
+      ) : (
+        <span className="sleep-wakes__thumbwrap">{thumb}</span>
+      )}
+      <div className="sleep-wakes__alert-body">
+        <span className="sleep-wakes__alert-label">{alertLabel(a.type)}{a.clip_status === 'pending' ? ' · recording…' : ''}</span>
+        <span className="sleep-wakes__alert-meta">
+          {fmtTime(a.created_at)}{a.camera_name ? ` · ${a.camera_name}` : ''}{a.detail ? ` · ${a.detail}` : ''}
+        </span>
+      </div>
+    </li>
   );
 }
 
@@ -263,11 +318,48 @@ function Stat({ label, value }) {
 
 // The to-scale bar: each segment positioned by its share of the window, plus hour tick labels and
 // onset/wake markers so the wake-ups read against a real time axis.
-function Timeline({ night, fmtTime, tz }) {
+function Timeline({ night, fmtTime, tz, tempUnit }) {
   const startMs = utcMs(night.window_start);
   const endMs = utcMs(night.window_end);
   const totalMs = Math.max(1, endMs - startMs);
   const segs = night.segments || [];
+
+  // Hover bubble: as the cursor (or a finger) moves across the bar, show the time under it, the sleep
+  // status at that moment, and — if the room had a sensor — the temperature then. `null` = not hovering.
+  const barRef = useRef(null);
+  const [hover, setHover] = useState(null);
+
+  const tempSeries = useMemo(
+    () => (night.climate?.series || []).filter((p) => p.temperature != null).map((p) => ({ ms: utcMs(p.t), c: p.temperature })),
+    [night]
+  );
+  const toF = tempUnit === 'F';
+  const tempUnitLabel = `°${tempUnit || 'C'}`;
+
+  function stateAt(ms) {
+    const s = segs.find((seg) => utcMs(seg.from_at) <= ms && ms < utcMs(seg.to_at));
+    return (s || segs[ms >= endMs ? segs.length - 1 : 0] || {}).state;
+  }
+  function tempAt(ms) {
+    if (!tempSeries.length) return null;
+    let best = tempSeries[0];
+    for (const p of tempSeries) if (Math.abs(p.ms - ms) < Math.abs(best.ms - ms)) best = p;
+    // Only report a nearby reading (within ~10 min) so we don't label a gap with a far-off temperature.
+    if (Math.abs(best.ms - ms) > 10 * 60000) return null;
+    const c = best.c;
+    return `${(toF ? (c * 9) / 5 + 32 : c).toFixed(1)}${tempUnitLabel}`;
+  }
+  const fmtMs = (ms) => new Intl.DateTimeFormat([], { timeZone: tz, hour: 'numeric', minute: '2-digit' }).format(new Date(ms));
+
+  function updateHover(clientX) {
+    const el = barRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const f = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const ms = startMs + f * totalMs;
+    setHover({ pct: f * 100, time: fmtMs(ms), status: labelFor(stateAt(ms)), temp: tempAt(ms) });
+  }
 
   const ticks = useMemo(() => {
     const out = [];
@@ -297,15 +389,30 @@ function Timeline({ night, fmtTime, tz }) {
           ))}
         </div>
       )}
-      <div className="sleep-tl__bar">
-        {segs.map((s, i) => (
-          <div key={i} className={`sleep-seg ${SEG_CLASS[s.state] || 'sleep-seg--awake'}`}
-            style={{ width: `${(s.minutes / (totalMs / 60000)) * 100}%` }}
-            title={`${fmtTime(s.from_at)}–${fmtTime(s.to_at)} · ${labelFor(s.state)}`} />
-        ))}
-        {onsetPct != null && <span className="sleep-tl__mark" style={{ left: `${onsetPct}%` }} />}
-        {wakePct != null && <span className="sleep-tl__mark" style={{ left: `${wakePct}%` }} />}
-        {nowPct != null && <span className="sleep-tl__now" style={{ left: `${nowPct}%` }} title="as of now" />}
+      <div className="sleep-tl__barwrap" ref={barRef}
+        onMouseMove={(e) => updateHover(e.clientX)}
+        onMouseLeave={() => setHover(null)}
+        onTouchStart={(e) => updateHover(e.touches[0].clientX)}
+        onTouchMove={(e) => updateHover(e.touches[0].clientX)}
+        onTouchEnd={() => setHover(null)}
+      >
+        <div className="sleep-tl__bar">
+          {segs.map((s, i) => (
+            <div key={i} className={`sleep-seg ${SEG_CLASS[s.state] || 'sleep-seg--awake'}`}
+              style={{ width: `${(s.minutes / (totalMs / 60000)) * 100}%` }} />
+          ))}
+          {onsetPct != null && <span className="sleep-tl__mark" style={{ left: `${onsetPct}%` }} />}
+          {wakePct != null && <span className="sleep-tl__mark" style={{ left: `${wakePct}%` }} />}
+          {nowPct != null && <span className="sleep-tl__now" style={{ left: `${nowPct}%` }} title="as of now" />}
+        </div>
+        {hover && (
+          <div className="sleep-tl__tip" style={{ left: `${hover.pct}%` }} aria-hidden="true">
+            <span className="sleep-tl__tip-time">{hover.time}</span>
+            <span className="sleep-tl__tip-status">{hover.status}</span>
+            {hover.temp && <span className="sleep-tl__tip-temp"><Thermometer size={11} aria-hidden="true" />{hover.temp}</span>}
+          </div>
+        )}
+        {hover && <span className="sleep-tl__cursor" style={{ left: `${hover.pct}%` }} aria-hidden="true" />}
       </div>
       <div className="sleep-tl__axis">
         {ticks.map((t, i) => (

@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { logger } from './logger.js';
+import { logger, isNoisyMediaLine } from './logger.js';
 import { recordCameraEvent, EVENT } from './cameraEvents.js';
 import { ffprobeAudioCodec } from './rtspProbe.js';
 import { hlsPathName, upsertPath, isPathConfiguredCorrectly } from './mediamtx.js';
@@ -135,6 +135,10 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraNam
         .split('\n')
         .filter((line) => line.length > 0)
         .forEach((line) => {
+          // Drop the benign per-packet timestamp spam from the logs (and from lastLine, so the exit
+          // message reports the real last error, not a cosmetic warning). The discontinuity check
+          // below still runs on every line — a real "DTS discontinuity" never matches the noise filter.
+          if (isNoisyMediaLine(line)) return;
           lastLine = line;
           logger.raw(`ffmpeg:${mediamtxPath}`, line);
           if (!restarting && line.includes('DTS discontinuity in stream')) {

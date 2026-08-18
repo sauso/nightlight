@@ -17,6 +17,21 @@
 const MAX_BUFFERED_LINES = 1000;
 const buffer = [];
 
+// FFmpeg (both the transcoder and the clip segmenter) emits a class of benign, high-frequency
+// per-packet warnings on cameras with jittery timestamps — we already stamp wall-clock at the
+// input, so these are cosmetic. Left alone they flood `docker logs` and the in-app log viewer
+// (~1700 lines/night on the Thingino cams) without conveying anything actionable, which buries
+// the lines that DO matter. They're dropped from both sinks here. Genuine, actionable ffmpeg
+// lines — process exits, a DTS *discontinuity*, connection failures — don't match this pattern
+// and still come through. NOTE: a caller that keys off a specific stderr line (e.g. transcoder's
+// "DTS discontinuity" restart trigger) must test the raw line itself BEFORE deciding to log — this
+// governs only what gets recorded, never what a caller processes.
+const NOISY_MEDIA_LINE =
+  /Non-monotonic (DTS|PTS)|Queue input is backward in time|Application provided invalid, non monotonically increasing dts/i;
+export function isNoisyMediaLine(line) {
+  return NOISY_MEDIA_LINE.test(line);
+}
+
 function timestamp() {
   const d = new Date();
   const pad = (n, len = 2) => String(n).padStart(len, '0');

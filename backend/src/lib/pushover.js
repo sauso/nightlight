@@ -13,12 +13,14 @@ const MAX_MESSAGE = 1024;
 
 export function getPushoverConfig() {
   const s = db
-    .prepare('SELECT pushover_enabled, pushover_app_token, pushover_user_key FROM settings WHERE id = ?')
+    .prepare('SELECT pushover_enabled, pushover_app_token, pushover_user_key, pushover_device FROM settings WHERE id = ?')
     .get('app') || {};
   return {
     enabled: !!s.pushover_enabled,
     appToken: (s.pushover_app_token || '').trim(),
     userKey: (s.pushover_user_key || '').trim(),
+    // Blank = all of the user's devices (Pushover's default). May be a comma-separated list.
+    device: (s.pushover_device || '').trim(),
   };
 }
 
@@ -37,11 +39,16 @@ export function pushoverEnabled() {
 
 // Confirm the app token + user/group key are real before saving an "enabled" state, so we never
 // accept a config that can't deliver. Uses Pushover's users/validate endpoint. Returns
-// { ok: true } or { ok: false, error }.
-export async function validatePushover(appToken, userKey) {
+// { ok: true } or { ok: false, error }. When a single target device is given (no comma), it's
+// validated too so a typo'd device name is caught here rather than silently dropping every alert; a
+// comma-separated list is left unvalidated (users/validate only checks one device at a time).
+export async function validatePushover(appToken, userKey, device = '') {
   if (!appToken || !userKey) return { ok: false, error: 'Both an application token and a user/group key are required.' };
   try {
-    const body = new URLSearchParams({ token: appToken, user: userKey });
+    const params = { token: appToken, user: userKey };
+    const dev = String(device || '').trim();
+    if (dev && !dev.includes(',')) params.device = dev;
+    const body = new URLSearchParams(params);
     const res = await fetch(`${API}/users/validate.json`, { method: 'POST', body });
     const data = await res.json().catch(() => ({}));
     if (data.status === 1) return { ok: true };
@@ -62,6 +69,8 @@ export async function sendPushover({ title, message, url, urlTitle, priority, im
     const form = new FormData();
     form.set('token', c.appToken);
     form.set('user', c.userKey);
+    // Deliver only to the chosen device(s); omitted entirely when blank so Pushover fans out to all.
+    if (c.device) form.set('device', c.device);
     form.set('message', String(message || '').slice(0, MAX_MESSAGE));
     if (title) form.set('title', String(title).slice(0, 250));
     if (url) form.set('url', url);
