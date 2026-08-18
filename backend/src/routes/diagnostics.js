@@ -115,7 +115,9 @@ router.get('/', requireAuth, requireAdmin, async (req, res) => {
         const safe = safeCamera(cam);
         return {
           ...safe,
-          stream_status: await getPathStatus(cam.mediamtx_path),
+          // Skip the MediaMTX query for a disabled camera — its path is removed, so it would 404 and log
+          // "path not found". It's intentionally off; report not-ready without asking.
+          stream_status: cam.disabled ? { ready: false, tracks: [] } : await getPathStatus(cam.mediamtx_path),
           mqtt_reading: cam.mqtt_topic ? getReading(cam.mqtt_topic) : null,
         };
       })

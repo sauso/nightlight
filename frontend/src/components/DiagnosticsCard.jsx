@@ -14,7 +14,7 @@ const ISSUE_URL =
 // One-click "support bundle" for logging a defect. Pulls the redacted diagnostics JSON from the
 // server and saves it as a file the user can attach to a GitHub issue. Nothing is uploaded from
 // here — the download stays on their device so they can review it before sharing.
-export default function DiagnosticsCard() {
+export default function DiagnosticsCard({ title }) {
   // idle → building the bundle → 'done' (held briefly so it can't be re-tapped while the phone is
   // still saving/opening the file — the flash-and-retry that produced several downloads before).
   const [state, setState] = useState('idle'); // 'idle' | 'busy' | 'done'
@@ -79,6 +79,7 @@ export default function DiagnosticsCard() {
 
   return (
     <div className="card">
+      {title && <div className="card-title">{title}</div>}
       <div className="camera-tile__sub" style={{ marginBottom: 12 }}>
         Hit a bug? Download a diagnostics bundle and attach it to a GitHub issue — it packages your
         version and build, host/runtime info, camera &amp; detection settings, live stream status,

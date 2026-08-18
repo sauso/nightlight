@@ -79,8 +79,8 @@ export default function ChildDetail() {
           <SensorHistoryCard key={c.id} camera={c} />
         ))}
 
-        <div className="section-title">Cameras · {childCams.length}</div>
         <div className="card tight">
+          <div className="card-title">Cameras · {childCams.length}</div>
           {childCams.map((c) => (
             <CameraRow
               key={c.id}
@@ -89,14 +89,18 @@ export default function ChildDetail() {
             />
           ))}
           {childCams.length === 0 && (
-            <div className="camera-tile__sub" style={{ padding: 14 }}>No cameras assigned yet — assign one from the Cameras tab.</div>
+            <div className="camera-tile__sub">No cameras assigned yet — assign one from the Cameras tab.</div>
           )}
         </div>
 
-        <div className="section-title">Recent alerts</div>
-        {alerts.length === 0
-          ? <div className="empty-state" style={{ padding: 20 }}>No alerts for {kid.name} yet.</div>
-          : <AlertList alerts={alerts} onChanged={loadAlerts} />}
+        {alerts.length === 0 ? (
+          <div className="card">
+            <div className="card-title">Recent alerts</div>
+            <div className="camera-tile__sub">No alerts for {kid.name} yet.</div>
+          </div>
+        ) : (
+          <AlertList alerts={alerts} onChanged={loadAlerts} title="Recent alerts" />
+        )}
       </main>
 
       {photoOpen && kid.photo && (

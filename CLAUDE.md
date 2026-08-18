@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Nightlight — a self-hosted baby monitor web app. Views multiple RTSP cameras (grouped by
 child) over the home network via low-latency WebRTC, installable as a PWA. Runs as a single
-Docker container (host networking) bundling three processes: the Node backend, MediaMTX, and
+Docker container bundling three processes: the Node backend, MediaMTX, and
 one FFmpeg process per camera.
 
 Every user-visible change must be recorded under `[Unreleased]` in `CHANGELOG.md` in the
@@ -44,9 +44,13 @@ backend logic, prefer building and running the Docker image over running `npm st
 
 ## Architecture
 
-**Everything ships as one Docker image, one container, host networking.** This is a
-deliberate choice (see README) to avoid NAT/ICE problems with WebRTC — there is no
-multi-container orchestration to reason about.
+**Everything ships as one Docker image, one container** — no multi-container orchestration to
+reason about. The container needs its own routable LAN IP so WebRTC has no NAT/ICE problems
+(MediaMTX advertises that IP to browsers). There are two supported ways to give it one: **host
+networking** (the README quick-start default — the container shares the host's IP), or an
+**ipvlan network with a dedicated IP**. The Unraid prod + staging deployments both use the latter
+(both on `br0.10` — see Branching and deploy pipeline below); the host-networking path is what an
+out-of-the-box `docker run` uses.
 
 ### The video pipeline (the core thing to understand before touching camera code)
 
@@ -165,12 +169,17 @@ the ref:
 See the workspace `CLAUDE.md` for the branch model. In short: work on `dev`, release to
 `main` via PR. Two containers run on Unraid:
 
-- **Production** — host networking, `192.168.1.100`, runs `sauso/nightlight:latest`. Updated
-  only by a release to `main`.
-- **Staging** — on the `br0.10` ipvlan network at `192.168.2.150` (its own LAN IP, so WebRTC
-  works without host networking — MediaMTX advertises that routable IP), separate data dir
-  (`/mnt/user/appdata/nightlight-dev`), container name `nightlight-dev`, runs
-  `sauso/nightlight:dev`. Test dev builds here.
+- **Production** — on a `br0.10` ipvlan network with its own dedicated routable LAN IP (so WebRTC
+  works without host networking — MediaMTX advertises that IP), data dir
+  `/mnt/user/appdata/nightlight`, container name `nightlight`, runs `sauso/nightlight:latest`.
+  Updated only by a release to `main`.
+- **Staging** — same setup on the same `br0.10` network (its own dedicated LAN IP, adjacent to
+  prod's), separate data dir (`/mnt/user/appdata/nightlight-dev`), container name `nightlight-dev`,
+  runs `sauso/nightlight:dev`. Test dev builds here.
+
+Deploys/log-checks are done over SSH to the Unraid host, using the guard script (see the workspace
+`CLAUDE.md`). The actual host/container IP addresses are kept out of this repo — they live in the
+agent's private deployment notes, not in version control.
 
 Deploys are **not** automated — after CI publishes an image, pull it and recreate the relevant
 container on Unraid (prod pulls `:latest`, staging pulls `:dev`). A push/merge does NOT mean the

@@ -3,8 +3,9 @@ import { readFileSync } from 'fs';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
 import { requireAuth, requireAdmin, requireAuthQueryOrHeader } from '../middleware/auth.js';
-import { upsertPath, removePath, getPathStatus, toPathName } from '../lib/mediamtx.js';
+import { upsertPath, removePath, getPathStatus, toPathName, hlsPathName } from '../lib/mediamtx.js';
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
+import { recordCameraEvent, EVENT } from '../lib/cameraEvents.js';
 import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.js';
 import { startMotionDetector, stopMotionDetector, motionLegWanted } from '../lib/motionDetector.js';
 import { startOnvifMotion, stopOnvifMotion, onvifMotionWanted } from '../lib/onvifMotion.js';
@@ -360,13 +361,34 @@ router.post('/:id/ptz/nudge', async (req, res) => {
   }
 });
 
+// Force a fresh restart of a camera's server-side stream (main transcoder + sub-stream). Useful when a
+// feed has drifted behind live or wedged in a way the watchdog hasn't caught yet — it tears down the
+// FFmpeg leg(s) (SIGTERM→SIGKILL) and relaunches, so every viewer reconnects at the live edge. Any
+// signed-in user (a recovery action, like a heavier pull-to-refresh that fixes it for everyone).
+router.post('/:id/restart', requireAuth, async (req, res) => {
+  const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+  if (!cam) return res.status(404).json({ error: 'Camera not found' });
+  if (cam.disabled) return res.status(400).json({ error: 'Camera is disabled' });
+  try {
+    await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
+    if (subConfigured(cam)) await startSubStream(cam).catch((e) => logger.error(`[restart] sub: ${e.message}`));
+    recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'stream restarted manually');
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(502).json({ error: e.message || 'Restart failed' });
+  }
+});
+
 router.get('/', async (req, res) => {
   const cameras = db.prepare('SELECT * FROM cameras ORDER BY sort_order, created_at').all();
   const isAdmin = req.user?.role === 'admin';
   const withStatus = await Promise.all(
     cameras.map(async (cam) => ({
       ...publicCamera(cam, isAdmin),
-      status: await getPathStatus(cam.mediamtx_path),
+      // A disabled camera has no MediaMTX path (it's removed when the camera is disabled), so asking
+      // MediaMTX for its status would 404 and spam its log with "ERR [API] path not found" on every
+      // poll of this list. It's off by design — report not-ready without querying.
+      status: cam.disabled ? { ready: false, tracks: [] } : await getPathStatus(cam.mediamtx_path),
       mqtt: cam.mqtt_topic ? getReading(cam.mqtt_topic) : null,
     }))
   );
@@ -759,6 +781,7 @@ router.put('/:id/enabled', requireAdmin, async (req, res) => {
     stopClipCapture(req.params.id);
     try {
       await removePath(existing.mediamtx_path);
+      await removePath(hlsPathName(existing.mediamtx_path)); // sibling AAC/HLS path
     } catch (e) {
       // Log but still record it as disabled - the transcoder is already stopped, so no
       // frames flow regardless of whether the path removal succeeded.
@@ -900,6 +923,7 @@ router.delete('/:id', requireAdmin, async (req, res) => {
   stopClipCapture(req.params.id);
   try {
     await removePath(existing.mediamtx_path);
+    await removePath(hlsPathName(existing.mediamtx_path)); // sibling AAC/HLS path
   } catch (e) {
     // Log but don't block deletion of the DB record.
     logger.error('Failed to remove MediaMTX path:', e.message);
