@@ -200,6 +200,16 @@ if (!childrenColumns.includes('photo')) {
   db.exec('ALTER TABLE children ADD COLUMN photo TEXT');
 }
 
+// Per-child sleep tracking (Stage 2). track_sleep gates whether we run the activity leg + compute a
+// nightly summary for this child; sleep_window_start/_end are that child's bedtime/wake window (local
+// HH:MM, wraps midnight) — replacing the old single global window. Existing children default to ON with
+// the previous 19:00-07:00 default so behaviour is unchanged. See lib/sleepAnalysis.js.
+if (!childrenColumns.includes('track_sleep')) {
+  db.exec('ALTER TABLE children ADD COLUMN track_sleep INTEGER NOT NULL DEFAULT 1');
+  db.exec("ALTER TABLE children ADD COLUMN sleep_window_start TEXT NOT NULL DEFAULT '19:00'");
+  db.exec("ALTER TABLE children ADD COLUMN sleep_window_end TEXT NOT NULL DEFAULT '07:00'");
+}
+
 const camerasColumns = db.prepare('PRAGMA table_info(cameras)').all().map((c) => c.name);
 if (!camerasColumns.includes('sort_order')) {
   db.exec('ALTER TABLE cameras ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0');
@@ -498,6 +508,27 @@ if (!detectionEventsColumns.includes('clip_status')) {
   db.exec('ALTER TABLE detection_events ADD COLUMN clip_path TEXT');
   db.exec('ALTER TABLE detection_events ADD COLUMN clip_duration_s INTEGER');
   db.exec('ALTER TABLE detection_events ADD COLUMN clip_bytes INTEGER');
+}
+
+// Outside-the-crib motion channel on activity_samples (sleep tracking). When a camera has a crib zone,
+// the motion detector now also measures movement OUTSIDE that zone — a parent coming in, or the child
+// out of bed — kept separate from the in-crib motion so the sleep timeline can distinguish stirring in
+// the crib from someone moving around the room. Null when there's no crib zone (whole-frame = no
+// "outside") or the detector wasn't running. See lib/activityTracker.js + lib/motionDetector.js.
+const activitySamplesColumns = db.prepare('PRAGMA table_info(activity_samples)').all().map((c) => c.name);
+if (!activitySamplesColumns.includes('motion_out_peak')) {
+  db.exec('ALTER TABLE activity_samples ADD COLUMN motion_out_level REAL');
+  db.exec('ALTER TABLE activity_samples ADD COLUMN motion_out_peak REAL');
+}
+
+// Sleep Stage 2 phase 5 (temp/humidity correlation): store each computed night's average room
+// temperature (Celsius) and humidity (%), derived from the child's cameras' sensor_readings over the
+// window. Kept on the night row so the insights correlation reads them without re-scanning sensor
+// history. Null when the child's cameras have no MQTT sensor. See lib/sleepAnalysis.js (nightClimate).
+const sleepNightsColumns = db.prepare('PRAGMA table_info(sleep_nights)').all().map((c) => c.name);
+if (!sleepNightsColumns.includes('avg_temperature')) {
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN avg_temperature REAL');
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN avg_humidity REAL');
 }
 
 // Ensure the single settings row always exists.
