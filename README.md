@@ -172,6 +172,37 @@ You can always add it again.
 **Assigning to a child** — use the "Assigned to" dropdown on each camera. (This is just for
 grouping the dashboard; any signed-in user can change it.)
 
+## Sleep tracking
+
+Nightlight can estimate each child's overnight sleep from what their cameras already see and
+hear — no wearables, no extra hardware. It's a **sleep-pattern guide, not a medical
+measurement**, and (like everything here) never a safety device — see the warning at the top.
+
+- **Turn it on per child.** Each child has a **Track sleep** toggle in their settings, with
+  their own **bedtime** and **wake time**. Sleep is estimated over exactly that overnight
+  window; the background sampler only runs during the window, and turning tracking off stops
+  it entirely. A child can have more than one camera — their movement and sound are combined.
+- **How it estimates.** Across the night it builds a per-minute movement + sound timeline from
+  the child's camera(s): falling still for a sustained stretch reads as falling asleep,
+  sustained movement or noise reads as an awakening (brief stirs don't count). If you've drawn
+  a **crib zone** on the camera — the same rectangle that scopes motion alerts — it also tracks
+  movement **outside** the crib (a parent coming in, or the child climbing out of bed) and shows
+  it separately as "in the room" activity, which catches a morning wake where the child has
+  already left the cot.
+- **At a glance, and live.** Each child's page summarises last night — total sleep, wake-ups,
+  longest stretch — and while a night is in progress it updates as **"Tonight · so far"**, so an
+  early-morning wake appears within a minute or two rather than only after the window closes.
+- **The detail view.** Tap the sleep summary for the full **night timeline**: a to-scale bar of
+  asleep / stirring / awake stretches on a real time axis, every wake-up listed with its time
+  and length, an "in the room" list, and a date picker to step back through roughly the last
+  month of nights.
+- **Room temperature (optional).** If a camera reports temperature/humidity over **MQTT** (set
+  up under **Settings → MQTT**, e.g. via Zigbee2MQTT — the readings also show on the camera
+  tile), the sleep detail overlays the night's room temperature beneath the timeline, aligned to
+  the same time axis. After a handful of tracked nights, a **"Sleep & room temperature"** card
+  compares wake-ups on the child's warmer vs cooler nights, so you can spot whether a warm room
+  tends to mean more waking — a pattern, not a cause.
+
 ## Adding caregivers
 
 Once signed in as admin, go to **Account → Add caregiver** to create additional logins (e.g.
