@@ -16,6 +16,15 @@ export function subPathName(pathName) {
   return `${pathName}-sub`;
 }
 
+// The Compatibility (HLS) audio lives at its OWN sibling path. MediaMTX's MPEG-TS HLS can only carry
+// AAC and won't tolerate a non-AAC audio track (notably Opus) sitting alongside it on the same path —
+// so instead of publishing two audio tracks to one path, the transcoder publishes the camera's own
+// audio (Opus/G711, for WebRTC) to the main path and a separate AAC copy to `<path>-hls`, which the
+// HLS player reads. A native-Opus camera thus keeps crisp Opus on Low latency AND works in Compatibility.
+export function hlsPathName(pathName) {
+  return `${pathName}-hls`;
+}
+
 // The path has no pull source — it's publisher-only. Our FFmpeg transcoder (see
 // transcoder.js) pulls the camera's RTSP feed itself and publishes the (audio
 // re-encoded) result straight into this path, rather than MediaMTX pulling the

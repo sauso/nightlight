@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
 import { requireAuth, requireAdmin, requireAuthQueryOrHeader } from '../middleware/auth.js';
-import { upsertPath, removePath, getPathStatus, toPathName } from '../lib/mediamtx.js';
+import { upsertPath, removePath, getPathStatus, toPathName, hlsPathName } from '../lib/mediamtx.js';
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
 import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.js';
 import { startMotionDetector, stopMotionDetector, motionLegWanted } from '../lib/motionDetector.js';
@@ -762,6 +762,7 @@ router.put('/:id/enabled', requireAdmin, async (req, res) => {
     stopClipCapture(req.params.id);
     try {
       await removePath(existing.mediamtx_path);
+      await removePath(hlsPathName(existing.mediamtx_path)); // sibling AAC/HLS path
     } catch (e) {
       // Log but still record it as disabled - the transcoder is already stopped, so no
       // frames flow regardless of whether the path removal succeeded.
@@ -903,6 +904,7 @@ router.delete('/:id', requireAdmin, async (req, res) => {
   stopClipCapture(req.params.id);
   try {
     await removePath(existing.mediamtx_path);
+    await removePath(hlsPathName(existing.mediamtx_path)); // sibling AAC/HLS path
   } catch (e) {
     // Log but don't block deletion of the DB record.
     logger.error('Failed to remove MediaMTX path:', e.message);

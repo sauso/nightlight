@@ -33,9 +33,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   app restarted. The watchdog now watches the low stream too and restarts it automatically, the same way it
   already does for the main stream.
 - **Cameras that send Opus audio now work in Compatibility mode too.** Opus gives noticeably clearer audio
-  on Low latency (WebRTC), but it was crashing the HLS muxer, breaking Compatibility mode. The audio tracks
-  are now ordered so HLS always picks the AAC track — so Low latency keeps the crisp Opus and Compatibility
-  works again.
+  on Low latency (WebRTC), but Compatibility (HLS) can't carry it, which was breaking that mode. Nightlight
+  now serves Compatibility from a separate AAC audio feed while Low latency keeps the crisp Opus — so both
+  modes work, whatever audio codec the camera uses (Opus, G711, or AAC).
 - **A disabled camera no longer spams the logs.** Disabled cameras have no stream path, so the app no longer
   asks MediaMTX about them on every camera-list refresh — which had been logging a steady stream of
   "path not found" errors.
