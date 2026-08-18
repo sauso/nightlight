@@ -18,6 +18,8 @@ function publicConfig() {
     app_token_set: !!c.appToken,
     user_key_masked: maskSecret(c.userKey),
     user_key_set: !!c.userKey,
+    // Device name isn't a secret — round-trip it in the clear so the field shows the current value.
+    device: c.device,
   };
 }
 
@@ -34,9 +36,12 @@ router.put('/config', requireAuth, requireAdmin, async (req, res) => {
   const existing = getPushoverConfig();
   const appToken = (req.body?.app_token || '').trim() || existing.appToken;
   const userKey = (req.body?.user_key || '').trim() || existing.userKey;
+  // Device isn't a secret and round-trips in the clear, so — unlike the tokens — a blank value means
+  // "clear it → send to all devices", not "keep the saved one". Save exactly what was submitted.
+  const device = (req.body?.device ?? '').trim();
 
   if (enabled) {
-    const check = await validatePushover(appToken, userKey);
+    const check = await validatePushover(appToken, userKey, device);
     if (!check.ok) {
       logger.info(`[pushover] enable rejected: ${check.error}`);
       return res.status(400).json({ error: check.error });
@@ -44,8 +49,8 @@ router.put('/config', requireAuth, requireAdmin, async (req, res) => {
   }
 
   db.prepare(
-    'UPDATE settings SET pushover_enabled = ?, pushover_app_token = ?, pushover_user_key = ? WHERE id = ?'
-  ).run(enabled ? 1 : 0, appToken || null, userKey || null, 'app');
+    'UPDATE settings SET pushover_enabled = ?, pushover_app_token = ?, pushover_user_key = ?, pushover_device = ? WHERE id = ?'
+  ).run(enabled ? 1 : 0, appToken || null, userKey || null, device || null, 'app');
   logger.info(`[pushover] config saved — notifications ${enabled ? 'ENABLED' : 'disabled'}`);
 
   res.json(publicConfig());

@@ -7,7 +7,7 @@ import SecretField from '../components/SecretField.jsx';
 const BACK = { to: '/settings/push', label: 'Push notifications' };
 
 export default function SettingsPushPushover() {
-  const [po, setPo] = useState({ enabled: false, configured: false, app_token_set: false, app_token_masked: '', user_key_set: false, user_key_masked: '' });
+  const [po, setPo] = useState({ enabled: false, configured: false, app_token_set: false, app_token_masked: '', user_key_set: false, user_key_masked: '', device: '' });
   // Secret inputs are separate and start empty; the server never sends the tokens back, so a blank
   // field on save means "keep the saved one".
   const [appToken, setAppToken] = useState('');
@@ -28,7 +28,7 @@ export default function SettingsPushPushover() {
     try {
       // Server validates the tokens with Pushover when enabling and 400s if they don't check out.
       // Blank fields keep the saved secrets.
-      const next = await api.put('/pushover/config', { enabled: po.enabled, app_token: appToken, user_key: userKey });
+      const next = await api.put('/pushover/config', { enabled: po.enabled, app_token: appToken, user_key: userKey, device: po.device || '' });
       setPo(next); setAppToken(''); setUserKey(''); setSaved(true); setTimeout(() => setSaved(false), 2500);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
@@ -78,6 +78,23 @@ export default function SettingsPushPushover() {
               placeholder="u1v2w3…"
               disabled={busy || !loaded}
             />
+            <div className="field" style={{ marginTop: 14, marginBottom: 0 }}>
+              <label htmlFor="po-device">Device <span style={{ fontWeight: 400, color: 'var(--text-secondary)' }}>(optional)</span></label>
+              <input
+                id="po-device"
+                value={po.device || ''}
+                onChange={(e) => setPo({ ...po, device: e.target.value })}
+                placeholder="Leave blank to alert all your devices"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                disabled={busy || !loaded}
+              />
+              <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                Send alerts only to a specific Pushover device (its name as shown in the Pushover app). Leave
+                blank to send to all of your devices. Separate multiple device names with commas.
+              </div>
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button className="btn btn-primary" type="submit" disabled={busy || !loaded}>{busy ? 'Working…' : 'Save changes'}</button>

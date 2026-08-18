@@ -258,6 +258,14 @@ if (!settingsColumns.includes('pushover_enabled')) {
   db.exec('ALTER TABLE settings ADD COLUMN pushover_user_key TEXT');
 }
 
+// Optional Pushover target device(s). Blank/NULL = deliver to all of the user's devices (Pushover's
+// default); a device name (or comma-separated list) limits delivery to just those. Not a secret, so
+// unlike the tokens it round-trips to the UI in the clear. Separate idempotent migration so existing
+// installs pick it up too.
+if (!settingsColumns.includes('pushover_device')) {
+  db.exec('ALTER TABLE settings ADD COLUMN pushover_device TEXT');
+}
+
 // ntfy notifications (https://ntfy.sh, or any self-hosted ntfy server) — the server POSTs the alert
 // to a topic; the recipient subscribes in the ntfy app/browser. Optional auth via an access token
 // (bearer) or username/password (basic). Off until configured + enabled.
