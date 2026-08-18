@@ -29,6 +29,22 @@ function appSettings() {
   );
 }
 
+// Per-child sleep config: whether to track this child + their own bedtime/wake window (local HH:MM,
+// wraps midnight). Replaces the old single global window. Falls back to the 19:00-07:00 default.
+function childSleepConfig(childId) {
+  const c = db.prepare('SELECT track_sleep, sleep_window_start, sleep_window_end FROM children WHERE id = ?').get(childId);
+  return {
+    track: c ? c.track_sleep !== 0 : false,
+    start: (c && c.sleep_window_start) || '19:00',
+    end: (c && c.sleep_window_end) || '07:00',
+  };
+}
+
+// Does this child have sleep tracking turned on? Used to gate the activity leg + nightly compute.
+export function childTracksSleep(childId) {
+  return childSleepConfig(childId).track;
+}
+
 // Offset (localWallClock - UTC) in ms for a given instant in a tz.
 function tzOffsetMs(instant, tz) {
   const dtf = new Intl.DateTimeFormat('en-US', {
@@ -81,26 +97,28 @@ function localDateStr(tz, deltaDays = 0) {
   return `${p.year}-${p.month}-${p.day}`;
 }
 
-// The start date of the night currently IN PROGRESS (its window contains 'now'), or null in the daytime
-// gap between windows. Powers the live "tonight so far" view.
-export function currentNightDate(settings = appSettings()) {
-  const tz = settings.timezone || 'UTC';
+// The start date of the child's night currently IN PROGRESS (their window contains 'now'), or null in
+// the daytime gap. Per-child window. Powers the live "tonight so far" view.
+export function currentNightDate(childId) {
+  const tz = appSettings().timezone || 'UTC';
+  const cfg = childSleepConfig(childId);
   const now = Date.now();
   for (let delta = 0; delta >= -1; delta--) {
     const date = localDateStr(tz, delta);
-    const { startUtc, endUtc } = windowBoundsUtc(date, tz, settings.sleep_window_start, settings.sleep_window_end);
+    const { startUtc, endUtc } = windowBoundsUtc(date, tz, cfg.start, cfg.end);
     if (startUtc.getTime() <= now && now < endUtc.getTime()) return date;
   }
   return null;
 }
 
-// The start date of the most recent night whose window has fully ended (so it's safe to compute).
-export function lastCompletedNightDate(settings = appSettings()) {
-  const tz = settings.timezone || 'UTC';
+// The start date of the child's most recent night whose window has fully ended (safe to compute).
+export function lastCompletedNightDate(childId) {
+  const tz = appSettings().timezone || 'UTC';
+  const cfg = childSleepConfig(childId);
   const now = Date.now();
   for (let delta = 0; delta >= -3; delta--) {
     const date = localDateStr(tz, delta);
-    const { endUtc } = windowBoundsUtc(date, tz, settings.sleep_window_start, settings.sleep_window_end);
+    const { endUtc } = windowBoundsUtc(date, tz, cfg.start, cfg.end);
     if (endUtc.getTime() <= now) return date;
   }
   return localDateStr(tz, -3);
@@ -111,9 +129,9 @@ export function lastCompletedNightDate(settings = appSettings()) {
 // Compute (but do not store) a child's sleep summary for the night starting on local date `nightDate`.
 // Returns { status, ...metrics, timeline? } — timeline only when includeTimeline is set (for tuning).
 export function computeNight(childId, nightDate, { includeTimeline = false } = {}) {
-  const settings = appSettings();
-  const tz = settings.timezone || 'UTC';
-  const { startUtc, endUtc } = windowBoundsUtc(nightDate, tz, settings.sleep_window_start, settings.sleep_window_end);
+  const tz = appSettings().timezone || 'UTC';
+  const cfg = childSleepConfig(childId);
+  const { startUtc, endUtc } = windowBoundsUtc(nightDate, tz, cfg.start, cfg.end);
   const startSql = toSqlUtc(startUtc);
   const endSql = toSqlUtc(endUtc);
 
@@ -140,6 +158,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     longest_stretch_minutes: null,
     coverage_minutes: 0,
   };
+  if (!cfg.track) return { ...base, status: 'off' };
   if (cams.length === 0) return { ...base, status: 'no_data' };
 
   const placeholders = cams.map(() => '?').join(',');
@@ -321,17 +340,17 @@ export function getStoredNights(childId, limit = 14) {
 // the scheduler (and once at startup) so "last night" is ready without an on-request compute.
 export function runNightlySleepJob() {
   try {
-    const settings = appSettings();
-    const nightDate = lastCompletedNightDate(settings);
     const kids = db.prepare('SELECT id FROM children').all();
     let computed = 0;
     for (const kid of kids) {
+      if (!childTracksSleep(kid.id)) continue; // sleep tracking off for this child
+      const nightDate = lastCompletedNightDate(kid.id); // each child on their own window
       const existing = db.prepare('SELECT status FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(kid.id, nightDate);
       if (existing) continue;
       computeAndStoreNight(kid.id, nightDate);
       computed++;
     }
-    if (computed > 0) logger.info(`[sleep] Computed ${computed} sleep summary(ies) for night ${nightDate}.`);
+    if (computed > 0) logger.info(`[sleep] Computed ${computed} sleep summary(ies).`);
   } catch (err) {
     logger.error('[sleep] Nightly job failed:', err.message);
   }

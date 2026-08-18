@@ -52,6 +52,13 @@ export default function SleepSummaryCard({ childId }) {
   let body;
   if (data === undefined) {
     body = <div className="night__soon">Loading sleep…</div>;
+  } else if (scope === 'off') {
+    body = (
+      <>
+        <div className="night__sleep-head">Sleep tracking is off</div>
+        <div className="night__soon">Turn it on in this child’s settings to see their nightly sleep.</div>
+      </>
+    );
   } else if (!night || night.status === 'no_data') {
     body = tonight ? (
       <>
@@ -99,8 +106,9 @@ export default function SleepSummaryCard({ childId }) {
   // The whole card is a button into the Sleep detail page (timeline + wake breakdown + date picker).
   // Clickable even with no data, so you can still browse other nights via the date picker there.
   return (
-    <button type="button" className="night__sleep night__sleep--btn" onClick={() => navigate(`/children/${childId}/sleep`)}
-      aria-label="View sleep detail and history">
+    <button type="button" className="night__sleep night__sleep--btn"
+      onClick={() => navigate(scope === 'off' ? `/children/${childId}/edit` : `/children/${childId}/sleep`)}
+      aria-label={scope === 'off' ? 'Turn on sleep tracking in settings' : 'View sleep detail and history'}>
       <Moon size={18} aria-hidden="true" />
       <div className="night__sleep-body">{body}</div>
       <ChevronRight size={18} aria-hidden="true" className="night__sleep-chev" />

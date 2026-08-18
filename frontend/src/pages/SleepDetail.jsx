@@ -136,6 +136,15 @@ export default function SleepDetail() {
 
 function NightBody({ night, fmtTime, tz }) {
   if (night === undefined) return <div className="card"><div className="empty-state" style={{ padding: 20 }}>Loading night…</div></div>;
+  if (night && night.status === 'off') {
+    return (
+      <div className="card">
+        <div className="camera-tile__sub" style={{ padding: 14 }}>
+          Sleep tracking is off for this child. Turn it on in their settings to record and see nightly sleep.
+        </div>
+      </div>
+    );
+  }
   if (!night || night.status === 'no_data') {
     return (
       <div className="card">
