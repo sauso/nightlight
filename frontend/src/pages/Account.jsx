@@ -251,21 +251,6 @@ export default function Account() {
 
         <TwoFactorSection />
 
-        <div className="card" style={{ marginBottom: 14 }}>
-          <div className="card-title">Signed in on</div>
-          {sessions.map((s) => (
-            <div className="list-row" key={s.id}>
-              <div>
-                <div>{s.device}{s.is_current ? ' (this device)' : ''}</div>
-                <div className="camera-tile__sub">Active {timeAgo(s.last_seen_at)}</div>
-              </div>
-              <button className="icon-btn" onClick={() => terminateSession(s)}>
-                Sign out
-              </button>
-            </div>
-          ))}
-        </div>
-
         {notificationsSupported() && (
           <>
             <div className="card" style={{ marginBottom: 14 }}>
@@ -299,6 +284,21 @@ export default function Account() {
             </div>
           </>
         )}
+
+        <div className="card" style={{ marginBottom: 14 }}>
+          <div className="card-title">Signed in on</div>
+          {sessions.map((s) => (
+            <div className="list-row" key={s.id}>
+              <div className="list-row__main">
+                <div className="list-row__title">{s.device}{s.is_current ? ' (this device)' : ''}</div>
+                <div className="camera-tile__sub">Active {timeAgo(s.last_seen_at)}</div>
+              </div>
+              <button className="icon-btn" onClick={() => terminateSession(s)}>
+                Sign out
+              </button>
+            </div>
+          ))}
+        </div>
 
         <button className="btn btn-danger" onClick={logout}>Sign out</button>
       </main>

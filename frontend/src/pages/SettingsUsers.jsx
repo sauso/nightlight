@@ -89,8 +89,8 @@ export default function SettingsUsers() {
           {allSessions.length === 0 && <div className="camera-tile__sub">None active</div>}
           {allSessions.map((s) => (
             <div className="list-row" key={s.id}>
-              <div>
-                <div>{s.username} — {s.device}{s.is_current ? ' (this device)' : ''}</div>
+              <div className="list-row__main">
+                <div className="list-row__title">{s.username} — {s.device}{s.is_current ? ' (this device)' : ''}</div>
                 <div className="camera-tile__sub">Active {timeAgo(s.last_seen_at)}</div>
               </div>
               <button className="icon-btn" onClick={() => terminateSession(s)}>Sign out</button>
