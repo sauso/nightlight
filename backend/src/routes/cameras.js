@@ -5,6 +5,7 @@ import db from '../db.js';
 import { requireAuth, requireAdmin, requireAuthQueryOrHeader } from '../middleware/auth.js';
 import { upsertPath, removePath, getPathStatus, toPathName, hlsPathName } from '../lib/mediamtx.js';
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
+import { recordCameraEvent, EVENT } from '../lib/cameraEvents.js';
 import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.js';
 import { startMotionDetector, stopMotionDetector, motionLegWanted } from '../lib/motionDetector.js';
 import { startOnvifMotion, stopOnvifMotion, onvifMotionWanted } from '../lib/onvifMotion.js';
@@ -357,6 +358,24 @@ router.post('/:id/ptz/nudge', async (req, res) => {
   } catch (e) {
     logger.info(`[ptz] nudge failed for ${req.params.id}: ${e.message}`);
     res.status(502).json({ error: e.message || 'PTZ move failed' });
+  }
+});
+
+// Force a fresh restart of a camera's server-side stream (main transcoder + sub-stream). Useful when a
+// feed has drifted behind live or wedged in a way the watchdog hasn't caught yet — it tears down the
+// FFmpeg leg(s) (SIGTERM→SIGKILL) and relaunches, so every viewer reconnects at the live edge. Any
+// signed-in user (a recovery action, like a heavier pull-to-refresh that fixes it for everyone).
+router.post('/:id/restart', requireAuth, async (req, res) => {
+  const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+  if (!cam) return res.status(404).json({ error: 'Camera not found' });
+  if (cam.disabled) return res.status(400).json({ error: 'Camera is disabled' });
+  try {
+    await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
+    if (subConfigured(cam)) await startSubStream(cam).catch((e) => logger.error(`[restart] sub: ${e.message}`));
+    recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'stream restarted manually');
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(502).json({ error: e.message || 'Restart failed' });
   }
 });
 

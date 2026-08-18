@@ -10,6 +10,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Added
+- **"Restart stream" button on each camera.** In a camera's menu you can now force a fresh restart of its
+  stream — handy if a feed has frozen or drifted behind live. It reloads the feed for everyone and the view
+  reconnects at the live edge within a few seconds.
 - **Wake-ups now show what the cameras flagged.** In a child's sleep detail, each wake-up in the breakdown
   now lists the motion/sound alerts that fired during that time (with the time, camera, and detail), so you
   can see what was happening when they woke.
