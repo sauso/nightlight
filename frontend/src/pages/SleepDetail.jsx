@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Moon, DoorOpen, Thermometer, Sparkles } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Moon, DoorOpen, Thermometer, Sparkles, Zap, AudioLines } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
@@ -170,6 +170,7 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
       : `from ${fmtTime(night.onset_at)} · still asleep at ${fmtTime(night.window_end)}`;
   const wakes = night.wakes || [];
   const visits = night.visits || [];
+  const alerts = night.alerts || [];
   // Coverage is measured against elapsed time so far for a live night, not the full window.
   const covEnd = night.in_progress && night.as_of ? night.as_of : night.window_end;
   const covPct = Math.round((night.coverage_minutes / Math.max(1, Math.round((utcMs(covEnd) - utcMs(night.window_start)) / 60000))) * 100);
@@ -205,12 +206,30 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
           <div className="camera-tile__sub" style={{ padding: '2px 2px 4px' }}>No awakenings counted (a stir under 5 minutes doesn’t count).</div>
         ) : (
           <ul className="sleep-wakes">
-            {wakes.map((w, i) => (
-              <li key={i} className="sleep-wakes__row">
-                <span className="sleep-wakes__time">{fmtTime(w.start_at)} – {fmtTime(w.end_at)}</span>
-                <span className="sleep-wakes__dur">{fmtDur(w.minutes)} awake</span>
-              </li>
-            ))}
+            {wakes.map((w, i) => {
+              const hits = alertsInRange(alerts, w.start_at, w.end_at);
+              return (
+                <li key={i} className="sleep-wakes__item">
+                  <div className="sleep-wakes__head">
+                    <span className="sleep-wakes__time">{fmtTime(w.start_at)} – {fmtTime(w.end_at)}</span>
+                    <span className="sleep-wakes__dur">{fmtDur(w.minutes)} awake</span>
+                  </div>
+                  {hits.length > 0 && (
+                    <ul className="sleep-wakes__alerts">
+                      {hits.map((a) => (
+                        <li key={a.id} className="sleep-wakes__alert">
+                          <AlertTypeIcon type={a.type} />
+                          <span className="sleep-wakes__alert-label">{alertLabel(a.type)}</span>
+                          <span className="sleep-wakes__alert-meta">
+                            {fmtTime(a.created_at)}{a.camera_name ? ` · ${a.camera_name}` : ''}{a.detail ? ` · ${a.detail}` : ''}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
@@ -426,6 +445,24 @@ function SleepInsights({ childId, tempUnit, childName }) {
 
 // --- small helpers ---
 const utcMs = (s) => new Date(String(s).replace(' ', 'T') + 'Z').getTime();
+
+// Detection alerts that fired within a wake's window, allowing a few minutes either side (a wake run is
+// trimmed to its active minutes, and an alert can fire just before/after). Keeps ascending order.
+const ALERT_MARGIN_MS = 3 * 60000;
+function alertsInRange(alerts, startAt, endAt) {
+  const s = utcMs(startAt) - ALERT_MARGIN_MS;
+  const e = utcMs(endAt) + ALERT_MARGIN_MS;
+  return alerts.filter((a) => {
+    const t = utcMs(a.created_at);
+    return t >= s && t <= e;
+  });
+}
+const alertLabel = (type) => (type === 'sound' ? 'Sound' : type === 'motion' ? 'Motion' : type || 'Alert');
+function AlertTypeIcon({ type }) {
+  const Icon = type === 'sound' ? AudioLines : Zap;
+  return <Icon size={13} className="sleep-wakes__alert-ico" aria-hidden="true" />;
+}
+
 const pctOf = (s, startMs, totalMs) => (s ? ((utcMs(s) - startMs) / totalMs) * 100 : null);
 const labelFor = (state) => (state === 'asleep' ? 'asleep' : state === 'stir' ? 'stirring' : state === 'wake' ? 'awake' : 'before/after sleep');
 function shortHour(ms, tz) {

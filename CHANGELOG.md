@@ -9,13 +9,25 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **Wake-ups now show what the cameras flagged.** In a child's sleep detail, each wake-up in the breakdown
+  now lists the motion/sound alerts that fired during that time (with the time, camera, and detail), so you
+  can see what was happening when they woke.
+
 ### Changed
 - **Consistent section headings across the app.** Card and section titles now share one style — matching
   the "Room climate" card — so headings read the same on every screen. On a child's page, **Cameras** and
   **Recent alerts** are now titles inside their cards; the sleep detail sections and all Settings headings
   match too. Settings sections are now grouped in tiles with the heading inside — **General** (theme
   presets, font, colours, temperature unit), **Camera controls**, **User management**, **Clip management**,
-  **Logs**, and **About**.
+  **Logs**, and **About**. The **General** page's first tile is now headed **General Settings**.
+- **"Change my password" stands out.** On the Account screen it's now a filled periwinkle button instead of
+  a plain outline, so it's easier to spot.
+
+### Fixed
+- **A disabled camera no longer spams the logs.** Disabled cameras have no stream path, so the app no longer
+  asks MediaMTX about them on every camera-list refresh — which had been logging a steady stream of
+  "path not found" errors.
 
 ## [0.19.0] - 2026-08-18
 
