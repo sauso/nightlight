@@ -394,7 +394,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     out.alerts = aph
       ? db
           .prepare(
-            `SELECT id, camera_id, camera_name, type, detail, created_at, snapshot
+            `SELECT id, camera_id, camera_name, type, detail, created_at, snapshot,
+                    clip_status, clip_duration_s
                FROM detection_events
                WHERE camera_id IN (${aph}) AND created_at >= ? AND created_at < ?
                ORDER BY created_at ASC`
