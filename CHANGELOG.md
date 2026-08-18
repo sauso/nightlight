@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-08-19
+
 ### Added
 - **Watch a wake-up's clip right from the sleep breakdown.** In a child's sleep detail, each wake-up is now
   collapsed by default with a chip showing how many alerts fired; tap to expand it and see those alerts — and
