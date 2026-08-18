@@ -386,6 +386,21 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       i = k;
     }
     out.segments = segments;
+
+    // Detection alerts (motion/sound) that fired anywhere in the window, so the detail view can line
+    // each wake-up up with what the cameras actually flagged at that time. A windowed query (not the
+    // recent-200 feed) so it works for any night in the date picker. Ascending by time.
+    const aph = cams.map(() => '?').join(',');
+    out.alerts = aph
+      ? db
+          .prepare(
+            `SELECT id, camera_id, camera_name, type, detail, created_at, snapshot
+               FROM detection_events
+               WHERE camera_id IN (${aph}) AND created_at >= ? AND created_at < ?
+               ORDER BY created_at ASC`
+          )
+          .all(...cams, startSql, endSql)
+      : [];
   }
   return out;
 }

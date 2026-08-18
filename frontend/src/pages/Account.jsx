@@ -240,7 +240,7 @@ export default function Account() {
 
         {passwordSaved && <div className="saved-banner">Password updated ✓</div>}
         <button
-          className="btn btn-secondary"
+          className="btn btn-peri"
           onClick={() => { setPasswordForm(BLANK_PASSWORD_FORM); setPasswordError(''); setChangingPassword(true); }}
           style={{ marginBottom: 14 }}
         >

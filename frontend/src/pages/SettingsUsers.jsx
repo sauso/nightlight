@@ -54,8 +54,8 @@ export default function SettingsUsers() {
       <main className="app-main">
         {error && <div className="error-banner">{error}</div>}
 
-        <div className="section-title">Caregiver accounts</div>
         <div className="card tight">
+          <div className="card-title">Caregiver accounts</div>
           {users.map((u) => {
             const open = () => navigate(`/settings/users/${u.id}`);
             return (
@@ -84,9 +84,9 @@ export default function SettingsUsers() {
           <Plus size={16} aria-hidden="true" /> Add caregiver
         </button>
 
-        <div className="section-title">All active sessions</div>
         <div className="card" style={{ marginBottom: 14 }}>
-          {allSessions.length === 0 && <div className="camera-tile__sub" style={{ padding: 12 }}>None active</div>}
+          <div className="card-title">All active sessions</div>
+          {allSessions.length === 0 && <div className="camera-tile__sub">None active</div>}
           {allSessions.map((s) => (
             <div className="list-row" key={s.id}>
               <div>

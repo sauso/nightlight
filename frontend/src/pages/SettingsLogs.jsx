@@ -10,17 +10,22 @@ export default function SettingsLogs() {
       <AppHeader title="Logs" back={{ to: '/settings', label: 'Settings' }} />
       <main className="app-main">
 
-        <div className="section-title">Report a problem</div>
-        <DiagnosticsCard />
+        <DiagnosticsCard title="Report a problem" />
 
-        <div className="section-title">Recent alerts</div>
-        <RecentAlerts />
+        <div className="card">
+          <div className="card-title">Recent alerts</div>
+          <RecentAlerts />
+        </div>
 
-        <div className="section-title">Camera history</div>
-        <EventLog />
+        <div className="card">
+          <div className="card-title">Camera history</div>
+          <EventLog />
+        </div>
 
-        <div className="section-title">Recent logs</div>
-        <LogViewer />
+        <div className="card">
+          <div className="card-title">Recent logs</div>
+          <LogViewer />
+        </div>
       </main>
     </>
   );

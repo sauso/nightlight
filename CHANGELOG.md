@@ -9,6 +9,42 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-08-18
+
+### Added
+- **"Restart stream" button on each camera.** In a camera's menu you can now force a fresh restart of its
+  stream — handy if a feed has frozen or drifted behind live. It reloads the feed for everyone and the view
+  reconnects at the live edge within a few seconds.
+- **Wake-ups now show what the cameras flagged.** In a child's sleep detail, each wake-up in the breakdown
+  now lists the motion/sound alerts that fired during that time (with the time, camera, and detail), so you
+  can see what was happening when they woke.
+
+### Changed
+- **Consistent section headings across the app.** Card and section titles now share one style — matching
+  the "Room climate" card — so headings read the same on every screen. On a child's page, **Cameras** and
+  **Recent alerts** are now titles inside their cards; the sleep detail sections and all Settings headings
+  match too. Settings sections are now grouped in tiles with the heading inside — **General** (theme
+  presets, font, colours, temperature unit), **Camera controls**, **User management**, **Clip management**,
+  **Logs**, and **About**. The **General** page's first tile is now headed **General Settings**.
+- **"Change my password" stands out.** On the Account screen it's now a filled periwinkle button instead of
+  a plain outline, so it's easier to spot.
+- **The connection-mode toggle now reads "Low latency"** (was just "Low"), so it pairs clearly with
+  "Compatibility".
+
+### Fixed
+- **A wedged "Low" (sub) stream now self-heals.** The low-resolution stream has its own background feed,
+  and it could get stuck (running but no longer delivering video — e.g. after a camera drop/reconnect or a
+  codec change) with nothing to recover it, so switching to **Low** quality showed no video until the whole
+  app restarted. The watchdog now watches the low stream too and restarts it automatically, the same way it
+  already does for the main stream.
+- **Cameras that send Opus audio now work in Compatibility mode too.** Opus gives noticeably clearer audio
+  on Low latency (WebRTC), but Compatibility (HLS) can't carry it, which was breaking that mode. Nightlight
+  now serves Compatibility from a separate AAC audio feed while Low latency keeps the crisp Opus — so both
+  modes work, whatever audio codec the camera uses (Opus, G711, or AAC).
+- **A disabled camera no longer spams the logs.** Disabled cameras have no stream path, so the app no longer
+  asks MediaMTX about them on every camera-list refresh — which had been logging a steady stream of
+  "path not found" errors.
+
 ## [0.19.0] - 2026-08-18
 
 ### Added

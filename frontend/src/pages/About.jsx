@@ -54,8 +54,8 @@ export default function About() {
           </div>
         </div>
 
-        <div className="section-title">Links</div>
         <div className="card">
+          <div className="card-title">Links</div>
           {LINKS.map(({ label, url }) => (
             <a key={url} className="list-row about-link" href={url} target="_blank" rel="noreferrer">
               <span>{label}</span>
@@ -64,8 +64,8 @@ export default function About() {
           ))}
         </div>
 
-        <div className="section-title">Support the project</div>
         <div className="card">
+          <div className="card-title">Support the project</div>
           <div className="camera-tile__sub" style={{ marginBottom: 12 }}>
             Nightlight is free and open source. If it helps you keep watch over your
             little ones, consider supporting its development.

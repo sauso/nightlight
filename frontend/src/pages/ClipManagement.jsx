@@ -138,8 +138,8 @@ export default function ClipManagement() {
           .filter(([k]) => !filterActive || selectedDays.has(k))
           .map(([k, g]) => (
             <div key={k}>
-              <div className="section-title">{g.label}</div>
               <div className="card tight">
+                <div className="card-title">{g.label}</div>
                 {g.rows.map((c) => {
                   const t = TYPE[c.type] || { label: c.type, Icon: Zap };
                   const Icon = t.Icon;

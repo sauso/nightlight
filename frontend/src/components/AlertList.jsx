@@ -23,7 +23,7 @@ function relTime(d) {
   return `${Math.round(h / 24)}d ago`;
 }
 
-export default function AlertList({ alerts, onChanged }) {
+export default function AlertList({ alerts, onChanged, title }) {
   const [clipFor, setClipFor] = useState(null); // the alert whose clip is open in the player
   const [dl, setDl] = useState(''); // '' | 'saving' | 'saved' | 'shared' | 'error'
   const [del, setDel] = useState(''); // '' | 'confirm' | 'deleting' | 'error'
@@ -78,6 +78,7 @@ export default function AlertList({ alerts, onChanged }) {
   return (
     <>
       <div className="card tight alert-list">
+        {title && <div className="card-title">{title}</div>}
         {alerts.map((ev) => {
           const t = TYPE[ev.type] || { label: ev.type, Icon: Zap };
           const Icon = t.Icon;

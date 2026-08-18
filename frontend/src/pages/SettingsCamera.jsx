@@ -47,8 +47,8 @@ export default function SettingsCamera() {
         {saved && <div className="saved-banner">Saved ✓</div>}
 
         <form onSubmit={save}>
-          <div className="section-title">Pan / tilt</div>
           <div className="card">
+            <div className="card-title">Pan / tilt</div>
             <div className="field" style={{ marginBottom: 0 }}>
               <label htmlFor="ptz-step">PTZ step size</label>
               <input
@@ -68,8 +68,8 @@ export default function SettingsCamera() {
             </div>
           </div>
 
-          <div className="section-title">Offline alerts</div>
           <div className="card">
+            <div className="card-title">Offline alerts</div>
             <div className="list-row" style={{ padding: 0 }}>
               <div>
                 <div>Notify when a camera goes offline</div>

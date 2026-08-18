@@ -1,4 +1,4 @@
-import { subPathName, upsertPath, removePath, isPathConfiguredCorrectly } from './mediamtx.js';
+import { subPathName, hlsPathName, upsertPath, removePath, isPathConfiguredCorrectly } from './mediamtx.js';
 import { startTranscoder, stopTranscoder, isRunning } from './transcoder.js';
 
 // Adaptive stream quality: a camera can have an optional lower-resolution sub-stream (sub_rtsp_url,
@@ -38,4 +38,6 @@ export async function startSubStream(camera) {
 export async function stopSubStream(camera) {
   await stopTranscoder(subCameraId(camera.id));
   await removePath(subPathName(camera.mediamtx_path)).catch(() => {});
+  // Also drop the sub's sibling AAC/HLS path (the transcoder creates it on start; see transcoder.js).
+  await removePath(hlsPathName(subPathName(camera.mediamtx_path))).catch(() => {});
 }

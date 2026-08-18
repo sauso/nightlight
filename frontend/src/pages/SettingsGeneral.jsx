@@ -81,6 +81,7 @@ export default function SettingsGeneral() {
 
         <form onSubmit={save}>
           <div className="card">
+            <div className="card-title">General Settings</div>
             <div className="field">
               <label htmlFor="app-name">App name</label>
               <input
@@ -115,42 +116,46 @@ export default function SettingsGeneral() {
             </div>
           </div>
 
-          <div className="section-title">Theme presets</div>
-          <div className="preset-row">
-            {PRESETS.map((preset) => (
-              <button
-                type="button"
-                key={preset.label}
-                className="preset-btn"
-                onClick={() => applyPreset(preset)}
-                title={preset.label}
-              >
-                <span style={{ background: preset.accent }} />
-                <span style={{ background: preset.live }} />
-                <span style={{ background: preset.offline }} />
-              </button>
-            ))}
-          </div>
-
-          <div className="section-title">Font</div>
-          <div className="font-row">
-            {Object.entries(FONT_PRESETS).map(([key, preset]) => (
-              <button
-                type="button"
-                key={key}
-                className={`font-btn${form.font_choice === key ? ' font-btn--active' : ''}`}
-                onClick={() => setForm({ ...form, font_choice: key })}
-              >
-                <span className="font-btn__sample" style={{ fontFamily: preset.display }}>
-                  {preset.sample}
-                </span>
-                <span className="font-btn__label">{preset.label}</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="section-title">Colors</div>
           <div className="card">
+            <div className="card-title">Theme presets</div>
+            <div className="preset-row" style={{ marginBottom: 0 }}>
+              {PRESETS.map((preset) => (
+                <button
+                  type="button"
+                  key={preset.label}
+                  className="preset-btn"
+                  onClick={() => applyPreset(preset)}
+                  title={preset.label}
+                >
+                  <span style={{ background: preset.accent }} />
+                  <span style={{ background: preset.live }} />
+                  <span style={{ background: preset.offline }} />
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-title">Font</div>
+            <div className="font-row" style={{ marginBottom: 0 }}>
+              {Object.entries(FONT_PRESETS).map(([key, preset]) => (
+                <button
+                  type="button"
+                  key={key}
+                  className={`font-btn${form.font_choice === key ? ' font-btn--active' : ''}`}
+                  onClick={() => setForm({ ...form, font_choice: key })}
+                >
+                  <span className="font-btn__sample" style={{ fontFamily: preset.display }}>
+                    {preset.sample}
+                  </span>
+                  <span className="font-btn__label">{preset.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-title">Colors</div>
             <div className="color-field">
               <label htmlFor="accent-color">Accent (buttons, highlights)</label>
               <div className="color-field__row">
@@ -189,26 +194,28 @@ export default function SettingsGeneral() {
             </div>
           </div>
 
-          <div className="section-title">Temperature unit</div>
-          <div className="preset-row">
-            <button
-              type="button"
-              className={`font-btn${form.temp_unit === 'C' ? ' font-btn--active' : ''}`}
-              onClick={() => setForm({ ...form, temp_unit: 'C' })}
-            >
-              <span className="font-btn__label">°C</span>
-            </button>
-            <button
-              type="button"
-              className={`font-btn${form.temp_unit === 'F' ? ' font-btn--active' : ''}`}
-              onClick={() => setForm({ ...form, temp_unit: 'F' })}
-            >
-              <span className="font-btn__label">°F</span>
-            </button>
+          <div className="card">
+            <div className="card-title">Temperature unit</div>
+            <div className="preset-row" style={{ marginBottom: 0 }}>
+              <button
+                type="button"
+                className={`font-btn${form.temp_unit === 'C' ? ' font-btn--active' : ''}`}
+                onClick={() => setForm({ ...form, temp_unit: 'C' })}
+              >
+                <span className="font-btn__label">°C</span>
+              </button>
+              <button
+                type="button"
+                className={`font-btn${form.temp_unit === 'F' ? ' font-btn--active' : ''}`}
+                onClick={() => setForm({ ...form, temp_unit: 'F' })}
+              >
+                <span className="font-btn__label">°F</span>
+              </button>
+            </div>
           </div>
 
-          <div className="section-title">Recording</div>
           <div className="card">
+            <div className="card-title">Recording</div>
             <div style={{ display: 'flex', gap: 10 }}>
               <div className="field" style={{ flex: 1, marginBottom: 0 }}>
                 <label htmlFor="clip-pre">Pre-roll (seconds)</label>

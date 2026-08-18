@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet, Zap, AudioLines, Clock, Square, Play } from 'lucide-react';
+import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet, Zap, AudioLines, Clock, Square, Play, RotateCcw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { startTalk } from '../lib/twoWayTalk.js';
@@ -216,6 +216,16 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [detBusy, setDetBusy] = useState(false); // guards the quick motion/sound toggles
+  const [restarting, setRestarting] = useState(false); // "Restart stream" in flight
+
+  // Force a fresh server-side restart of this camera's stream — clears a feed that's drifted behind live
+  // or wedged. The players reconnect on their own once the transcoder relaunches (~5s).
+  async function restartStream() {
+    if (restarting) return;
+    setRestarting(true);
+    try { await api.post(`/cameras/${camera.id}/restart`, {}); } catch { /* ignore — best effort */ }
+    setTimeout(() => setRestarting(false), 5000);
+  }
   function closeMenu() {
     setModeMenuOpen(false);
     setSheetDragY(0);
@@ -590,7 +600,9 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
           ) : (
             <HlsPlayer
               key={`compat-${refreshNonce}`}
-              mediamtxPath={effectivePath}
+              /* Compatibility (HLS) reads the sibling AAC path — MediaMTX's MPEG-TS HLS can't carry the
+                 camera's own audio (e.g. Opus) that the main path uses for WebRTC. See transcoder.js. */
+              mediamtxPath={`${effectivePath}-hls`}
               active={streamActive}
               muted={effectiveMuted}
             />
@@ -637,7 +649,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
                   className={`segmented__btn${mode === 'live' ? ' segmented__btn--active' : ''}`}
                   onClick={() => selectMode('live')}
                 >
-                  Low
+                  Low latency
                 </button>
                 <button
                   type="button"
@@ -700,6 +712,15 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
                     Camera settings
                   </button>
                 )}
+              </div>
+
+              <button type="button" className="btn btn-secondary" style={{ width: '100%', marginBottom: 8 }}
+                onClick={restartStream} disabled={restarting}>
+                <RotateCcw size={16} />
+                {restarting ? 'Restarting…' : 'Restart stream'}
+              </button>
+              <div className="camera-tile__sub" style={{ margin: '-2px 2px 8px', textAlign: 'center' }}>
+                Reloads the feed for everyone — use if it's frozen or lagging behind.
               </div>
 
               <button className="tile-menu__done" onClick={closeMenu}>Done</button>

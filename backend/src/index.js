@@ -22,7 +22,7 @@ import { requireAuth, requireAuthQueryOrHeader, verifyToken } from './middleware
 import { startTalkSession, talkConfigured } from './lib/twoWayAudio.js';
 import { subConfigured, isSubRunning, startSubStream } from './lib/subStream.js';
 import db from './db.js';
-import { upsertPath, isPathConfiguredCorrectly, getPathStatus } from './lib/mediamtx.js';
+import { upsertPath, isPathConfiguredCorrectly, getPathStatus, subPathName } from './lib/mediamtx.js';
 import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder.js';
 import { startMotionDetector, stopMotionDetector, isDetecting, stopAllMotionDetectors, motionLegWanted } from './lib/motionDetector.js';
 import { startOnvifMotion, stopOnvifMotion, isOnvifMotion, onvifMotionWanted, stopAllOnvifMotion } from './lib/onvifMotion.js';
@@ -258,6 +258,12 @@ setInterval(purgeExpiredSessions, 24 * 60 * 60 * 1000);
 // status directly, and force-restarts a camera's transcoder if it's been stuck
 // not-ready for too long - regardless of what the FFmpeg process itself is doing.
 const notReadySince = new Map(); // camera_id -> timestamp
+// Same idea for the optional low-res SUB stream. Its transcoder can wedge (FFmpeg alive but no longer
+// publishing — seen after a camera drops/reconnects or a codec change), which the reconcile can't catch
+// because the process IS running (isSubRunning stays true), and the main-path check above never looks at
+// the sub path. So a wedged sub-stream ("Low" quality shows no video) would otherwise stay dead until the
+// whole app restarts. This tracks sub-path readiness and force-restarts just the sub leg when it's stuck.
+const subNotReadySince = new Map(); // camera_id -> timestamp
 // Stable online/offline status per camera, so the Camera history panel gets one clean
 // "offline" event when a camera actually stops and one "online" event when it comes
 // back - not a new event every 15s poll while it stays down. Seeded lazily: the first
@@ -284,6 +290,7 @@ setInterval(async () => {
     // it. Clear any tracked state so re-enabling starts clean (seeds silently, no event).
     if (cam.disabled) {
       notReadySince.delete(cam.id);
+      subNotReadySince.delete(cam.id);
       onlineState.delete(cam.id);
       offlineSince.delete(cam.id);
       offlineAlerted.delete(cam.id);
@@ -322,6 +329,29 @@ setInterval(async () => {
         offlineAlerted.add(cam.id);
         notifyCameraOffline(cam, offlineCfg.minutes);
       }
+    }
+
+    // Sub-stream (Low quality) wedge check — independent of the main path above, and BEFORE its early
+    // `continue`, so it runs even when the main stream is healthy. Mirrors the main logic: if the sub path
+    // stays not-ready past the threshold, force-restart just the sub leg (startSubStream → stopTranscoder
+    // SIGTERM→SIGKILL → relaunch), which clears a wedged FFmpeg that the reconcile can't (it's still alive).
+    if (subConfigured(cam)) {
+      const subReady = (await getPathStatus(subPathName(cam.mediamtx_path))).ready;
+      if (subReady) {
+        subNotReadySince.delete(cam.id);
+      } else {
+        const subSince = subNotReadySince.get(cam.id);
+        if (!subSince) {
+          subNotReadySince.set(cam.id, Date.now());
+        } else if (Date.now() - subSince > STUCK_THRESHOLD_MS) {
+          logger.error(`Sub-stream (Low) for "${cam.name}" unready over ${STUCK_THRESHOLD_MS / 1000}s - force-restarting it.`);
+          recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'sub-stream force-restarted by watchdog (unready 30s+)');
+          await startSubStream(cam);
+          subNotReadySince.delete(cam.id);
+        }
+      }
+    } else {
+      subNotReadySince.delete(cam.id);
     }
 
     if (status.ready) {
