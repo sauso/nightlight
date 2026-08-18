@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-08-18
+
 ### Added
 - **"Restart stream" button on each camera.** In a camera's menu you can now force a fresh restart of its
   stream — handy if a feed has frozen or drifted behind live. It reloads the feed for everyone and the view
