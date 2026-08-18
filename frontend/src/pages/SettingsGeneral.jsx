@@ -81,6 +81,7 @@ export default function SettingsGeneral() {
 
         <form onSubmit={save}>
           <div className="card">
+            <div className="card-title">General Settings</div>
             <div className="field">
               <label htmlFor="app-name">App name</label>
               <input

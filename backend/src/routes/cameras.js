@@ -366,7 +366,10 @@ router.get('/', async (req, res) => {
   const withStatus = await Promise.all(
     cameras.map(async (cam) => ({
       ...publicCamera(cam, isAdmin),
-      status: await getPathStatus(cam.mediamtx_path),
+      // A disabled camera has no MediaMTX path (it's removed when the camera is disabled), so asking
+      // MediaMTX for its status would 404 and spam its log with "ERR [API] path not found" on every
+      // poll of this list. It's off by design — report not-ready without querying.
+      status: cam.disabled ? { ready: false, tracks: [] } : await getPathStatus(cam.mediamtx_path),
       mqtt: cam.mqtt_topic ? getReading(cam.mqtt_topic) : null,
     }))
   );
