@@ -1122,6 +1122,24 @@ body.in-pip .tile-menu-backdrop {
 .sleep-wakes__dur--visit { color: var(--sleep-visit); }
 .sleep-tl__mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text-primary); opacity: 0.55; transform: translateX(-1px); }
 .sleep-tl__now { position: absolute; top: -4px; bottom: -4px; width: 0; border-left: 2px dashed var(--accent); transform: translateX(-1px); }
+/* Hover bubble over the timeline: a follow-the-cursor tooltip with the time, sleep status, and (if a
+   sensor was present) the temperature at that moment. The wrap is the mouse/touch target; it must NOT
+   clip (unlike the bar, which hides its segment corners). */
+.sleep-tl__barwrap { position: relative; }
+.sleep-tl__cursor { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text-primary); opacity: 0.5; transform: translateX(-1px); pointer-events: none; }
+.sleep-tl__tip {
+  position: absolute; bottom: calc(100% + 8px); transform: translateX(-50%);
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28); padding: 6px 9px; z-index: 5; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; gap: 1px; white-space: nowrap;
+}
+.sleep-tl__tip::after {
+  content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  border: 5px solid transparent; border-top-color: var(--bg-elevated);
+}
+.sleep-tl__tip-time { font-size: 12.5px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.sleep-tl__tip-status { font-size: 11.5px; color: var(--text-secondary); text-transform: capitalize; }
+.sleep-tl__tip-temp { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--sleep-temp); font-variant-numeric: tabular-nums; }
 .sleep-live-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: #1b1c33; background: var(--accent); vertical-align: 2px; }
 .sleep-tl__axis { position: relative; height: 16px; margin-top: 4px; }
 .sleep-tl__tick { position: absolute; top: 0; width: 1px; height: 4px; background: var(--border); transform: translateX(-0.5px); }
