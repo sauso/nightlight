@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, ChevronDown, Moon, DoorOpen, Thermometer, Sparkles, Zap, AudioLines, Play } from 'lucide-react';
 import { api } from '../lib/api.js';
@@ -193,7 +193,7 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
 
       <div className="card">
         <div className="sleep-detail__section-title">Night timeline</div>
-        <Timeline night={night} fmtTime={fmtTime} tz={tz} />
+        <Timeline night={night} fmtTime={fmtTime} tz={tz} tempUnit={tempUnit} />
         <div className="sleep-legend">
           <span><i className="sleep-legend__sw sleep-seg--asleep" /> Asleep</span>
           <span><i className="sleep-legend__sw sleep-seg--stir" /> Stirring</span>
@@ -318,11 +318,48 @@ function Stat({ label, value }) {
 
 // The to-scale bar: each segment positioned by its share of the window, plus hour tick labels and
 // onset/wake markers so the wake-ups read against a real time axis.
-function Timeline({ night, fmtTime, tz }) {
+function Timeline({ night, fmtTime, tz, tempUnit }) {
   const startMs = utcMs(night.window_start);
   const endMs = utcMs(night.window_end);
   const totalMs = Math.max(1, endMs - startMs);
   const segs = night.segments || [];
+
+  // Hover bubble: as the cursor (or a finger) moves across the bar, show the time under it, the sleep
+  // status at that moment, and — if the room had a sensor — the temperature then. `null` = not hovering.
+  const barRef = useRef(null);
+  const [hover, setHover] = useState(null);
+
+  const tempSeries = useMemo(
+    () => (night.climate?.series || []).filter((p) => p.temperature != null).map((p) => ({ ms: utcMs(p.t), c: p.temperature })),
+    [night]
+  );
+  const toF = tempUnit === 'F';
+  const tempUnitLabel = `°${tempUnit || 'C'}`;
+
+  function stateAt(ms) {
+    const s = segs.find((seg) => utcMs(seg.from_at) <= ms && ms < utcMs(seg.to_at));
+    return (s || segs[ms >= endMs ? segs.length - 1 : 0] || {}).state;
+  }
+  function tempAt(ms) {
+    if (!tempSeries.length) return null;
+    let best = tempSeries[0];
+    for (const p of tempSeries) if (Math.abs(p.ms - ms) < Math.abs(best.ms - ms)) best = p;
+    // Only report a nearby reading (within ~10 min) so we don't label a gap with a far-off temperature.
+    if (Math.abs(best.ms - ms) > 10 * 60000) return null;
+    const c = best.c;
+    return `${(toF ? (c * 9) / 5 + 32 : c).toFixed(1)}${tempUnitLabel}`;
+  }
+  const fmtMs = (ms) => new Intl.DateTimeFormat([], { timeZone: tz, hour: 'numeric', minute: '2-digit' }).format(new Date(ms));
+
+  function updateHover(clientX) {
+    const el = barRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const f = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const ms = startMs + f * totalMs;
+    setHover({ pct: f * 100, time: fmtMs(ms), status: labelFor(stateAt(ms)), temp: tempAt(ms) });
+  }
 
   const ticks = useMemo(() => {
     const out = [];
@@ -352,15 +389,30 @@ function Timeline({ night, fmtTime, tz }) {
           ))}
         </div>
       )}
-      <div className="sleep-tl__bar">
-        {segs.map((s, i) => (
-          <div key={i} className={`sleep-seg ${SEG_CLASS[s.state] || 'sleep-seg--awake'}`}
-            style={{ width: `${(s.minutes / (totalMs / 60000)) * 100}%` }}
-            title={`${fmtTime(s.from_at)}–${fmtTime(s.to_at)} · ${labelFor(s.state)}`} />
-        ))}
-        {onsetPct != null && <span className="sleep-tl__mark" style={{ left: `${onsetPct}%` }} />}
-        {wakePct != null && <span className="sleep-tl__mark" style={{ left: `${wakePct}%` }} />}
-        {nowPct != null && <span className="sleep-tl__now" style={{ left: `${nowPct}%` }} title="as of now" />}
+      <div className="sleep-tl__barwrap" ref={barRef}
+        onMouseMove={(e) => updateHover(e.clientX)}
+        onMouseLeave={() => setHover(null)}
+        onTouchStart={(e) => updateHover(e.touches[0].clientX)}
+        onTouchMove={(e) => updateHover(e.touches[0].clientX)}
+        onTouchEnd={() => setHover(null)}
+      >
+        <div className="sleep-tl__bar">
+          {segs.map((s, i) => (
+            <div key={i} className={`sleep-seg ${SEG_CLASS[s.state] || 'sleep-seg--awake'}`}
+              style={{ width: `${(s.minutes / (totalMs / 60000)) * 100}%` }} />
+          ))}
+          {onsetPct != null && <span className="sleep-tl__mark" style={{ left: `${onsetPct}%` }} />}
+          {wakePct != null && <span className="sleep-tl__mark" style={{ left: `${wakePct}%` }} />}
+          {nowPct != null && <span className="sleep-tl__now" style={{ left: `${nowPct}%` }} title="as of now" />}
+        </div>
+        {hover && (
+          <div className="sleep-tl__tip" style={{ left: `${hover.pct}%` }} aria-hidden="true">
+            <span className="sleep-tl__tip-time">{hover.time}</span>
+            <span className="sleep-tl__tip-status">{hover.status}</span>
+            {hover.temp && <span className="sleep-tl__tip-temp"><Thermometer size={11} aria-hidden="true" />{hover.temp}</span>}
+          </div>
+        )}
+        {hover && <span className="sleep-tl__cursor" style={{ left: `${hover.pct}%` }} aria-hidden="true" />}
       </div>
       <div className="sleep-tl__axis">
         {ticks.map((t, i) => (

@@ -16,6 +16,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - **Pushover: choose a target device.** Pushover settings now have an optional **Device** field, so you can
   send alerts to just one device (or a comma-separated list). Leave it blank to alert all your devices as
   before; a bad device name is caught when you enable it.
+- **Hover the sleep timeline for details.** On a child's night timeline, moving over the bar now shows a
+  little bubble with the exact time, the sleep status at that moment (asleep / stirring / awake), and the
+  room temperature then if a sensor was present. Works on touch too (drag along the bar).
 
 ### Changed
 - **Tidier Account and Caregivers screens.** On your Account, **Change my password** now sits with your name
