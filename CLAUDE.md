@@ -169,14 +169,17 @@ the ref:
 See the workspace `CLAUDE.md` for the branch model. In short: work on `dev`, release to
 `main` via PR. Two containers run on Unraid:
 
-- **Production** — on the `br0.10` ipvlan network at `192.168.2.151` (its own routable LAN IP, so
-  WebRTC works without host networking — MediaMTX advertises that IP), data dir
+- **Production** — on a `br0.10` ipvlan network with its own dedicated routable LAN IP (so WebRTC
+  works without host networking — MediaMTX advertises that IP), data dir
   `/mnt/user/appdata/nightlight`, container name `nightlight`, runs `sauso/nightlight:latest`.
-  Updated only by a release to `main`. (Note: `192.168.1.100` is the **Unraid host** you SSH into
-  for deploys/log-checks — not the prod container's own IP, which is `192.168.2.151`.)
-- **Staging** — on the same `br0.10` ipvlan network at `192.168.2.150` (adjacent to prod's `.151`;
-  its own LAN IP, same reason as prod), separate data dir (`/mnt/user/appdata/nightlight-dev`),
-  container name `nightlight-dev`, runs `sauso/nightlight:dev`. Test dev builds here.
+  Updated only by a release to `main`.
+- **Staging** — same setup on the same `br0.10` network (its own dedicated LAN IP, adjacent to
+  prod's), separate data dir (`/mnt/user/appdata/nightlight-dev`), container name `nightlight-dev`,
+  runs `sauso/nightlight:dev`. Test dev builds here.
+
+Deploys/log-checks are done over SSH to the Unraid host, using the guard script (see the workspace
+`CLAUDE.md`). The actual host/container IP addresses are kept out of this repo — they live in the
+agent's private deployment notes, not in version control.
 
 Deploys are **not** automated — after CI publishes an image, pull it and recreate the relevant
 container on Unraid (prod pulls `:latest`, staging pulls `:dev`). A push/merge does NOT mean the

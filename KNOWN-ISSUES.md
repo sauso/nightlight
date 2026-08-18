@@ -126,7 +126,7 @@ This is how the Sonoff/Thingino cameras are happiest — flip AAC → G711A in t
 
 **What you see:** A camera set to **Compatibility** never shows video (the tile sits on
 "Connecting…" then "No signal") when you're reaching Nightlight over an **`http://`** URL —
-typically a LAN address like `http://192.168.1.100` with no reverse proxy / TLS in front.
+typically a LAN address like `http://<server-lan-ip>` with no reverse proxy / TLS in front.
 **Low latency** (WebRTC) mode on the same camera works fine, and Compatibility works fine once
 the app is served over **HTTPS**.
 
