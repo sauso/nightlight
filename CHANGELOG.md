@@ -9,6 +9,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+- **Smaller, leaner Docker image.** The build now compiles/install backend dependencies in a separate
+  stage, so the C/C++ compiler toolchain (gcc/g++/make) and python3 that only node-gyp needs at build
+  time — plus the npm/node-gyp caches — no longer ship in the runtime image. This trims roughly a third
+  off the image size and removes those build-only packages (and their scanner findings) from what runs
+  in production. No runtime behaviour change.
+
 ## [0.22.0] - 2026-08-19
 
 ### Added
