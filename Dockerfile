@@ -59,6 +59,15 @@ RUN chmod +x /usr/local/bin/mediamtx
 COPY backend/package.json backend/package-lock.json ./
 RUN npm ci --omit=dev
 
+# Drop the base image's bundled npm once install is done. npm is the package manager, not part of
+# the running app (the container runs `node src/index.js`; entrypoint.sh only uses su-exec/node) —
+# but the copy that ships in node:24-alpine drags in its own vulnerable transitive deps
+# (tar/undici/brace-expansion/ip-address DoS + SSRF CVEs) that image scanners (Docker Scout/Trivy)
+# flag on an otherwise-clean image. Removing it here clears those findings and trims the attack
+# surface. better-sqlite3's native addon is already compiled by this point and loads at runtime
+# without npm. NOTE: this must stay AFTER the last `npm ci`; if a later step ever needs npm, move it.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+
 COPY backend/src ./src
 COPY --from=frontend-build /frontend/dist ./public
 

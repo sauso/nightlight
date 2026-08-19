@@ -539,6 +539,27 @@ export async function probePtzRelativeSupport({ host, port, username, password }
  * taken from pan/tilt/zoom (sign); magnitude is the fixed step. Throws on error so the caller can
  * fall back to ptzNudge.
  */
+/**
+ * Reboot the camera over ONVIF (Device Management SystemReboot). A full power-cycle of the camera —
+ * heavier than restarting our own transcoder, and it takes the feed offline for ~30-60s while the
+ * camera comes back — but it recovers states a stream restart can't (e.g. a wedged on-camera video
+ * encoder). Authenticated, so we seed the WS-Security clock first, same as the PTZ commands.
+ * NOTE: the onvif lib routes SystemReboot to its "deviceIO" service slot; point that at the standard
+ * device_service endpoint, which is where minimal servers (onvif_simple_server / Thingino) actually
+ * serve SystemReboot. Throws with the camera's fault message on failure.
+ */
+export async function rebootCamera({ host, port, username, password }) {
+  const cam = makeControlCam({ host, port, username, password });
+  cam.uri = { ...(cam.uri || {}), deviceIO: { path: DEVICE_PATH } };
+  await ensureAuthClock(cam);
+  if (typeof cam.systemReboot !== 'function') throw new Error('ONVIF client has no SystemReboot support');
+  const message = await new Promise((resolve, reject) => {
+    cam.systemReboot((err, res) => (err ? reject(err) : resolve(res)));
+  });
+  logger.info(`[onvif] SystemReboot sent to ${host} — ${message || 'accepted'}`);
+  return { message: message || null };
+}
+
 export async function ptzRelativeStep({ host, port, username, password, profileToken, pan = 0, tilt = 0, zoom = 0, step, zoomStep }) {
   const cam = makeControlCam({ host, port, username, password });
   await ensureAuthClock(cam);
