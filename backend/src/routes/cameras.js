@@ -21,7 +21,7 @@ import {
 } from '../lib/detectionEvents.js';
 import { verifyTalkCreds, talkConfigured, verifyBackchannel } from '../lib/twoWayAudio.js';
 import { getReading, subscribeAllCameraTopics, refreshMqttConnection } from '../lib/mqttClient.js';
-import { probeOnvifCamera, ptzNudge, ptzRelativeStep, probePtzRelativeSupport } from '../lib/onvif.js';
+import { probeOnvifCamera, ptzNudge, ptzRelativeStep, probePtzRelativeSupport, rebootCamera } from '../lib/onvif.js';
 import { validateRtspStream, probeRtspDetailed, ffprobeVersion } from '../lib/rtspProbe.js';
 import { captureSnapshot, fetchHttpSnapshot } from '../lib/snapshot.js';
 import { logger } from '../lib/logger.js';
@@ -153,6 +153,9 @@ function publicCamera(cam, isAdmin) {
     ...rest,
     talk_configured: talkConfigured(cam),
     has_sub: !!(sub_rtsp_url && sub_rtsp_url.trim()),
+    // Can we power-cycle this camera over ONVIF (Device SystemReboot)? True only for ONVIF-added
+    // cameras with a stored device endpoint — drives whether the tile shows a "Restart camera" button.
+    reboot_capable: !!(cam.onvif_capable && cam.onvif_device_url),
     // Parse the crib zone (stored as a JSON string) into an object for the client.
     detect_zone: parseZone(cam.detect_zone),
   };
@@ -376,6 +379,33 @@ router.post('/:id/restart', requireAuth, async (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     res.status(502).json({ error: e.message || 'Restart failed' });
+  }
+});
+
+// Power-cycle the whole camera over ONVIF (Device SystemReboot). A heavier recovery than /restart —
+// it takes the feed offline for ~30-60s — but it clears states a stream restart can't (e.g. a wedged
+// on-camera video encoder). Only for ONVIF-added cameras (reboot_capable); the UI hides the button
+// otherwise. Any signed-in user, same as /restart.
+router.post('/:id/reboot', requireAuth, async (req, res) => {
+  const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+  if (!cam) return res.status(404).json({ error: 'Camera not found' });
+  if (!cam.onvif_capable || !cam.onvif_device_url) {
+    return res.status(400).json({ error: 'This camera cannot be rebooted over ONVIF' });
+  }
+  let conn;
+  try {
+    const u = new URL(cam.onvif_device_url);
+    conn = { host: u.hostname, port: u.port || 80, username: cam.onvif_username, password: cam.onvif_password };
+  } catch {
+    return res.status(500).json({ error: 'Stored ONVIF address for this camera is invalid' });
+  }
+  try {
+    await rebootCamera(conn);
+    recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'camera reboot requested (ONVIF)');
+    res.json({ ok: true });
+  } catch (e) {
+    logger.info(`[onvif] reboot failed for ${cam.name}: ${e.message}`);
+    res.status(502).json({ error: e.message || 'Camera reboot failed' });
   }
 });
 

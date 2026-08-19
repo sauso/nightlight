@@ -9,6 +9,24 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-08-19
+
+### Added
+- **Restart the camera itself, not just the stream.** For cameras that support it over ONVIF, the camera
+  menu now shows a **Restart camera** button beside **Restart stream** — it power-cycles the camera (useful
+  when the picture is stuck in a way a stream restart can't fix), and appears only on cameras that can be
+  rebooted this way.
+
+### Changed
+- **Restart stream now asks first.** Both **Restart stream** and **Restart camera** confirm before running,
+  since each briefly takes the feed down for everyone.
+
+### Security
+- **Removed the unused `npm` from the runtime image.** The published Docker image no longer ships the
+  base image's bundled npm (used only at build time), which clears the HIGH/CRITICAL scanner findings that
+  came from npm's own bundled dependencies (they were never reachable at runtime — the app runs `node`,
+  not npm).
+
 ## [0.21.0] - 2026-08-19
 
 ### Added
