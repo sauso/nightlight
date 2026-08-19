@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-08-19
+
 ### Added
 - **Restart the camera itself, not just the stream.** For cameras that support it over ONVIF, the camera
   menu now shows a **Restart camera** button beside **Restart stream** — it power-cycles the camera (useful
