@@ -1,0 +1,75 @@
+name: Weekly image rebuild
+
+# Rebuilds the published images from UNCHANGED source with a freshly-pulled base and
+# re-resolved apk layers, so Alpine/OS security fixes (e.g. ffmpeg/codec CVEs) land in the
+# running image as they ship — without waiting for a code push. The app code, version, and
+# CHANGELOG are untouched; only the base/OS layers move. Because it's a rebuild of the same
+# code, it does NOT get a changelog entry — the About page's build time (baked below) is the
+# record that the image was re-patched, and the version tag stays put.
+#
+# Refreshes only the MOVING tags — :latest (prod) and :dev (staging). The immutable vX.Y.Z
+# release tags are never re-pointed, so a pinned version keeps pulling the exact artifact it
+# always did. Publishing only: deploy is still manual (pull the refreshed tag on Unraid via
+# the guard script to actually apply the patches).
+on:
+  schedule:
+    - cron: '0 16 * * 1' # Mondays 16:00 UTC (after the 15:00 nightly e2e, so it doesn't overlap)
+  workflow_dispatch: {}
+
+concurrency:
+  group: weekly-rebuild
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # main -> :latest (prod), dev -> :dev (staging). Each rebuilt from its own branch tip.
+      matrix:
+        include:
+          - ref: main
+            tag: latest
+          - ref: dev
+            tag: dev
+    steps:
+      - name: Check out ${{ matrix.ref }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+
+      - name: Set up QEMU (for building arm64 on an amd64 runner)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build metadata
+        id: bmeta
+        run: |
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # pull: always re-pull the base image; no-cache: re-run every RUN (notably `apk add`) so
+      # OS packages resolve to the latest available — that's the whole point of this job, and it's
+      # why it deliberately doesn't use the gha build cache the push workflow relies on.
+      - name: Rebuild and push :${{ matrix.tag }} (fresh base, no cache)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          pull: true
+          no-cache: true
+          tags: sauso/nightlight:${{ matrix.tag }}
+          build-args: |
+            GIT_SHA=${{ steps.bmeta.outputs.sha }}
+            GIT_REF=${{ matrix.ref }}
+            BUILD_TIME=${{ steps.bmeta.outputs.date }}
