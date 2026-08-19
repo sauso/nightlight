@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet, Zap, AudioLines, Clock, Square, Play, RotateCcw } from 'lucide-react';
+import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet, Zap, AudioLines, Clock, Square, Play, RotateCcw, Power } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { startTalk } from '../lib/twoWayTalk.js';
@@ -217,18 +217,41 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [detBusy, setDetBusy] = useState(false); // guards the quick motion/sound toggles
   const [restarting, setRestarting] = useState(false); // "Restart stream" in flight
+  const [rebooting, setRebooting] = useState(false); // "Restart camera" (ONVIF reboot) in flight
+  const [confirmAction, setConfirmAction] = useState(null); // null | 'restart' | 'reboot' — inline confirm
+  const [rebootMsg, setRebootMsg] = useState(''); // transient error text if a reboot request is rejected
 
   // Force a fresh server-side restart of this camera's stream — clears a feed that's drifted behind live
-  // or wedged. The players reconnect on their own once the transcoder relaunches (~5s).
-  async function restartStream() {
+  // or wedged. The players reconnect on their own once the transcoder relaunches (~5s). Both this and the
+  // camera reboot below take the feed down for everyone, so each is behind an inline confirm.
+  async function restartStreamNow() {
+    setConfirmAction(null);
     if (restarting) return;
     setRestarting(true);
     try { await api.post(`/cameras/${camera.id}/restart`, {}); } catch { /* ignore — best effort */ }
     setTimeout(() => setRestarting(false), 5000);
   }
+  // Power-cycle the whole camera over ONVIF (only offered when camera.reboot_capable). Heavier than a
+  // stream restart — the camera is fully offline ~30-60s — but it recovers a wedged on-camera encoder.
+  async function rebootCameraNow() {
+    setConfirmAction(null);
+    if (rebooting) return;
+    setRebooting(true);
+    setRebootMsg('');
+    try {
+      await api.post(`/cameras/${camera.id}/reboot`, {});
+    } catch (e) {
+      setRebootMsg(e?.message || 'Reboot failed');
+      setTimeout(() => setRebootMsg(''), 5000);
+    }
+    // Keep the button disabled while the camera is away and reconnecting.
+    setTimeout(() => setRebooting(false), 45000);
+  }
   function closeMenu() {
     setModeMenuOpen(false);
     setSheetDragY(0);
+    setConfirmAction(null); // don't leave a pending restart/reboot confirm showing on reopen
+    setRebootMsg('');
   }
 
   // Swipe-down-to-dismiss for the cog bottom sheet (mobile). Only starts a drag when the sheet is
@@ -714,14 +737,51 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
                 )}
               </div>
 
-              <button type="button" className="btn btn-secondary" style={{ width: '100%', marginBottom: 8 }}
-                onClick={restartStream} disabled={restarting}>
-                <RotateCcw size={16} />
-                {restarting ? 'Restarting…' : 'Restart stream'}
-              </button>
-              <div className="camera-tile__sub" style={{ margin: '-2px 2px 8px', textAlign: 'center' }}>
-                Reloads the feed for everyone — use if it's frozen or lagging behind.
-              </div>
+              {confirmAction ? (
+                <div style={{ marginBottom: 8 }}>
+                  <div className="camera-tile__sub" style={{ margin: '0 2px 8px', textAlign: 'center' }}>
+                    {confirmAction === 'reboot'
+                      ? 'Power-cycle the camera? It goes fully offline for everyone for about 30–60 seconds while it reboots.'
+                      : 'Restart the stream? It reloads the feed for everyone.'}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setConfirmAction(null)}>
+                      Cancel
+                    </button>
+                    <button type="button" className="btn btn-danger" style={{ flex: 1 }}
+                      onClick={confirmAction === 'reboot' ? rebootCameraNow : restartStreamNow}>
+                      {confirmAction === 'reboot' ? 'Restart camera' : 'Restart stream'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                    <button type="button" className="btn btn-secondary" style={{ flex: 1 }}
+                      onClick={() => setConfirmAction('restart')} disabled={restarting}>
+                      <RotateCcw size={16} />
+                      {restarting ? 'Restarting…' : 'Restart stream'}
+                    </button>
+                    {camera.reboot_capable && (
+                      <button type="button" className="btn btn-secondary" style={{ flex: 1 }}
+                        onClick={() => setConfirmAction('reboot')} disabled={rebooting}>
+                        <Power size={16} />
+                        {rebooting ? 'Rebooting…' : 'Restart camera'}
+                      </button>
+                    )}
+                  </div>
+                  <div className="camera-tile__sub" style={{ margin: '-2px 2px 8px', textAlign: 'center' }}>
+                    {camera.reboot_capable
+                      ? 'Restart stream reloads the feed; Restart camera power-cycles it (~30–60s offline).'
+                      : "Reloads the feed for everyone — use if it's frozen or lagging behind."}
+                  </div>
+                  {rebootMsg && (
+                    <div className="camera-tile__sub" style={{ margin: '-4px 2px 8px', textAlign: 'center', color: 'var(--offline)' }}>
+                      {rebootMsg}
+                    </div>
+                  )}
+                </>
+              )}
 
               <button className="tile-menu__done" onClick={closeMenu}>Done</button>
             </div>
