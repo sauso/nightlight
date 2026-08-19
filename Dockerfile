@@ -29,11 +29,23 @@ RUN npm run build
 # without risking an unannounced breaking change from a future major version.
 FROM bluenviron/mediamtx:1 AS mediamtx-binary
 
-# --- Stage 3: combined runtime (app + MediaMTX + FFmpeg) ---
+# --- Stage 3: install the backend's production dependencies ---
+# Kept separate from the runtime so the compiler toolchain and npm/node-gyp caches this
+# needs are thrown away with the stage instead of shipping in the final image (~300MB).
+# python3/make/g++ are node-gyp's build toolchain: better-sqlite3 v13 actually ships a
+# musl prebuilt binary (prebuilds/linuxmusl-*.node) and loads that, so no compile happens
+# today - but keeping the toolchain here means the build still works unchanged if a future
+# dependency (or a better-sqlite3 without a matching prebuild) does need to compile.
+FROM node:24-alpine AS backend-deps
+WORKDIR /app
+RUN apk add --no-cache python3 make g++
+COPY backend/package.json backend/package-lock.json ./
+RUN npm ci --omit=dev
+
+# --- Stage 4: combined runtime (app + MediaMTX + FFmpeg) ---
 FROM node:24-alpine
 WORKDIR /app
 
-# python3/make/g++: needed to compile better-sqlite3's native addon.
 # ffmpeg: transcodes camera audio (many IP cameras use G711, which HLS can't carry).
 # tini: proper PID 1 - reaps zombie child processes (MediaMTX + one FFmpeg process
 #   per camera) and forwards signals correctly, which a plain `node` process won't do
@@ -45,7 +57,9 @@ WORKDIR /app
 # tzdata: Alpine doesn't ship timezone data by default - without it, setting TZ has no
 #   effect at all (both MediaMTX and Node silently fall back to UTC instead of erroring),
 #   since there's no zone database for either to actually look up "Australia/Melbourne" in.
-RUN apk add --no-cache python3 make g++ ffmpeg tini shadow su-exec tzdata
+# NOTE: no python3/make/g++ here - the backend-deps stage already produced node_modules,
+# and better-sqlite3's addon is a prebuilt binary that loads without any toolchain.
+RUN apk add --no-cache ffmpeg tini shadow su-exec tzdata
 
 # Placeholder UID/GID - entrypoint.sh remaps this to PUID/PGID (default 99/100) on
 # every container start, so the exact values baked in here don't matter, as long as
@@ -56,16 +70,17 @@ RUN addgroup -g 1500 nightlight && adduser -D -u 1500 -G nightlight -h /app nigh
 COPY --from=mediamtx-binary /mediamtx /usr/local/bin/mediamtx
 RUN chmod +x /usr/local/bin/mediamtx
 
-COPY backend/package.json backend/package-lock.json ./
-RUN npm ci --omit=dev
+# Just the finished dependency tree from the build stage - no npm ci, no toolchain, no
+# node-gyp/npm caches. package.json comes along so anything that reads the app version at
+# runtime still can.
+COPY --from=backend-deps /app/node_modules ./node_modules
+COPY backend/package.json ./
 
-# Drop the base image's bundled npm once install is done. npm is the package manager, not part of
-# the running app (the container runs `node src/index.js`; entrypoint.sh only uses su-exec/node) —
-# but the copy that ships in node:24-alpine drags in its own vulnerable transitive deps
-# (tar/undici/brace-expansion/ip-address DoS + SSRF CVEs) that image scanners (Docker Scout/Trivy)
-# flag on an otherwise-clean image. Removing it here clears those findings and trims the attack
-# surface. better-sqlite3's native addon is already compiled by this point and loads at runtime
-# without npm. NOTE: this must stay AFTER the last `npm ci`; if a later step ever needs npm, move it.
+# Drop the base image's bundled npm. npm is the package manager, not part of the running app
+# (the container runs `node src/index.js`; entrypoint.sh only uses su-exec/node) - but the copy
+# that ships in node:24-alpine drags in its own vulnerable transitive deps (tar/undici/
+# brace-expansion/ip-address DoS + SSRF CVEs) that image scanners (Docker Scout/Trivy) flag on an
+# otherwise-clean image. Removing it clears those findings and trims the attack surface.
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 
 COPY backend/src ./src
