@@ -1,5 +1,10 @@
 import db from '../db.js';
 import { logger } from './logger.js';
+import { notifySleepReports } from './sleepReportAlert.js';
+
+// A computed night is "fresh" (worth notifying about) only if its window closed within this long — so a
+// mid-day container restart that re-computes an already-seen night does NOT re-send the report push.
+const REPORT_FRESH_MS = 2 * 60 * 60 * 1000;
 
 // Stage-2 sleep tracking: infer a child's overnight sleep from the per-minute activity_samples the
 // motion/sound detectors produce (see activityTracker.js). Nothing here is a medical/vitals claim —
@@ -534,17 +539,24 @@ export function sleepInsights(childId, { nights = 30 } = {}) {
 // the scheduler (and once at startup) so "last night" is ready without an on-request compute.
 export function runNightlySleepJob() {
   try {
-    const kids = db.prepare('SELECT id FROM children').all();
+    const kids = db.prepare('SELECT id, name FROM children').all();
     let computed = 0;
+    const fresh = []; // freshly-closed nights to notify about ({ name, summary })
+    const now = Date.now();
+    const notifyOn = db.prepare('SELECT sleep_report_alert_enabled FROM settings WHERE id = ?').get('app')?.sleep_report_alert_enabled;
     for (const kid of kids) {
       if (!childTracksSleep(kid.id)) continue; // sleep tracking off for this child
       const nightDate = lastCompletedNightDate(kid.id); // each child on their own window
       const existing = db.prepare('SELECT status FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(kid.id, nightDate);
       if (existing) continue;
-      computeAndStoreNight(kid.id, nightDate);
+      const summary = computeAndStoreNight(kid.id, nightDate);
       computed++;
+      // Only notify if the window closed recently (guards against a mid-day restart re-notifying).
+      const endMs = summary.window_end ? new Date(summary.window_end.replace(' ', 'T') + 'Z').getTime() : 0;
+      if (endMs && now - endMs <= REPORT_FRESH_MS) fresh.push({ name: kid.name, summary });
     }
     if (computed > 0) logger.info(`[sleep] Computed ${computed} sleep summary(ies).`);
+    if (notifyOn && fresh.length > 0) notifySleepReports(fresh);
   } catch (err) {
     logger.error('[sleep] Nightly job failed:', err.message);
   }
