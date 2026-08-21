@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet, Zap, AudioLines, Clock, Square, Play, RotateCcw, Power } from 'lucide-react';
+import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet, Zap, AudioLines, Clock, Square, Play, RotateCcw, Power, BellOff } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { startTalk } from '../lib/twoWayTalk.js';
@@ -247,6 +247,24 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
     // Keep the button disabled while the camera is away and reconnecting.
     setTimeout(() => setRebooting(false), 45000);
   }
+
+  // Quick-silence: temporarily mute ALL of this camera's alerts (for when you're still up as the alert
+  // schedule kicks in). minutes = 0 clears an active mute. Any signed-in user (like Restart).
+  const [snoozeBusy, setSnoozeBusy] = useState(false);
+  const snoozedUntil = camera.alerts_snoozed_until && camera.alerts_snoozed_until > Date.now()
+    ? camera.alerts_snoozed_until : null;
+  const snoozeLabel = snoozedUntil
+    ? new Date(snoozedUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
+  async function snoozeAlerts(minutes) {
+    if (snoozeBusy) return;
+    setSnoozeBusy(true);
+    try {
+      await api.post(`/cameras/${camera.id}/snooze`, { minutes });
+      await refreshCameras();
+    } catch { /* best effort — next refresh reflects real state */ }
+    finally { setSnoozeBusy(false); }
+  }
+
   function closeMenu() {
     setModeMenuOpen(false);
     setSheetDragY(0);
@@ -719,6 +737,28 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
                 </>
               )}
 
+              {/* Quick-silence: temporarily mute this camera's alerts, e.g. when you're still up at bedtime. */}
+              <div className="tile-menu__label">Silence alerts</div>
+              <div className="card" style={{ padding: 10, marginBottom: 12 }}>
+                {snoozedUntil ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <BellOff size={16} aria-hidden="true" />
+                    <span className="camera-tile__sub" style={{ flex: 1, margin: 0 }}>Muted until {snoozeLabel}</span>
+                    <button type="button" className="btn btn-sm btn-secondary" disabled={snoozeBusy}
+                      onClick={() => snoozeAlerts(0)}>Un-mute</button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button type="button" className="btn btn-sm btn-secondary" style={{ flex: 1 }} disabled={snoozeBusy}
+                      onClick={() => snoozeAlerts(30)}>30 min</button>
+                    <button type="button" className="btn btn-sm btn-secondary" style={{ flex: 1 }} disabled={snoozeBusy}
+                      onClick={() => snoozeAlerts(60)}>1 hour</button>
+                    <button type="button" className="btn btn-sm btn-secondary" style={{ flex: 1 }} disabled={snoozeBusy}
+                      onClick={() => snoozeAlerts(120)}>2 hours</button>
+                  </div>
+                )}
+              </div>
+
               <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                 <button
                   type="button"
@@ -887,6 +927,12 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
           </div>
         </div>
         <div className="status-row">
+          {snoozedUntil && (
+            <span className="camera-tile__reading" title={`Alerts muted until ${snoozeLabel}`}>
+              <BellOff size={16} className="camera-tile__reading-icon" aria-hidden="true" />
+              {snoozeLabel}
+            </span>
+          )}
           {readingParts(camera.mqtt, settings.temp_unit).map(({ key, Icon, text }) => (
             <span key={key} className="camera-tile__reading">
               <Icon size={16} className="camera-tile__reading-icon" aria-hidden="true" />
