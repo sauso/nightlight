@@ -9,6 +9,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **Quickly silence a camera's alerts.** The camera menu now has a **Silence alerts** section with
+  30-minute / 1-hour / 2-hour buttons that temporarily mute *all* of that camera's alerts (motion, sound,
+  ONVIF, MQTT) — handy when you're still up as the overnight alert schedule kicks in. While muted, the tile
+  shows a small bell-off marker with the un-mute time, and the menu offers a one-tap **Un-mute**.
+- **Get notified when the nightly sleep report is ready.** When a child's sleep window closes and their
+  night is computed, Nightlight now sends a push (across whichever notification channels you have set up)
+  with a one-line summary — time asleep, wake-ups, and wake-up time. On by default; only fires for a
+  just-closed night, so restarts don't re-notify.
+
 ### Changed
 - **Smaller, leaner Docker image.** The build now compiles/install backend dependencies in a separate
   stage, so the C/C++ compiler toolchain (gcc/g++/make) and python3 that only node-gyp needs at build
