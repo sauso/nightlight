@@ -409,6 +409,19 @@ router.post('/:id/reboot', requireAuth, async (req, res) => {
   }
 });
 
+// Quick-silence: temporarily mute ALL of this camera's alerts (motion/sound/ONVIF/MQTT) for `minutes`
+// from now — for when you're still up as the alert schedule kicks in. minutes=0 clears the mute early.
+// Any signed-in user (an operational action, like /restart). Enforced in lib/detectSchedule.js.
+router.post('/:id/snooze', requireAuth, (req, res) => {
+  const cam = db.prepare('SELECT id, name FROM cameras WHERE id = ?').get(req.params.id);
+  if (!cam) return res.status(404).json({ error: 'Camera not found' });
+  const minutes = Math.max(0, Math.min(720, Math.round(Number(req.body?.minutes) || 0)));
+  const until = minutes > 0 ? Date.now() + minutes * 60000 : null;
+  db.prepare('UPDATE cameras SET alerts_snoozed_until = ? WHERE id = ?').run(until, cam.id);
+  logger.info(`[snooze] "${cam.name}" alerts ${until ? `muted for ${minutes} min` : 'un-muted'}`);
+  res.json({ ok: true, alerts_snoozed_until: until });
+});
+
 router.get('/', async (req, res) => {
   const cameras = db.prepare('SELECT * FROM cameras ORDER BY sort_order, created_at').all();
   const isAdmin = req.user?.role === 'admin';

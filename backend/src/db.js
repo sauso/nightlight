@@ -539,6 +539,20 @@ if (!sleepNightsColumns.includes('avg_temperature')) {
   db.exec('ALTER TABLE sleep_nights ADD COLUMN avg_humidity REAL');
 }
 
+// Quick-silence: a per-camera temporary mute of ALL alerts (motion/sound/ONVIF/MQTT), for when you're
+// still up as the alert schedule kicks in. Epoch millis; NULL/past = not muted. inActiveWindow() reads
+// it fresh each check so a snooze set from the UI takes effect without restarting the detector leg.
+if (!camerasColumns.includes('alerts_snoozed_until')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN alerts_snoozed_until INTEGER');
+}
+
+// Push a notification when a child's nightly sleep report is computed (window closed + row stored).
+// On by default; fires only for a freshly-closed night (a mid-day restart re-computing an old night
+// does not re-notify). See lib/sleepReportAlert.js.
+if (!settingsColumns.includes('sleep_report_alert_enabled')) {
+  db.exec('ALTER TABLE settings ADD COLUMN sleep_report_alert_enabled INTEGER NOT NULL DEFAULT 1');
+}
+
 // Ensure the single settings row always exists.
 db.prepare(
   `INSERT OR IGNORE INTO settings (id, app_name, accent_color, live_color, offline_color, timezone, font_choice, temp_unit)
