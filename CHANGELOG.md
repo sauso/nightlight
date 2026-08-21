@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-08-22
+
 ### Added
 - **Quickly silence a camera's alerts.** The camera menu now has a **Silence alerts** section with
   30-minute / 1-hour / 2-hour buttons that temporarily mute *all* of that camera's alerts (motion, sound,
