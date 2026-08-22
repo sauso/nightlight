@@ -30,6 +30,12 @@ const MIN_COVERAGE_FRAC = 0.5; // need activity samples for at least this fracti
 // window edge, so the terminal exit that marks "up for the day" may fall a couple hours later. Only the
 // SHADOW wake uses this (the live algo still stops at the window). See computeNight's shadow block.
 const WAKE_LOOKAHEAD_MS = 3 * 60 * 60 * 1000;
+// SHADOW wake needs the crib to stay empty (no in-crib motion) at least this long after the last in-crib
+// movement to call it "up for the day" (vs a momentary lull while still asleep in the crib).
+const MORNING_ABSENCE_MIN = 20;
+// When the empty-crib run starts near a recorded crib transition, snap the wake to that transition's clock
+// time (its TIMING is trustworthy even though its in/out LABEL isn't — see the destination-state note).
+const WAKE_SNAP_MS = 5 * 60 * 1000;
 
 // --- timezone helpers (no library; same Intl approach as detectSchedule.nowMinutesInAppTz) ---
 
@@ -391,13 +397,42 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     }
     out.onset_at_shadow = minuteTime(onsetIdx);
 
-    // Wake: "wait until out of bed is detected" — the morning wake is the first out_of_bed that follows
-    // the LAST into_bed of the night (they got up and stayed up), even if it lands past the window edge.
-    // Falls back to the algo wake when there's no such exit (e.g. still in the crib within the lookahead).
-    let lastInMs = startUtc.getTime();
-    for (const t of transitions) if (t.type === 'into_bed') lastInMs = Math.max(lastInMs, txMs(t.created_at));
-    const morningOut = transitions.find((t) => t.type === 'out_of_bed' && txMs(t.created_at) > lastInMs);
-    out.wake_at_shadow = morningOut ? toSqlUtc(new Date(txMs(morningOut.created_at))) : out.wake_at;
+    // Wake: classify the morning exit by DESTINATION STATE, not by a transition's in/out label. At a real
+    // climb-out the crib and outside channels move near-simultaneously, so which one "leads" (and hence the
+    // out_of_bed vs into_bed label) is unreliable — the SAME 06:41 exit was labelled oppositely on two legs
+    // of one camera (2026-08-23). What IS reliable is what the crib does AFTER: it goes empty (no in-crib
+    // motion) when the child is gone, vs. in-crib stir motion resuming when they were only resettled. So the
+    // wake = the end of the last in-crib motion whose trailing empty-crib run is long enough to mean absence.
+    // Only for a completed night (mid-night we don't guess a morning wake). The transition TIMING is still
+    // good, so we snap the wake to a nearby transition of either label for a crisp clock time. Defaults to
+    // the algo wake, so the shadow value is never worse than the live estimate when no exit is detected.
+    out.wake_at_shadow = out.wake_at;
+    if (!inProgress) {
+      const totalMinExt = Math.max(totalMin, Math.round((endUtc.getTime() + lookahead - startUtc.getTime()) / 60000));
+      const extRows = db
+        .prepare(
+          `SELECT bucket_start AS t, motion_peak FROM activity_samples
+             WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
+        )
+        .all(...cams, startSql, txEndSql);
+      const cribActExt = new Array(totalMinExt).fill(false);
+      for (const r of extRows) {
+        const i = idxOf(r.t);
+        if (i >= 0 && i < totalMinExt && r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) cribActExt[i] = true;
+      }
+      let lastCrib = -1;
+      for (let i = onset; i < totalMinExt; i++) if (cribActExt[i]) lastCrib = i;
+      const emptyStartIdx = lastCrib + 1;
+      if (lastCrib >= onset && totalMinExt - emptyStartIdx >= MORNING_ABSENCE_MIN) {
+        const emptyStartMs = startUtc.getTime() + emptyStartIdx * 60000;
+        let best = null;
+        for (const t of transitions) {
+          const dt = Math.abs(txMs(t.created_at) - emptyStartMs);
+          if (dt <= WAKE_SNAP_MS && (best == null || dt < best.dt)) best = { dt, ms: txMs(t.created_at) };
+        }
+        out.wake_at_shadow = toSqlUtc(new Date(best ? best.ms : emptyStartMs));
+      }
+    }
 
     if (includeTimeline) out.transitions = transitions.map((t) => ({ type: t.type, at: t.created_at }));
   }
