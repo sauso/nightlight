@@ -9,6 +9,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **Out-of-bed / into-bed detection now feeds sleep times (experimental).** The frame-diff detector's
+  crib entry/exit events are now persisted, and the nightly sleep computation uses them to derive a
+  *refined* sleep onset and morning wake-up: onset waits until the child is actually placed in the crib
+  (an empty, quiet crib no longer reads as sleep), and the morning wake is taken from the child actually
+  getting out of bed — even when that happens a little after the sleep window closes. These refined times
+  are computed alongside the existing movement-based estimate and shown on the Sleep detail view (with
+  ▼ into-bed / ▲ out-of-bed markers on the night timeline) for validation; the headline figures still use
+  the movement &amp; sound estimate for now.
+
 ## [0.23.0] - 2026-08-22
 
 ### Added

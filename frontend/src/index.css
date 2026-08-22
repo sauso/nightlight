@@ -1121,6 +1121,20 @@ body.in-pip .tile-menu-backdrop {
 .sleep-legend__sw--visit { background: var(--sleep-visit); border-radius: 50%; }
 .sleep-wakes__dur--visit { color: var(--sleep-visit); }
 .sleep-tl__mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text-primary); opacity: 0.55; transform: translateX(-1px); }
+/* Crib-boundary transition markers (out-of-bed detection): a triangle pointing DOWN at the bar = placed
+   into the crib; pointing UP = climbed/lifted out. Sit in their own strip just above the timeline bar. */
+.sleep-tl__txs { position: relative; height: 9px; margin-bottom: 2px; }
+.sleep-tl__tx { position: absolute; top: 1px; width: 0; height: 0; transform: translateX(-50%); border-left: 4px solid transparent; border-right: 4px solid transparent; }
+.sleep-tl__tx--in { border-top: 7px solid var(--sleep-asleep); }
+.sleep-tl__tx--out { border-bottom: 7px solid var(--sleep-wake); }
+/* "Refined" (transition-corrected) onset/wake shown under the summary while we validate it against the
+   live estimate. Struck-through old value + the new one, clearly flagged as experimental. */
+.sleep-refined { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-top: 12px; padding-top: 11px; border-top: 1px dashed var(--border); }
+.sleep-refined__label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; letter-spacing: 0.02em; color: var(--sleep-visit); }
+.sleep-refined__item { font-size: 13px; color: var(--text-secondary); }
+.sleep-refined__item b { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+.sleep-refined__old { text-decoration: line-through; opacity: 0.55; margin-right: 5px; font-variant-numeric: tabular-nums; }
+.sleep-refined__note { flex-basis: 100%; font-size: 11px; color: var(--text-secondary); opacity: 0.8; margin-top: 2px; }
 .sleep-tl__now { position: absolute; top: -4px; bottom: -4px; width: 0; border-left: 2px dashed var(--accent); transform: translateX(-1px); }
 /* Hover bubble over the timeline: a follow-the-cursor tooltip with the time, sleep status, and (if a
    sensor was present) the temperature at that moment. The wrap is the mouse/touch target; it must NOT

@@ -6,6 +6,7 @@ import { inActiveWindow } from './detectSchedule.js';
 import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
 import { recordMotion, recordMotionOut } from './activityTracker.js';
+import { recordBedTransition, TRANSITION } from './bedTransitions.js';
 import { childWindowActiveNow } from './sleepAnalysis.js';
 
 // Server-side motion detection. Per camera with detection enabled, a cheap FFmpeg leg reads
@@ -272,6 +273,7 @@ export async function startMotionDetector(camera) {
                 logger.info(
                   `[oob] "${camera.name}" OUT OF BED — motion left the crib, quiet ${OOB_CONFIRM_QUIET_MS}ms since, outside peak ${(oobPeakOut * 100).toFixed(1)}%`
                 );
+                recordBedTransition(camera.id, TRANSITION.OUT_OF_BED, oobPeakOut);
               }
               oobPendingAt = 0;
               oobPeakOut = 0;
@@ -301,6 +303,7 @@ export async function startMotionDetector(camera) {
                 logger.info(
                   `[intobed] "${camera.name}" INTO BED — motion entered the crib, outside quiet ${IB_CONFIRM_QUIET_MS}ms since, crib peak ${(ibPeakCrib * 100).toFixed(1)}%`
                 );
+                recordBedTransition(camera.id, TRANSITION.INTO_BED, ibPeakCrib);
               }
               ibPendingAt = 0;
               ibPeakCrib = 0;
