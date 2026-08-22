@@ -1,6 +1,7 @@
 import db from '../db.js';
 import { logger } from './logger.js';
 import { notifySleepReports } from './sleepReportAlert.js';
+import { getBedTransitions } from './bedTransitions.js';
 
 // A computed night is "fresh" (worth notifying about) only if its window closed within this long — so a
 // mid-day container restart that re-computes an already-seen night does NOT re-send the report push.
@@ -25,6 +26,10 @@ const ONSET_QUIET_MIN = 15; // continuous quiet minutes to call it "asleep"
 const WAKE_ACTIVE_MIN = 5; // active minutes (within a run) to count as an awakening (vs a brief stir)
 const WAKE_GAP_MIN = 3; // bridge quiet gaps up to this long inside one awakening (intermittent noise/movement)
 const MIN_COVERAGE_FRAC = 0.5; // need activity samples for at least this fraction of the window, else no_data
+// How far PAST the window end to keep looking for the morning "out of bed" — a child can sleep past the
+// window edge, so the terminal exit that marks "up for the day" may fall a couple hours later. Only the
+// SHADOW wake uses this (the live algo still stops at the window). See computeNight's shadow block.
+const WAKE_LOOKAHEAD_MS = 3 * 60 * 60 * 1000;
 
 // --- timezone helpers (no library; same Intl approach as detectSchedule.nowMinutesInAppTz) ---
 
@@ -236,6 +241,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     as_of: asOfSql,
     onset_at: null,
     wake_at: null,
+    onset_at_shadow: null,
+    wake_at_shadow: null,
     asleep_minutes: null,
     awake_minutes: null,
     wake_count: null,
@@ -350,6 +357,50 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     wake_count: wakeCount,
     longest_stretch_minutes: longest,
   };
+
+  // --- SHADOW onset/wake from crib-boundary transitions (validation only — NOT the authoritative
+  // numbers yet; stored in *_shadow columns so we can compare them to the algo night-by-night). The
+  // activity-only algo can't tell an empty quiet crib from a sleeping child; the transitions can. ---
+  {
+    // First quiet run of >= ONSET_QUIET_MIN starting at or after index `from` (null if none).
+    const firstQuietRunFrom = (from) => {
+      for (let i = Math.max(0, from); i + ONSET_QUIET_MIN <= totalMin; i++) {
+        let quiet = true;
+        for (let j = i; j < i + ONSET_QUIET_MIN; j++) if (active[j]) { quiet = false; break; }
+        if (quiet) return i;
+      }
+      return null;
+    };
+    // Transitions across the window, plus a lookahead past its end for the morning exit (completed
+    // nights only — mid-night we don't guess ahead).
+    const lookahead = inProgress ? 0 : WAKE_LOOKAHEAD_MS;
+    const txEndSql = toSqlUtc(new Date(endUtc.getTime() + lookahead));
+    const transitions = getBedTransitions(cams, startSql, txEndSql);
+    const txMs = (t) => new Date(t.replace(' ', 'T') + 'Z').getTime();
+
+    // Onset: an into_bed only ever DELAYS onset — before the child was actually placed in the crib the
+    // quiet is an empty crib, not sleep. Take the latest into_bed that's followed by sustained quiet;
+    // never move earlier than the algo onset.
+    let onsetIdx = onset;
+    for (const t of transitions) {
+      if (t.type !== 'into_bed') continue;
+      const idx = Math.round((txMs(t.created_at) - startUtc.getTime()) / 60000);
+      if (idx < 0 || idx >= totalMin) continue;
+      const q = firstQuietRunFrom(idx);
+      if (q != null && q > onsetIdx) onsetIdx = q;
+    }
+    out.onset_at_shadow = minuteTime(onsetIdx);
+
+    // Wake: "wait until out of bed is detected" — the morning wake is the first out_of_bed that follows
+    // the LAST into_bed of the night (they got up and stayed up), even if it lands past the window edge.
+    // Falls back to the algo wake when there's no such exit (e.g. still in the crib within the lookahead).
+    let lastInMs = startUtc.getTime();
+    for (const t of transitions) if (t.type === 'into_bed') lastInMs = Math.max(lastInMs, txMs(t.created_at));
+    const morningOut = transitions.find((t) => t.type === 'out_of_bed' && txMs(t.created_at) > lastInMs);
+    out.wake_at_shadow = morningOut ? toSqlUtc(new Date(txMs(morningOut.created_at))) : out.wake_at;
+
+    if (includeTimeline) out.transitions = transitions.map((t) => ({ type: t.type, at: t.created_at }));
+  }
   if (includeTimeline) {
     out.timeline = state.map((s, i) => ({ t: minuteTime(i), state: s === null ? 'gap' : s ? 'active' : 'quiet', inWake: inWake[i], out: outAt[i] }));
 
@@ -414,14 +465,18 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
 const upsertNight = db.prepare(
   `INSERT INTO sleep_nights
      (child_id, night_date, window_start, window_end, status, onset_at, wake_at,
+      onset_at_shadow, wake_at_shadow,
       asleep_minutes, awake_minutes, wake_count, longest_stretch_minutes, coverage_minutes,
       avg_temperature, avg_humidity, computed_at)
    VALUES (@child_id, @night_date, @window_start, @window_end, @status, @onset_at, @wake_at,
+           @onset_at_shadow, @wake_at_shadow,
            @asleep_minutes, @awake_minutes, @wake_count, @longest_stretch_minutes, @coverage_minutes,
            @avg_temperature, @avg_humidity, datetime('now'))
    ON CONFLICT(child_id, night_date) DO UPDATE SET
      window_start=excluded.window_start, window_end=excluded.window_end, status=excluded.status,
-     onset_at=excluded.onset_at, wake_at=excluded.wake_at, asleep_minutes=excluded.asleep_minutes,
+     onset_at=excluded.onset_at, wake_at=excluded.wake_at,
+     onset_at_shadow=excluded.onset_at_shadow, wake_at_shadow=excluded.wake_at_shadow,
+     asleep_minutes=excluded.asleep_minutes,
      awake_minutes=excluded.awake_minutes, wake_count=excluded.wake_count,
      longest_stretch_minutes=excluded.longest_stretch_minutes, coverage_minutes=excluded.coverage_minutes,
      avg_temperature=excluded.avg_temperature, avg_humidity=excluded.avg_humidity,
