@@ -189,6 +189,7 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
           <Stat label="Longest stretch" value={fmtDurAbbr(night.longest_stretch_minutes)} />
           <Stat label="Coverage" value={`${covPct}%`} />
         </div>
+        <RefinedTimes night={night} fmtTime={fmtTime} />
       </div>
 
       <div className="card">
@@ -200,6 +201,10 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
           <span><i className="sleep-legend__sw sleep-seg--wake" /> Awake</span>
           <span><i className="sleep-legend__sw sleep-seg--awake" /> Before/after sleep</span>
           {visits.length > 0 && <span><i className="sleep-legend__sw sleep-legend__sw--visit" /> In the room</span>}
+          {(night.transitions || []).length > 0 && (
+            <span><i className="sleep-tl__tx sleep-tl__tx--in" style={{ position: 'static', display: 'inline-block', transform: 'none', margin: '0 4px 1px 0', verticalAlign: 'middle' }} /> Into bed
+              <i className="sleep-tl__tx sleep-tl__tx--out" style={{ position: 'static', display: 'inline-block', transform: 'none', margin: '0 4px 0 10px', verticalAlign: 'middle' }} /> Out of bed</span>
+          )}
         </div>
         <ClimateTrack night={night} startMs={utcMs(night.window_start)} endMs={utcMs(night.window_end)} tempUnit={tempUnit} />
       </div>
@@ -316,6 +321,31 @@ function Stat({ label, value }) {
   );
 }
 
+// The out-of-bed-corrected onset/wake, shown only when they DIFFER from the live estimate — so we can
+// eyeball the transition-based times against the movement-only algorithm each morning while they're
+// being validated. Flagged experimental; the headline numbers above are still the live algorithm's.
+function RefinedTimes({ night, fmtTime }) {
+  const onsetDiff = night.onset_at_shadow && night.onset_at_shadow !== night.onset_at;
+  const wakeDiff = night.wake_at_shadow && night.wake_at_shadow !== night.wake_at;
+  if (!onsetDiff && !wakeDiff) return null;
+  return (
+    <div className="sleep-refined">
+      <span className="sleep-refined__label"><DoorOpen size={13} aria-hidden="true" /> Out-of-bed estimate</span>
+      {onsetDiff && (
+        <span className="sleep-refined__item">
+          Asleep <span className="sleep-refined__old">{fmtTime(night.onset_at)}</span><b>{fmtTime(night.onset_at_shadow)}</b>
+        </span>
+      )}
+      {wakeDiff && (
+        <span className="sleep-refined__item">
+          Woke <span className="sleep-refined__old">{night.wake_at ? fmtTime(night.wake_at) : '—'}</span><b>{fmtTime(night.wake_at_shadow)}</b>
+        </span>
+      )}
+      <span className="sleep-refined__note">Experimental — refined from crib entry/exit detection. The figures above still use movement &amp; sound.</span>
+    </div>
+  );
+}
+
 // The to-scale bar: each segment positioned by its share of the window, plus hour tick labels and
 // onset/wake markers so the wake-ups read against a real time axis.
 function Timeline({ night, fmtTime, tz, tempUnit }) {
@@ -377,9 +407,25 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
   const wakePct = night.wake_at ? pctOf(night.wake_at, startMs, totalMs) : null;
   const nowPct = night.in_progress && night.as_of ? pctOf(night.as_of, startMs, totalMs) : null;
   const visits = night.visits || [];
+  // Crib entry/exit transitions — clamp to [0,100] since the morning exit can land just past the window
+  // end (the shadow-wake lookahead), and drop any that fall well outside the bar.
+  const transitions = (night.transitions || [])
+    .map((t) => ({ ...t, pct: pctOf(t.at, startMs, totalMs) }))
+    .filter((t) => t.pct != null && t.pct >= -1 && t.pct <= 101)
+    .map((t) => ({ ...t, pct: Math.max(0, Math.min(100, t.pct)) }));
 
   return (
     <div className="sleep-tl">
+      {/* Crib entry (▼ into bed) / exit (▲ out of bed) markers from the frame-diff detector. */}
+      {transitions.length > 0 && (
+        <div className="sleep-tl__txs">
+          {transitions.map((t, i) => (
+            <span key={i} className={`sleep-tl__tx ${t.type === 'into_bed' ? 'sleep-tl__tx--in' : 'sleep-tl__tx--out'}`}
+              style={{ left: `${t.pct}%` }}
+              title={`${t.type === 'into_bed' ? 'Into bed' : 'Out of bed'} · ${fmtTime(t.at)}`} />
+          ))}
+        </div>
+      )}
       {/* Room-activity (outside-crib) markers sit above the bar so they read as events, not sleep state. */}
       {visits.length > 0 && (
         <div className="sleep-tl__visits">
