@@ -35,7 +35,18 @@ meaningful (min sample size, min effect). Correlational, clearly labelled — **
 **Effort:** small–medium (the stats + guardrails against spurious findings). **Open Q:** which
 environmental factors beyond temp (humidity, day-of-week, nap-that-day).
 
-### A3. Nightly sleep timelapse ("memories")
+### A3. Nightly sleep timelapse ("memories") — SHIPPED (dev, → next release)
+Built as decided below. **Sampling:** live snapshots every 2 min during each child's open sleep window
+(the cheap option; reuses `snapshot.js`'s local grab, so no extra camera session). **Assembly:** the
+nightly sleep job, once a window closes, runs one FFmpeg image2 pass over the night's frames at a
+frame-count-derived fps targeting ~30s. **Storage/schema:** its OWN `timelapses` table (NOT
+`detection_events` — that would leak keepsakes into the alert feed / clip-management list and let clip
+retention sweep them); MP4s live under `CLIPS_DIR/timelapse/`, kept last 30 nights per child.
+**UI:** a `TimelapseCard` on child detail (hero + a strip of earlier nights), plays in a `Modal`.
+Files: `lib/timelapse.js`, `routes/timelapses.js`, `components/TimelapseCard.jsx`. Follow-ups: a "pin"
+to keep a favourite past the 30-night prune; sample from the on-demand recording ring for higher night
+quality once that buffer is always-on.
+
 **Problem:** a delightful keepsake from footage we already have access to.
 **Approach:** condense a night into a ~30s timelapse. Sample frames (snapshot endpoint or the segmenter
 ring) at intervals across the night window, assemble with one FFmpeg pass. Store like a clip

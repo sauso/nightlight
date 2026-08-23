@@ -171,6 +171,25 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_bed_transitions_cam_time ON bed_transitions(camera_id, created_at);
 
+  -- One "memories" timelapse per child per night (spec A3): the sleep window's sampled frames
+  -- assembled into a short MP4. Kept in its OWN table (not detection_events) so keepsakes never
+  -- leak into the alert feed / clip-management list and aren't swept by clip retention — they get
+  -- their own keep-last-N-per-child prune (lib/timelapse.js). path/thumb_path are relative to
+  -- CLIPS_DIR. night_date is the child's local window-start date; created_at is UTC text.
+  CREATE TABLE IF NOT EXISTS timelapses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    child_id TEXT NOT NULL,
+    night_date TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    path TEXT,
+    thumb_path TEXT,
+    frame_count INTEGER,
+    duration_s INTEGER,
+    bytes INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_timelapses_child_night ON timelapses(child_id, night_date);
+
   -- FCM device tokens for push notifications (one row per app install that registered). The
   -- token is the primary key so re-registering the same device is idempotent; user_id is who
   -- was logged in when it registered (informational). Tokens FCM reports as dead are pruned by

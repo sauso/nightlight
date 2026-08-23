@@ -2059,6 +2059,97 @@ input[type='range'] {
   flex: 1;
 }
 
+/* "Memories" timelapse card on child detail (see components/TimelapseCard.jsx). */
+.timelapse-card .card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.timelapse-hero {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg-elevated-2);
+  cursor: pointer;
+  aspect-ratio: 16 / 9;
+}
+.timelapse-hero__thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.timelapse-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 56px;
+  height: 56px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  backdrop-filter: blur(2px);
+}
+.timelapse-hero__meta {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+}
+.timelapse-strip {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.timelapse-strip__item {
+  flex: 0 0 auto;
+  width: 84px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-elevated-2);
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+.timelapse-strip__item--active {
+  border-color: var(--peri);
+  color: var(--text-primary);
+}
+.timelapse-strip__item img {
+  width: 100%;
+  height: 48px;
+  object-fit: cover;
+  display: block;
+}
+.timelapse-strip__item span {
+  display: block;
+  font-size: 11px;
+  padding: 3px 2px;
+  text-align: center;
+}
+.timelapse-player {
+  width: 100%;
+  max-height: 70vh;
+  border-radius: 8px;
+  background: #000;
+}
+
 /* Pill toggle switch (see components/Switch.jsx) — for immediate-apply settings only.
    The real checkbox is stretched over the track and made invisible so it stays the hit
    target and keeps native label/keyboard behaviour; the track + thumb are the visuals. */
