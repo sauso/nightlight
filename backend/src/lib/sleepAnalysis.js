@@ -662,6 +662,7 @@ export function runNightlySleepJob() {
     const kids = db.prepare('SELECT id, name FROM children').all();
     let computed = 0;
     const fresh = []; // freshly-closed nights to notify about ({ name, summary })
+    const toTimelapse = []; // freshly-closed nights to assemble a memories timelapse for
     const now = Date.now();
     const notifyOn = db.prepare('SELECT sleep_report_alert_enabled FROM settings WHERE id = ?').get('app')?.sleep_report_alert_enabled;
     for (const kid of kids) {
@@ -671,12 +672,22 @@ export function runNightlySleepJob() {
       if (existing) continue;
       const summary = computeAndStoreNight(kid.id, nightDate);
       computed++;
+      toTimelapse.push({ childId: kid.id, nightDate });
       // Only notify if the window closed recently (guards against a mid-day restart re-notifying).
       const endMs = summary.window_end ? new Date(summary.window_end.replace(' ', 'T') + 'Z').getTime() : 0;
       if (endMs && now - endMs <= REPORT_FRESH_MS) fresh.push({ name: kid.name, summary });
     }
     if (computed > 0) logger.info(`[sleep] Computed ${computed} sleep summary(ies).`);
     if (notifyOn && fresh.length > 0) notifySleepReports(fresh);
+    // Assemble each freshly-closed night's memories timelapse from the frames the sampler collected
+    // overnight. Fire-and-forget (one FFmpeg pass each) and dynamically imported to avoid a static
+    // import cycle (timelapse.js imports the window helpers from this module). Runs once per night —
+    // the `existing` guard above means a night is only in this list the first time it's computed.
+    if (toTimelapse.length) {
+      import('./timelapse.js')
+        .then((m) => { for (const t of toTimelapse) m.assembleTimelapse(t.childId, t.nightDate).catch(() => {}); })
+        .catch((e) => logger.error(`[timelapse] assembly trigger import failed: ${e.message}`));
+    }
   } catch (err) {
     logger.error('[sleep] Nightly job failed:', err.message);
   }

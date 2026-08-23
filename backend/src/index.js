@@ -18,6 +18,7 @@ import pushoverRoutes from './routes/pushover.js';
 import ntfyRoutes from './routes/ntfy.js';
 import gotifyRoutes from './routes/gotify.js';
 import notificationsRoutes from './routes/notifications.js';
+import timelapsesRoutes from './routes/timelapses.js';
 import { requireAuth, requireAuthQueryOrHeader, verifyToken } from './middleware/auth.js';
 import { startTalkSession, talkConfigured } from './lib/twoWayAudio.js';
 import { subConfigured, isSubRunning, startSubStream } from './lib/subStream.js';
@@ -35,6 +36,7 @@ import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
 import { startSensorSampler } from './lib/sensorSampler.js';
 import { startActivityTracker } from './lib/activityTracker.js';
 import { startSleepJob } from './lib/sleepAnalysis.js';
+import { startTimelapseSampler } from './lib/timelapse.js';
 import { logger } from './lib/logger.js';
 import { recordCameraEvent, EVENT } from './lib/cameraEvents.js';
 import { probeAudioFlowing, tracksHaveAudio } from './lib/audioLiveness.js';
@@ -153,6 +155,7 @@ app.use('/api/pushover', pushoverRoutes);
 app.use('/api/ntfy', ntfyRoutes);
 app.use('/api/gotify', gotifyRoutes);
 app.use('/api/notifications', notificationsRoutes);
+app.use('/api/timelapses', timelapsesRoutes);
 app.use('/manifest.webmanifest', manifestRoutes);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
@@ -171,6 +174,7 @@ const server = app.listen(PORT, () => {
   // Run the clip-storage guard + retention sweeper BEFORE reconcile, so reconcile only starts
   // segmenters once storage is known usable (startClipCapture gates on it).
   startClipStorage();
+  startTimelapseSampler(); // sample sleep-window frames for the nightly memories timelapse (gated on clip storage)
   reconcileCameraPaths();
   initPush();
 });
