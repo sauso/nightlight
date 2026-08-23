@@ -22,6 +22,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   Hikvision ISAPI backend and quietly break talk on a plain edit. Applies on both add and edit.
 
 ### Added
+- **Nightly sleep timelapse ("memories").** While a child's sleep window is open, Nightlight now samples a
+  still from their camera every couple of minutes and, once the window closes, assembles the night into a
+  short (~30-second) timelapse. A **Timelapse** card on the child's detail page plays the most recent night,
+  with a strip of earlier nights to look back through. Frames come from the same local snapshot the alert
+  image uses (no extra load on the camera), the keepsakes live alongside recordings on disk, and each child
+  keeps their most recent 30 nights.
 - **Sleep timeline now tells "child out of the crib" apart from "someone in the room."** Room-activity
   events on the Sleep detail view are labelled and coloured by which they are — movement while the child is
   out of the crib (between a detected exit and the next return) vs. movement while the child is still in the
