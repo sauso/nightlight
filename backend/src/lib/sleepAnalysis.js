@@ -364,6 +364,10 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     longest_stretch_minutes: longest,
   };
 
+  // Periods the child is OUT of the crib — from an out_of_bed event until the next into_bed — used below
+  // to classify each room-activity block as the child being out vs someone else in the room (child in crib).
+  let outIntervals = [];
+
   // --- SHADOW onset/wake from crib-boundary transitions (validation only — NOT the authoritative
   // numbers yet; stored in *_shadow columns so we can compare them to the algo night-by-night). The
   // activity-only algo can't tell an empty quiet crib from a sleeping child; the transitions can. ---
@@ -383,6 +387,19 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     const txEndSql = toSqlUtc(new Date(endUtc.getTime() + lookahead));
     const transitions = getBedTransitions(cams, startSql, txEndSql);
     const txMs = (t) => new Date(t.replace(' ', 'T') + 'Z').getTime();
+
+    // Build the child-out intervals: open on an out_of_bed, close on the next into_bed. Consecutive
+    // out_of_bed events (e.g. a morning cluster) stay one interval; an interval still open at the end of
+    // the analysis means the child was out through to the end.
+    {
+      let openOut = null;
+      for (const t of transitions) {
+        const ms = txMs(t.created_at);
+        if (t.type === 'out_of_bed') { if (openOut == null) openOut = ms; }
+        else if (t.type === 'into_bed') { if (openOut != null) { outIntervals.push([openOut, ms]); openOut = null; } }
+      }
+      if (openOut != null) outIntervals.push([openOut, effEndMs]);
+    }
 
     // Onset: an into_bed only ever DELAYS onset — before the child was actually placed in the crib the
     // quiet is an empty crib, not sleep. Take the latest into_bed that's followed by sustained quiet;
@@ -450,15 +467,23 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     }
     out.wakes = wakes;
 
-    // Outside-the-crib movement grouped into "room activity" events (someone came in / the child out of
-    // bed), bridging single-minute gaps. Shown distinctly from the child's own stirring/waking.
+    // Outside-the-crib movement grouped into "room activity" events, bridging single-minute gaps. Each is
+    // typed by whether it falls inside a child-out interval (out_of_bed→into_bed): 'child_out' = the child
+    // themselves out of the crib; 'room' = movement while the child is still in the crib (someone in the
+    // room). Shown distinctly from the child's own in-crib stirring/waking.
+    const overlapsOut = (a, b) => outIntervals.some(([s, e]) => a < e && s < b);
     const visits = [];
     for (let i = 0; i < totalMin; ) {
       if (!outAt[i]) { i++; continue; }
       let last = i;
       let k = i + 1;
       while (k < totalMin && (outAt[k] || (k + 1 < totalMin && outAt[k + 1]))) { if (outAt[k]) last = k; k++; }
-      visits.push({ start_at: minuteTime(i), end_at: minuteTime(last + 1), minutes: last - i + 1 });
+      const vStartMs = startUtc.getTime() + i * 60000;
+      const vEndMs = startUtc.getTime() + (last + 1) * 60000;
+      visits.push({
+        start_at: minuteTime(i), end_at: minuteTime(last + 1), minutes: last - i + 1,
+        type: overlapsOut(vStartMs, vEndMs) ? 'child_out' : 'room',
+      });
       i = last + 1;
     }
     out.visits = visits;
