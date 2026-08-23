@@ -402,15 +402,20 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     }
 
     // Onset: an into_bed only ever DELAYS onset — before the child was actually placed in the crib the
-    // quiet is an empty crib, not sleep. Take the latest into_bed that's followed by sustained quiet;
-    // never move earlier than the algo onset.
+    // quiet is an empty crib, not sleep. Onset is a once-per-night event: the FIRST put-down that leads to
+    // sustained sleep. Take the EARLIEST into_bed whose following quiet run qualifies (firstQuietRunFrom
+    // already skips the evening fussing, so this lands on the settle, not the put-down instant); never move
+    // earlier than the algo onset. Using the earliest — not the latest — is deliberate: on a restless night
+    // the child is re-settled into the crib several times (into_bed at ~3am after a 2–4am waking), and the
+    // LAST such re-settle must not be mistaken for the night's onset (that bug put onset at 4:20am on
+    // 2026-08-23). The first qualifying sleep stretch is the onset; later re-settles are mid-night wakes.
     let onsetIdx = onset;
     for (const t of transitions) {
       if (t.type !== 'into_bed') continue;
       const idx = Math.round((txMs(t.created_at) - startUtc.getTime()) / 60000);
       if (idx < 0 || idx >= totalMin) continue;
       const q = firstQuietRunFrom(idx);
-      if (q != null && q > onsetIdx) onsetIdx = q;
+      if (q != null) { onsetIdx = Math.max(q, onset); break; } // earliest qualifying into_bed wins
     }
     out.onset_at_shadow = minuteTime(onsetIdx);
 
