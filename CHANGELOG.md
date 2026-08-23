@@ -9,6 +9,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+- **Two-way audio no longer silently downgrades on ONVIF cameras.** For a camera that supports the ONVIF/RTSP
+  audio backchannel (Thingino/Sonoff and most ONVIF cams), talk-back always uses the backchannel with the
+  camera's stream credentials — a value left in the two-way-audio username field can no longer force the
+  Hikvision ISAPI backend and quietly break talk on a plain edit. Applies on both add and edit.
+
 ### Added
 - **Out-of-bed / into-bed detection now feeds sleep times (experimental).** The frame-diff detector's
   crib entry/exit events are now persisted, and the nightly sleep computation uses them to derive a
