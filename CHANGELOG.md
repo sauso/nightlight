@@ -9,6 +9,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+- **Simpler camera menu.** The detection quick-toggles for **Motion**, **Sound** and **Alerts** are now three
+  compact icon buttons on a single row (tap each to turn it on/off), replacing the stacked switch rows.
+  **Silence alerts** is now one button that reveals **15 min / 30 min / 1 hour** options when tapped (was a
+  row of 30 min / 1 hour / 2 hours); while muted it becomes a one-tap un-mute.
+
 ### Fixed
 - **Two-way audio no longer silently downgrades on ONVIF cameras.** For a camera that supports the ONVIF/RTSP
   audio backchannel (Thingino/Sonoff and most ONVIF cams), talk-back always uses the backchannel with the
