@@ -1119,7 +1119,16 @@ body.in-pip .tile-menu-backdrop {
 .sleep-seg--wake { background: var(--sleep-wake); }
 .sleep-seg--awake { background: var(--sleep-awake); }
 .sleep-legend__sw--visit { background: var(--sleep-visit); border-radius: 50%; }
+.sleep-legend__sw--out { background: var(--sleep-wake); border-radius: 50%; }
 .sleep-wakes__dur--visit { color: var(--sleep-visit); }
+.sleep-wakes__dur--out { color: var(--sleep-wake); }
+/* Room-activity rows now carry a type tag (child out of the crib vs someone else in the room), so the
+   right-hand side groups the tag + duration together. */
+.sleep-visit-right { display: inline-flex; align-items: center; gap: 10px; }
+.sleep-visit-tag { font-size: 11px; font-weight: 700; letter-spacing: 0.02em; color: var(--sleep-visit); background: color-mix(in srgb, var(--sleep-visit) 15%, transparent); padding: 1px 8px; border-radius: 20px; white-space: nowrap; }
+.sleep-visit-tag--out { color: var(--sleep-wake); background: color-mix(in srgb, var(--sleep-wake) 15%, transparent); }
+/* Out-of-crib room-activity dot on the timeline — the child themselves out (vs teal = someone in the room). */
+.sleep-tl__visit--out { background: var(--sleep-wake); box-shadow: 0 0 0 1px var(--sleep-wake); }
 .sleep-tl__mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text-primary); opacity: 0.55; transform: translateX(-1px); }
 /* Crib-boundary transition markers (out-of-bed detection): a triangle pointing DOWN at the bar = placed
    into the crib; pointing UP = climbed/lifted out. Sit in their own strip just above the timeline bar. */

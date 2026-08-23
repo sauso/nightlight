@@ -174,6 +174,8 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
       : `from ${fmtTime(night.onset_at)} · still asleep at ${fmtTime(night.window_end)}`;
   const wakes = night.wakes || [];
   const visits = night.visits || [];
+  const hasChildOut = visits.some((v) => v.type === 'child_out');
+  const hasRoom = visits.some((v) => v.type !== 'child_out');
   const alerts = night.alerts || [];
   // Coverage is measured against elapsed time so far for a live night, not the full window.
   const covEnd = night.in_progress && night.as_of ? night.as_of : night.window_end;
@@ -200,7 +202,8 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
           <span><i className="sleep-legend__sw sleep-seg--stir" /> Stirring</span>
           <span><i className="sleep-legend__sw sleep-seg--wake" /> Awake</span>
           <span><i className="sleep-legend__sw sleep-seg--awake" /> Before/after sleep</span>
-          {visits.length > 0 && <span><i className="sleep-legend__sw sleep-legend__sw--visit" /> In the room</span>}
+          {hasRoom && <span><i className="sleep-legend__sw sleep-legend__sw--visit" /> In the room</span>}
+          {hasChildOut && <span><i className="sleep-legend__sw sleep-legend__sw--out" /> Out of crib</span>}
           {(night.transitions || []).length > 0 && (
             <span><i className="sleep-tl__tx sleep-tl__tx--in" style={{ position: 'static', display: 'inline-block', transform: 'none', margin: '0 4px 1px 0', verticalAlign: 'middle' }} /> Into bed
               <i className="sleep-tl__tx sleep-tl__tx--out" style={{ position: 'static', display: 'inline-block', transform: 'none', margin: '0 4px 0 10px', verticalAlign: 'middle' }} /> Out of bed</span>
@@ -226,14 +229,20 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
       {visits.length > 0 && (
         <div className="card">
           <div className="sleep-detail__section-title"><DoorOpen size={15} aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: 6 }} />Room activity · {visits.length}</div>
-          <div className="camera-tile__sub" style={{ margin: '-6px 0 10px' }}>Movement outside the crib — someone in the room, or the child out of bed.</div>
+          <div className="camera-tile__sub" style={{ margin: '-6px 0 10px' }}>Movement outside the crib — the child out of the crib, or someone else in the room.</div>
           <ul className="sleep-wakes">
-            {visits.map((v, i) => (
-              <li key={i} className="sleep-wakes__row">
-                <span className="sleep-wakes__time">{fmtTime(v.start_at)}{v.minutes > 1 ? ` – ${fmtTime(v.end_at)}` : ''}</span>
-                <span className="sleep-wakes__dur sleep-wakes__dur--visit">{fmtDur(v.minutes)}</span>
-              </li>
-            ))}
+            {visits.map((v, i) => {
+              const isOut = v.type === 'child_out';
+              return (
+                <li key={i} className="sleep-wakes__row">
+                  <span className="sleep-wakes__time">{fmtTime(v.start_at)}{v.minutes > 1 ? ` – ${fmtTime(v.end_at)}` : ''}</span>
+                  <span className="sleep-visit-right">
+                    <span className={`sleep-visit-tag${isOut ? ' sleep-visit-tag--out' : ''}`}>{isOut ? 'Out of crib' : 'In the room'}</span>
+                    <span className={`sleep-wakes__dur ${isOut ? 'sleep-wakes__dur--out' : 'sleep-wakes__dur--visit'}`}>{fmtDur(v.minutes)}</span>
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
@@ -430,8 +439,9 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
       {visits.length > 0 && (
         <div className="sleep-tl__visits">
           {visits.map((v, i) => (
-            <span key={i} className="sleep-tl__visit" style={{ left: `${pctOf(v.start_at, startMs, totalMs)}%` }}
-              title={`In the room · ${fmtTime(v.start_at)}`} />
+            <span key={i} className={`sleep-tl__visit${v.type === 'child_out' ? ' sleep-tl__visit--out' : ''}`}
+              style={{ left: `${pctOf(v.start_at, startMs, totalMs)}%` }}
+              title={`${v.type === 'child_out' ? 'Child out of crib' : 'In the room'} · ${fmtTime(v.start_at)}`} />
           ))}
         </div>
       )}
