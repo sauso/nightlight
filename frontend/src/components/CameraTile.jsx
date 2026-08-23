@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet, Zap, AudioLines, Clock, Square, Play, RotateCcw, Power, BellOff } from 'lucide-react';
+import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet, Zap, AudioLines, Bell, Square, Play, RotateCcw, Power, BellOff } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { startTalk } from '../lib/twoWayTalk.js';
@@ -10,8 +10,6 @@ import { isNativeApp, isIOS, isSoftReload, setBackgroundListening, onBackgroundS
 import WhepPlayer from './WhepPlayer.jsx';
 import HlsPlayer from './HlsPlayer.jsx';
 import BreathingDot from './BreathingDot.jsx';
-import Switch from './Switch.jsx';
-import DetectionRow from './DetectionRow.jsx';
 
 // The /detection endpoint replaces the whole detection config at once, so a quick motion/sound
 // toggle from the tile must resend every field (from the camera row) with just its flag flipped —
@@ -251,12 +249,14 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   // Quick-silence: temporarily mute ALL of this camera's alerts (for when you're still up as the alert
   // schedule kicks in). minutes = 0 clears an active mute. Any signed-in user (like Restart).
   const [snoozeBusy, setSnoozeBusy] = useState(false);
+  const [showSilenceMenu, setShowSilenceMenu] = useState(false); // "Silence alerts" → pick a duration
   const snoozedUntil = camera.alerts_snoozed_until && camera.alerts_snoozed_until > Date.now()
     ? camera.alerts_snoozed_until : null;
   const snoozeLabel = snoozedUntil
     ? new Date(snoozedUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
   async function snoozeAlerts(minutes) {
     if (snoozeBusy) return;
+    setShowSilenceMenu(false);
     setSnoozeBusy(true);
     try {
       await api.post(`/cameras/${camera.id}/snooze`, { minutes });
@@ -725,37 +725,74 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
 
               {isAdmin && (
                 <>
-                  <div className="tile-menu__label">Detection · quick toggle</div>
-                  <div className="card" style={{ padding: 0, marginBottom: 12 }}>
-                    <DetectionRow as="label" Icon={Zap} label="Motion detection"
-                      right={<Switch checked={!!camera.detect_motion_enabled} disabled={detBusy} onChange={() => toggleDetection('motion')} />} />
-                    <DetectionRow as="label" Icon={AudioLines} label="Sound detection"
-                      right={<Switch checked={!!camera.detect_sound_enabled} disabled={detBusy} onChange={() => toggleDetection('sound')} />} />
-                    <DetectionRow as="label" Icon={Clock} label="Alert schedule"
-                      right={<Switch checked={!!camera.detect_schedule_enabled} disabled={detBusy} onChange={() => toggleDetection('schedule')} />} />
+                  <div className="tile-menu__label">Detection</div>
+                  <div className="detect-toggles" role="group" aria-label="Detection toggles">
+                    <button
+                      type="button"
+                      className={`detect-toggle${camera.detect_motion_enabled ? ' detect-toggle--on' : ''}`}
+                      disabled={detBusy}
+                      aria-pressed={!!camera.detect_motion_enabled}
+                      onClick={() => toggleDetection('motion')}
+                    >
+                      <Zap size={20} aria-hidden="true" />
+                      <span>Motion</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`detect-toggle${camera.detect_sound_enabled ? ' detect-toggle--on' : ''}`}
+                      disabled={detBusy}
+                      aria-pressed={!!camera.detect_sound_enabled}
+                      onClick={() => toggleDetection('sound')}
+                    >
+                      <AudioLines size={20} aria-hidden="true" />
+                      <span>Sound</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`detect-toggle${camera.detect_schedule_enabled ? ' detect-toggle--on' : ''}`}
+                      disabled={detBusy}
+                      aria-pressed={!!camera.detect_schedule_enabled}
+                      onClick={() => toggleDetection('schedule')}
+                    >
+                      <Bell size={20} aria-hidden="true" />
+                      <span>Alerts</span>
+                    </button>
                   </div>
                 </>
               )}
 
               {/* Quick-silence: temporarily mute this camera's alerts, e.g. when you're still up at bedtime. */}
               <div className="tile-menu__label">Silence alerts</div>
-              <div className="card" style={{ padding: 10, marginBottom: 12 }}>
+              <div className="silence-block">
                 {snoozedUntil ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary silence-btn silence-btn--muted"
+                    disabled={snoozeBusy}
+                    onClick={() => snoozeAlerts(0)}
+                  >
                     <BellOff size={16} aria-hidden="true" />
-                    <span className="camera-tile__sub" style={{ flex: 1, margin: 0 }}>Muted until {snoozeLabel}</span>
+                    Muted until {snoozeLabel} · tap to un-mute
+                  </button>
+                ) : showSilenceMenu ? (
+                  <div className="silence-menu" role="group" aria-label="Silence duration">
                     <button type="button" className="btn btn-sm btn-secondary" disabled={snoozeBusy}
-                      onClick={() => snoozeAlerts(0)}>Un-mute</button>
+                      onClick={() => snoozeAlerts(15)}>15 min</button>
+                    <button type="button" className="btn btn-sm btn-secondary" disabled={snoozeBusy}
+                      onClick={() => snoozeAlerts(30)}>30 min</button>
+                    <button type="button" className="btn btn-sm btn-secondary" disabled={snoozeBusy}
+                      onClick={() => snoozeAlerts(60)}>1 hour</button>
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button type="button" className="btn btn-sm btn-secondary" style={{ flex: 1 }} disabled={snoozeBusy}
-                      onClick={() => snoozeAlerts(30)}>30 min</button>
-                    <button type="button" className="btn btn-sm btn-secondary" style={{ flex: 1 }} disabled={snoozeBusy}
-                      onClick={() => snoozeAlerts(60)}>1 hour</button>
-                    <button type="button" className="btn btn-sm btn-secondary" style={{ flex: 1 }} disabled={snoozeBusy}
-                      onClick={() => snoozeAlerts(120)}>2 hours</button>
-                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary silence-btn"
+                    disabled={snoozeBusy}
+                    onClick={() => setShowSilenceMenu(true)}
+                  >
+                    <BellOff size={16} aria-hidden="true" />
+                    Silence alerts
+                  </button>
                 )}
               </div>
 

@@ -1999,6 +1999,66 @@ input[type='range'] {
   font-weight: 600;
 }
 
+/* Camera tile detection quick-toggles — Motion / Sound / Alerts as three icon-over-label buttons
+   on one row. Off = dim outline; on = filled peri (matches .segmented__btn--active). */
+.detect-toggles {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.detect-toggle {
+  flex: 1;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 10px 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.detect-toggle:hover:not(:disabled) {
+  border-color: var(--peri);
+  color: var(--text-primary);
+}
+.detect-toggle--on {
+  background: var(--peri);
+  border-color: var(--peri);
+  color: #fff;
+  font-weight: 600;
+}
+.detect-toggle:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* "Silence alerts" — one button that reveals 15/30/60-min durations; when muted it flips to a
+   tap-to-un-mute button. */
+.silence-block {
+  margin-bottom: 12px;
+}
+.silence-btn {
+  width: 100%;
+  justify-content: center;
+}
+.silence-btn--muted {
+  border-color: var(--accent-dim);
+  color: var(--accent-dim);
+}
+.silence-menu {
+  display: flex;
+  gap: 8px;
+}
+.silence-menu .btn {
+  flex: 1;
+}
+
 /* Pill toggle switch (see components/Switch.jsx) — for immediate-apply settings only.
    The real checkbox is stretched over the track and made invisible so it stays the hit
    target and keeps native label/keyboard behaviour; the track + thumb are the visuals. */
