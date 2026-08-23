@@ -16,6 +16,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   Hikvision ISAPI backend and quietly break talk on a plain edit. Applies on both add and edit.
 
 ### Added
+- **Sleep timeline now tells "child out of the crib" apart from "someone in the room."** Room-activity
+  events on the Sleep detail view are labelled and coloured by which they are — movement while the child is
+  out of the crib (between a detected exit and the next return) vs. movement while the child is still in the
+  crib (a parent in the room) — instead of lumping both as generic outside-crib activity.
 - **Out-of-bed / into-bed detection now feeds sleep times (experimental).** The frame-diff detector's
   crib entry/exit events are now persisted, and the nightly sleep computation uses them to derive a
   *refined* sleep onset and morning wake-up: onset waits until the child is actually placed in the crib
