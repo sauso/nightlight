@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-08-24
+
 ### Changed
 - **Simpler camera menu.** The detection quick-toggles for **Motion**, **Sound** and **Alerts** are now three
   compact icon buttons on a single row (tap each to turn it on/off), replacing the stacked switch rows.
