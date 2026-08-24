@@ -190,6 +190,28 @@ db.exec(`
   );
   CREATE UNIQUE INDEX IF NOT EXISTS idx_timelapses_child_night ON timelapses(child_id, night_date);
 
+  -- On-demand ("Record" button) recordings. Deliberately their OWN table rather than detection_events,
+  -- for the same reason timelapses got one: these are keepsakes a person chose to capture, and mixing
+  -- them into the alert feed would both bury them among motion/sound events and expose them to the
+  -- clip retention sweeper, which would quietly delete the very moments someone meant to keep.
+  -- started_at already includes the pre-roll reach-back, so it is the true first frame of the video.
+  CREATE TABLE IF NOT EXISTS recordings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    camera_id TEXT NOT NULL,
+    child_id TEXT,
+    status TEXT NOT NULL DEFAULT 'recording',
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    duration_s INTEGER,
+    path TEXT,
+    thumb_path TEXT,
+    bytes INTEGER,
+    triggered_by TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_recordings_child ON recordings(child_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_recordings_camera ON recordings(camera_id, created_at DESC);
+
   -- FCM device tokens for push notifications (one row per app install that registered). The
   -- token is the primary key so re-registering the same device is idempotent; user_id is who
   -- was logged in when it registered (informational). Tokens FCM reports as dead are pruned by
@@ -344,6 +366,17 @@ if (!settingsColumns.includes('ptz_step')) {
 if (!settingsColumns.includes('clip_pre_roll_s')) {
   db.exec('ALTER TABLE settings ADD COLUMN clip_pre_roll_s INTEGER NOT NULL DEFAULT 5');
   db.exec('ALTER TABLE settings ADD COLUMN clip_post_roll_s INTEGER NOT NULL DEFAULT 15');
+}
+
+// On-demand recording (the tile's Record button). ondemand_enabled gates the whole feature: while it's
+// on, every enabled camera keeps a rolling ring so Record can reach BACKWARD by ondemand_pre_roll_s and
+// capture the moment before the button was pressed — that buffering is the cost the toggle turns off.
+// ondemand_max_duration_s auto-stops a forgotten recording so it can't grow unbounded or fill the disk.
+// Defaults on / 30s back / 2 min cap; bounds enforced in routes/settings.js. See lib/recordings.js.
+if (!settingsColumns.includes('ondemand_enabled')) {
+  db.exec('ALTER TABLE settings ADD COLUMN ondemand_enabled INTEGER NOT NULL DEFAULT 1');
+  db.exec('ALTER TABLE settings ADD COLUMN ondemand_pre_roll_s INTEGER NOT NULL DEFAULT 30');
+  db.exec('ALTER TABLE settings ADD COLUMN ondemand_max_duration_s INTEGER NOT NULL DEFAULT 120');
 }
 
 // Clip retention (Stage 1 phase 3): clips are deleted when EITHER bound is exceeded — older than
