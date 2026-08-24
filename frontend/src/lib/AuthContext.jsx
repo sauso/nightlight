@@ -31,7 +31,7 @@ export function AuthProvider({ children }) {
     refresh();
   }, []);
 
-  // Keep the in-memory media token fresh while signed in (its own TTL is 6h; refresh hourly so any
+  // Keep the in-memory media token fresh while signed in (its own TTL is 12h; refresh hourly so any
   // newly-built media URL always carries a comfortably-valid token).
   useEffect(() => {
     if (!user) return;
