@@ -19,6 +19,7 @@ import ntfyRoutes from './routes/ntfy.js';
 import gotifyRoutes from './routes/gotify.js';
 import notificationsRoutes from './routes/notifications.js';
 import timelapsesRoutes from './routes/timelapses.js';
+import recordingsRoutes from './routes/recordings.js';
 import { requireAuth, requireAuthQueryOrHeader, verifyToken } from './middleware/auth.js';
 import { startTalkSession, talkConfigured } from './lib/twoWayAudio.js';
 import { subConfigured, isSubRunning, startSubStream } from './lib/subStream.js';
@@ -29,6 +30,7 @@ import { startMotionDetector, stopMotionDetector, isDetecting, stopAllMotionDete
 import { startOnvifMotion, stopOnvifMotion, isOnvifMotion, onvifMotionWanted, stopAllOnvifMotion } from './lib/onvifMotion.js';
 import { startSoundDetector, isSoundDetecting, stopAllSoundDetectors } from './lib/soundDetector.js';
 import { startClipCapture, isClipCapturing, stopAllClipCapture } from './lib/clipCapture.js';
+import { stopAllRecordings } from './lib/recordings.js';
 import { startClipStorage } from './lib/clipStorage.js';
 import { initPush } from './lib/push.js';
 import { startMediaMTX, stopMediaMTX } from './lib/mediamtxProcess.js';
@@ -182,6 +184,7 @@ app.use('/api/ntfy', ntfyRoutes);
 app.use('/api/gotify', gotifyRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/timelapses', timelapsesRoutes);
+app.use('/api/recordings', recordingsRoutes);
 app.use('/manifest.webmanifest', manifestRoutes);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
@@ -556,6 +559,8 @@ async function shutdown() {
   await stopAllMotionDetectors();
   await stopAllOnvifMotion();
   await stopAllSoundDetectors();
+  // Finish any in-flight recording first — it cuts from the ring the segmenters own.
+  stopAllRecordings().catch(() => {});
   stopAllClipCapture();
   await stopAllTranscoders();
   stopMediaMTX();

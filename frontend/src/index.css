@@ -2510,3 +2510,20 @@ input[type='range'] {
 .push-banner__close:active {
   background: var(--bg-elevated);
 }
+
+/* On-demand recording button on the camera tile (see CameraTile.jsx). Sits with the mute/talk/
+   fullscreen overlay controls; while recording it turns red, pulses, and widens to show MM:SS. */
+.rec-btn {
+  position: absolute; bottom: 8px; right: 84px;
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(0, 0, 0, 0.45); color: #fff;
+  border: none; border-radius: 999px; padding: 7px 9px;
+  cursor: pointer; line-height: 0;
+}
+.rec-btn:disabled { opacity: 0.6; cursor: default; }
+.rec-btn--active { background: var(--offline, #e08585); animation: rec-pulse 1.6s ease-in-out infinite; }
+.rec-btn__time { font-size: 12px; line-height: 1; font-variant-numeric: tabular-nums; }
+@keyframes rec-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.62; } }
+@media (prefers-reduced-motion: reduce) { .rec-btn--active { animation: none; } }
+/* Small play badge for the recordings strip (reuses the timelapse strip layout). */
+.timelapse-play--sm { width: 28px; height: 28px; }
