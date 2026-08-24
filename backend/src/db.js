@@ -156,6 +156,40 @@ db.exec(`
     UNIQUE (child_id, night_date)
   );
 
+  -- Crib-boundary transition events from the frame-diff detector: a child leaving the crib
+  -- ('out_of_bed') or being placed into it ('into_bed'), classified by the SEQUENCE of the in-crib vs
+  -- outside-crib motion channels (see lib/motionDetector.js). Low-rate signal, distinct from the
+  -- cooldown-throttled detection_events alert feed and NOT surfaced there. sleepAnalysis reads these to
+  -- correct onset (gate on the last into_bed before sleep) and wake (the terminal out_of_bed for the
+  -- day, even past the window). Denormalized camera_id (no FK), pruned by age. Times are UTC text.
+  CREATE TABLE IF NOT EXISTS bed_transitions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    camera_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    peak REAL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_bed_transitions_cam_time ON bed_transitions(camera_id, created_at);
+
+  -- One "memories" timelapse per child per night (spec A3): the sleep window's sampled frames
+  -- assembled into a short MP4. Kept in its OWN table (not detection_events) so keepsakes never
+  -- leak into the alert feed / clip-management list and aren't swept by clip retention — they get
+  -- their own keep-last-N-per-child prune (lib/timelapse.js). path/thumb_path are relative to
+  -- CLIPS_DIR. night_date is the child's local window-start date; created_at is UTC text.
+  CREATE TABLE IF NOT EXISTS timelapses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    child_id TEXT NOT NULL,
+    night_date TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    path TEXT,
+    thumb_path TEXT,
+    frame_count INTEGER,
+    duration_s INTEGER,
+    bytes INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_timelapses_child_night ON timelapses(child_id, night_date);
+
   -- FCM device tokens for push notifications (one row per app install that registered). The
   -- token is the primary key so re-registering the same device is idempotent; user_id is who
   -- was logged in when it registered (informational). Tokens FCM reports as dead are pruned by
@@ -537,6 +571,15 @@ const sleepNightsColumns = db.prepare('PRAGMA table_info(sleep_nights)').all().m
 if (!sleepNightsColumns.includes('avg_temperature')) {
   db.exec('ALTER TABLE sleep_nights ADD COLUMN avg_temperature REAL');
   db.exec('ALTER TABLE sleep_nights ADD COLUMN avg_humidity REAL');
+}
+
+// SHADOW onset/wake: an alternative onset_at/wake_at derived from the out-of-bed / into-bed transition
+// events (bed_transitions below), computed alongside the primary activity-only values but NOT yet used
+// as the authoritative numbers. Lets us validate the transition-corrected sleep times against the live
+// algorithm night-by-night before promoting them. See lib/sleepAnalysis.js.
+if (!sleepNightsColumns.includes('onset_at_shadow')) {
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN onset_at_shadow TEXT');
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN wake_at_shadow TEXT');
 }
 
 // Quick-silence: a per-camera temporary mute of ALL alerts (motion/sound/ONVIF/MQTT), for when you're

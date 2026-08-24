@@ -597,11 +597,15 @@ router.post('/', requireAdmin, async (req, res) => {
   if (isOnvif && backchannel === 'yes' && (await verifyBackchannel(rtsp_url))) {
     talkBackend = 'onvif-backchannel';
     talkUser = null; // creds come from the stream URL
+  } else if (isOnvif && backchannel === 'yes') {
+    // Backchannel-capable but couldn't verify right now (camera briefly unreachable at add): still the
+    // right protocol for it. Don't let a username typed into the two-way-audio field downgrade it to the
+    // Hikvision ISAPI sink — prefer the backchannel on the probed capability and drop the spurious creds.
+    talkBackend = 'onvif-backchannel';
+    talkUser = null;
   } else if (talkUser) {
     talkBackend = 'hikvision-isapi';
     talkPass = talk_password || null;
-  } else if (isOnvif && backchannel === 'yes') {
-    talkBackend = 'onvif-backchannel';
   }
   // Low-quality sub-stream: a path on the same camera (reuses the main host/port/creds).
   const subUrl = sub_rtsp_path && sub_rtsp_path.trim()
@@ -685,6 +689,13 @@ router.put('/:id', requireAdmin, async (req, res) => {
   if (talk_username !== undefined) {
     if (!talk_username.trim()) {
       talkBackend = null; talkUser = null; talkPass = null;
+    } else if (existing.backchannel_supported === 'yes') {
+      // Backchannel-capable ONVIF cam (Thingino/Sonoff/most ONVIF): talk goes over the RTSP audio
+      // backchannel using the STREAM creds, so it needs no separate username. A value left in the
+      // two-way-audio field must NOT force the Hikvision ISAPI backend — that footgun silently reverted
+      // these cams to a dead ISAPI endpoint on a plain edit (owner hit this 2026-08-23). Keep the
+      // backchannel and drop the spurious creds. (A re-probe below still live-verifies.)
+      talkBackend = 'onvif-backchannel'; talkUser = null; talkPass = null;
     } else {
       talkBackend = 'hikvision-isapi';
       talkUser = talk_username.trim();

@@ -9,6 +9,44 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-08-24
+
+### Changed
+- **Simpler camera menu.** The detection quick-toggles for **Motion**, **Sound** and **Alerts** are now three
+  compact icon buttons on a single row (tap each to turn it on/off), replacing the stacked switch rows.
+  **Silence alerts** is now one button that reveals **15 min / 30 min / 1 hour** options when tapped (was a
+  row of 30 min / 1 hour / 2 hours); while muted it becomes a one-tap un-mute.
+
+### Fixed
+- **Camera readings stay visible on a phone in landscape.** In landscape the top bar, bottom nav, and a full
+  16:9 camera tile used to overflow the short screen, hiding each camera's temperature/humidity readings below
+  the video. The header and nav are now slimmer and the video is capped in landscape so the whole tile — video
+  plus readings — fits on screen.
+- **Two-way audio no longer silently downgrades on ONVIF cameras.** For a camera that supports the ONVIF/RTSP
+  audio backchannel (Thingino/Sonoff and most ONVIF cams), talk-back always uses the backchannel with the
+  camera's stream credentials — a value left in the two-way-audio username field can no longer force the
+  Hikvision ISAPI backend and quietly break talk on a plain edit. Applies on both add and edit.
+
+### Added
+- **Nightly sleep timelapse ("memories").** While a child's sleep window is open, Nightlight now samples a
+  still from their camera every couple of minutes and, once the window closes, assembles the night into a
+  short (~30-second) timelapse. A **Timelapse** card on the child's detail page plays the most recent night,
+  with a strip of earlier nights to look back through. Frames come from the same local snapshot the alert
+  image uses (no extra load on the camera), the keepsakes live alongside recordings on disk, and each child
+  keeps their most recent 30 nights.
+- **Sleep timeline now tells "child out of the crib" apart from "someone in the room."** Room-activity
+  events on the Sleep detail view are labelled and coloured by which they are — movement while the child is
+  out of the crib (between a detected exit and the next return) vs. movement while the child is still in the
+  crib (a parent in the room) — instead of lumping both as generic outside-crib activity.
+- **Out-of-bed / into-bed detection now feeds sleep times (experimental).** The frame-diff detector's
+  crib entry/exit events are now persisted, and the nightly sleep computation uses them to derive a
+  *refined* sleep onset and morning wake-up: onset waits until the child is actually placed in the crib
+  (an empty, quiet crib no longer reads as sleep), and the morning wake is taken from the child actually
+  getting out of bed — even when that happens a little after the sleep window closes. These refined times
+  are computed alongside the existing movement-based estimate and shown on the Sleep detail view (with
+  ▼ into-bed / ▲ out-of-bed markers on the night timeline) for validation; the headline figures still use
+  the movement &amp; sound estimate for now.
+
 ## [0.23.0] - 2026-08-22
 
 ### Added
