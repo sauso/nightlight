@@ -16,6 +16,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   row of 30 min / 1 hour / 2 hours); while muted it becomes a one-tap un-mute.
 
 ### Fixed
+- **Camera readings stay visible on a phone in landscape.** In landscape the top bar, bottom nav, and a full
+  16:9 camera tile used to overflow the short screen, hiding each camera's temperature/humidity readings below
+  the video. The header and nav are now slimmer and the video is capped in landscape so the whole tile — video
+  plus readings — fits on screen.
 - **Two-way audio no longer silently downgrades on ONVIF cameras.** For a camera that supports the ONVIF/RTSP
   audio backchannel (Thingino/Sonoff and most ONVIF cams), talk-back always uses the backchannel with the
   camera's stream credentials — a value left in the two-way-audio username field can no longer force the
