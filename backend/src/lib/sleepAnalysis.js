@@ -473,7 +473,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       //
       // The transition must be an `out_of_bed` specifically: accepting any transition would let an
       // `into_bed` vouch for a departure, which is how the other child's shadow landed 53 minutes late
-      // (her crib kept registering motion long after she was carried out, and the nearest marker was an
+      // (that crib kept registering motion long after the child was carried out, and the nearest marker was an
       // into-bed). If nothing corroborates any gap we keep the algo's wake rather than guess.
       let exitMs = null;
       for (let i = Math.max(onset, 0); i < totalMinExt; ) {
