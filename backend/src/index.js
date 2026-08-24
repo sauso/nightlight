@@ -69,29 +69,30 @@ const app = express();
 // per-IP rate limiting (see auth.js) for anyone connecting through the proxy.
 app.set('trust proxy', 'loopback');
 
-// Content-Security-Policy — rolled out in REPORT-ONLY first (see planning/csp-hardening-scope.md):
-// the browser reports what WOULD be blocked (to /api/csp-report below) but blocks nothing, so we can
-// confirm every feature is covered before switching to enforcing. Directives are tuned to this app:
-//  - script-src 'self': Vite emits one external module script, no inline scripts (don't add unsafe-*).
+// Content-Security-Policy — ENFORCING (validated via a report-only rollout on staging that exercised
+// every feature; see planning/csp-hardening-scope.md). The report-uri below still logs any future
+// violation to /api/csp-report, so a regression (e.g. a new dependency pulling a third-party script)
+// shows up in the container log instead of silently. Directives are tuned to this app:
+//  - script-src 'self' + static.cloudflareinsights.com: Vite emits one external module script (no
+//    inline scripts — don't add unsafe-*); the Cloudflare Web Analytics beacon is allowed by choice.
 //  - style-src 'self': theming uses element.style.setProperty (CSSOM), which CSP doesn't police; app
 //    CSS is an external <link>. (If real style violations show up, add 'unsafe-inline' — low risk.)
 //  - media-src/worker-src blob:: hls.js feeds <video> via MSE blob URLs and runs its demuxer worker
 //    from a blob: URL. img-src data:: snapshot posters/icons. font-src data:: any inlined @font-face.
-//  - connect-src adds the client-side WebRTC STUN host (WhepPlayer.jsx) — keep in sync if it changes.
+//  - connect-src adds the client-side WebRTC STUN host (WhepPlayer.jsx) + the CF beacon POST target —
+//    keep the STUN host in sync if it ever changes.
 //  - No upgrade-insecure-requests: the app is also served over plain http on the LAN.
-// To ENFORCE once the report log is clean: set reportOnly:false (and optionally drop the report route).
 app.use(helmet({
   contentSecurityPolicy: {
-    reportOnly: true,
     useDefaults: false,
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"],
+      scriptSrc: ["'self'", 'https://static.cloudflareinsights.com'],
       styleSrc: ["'self'"],
       imgSrc: ["'self'", 'data:'],
       mediaSrc: ["'self'", 'blob:'],
       workerSrc: ["'self'", 'blob:'],
-      connectSrc: ["'self'", 'stun.l.google.com:19302'],
+      connectSrc: ["'self'", 'stun.l.google.com:19302', 'https://cloudflareinsights.com'],
       fontSrc: ["'self'", 'data:'],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
