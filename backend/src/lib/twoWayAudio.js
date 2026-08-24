@@ -332,7 +332,13 @@ class OnvifBackchannelTalk {
 // camera is re-pointed at a different device or was added before this protocol existed, instead of
 // latching onto whatever was stored first. `backchannel_supported` (from the ONVIF probe) only says the
 // device advertises an audio output — this proves the send path actually works.
-export async function verifyBackchannel(rtspUrl, { timeoutMs = 6000 } = {}) {
+// timeoutMs bounds the WHOLE handshake (DESCRIBE→[digest]→DESCRIBE→SETUP→PLAY). It needs headroom for a
+// slow-but-working camera: a real Hikvision that DOES service the backchannel measured ~5.6s here, right
+// against the old 6s cap — so an occasional slower probe would time out and misclassify the SAME camera as
+// no-backchannel (→ ISAPI), flip-flopping between probes. 12s gives comfortable margin. This is now safe
+// against a genuinely dead camera because each individual RTSP request is separately capped at
+// RTSP_REQUEST_TIMEOUT_MS, so a wedged request fails fast rather than eating the whole budget.
+export async function verifyBackchannel(rtspUrl, { timeoutMs = 12000 } = {}) {
   const parts = parseRtspUrl(rtspUrl);
   if (!parts || !parts.host) return false;
   const session = new OnvifBackchannelTalk(parts);
