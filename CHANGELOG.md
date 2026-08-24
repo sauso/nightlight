@@ -10,6 +10,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Security
+- **A Content-Security-Policy is now enforced.** The app serves a strict CSP that only allows scripts,
+  styles, images, media and connections from itself (plus the video stream's STUN server and, by choice,
+  Cloudflare's analytics beacon). This is defense-in-depth: if a bug or a future dependency ever tried to
+  inject a rogue script, the browser blocks it. Rolled out in report-only mode first and validated against
+  every feature (both stream modes, snapshots, clips, timelapses, two-way audio, theming) before enforcing.
 - **Video/image URLs no longer carry your full login token.** The stream (HLS), snapshot, clip,
   timelapse, and talk-back URLs the browser loads directly used to include your 30-day session token
   as a `?token=` query parameter — and query strings can end up in reverse-proxy/CDN access logs,
