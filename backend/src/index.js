@@ -186,14 +186,36 @@ app.use('/manifest.webmanifest', manifestRoutes);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
-// CSP violation sink for the report-only rollout (see the helmet block above). The browser POSTs a
-// report here whenever a directive WOULD have blocked something; we log it so violations can be
-// collected from the container logs while tuning the policy. Unauthenticated by necessity (the browser
-// sends these with no credentials) and best-effort. express.text with a wildcard type captures the body
-// regardless of the report's content-type (application/csp-report vs application/reports+json).
+// CSP violation sink (see the helmet block above). The browser POSTs a report here whenever the policy
+// blocks something; we log it so a regression — e.g. a new dependency pulling in a third-party script —
+// shows up in the container log instead of silently breaking a feature. Unauthenticated by necessity
+// (browsers send these with no credentials), so it is deliberately hardened against abuse: anyone who
+// can reach the app can post here, and the log is a 1000-line ring buffer that also backs the in-app log
+// viewer. Without limits, a flood would evict every real log line, and newlines in the body would forge
+// convincing-looking log entries. Hence: a per-minute cap, one line, and length-clamped.
+// express.text with a wildcard type captures the body regardless of the report's content-type
+// (application/csp-report vs application/reports+json).
+const CSP_REPORTS_PER_MIN = 10;
+const CSP_REPORT_MAX_CHARS = 500;
+let cspReportWindowStart = 0;
+let cspReportCount = 0;
 app.post('/api/csp-report', express.text({ type: '*/*', limit: '64kb' }), (req, res) => {
-  if (req.body) logger.warn(`[csp-report] ${typeof req.body === 'string' ? req.body : JSON.stringify(req.body)}`);
-  res.status(204).end();
+  res.status(204).end(); // always accept; the browser has nothing useful to do with an error
+  if (!req.body) return;
+  const now = Date.now();
+  if (now - cspReportWindowStart > 60_000) {
+    // Note when a burst was actually dropped, so silence isn't mistaken for "no violations".
+    if (cspReportCount > CSP_REPORTS_PER_MIN) {
+      logger.warn(`[csp-report] suppressed ${cspReportCount - CSP_REPORTS_PER_MIN} further report(s) in the last minute`);
+    }
+    cspReportWindowStart = now;
+    cspReportCount = 0;
+  }
+  if (++cspReportCount > CSP_REPORTS_PER_MIN) return;
+  const raw = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+  // Collapse all whitespace so a body can't inject extra log lines, then clamp the length.
+  const oneLine = raw.replace(/\s+/g, ' ').trim().slice(0, CSP_REPORT_MAX_CHARS);
+  logger.warn(`[csp-report] ${oneLine}${raw.length > CSP_REPORT_MAX_CHARS ? '…' : ''}`);
 });
 
 // Serve the built React frontend (see Dockerfile — built at image-build time into ./public).

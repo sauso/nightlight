@@ -10,13 +10,20 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Fixed
+- **More accurate refined wake-up times.** The refined ("out of bed") wake-up time shown on a night's
+  sleep detail now has to be backed by an actual out-of-bed event, instead of being inferred from a quiet
+  crib alone. A quiet stretch on its own could be a child who is simply still, so the old rule could pick
+  a wake-up up to 40 minutes early — or, when a crib kept registering movement after the child had been
+  carried out, up to an hour late. When no departure is detected, the night keeps its standard wake-up
+  time rather than showing a refined one that might be wrong. Checked against a real night: both children
+  now match what actually happened, or fall back cleanly.
 - **Re-probing a camera over ONVIF no longer hangs on some Hikvision cameras.** After probing, the app
   live-tests whether the camera can play talk-back over its stream. On certain Hikvision cameras that
   advertise an audio output but don't actually support the ONVIF/RTSP backchannel, that test could get
   stuck waiting on a reply the camera never sends, leaving the probe spinning forever. RTSP handshake
-  requests now time out cleanly, so the probe always finishes and reports its result. The overall
-  backchannel check also gets more time to complete, so a slow-but-working camera is classified the
-  same way on every probe instead of occasionally flipping between "needs a talk login" and "doesn't."
+  requests now time out cleanly, so the probe always finishes and reports its result — and because the
+  app no longer waits for a disconnect acknowledgement the camera was never going to send, re-probing
+  one of these cameras is about five seconds faster.
 
 ### Security
 - **A Content-Security-Policy is now enforced.** The app serves a strict CSP that only allows scripts,

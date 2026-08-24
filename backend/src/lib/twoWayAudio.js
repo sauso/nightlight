@@ -231,8 +231,14 @@ class OnvifBackchannelTalk {
         }
       };
       // No per-request timeout otherwise (the socket's own timeout is disabled after connect), so an
-      // unanswered request would hang forever — reject instead so start()/close() can't wedge.
-      timer = setTimeout(() => { cleanup(); reject(new Error(`RTSP ${method} timed out`)); }, RTSP_REQUEST_TIMEOUT_MS);
+      // unanswered request would hang forever — reject instead so start()/close() can't wedge. Destroy
+      // the socket too: after a timeout we no longer know where the response framing is, so a late reply
+      // would be mis-parsed as the *next* request's response (wrong CSeq, wrong status).
+      timer = setTimeout(() => {
+        cleanup();
+        try { this.sock.destroy(); } catch { /* ignore */ }
+        reject(new Error(`RTSP ${method} timed out`));
+      }, RTSP_REQUEST_TIMEOUT_MS);
       this.sock.on('data', onData);
       this.sock.write(headers.join('\r\n') + '\r\n\r\n');
     });
@@ -318,8 +324,23 @@ class OnvifBackchannelTalk {
     if (this.closed) return;
     this.closed = true;
     if (this.keepalive) clearInterval(this.keepalive);
-    try { if (this.session) await this._send('TEARDOWN', this.url, [`Session: ${this.session}`]); } catch { /* best-effort */ }
-    try { this.sock?.end(); } catch { /* ignore */ }
+    // TEARDOWN is best-effort and we never use its response — the socket is being dropped either way.
+    // So write it and let end() flush, rather than AWAITING a reply: cameras exist that accept the
+    // request and simply never answer it (the staging Hikvision is one), and waiting cost a full
+    // RTSP_REQUEST_TIMEOUT_MS on every single close — which is most of what a backchannel verify used
+    // to spend. Skip it entirely once the socket is gone (e.g. destroyed by a request timeout).
+    try {
+      if (this.session && this.sock && !this.sock.destroyed) {
+        const req = [`TEARDOWN ${this.url} RTSP/1.0`, `CSeq: ${this.cseq++}`];
+        const a = this._authHeader('TEARDOWN', this.url);
+        if (a) req.push(`Authorization: ${a}`);
+        req.push(`Session: ${this.session}`);
+        this.sock.end(req.join('\r\n') + '\r\n\r\n'); // flushes, then FINs
+        // Backstop in case the FIN never completes; unref'd so it can't hold the process open.
+        setTimeout(() => { try { this.sock?.destroy(); } catch { /* ignore */ } }, 250).unref?.();
+        return;
+      }
+    } catch { /* fall through to destroy */ }
     try { this.sock?.destroy(); } catch { /* ignore */ }
   }
 }
@@ -332,12 +353,11 @@ class OnvifBackchannelTalk {
 // camera is re-pointed at a different device or was added before this protocol existed, instead of
 // latching onto whatever was stored first. `backchannel_supported` (from the ONVIF probe) only says the
 // device advertises an audio output — this proves the send path actually works.
-// timeoutMs bounds the WHOLE handshake (DESCRIBE→[digest]→DESCRIBE→SETUP→PLAY). It needs headroom for a
-// slow-but-working camera: a real Hikvision that DOES service the backchannel measured ~5.6s here, right
-// against the old 6s cap — so an occasional slower probe would time out and misclassify the SAME camera as
-// no-backchannel (→ ISAPI), flip-flopping between probes. 12s gives comfortable margin. This is now safe
-// against a genuinely dead camera because each individual RTSP request is separately capped at
-// RTSP_REQUEST_TIMEOUT_MS, so a wedged request fails fast rather than eating the whole budget.
+// timeoutMs bounds the WHOLE handshake (DESCRIBE→[digest]→DESCRIBE→SETUP→PLAY) as a backstop; each
+// individual request is separately capped at RTSP_REQUEST_TIMEOUT_MS, so a wedged camera fails fast
+// rather than eating the budget. 12s is deliberately generous — measured against a real Hikvision the
+// whole handshake is well under a second (slowest request: the authenticated DESCRIBE at ~570ms), so
+// this only ever matters for a genuinely slow camera.
 export async function verifyBackchannel(rtspUrl, { timeoutMs = 12000 } = {}) {
   const parts = parseRtspUrl(rtspUrl);
   if (!parts || !parts.host) return false;
@@ -403,18 +423,27 @@ export async function startTalkSession(camera) {
   if (camera.talk_backend === 'onvif-backchannel') {
     const parts = parseRtspUrl(camera.rtsp_url);
     if (!parts || !parts.host) throw new Error('Could not parse the camera stream URL for talk-back');
-    const session = new OnvifBackchannelTalk(parts);
-    await session.start();
-    return session;
+    return startOrClose(new OnvifBackchannelTalk(parts));
   }
 
   const host = hostFromCamera(camera);
   if (!host) throw new Error('Could not determine camera host for talk-back');
-  const session = new HikvisionTalk({
+  return startOrClose(new HikvisionTalk({
     host,
     username: camera.talk_username,
     password: camera.talk_password,
-  });
-  await session.start();
+  }));
+}
+
+// start() the session, closing it if start fails. Without this the half-built session — and its open
+// camera socket — is unreachable to the caller (which only ever sees the thrown error and so has
+// nothing to close), leaking one socket per failed talk attempt.
+async function startOrClose(session) {
+  try {
+    await session.start();
+  } catch (err) {
+    try { await session.close(); } catch { /* ignore */ }
+    throw err;
+  }
   return session;
 }
