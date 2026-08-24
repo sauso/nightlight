@@ -53,10 +53,18 @@ test('add a camera through the UI and see it go live on the grid', async ({ page
     await page.request.get('/api/cameras', { headers: { Authorization: `Bearer ${token}` } })
   ).json();
   const path = cameras.find((c) => c.name === CAMERA.name).mediamtx_path;
+  // The token in an HLS query string must be MEDIA-scoped — the server rejects a session token there
+  // (it's header-only), so mint one the same way the app does at bootstrap.
+  const mediaToken = (
+    await (
+      await page.request.post('/api/auth/media-token', { headers: { Authorization: `Bearer ${token}` } })
+    ).json()
+  ).token;
+  expect(mediaToken, 'a media token should be issued for HLS playback').toBeTruthy();
   await expect
     .poll(
       async () => {
-        const r = await page.request.get(`/hls/${path}/index.m3u8?token=${token}`);
+        const r = await page.request.get(`/hls/${path}/index.m3u8?token=${mediaToken}`);
         return r.ok() ? await r.text() : '';
       },
       { timeout: 30_000, message: 'the camera HLS manifest should serve a live playlist' }
