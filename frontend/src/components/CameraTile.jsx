@@ -152,14 +152,14 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   // capture that's still running); `camera.recording` / `elapsed_s` come back on the camera row, and we
   // tick the displayed time locally between refreshes rather than polling the server every second.
   const [recording, setRecording] = useState(!!camera.recording);
-  const [recElapsed, setRecElapsed] = useState(camera.elapsed_s || 0);
+  const [recElapsed, setRecElapsed] = useState(camera.recording_elapsed_s || 0);
   const [recBusy, setRecBusy] = useState(false);
   const [recError, setRecError] = useState('');
 
   useEffect(() => {
     setRecording(!!camera.recording);
-    setRecElapsed(camera.elapsed_s || 0);
-  }, [camera.recording, camera.elapsed_s]);
+    setRecElapsed(camera.recording_elapsed_s || 0);
+  }, [camera.recording, camera.recording_elapsed_s]);
 
   useEffect(() => {
     if (!recording) return;
