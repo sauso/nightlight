@@ -129,8 +129,7 @@ the app is served over **HTTPS**.
 cookie with the `Secure` attribute. Browsers refuse to store a `Secure` cookie on an insecure
 (`http://`) origin, so the check never completes and every HLS request fails. WebRTC doesn't use
 that cookie, so Low latency is unaffected. This surfaced while building the end-to-end tests,
-where the same thing broke in-browser HLS until the test stack was served over TLS (see
-`planning/documentation-and-e2e-testing-scope.md`).
+where the same thing broke in-browser HLS until the test stack was served over TLS.
 
 **What to do:** Use **Low latency** on a plain-HTTP LAN setup, or put the app behind HTTPS (a
 reverse proxy such as SWAG — see the README's "Running behind a reverse proxy" section), after

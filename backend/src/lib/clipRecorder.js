@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { logger, isNoisyMediaLine } from './logger.js';
 
-// Event-recording capture core (Stage 1, "Option A" — see planning/recording-and-sleep-tracking-scope.md).
+// Event-recording capture core (Stage 1, "Option A"; shipped in 0.17.0).
 //
 // For every detection-enabled camera we run one continuous, cheap `-c copy` "segmenter" FFmpeg that
 // pulls the ALREADY-published local MediaMTX path (never a second RTSP session on the camera) and

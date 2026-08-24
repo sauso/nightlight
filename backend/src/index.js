@@ -70,7 +70,7 @@ const app = express();
 app.set('trust proxy', 'loopback');
 
 // Content-Security-Policy — ENFORCING (validated via a report-only rollout on staging that exercised
-// every feature; see planning/csp-hardening-scope.md). The report-uri below still logs any future
+// every feature). The report-uri below still logs any future
 // violation to /api/csp-report, so a regression (e.g. a new dependency pulling a third-party script)
 // shows up in the container log instead of silently. Directives are tuned to this app:
 //  - script-src 'self' + static.cloudflareinsights.com: Vite emits one external module script (no

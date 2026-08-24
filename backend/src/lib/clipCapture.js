@@ -15,7 +15,7 @@ import { clipStorageReady, hasMinFreeSpace } from './clipStorage.js';
 //     driven from the same places the motion/sound detectors are (routes + reconcile + startup).
 //   * job queue: when a detection fires on a recording-enabled camera, fireDetectionAlert calls
 //     enqueueClip(), which cuts the [pre, post] clip and writes clip_* onto the event row.
-// See planning/recording-and-sleep-tracking-scope.md.
+// Shipped in 0.17.0.
 
 // Small in-process queue so a burst of triggers across cameras can't spawn unbounded ffmpeg. Each job
 // occupies a worker for roughly the post-roll (extractClip waits it out) plus a quick concat.
