@@ -189,7 +189,9 @@ server.on('upgrade', (req, socket, head) => {
   let url;
   try { url = new URL(req.url, 'http://localhost'); } catch { socket.destroy(); return; }
   if (url.pathname !== '/api/talk') { socket.destroy(); return; }
-  const user = verifyToken(url.searchParams.get('token'));
+  // The token rides in the WS URL (browsers can't set headers on the handshake), so it must be a
+  // media-scoped token, not the full session token - same reason as the HLS/query-token routes.
+  const user = verifyToken(url.searchParams.get('token'), { purpose: 'media' });
   if (!user) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
   const cameraId = url.searchParams.get('camera');
   const camera = cameraId ? db.prepare('SELECT * FROM cameras WHERE id = ?').get(cameraId) : null;

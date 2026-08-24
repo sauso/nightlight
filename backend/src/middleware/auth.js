@@ -52,10 +52,13 @@ function sessionStillValid(sessionId) {
 
 // Verify a raw JWT the same way the middleware does (signature + live session), for contexts
 // without an Express req/res - e.g. the WebSocket upgrade handshake. Returns the payload or null.
-export function verifyToken(token) {
+// Pass { purpose } to require a specific token purpose (e.g. 'media' for the talk WebSocket, whose
+// token travels in the URL and so must be a media-scoped capability, not a full session token).
+export function verifyToken(token, { purpose } = {}) {
   if (!token) return null;
   try {
     const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+    if (purpose ? payload.purpose !== purpose : payload.purpose === 'media') return null;
     if (!sessionStillValid(payload.sid)) return null;
     return payload;
   } catch {
@@ -69,6 +72,10 @@ export function requireAuth(req, res, next) {
   if (!token) return res.status(401).json({ error: 'Not authenticated' });
   try {
     const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+    // A media-scoped token (see routes/auth.js /media-token) is a video/image-only capability meant
+    // to ride in URL query params — it must NEVER authenticate a full API request, even though it
+    // names a live session. This is what confines a leaked media URL to media, not account access.
+    if (payload.purpose === 'media') return res.status(401).json({ error: 'Invalid or expired session' });
     if (!sessionStillValid(payload.sid)) return res.status(401).json({ error: 'Invalid or expired session' });
     req.user = payload;
     next();
@@ -80,12 +87,20 @@ export function requireAuth(req, res, next) {
 // Same as requireAuth, but also accepts the token as a ?token= query param.
 // Needed for HLS: Safari's native <video> player fetches playlist/segment URLs
 // itself with no way for us to attach an Authorization header to those requests.
+// A token in the QUERY STRING must be media-scoped: query strings leak into reverse-proxy/CDN access
+// logs, browser history and Referer headers, so only a short-lived, media-only capability may travel
+// that way. A full session token is accepted only via the Authorization header (which those channels
+// don't record).
 export function requireAuthQueryOrHeader(req, res, next) {
   const header = req.headers.authorization || '';
-  const token = (header.startsWith('Bearer ') ? header.slice(7) : null) || req.query.token;
+  const headerToken = header.startsWith('Bearer ') ? header.slice(7) : null;
+  const token = headerToken || req.query.token;
   if (!token) return res.status(401).json({ error: 'Not authenticated' });
   try {
     const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+    if (!headerToken && payload.purpose !== 'media') {
+      return res.status(401).json({ error: 'Invalid or expired session' });
+    }
     if (!sessionStillValid(payload.sid)) return res.status(401).json({ error: 'Invalid or expired session' });
     req.user = payload;
     next();
