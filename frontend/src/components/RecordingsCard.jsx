@@ -61,17 +61,17 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
         <Video size={16} aria-hidden="true" /> Recordings
       </div>
 
-      <div className="timelapse-strip">
+      <div className="rec-strip">
         {list.map((r) => (
           <button
             key={r.id}
             type="button"
-            className="timelapse-strip__item"
+            className="rec-strip__item"
             onClick={() => setOpenId(r.id)}
             title={`${r.camera_name || 'Camera'} · ${when(r.started_at)}`}
           >
             <img src={api.url(`/recordings/${r.id}/thumb`)} alt="" loading="lazy" />
-            <span className="timelapse-play timelapse-play--sm"><Play size={16} aria-hidden="true" /></span>
+            <span className="rec-strip__play"><Play size={16} aria-hidden="true" /></span>
             <span>{when(r.started_at)}</span>
           </button>
         ))}

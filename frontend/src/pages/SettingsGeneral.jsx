@@ -5,13 +5,6 @@ import { getCommonTimezones } from '../lib/greeting.js';
 import { FONT_PRESETS } from '../lib/fonts.js';
 import AppHeader from '../components/AppHeader.jsx';
 
-function fmtBytes(b) {
-  if (b == null || !isFinite(b)) return '—';
-  if (b >= 1024 ** 3) return `${(b / 1024 ** 3).toFixed(2)} GB`;
-  if (b >= 1024 ** 2) return `${(b / 1024 ** 2).toFixed(0)} MB`;
-  return `${(b / 1024).toFixed(0)} KB`;
-}
-
 const PRESETS = [
   { label: 'Nursery (default)', accent: '#f4c56a', live: '#7FBFA3', offline: '#E08585' },
   { label: 'Dusk lavender', accent: '#C9B6F5', live: '#7FBFA3', offline: '#E08585' },
@@ -26,11 +19,8 @@ export default function SettingsGeneral() {
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [timezones] = useState(getCommonTimezones);
-  const [storage, setStorage] = useState(null);
 
   useEffect(() => setForm((f) => ({ ...f, ...settings })), [settings]);
-  const loadStorage = () => api.get('/settings/clip-storage').then(setStorage).catch(() => {});
-  useEffect(() => { loadStorage(); }, []);
 
   async function save(e) {
     e.preventDefault();
@@ -48,16 +38,11 @@ export default function SettingsGeneral() {
         timezone: form.timezone,
         font_choice: form.font_choice,
         temp_unit: form.temp_unit,
-        clip_pre_roll_s: form.clip_pre_roll_s,
-        clip_post_roll_s: form.clip_post_roll_s,
-        clip_retention_days: form.clip_retention_days,
-        clip_retention_max_gb: form.clip_retention_max_gb,
         ondemand_enabled: form.ondemand_enabled,
         ondemand_pre_roll_s: form.ondemand_pre_roll_s,
         ondemand_max_duration_s: form.ondemand_max_duration_s,
       });
       await refresh();
-      loadStorage();
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
@@ -215,129 +200,6 @@ export default function SettingsGeneral() {
                 <span className="font-btn__label">°F</span>
               </button>
             </div>
-          </div>
-
-          <div className="card">
-            <div className="card-title">Recording</div>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-                <label htmlFor="clip-pre">Pre-roll (seconds)</label>
-                <input
-                  id="clip-pre"
-                  type="number"
-                  min="0"
-                  max="30"
-                  value={form.clip_pre_roll_s ?? 5}
-                  onChange={(e) => setForm({ ...form, clip_pre_roll_s: e.target.value })}
-                />
-              </div>
-              <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-                <label htmlFor="clip-post">Post-roll (seconds)</label>
-                <input
-                  id="clip-post"
-                  type="number"
-                  min="5"
-                  max="120"
-                  value={form.clip_post_roll_s ?? 15}
-                  onChange={(e) => setForm({ ...form, clip_post_roll_s: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="camera-tile__sub" style={{ marginTop: 10 }}>
-              How much video to keep before and after a detection, for cameras with “Save a clip when
-              triggered” on (set per camera under its Motion/Sound settings). Clips are stored on the
-              server and shown on the alert they belong to.
-            </div>
-
-            {/* A plain checkbox, not a Switch: this form is save-on-submit, and the codebase reserves
-                the pill switch for settings that apply the instant they're flipped. */}
-            <label className="field" style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 18, marginBottom: 0 }}>
-              <input
-                type="checkbox"
-                checked={form.ondemand_enabled ?? true}
-                onChange={(e) => setForm({ ...form, ondemand_enabled: e.target.checked })}
-              />
-              <span>Enable on-demand recording (a Record button on each camera)</span>
-            </label>
-
-            {(form.ondemand_enabled ?? true) && (
-              <>
-                <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
-                  <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-                    <label htmlFor="ond-pre">Capture from (seconds before)</label>
-                    <input
-                      id="ond-pre"
-                      type="number"
-                      min="0"
-                      max="60"
-                      value={form.ondemand_pre_roll_s ?? 30}
-                      onChange={(e) => setForm({ ...form, ondemand_pre_roll_s: e.target.value })}
-                    />
-                  </div>
-                  <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-                    <label htmlFor="ond-max">Stop automatically after (seconds)</label>
-                    <input
-                      id="ond-max"
-                      type="number"
-                      min="5"
-                      max="600"
-                      value={form.ondemand_max_duration_s ?? 120}
-                      onChange={(e) => setForm({ ...form, ondemand_max_duration_s: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div className="camera-tile__sub" style={{ marginTop: 10 }}>
-                  Pressing Record also saves the seconds <em>before</em> you pressed, so you can catch a
-                  moment just after it happens. To do that the server keeps a short rolling buffer for
-                  every camera — turning this off stops that buffering. Recordings are kept until you
-                  delete them (they’re never removed by the clip retention above) and appear on the
-                  child’s page.
-                </div>
-              </>
-            )}
-
-            <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
-              <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-                <label htmlFor="clip-days">Keep clips for (days)</label>
-                <input
-                  id="clip-days"
-                  type="number"
-                  min="0"
-                  max="365"
-                  value={form.clip_retention_days ?? 14}
-                  onChange={(e) => setForm({ ...form, clip_retention_days: e.target.value })}
-                />
-              </div>
-              <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-                <label htmlFor="clip-gb">Storage cap (GB)</label>
-                <input
-                  id="clip-gb"
-                  type="number"
-                  min="0"
-                  max="2000"
-                  value={form.clip_retention_max_gb ?? 5}
-                  onChange={(e) => setForm({ ...form, clip_retention_max_gb: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="camera-tile__sub" style={{ marginTop: 10 }}>
-              Oldest clips are deleted once either limit is passed (0 turns that limit off). The alert
-              and its snapshot stay — only the video is removed.
-            </div>
-
-            {storage && (
-              <div className="storage-readout">
-                <div>
-                  <strong>{fmtBytes(storage.usedBytes)}</strong> used
-                  {typeof storage.clipCount === 'number' ? ` · ${storage.clipCount} clip${storage.clipCount === 1 ? '' : 's'}` : ''}
-                  {typeof storage.freeBytes === 'number' && isFinite(storage.freeBytes) ? ` · ${fmtBytes(storage.freeBytes)} free` : ''}
-                </div>
-                <div className="camera-tile__sub" style={{ wordBreak: 'break-all' }}>
-                  Saving to <code>{storage.path}</code>
-                  {storage.ok ? '' : ' — ⚠ not a mapped volume; recording is disabled until this path is mounted'}
-                </div>
-              </div>
-            )}
           </div>
 
           <button className="btn btn-primary" type="submit" disabled={busy} style={{ marginTop: 20 }}>
