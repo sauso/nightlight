@@ -147,6 +147,7 @@ function serializeZone(z) {
 }
 
 function publicCamera(cam, isAdmin) {
+  const recState = recordingState(cam.id);
   // snapshot_url can carry Basic-auth creds, so keep it admin-only (like the RTSP/ONVIF secrets).
   const { rtsp_url, onvif_username, onvif_password, talk_username, talk_password, sub_rtsp_url, snapshot_url, ...rest } = cam;
   // talk_configured / has_sub (safe for everyone) drive the tile's talk button + quality selector.
@@ -163,7 +164,11 @@ function publicCamera(cam, isAdmin) {
     // second device. `can_record` is false while the ring isn't up (camera offline / feature off), which
     // is exactly when Start would be rejected — so the button can disable itself instead of failing.
     can_record: getOndemandSettings().enabled && isClipCapturing(cam.id) && !cam.disabled,
-    ...recordingState(cam.id),
+    // Mapped field by field, NOT spread: recordingState carries its own `id` (the recording's), which
+    // spreading would silently overwrite the camera's `id` for exactly as long as a recording runs.
+    recording: recState.recording,
+    recording_id: recState.id ?? null,
+    recording_elapsed_s: recState.elapsed_s ?? 0,
   };
   if (!isAdmin) return base;
   const parts = parseRtspComponents(rtsp_url) || {};
