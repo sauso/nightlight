@@ -1,6 +1,7 @@
 import db from '../db.js';
 import { logger } from './logger.js';
 import { notifySleepReports } from './sleepReportAlert.js';
+import { getBedTransitions } from './bedTransitions.js';
 
 // A computed night is "fresh" (worth notifying about) only if its window closed within this long — so a
 // mid-day container restart that re-computes an already-seen night does NOT re-send the report push.
@@ -25,6 +26,23 @@ const ONSET_QUIET_MIN = 15; // continuous quiet minutes to call it "asleep"
 const WAKE_ACTIVE_MIN = 5; // active minutes (within a run) to count as an awakening (vs a brief stir)
 const WAKE_GAP_MIN = 3; // bridge quiet gaps up to this long inside one awakening (intermittent noise/movement)
 const MIN_COVERAGE_FRAC = 0.5; // need activity samples for at least this fraction of the window, else no_data
+// How far PAST the window end to keep looking for the morning "out of bed" — a child can sleep past the
+// window edge, so the terminal exit that marks "up for the day" may fall a couple hours later. Only the
+// SHADOW wake uses this (the live algo still stops at the window). See computeNight's shadow block.
+const WAKE_LOOKAHEAD_MS = 3 * 60 * 60 * 1000;
+// SHADOW wake needs the crib to stay empty (no in-crib motion) at least this long after the last in-crib
+// movement to call it "up for the day" (vs a momentary lull while still asleep in the crib).
+const MORNING_ABSENCE_MIN = 20;
+// A morning departure is a sustained empty-crib gap after which only a FEW isolated crib-active minutes
+// remain — a parent reaching into the empty crib after the child is already up (getting them, tidying).
+// A mid-sleep quiet gap, by contrast, is followed by lots more in-crib stirring. This cap is what keeps a
+// parent handling the crib post-wake from dragging the wake time out to the last hand-in-the-crib, and
+// keeps a long deep-sleep lull from reading as the morning exit. Tuned against real nights (2026-08-23
+// Renz: real exit ~06:38 leaves 7 active min after; the mid-sleep 05:14 lull leaves 22).
+const MAX_POST_EXIT_ACTIVE_MIN = 10;
+// When the empty-crib run starts near a recorded crib transition, snap the wake to that transition's clock
+// time (its TIMING is trustworthy even though its in/out LABEL isn't — see the destination-state note).
+const WAKE_SNAP_MS = 5 * 60 * 1000;
 
 // --- timezone helpers (no library; same Intl approach as detectSchedule.nowMinutesInAppTz) ---
 
@@ -236,6 +254,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     as_of: asOfSql,
     onset_at: null,
     wake_at: null,
+    onset_at_shadow: null,
+    wake_at_shadow: null,
     asleep_minutes: null,
     awake_minutes: null,
     wake_count: null,
@@ -350,6 +370,118 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     wake_count: wakeCount,
     longest_stretch_minutes: longest,
   };
+
+  // Periods the child is OUT of the crib — from an out_of_bed event until the next into_bed — used below
+  // to classify each room-activity block as the child being out vs someone else in the room (child in crib).
+  let outIntervals = [];
+
+  // --- SHADOW onset/wake from crib-boundary transitions (validation only — NOT the authoritative
+  // numbers yet; stored in *_shadow columns so we can compare them to the algo night-by-night). The
+  // activity-only algo can't tell an empty quiet crib from a sleeping child; the transitions can. ---
+  {
+    // First quiet run of >= ONSET_QUIET_MIN starting at or after index `from` (null if none).
+    const firstQuietRunFrom = (from) => {
+      for (let i = Math.max(0, from); i + ONSET_QUIET_MIN <= totalMin; i++) {
+        let quiet = true;
+        for (let j = i; j < i + ONSET_QUIET_MIN; j++) if (active[j]) { quiet = false; break; }
+        if (quiet) return i;
+      }
+      return null;
+    };
+    // Transitions across the window, plus a lookahead past its end for the morning exit (completed
+    // nights only — mid-night we don't guess ahead).
+    const lookahead = inProgress ? 0 : WAKE_LOOKAHEAD_MS;
+    const txEndSql = toSqlUtc(new Date(endUtc.getTime() + lookahead));
+    const transitions = getBedTransitions(cams, startSql, txEndSql);
+    const txMs = (t) => new Date(t.replace(' ', 'T') + 'Z').getTime();
+
+    // Build the child-out intervals: open on an out_of_bed, close on the next into_bed. Consecutive
+    // out_of_bed events (e.g. a morning cluster) stay one interval; an interval still open at the end of
+    // the analysis means the child was out through to the end.
+    {
+      let openOut = null;
+      for (const t of transitions) {
+        const ms = txMs(t.created_at);
+        if (t.type === 'out_of_bed') { if (openOut == null) openOut = ms; }
+        else if (t.type === 'into_bed') { if (openOut != null) { outIntervals.push([openOut, ms]); openOut = null; } }
+      }
+      if (openOut != null) outIntervals.push([openOut, effEndMs]);
+    }
+
+    // Onset: an into_bed only ever DELAYS onset — before the child was actually placed in the crib the
+    // quiet is an empty crib, not sleep. Onset is a once-per-night event: the FIRST put-down that leads to
+    // sustained sleep. Take the EARLIEST into_bed whose following quiet run qualifies (firstQuietRunFrom
+    // already skips the evening fussing, so this lands on the settle, not the put-down instant); never move
+    // earlier than the algo onset. Using the earliest — not the latest — is deliberate: on a restless night
+    // the child is re-settled into the crib several times (into_bed at ~3am after a 2–4am waking), and the
+    // LAST such re-settle must not be mistaken for the night's onset (that bug put onset at 4:20am on
+    // 2026-08-23). The first qualifying sleep stretch is the onset; later re-settles are mid-night wakes.
+    let onsetIdx = onset;
+    for (const t of transitions) {
+      if (t.type !== 'into_bed') continue;
+      const idx = Math.round((txMs(t.created_at) - startUtc.getTime()) / 60000);
+      if (idx < 0 || idx >= totalMin) continue;
+      const q = firstQuietRunFrom(idx);
+      if (q != null) { onsetIdx = Math.max(q, onset); break; } // earliest qualifying into_bed wins
+    }
+    out.onset_at_shadow = minuteTime(onsetIdx);
+
+    // Wake: find the morning DEPARTURE from the crib-motion timeline, ignoring the unreliable in/out labels
+    // (the SAME 06:41 exit was labelled oppositely on two legs of one camera, 2026-08-23) AND ignoring a
+    // parent handling the crib after the child is already up. The departure is the earliest sustained
+    // empty-crib gap after which the crib stays essentially empty (only a few isolated hand-in-crib spikes)
+    // — see the scan below. This deliberately does NOT use the LAST in-crib motion: on 2026-08-24 the child
+    // was up ~06:38 but a parent then reached into the crib (peaks 0.89/0.99 at 07:22–08:11), which the
+    // old "last motion then empty" rule mistook for the wake (08:11). Only for a completed night (mid-night
+    // we don't guess a morning wake). Transition TIMING is still trustworthy, so we snap the departure to a
+    // nearby transition of either label for a crisp clock time. Defaults to the algo wake, so the shadow
+    // value is never worse than the live estimate when no clear departure is found.
+    out.wake_at_shadow = out.wake_at;
+    if (!inProgress) {
+      const totalMinExt = Math.max(totalMin, Math.round((endUtc.getTime() + lookahead - startUtc.getTime()) / 60000));
+      const extRows = db
+        .prepare(
+          `SELECT bucket_start AS t, motion_peak FROM activity_samples
+             WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
+        )
+        .all(...cams, startSql, txEndSql);
+      const cribActExt = new Array(totalMinExt).fill(false);
+      for (const r of extRows) {
+        const i = idxOf(r.t);
+        if (i >= 0 && i < totalMinExt && r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) cribActExt[i] = true;
+      }
+      // Suffix count of crib-active minutes from each index to the end, so we can cheaply ask "how much
+      // in-crib motion remains after this point?" for each candidate gap.
+      const activeSuffix = new Array(totalMinExt + 1).fill(0);
+      for (let i = totalMinExt - 1; i >= 0; i--) activeSuffix[i] = activeSuffix[i + 1] + (cribActExt[i] ? 1 : 0);
+
+      // Morning departure = the EARLIEST sustained empty-crib gap (>= MORNING_ABSENCE_MIN) at/after onset
+      // after which only a few isolated crib-active minutes remain (<= MAX_POST_EXIT_ACTIVE_MIN). Scanning
+      // for the FIRST such gap — rather than the last in-crib motion — is the fix for a parent handling the
+      // crib after the child is already up: those late hand-in-crib spikes fall AFTER the departure gap, so
+      // they no longer drag the wake later. And the "few active minutes remain" test is what stops a
+      // mid-sleep lull (followed by lots more stirring) from being mistaken for the exit.
+      let exitIdx = -1;
+      for (let i = Math.max(onset, 0); i < totalMinExt; ) {
+        if (cribActExt[i]) { i++; continue; }
+        let j = i;
+        while (j < totalMinExt && !cribActExt[j]) j++; // [i, j) is a maximal empty run
+        if (j - i >= MORNING_ABSENCE_MIN && activeSuffix[i] <= MAX_POST_EXIT_ACTIVE_MIN) { exitIdx = i; break; }
+        i = j;
+      }
+      if (exitIdx >= 0) {
+        const emptyStartMs = startUtc.getTime() + exitIdx * 60000;
+        let best = null;
+        for (const t of transitions) {
+          const dt = Math.abs(txMs(t.created_at) - emptyStartMs);
+          if (dt <= WAKE_SNAP_MS && (best == null || dt < best.dt)) best = { dt, ms: txMs(t.created_at) };
+        }
+        out.wake_at_shadow = toSqlUtc(new Date(best ? best.ms : emptyStartMs));
+      }
+    }
+
+    if (includeTimeline) out.transitions = transitions.map((t) => ({ type: t.type, at: t.created_at }));
+  }
   if (includeTimeline) {
     out.timeline = state.map((s, i) => ({ t: minuteTime(i), state: s === null ? 'gap' : s ? 'active' : 'quiet', inWake: inWake[i], out: outAt[i] }));
 
@@ -364,15 +496,23 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     }
     out.wakes = wakes;
 
-    // Outside-the-crib movement grouped into "room activity" events (someone came in / the child out of
-    // bed), bridging single-minute gaps. Shown distinctly from the child's own stirring/waking.
+    // Outside-the-crib movement grouped into "room activity" events, bridging single-minute gaps. Each is
+    // typed by whether it falls inside a child-out interval (out_of_bed→into_bed): 'child_out' = the child
+    // themselves out of the crib; 'room' = movement while the child is still in the crib (someone in the
+    // room). Shown distinctly from the child's own in-crib stirring/waking.
+    const overlapsOut = (a, b) => outIntervals.some(([s, e]) => a < e && s < b);
     const visits = [];
     for (let i = 0; i < totalMin; ) {
       if (!outAt[i]) { i++; continue; }
       let last = i;
       let k = i + 1;
       while (k < totalMin && (outAt[k] || (k + 1 < totalMin && outAt[k + 1]))) { if (outAt[k]) last = k; k++; }
-      visits.push({ start_at: minuteTime(i), end_at: minuteTime(last + 1), minutes: last - i + 1 });
+      const vStartMs = startUtc.getTime() + i * 60000;
+      const vEndMs = startUtc.getTime() + (last + 1) * 60000;
+      visits.push({
+        start_at: minuteTime(i), end_at: minuteTime(last + 1), minutes: last - i + 1,
+        type: overlapsOut(vStartMs, vEndMs) ? 'child_out' : 'room',
+      });
       i = last + 1;
     }
     out.visits = visits;
@@ -414,14 +554,18 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
 const upsertNight = db.prepare(
   `INSERT INTO sleep_nights
      (child_id, night_date, window_start, window_end, status, onset_at, wake_at,
+      onset_at_shadow, wake_at_shadow,
       asleep_minutes, awake_minutes, wake_count, longest_stretch_minutes, coverage_minutes,
       avg_temperature, avg_humidity, computed_at)
    VALUES (@child_id, @night_date, @window_start, @window_end, @status, @onset_at, @wake_at,
+           @onset_at_shadow, @wake_at_shadow,
            @asleep_minutes, @awake_minutes, @wake_count, @longest_stretch_minutes, @coverage_minutes,
            @avg_temperature, @avg_humidity, datetime('now'))
    ON CONFLICT(child_id, night_date) DO UPDATE SET
      window_start=excluded.window_start, window_end=excluded.window_end, status=excluded.status,
-     onset_at=excluded.onset_at, wake_at=excluded.wake_at, asleep_minutes=excluded.asleep_minutes,
+     onset_at=excluded.onset_at, wake_at=excluded.wake_at,
+     onset_at_shadow=excluded.onset_at_shadow, wake_at_shadow=excluded.wake_at_shadow,
+     asleep_minutes=excluded.asleep_minutes,
      awake_minutes=excluded.awake_minutes, wake_count=excluded.wake_count,
      longest_stretch_minutes=excluded.longest_stretch_minutes, coverage_minutes=excluded.coverage_minutes,
      avg_temperature=excluded.avg_temperature, avg_humidity=excluded.avg_humidity,
@@ -542,6 +686,7 @@ export function runNightlySleepJob() {
     const kids = db.prepare('SELECT id, name FROM children').all();
     let computed = 0;
     const fresh = []; // freshly-closed nights to notify about ({ name, summary })
+    const toTimelapse = []; // freshly-closed nights to assemble a memories timelapse for
     const now = Date.now();
     const notifyOn = db.prepare('SELECT sleep_report_alert_enabled FROM settings WHERE id = ?').get('app')?.sleep_report_alert_enabled;
     for (const kid of kids) {
@@ -551,12 +696,22 @@ export function runNightlySleepJob() {
       if (existing) continue;
       const summary = computeAndStoreNight(kid.id, nightDate);
       computed++;
+      toTimelapse.push({ childId: kid.id, nightDate });
       // Only notify if the window closed recently (guards against a mid-day restart re-notifying).
       const endMs = summary.window_end ? new Date(summary.window_end.replace(' ', 'T') + 'Z').getTime() : 0;
       if (endMs && now - endMs <= REPORT_FRESH_MS) fresh.push({ name: kid.name, summary });
     }
     if (computed > 0) logger.info(`[sleep] Computed ${computed} sleep summary(ies).`);
     if (notifyOn && fresh.length > 0) notifySleepReports(fresh);
+    // Assemble each freshly-closed night's memories timelapse from the frames the sampler collected
+    // overnight. Fire-and-forget (one FFmpeg pass each) and dynamically imported to avoid a static
+    // import cycle (timelapse.js imports the window helpers from this module). Runs once per night —
+    // the `existing` guard above means a night is only in this list the first time it's computed.
+    if (toTimelapse.length) {
+      import('./timelapse.js')
+        .then((m) => { for (const t of toTimelapse) m.assembleTimelapse(t.childId, t.nightDate).catch(() => {}); })
+        .catch((e) => logger.error(`[timelapse] assembly trigger import failed: ${e.message}`));
+    }
   } catch (err) {
     logger.error('[sleep] Nightly job failed:', err.message);
   }

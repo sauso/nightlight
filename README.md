@@ -36,9 +36,11 @@ by the end-to-end test suite, so they stay in sync with the actual UI.
   added by IP over **ONVIF** (auto-filling the stream details), and PTZ (pan/tilt) cameras
   get on-screen controls — see [Managing cameras](#managing-cameras).
 
-Everything above runs in a **single Docker container** using **host networking**, which is
-the simplest and most reliable way to run WebRTC on a local network (no NAT/ICE headaches,
-no ports to keep in sync).
+Everything above runs in a **single Docker container**, which needs its own routable IP on your LAN so
+WebRTC connects without NAT/ICE headaches (MediaMTX advertises that IP to browsers). The simple default
+is **host networking** — the container shares the host's IP — used by the quick start and the Unraid
+template. If host mode doesn't suit you (e.g. a port clash with another service), you can instead give
+the container its **own dedicated LAN IP**; see [Networking modes](#networking-modes) below.
 
 This is designed for **local network use by default** — see "Remote / internet access"
 below if you want it reachable from outside your home too.
@@ -119,6 +121,53 @@ Apps tab), install it locally by placing the file where Unraid looks for user te
 
 This is a single container — no extra plugins needed, Unraid's normal Docker UI handles it
 directly.
+
+## Networking modes
+
+Nightlight needs its own routable IP on your LAN so WebRTC has no NAT/ICE trouble — MediaMTX advertises
+that IP to browsers. There are two supported ways to provide one:
+
+- **Host networking (default, simplest).** The container shares the host's IP (`--network host`, or
+  `<Network>host</Network>` in the Unraid template). Nothing to configure — it's what the quick start and
+  the template use. The trade-off is that it binds its ports (4000, plus MediaMTX's) directly on the host,
+  which clashes if something else there already uses them.
+- **A dedicated LAN IP (ipvlan / macvlan).** Put the container on a Docker `ipvlan`/`macvlan` network so it
+  gets its **own** address on your LAN, separate from the host. Nightlight auto-detects the container's IP
+  and has MediaMTX advertise it, so WebRTC works on the LAN with **no extra configuration** (no `PUBLIC_HOST`
+  needed for local viewing). Use this to avoid host-mode port conflicts, or just to keep the app on a tidy
+  fixed IP of its own.
+  - **On Unraid:** create a custom Docker network on your NIC (e.g. `br0`, or a VLAN like `br0.10`), then in
+    the container template set the **Network Type** to that network and give it a fixed IP.
+  - **macvlan caveat:** with plain `macvlan`, the **host itself usually can't reach the container** (a Linux
+    kernel limitation) — which matters if your reverse proxy (e.g. SWAG) runs on that same host. Use
+    **`ipvlan`** (or add a macvlan shim interface) so the host can reach it.
+
+Either way, the app is still served on port **4000** (change it with the `PORT` env var if you need to).
+For **remote / internet** access, see "Remote / internet access" below — that part is the same in both
+modes.
+
+### Running more than one instance (e.g. staging + production)
+
+Running two copies on one host is easiest with the **dedicated LAN IP** mode above: give each its own IP
+and they can keep the same internal ports without clashing (host networking can't — two host-mode
+containers would both try to grab port 4000). Set a different `PORT` on an instance if you'd rather change
+its HTTP port instead.
+
+Watching **both remotely in Low latency (WebRTC)** takes one extra step, because each instance's WebRTC
+media needs its own UDP port forwarded **1:1** — the port a browser must reach has to match the port
+MediaMTX advertises, so a router that *remaps* the port breaks WebRTC:
+
+1. Give each instance a **distinct WebRTC UDP port**: leave one at the default `8189` and set the other
+   with the `MTX_WEBRTCLOCALUDPADDRESS` env var, e.g. `MTX_WEBRTCLOCALUDPADDRESS=:8190`.
+2. **Forward each 1:1** on your router — external UDP `8189` → instance A's `8189`, external UDP `8190` →
+   instance B's `8190` (same number in and out).
+3. Set `PUBLIC_HOST` (your public IP or DDNS) on **both**.
+4. Put each behind its **own subdomain** in SWAG (e.g. `nursery.example.com`, `nursery-dev.example.com`);
+   the HTTP and the WebRTC signalling both ride 443, so the only per-instance forwards are those two UDP
+   media ports.
+
+**Compatibility (HLS)** needs none of this — it's all HTTP over 443, so both instances work remotely with
+no extra port forwarding.
 
 ## Managing cameras
 
@@ -213,8 +262,13 @@ can't manage other user accounts or change app-wide settings.
 
 A ready-to-use config is in `reverse-proxy/nightlight.subdomain.conf`. Copy it to
 `swag/config/nginx/proxy-confs/nightlight.subdomain.conf` and replace `UNRAID_LAN_IP`
-with your server's actual LAN IP — since this uses `network_mode: host`, SWAG can't reach
-it by container name, only by that real IP.
+with the container's LAN IP — the **host's IP** in host mode, or the container's **own
+dedicated IP** if you gave it one (see [Networking modes](#networking-modes)). Either way SWAG
+reaches it by that IP, not by container name.
+
+> **macvlan note:** if you put Nightlight on its own IP with plain `macvlan`, SWAG running on the
+> *same host* won't be able to reach it (the host↔macvlan-container limitation noted above) — use
+> `ipvlan`, or run SWAG on a different host.
 
 Everything is proxied through a single port (4000): the app, login, all pages, and the
 video signaling handshake — no extra ports to open on your router for this part.

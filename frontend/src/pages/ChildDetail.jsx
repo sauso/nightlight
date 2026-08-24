@@ -10,6 +10,7 @@ import CameraRow from '../components/CameraRow.jsx';
 import AlertList from '../components/AlertList.jsx';
 import SensorHistoryCard from '../components/SensorHistoryCard.jsx';
 import SleepSummaryCard from '../components/SleepSummaryCard.jsx';
+import TimelapseCard from '../components/TimelapseCard.jsx';
 import { ageLabel } from '../lib/age.js';
 
 // A child's hub: their identity + (later) last night's sleep, then their cameras and their alerts.
@@ -74,6 +75,8 @@ export default function ChildDetail() {
           </div>
           <SleepSummaryCard childId={id} />
         </div>
+
+        <TimelapseCard childId={id} />
 
         {childCams.filter((c) => c.mqtt_topic).map((c) => (
           <SensorHistoryCard key={c.id} camera={c} />

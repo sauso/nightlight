@@ -552,6 +552,39 @@ body.in-pip .tile-menu-backdrop {
   }
 }
 
+/* --- Phone in landscape: reclaim vertical space ---
+   A phone's landscape viewport is short, but the sticky header, the fixed bottom nav, and a full 16:9
+   camera tile together overflow it — pushing each tile's temperature/humidity readings (which sit BELOW
+   the video, in .camera-tile__meta) off-screen or behind the nav. So slim the header + nav and cap the
+   video height so the whole tile (video + readings) fits. Scoped to SHORT landscape (max-height) so
+   portrait phones, tablets, and the ≥1200px desktop sidebar layout are untouched; :not(:fullscreen)
+   leaves a fullscreened video full-size. */
+@media (orientation: landscape) and (max-height: 480px) {
+  .app-shell { padding-bottom: 48px; }
+
+  .app-header {
+    min-height: 0;
+    padding-top: calc(4px + env(safe-area-inset-top));
+    padding-bottom: 4px;
+  }
+  .app-header h1 { font-size: 17px; }
+  .app-header__icon { width: 28px; height: 28px; }
+
+  .bottom-nav { padding: 2px 8px calc(2px + env(safe-area-inset-bottom)); }
+  .bottom-nav a { font-size: 10px; padding: 2px 4px; }
+  .bottom-nav__icon { margin-bottom: 3px; }
+
+  .app-main { padding-top: 10px; padding-bottom: 12px; }
+  .card-grid { gap: 16px; }
+
+  /* Shrink the video so the readings row stays on screen. aspect-ratio:auto + a viewport-height cap;
+     object-fit: cover (already on the video) absorbs the small crop. Untouched in fullscreen. */
+  .camera-tile__video-wrap:not(:fullscreen) {
+    aspect-ratio: auto;
+    height: 50vh;
+  }
+}
+
 /* Section heading that sits ABOVE a card (bare, with spacing). Shares the canonical card-title
    typography below so every heading in the app reads the same — matching the Room-climate card title. */
 .section-title {
@@ -1119,8 +1152,31 @@ body.in-pip .tile-menu-backdrop {
 .sleep-seg--wake { background: var(--sleep-wake); }
 .sleep-seg--awake { background: var(--sleep-awake); }
 .sleep-legend__sw--visit { background: var(--sleep-visit); border-radius: 50%; }
+.sleep-legend__sw--out { background: var(--sleep-wake); border-radius: 50%; }
 .sleep-wakes__dur--visit { color: var(--sleep-visit); }
+.sleep-wakes__dur--out { color: var(--sleep-wake); }
+/* Room-activity rows now carry a type tag (child out of the crib vs someone else in the room), so the
+   right-hand side groups the tag + duration together. */
+.sleep-visit-right { display: inline-flex; align-items: center; gap: 10px; }
+.sleep-visit-tag { font-size: 11px; font-weight: 700; letter-spacing: 0.02em; color: var(--sleep-visit); background: color-mix(in srgb, var(--sleep-visit) 15%, transparent); padding: 1px 8px; border-radius: 20px; white-space: nowrap; }
+.sleep-visit-tag--out { color: var(--sleep-wake); background: color-mix(in srgb, var(--sleep-wake) 15%, transparent); }
+/* Out-of-crib room-activity dot on the timeline — the child themselves out (vs teal = someone in the room). */
+.sleep-tl__visit--out { background: var(--sleep-wake); box-shadow: 0 0 0 1px var(--sleep-wake); }
 .sleep-tl__mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text-primary); opacity: 0.55; transform: translateX(-1px); }
+/* Crib-boundary transition markers (out-of-bed detection): a triangle pointing DOWN at the bar = placed
+   into the crib; pointing UP = climbed/lifted out. Sit in their own strip just above the timeline bar. */
+.sleep-tl__txs { position: relative; height: 9px; margin-bottom: 2px; }
+.sleep-tl__tx { position: absolute; top: 1px; width: 0; height: 0; transform: translateX(-50%); border-left: 4px solid transparent; border-right: 4px solid transparent; }
+.sleep-tl__tx--in { border-top: 7px solid var(--sleep-asleep); }
+.sleep-tl__tx--out { border-bottom: 7px solid var(--sleep-wake); }
+/* "Refined" (transition-corrected) onset/wake shown under the summary while we validate it against the
+   live estimate. Struck-through old value + the new one, clearly flagged as experimental. */
+.sleep-refined { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-top: 12px; padding-top: 11px; border-top: 1px dashed var(--border); }
+.sleep-refined__label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; letter-spacing: 0.02em; color: var(--sleep-visit); }
+.sleep-refined__item { font-size: 13px; color: var(--text-secondary); }
+.sleep-refined__item b { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+.sleep-refined__old { text-decoration: line-through; opacity: 0.55; margin-right: 5px; font-variant-numeric: tabular-nums; }
+.sleep-refined__note { flex-basis: 100%; font-size: 11px; color: var(--text-secondary); opacity: 0.8; margin-top: 2px; }
 .sleep-tl__now { position: absolute; top: -4px; bottom: -4px; width: 0; border-left: 2px dashed var(--accent); transform: translateX(-1px); }
 /* Hover bubble over the timeline: a follow-the-cursor tooltip with the time, sleep status, and (if a
    sensor was present) the temperature at that moment. The wrap is the mouse/touch target; it must NOT
@@ -1974,6 +2030,157 @@ input[type='range'] {
   background: var(--peri);
   color: #fff;
   font-weight: 600;
+}
+
+/* Camera tile detection quick-toggles — Motion / Sound / Alerts as three icon-over-label buttons
+   on one row. Off = dim outline; on = filled peri (matches .segmented__btn--active). */
+.detect-toggles {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.detect-toggle {
+  flex: 1;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 10px 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.detect-toggle:hover:not(:disabled) {
+  border-color: var(--peri);
+  color: var(--text-primary);
+}
+.detect-toggle--on {
+  background: var(--peri);
+  border-color: var(--peri);
+  color: #fff;
+  font-weight: 600;
+}
+.detect-toggle:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* "Silence alerts" — one button that reveals 15/30/60-min durations; when muted it flips to a
+   tap-to-un-mute button. */
+.silence-block {
+  margin-bottom: 12px;
+}
+.silence-btn {
+  width: 100%;
+  justify-content: center;
+}
+.silence-btn--muted {
+  border-color: var(--accent-dim);
+  color: var(--accent-dim);
+}
+.silence-menu {
+  display: flex;
+  gap: 8px;
+}
+.silence-menu .btn {
+  flex: 1;
+}
+
+/* "Memories" timelapse card on child detail (see components/TimelapseCard.jsx). */
+.timelapse-card .card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.timelapse-hero {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg-elevated-2);
+  cursor: pointer;
+  aspect-ratio: 16 / 9;
+}
+.timelapse-hero__thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.timelapse-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 56px;
+  height: 56px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  backdrop-filter: blur(2px);
+}
+.timelapse-hero__meta {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+}
+.timelapse-strip {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.timelapse-strip__item {
+  flex: 0 0 auto;
+  width: 84px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-elevated-2);
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+.timelapse-strip__item--active {
+  border-color: var(--peri);
+  color: var(--text-primary);
+}
+.timelapse-strip__item img {
+  width: 100%;
+  height: 48px;
+  object-fit: cover;
+  display: block;
+}
+.timelapse-strip__item span {
+  display: block;
+  font-size: 11px;
+  padding: 3px 2px;
+  text-align: center;
+}
+.timelapse-player {
+  width: 100%;
+  max-height: 70vh;
+  border-radius: 8px;
+  background: #000;
 }
 
 /* Pill toggle switch (see components/Switch.jsx) — for immediate-apply settings only.

@@ -37,6 +37,6 @@ connect an MQTT broker to show room temperature/humidity on each tile.
 
 ## Push notifications
 
-Nightlight can push a motion alert to your phone even when the app is closed — using your own
-Firebase project (nothing is shared through a Nightlight cloud). It's optional and off by default.
-See **[notifications.md](notifications.md)** for the one-time setup.
+Nightlight can push a motion alert to your phone even when the app is closed — through your choice of
+**Pushover, ntfy, Gotify, or your own Firebase project** (nothing is shared through a Nightlight cloud).
+It's optional and off by default. See **[notifications.md](notifications.md)** for the one-time setup.
