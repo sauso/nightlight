@@ -87,14 +87,14 @@ export default function SettingsRecording() {
               triggered” on (set per camera under its Motion/Sound settings). Each clip is shown on the
               alert it belongs to.
             </div>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+            <div className="field-row">
+              <div className="field">
                 <label htmlFor="clip-pre">Pre-roll (seconds)</label>
                 <input id="clip-pre" type="number" min="0" max="30"
                   value={form.clip_pre_roll_s ?? 5}
                   onChange={(e) => setForm({ ...form, clip_pre_roll_s: e.target.value })} />
               </div>
-              <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+              <div className="field">
                 <label htmlFor="clip-post">Post-roll (seconds)</label>
                 <input id="clip-post" type="number" min="5" max="120"
                   value={form.clip_post_roll_s ?? 15}
@@ -105,14 +105,14 @@ export default function SettingsRecording() {
               How much video to keep before and after the moment that triggered the alert.
             </div>
 
-            <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-              <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+            <div className="field-row" style={{ marginTop: 16 }}>
+              <div className="field">
                 <label htmlFor="clip-days">Keep clips for (days)</label>
                 <input id="clip-days" type="number" min="0" max="365"
                   value={form.clip_retention_days ?? 14}
                   onChange={(e) => setForm({ ...form, clip_retention_days: e.target.value })} />
               </div>
-              <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+              <div className="field">
                 <label htmlFor="clip-gb">Storage cap (GB)</label>
                 <input id="clip-gb" type="number" min="0" max="2000"
                   value={form.clip_retention_max_gb ?? 5}
@@ -145,15 +145,15 @@ export default function SettingsRecording() {
 
             {ondemandOn && (
               <>
-                <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-                  <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-                    <label htmlFor="ond-pre">Also capture (seconds before)</label>
+                <div className="field-row" style={{ marginTop: 16 }}>
+                  <div className="field">
+                    <label htmlFor="ond-pre">Capture before (seconds)</label>
                     <input id="ond-pre" type="number" min="0" max="60"
                       value={form.ondemand_pre_roll_s ?? 30}
                       onChange={(e) => setForm({ ...form, ondemand_pre_roll_s: e.target.value })} />
                   </div>
-                  <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-                    <label htmlFor="ond-max">Stop automatically after (seconds)</label>
+                  <div className="field">
+                    <label htmlFor="ond-max">Auto-stop after (seconds)</label>
                     <input id="ond-max" type="number" min="5" max="600"
                       value={form.ondemand_max_duration_s ?? 120}
                       onChange={(e) => setForm({ ...form, ondemand_max_duration_s: e.target.value })} />
