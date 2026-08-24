@@ -2176,13 +2176,6 @@ input[type='range'] {
   padding: 3px 2px;
   text-align: center;
 }
-.timelapse-player {
-  width: 100%;
-  max-height: 70vh;
-  border-radius: 8px;
-  background: #000;
-}
-
 /* Pill toggle switch (see components/Switch.jsx) — for immediate-apply settings only.
    The real checkbox is stretched over the track and made invisible so it stays the hit
    target and keeps native label/keyboard behaviour; the track + thumb are the visuals. */
