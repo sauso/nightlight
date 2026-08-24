@@ -68,6 +68,7 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     app_name, accent_color, live_color, offline_color, timezone, font_choice,
     temp_unit, mqtt_enabled, mqtt_host, mqtt_port, mqtt_username, mqtt_password,
     ptz_step, clip_pre_roll_s, clip_post_roll_s, clip_retention_days, clip_retention_max_gb,
+    ondemand_enabled, ondemand_pre_roll_s, ondemand_max_duration_s,
     camera_offline_alert_enabled, camera_offline_alert_minutes,
   } = req.body || {};
 
@@ -118,6 +119,32 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     postRoll = n;
   }
   const clipLenChanged = preRoll !== existing.clip_pre_roll_s || postRoll !== existing.clip_post_roll_s;
+
+  // On-demand recording. The pre-roll drives the segmenter ring depth (like the clip pre-roll), so a
+  // change here has to re-arm the rings too. Cap it at 60s: the ring holds that much video for every
+  // camera continuously, and reaching back further than a minute isn't what the button is for.
+  let ondEnabled = existing.ondemand_enabled;
+  if (ondemand_enabled !== undefined) ondEnabled = ondemand_enabled ? 1 : 0;
+  let ondPreRoll = existing.ondemand_pre_roll_s;
+  if (ondemand_pre_roll_s !== undefined) {
+    const n = parseInt(ondemand_pre_roll_s, 10);
+    if (!Number.isFinite(n) || n < 0 || n > 60) {
+      return res.status(400).json({ error: 'Record pre-roll must be between 0 and 60 seconds' });
+    }
+    ondPreRoll = n;
+  }
+  let ondMaxDur = existing.ondemand_max_duration_s;
+  if (ondemand_max_duration_s !== undefined) {
+    const n = parseInt(ondemand_max_duration_s, 10);
+    if (!Number.isFinite(n) || n < 5 || n > 600) {
+      return res.status(400).json({ error: 'Maximum recording length must be between 5 and 600 seconds' });
+    }
+    ondMaxDur = n;
+  }
+  // Turning the feature on or off, or changing its pre-roll, changes which cameras need a ring and how
+  // deep it must be — so both need the same re-arm as a clip-length change.
+  const ondemandChanged =
+    ondEnabled !== existing.ondemand_enabled || ondPreRoll !== existing.ondemand_pre_roll_s;
   // Retention. 0 disables a bound; otherwise days 1-365, cap 1-2000 GB.
   let retentionDays = existing.clip_retention_days;
   if (clip_retention_days !== undefined) {
@@ -157,7 +184,8 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
      SET app_name = ?, accent_color = ?, live_color = ?, offline_color = ?, timezone = ?, font_choice = ?,
          temp_unit = ?, mqtt_enabled = ?, mqtt_host = ?, mqtt_port = ?, mqtt_username = ?, mqtt_password = ?,
          ptz_step = ?, clip_pre_roll_s = ?, clip_post_roll_s = ?, clip_retention_days = ?, clip_retention_max_gb = ?,
-         camera_offline_alert_enabled = ?, camera_offline_alert_minutes = ?
+         camera_offline_alert_enabled = ?, camera_offline_alert_minutes = ?,
+         ondemand_enabled = ?, ondemand_pre_roll_s = ?, ondemand_max_duration_s = ?
      WHERE id = ?`
   ).run(
     app_name?.trim() || existing.app_name,
@@ -179,12 +207,17 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     retentionGb,
     offlineAlertEnabled,
     offlineAlertMinutes,
+    ondEnabled,
+    ondPreRoll,
+    ondMaxDur,
     'app'
   );
   refreshMqttConnection();
   // New pre/post-roll changes the required ring depth, so re-arm any camera that's recording.
-  if (clipLenChanged) {
-    for (const cam of db.prepare('SELECT * FROM cameras WHERE detect_record_clips = 1 AND disabled = 0').all()) {
+  if (clipLenChanged || ondemandChanged) {
+    // Every enabled camera, not just the clip-recording ones: with on-demand on, a camera that doesn't
+    // record detections still needs a ring for Record's pre-roll (and must lose it when turned off).
+    for (const cam of db.prepare('SELECT * FROM cameras WHERE disabled = 0').all()) {
       restartClipCapture(cam);
     }
   }

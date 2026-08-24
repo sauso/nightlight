@@ -1,5 +1,6 @@
 import db from '../db.js';
 import { logger } from './logger.js';
+import { getOndemandSettings } from './recordings.js';
 import {
   startSegmenter,
   stopSegmenter,
@@ -53,12 +54,21 @@ function pump() {
 // Start (idempotently) a camera's segmenter if it opts into clip recording. No-op if already running
 // so a reconcile tick never drops the ring. Mirrors startMotionDetector's guard.
 export function startClipCapture(camera) {
-  if (!camera.detect_record_clips || camera.disabled) return;
+  if (camera.disabled) return;
+  // The ring is needed by EITHER feature: detection clips (reach back over the pre-roll when something
+  // fires) or on-demand recording (reach back when someone presses Record). On-demand's pre-roll is the
+  // whole point of the feature, so its buffering is what the ondemand_enabled setting turns off.
+  const ond = getOndemandSettings();
+  if (!camera.detect_record_clips && !ond.enabled) return;
   // Storage unusable (unmapped/unwritable CLIPS_DIR) — don't run a segmenter that can't produce clips.
   if (!clipStorageReady()) return;
   if (isSegmenterRunning(camera.id)) return;
   const { preRollSec, postRollSec } = getClipSettings();
-  startSegmenter(camera.id, camera.mediamtx_path, { preRollSec, postRollSec });
+  // Size the ring for the deeper of the two pre-rolls, so whichever trigger fires can reach back far
+  // enough. (A long on-demand recording additionally HOLDS its segments from pruning while it runs —
+  // see holdRing — so the ring doesn't need to be sized for the max recording length.)
+  const deepestPreRoll = Math.max(preRollSec, ond.enabled ? ond.preRollSec : 0);
+  startSegmenter(camera.id, camera.mediamtx_path, { preRollSec: deepestPreRoll, postRollSec });
 }
 
 export function stopClipCapture(cameraId) {

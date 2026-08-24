@@ -10,6 +10,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Added
+- **Record a moment yourself.** Each camera now has a **Record** button that captures a clip on the spot —
+  and because the server is always keeping a short rolling buffer, it also saves the **30 seconds before
+  you pressed**, so you can catch something just *after* it happens. Press again to stop (or let it stop
+  itself at the time limit), and the clip appears under **Recordings** on that child's page, where it can
+  be played, downloaded or deleted. Unlike alert clips, recordings are **never** removed automatically —
+  they stay until you delete them. Settings → General lets you change how far back Record reaches, the
+  automatic stop time, or turn the whole feature (and its buffering) off.
 - **Download a night'''s timelapse.** Opening a timelapse now uses the same player as an alert clip,
   including a **Download** button — so a night you want to keep can be saved to your phone'''s Downloads
   (or shared) just like a recorded clip. The timelapse player also now shows the night and its length

@@ -47,7 +47,7 @@ const RING_ROOT = path.join(CLIPS_DIR, '.ring');
 const SEGMENT_SEC = 2;
 const RESTART_DELAY_MS = 5000;
 
-// cameraId -> { proc, stopped, ringDir, ringDepthMs, janitor }
+// cameraId -> { proc, stopped, ringDir, ringDepthMs, janitor, holdFromMs }
 const segmenters = new Map();
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -103,8 +103,13 @@ function segmenterArgs(pathName, ringDir) {
 }
 
 // Delete ring segments older than the ring depth. Runs on a timer while the segmenter lives.
-function pruneRing(ringDir, depthMs) {
-  const cutoff = Date.now() - depthMs;
+// `holdFromMs` protects everything at/after that wall-clock time from pruning, however deep the ring is
+// nominally sized. An on-demand recording sets it while running: the ring is sized for a ~20s alert
+// clip, so a 2-minute manual recording would otherwise have its own opening pruned out from under it
+// before the extraction runs. Holding is bounded by the recording's max-duration cap, so the ring can't
+// grow without limit, and normal depth resumes the moment the recording ends.
+function pruneRing(ringDir, depthMs, holdFromMs = null) {
+  const cutoff = Math.min(Date.now() - depthMs, holdFromMs ?? Infinity);
   for (const f of safeReaddir(ringDir)) {
     if (!f.endsWith('.mkv')) continue;
     const p = path.join(ringDir, f);
@@ -121,6 +126,23 @@ function pruneRing(ringDir, depthMs) {
 
 export function isSegmenterRunning(cameraId) {
   return segmenters.has(cameraId);
+}
+
+// Protect ring segments back to `fromMs` from pruning, for the duration of an on-demand recording (see
+// pruneRing). Returns false if no segmenter is running for the camera, so the caller can refuse to
+// start a recording that would have nothing to cut.
+export function holdRing(cameraId, fromMs) {
+  const entry = segmenters.get(cameraId);
+  if (!entry) return false;
+  entry.holdFromMs = fromMs;
+  return true;
+}
+
+// Resume normal depth-based pruning. Always call this when a recording ends (including on failure),
+// or the ring for that camera grows until the segmenter next restarts.
+export function releaseRing(cameraId) {
+  const entry = segmenters.get(cameraId);
+  if (entry) entry.holdFromMs = null;
 }
 
 // Start (or restart) the continuous segmenter for a camera. `pathName` is the camera's local MediaMTX
@@ -144,7 +166,7 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
   // and exits within a second, every 5s). We used to log an ERROR on every one of those, which
   // spammed ~30 identical lines per camera blip. Now we log the first, then go quiet, and log a
   // recovery when it comes back — see the exit handler.
-  const entry = { proc: null, stopped: false, ringDir, ringDepthMs, janitor: null, fastFails: 0 };
+  const entry = { proc: null, stopped: false, ringDir, ringDepthMs, janitor: null, fastFails: 0, holdFromMs: null };
   segmenters.set(cameraId, entry);
 
   function launch() {
@@ -193,7 +215,7 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
   }
 
   launch();
-  entry.janitor = setInterval(() => pruneRing(ringDir, entry.ringDepthMs), SEGMENT_SEC * 1000);
+  entry.janitor = setInterval(() => pruneRing(ringDir, entry.ringDepthMs, entry.holdFromMs), SEGMENT_SEC * 1000);
   logger.info(
     `[clipseg:${pathName}] segmenter started (ring ${ringDir}, depth ${Math.round(ringDepthMs / 1000)}s)`
   );
@@ -257,7 +279,7 @@ export async function probeClip(file) {
 // (Phase 2 passes the eventId; the spike passes a timestamp). Returns { file, thumb, segments, probe }.
 export async function extractClip(
   cameraId,
-  { preRollSec = 5, postRollSec = 15, at = Date.now(), outBase = String(Date.now()) } = {}
+  { preRollSec = 5, postRollSec = 15, at = Date.now(), outBase = String(Date.now()), settleMs = null } = {}
 ) {
   const entry = segmenters.get(cameraId);
   if (!entry) throw new Error(`no segmenter running for camera ${cameraId}`);
@@ -265,7 +287,10 @@ export async function extractClip(
 
   // Wait past the post-roll AND far enough that the segment covering (at+post) has been CLOSED and a
   // fresh one opened — otherwise we'd concat a half-written tail segment and truncate the clip.
-  await sleep(postRollSec * 1000 + 2 * SEGMENT_SEC * 1000 + 500);
+  // A detection clip is cut the moment it fires, so we must WAIT OUT its post-roll. An on-demand
+  // recording is cut when the user presses Stop — that span is already in the past, so it passes a
+  // short settleMs and only waits for the final segment to close.
+  await sleep(settleMs ?? postRollSec * 1000 + 2 * SEGMENT_SEC * 1000 + 500);
 
   // Select GENEROUSLY — every segment that could touch [at-pre, at+post] plus a couple-segment margin
   // each side — so the concatenated source is guaranteed to fully contain the requested window. The
