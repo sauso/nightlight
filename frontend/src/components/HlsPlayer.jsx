@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
-import { getToken } from '../lib/api.js';
+import { getMediaToken } from '../lib/api.js';
 
 // The token travels as a query param (not an Authorization header) because Safari's
-// native HLS playback fetches segments itself with no way for us to attach headers.
+// native HLS playback fetches segments itself with no way for us to attach headers. It's the
+// short-lived MEDIA token, not the session token (MediaMTX copies this query onto every segment URL
+// it emits, so the token is embedded in each segment request too).
 function hlsUrl(mediamtxPath) {
-  return `/hls/${mediamtxPath}/index.m3u8?token=${encodeURIComponent(getToken())}`;
+  return `/hls/${mediamtxPath}/index.m3u8?token=${encodeURIComponent(getMediaToken() || '')}`;
 }
 
 // Matches .camera-tile__video-wrap's background. A blank <video> with no poster is what

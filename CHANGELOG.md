@@ -9,6 +9,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Security
+- **Video/image URLs no longer carry your full login token.** The stream (HLS), snapshot, clip,
+  timelapse, and talk-back URLs the browser loads directly used to include your 30-day session token
+  as a `?token=` query parameter — and query strings can end up in reverse-proxy/CDN access logs,
+  browser history, and referrer headers, so a leaked URL meant full account access. These URLs now
+  use a separate **short-lived, video-only token** (6-hour lifetime, tied to your session so signing
+  out revokes it) that can only fetch media — it can't touch the rest of the app. No visible change
+  in use; the app fetches and refreshes the media token automatically.
+
 ## [0.24.1] - 2026-08-24
 
 ### Fixed
