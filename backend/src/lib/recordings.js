@@ -209,10 +209,3 @@ export function deleteRecording(id) {
   return true;
 }
 
-// Recordings are NOT touched by the clip retention sweeper (that walks detection_events rows), which is
-// the point — a keepsake shouldn't age out. They do still occupy the same disk though, so surface their
-// size for the storage display rather than letting it silently under-report.
-export function recordingStorageTotals() {
-  const r = db.prepare("SELECT COUNT(*) n, COALESCE(SUM(bytes),0) b FROM recordings WHERE status='ready'").get();
-  return { count: r?.n || 0, bytes: r?.b || 0 };
-}

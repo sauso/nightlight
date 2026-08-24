@@ -10,6 +10,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Added
+- **Recording now has its own Settings screen.** Settings → **Recording** replaces the recording block that
+  was buried in General, and separates the two things that were previously tangled together: **Automatic
+  clips** (captured when a detection fires, and aged out by retention) and **On-demand recording** (captured
+  because you pressed Record, and kept until you delete it). The storage readout now also shows how much
+  space your own recordings are using, which it previously left out entirely.
 - **Record a moment yourself.** Each camera now has a **Record** button that captures a clip on the spot —
   and because the server is always keeping a short rolling buffer, it also saves the **30 seconds before
   you pressed**, so you can catch something just *after* it happens. Press again to stop (or let it stop
