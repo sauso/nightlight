@@ -9,7 +9,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
-## [0.24.0] - 2026-08-24
+### Fixed
+- **Two-way audio no longer looks like it "won't save" on cameras that don't need a talk login.** Cameras
+  that play talk-back over their own stream (Thingino/Sonoff and most ONVIF cameras) use the stream
+  credentials — they need no separate login. The camera settings form was still showing a Talk
+  username/password box for them and then discarding whatever was entered, so the fields came back blank
+  every time. Those cameras now show *"no separate login needed — talk-back is enabled automatically"*
+  instead; only cameras that genuinely need a web login (Hikvision ISAPI) show the credential form, and
+  the ONVIF probe now live-verifies which kind a camera is. As part of this, editing an unrelated setting
+  on a stream-backchannel camera no longer silently turns its two-way audio off.
 
 ### Changed
 - **Simpler camera menu.** The detection quick-toggles for **Motion**, **Sound** and **Alerts** are now three
