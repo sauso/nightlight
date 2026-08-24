@@ -11,7 +11,7 @@ import { startTranscoder, stopTranscoder, isRunning } from './transcoder.js';
 // NOTE: this runs the sub transcoder continuously alongside the main one whenever a sub_rtsp_url is
 // configured. That means a second concurrent RTSP pull from the camera; cheap cameras cap concurrent
 // clients, so an on-demand start (only while a client is watching Low) is a worthwhile follow-up -
-// see planning/adaptive-stream-quality-scope.md.
+// see planning/ROADMAP.md §2.2 (Phase 1).
 
 export function subCameraId(cameraId) {
   return `${cameraId}-sub`;
