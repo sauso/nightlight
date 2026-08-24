@@ -69,13 +69,38 @@ const app = express();
 // per-IP rate limiting (see auth.js) for anyone connecting through the proxy.
 app.set('trust proxy', 'loopback');
 
-// CSP is deliberately disabled here rather than misconfigured: the custom theming
-// feature applies colors via inline styles (document.documentElement.style...), and
-// WebRTC connects out to a STUN server - both need careful, tested CSP directives to
-// allow without weakening the policy generally, and that's not something to get right
-// blind. Every other protection helmet provides (clickjacking, MIME-sniffing, etc.)
-// stays on.
-app.use(helmet({ contentSecurityPolicy: false }));
+// Content-Security-Policy — rolled out in REPORT-ONLY first (see planning/csp-hardening-scope.md):
+// the browser reports what WOULD be blocked (to /api/csp-report below) but blocks nothing, so we can
+// confirm every feature is covered before switching to enforcing. Directives are tuned to this app:
+//  - script-src 'self': Vite emits one external module script, no inline scripts (don't add unsafe-*).
+//  - style-src 'self': theming uses element.style.setProperty (CSSOM), which CSP doesn't police; app
+//    CSS is an external <link>. (If real style violations show up, add 'unsafe-inline' — low risk.)
+//  - media-src/worker-src blob:: hls.js feeds <video> via MSE blob URLs and runs its demuxer worker
+//    from a blob: URL. img-src data:: snapshot posters/icons. font-src data:: any inlined @font-face.
+//  - connect-src adds the client-side WebRTC STUN host (WhepPlayer.jsx) — keep in sync if it changes.
+//  - No upgrade-insecure-requests: the app is also served over plain http on the LAN.
+// To ENFORCE once the report log is clean: set reportOnly:false (and optionally drop the report route).
+app.use(helmet({
+  contentSecurityPolicy: {
+    reportOnly: true,
+    useDefaults: false,
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'"],
+      imgSrc: ["'self'", 'data:'],
+      mediaSrc: ["'self'", 'blob:'],
+      workerSrc: ["'self'", 'blob:'],
+      connectSrc: ["'self'", 'stun.l.google.com:19302'],
+      fontSrc: ["'self'", 'data:'],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+      frameAncestors: ["'none'"],
+      reportUri: ['/api/csp-report'],
+    },
+  },
+}));
 
 // MediaMTX doesn't know it's being reverse-proxied under a prefix (e.g. /live or /hls),
 // so any redirect or resource-location it issues (WHEP's session Location header, HLS's
@@ -159,6 +184,16 @@ app.use('/api/timelapses', timelapsesRoutes);
 app.use('/manifest.webmanifest', manifestRoutes);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
+
+// CSP violation sink for the report-only rollout (see the helmet block above). The browser POSTs a
+// report here whenever a directive WOULD have blocked something; we log it so violations can be
+// collected from the container logs while tuning the policy. Unauthenticated by necessity (the browser
+// sends these with no credentials) and best-effort. express.text with a wildcard type captures the body
+// regardless of the report's content-type (application/csp-report vs application/reports+json).
+app.post('/api/csp-report', express.text({ type: '*/*', limit: '64kb' }), (req, res) => {
+  if (req.body) logger.warn(`[csp-report] ${typeof req.body === 'string' ? req.body : JSON.stringify(req.body)}`);
+  res.status(204).end();
+});
 
 // Serve the built React frontend (see Dockerfile — built at image-build time into ./public).
 const publicDir = path.join(__dirname, '..', 'public');
