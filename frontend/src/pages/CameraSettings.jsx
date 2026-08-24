@@ -92,7 +92,7 @@ export default function CameraSettings() {
         ptz_supported: r.ptz ? 1 : 0,
         onvif_profile_token: r.profileToken || null,
       };
-      setCaps((c) => ({ ...c, backchannel_supported: r.backchannel }));
+      setCaps((c) => ({ ...c, backchannel_supported: r.backchannel, backchannel_verified: r.backchannelVerified }));
       const res = r.video?.width ? `${r.video.codec || ''} ${r.video.width}×${r.video.height}`.trim() : r.video?.codec || '';
       const talk = r.backchannel === 'yes' ? ' · two-way audio' : r.backchannel === 'no' ? ' · no two-way audio' : '';
       const ptz = r.ptz ? ' · PTZ' : '';
@@ -123,9 +123,29 @@ export default function CameraSettings() {
     }
   }
 
+  // How talk-back is delivered, which decides what the talk panel shows:
+  //  - 'onvif-backchannel' (Thingino/Sonoff/most ONVIF): rides the stream audio using the STREAM
+  //    creds — no separate login. Prompting for one is misleading, and the save path discards it.
+  //  - 'hikvision-isapi': needs the camera's web login (separate from the ONVIF user).
+  // Prefer a fresh probe's live verification; otherwise trust the backend already stored on the camera.
+  const talkBackend =
+    caps.backchannel_verified === true ? 'onvif-backchannel'
+    : caps.backchannel_verified === false ? 'hikvision-isapi'
+    : cam?.talk_backend || null;
+  // Talk-back over the stream backchannel is the default for any backchannel-capable camera; only a
+  // camera positively known to use the Hikvision ISAPI login shows the credential form. This keeps a
+  // legacy cam whose backend was never resolved out of the "empty username = disable talk" footgun.
+  const isIsapi = talkBackend === 'hikvision-isapi';
+  const showTalk = caps.backchannel_supported === 'yes' || isIsapi;
+  const talkOverStream = showTalk && !isIsapi;
+
   async function doSave(force) {
     setBusy(true); setPageError('');
     const payload = { ...form, child_id: form.child_id || null, ...extraRef.current, ...(force ? { force: true } : {}) };
+    // Backchannel cams carry no separate talk login (talk-back uses the stream creds). Never send the
+    // empty talk fields for them — the API reads an empty talk_username as "disable talk-back", which
+    // would silently turn two-way audio off on any unrelated edit.
+    if (talkOverStream) { delete payload.talk_username; delete payload.talk_password; }
     try {
       const saved = isNew ? await api.post('/cameras', payload) : await api.put(`/cameras/${id}`, payload);
       await refresh();
@@ -157,7 +177,6 @@ export default function CameraSettings() {
     }
   }
 
-  const showTalk = caps.backchannel_supported === 'yes';
   const detFrom = { state: { from: { to: `/cameras/${id}`, label: 'Camera' } } };
 
   return (
@@ -229,28 +248,39 @@ export default function CameraSettings() {
             {showTalk && (
               <div className="onvif-box">
                 <div className="onvif-box__title">Two-way audio (talk-back)</div>
-                <p className="onvif-box__hint">
-                  This camera supports talk-back. Enter its <strong>web login</strong> to enable the hold-to-talk
-                  button — for Hikvision that's the User Management account (separate from the ONVIF user). Leave the username blank to turn it off.
-                </p>
-                <div className="onvif-box__row">
-                  <div className="field">
-                    <label htmlFor="cam-talk-user">Talk username</label>
-                    <input id="cam-talk-user" value={form.talk_username} onChange={(e) => setForm({ ...form, talk_username: e.target.value })}
-                      autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
-                  </div>
-                  <div className="field">
-                    <label htmlFor="cam-talk-pass">Talk password</label>
-                    <input id="cam-talk-pass" type="password" value={form.talk_password}
-                      onChange={(e) => setForm({ ...form, talk_password: e.target.value })}
-                      autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false}
-                      placeholder={caps.talk_has_password ? '•••••• (unchanged)' : ''} />
-                  </div>
-                </div>
-                <button type="button" className="btn btn-peri" onClick={verifyTalk} disabled={talkVerifyBusy} style={{ marginTop: 4 }}>
-                  {talkVerifyBusy ? 'Verifying…' : 'Verify login'}
-                </button>
-                {talkVerifyMsg && <div className={talkVerifyMsg.ok ? 'onvif-box__ok' : 'onvif-box__err'}>{talkVerifyMsg.text}</div>}
+                {talkOverStream ? (
+                  <p className="onvif-box__hint">
+                    This camera plays talk-back over its own stream audio, so it needs <strong>no separate
+                    login</strong> — the hold-to-talk button is enabled automatically using the stream
+                    credentials above.
+                  </p>
+                ) : (
+                  <>
+                    <p className="onvif-box__hint">
+                      This camera needs its <strong>web login</strong> to enable the hold-to-talk button — for
+                      Hikvision that's the User Management account (separate from the ONVIF user). Leave the
+                      username blank to turn it off.
+                    </p>
+                    <div className="onvif-box__row">
+                      <div className="field">
+                        <label htmlFor="cam-talk-user">Talk username</label>
+                        <input id="cam-talk-user" value={form.talk_username} onChange={(e) => setForm({ ...form, talk_username: e.target.value })}
+                          autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
+                      </div>
+                      <div className="field">
+                        <label htmlFor="cam-talk-pass">Talk password</label>
+                        <input id="cam-talk-pass" type="password" value={form.talk_password}
+                          onChange={(e) => setForm({ ...form, talk_password: e.target.value })}
+                          autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                          placeholder={caps.talk_has_password ? '•••••• (unchanged)' : ''} />
+                      </div>
+                    </div>
+                    <button type="button" className="btn btn-peri" onClick={verifyTalk} disabled={talkVerifyBusy} style={{ marginTop: 4 }}>
+                      {talkVerifyBusy ? 'Verifying…' : 'Verify login'}
+                    </button>
+                    {talkVerifyMsg && <div className={talkVerifyMsg.ok ? 'onvif-box__ok' : 'onvif-box__err'}>{talkVerifyMsg.text}</div>}
+                  </>
+                )}
               </div>
             )}
 
