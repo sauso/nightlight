@@ -171,6 +171,13 @@ function parseRtspUrl(rtspUrl) {
 }
 
 const BACKCHANNEL_REQUIRE = 'Require: www.onvif.org/ver20/backchannel';
+// Per-request RTSP timeout. The socket's own timeout is cleared after connect (setTimeout(0)) so a
+// long talk isn't torn down, which means an individual RTSP request has no backstop of its own: a
+// camera that accepts the TCP connection but never answers a request (some Hikvisions do exactly
+// this to an ONVIF-backchannel DESCRIBE/SETUP/TEARDOWN they don't really support) would otherwise
+// leave the awaiting caller hung forever — including the TEARDOWN inside close(), which is awaited
+// by verifyBackchannel and, through it, by the /onvif-probe HTTP handler.
+const RTSP_REQUEST_TIMEOUT_MS = 5000;
 
 class OnvifBackchannelTalk {
   constructor({ host, port = 554, path = '/', username, password }) {
@@ -207,6 +214,11 @@ class OnvifBackchannelTalk {
       if (a) headers.push(`Authorization: ${a}`);
       headers.push(...extra);
       let buf = '';
+      let timer = null;
+      const cleanup = () => {
+        if (timer) clearTimeout(timer);
+        this.sock.removeListener('data', onData);
+      };
       const onData = (d) => {
         buf += d.toString('latin1');
         const idx = buf.indexOf('\r\n\r\n');
@@ -214,10 +226,13 @@ class OnvifBackchannelTalk {
         const head = buf.slice(0, idx);
         const m = /Content-Length:\s*(\d+)/i.exec(head);
         if (buf.length - (idx + 4) >= (m ? Number(m[1]) : 0)) {
-          this.sock.removeListener('data', onData);
+          cleanup();
           resolve({ head, body: buf.slice(idx + 4), status: Number((/^\S+\s+(\d+)/.exec(head) || [])[1]) });
         }
       };
+      // No per-request timeout otherwise (the socket's own timeout is disabled after connect), so an
+      // unanswered request would hang forever — reject instead so start()/close() can't wedge.
+      timer = setTimeout(() => { cleanup(); reject(new Error(`RTSP ${method} timed out`)); }, RTSP_REQUEST_TIMEOUT_MS);
       this.sock.on('data', onData);
       this.sock.write(headers.join('\r\n') + '\r\n\r\n');
     });

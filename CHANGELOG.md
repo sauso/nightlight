@@ -9,6 +9,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+- **Re-probing a camera over ONVIF no longer hangs on some Hikvision cameras.** After probing, the app
+  live-tests whether the camera can play talk-back over its stream. On certain Hikvision cameras that
+  advertise an audio output but don't actually support the ONVIF/RTSP backchannel, that test could get
+  stuck waiting on a reply the camera never sends, leaving the probe spinning forever. RTSP handshake
+  requests now time out cleanly, so the probe always finishes and reports its result.
+
 ### Security
 - **A Content-Security-Policy is now enforced.** The app serves a strict CSP that only allows scripts,
   styles, images, media and connections from itself (plus the video stream's STUN server and, by choice,
