@@ -208,6 +208,17 @@ router.post('/onvif-probe', requireAdmin, async (req, res) => {
         )
       ),
     ]);
+    // When the device advertises an audio output, live-verify the ONVIF/RTSP audio backchannel with
+    // the entered stream creds — the same test the save path uses to PICK the talk backend. This lets
+    // the form tell the two 'yes' cases apart: a camera that plays talk-back over its stream (no
+    // separate login — Thingino/Sonoff/most ONVIF) vs. a Hikvision that needs its web (ISAPI) login.
+    // Without it the form can't distinguish them and wrongly prompts for a login the save path discards.
+    if (result?.backchannel === 'yes') {
+      const rtspUrl = assembleRtspUrl({
+        host: result.rtspHost, port: result.rtspPort, path: result.rtspPath, username, password,
+      });
+      result.backchannelVerified = rtspUrl ? await verifyBackchannel(rtspUrl) : false;
+    }
     res.json(result);
   } catch (err) {
     // Expected failure mode (wrong IP/creds, not an ONVIF camera, timeout). Use 422, NOT a
