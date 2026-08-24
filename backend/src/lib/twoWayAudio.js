@@ -358,7 +358,21 @@ class OnvifBackchannelTalk {
 // rather than eating the budget. 12s is deliberately generous — measured against a real Hikvision the
 // whole handshake is well under a second (slowest request: the authenticated DESCRIBE at ~570ms), so
 // this only ever matters for a genuinely slow camera.
-export async function verifyBackchannel(rtspUrl, { timeoutMs = 12000 } = {}) {
+// A camera can need a moment to release the previous RTSP session before it will grant another. This
+// one never acknowledges TEARDOWN, so there is nothing to wait FOR — we can only leave a gap. Measured:
+// back-to-back verifies fail every other call, while a >=500ms gap is reliable across many runs. A
+// probe followed by a save is the realistic way two land close together, so retry once after a pause
+// rather than misreport a working camera as having no backchannel (which would wrongly demand a
+// talk login). Only a negative is retried, so a genuine no-backchannel camera costs one extra attempt.
+const BACKCHANNEL_RETRY_PAUSE_MS = 750;
+
+export async function verifyBackchannel(rtspUrl, opts = {}) {
+  if (await verifyBackchannelOnce(rtspUrl, opts)) return true;
+  await new Promise((r) => setTimeout(r, BACKCHANNEL_RETRY_PAUSE_MS));
+  return verifyBackchannelOnce(rtspUrl, opts);
+}
+
+async function verifyBackchannelOnce(rtspUrl, { timeoutMs = 12000 } = {}) {
   const parts = parseRtspUrl(rtspUrl);
   if (!parts || !parts.host) return false;
   const session = new OnvifBackchannelTalk(parts);
