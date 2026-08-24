@@ -84,11 +84,6 @@ Compatibility is still available for live viewing; it just can't run in the back
 is unaffected — its foreground background-listening service keeps the process alive, so both modes
 sustain background audio.
 
-**What to do:** **Low latency** is still the smoothest option on iOS, so prefer it when you can;
-use Compatibility when a camera or network can't sustain WebRTC. Android is
-unaffected — its foreground background-listening service keeps the whole process alive, so both
-modes sustain background audio there regardless.
-
 ## Non-monotonic DTS spam in the logs
 
 **What you see:** `docker logs` filling with `Non-monotonic DTS; previous: … current: …`
@@ -141,22 +136,3 @@ where the same thing broke in-browser HLS until the test stack was served over T
 reverse proxy such as SWAG — see the README's "Running behind a reverse proxy" section), after
 which Compatibility works. A proper fix (e.g. having the app strip `Secure` from that cookie when
 it's serving over HTTP) is not yet implemented.
-
-### Two-way audio (talk-back) only works on Hikvision (ISAPI) cameras
-
-**What you see:** The talk / two-way-audio control is offered on a camera (often because ONVIF reported
-it supports an audio backchannel), but talking does nothing — no sound comes out of the camera, and
-there's usually no visible error.
-
-**Why:** Nightlight's two-way audio is implemented only for **Hikvision's ISAPI** HTTP protocol. When a
-camera is added with talk credentials it's currently labelled as the Hikvision backend regardless of
-make. A non-Hikvision camera — e.g. a **Thingino/Sonoff**, which does two-way audio over the
-**ONVIF/RTSP audio backchannel** — doesn't implement ISAPI; and because its web server answers every
-path with `200` (Thingino does), Nightlight's ISAPI calls *appear* to succeed while the camera ignores
-them, so talk silently no-ops.
-
-**What to do:** Two-way audio currently works only on Hikvision (ISAPI) cameras. On other cameras it
-isn't supported yet — an **ONVIF/RTSP audio-backchannel** talk backend is the pending feature that would
-enable it. Until then, don't rely on talk-back on non-Hikvision cameras. (A related cleanup: the add
-flow should only label a camera `hikvision-isapi` when it's actually Hikvision, so the control isn't
-offered where it can't work.)
