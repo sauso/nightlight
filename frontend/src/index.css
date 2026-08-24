@@ -552,6 +552,39 @@ body.in-pip .tile-menu-backdrop {
   }
 }
 
+/* --- Phone in landscape: reclaim vertical space ---
+   A phone's landscape viewport is short, but the sticky header, the fixed bottom nav, and a full 16:9
+   camera tile together overflow it — pushing each tile's temperature/humidity readings (which sit BELOW
+   the video, in .camera-tile__meta) off-screen or behind the nav. So slim the header + nav and cap the
+   video height so the whole tile (video + readings) fits. Scoped to SHORT landscape (max-height) so
+   portrait phones, tablets, and the ≥1200px desktop sidebar layout are untouched; :not(:fullscreen)
+   leaves a fullscreened video full-size. */
+@media (orientation: landscape) and (max-height: 480px) {
+  .app-shell { padding-bottom: 48px; }
+
+  .app-header {
+    min-height: 0;
+    padding-top: calc(4px + env(safe-area-inset-top));
+    padding-bottom: 4px;
+  }
+  .app-header h1 { font-size: 17px; }
+  .app-header__icon { width: 28px; height: 28px; }
+
+  .bottom-nav { padding: 2px 8px calc(2px + env(safe-area-inset-bottom)); }
+  .bottom-nav a { font-size: 10px; padding: 2px 4px; }
+  .bottom-nav__icon { margin-bottom: 3px; }
+
+  .app-main { padding-top: 10px; padding-bottom: 12px; }
+  .card-grid { gap: 16px; }
+
+  /* Shrink the video so the readings row stays on screen. aspect-ratio:auto + a viewport-height cap;
+     object-fit: cover (already on the video) absorbs the small crop. Untouched in fullscreen. */
+  .camera-tile__video-wrap:not(:fullscreen) {
+    aspect-ratio: auto;
+    height: 50vh;
+  }
+}
+
 /* Section heading that sits ABOVE a card (bare, with spacing). Shares the canonical card-title
    typography below so every heading in the app reads the same — matching the Room-climate card title. */
 .section-title {
