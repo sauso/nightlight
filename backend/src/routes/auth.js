@@ -30,7 +30,7 @@ function signMfaToken(userId) {
 // too), but purpose:'media' bars it from the JSON API (requireAuth rejects it) and it only rides in
 // query params. So if one of these URLs ends up in a proxy log, browser history or Referer header,
 // what leaks is a time-boxed, video-only capability — not the 30-day full-account session token.
-const MEDIA_TOKEN_TTL_SECONDS = 6 * 60 * 60; // 6h: long enough for a viewing session, tiny vs the 30-day session
+const MEDIA_TOKEN_TTL_SECONDS = 12 * 60 * 60; // 12h: covers a full overnight viewing session, tiny vs the 30-day session
 function signMediaToken(userId, sessionId) {
   return jwt.sign({ id: userId, sid: sessionId, purpose: 'media' }, JWT_SECRET, {
     algorithm: 'HS256',

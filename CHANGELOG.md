@@ -14,9 +14,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   timelapse, and talk-back URLs the browser loads directly used to include your 30-day session token
   as a `?token=` query parameter — and query strings can end up in reverse-proxy/CDN access logs,
   browser history, and referrer headers, so a leaked URL meant full account access. These URLs now
-  use a separate **short-lived, video-only token** (6-hour lifetime, tied to your session so signing
-  out revokes it) that can only fetch media — it can't touch the rest of the app. No visible change
-  in use; the app fetches and refreshes the media token automatically.
+  use a separate **short-lived, video-only token** (12-hour lifetime, tied to your session so signing
+  out revokes it) that can only fetch media — it can't touch the rest of the app. Live/background audio
+  (WebRTC) authenticates once at connect and isn't affected; only Compatibility (HLS) streams carry the
+  token, and they reconnect automatically if it ever expires mid-view. No visible change in use; the app
+  fetches and refreshes the media token automatically.
 
 ## [0.24.1] - 2026-08-24
 
