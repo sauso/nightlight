@@ -1633,6 +1633,21 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   margin-bottom: 14px;
 }
 
+/* Two fields side by side (e.g. a pre-roll and an auto-stop). A plain flex row let the longer label
+   wrap onto a second line and shove its input down out of line with its neighbour; the grid gives both
+   columns an identical track, and `align-items: end` keeps the two inputs on the same line however the
+   labels above them happen to wrap. Stacks on very narrow screens rather than squeezing both. */
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-items: end;
+}
+.field-row > .field { margin-bottom: 0; }
+@media (max-width: 400px) {
+  .field-row { grid-template-columns: 1fr; gap: 12px; }
+}
+
 .field label {
   display: block;
   font-size: 12px;
