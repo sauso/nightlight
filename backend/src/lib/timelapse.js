@@ -8,7 +8,7 @@ import { clipStorageReady, hasMinFreeSpace } from './clipStorage.js';
 import { captureSnapshot, fetchHttpSnapshot } from './snapshot.js';
 import { childTracksSleep, childWindowActiveNow, currentNightDate } from './sleepAnalysis.js';
 
-// Nightly "memories" timelapse (planning/feature-backlog-2026-08-scope.md §A3). While a child's sleep
+// Nightly "memories" timelapse (shipped in 0.24.0). While a child's sleep
 // window is open we sample one still every SAMPLE_INTERVAL from their primary camera into a per-night
 // frame dir; when the window closes the nightly sleep job assembles those frames into a short MP4 that
 // condenses the whole night into ~TARGET_DURATION_SEC. Cheap and self-contained: frames come from the

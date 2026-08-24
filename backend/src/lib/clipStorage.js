@@ -15,7 +15,7 @@ import {
 //     ephemeral overlay layer (where clips would vanish on recreate and bloat the image);
 //   * a minimum-free-space check callers make before writing a clip, so a full disk can't wedge things;
 //   * a periodic sweeper that enforces the admin's day + size-cap retention (oldest deleted first).
-// See planning/recording-and-sleep-tracking-scope.md §1.4.
+// Shipped in 0.17.0.
 
 const GB = 1024 * 1024 * 1024;
 // Refuse to start a new clip if the volume has less than this free. A clip is a few MB, but this is a

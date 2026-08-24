@@ -16,7 +16,13 @@ are different values for the same kid. Look them up fresh if unsure:
 |---|---|---|
 | Renz Cam | `501ca6c2-5688-4381-940d-edfa0d1e721d` | `884974cd-b11c-4393-9608-dde3099779f0` |
 | Test Cam | `902098f5-4982-4844-8cf8-575387b326da` | `c75ed329-de89-42ca-83aa-edaf692295b6` |
-| Test | `01248e86-7715-44dc-984f-40fa838ea8ae` | `884974cd-b11c-4393-9608-dde3099779f0` |
+| Test | `01248e86-7715-44dc-984f-40fa838ea8ae` | *(none — no child assigned)* |
+
+Verified against the staging DB 2026-08-24.
+
+> ⚠️ **"Test Cam" and "Test" are two different cameras.** *Test Cam* is the Sonoff; *Test* is a
+> Hikvision with **no child assigned**, so it produces no `sleep_nights` rows at all — an empty
+> result for it is correct, not a bug.
 
 Prod ("Renz Room") is `cam_a6f9b0a4` in a separate DB — **not** valid on staging. If a
 staging query returns empty, first suspect a prod ID pasted by mistake.

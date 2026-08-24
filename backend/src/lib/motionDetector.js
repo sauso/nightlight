@@ -50,7 +50,9 @@ const OOB_COOLDOWN_MS = 120000; // don't re-log an exit more than once per this
 // The mirror of out-of-bed: a child being placed INTO the crib reads as motion OUTSIDE first (parent
 // carrying/leaning in), then motion in the CRIB while the outside goes and STAYS quiet (the parent stepped
 // back, leaving the child settling in the crib alone). Same state machine as OOB with the two channels
-// swapped. Log-only for now while we tune it on staging alongside OOB. See planning/out-of-bed-detection-scope.md.
+// swapped. Confirmed transitions are persisted to `bed_transitions` (see lib/bedTransitions.js) and feed
+// the SHADOW onset/wake columns; the headline sleep numbers still come from the motion+sound algorithm
+// until the shadow values are promoted — see planning/ROADMAP.md §1.1.
 const IB_LINK_MS = 8000; // outside must have been active within this long before the crib burst
 const IB_CONFIRM_QUIET_MS = 6000; // ...and the outside must stay quiet this long after, to count as "placed in"
 const IB_COOLDOWN_MS = 120000; // don't re-log an entry more than once per this
