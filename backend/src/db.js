@@ -529,7 +529,7 @@ if (!pushTokenColumns.includes('base_url')) {
 // Event-recording opt-in, per camera (separate from alerts — every detection still logs an event +
 // snapshot; a video clip is only captured when this is on). Turning it on starts that camera's
 // segmenter (lib/clipCapture.js). Off by default so a camera costs no disk unless asked. See
-// planning/recording-and-sleep-tracking-scope.md.
+// the CHANGELOG entry for 0.17.0.
 if (!camerasColumns.includes('detect_record_clips')) {
   db.exec('ALTER TABLE cameras ADD COLUMN detect_record_clips INTEGER NOT NULL DEFAULT 0');
 }
