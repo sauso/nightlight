@@ -33,6 +33,13 @@ const WAKE_LOOKAHEAD_MS = 3 * 60 * 60 * 1000;
 // SHADOW wake needs the crib to stay empty (no in-crib motion) at least this long after the last in-crib
 // movement to call it "up for the day" (vs a momentary lull while still asleep in the crib).
 const MORNING_ABSENCE_MIN = 20;
+// A morning departure is a sustained empty-crib gap after which only a FEW isolated crib-active minutes
+// remain — a parent reaching into the empty crib after the child is already up (getting them, tidying).
+// A mid-sleep quiet gap, by contrast, is followed by lots more in-crib stirring. This cap is what keeps a
+// parent handling the crib post-wake from dragging the wake time out to the last hand-in-the-crib, and
+// keeps a long deep-sleep lull from reading as the morning exit. Tuned against real nights (2026-08-23
+// Renz: real exit ~06:38 leaves 7 active min after; the mid-sleep 05:14 lull leaves 22).
+const MAX_POST_EXIT_ACTIVE_MIN = 10;
 // When the empty-crib run starts near a recorded crib transition, snap the wake to that transition's clock
 // time (its TIMING is trustworthy even though its in/out LABEL isn't — see the destination-state note).
 const WAKE_SNAP_MS = 5 * 60 * 1000;
@@ -419,15 +426,16 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     }
     out.onset_at_shadow = minuteTime(onsetIdx);
 
-    // Wake: classify the morning exit by DESTINATION STATE, not by a transition's in/out label. At a real
-    // climb-out the crib and outside channels move near-simultaneously, so which one "leads" (and hence the
-    // out_of_bed vs into_bed label) is unreliable — the SAME 06:41 exit was labelled oppositely on two legs
-    // of one camera (2026-08-23). What IS reliable is what the crib does AFTER: it goes empty (no in-crib
-    // motion) when the child is gone, vs. in-crib stir motion resuming when they were only resettled. So the
-    // wake = the end of the last in-crib motion whose trailing empty-crib run is long enough to mean absence.
-    // Only for a completed night (mid-night we don't guess a morning wake). The transition TIMING is still
-    // good, so we snap the wake to a nearby transition of either label for a crisp clock time. Defaults to
-    // the algo wake, so the shadow value is never worse than the live estimate when no exit is detected.
+    // Wake: find the morning DEPARTURE from the crib-motion timeline, ignoring the unreliable in/out labels
+    // (the SAME 06:41 exit was labelled oppositely on two legs of one camera, 2026-08-23) AND ignoring a
+    // parent handling the crib after the child is already up. The departure is the earliest sustained
+    // empty-crib gap after which the crib stays essentially empty (only a few isolated hand-in-crib spikes)
+    // — see the scan below. This deliberately does NOT use the LAST in-crib motion: on 2026-08-24 the child
+    // was up ~06:38 but a parent then reached into the crib (peaks 0.89/0.99 at 07:22–08:11), which the
+    // old "last motion then empty" rule mistook for the wake (08:11). Only for a completed night (mid-night
+    // we don't guess a morning wake). Transition TIMING is still trustworthy, so we snap the departure to a
+    // nearby transition of either label for a crisp clock time. Defaults to the algo wake, so the shadow
+    // value is never worse than the live estimate when no clear departure is found.
     out.wake_at_shadow = out.wake_at;
     if (!inProgress) {
       const totalMinExt = Math.max(totalMin, Math.round((endUtc.getTime() + lookahead - startUtc.getTime()) / 60000));
@@ -442,11 +450,27 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
         const i = idxOf(r.t);
         if (i >= 0 && i < totalMinExt && r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) cribActExt[i] = true;
       }
-      let lastCrib = -1;
-      for (let i = onset; i < totalMinExt; i++) if (cribActExt[i]) lastCrib = i;
-      const emptyStartIdx = lastCrib + 1;
-      if (lastCrib >= onset && totalMinExt - emptyStartIdx >= MORNING_ABSENCE_MIN) {
-        const emptyStartMs = startUtc.getTime() + emptyStartIdx * 60000;
+      // Suffix count of crib-active minutes from each index to the end, so we can cheaply ask "how much
+      // in-crib motion remains after this point?" for each candidate gap.
+      const activeSuffix = new Array(totalMinExt + 1).fill(0);
+      for (let i = totalMinExt - 1; i >= 0; i--) activeSuffix[i] = activeSuffix[i + 1] + (cribActExt[i] ? 1 : 0);
+
+      // Morning departure = the EARLIEST sustained empty-crib gap (>= MORNING_ABSENCE_MIN) at/after onset
+      // after which only a few isolated crib-active minutes remain (<= MAX_POST_EXIT_ACTIVE_MIN). Scanning
+      // for the FIRST such gap — rather than the last in-crib motion — is the fix for a parent handling the
+      // crib after the child is already up: those late hand-in-crib spikes fall AFTER the departure gap, so
+      // they no longer drag the wake later. And the "few active minutes remain" test is what stops a
+      // mid-sleep lull (followed by lots more stirring) from being mistaken for the exit.
+      let exitIdx = -1;
+      for (let i = Math.max(onset, 0); i < totalMinExt; ) {
+        if (cribActExt[i]) { i++; continue; }
+        let j = i;
+        while (j < totalMinExt && !cribActExt[j]) j++; // [i, j) is a maximal empty run
+        if (j - i >= MORNING_ABSENCE_MIN && activeSuffix[i] <= MAX_POST_EXIT_ACTIVE_MIN) { exitIdx = i; break; }
+        i = j;
+      }
+      if (exitIdx >= 0) {
+        const emptyStartMs = startUtc.getTime() + exitIdx * 60000;
         let best = null;
         for (const t of transitions) {
           const dt = Math.abs(txMs(t.created_at) - emptyStartMs);
