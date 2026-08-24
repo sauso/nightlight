@@ -14,7 +14,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   live-tests whether the camera can play talk-back over its stream. On certain Hikvision cameras that
   advertise an audio output but don't actually support the ONVIF/RTSP backchannel, that test could get
   stuck waiting on a reply the camera never sends, leaving the probe spinning forever. RTSP handshake
-  requests now time out cleanly, so the probe always finishes and reports its result.
+  requests now time out cleanly, so the probe always finishes and reports its result. The overall
+  backchannel check also gets more time to complete, so a slow-but-working camera is classified the
+  same way on every probe instead of occasionally flipping between "needs a talk login" and "doesn't."
 
 ### Security
 - **A Content-Security-Policy is now enforced.** The app serves a strict CSP that only allows scripts,
