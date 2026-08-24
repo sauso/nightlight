@@ -9,6 +9,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **Download a night'''s timelapse.** Opening a timelapse now uses the same player as an alert clip,
+  including a **Download** button — so a night you want to keep can be saved to your phone'''s Downloads
+  (or shared) just like a recorded clip. The timelapse player also now shows the night and its length
+  underneath, matching the clip player.
+
 ### Fixed
 - **More accurate refined wake-up times.** The refined ("out of bed") wake-up time shown on a night's
   sleep detail now has to be backed by an actual out-of-bed event, instead of being inferred from a quiet
