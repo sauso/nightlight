@@ -9,6 +9,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+- **If you use two-factor authentication, you'll need to set it up again — once.** The library behind
+  the 6-digit codes was updated to a version that enforces the modern minimum key strength, and it
+  won't accept the shorter keys created by older versions. Your authenticator app will keep showing
+  codes, but they can't be accepted any more. Nightlight now tells you this at sign-in instead of just
+  saying the code is wrong: **sign in with a backup code, turn two-factor off, then turn it back on and
+  re-scan the QR code.** Backup codes are unaffected, and so is the admin reset if you've run out of
+  those. Keys created from now on are twice as strong, and this is a one-time step — see `docs/mfa.md`.
+
 ## [0.25.1] - 2026-08-25
 
 ### Changed
