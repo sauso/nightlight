@@ -86,7 +86,7 @@ a blank password means "keep the existing one." Keep that invariant.
   the host/creds the camera returns — often empty/bogus). `probeOnvifCamera()` powers
   add-by-IP (`POST /api/cameras/onvif-probe`) and also reports two-way-audio (`getAudioOutput-
   Configurations`) and PTZ capability. **Discovery is add-by-IP, not multicast** — WS-Discovery
-  doesn't cross VLANs (see `planning/onvif-and-two-way-audio-scope.md`).
+  doesn't cross VLANs.
 - **PTZ** — `ptzNudge()` does start → hold `PTZ_NUDGE_MS` → stop in one call, so each press
   moves a fixed distance regardless of tap/network timing (`POST /api/cameras/:id/ptz/nudge`;
   the tile sends one per tap and repeats while held). ONVIF creds for control are the same
@@ -150,12 +150,16 @@ main dashboard; `pages/` holds the four management screens (Children, Cameras, A
 Settings — the latter is admin-only). `lib/api.js` is a thin fetch wrapper that attaches the
 JWT and redirects to `#/login` on a 401.
 
-### CSP is deliberately disabled
+### CSP is enforced — keep it that way
 
-`helmet({ contentSecurityPolicy: false })` in `backend/src/index.js` — noted inline as
-intentional, not an oversight, because the custom theming feature sets inline styles and WebRTC
-needs to reach a STUN server, both of which need carefully tested CSP directives to allow
-correctly. Don't silently "fix" this without doing that work.
+`backend/src/index.js` serves an **enforcing** Content-Security-Policy via helmet (it was
+deliberately disabled until 2026-08-24, when it was rolled out report-only across every feature
+first, then switched to enforcing). The directives are tuned to this app and the reasoning is in
+the inline comment above the policy — read it before changing anything there. Two things that
+bite: hls.js needs `worker-src blob:` + `media-src blob:`, and WebRTC's STUN server is gated by
+`connect-src`. Never add `unsafe-inline`/`unsafe-eval` to `script-src`; theming is safe because it
+uses CSSOM `setProperty`, which CSP doesn't police. Violations are logged to the container log via
+`POST /api/csp-report`, so check there if a new dependency breaks.
 
 ### CI/CD
 

@@ -2,7 +2,7 @@ const { test, expect } = require('@playwright/test');
 const { CAMERA, ensureSyntheticCamera } = require('./helpers');
 
 // Documentation screenshots, generated as a byproduct of the suite so they stay in
-// sync with the real UI (see planning/documentation-and-e2e-testing-scope.md). Written
+// sync with the real UI. Written
 // to ./screenshots (gitignored); CI uploads them as the `docs-screenshots` artifact,
 // and the good ones are committed under docs/screenshots/. Also a light smoke test —
 // each shot asserts the screen actually rendered before capturing.

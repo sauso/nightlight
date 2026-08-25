@@ -24,6 +24,20 @@ function signMfaToken(userId) {
   return jwt.sign({ id: userId, purpose: 'mfa' }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '5m' });
 }
 
+// A short-lived, media-ONLY token for URLs the browser has to fetch itself and can't attach an
+// Authorization header to: HLS playlists/segments, the talk WebSocket, and <img>/<video> snapshot/
+// clip/timelapse loads. It carries the session id (so signing out or revoking that session kills it
+// too), but purpose:'media' bars it from the JSON API (requireAuth rejects it) and it only rides in
+// query params. So if one of these URLs ends up in a proxy log, browser history or Referer header,
+// what leaks is a time-boxed, video-only capability — not the 30-day full-account session token.
+const MEDIA_TOKEN_TTL_SECONDS = 12 * 60 * 60; // 12h: covers a full overnight viewing session, tiny vs the 30-day session
+function signMediaToken(userId, sessionId) {
+  return jwt.sign({ id: userId, sid: sessionId, purpose: 'media' }, JWT_SECRET, {
+    algorithm: 'HS256',
+    expiresIn: MEDIA_TOKEN_TTL_SECONDS,
+  });
+}
+
 // Login has no other protection against repeated guessing (no account lockout, no
 // CAPTCHA) - this is the actual backstop against brute-forcing a password. Keyed by
 // IP, not username, so it can't be used to lock a legitimate user out by deliberately
@@ -188,6 +202,13 @@ router.get('/me', requireAuth, (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
   res.json(toPublicUser(user));
+});
+
+// Mint a media token for the current session (see signMediaToken). requireAuth guarantees a real
+// session token in the Authorization header; the media token inherits that session's id, so it's
+// revoked the moment the session is. The client refreshes it before it expires.
+router.post('/media-token', requireAuth, (req, res) => {
+  res.json({ token: signMediaToken(req.user.id, req.user.sid), expires_in: MEDIA_TOKEN_TTL_SECONDS });
 });
 
 // Self-service: your own active sessions (other devices/browsers you're logged in on).

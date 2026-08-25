@@ -15,7 +15,7 @@ import {
 //     ephemeral overlay layer (where clips would vanish on recreate and bloat the image);
 //   * a minimum-free-space check callers make before writing a clip, so a full disk can't wedge things;
 //   * a periodic sweeper that enforces the admin's day + size-cap retention (oldest deleted first).
-// See planning/recording-and-sleep-tracking-scope.md §1.4.
+// Shipped in 0.17.0.
 
 const GB = 1024 * 1024 * 1024;
 // Refuse to start a new clip if the volume has less than this free. A clip is a few MB, but this is a
@@ -115,7 +115,17 @@ function getRetention() {
 // Used storage + where it lives, for the Settings display.
 export function clipStorageStats() {
   const totals = getClipStorageTotals();
+  // On-demand recordings live in their own table and are NEVER swept by the retention above, so they
+  // don't appear in getClipStorageTotals() — report them separately rather than under-stating what
+  // recording is actually using on disk. Queried directly rather than imported from lib/recordings.js,
+  // which imports hasMinFreeSpace() from here: the cycle happens to resolve via hoisting, but there's
+  // no reason to introduce one for a single COUNT/SUM.
+  const rec = db
+    .prepare("SELECT COUNT(*) n, COALESCE(SUM(bytes),0) b FROM recordings WHERE status='ready'")
+    .get() || { n: 0, b: 0 };
   return {
+    recordingCount: rec.n,
+    recordingBytes: rec.b,
     path: status.path,
     onMount: status.onMount,
     writable: status.writable,

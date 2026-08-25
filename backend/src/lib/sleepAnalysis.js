@@ -1,7 +1,7 @@
 import db from '../db.js';
 import { logger } from './logger.js';
 import { notifySleepReports } from './sleepReportAlert.js';
-import { getBedTransitions } from './bedTransitions.js';
+import { getBedTransitions, TRANSITION } from './bedTransitions.js';
 
 // A computed night is "fresh" (worth notifying about) only if its window closed within this long — so a
 // mid-day container restart that re-computes an already-seen night does NOT re-send the report push.
@@ -461,22 +461,39 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       // crib after the child is already up: those late hand-in-crib spikes fall AFTER the departure gap, so
       // they no longer drag the wake later. And the "few active minutes remain" test is what stops a
       // mid-sleep lull (followed by lots more stirring) from being mistaken for the exit.
-      let exitIdx = -1;
+      //
+      // A qualifying gap is only ACCEPTED if a real out-of-bed transition corroborates it (within
+      // WAKE_SNAP_MS); otherwise we keep scanning for a later gap that is corroborated. Requiring that
+      // second, independent signal matters because the gap test alone is knife-edge: on the night of
+      // 2026-08-24 a single missing sample minute manufactured a 22-minute gap (threshold 20) carrying 9
+      // trailing active minutes (threshold 10) — both within 2 of flipping — which put the shadow wake 40
+      // minutes early on staging while prod, reading the same camera, got it exactly right. Scanning on
+      // rather than giving up at the first candidate is what lets that bogus gap be skipped and the real
+      // departure (the next gap, matching an actual exit event) still be found.
+      //
+      // The transition must be an `out_of_bed` specifically: accepting any transition would let an
+      // `into_bed` vouch for a departure, which is how the other child's shadow landed 53 minutes late
+      // (that crib kept registering motion long after the child was carried out, and the nearest marker was an
+      // into-bed). If nothing corroborates any gap we keep the algo's wake rather than guess.
+      let exitMs = null;
       for (let i = Math.max(onset, 0); i < totalMinExt; ) {
         if (cribActExt[i]) { i++; continue; }
         let j = i;
         while (j < totalMinExt && !cribActExt[j]) j++; // [i, j) is a maximal empty run
-        if (j - i >= MORNING_ABSENCE_MIN && activeSuffix[i] <= MAX_POST_EXIT_ACTIVE_MIN) { exitIdx = i; break; }
+        if (j - i >= MORNING_ABSENCE_MIN && activeSuffix[i] <= MAX_POST_EXIT_ACTIVE_MIN) {
+          const emptyStartMs = startUtc.getTime() + i * 60000;
+          let best = null;
+          for (const t of transitions) {
+            if (t.type !== TRANSITION.OUT_OF_BED) continue;
+            const dt = Math.abs(txMs(t.created_at) - emptyStartMs);
+            if (dt <= WAKE_SNAP_MS && (best == null || dt < best.dt)) best = { dt, ms: txMs(t.created_at) };
+          }
+          if (best) { exitMs = best.ms; break; } // corroborated departure — this is the morning exit
+        }
         i = j;
       }
-      if (exitIdx >= 0) {
-        const emptyStartMs = startUtc.getTime() + exitIdx * 60000;
-        let best = null;
-        for (const t of transitions) {
-          const dt = Math.abs(txMs(t.created_at) - emptyStartMs);
-          if (dt <= WAKE_SNAP_MS && (best == null || dt < best.dt)) best = { dt, ms: txMs(t.created_at) };
-        }
-        out.wake_at_shadow = toSqlUtc(new Date(best ? best.ms : emptyStartMs));
+      if (exitMs != null) {
+        out.wake_at_shadow = toSqlUtc(new Date(exitMs));
       }
     }
 

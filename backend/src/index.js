@@ -19,6 +19,7 @@ import ntfyRoutes from './routes/ntfy.js';
 import gotifyRoutes from './routes/gotify.js';
 import notificationsRoutes from './routes/notifications.js';
 import timelapsesRoutes from './routes/timelapses.js';
+import recordingsRoutes from './routes/recordings.js';
 import { requireAuth, requireAuthQueryOrHeader, verifyToken } from './middleware/auth.js';
 import { startTalkSession, talkConfigured } from './lib/twoWayAudio.js';
 import { subConfigured, isSubRunning, startSubStream } from './lib/subStream.js';
@@ -29,6 +30,7 @@ import { startMotionDetector, stopMotionDetector, isDetecting, stopAllMotionDete
 import { startOnvifMotion, stopOnvifMotion, isOnvifMotion, onvifMotionWanted, stopAllOnvifMotion } from './lib/onvifMotion.js';
 import { startSoundDetector, isSoundDetecting, stopAllSoundDetectors } from './lib/soundDetector.js';
 import { startClipCapture, isClipCapturing, stopAllClipCapture } from './lib/clipCapture.js';
+import { stopAllRecordings } from './lib/recordings.js';
 import { startClipStorage } from './lib/clipStorage.js';
 import { initPush } from './lib/push.js';
 import { startMediaMTX, stopMediaMTX } from './lib/mediamtxProcess.js';
@@ -69,13 +71,39 @@ const app = express();
 // per-IP rate limiting (see auth.js) for anyone connecting through the proxy.
 app.set('trust proxy', 'loopback');
 
-// CSP is deliberately disabled here rather than misconfigured: the custom theming
-// feature applies colors via inline styles (document.documentElement.style...), and
-// WebRTC connects out to a STUN server - both need careful, tested CSP directives to
-// allow without weakening the policy generally, and that's not something to get right
-// blind. Every other protection helmet provides (clickjacking, MIME-sniffing, etc.)
-// stays on.
-app.use(helmet({ contentSecurityPolicy: false }));
+// Content-Security-Policy — ENFORCING (validated via a report-only rollout on staging that exercised
+// every feature). The report-uri below still logs any future
+// violation to /api/csp-report, so a regression (e.g. a new dependency pulling a third-party script)
+// shows up in the container log instead of silently. Directives are tuned to this app:
+//  - script-src 'self' + static.cloudflareinsights.com: Vite emits one external module script (no
+//    inline scripts — don't add unsafe-*); the Cloudflare Web Analytics beacon is allowed by choice.
+//  - style-src 'self': theming uses element.style.setProperty (CSSOM), which CSP doesn't police; app
+//    CSS is an external <link>. (If real style violations show up, add 'unsafe-inline' — low risk.)
+//  - media-src/worker-src blob:: hls.js feeds <video> via MSE blob URLs and runs its demuxer worker
+//    from a blob: URL. img-src data:: snapshot posters/icons. font-src data:: any inlined @font-face.
+//  - connect-src adds the client-side WebRTC STUN host (WhepPlayer.jsx) + the CF beacon POST target —
+//    keep the STUN host in sync if it ever changes.
+//  - No upgrade-insecure-requests: the app is also served over plain http on the LAN.
+app.use(helmet({
+  contentSecurityPolicy: {
+    useDefaults: false,
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", 'https://static.cloudflareinsights.com'],
+      styleSrc: ["'self'"],
+      imgSrc: ["'self'", 'data:'],
+      mediaSrc: ["'self'", 'blob:'],
+      workerSrc: ["'self'", 'blob:'],
+      connectSrc: ["'self'", 'stun.l.google.com:19302', 'https://cloudflareinsights.com'],
+      fontSrc: ["'self'", 'data:'],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+      frameAncestors: ["'none'"],
+      reportUri: ['/api/csp-report'],
+    },
+  },
+}));
 
 // MediaMTX doesn't know it's being reverse-proxied under a prefix (e.g. /live or /hls),
 // so any redirect or resource-location it issues (WHEP's session Location header, HLS's
@@ -156,9 +184,42 @@ app.use('/api/ntfy', ntfyRoutes);
 app.use('/api/gotify', gotifyRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/timelapses', timelapsesRoutes);
+app.use('/api/recordings', recordingsRoutes);
 app.use('/manifest.webmanifest', manifestRoutes);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
+
+// CSP violation sink (see the helmet block above). The browser POSTs a report here whenever the policy
+// blocks something; we log it so a regression — e.g. a new dependency pulling in a third-party script —
+// shows up in the container log instead of silently breaking a feature. Unauthenticated by necessity
+// (browsers send these with no credentials), so it is deliberately hardened against abuse: anyone who
+// can reach the app can post here, and the log is a 1000-line ring buffer that also backs the in-app log
+// viewer. Without limits, a flood would evict every real log line, and newlines in the body would forge
+// convincing-looking log entries. Hence: a per-minute cap, one line, and length-clamped.
+// express.text with a wildcard type captures the body regardless of the report's content-type
+// (application/csp-report vs application/reports+json).
+const CSP_REPORTS_PER_MIN = 10;
+const CSP_REPORT_MAX_CHARS = 500;
+let cspReportWindowStart = 0;
+let cspReportCount = 0;
+app.post('/api/csp-report', express.text({ type: '*/*', limit: '64kb' }), (req, res) => {
+  res.status(204).end(); // always accept; the browser has nothing useful to do with an error
+  if (!req.body) return;
+  const now = Date.now();
+  if (now - cspReportWindowStart > 60_000) {
+    // Note when a burst was actually dropped, so silence isn't mistaken for "no violations".
+    if (cspReportCount > CSP_REPORTS_PER_MIN) {
+      logger.warn(`[csp-report] suppressed ${cspReportCount - CSP_REPORTS_PER_MIN} further report(s) in the last minute`);
+    }
+    cspReportWindowStart = now;
+    cspReportCount = 0;
+  }
+  if (++cspReportCount > CSP_REPORTS_PER_MIN) return;
+  const raw = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+  // Collapse all whitespace so a body can't inject extra log lines, then clamp the length.
+  const oneLine = raw.replace(/\s+/g, ' ').trim().slice(0, CSP_REPORT_MAX_CHARS);
+  logger.warn(`[csp-report] ${oneLine}${raw.length > CSP_REPORT_MAX_CHARS ? '…' : ''}`);
+});
 
 // Serve the built React frontend (see Dockerfile — built at image-build time into ./public).
 const publicDir = path.join(__dirname, '..', 'public');
@@ -189,7 +250,9 @@ server.on('upgrade', (req, socket, head) => {
   let url;
   try { url = new URL(req.url, 'http://localhost'); } catch { socket.destroy(); return; }
   if (url.pathname !== '/api/talk') { socket.destroy(); return; }
-  const user = verifyToken(url.searchParams.get('token'));
+  // The token rides in the WS URL (browsers can't set headers on the handshake), so it must be a
+  // media-scoped token, not the full session token - same reason as the HLS/query-token routes.
+  const user = verifyToken(url.searchParams.get('token'), { purpose: 'media' });
   if (!user) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
   const cameraId = url.searchParams.get('camera');
   const camera = cameraId ? db.prepare('SELECT * FROM cameras WHERE id = ?').get(cameraId) : null;
@@ -496,6 +559,8 @@ async function shutdown() {
   await stopAllMotionDetectors();
   await stopAllOnvifMotion();
   await stopAllSoundDetectors();
+  // Finish any in-flight recording first — it cuts from the ring the segmenters own.
+  stopAllRecordings().catch(() => {});
   stopAllClipCapture();
   await stopAllTranscoders();
   stopMediaMTX();

@@ -9,6 +9,58 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-08-25
+
+### Added
+- **Recording now has its own Settings screen.** Settings → **Recording** replaces the recording block that
+  was buried in General, and separates the two things that were previously tangled together: **Automatic
+  clips** (captured when a detection fires, and aged out by retention) and **On-demand recording** (captured
+  because you pressed Record, and kept until you delete it). The storage readout now also shows how much
+  space your own recordings are using, which it previously left out entirely.
+- **Record a moment yourself.** Each camera now has a **Record** button that captures a clip on the spot —
+  and because the server is always keeping a short rolling buffer, it also saves the **30 seconds before
+  you pressed**, so you can catch something just *after* it happens. Press again to stop (or let it stop
+  itself at the time limit), and the clip appears under **Recordings** on that child's page, where it can
+  be played, downloaded or deleted. Unlike alert clips, recordings are **never** removed automatically —
+  they stay until you delete them. Settings → General lets you change how far back Record reaches, the
+  automatic stop time, or turn the whole feature (and its buffering) off.
+- **Download a night’s timelapse.** Opening a timelapse now uses the same player as an alert clip,
+  including a **Download** button — so a night you want to keep can be saved to your phone'''s Downloads
+  (or shared) just like a recorded clip. The timelapse player also now shows the night and its length
+  underneath, matching the clip player.
+
+### Fixed
+- **More accurate refined wake-up times.** The refined ("out of bed") wake-up time shown on a night's
+  sleep detail now has to be backed by an actual out-of-bed event, instead of being inferred from a quiet
+  crib alone. A quiet stretch on its own could be a child who is simply still, so the old rule could pick
+  a wake-up up to 40 minutes early — or, when a crib kept registering movement after the child had been
+  carried out, up to an hour late. When no departure is detected, the night keeps its standard wake-up
+  time rather than showing a refined one that might be wrong. Checked against a real night: both children
+  now match what actually happened, or fall back cleanly.
+- **Re-probing a camera over ONVIF no longer hangs on some Hikvision cameras.** After probing, the app
+  live-tests whether the camera can play talk-back over its stream. On certain Hikvision cameras that
+  advertise an audio output but don't actually support the ONVIF/RTSP backchannel, that test could get
+  stuck waiting on a reply the camera never sends, leaving the probe spinning forever. RTSP handshake
+  requests now time out cleanly, so the probe always finishes and reports its result — and because the
+  app no longer waits for a disconnect acknowledgement the camera was never going to send, re-probing
+  one of these cameras is about five seconds faster.
+
+### Security
+- **A Content-Security-Policy is now enforced.** The app serves a strict CSP that only allows scripts,
+  styles, images, media and connections from itself (plus the video stream's STUN server and, by choice,
+  Cloudflare's analytics beacon). This is defense-in-depth: if a bug or a future dependency ever tried to
+  inject a rogue script, the browser blocks it. Rolled out in report-only mode first and validated against
+  every feature (both stream modes, snapshots, clips, timelapses, two-way audio, theming) before enforcing.
+- **Video/image URLs no longer carry your full login token.** The stream (HLS), snapshot, clip,
+  timelapse, and talk-back URLs the browser loads directly used to include your 30-day session token
+  as a `?token=` query parameter — and query strings can end up in reverse-proxy/CDN access logs,
+  browser history, and referrer headers, so a leaked URL meant full account access. These URLs now
+  use a separate **short-lived, video-only token** (12-hour lifetime, tied to your session so signing
+  out revokes it) that can only fetch media — it can't touch the rest of the app. Live/background audio
+  (WebRTC) authenticates once at connect and isn't affected; only Compatibility (HLS) streams carry the
+  token, and they reconnect automatically if it ever expires mid-view. No visible change in use; the app
+  fetches and refreshes the media token automatically.
+
 ## [0.24.1] - 2026-08-24
 
 ### Fixed

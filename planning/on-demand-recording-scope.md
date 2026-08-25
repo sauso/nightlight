@@ -5,13 +5,14 @@ Add a **manual "Record" button** so a caregiver can capture a clip on demand —
 still get the seconds leading up to it (retroactive / "instant replay" capture). The buffer length is
 an admin setting; an optional auto-stop timer caps runaway recordings.
 
-> Status: PLAN ONLY. Reconciles against the shipped recording pipeline (0.17.0). Nothing built yet.
+> Status: **SPECCED — nothing built.** Design settled and reconciled against the shipped recording
+> pipeline (0.17.0). Tracked as item 2.1 in `ROADMAP.md`, which is the index of all open work.
 
 ---
 
 ## The key realization: the pre-roll buffer already exists
 
-Event-recording (see `recording-and-sleep-tracking-scope.md`, shipped) chose **Option A**: one
+Event-recording (shipped in 0.17.0) chose **Option A**: one
 continuous **segmenter FFmpeg per detection-enabled camera**, pulling from the *local MediaMTX path*
 (`rtsp://127.0.0.1:8554/<path>`, no second RTSP session on the camera), mapping **video + the AAC
 track only** (`-map 0:v -map 0:a:1`), writing short (~2s) segments into a **rolling ring** sized to

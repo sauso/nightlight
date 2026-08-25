@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet, Zap, AudioLines, Bell, Square, Play, RotateCcw, Power, BellOff } from 'lucide-react';
+import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet, Zap, AudioLines, Bell, Square, Play, RotateCcw, Power, BellOff, Circle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { startTalk } from '../lib/twoWayTalk.js';
@@ -51,7 +51,13 @@ function readingParts(mqtt, tempUnit) {
   return parts;
 }
 
-export default function CameraTile({ camera, childName, dragHandleProps, refreshNonce = 0 }) {
+// MM:SS for the running recording timer.
+function fmtElapsed(sec) {
+  const s = Math.max(0, Math.round(sec));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+export default function CameraTile({ camera, childName, dragHandleProps, refreshNonce = 0, onRecordingSaved }) {
   const { settings } = useSettings();
   const { user } = useAuth();
   const { refresh: refreshCameras } = useCameras();
@@ -141,6 +147,49 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   const talkStopRef = useRef(null);
   const talkTimeoutRef = useRef(null);
   const [talkError, setTalkError] = useState('');
+
+  // On-demand recording. The server owns the recording state (so a reload, or a second device, sees a
+  // capture that's still running); `camera.recording` / `elapsed_s` come back on the camera row, and we
+  // tick the displayed time locally between refreshes rather than polling the server every second.
+  const [recording, setRecording] = useState(!!camera.recording);
+  const [recElapsed, setRecElapsed] = useState(camera.recording_elapsed_s || 0);
+  const [recBusy, setRecBusy] = useState(false);
+  const [recError, setRecError] = useState('');
+
+  useEffect(() => {
+    setRecording(!!camera.recording);
+    setRecElapsed(camera.recording_elapsed_s || 0);
+  }, [camera.recording, camera.recording_elapsed_s]);
+
+  useEffect(() => {
+    if (!recording) return;
+    const t = setInterval(() => setRecElapsed((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [recording]);
+
+  async function toggleRecord() {
+    setRecError('');
+    setRecBusy(true);
+    try {
+      if (recording) {
+        setRecording(false); // stop feels instant; the server is still cutting the clip
+        await api.post(`/cameras/${camera.id}/record/stop`, {});
+        refreshCameras?.(); // pick up the server's authoritative state
+        onRecordingSaved?.(); // let a recordings list know there's a new one
+      } else {
+        const st = await api.post(`/cameras/${camera.id}/record/start`, {});
+        setRecording(!!st.recording);
+        setRecElapsed(st.elapsed_s || 0);
+      }
+    } catch (err) {
+      // The server refuses with a clear reason (feature off, camera not buffering, disk full).
+      setRecError(err.message || 'Recording failed');
+      setRecording(false);
+      setTimeout(() => setRecError(''), 4000);
+    } finally {
+      setRecBusy(false);
+    }
+  }
   // Tap-to-talk (toggle), not hold: tap once to go live, tap again to stop. A safety cap auto-stops
   // it so a forgotten "on" can't leave the mic live indefinitely (the reason the old design held).
   const TALK_MAX_MS = 2 * 60 * 1000;
@@ -929,6 +978,22 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
             title={talkError || (talking ? 'Tap to stop' : 'Tap to talk')}
           >
             <Mic size={16} />
+          </button>
+        )}
+        {/* On-demand recording. Because the server is always buffering, this also captures the
+            seconds BEFORE the tap — so you can hit it just after the moment. Recording shows a
+            pulsing red dot and the elapsed time; it auto-stops at the configured cap. */}
+        {camera.can_record && (
+          <button
+            className={`rec-btn${recording ? ' rec-btn--active' : ''}`}
+            onClick={toggleRecord}
+            aria-label={recording ? `Stop recording ${camera.name}` : `Record ${camera.name}`}
+            aria-pressed={recording}
+            disabled={recBusy}
+            title={recError || (recording ? 'Tap to stop and save' : 'Record this moment')}
+          >
+            <Circle size={16} fill="currentColor" />
+            {recording && <span className="rec-btn__time">{fmtElapsed(recElapsed)}</span>}
           </button>
         )}
         <button

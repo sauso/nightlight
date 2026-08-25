@@ -10,7 +10,7 @@ import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.j
 import { startMotionDetector, stopMotionDetector, motionLegWanted } from '../lib/motionDetector.js';
 import { startOnvifMotion, stopOnvifMotion, onvifMotionWanted } from '../lib/onvifMotion.js';
 import { startSoundDetector, stopSoundDetector } from '../lib/soundDetector.js';
-import { startClipCapture, stopClipCapture } from '../lib/clipCapture.js';
+import { startClipCapture, stopClipCapture, isClipCapturing } from '../lib/clipCapture.js';
 import {
   getRecentDetectionEvents,
   clearDetectionEvents,
@@ -25,6 +25,7 @@ import { probeOnvifCamera, ptzNudge, ptzRelativeStep, probePtzRelativeSupport, r
 import { validateRtspStream, probeRtspDetailed, ffprobeVersion } from '../lib/rtspProbe.js';
 import { captureSnapshot, fetchHttpSnapshot } from '../lib/snapshot.js';
 import { logger } from '../lib/logger.js';
+import { startRecording, stopRecording, recordingState, getOndemandSettings } from '../lib/recordings.js';
 
 const router = Router();
 
@@ -146,6 +147,7 @@ function serializeZone(z) {
 }
 
 function publicCamera(cam, isAdmin) {
+  const recState = recordingState(cam.id);
   // snapshot_url can carry Basic-auth creds, so keep it admin-only (like the RTSP/ONVIF secrets).
   const { rtsp_url, onvif_username, onvif_password, talk_username, talk_password, sub_rtsp_url, snapshot_url, ...rest } = cam;
   // talk_configured / has_sub (safe for everyone) drive the tile's talk button + quality selector.
@@ -158,6 +160,15 @@ function publicCamera(cam, isAdmin) {
     reboot_capable: !!(cam.onvif_capable && cam.onvif_device_url),
     // Parse the crib zone (stored as a JSON string) into an object for the client.
     detect_zone: parseZone(cam.detect_zone),
+    // On-demand recording state, so the tile can show Record vs a running Stop after a reload or on a
+    // second device. `can_record` is false while the ring isn't up (camera offline / feature off), which
+    // is exactly when Start would be rejected — so the button can disable itself instead of failing.
+    can_record: getOndemandSettings().enabled && isClipCapturing(cam.id) && !cam.disabled,
+    // Mapped field by field, NOT spread: recordingState carries its own `id` (the recording's), which
+    // spreading would silently overwrite the camera's `id` for exactly as long as a recording runs.
+    recording: recState.recording,
+    recording_id: recState.id ?? null,
+    recording_elapsed_s: recState.elapsed_s ?? 0,
   };
   if (!isAdmin) return base;
   const parts = parseRtspComponents(rtsp_url) || {};
@@ -338,6 +349,31 @@ function ptzConnForCamera(id, res) {
     return null;
   }
 }
+
+// --- On-demand recording (the tile's Record button) ---
+// Any signed-in user can record; this is a household app and capturing a moment isn't an admin action.
+// Both routes are idempotent by design (see lib/recordings.js): a second Start returns the in-progress
+// state, and a Stop with nothing running is a no-op — so a double-tap or a retried request is harmless.
+
+router.post('/:id/record/start', (req, res) => {
+  const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+  if (!cam) return res.status(404).json({ error: 'Camera not found' });
+  try {
+    res.json(startRecording(cam, req.user?.id ?? null));
+  } catch (err) {
+    // 4xx, not 5xx: these are all actionable user-facing conditions (feature off, camera offline,
+    // disk full), and a reverse proxy would strip the message off a 5xx (see the onvif-probe note).
+    res.status(409).json({ error: err.message || 'Could not start recording' });
+  }
+});
+
+router.post('/:id/record/stop', async (req, res) => {
+  const cam = db.prepare('SELECT id FROM cameras WHERE id = ?').get(req.params.id);
+  if (!cam) return res.status(404).json({ error: 'Camera not found' });
+  // Resolves once the clip has been cut, so the client can refresh and see the new recording.
+  const id = await stopRecording(req.params.id);
+  res.json({ ok: true, recording_id: id });
+});
 
 // One fixed-distance step per call, so each press of a D-pad arrow travels a consistent amount. The
 // client sends one per tap and repeats while a button is held. Prefer ONVIF RelativeMove (the camera

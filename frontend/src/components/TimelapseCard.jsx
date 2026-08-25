@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Play, Film } from 'lucide-react';
 import { api } from '../lib/api.js';
-import Modal from './Modal.jsx';
+import MediaPlayerModal from './MediaPlayerModal.jsx';
 
 // "Memories" card on a child's detail page: the nightly sleep timelapse (see lib/timelapse.js). Shows
 // the most recent night as a hero thumbnail that plays in a modal; older nights sit in a strip below to
@@ -67,16 +67,14 @@ export default function TimelapseCard({ childId }) {
       )}
 
       {playing && (
-        <Modal title={`Timelapse · ${nightLabel(sel.night_date)}`} onClose={() => setPlaying(false)}>
-          <video
-            className="timelapse-player"
-            src={api.url(`/timelapses/${sel.id}/video`)}
-            poster={api.url(`/timelapses/${sel.id}/thumb`)}
-            controls
-            autoPlay
-            playsInline
-          />
-        </Modal>
+        <MediaPlayerModal
+          title={`Timelapse · ${nightLabel(sel.night_date)}`}
+          videoPath={`/timelapses/${sel.id}/video`}
+          posterPath={`/timelapses/${sel.id}/thumb`}
+          filename={`timelapse-${sel.night_date}.mp4`}
+          meta={`${nightLabel(sel.night_date)}${sel.duration_s ? ` · ${sel.duration_s}s` : ''}`}
+          onClose={() => setPlaying(false)}
+        />
       )}
     </div>
   );
