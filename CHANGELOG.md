@@ -17,6 +17,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   data": the cameras were watching all night, there simply wasn't anyone there. The nightly report says
   it too, instead of inventing a night's sleep.
 
+### Added
+- **Admins can delete a timelapse.** Open it and use the bin icon in the corner of the player, the same
+  way an alert clip is removed. It asks first — unlike a clip, a timelapse can't be rebuilt, because the
+  frames it was made from are deleted once it's assembled.
+
 ### Changed
 - **Wake-up and bedtime now come from watching your child leave and enter the bed**, rather than from
   movement and sound alone. The app could already detect the moment a child got out of bed, but only
@@ -29,6 +34,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   said, for comparison.
 
 ### Fixed
+- **No timelapse is made for a night nobody slept there.** A night with an empty bed was still producing
+  a "memory" of an empty room, and leaving it on the child's page. Those nights are now skipped and their
+  frames discarded.
 - **Bedtime no longer has to match the schedule.** Children don't go to bed at a fixed time — a tired
   one can be asleep well before their sleep window opens. Sleep that started early was previously
   clipped to the start of the window, so an early night was recorded as shorter than it really was.

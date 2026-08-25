@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Play, Film } from 'lucide-react';
+import { Play, Film, Trash2 } from 'lucide-react';
 import { api } from '../lib/api.js';
+import { useAuth } from '../lib/AuthContext.jsx';
 import MediaPlayerModal from './MediaPlayerModal.jsx';
 
 // "Memories" card on a child's detail page: the nightly sleep timelapse (see lib/timelapse.js). Shows
@@ -14,26 +15,54 @@ function nightLabel(nightDate) {
 }
 
 export default function TimelapseCard({ childId }) {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [list, setList] = useState([]);
   const [selId, setSelId] = useState(null);
   const [playing, setPlaying] = useState(false);
+  const [del, setDel] = useState(''); // '' | 'confirm' | 'deleting' | 'error'
 
-  useEffect(() => {
-    let alive = true;
-    api
+  function load(alive = { current: true }) {
+    return api
       .get(`/timelapses/child/${childId}`)
       .then((rows) => {
-        if (!alive) return;
+        if (!alive.current) return;
         const arr = Array.isArray(rows) ? rows : [];
         setList(arr);
-        setSelId(arr.length ? arr[0].id : null);
+        // Keep the current pick if it survived the refresh, else fall back to the newest.
+        setSelId((prev) => (arr.some((t) => t.id === prev) ? prev : arr.length ? arr[0].id : null));
       })
       .catch(() => {});
-    return () => { alive = false; };
+  }
+
+  useEffect(() => {
+    const alive = { current: true };
+    load(alive);
+    return () => { alive.current = false; };
   }, [childId]);
 
   if (!list.length) return null;
   const sel = list.find((t) => t.id === selId) || list[0];
+  const confirming = del === 'confirm' || del === 'deleting' || del === 'error';
+
+  function closePlayer() {
+    setDel('');
+    setPlaying(false);
+  }
+
+  // Admin-only, and irreversible: unlike an alert clip (whose alert and snapshot survive), a timelapse
+  // is the only copy — its source frames are deleted as soon as it's assembled. Confirmed in-app, never
+  // with a browser dialog.
+  async function deleteNow() {
+    setDel('deleting');
+    try {
+      await api.del(`/timelapses/${sel.id}`);
+      closePlayer();
+      await load();
+    } catch {
+      setDel('error');
+    }
+  }
 
   return (
     <div className="card timelapse-card">
@@ -73,7 +102,32 @@ export default function TimelapseCard({ childId }) {
           posterPath={`/timelapses/${sel.id}/thumb`}
           filename={`timelapse-${sel.night_date}.mp4`}
           meta={`${nightLabel(sel.night_date)}${sel.duration_s ? ` · ${sel.duration_s}s` : ''}`}
-          onClose={() => setPlaying(false)}
+          onClose={closePlayer}
+          headerAction={
+            isAdmin ? (
+              <button type="button" className="icon-btn icon-btn--danger" aria-label="Delete timelapse"
+                onClick={() => setDel('confirm')} disabled={del === 'deleting'}>
+                <Trash2 size={17} />
+              </button>
+            ) : null
+          }
+          footer={
+            confirming ? (
+              <div className="clip-confirm">
+                <span>
+                  {del === 'error'
+                    ? 'Couldn’t delete — try again.'
+                    : 'Delete this timelapse? It can’t be rebuilt — the frames it was made from are gone.'}
+                </span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" className="btn" onClick={() => setDel('')} disabled={del === 'deleting'}>Cancel</button>
+                  <button type="button" className="btn btn-danger" onClick={deleteNow} disabled={del === 'deleting'}>
+                    {del === 'deleting' ? 'Deleting…' : 'Delete'}
+                  </button>
+                </div>
+              </div>
+            ) : null
+          }
         />
       )}
     </div>

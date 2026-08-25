@@ -890,6 +890,7 @@ export function runNightlySleepJob() {
     let computed = 0;
     const fresh = []; // freshly-closed nights to notify about ({ name, summary })
     const toTimelapse = []; // freshly-closed nights to assemble a memories timelapse for
+    const emptyNights = []; // ...and those with nobody in the bed, whose frames get thrown away
     const now = Date.now();
     const notifyOn = db.prepare('SELECT sleep_report_alert_enabled FROM settings WHERE id = ?').get('app')?.sleep_report_alert_enabled;
     for (const kid of kids) {
@@ -899,7 +900,12 @@ export function runNightlySleepJob() {
       if (existing) continue;
       const summary = computeAndStoreNight(kid.id, nightDate);
       computed++;
-      toTimelapse.push({ childId: kid.id, nightDate });
+      // No one in the bed = no memory worth keeping. The frames are of an empty room, so building a
+      // timelapse would spend an FFmpeg pass and disk on nothing, and leave a pointless card on the
+      // child's page. Occupancy is only known once the night is scored, so the frames are collected
+      // overnight either way and discarded here.
+      if (summary.status === 'empty') emptyNights.push({ childId: kid.id, nightDate });
+      else toTimelapse.push({ childId: kid.id, nightDate });
       // Only notify if the window closed recently (guards against a mid-day restart re-notifying).
       const endMs = summary.window_end ? new Date(summary.window_end.replace(' ', 'T') + 'Z').getTime() : 0;
       if (endMs && now - endMs <= REPORT_FRESH_MS) fresh.push({ name: kid.name, summary });
@@ -910,9 +916,12 @@ export function runNightlySleepJob() {
     // overnight. Fire-and-forget (one FFmpeg pass each) and dynamically imported to avoid a static
     // import cycle (timelapse.js imports the window helpers from this module). Runs once per night —
     // the `existing` guard above means a night is only in this list the first time it's computed.
-    if (toTimelapse.length) {
+    if (toTimelapse.length || emptyNights.length) {
       import('./timelapse.js')
-        .then((m) => { for (const t of toTimelapse) m.assembleTimelapse(t.childId, t.nightDate).catch(() => {}); })
+        .then((m) => {
+          for (const t of toTimelapse) m.assembleTimelapse(t.childId, t.nightDate).catch(() => {});
+          for (const t of emptyNights) { try { m.discardTimelapseFrames(t.childId, t.nightDate); } catch { /* best effort */ } }
+        })
         .catch((e) => logger.error(`[timelapse] assembly trigger import failed: ${e.message}`));
     }
   } catch (err) {
