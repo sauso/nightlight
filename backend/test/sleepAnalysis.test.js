@@ -30,6 +30,7 @@ const TZ_OFF = 10 * 3600 * 1000;
 // A local wall-clock time on the night of DATE (dayShift 1 = the following morning) as a UTC Date.
 const at = (h, m, dayShift = 0) => new Date(Date.UTC(2026, 6, 1 + dayShift, h, m) - TZ_OFF);
 const sqlTime = (d) => d.toISOString().slice(0, 19).replace('T', ' ').replace(/:\d\d$/, ':00');
+const utcMs = (u) => new Date(u.replace(' ', 'T') + 'Z').getTime();
 const hhmm = (u) =>
   u ? new Date(u.replace(' ', 'T') + 'Z').toLocaleString('en-AU', { timeZone: TZ, hour12: false, hour: '2-digit', minute: '2-digit' }) : null;
 
@@ -150,6 +151,62 @@ test('empty bed does not fire for an occupied night', () => {
   assert.equal(night.status, 'ok');
   assert.ok(night.wake_count > 0);
   assert.ok(night.asleep_minutes > 0);
+});
+
+// --- Promotion of the transition-derived times to authoritative -------------------------------
+//
+// The shape below is the real 2026-08-25 night: the child got out of bed at 05:09 and never went back,
+// but a parent handled the bed later in the morning, and the movement-only rule read that as the wake.
+// Ground truth confirmed 05:09, so the movement-only answer was 89 minutes late.
+function layDepartureNight({ withTransition }) {
+  laySamples(at(19, 30), at(7, 0, 1), [
+    [at(19, 30), at(19, 40)], // settling
+    [at(23, 0), at(23, 6)], // a real awakening
+    [at(2, 0, 1), at(2, 8, 1)], // another
+    [at(5, 0, 1), at(5, 9, 1)], // stirs, then gets out of bed
+    [at(6, 45, 1), at(7, 0, 1)], // a parent handling the empty bed afterwards
+  ]);
+  if (withTransition) insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(5, 9, 1)));
+}
+
+test('a corroborated departure becomes the authoritative wake time', () => {
+  layDepartureNight({ withTransition: true });
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.status, 'ok');
+  assert.equal(hhmm(night.wake_at), '05:09', 'the real departure, not the later bed-handling');
+  // The movement-only figure is kept so the two methods stay comparable night by night.
+  assert.equal(hhmm(night.wake_at_algo), '06:45');
+  assert.equal(hhmm(night.wake_at_shadow), '05:09');
+});
+
+test('adopting the departure also shortens the recorded sleep', () => {
+  // The point of computing the adoption BEFORE the metrics: promoting only the displayed time would
+  // leave "asleep" still counting the 96 minutes after the child had already left the bed.
+  layDepartureNight({ withTransition: true });
+  const promoted = computeNight(CHILD, DATE);
+
+  db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  const movementOnly = computeNight(CHILD, DATE);
+
+  assert.ok(
+    promoted.asleep_minutes < movementOnly.asleep_minutes,
+    `promoted (${promoted.asleep_minutes}) must be shorter than movement-only (${movementOnly.asleep_minutes})`
+  );
+  // Both onset and the counted awakenings are unchanged; only the end of the night moved.
+  assert.equal(promoted.onset_at, movementOnly.onset_at);
+  assert.equal(promoted.wake_count, movementOnly.wake_count);
+  const span = Math.round((utcMs(promoted.wake_at) - utcMs(promoted.onset_at)) / 60000);
+  assert.equal(promoted.asleep_minutes + promoted.awake_minutes, span);
+});
+
+test('with nothing corroborating it, the wake falls back to the movement-only value', () => {
+  // Adoption is safe by construction: no transition means exactly the old behaviour.
+  layDepartureNight({ withTransition: false });
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(hhmm(night.wake_at), '06:45');
+  assert.equal(night.wake_at, night.wake_at_algo, 'must be identical to the movement-only figure');
 });
 
 test('a night with too few samples is no_data, not empty', () => {

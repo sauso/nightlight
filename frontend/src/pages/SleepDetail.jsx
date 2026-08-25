@@ -340,27 +340,28 @@ function Stat({ label, value }) {
   );
 }
 
-// The out-of-bed-corrected onset/wake, shown only when they DIFFER from the live estimate — so we can
-// eyeball the transition-based times against the movement-only algorithm each morning while they're
-// being validated. Flagged experimental; the headline numbers above are still the live algorithm's.
+// The headline times now come from bed entry/exit detection where a real transition supports them. This
+// strip shows what movement & sound ALONE would have reported, and only when the two differ — so the two
+// methods can still be compared each morning now that the better one is the default. Older nights
+// (computed before the promotion) have no *_algo values and simply show nothing.
 function RefinedTimes({ night, fmtTime }) {
-  const onsetDiff = night.onset_at_shadow && night.onset_at_shadow !== night.onset_at;
-  const wakeDiff = night.wake_at_shadow && night.wake_at_shadow !== night.wake_at;
+  const onsetDiff = night.onset_at_algo && night.onset_at_algo !== night.onset_at;
+  const wakeDiff = night.wake_at_algo && night.wake_at_algo !== night.wake_at;
   if (!onsetDiff && !wakeDiff) return null;
   return (
     <div className="sleep-refined">
-      <span className="sleep-refined__label"><DoorOpen size={13} aria-hidden="true" /> Out-of-bed estimate</span>
+      <span className="sleep-refined__label"><DoorOpen size={13} aria-hidden="true" /> Movement-only estimate</span>
       {onsetDiff && (
         <span className="sleep-refined__item">
-          Asleep <span className="sleep-refined__old">{fmtTime(night.onset_at)}</span><b>{fmtTime(night.onset_at_shadow)}</b>
+          Asleep <span className="sleep-refined__old">{fmtTime(night.onset_at_algo)}</span><b>{fmtTime(night.onset_at)}</b>
         </span>
       )}
       {wakeDiff && (
         <span className="sleep-refined__item">
-          Woke <span className="sleep-refined__old">{night.wake_at ? fmtTime(night.wake_at) : '—'}</span><b>{fmtTime(night.wake_at_shadow)}</b>
+          Woke <span className="sleep-refined__old">{fmtTime(night.wake_at_algo)}</span><b>{night.wake_at ? fmtTime(night.wake_at) : '—'}</b>
         </span>
       )}
-      <span className="sleep-refined__note">Experimental — refined from bed entry/exit detection. The figures above still use movement &amp; sound.</span>
+      <span className="sleep-refined__note">The times above use bed entry/exit detection. Struck through is what movement &amp; sound alone would have reported.</span>
     </div>
   );
 }
