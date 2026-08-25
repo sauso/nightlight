@@ -15,12 +15,17 @@ release procedure).
 
 ## Commands
 
-There is no root-level build — `backend/` and `frontend/` are independent npm projects with
-no test suite or linter configured in either.
+There is no root-level build — `backend/` and `frontend/` are independent npm projects. No linter is
+configured in either. `backend/` has a unit test suite (Node's built-in runner, no dependencies);
+`frontend/` has none. End-to-end coverage lives separately in `e2e/` (Playwright, needs Docker).
 
 ```bash
 # Backend (Node/Express, ESM, port 4000)
 cd backend && npm install
+npm test                     # node --test — unit tests, no container/network needed. Points DATA_DIR
+                              # at a temp dir, so it never touches a real database. Prefer this over
+                              # replaying logic inside a deployed container: it runs in ~0.5s and
+                              # covers the branches real data can't reach (early bedtime, empty bed).
 npm start                    # node src/index.js — expects MediaMTX/ffmpeg binaries on PATH,
                               # so in practice this is normally run inside the Docker image
                               # rather than bare on a dev machine
