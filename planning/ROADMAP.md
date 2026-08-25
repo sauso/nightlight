@@ -99,21 +99,7 @@ camera's detail/diagnostics screen — "this sub-stream is the same size as the 
 save bandwidth". A warning, not a block: it's a camera-side misconfiguration, so the fix is on the
 camera, and refusing to save would be unhelpful.
 
-### 2.2 Adaptive stream quality — Phase 3 — `SPECCED`
-Phase 2 (manual High/Low per tile, backed by a per-camera sub-stream path) shipped. **Phase 1
-(on-demand sub-stream transcoders) was measured and dropped — see §4.** One phase remains:
-
-- **Phase 3 — automatic quality switching.** Explicitly optional and removable; `Auto` just becomes an
-  unavailable option if it's dropped. Detection is the easy part (`RTCPeerConnection.getStats()` gives
-  `packetsLost`, `jitter`, frames-dropped). **The hard part is hysteresis** — naive thresholds flap
-  between tiers every few seconds, which feels worse than simply being stuck on Low. Requirements:
-  asymmetric thresholds (drop fast, recover slowly on sustained evidence), a cooldown after any switch,
-  and a per-session switch cap. Every switch costs a reconnect gap, and WebRTC can wedge on reconnect
-  on iOS — so keep it conservative.
-  **Evaluation bar before keeping it:** does it measurably reduce stuttering without visible flapping?
-  If not, remove it and keep the manual selector — that's a fine outcome, not a failure.
-
-### 2.3 Cry classification — `SPECCED`
+### 2.2 Cry classification — `SPECCED`
 Sound detection today alerts on **loudness** (FFmpeg `silencedetect`), not on what the noise *is*. The
 agreed staging was always: prove motion+push → add sound presence → tune against real usage → *only
 then* evaluate cry-specific classification, informed by how well plain sound detection performs.
@@ -124,7 +110,7 @@ problem. A spare **USB Coral** may accelerate it, but it must stay **optional an
 with a CPU fallback — the app has to run fully without one, and everything shipped so far is
 deliberately Node + FFmpeg only (no Python in the runtime image).
 
-### 2.4 E2E testing — Phase 4 & Phase 5 — `SPECCED`
+### 2.3 E2E testing — Phase 4 & Phase 5 — `SPECCED`
 Phases 1–3 shipped: the synthetic-camera stack, the Playwright UI suite, and auto-generated docs
 screenshots, all green in `e2e.yml`.
 
@@ -137,8 +123,8 @@ screenshots, all green in `e2e.yml`.
 
 Harder-to-fake features, deliberately deferred within the suite: **two-way audio** (Playwright can fake
 a mic and assert the WebSocket connects and bytes flow, but never that the camera physically plays it)
-and **PTZ/ONVIF** (needs a camera to respond). **Adaptive quality is testable** — give the synthetic
-source a second path and assert High/Low swaps the stream.
+and **PTZ/ONVIF** (needs a camera to respond). **The High/Low selector is testable** — give the
+synthetic source a second path and assert the toggle swaps the stream.
 
 ---
 
@@ -200,26 +186,14 @@ Recorded so they don't get re-litigated. Each was considered and consciously par
   MediaMTX segments and addressing camera GOP.
 - **otplib 12 → 13 (Dependabot #128)** — `HELD`. A major bump that gates TOTP login; pinned until it can
   be verified end-to-end on staging.
-- **On-demand sub-stream transcoders (was §2.2 Phase 1)** — `DROPPED 2026-08-25, measured`. The plan was
-  to start the sub leg only while a client is watching Low, to halve the FFmpeg surface and avoid a
-  second concurrent RTSP pull from cameras that cap simultaneous clients. The de-risking spike this file
-  asked for was run against prod, and it does not survive contact with the measurements:
-  - **The motion detector is a permanent consumer of the sub path.** It deliberately prefers the sub
-    (cheap to decode), and a `framediff` alerter runs 24/7 — alerts aren't window-gated. Both prod
-    cameras are `framediff` with a sub configured, so each `-sub` path already shows exactly **1 reader**
-    with no browser client attached. Starting the sub "only while someone watches Low" would therefore
-    either change nothing, or — if implemented against viewers alone — push both detectors onto the
-    full-resolution main stream 24/7, costing *more* CPU than the whole change could ever save.
-  - **The client-cap risk did not materialise.** 72 hours of prod logs: **one** transcoder restart in
-    total and **zero** client-limit / refused-connection errors. Both Thingino cameras serve ch0 + ch1
-    concurrently without complaint.
-  - **The prize is small.** The two sub transcoders cost **3.3% of one core** combined, out of ~21% for
-    the whole container.
-
-  If it is ever revisited, the only correct shape is a **reference-counted sub lifetime** with the
-  detector as a first-class lease holder, not a viewer-only trigger — `getPathStatus()` already returns
-  a MediaMTX `readers` count, so the plumbing exists. The far better return on the same concern is
-  §2.1: fixing a sub that isn't actually a sub saves ~4.7% of a core on its own.
+- **Adaptive stream quality, beyond the manual selector** — `CLOSED 2026-08-25, not building`. High/Low
+  per tile, remembered per camera, is the finished feature. Both phases once planned on top of it are
+  decided against: **on-demand sub-stream transcoders** (measured on prod — the motion detector holds
+  the sub path open 24/7 regardless of viewers, so it saves nothing and could cost more; 72h of logs
+  showed zero camera client-limit errors) and **automatic quality switching** (every switch costs a
+  WebRTC reconnect — this app's worst existing failure mode — to solve a bandwidth problem that hasn't
+  occurred on a LAN monitor). The sub-stream reasoning is repeated in `lib/subStream.js`, where anyone
+  tempted to build it would actually hit it.
 
 ---
 
