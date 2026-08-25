@@ -5,13 +5,15 @@ or a deliberate non-goal (§6).
 
 **Ground rule:** this file tracks *intent*. `CHANGELOG.md` is the record of what actually shipped —
 when the two disagree, the changelog is right. Update this file in the same commit that changes the
-plan, and delete an item from here when it ships.
+plan, and **delete an item from here the moment it ships** — cutting a release is the checkpoint where
+that gets verified (see the `release` skill's roadmap gate). An item that turns out not to be worth
+building goes to §4 *with the evidence*, so it doesn't get re-proposed later.
 
-> **History note (2026-08-24):** `planning/` previously held 12 per-feature scope docs, most of them
-> describing work that had already shipped — several still headed "Not started" months after release,
-> and one (`ux-refresh-v2-scope.md`) specifying a Live/Alerts/Family/Settings nav that was built and
-> then abandoned. They were deleted in favour of this file; the full text of each remains in git
-> history if the original design reasoning is ever needed.
+> **History note:** `planning/` previously held 12 per-feature scope docs, most describing work that had
+> already shipped — several still headed "Not started" months after release, and one
+> (`ux-refresh-v2-scope.md`) specifying a nav that was built and then abandoned. They were deleted in
+> favour of this file (2026-08-24), and `on-demand-recording-scope.md` followed once that feature
+> shipped in 0.25.0. The full text of each remains in git history if the design reasoning is ever needed.
 
 **Status vocabulary:** `NEXT` (agreed, ready to start) · `SPECCED` (design settled, unbuilt) ·
 `IDEA` (worth doing, not committed) · `HELD` (blocked or waiting on something).
@@ -20,20 +22,54 @@ plan, and delete an item from here when it ships.
 
 ## 1. Next up
 
-### 1.1 Promote shadow sleep onset/wake to authoritative — `NEXT`
-Out-of-bed detection ships today in **shadow mode**: `sleep_nights.onset_at_shadow` /
-`wake_at_shadow` are computed from the `bed_transitions` table alongside the live motion+sound
-numbers, but the headline figures parents see still come from the old algorithm. Both shadow values
-validated correct on 2026-08-23 (19:37 onset / 06:39 wake), and the wake rule was unit-checked
-against real 2026-08-22 data.
+### 1.1 Fix Raffa's crib-zone discrimination — `NEXT`
+**This is the blocker for 1.2, and it is a camera-framing problem, not a code problem.**
+
+On the night of 2026-08-24→25 there was **no `out_of_bed` transition anywhere near Raffa's real 06:10
+exit** (the last one was 01:22), and the detector then logged three *false* `into_bed` events after he
+was already out (06:33, 06:43, 06:56). Crib-zone motion kept registering until 07:02 despite the crib
+being empty from 06:10. Transition peaks are also much weaker than Renz's (0.013–0.037 vs up to 0.2).
+
+The zone covers ~19.5% of the frame, much of it bare wall, and misses most of the bed — so "inside the
+crib" and "outside the crib" aren't actually distinguishable for that camera.
+
+**Work:** re-aim the camera so the cot fills more of the frame and the floor beside it is visible, then
+**redraw `detect_zone`** — it is stored as normalised frame fractions, so *moving the camera without
+redrawing points the zone at the wrong things and makes out-of-bed detection worse, not better*. The
+grid picker (paint the cells covering the cot) can follow a diagonal cot that the old rectangles
+couldn't. Then review a few mornings against ground truth.
+
+### 1.2 Promote shadow sleep onset/wake to authoritative — `HELD` (was `NEXT`)
+Out-of-bed detection ships today in **shadow mode**: `sleep_nights.onset_at_shadow` / `wake_at_shadow`
+are computed from the `bed_transitions` table alongside the live motion+sound numbers, but the headline
+figures parents see still come from the old algorithm.
 
 **Why shadow exists:** motion-based tracking is blind to a child who *leaves* — an empty crib and a
 sleeping child both read as "no motion". The bed transitions are what distinguish absence from sleep.
 
-**Remaining work** — small, deliberately gated on more observation:
-- Eyeball shadow vs algorithm on SleepDetail for a few more mornings.
-- When shadow consistently wins: flip it to authoritative (~1 line) and point the nightly
-  sleep-report push at the shadow values.
+**Why this is now HELD rather than NEXT.** The previous plan here was "eyeball it for a few mornings,
+then flip a line". Measured against owner ground truth on 2026-08-24→25, shadow wake scored **1 of 3**:
+Renz on prod was exact (05:58), Renz on *staging* — same physical camera — was 40 min early, and Raffa
+was 53 min late, i.e. **worse than the algorithm it was meant to replace**. Two distinct causes:
+
+- **Knife-edge thresholds.** Staging was missing a single sample minute that prod had, which
+  manufactured a 22-minute empty-crib gap (limit 20) with 9 minutes of trailing activity (limit 10).
+  Both margins within 2 → accepted. One sample minute flipped the answer for the same camera.
+- **Raffa's zone can't tell inside-crib from outside-crib** — see 1.1.
+
+**Mitigation shipped (0.25.0):** a qualifying gap is now only accepted when a real `out_of_bed`
+corroborates it within the snap window; otherwise the scan continues to a later gap, and failing that
+the algorithm's wake stands. It must be an `out_of_bed` specifically — matching any polarity let an
+`into_bed` vouch for a departure. Replayed against that night's real data: Renz prod 05:58 exact, Renz
+staging 05:18 → 05:58 exact (the prod/staging divergence is gone), Raffa falls back to the algorithm
+(11 min early, rather than 53 min late).
+
+**Remaining work, in order:**
+- **1.1 first.** Shadow can't produce a refined time for Raffa at all until his zone emits a real
+  `out_of_bed` at the actual exit.
+- Then re-check several mornings against ground truth on *both* children before flipping anything.
+- When it consistently wins: flip to authoritative (~1 line) and point the nightly sleep-report push at
+  the shadow values.
 - Consider extending Renz's `sleep_window_end` — it closes 06:30 but real wake-up has been ~07:57.
 - Watch edge case **B** (child held ~30 min then put back down): a re-settle must require an
   *into-bed* transition before sustained quiet re-scores as sleep, or the held gap wrongly reads as
@@ -42,51 +78,38 @@ sleeping child both read as "no motion". The bed transitions are what distinguis
 
 Runbook for reading a night's markers: **`sleep-marker-review-runbook.md`**.
 
-### 1.2 Ship the pending security work to prod — `NEXT`
-Sitting in `[Unreleased]` on dev/staging, needs a prod release: **CSP enforcement** and the
-**media-scoped token** (video/image URLs no longer carry the full 30-day session token). Both were
-validated on staging — CSP ran report-only across every feature first and surfaced exactly one
-violation (the Cloudflare analytics beacon, now explicitly allowed).
-
 ---
 
 ## 2. Specced, not built
 
-### 2.1 On-demand recording (manual capture + pre-record buffer) — `SPECCED`
-A manual **Record** button with a pre-roll buffer, so you can hit record *after* the moment and still
-capture the seconds before it. Full design — including the schema, endpoints, retention/pin behaviour
-and phasing — is in **`on-demand-recording-scope.md`** (kept; still accurate against the shipped
-0.17.0 recording pipeline).
+### 2.1 Sub-stream sanity check — warn when "Low" isn't actually low — `SPECCED`
+Nothing verifies that a configured `sub_rtsp_url` is actually *smaller* than the main stream. Found on
+prod 2026-08-25: one camera's `/ch1` was serving **1920×1080 @ 15fps — identical to its main stream**.
+Cause: **the camera's second encoder was disabled, and the firmware answered `/ch1` with the main
+stream instead of refusing it.** Nothing anywhere reported a problem. Two silent consequences, neither
+of which surfaced in the UI:
 
-**The short version:** the pre-roll ring already exists. Event-recording runs a continuous segmenter
-per detection-enabled camera writing ~2s segments into a rolling ring; a motion clip is just a concat
-over `[t−pre, t+post]`. On-demand is the same extraction with a different trigger and a running end.
-The one genuinely new piece is running that ring on cameras where motion detection is **off**
-(`ondemand_buffer`, per-camera opt-in — it's a continuous FFmpeg + disk writes, which is not free on
-the RAM-starved Thingino cams).
+- The **Low** quality option delivers the same bitrate as High, so the feature does nothing for that
+  camera while looking like it works.
+- The motion detector prefers the sub path precisely because it's cheap to decode. Decoding 1080p
+  instead of 360p cost **5.9% of a core vs 1.2%** — the single largest FFmpeg line in the container,
+  ~5× what it should be.
 
-### 2.2 Adaptive stream quality — Phase 1 & Phase 3 — `SPECCED`
-Phase 2 (manual High/Low per tile, backed by a per-camera sub-stream path) shipped. Two phases remain:
+**The check has to measure the actual stream, not read configuration back.** ONVIF reported
+`Profile_1` = 640×360 mapped to `/ch1`, and the camera's own settings page agreed — both described a
+substream that wasn't being produced. Only probing the RTSP endpoint revealed it. (This firmware also
+reports an identical canned `fps=30, bitrate=5000` for every profile, matching no actual stream, so its
+encoder figures can't be trusted as a live read either.)
 
-- **Phase 1 — on-demand sub-stream transcoders.** Today the sub leg runs **continuously**. Starting it
-  only while a client is watching Low would fix two real risks: it halves the FFmpeg process/restart
-  surface per camera, and — more importantly — it avoids a **second concurrent RTSP pull** from
-  cameras that cap simultaneous clients (often 2–4). Main + sub + someone checking in VLC can exhaust
-  that cap and break the *main* stream.
-  **Cheap de-risking spike:** run a second `-c:v copy` sub transcoder on one camera for a few hours and
-  watch for camera RTSP client-limit errors. That one test settles the whole continuous-vs-on-demand
-  question for near-zero cost.
-- **Phase 3 — automatic quality switching.** Explicitly optional and removable; `Auto` just becomes an
-  unavailable option if it's dropped. Detection is the easy part (`RTCPeerConnection.getStats()` gives
-  `packetsLost`, `jitter`, frames-dropped). **The hard part is hysteresis** — naive thresholds flap
-  between tiers every few seconds, which feels worse than simply being stuck on Low. Requirements:
-  asymmetric thresholds (drop fast, recover slowly on sustained evidence), a cooldown after any switch,
-  and a per-session switch cap. Every switch costs a reconnect gap, and WebRTC can wedge on reconnect
-  on iOS — so keep it conservative.
-  **Evaluation bar before keeping it:** does it measurably reduce stuttering without visible flapping?
-  If not, remove it and keep the manual selector — that's a fine outcome, not a failure.
+**Proposal:** probe the sub's resolution when a camera is saved (ffprobe already runs there via
+`validateRtspStream`) and store it alongside the main's. If the sub isn't meaningfully smaller, say so
+on the camera's detail/diagnostics screen — "this sub-stream is delivering the same resolution as the
+main stream; Low won't save bandwidth". A warning, not a block: the fix is on the camera, and refusing
+to save would be unhelpful. Worth re-checking periodically rather than only at save time, since someone
+can disable the camera's second encoder long after Nightlight was configured — which is exactly what
+happened here.
 
-### 2.3 Cry classification — `SPECCED`
+### 2.2 Cry classification — `SPECCED`
 Sound detection today alerts on **loudness** (FFmpeg `silencedetect`), not on what the noise *is*. The
 agreed staging was always: prove motion+push → add sound presence → tune against real usage → *only
 then* evaluate cry-specific classification, informed by how well plain sound detection performs.
@@ -97,7 +120,7 @@ problem. A spare **USB Coral** may accelerate it, but it must stay **optional an
 with a CPU fallback — the app has to run fully without one, and everything shipped so far is
 deliberately Node + FFmpeg only (no Python in the runtime image).
 
-### 2.4 E2E testing — Phase 4 & Phase 5 — `SPECCED`
+### 2.3 E2E testing — Phase 4 & Phase 5 — `SPECCED`
 Phases 1–3 shipped: the synthetic-camera stack, the Playwright UI suite, and auto-generated docs
 screenshots, all green in `e2e.yml`.
 
@@ -110,8 +133,8 @@ screenshots, all green in `e2e.yml`.
 
 Harder-to-fake features, deliberately deferred within the suite: **two-way audio** (Playwright can fake
 a mic and assert the WebSocket connects and bytes flow, but never that the camera physically plays it)
-and **PTZ/ONVIF** (needs a camera to respond). **Adaptive quality is testable** — give the synthetic
-source a second path and assert High/Low swaps the stream.
+and **PTZ/ONVIF** (needs a camera to respond). **The High/Low selector is testable** — give the
+synthetic source a second path and assert the toggle swaps the stream.
 
 ---
 
@@ -173,6 +196,14 @@ Recorded so they don't get re-litigated. Each was considered and consciously par
   MediaMTX segments and addressing camera GOP.
 - **otplib 12 → 13 (Dependabot #128)** — `HELD`. A major bump that gates TOTP login; pinned until it can
   be verified end-to-end on staging.
+- **Adaptive stream quality, beyond the manual selector** — `CLOSED 2026-08-25, not building`. High/Low
+  per tile, remembered per camera, is the finished feature. Both phases once planned on top of it are
+  decided against: **on-demand sub-stream transcoders** (measured on prod — the motion detector holds
+  the sub path open 24/7 regardless of viewers, so it saves nothing and could cost more; 72h of logs
+  showed zero camera client-limit errors) and **automatic quality switching** (every switch costs a
+  WebRTC reconnect — this app's worst existing failure mode — to solve a bandwidth problem that hasn't
+  occurred on a LAN monitor). The sub-stream reasoning is repeated in `lib/subStream.js`, where anyone
+  tempted to build it would actually hit it.
 
 ---
 

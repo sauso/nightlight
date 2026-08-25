@@ -9,9 +9,14 @@ import { startTranscoder, stopTranscoder, isRunning } from './transcoder.js';
 // existing transcoder supervisor (its own restart/watchdog lifecycle) unchanged.
 //
 // NOTE: this runs the sub transcoder continuously alongside the main one whenever a sub_rtsp_url is
-// configured. That means a second concurrent RTSP pull from the camera; cheap cameras cap concurrent
-// clients, so an on-demand start (only while a client is watching Low) is a worthwhile follow-up -
-// see planning/ROADMAP.md §2.2 (Phase 1).
+// configured, which is a second concurrent RTSP pull from the camera. Starting it on demand (only while
+// a client watches Low) was considered and DROPPED after measuring prod — the motion detector prefers
+// the sub path and a framediff alerter runs 24/7, so the sub has a permanent consumer regardless of
+// viewers; a viewer-only trigger would push the detector onto the full-res main stream and cost more
+// than it saves. Decided against 2026-08-25 (planning/ROADMAP.md §4) — 72h of prod logs also showed
+// zero camera client-limit errors, so the risk it was meant to avoid isn't real here. If it is ever
+// revisited it must be reference-counted with the detector holding a lease, not viewer-triggered:
+// getPathStatus() already returns a MediaMTX `readers` count, so the plumbing exists.
 
 export function subCameraId(cameraId) {
   return `${cameraId}-sub`;
