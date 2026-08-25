@@ -39,34 +39,47 @@ redrawing points the zone at the wrong things and makes out-of-bed detection wor
 grid picker (paint the cells covering the bed) can follow a diagonal bed that the old rectangles
 couldn't. Then review a few mornings against ground truth.
 
-### 1.2 Report a night where nobody was in the bed — `NEXT`
-**Today an empty bed reports a perfect night's sleep.** This is not a curiosity: children are away,
-sleep in a parent's bed, or are sick, and the app should say *"no one was in the bed"* rather than
-inventing eleven hours of sleep and filing it in the child's history.
+### 1.2 Report a night where nobody was in the bed — `SHIPPED` (on dev, 2026-08-26)
+A fifth status `empty` — "No one in the bed" — now sits alongside `off` / `no_data` / `no_sleep` / `ok`,
+and is deliberately a different statement from `no_data` ("we couldn't see"). Surfaced on the child
+page, the sleep detail page and in the nightly report push. The night is stored with no onset/wake and
+no durations: inventing "11h06m asleep, 0 wakes" for an empty bed was the bug.
 
-**Why it happens.** The pipeline has no notion of occupancy. An empty room still produces activity
-samples, so `coverage` passes; near-zero motion then satisfies `ONSET_QUIET_MIN` (15 continuous quiet
-minutes), so an onset is found and the night scores `status: 'ok'`. The assumption is written into the
-threshold itself — `MOTION_ACTIVE = 0.01 // in-bed per-frame changed-fraction above this = real
-movement (sleeping room ~0)`. If a sleeping room is ~0, so is an empty one.
+**Rule, chosen from the 2026-08-25 A/B** (Renz away = empty bed, Raffa in his, same night, same house,
+same firmware) measured against **17 occupied prod nights**. All three must hold:
+`max in-bed motion_peak < 0.10` **and** `wake_count == 0` **and** `awake_minutes == 0`.
 
-**Status vocabulary today** is `off` / `no_data` / `no_sleep` / `ok`. This needs a fifth: something like
-`empty` — "No one in the bed" — which is a *different statement* from `no_data` ("we couldn't see").
-Both the sleep report push and the child page should say it plainly.
+| signal | empty | occupied floor | separation |
+|---|---|---|---|
+| max in-bed `motion_peak` | 0.0163 | 0.2883 (usually ~1.0) | **18x** |
+| `wake_count` | 0 | >= 1 every night | clean |
+| `awake_minutes` | 0 | >= 10 every night | clean |
 
-**Likely discriminators** (to be settled with data, not guessed):
-- **No `into_bed` transition for the whole window.** The strongest single signal — if nobody ever got
-  in, nobody's in it. Depends on the transition detector being reliable for that camera, which is
-  exactly what 1.1 is fixing.
-- **Essentially zero in-bed active minutes across the window.** A real sleeper stirs; the question is
-  what the floor actually looks like for an occupied bed versus an empty one.
-- Sound is probably a weak signal here — it's room-level, not bed-level.
+No occupied night on record trips even one of the three. **The "no `into_bed` all window" discriminator
+this section originally proposed was tested and DISCARDED** — it would have flagged Raffa's genuinely
+occupied night as empty, because his put-downs happened at 19:14-19:28 and his window opens at 19:30,
+so the count *inside the window* was zero. A child is usually put to bed before the window opens;
+transition counts inside the window are not a sound occupancy signal. Magnitude is.
 
-**Calibration data arrives 2026-08-26.** The night of 2026-08-25 is a natural experiment: Renz is away
-so his bed is empty all night, while Raffa is in his, on the same night, in the same house, with both
-cameras on the same firmware. Compare the two distributions of `activity_samples.motion_peak` before
-choosing a rule. Nothing extra needs building to capture it — the per-minute samples and
-`bed_transitions` are already recorded for both.
+⚠️ **n = 1 for the empty case.** The separation is large, but one empty night is one sample — hence the
+conservative 0.10 threshold. Keep an eye on the occupied floor (0.2883) as more nights accumulate.
+
+### 1.2a Bedtime is not a fixed time — `SHIPPED` (on dev, 2026-08-26)
+Sleep that started **before** the window opened was clipped to the window edge, under-reporting an early
+night. The analysis timeline now begins `ONSET_LOOKBEHIND_MS` (3h) before the window, and an early onset
+is adopted only when anchored to a real `into_bed` put-down **and** the sleep continues into the window
+(no awakening in between, which is what excludes an afternoon nap), **and** those minutes were actually
+observed (the settle minute has a sample; the stretch is >= 50% covered).
+
+Costs nothing to collect: a framediff-**alerting** camera is never window-gated and already samples 24/7
+— measured at ~1437 of a possible 1440 rows/camera/day, ~10.7 MB at the 30-day retention. Only the
+activity-only leg (MQTT-source / alerts-off cameras) is gated, and it now opens the same 3h early via
+`childSamplingActiveNow` rather than running all day.
+
+**Trap worth remembering:** a minute with no sample is treated as *quiet* for continuity, so the
+lookbehind before sampling starts is one long fake quiet run. Searching it for "the first quiet run"
+always lands on the start of a data gap — the search must be anchored on the put-down instead. The first
+implementation had exactly this bug and was silently inert.
 
 ### 1.3 Promote shadow sleep onset/wake to authoritative — `HELD` (was `NEXT`)
 Out-of-bed detection ships today in **shadow mode**: `sleep_nights.onset_at_shadow` / `wake_at_shadow`
@@ -93,10 +106,23 @@ the algorithm's wake stands. It must be an `out_of_bed` specifically — matchin
 staging 05:18 → 05:58 exact (the prod/staging divergence is gone), Raffa falls back to the algorithm
 (11 min early, rather than 53 min late).
 
+**Scorecard update — night of 2026-08-25→26 (ground truth: Raffa out of bed 05:09, never returned):**
+shadow was **EXACT on both prod and staging** (05:09), against an algorithm that was 89 minutes late
+(06:38). Prod and staging agreed to the minute all night, so the camera re-sync closed the divergence,
+and Raffa's zone *did* emit a real `out_of_bed` at his true exit — clearing 1.1's blocker for that night.
+
+**But it survived on a margin of ZERO, which is why this stays HELD.** The accept test allowed <= 10
+trailing bed-active minutes; the true departure left exactly 10 on staging and 9 on prod. One more
+minute of a parent tidying the bed and the scan would have skipped it and reported the wake ~2h late —
+the same knife-edge as before, landing the right way. **Fixed on dev 2026-08-26:** the cap is now 20,
+chosen from the measured separation (real exits leave 5-8 trailing minutes; the one corroborated
+mid-night impostor on record leaves 31). Verified: no night on record changes its reported wake.
+Also disproven while picking it — **gap *length* is not a "this is the terminal one" signal**: mid-sleep
+empty runs of 226 and 312 minutes are normal, the latter five hours before the child actually got up.
+
 **Remaining work, in order:**
-- **1.1 first.** Shadow can't produce a refined time for Raffa at all until his zone emits a real
-  `out_of_bed` at the actual exit.
-- Then re-check several mornings against ground truth on *both* children before flipping anything.
+- **More mornings of ground truth**, on *both* children, now that the margin is comfortable — one exact
+  night is one night. 1.1 is no longer a hard blocker but Raffa's zone should be watched.
 - When it consistently wins: flip to authoritative (~1 line) and point the nightly sleep-report push at
   the shadow values.
 - Consider extending Renz's `sleep_window_end` — it closes 06:30 but real wake-up has been ~07:57.

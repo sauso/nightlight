@@ -39,6 +39,9 @@ function fmtDur(min) {
 
 // Build the one-line summary for a single child's night.
 function lineFor(name, summary, tz) {
+  // An empty bed is a real observation, not missing data — say so, rather than lumping it in with
+  // "no sleep data" (which reads as a broken camera) or inventing a night's sleep for it.
+  if (summary?.status === 'empty') return `${name}: no one in the bed`;
   if (!summary || summary.status !== 'ok') return `${name}: no sleep data`;
   const wake = localHm(summary.wake_at, tz);
   const parts = [`asleep ${fmtDur(summary.asleep_minutes)}`, `${summary.wake_count} wake${summary.wake_count === 1 ? '' : 's'}`];

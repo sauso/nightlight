@@ -37,9 +37,40 @@ const MORNING_ABSENCE_MIN = 20;
 // remain — a parent reaching into the empty bed after the child is already up (getting them, tidying).
 // A mid-sleep quiet gap, by contrast, is followed by lots more in-bed stirring. This cap is what keeps a
 // parent handling the bed post-wake from dragging the wake time out to the last hand-in-the-bed, and
-// keeps a long deep-sleep lull from reading as the morning exit. Tuned against real nights (2026-08-23
-// Renz: real exit ~06:38 leaves 7 active min after; the mid-sleep 05:14 lull leaves 22).
-const MAX_POST_EXIT_ACTIVE_MIN = 10;
+// keeps a long deep-sleep lull from reading as the morning exit.
+//
+// Set from the measured separation across every night on record, NOT guessed. Real morning exits leave
+// 5-8 trailing active minutes (2026-08-25 Raffa 8, 2026-08-24 Renz 5); the one bogus mid-night gap that
+// an out_of_bed corroborates leaves 31 (2026-08-24 Renz 01:29). 20 sits midway between those two
+// populations. It was 10, which sat right on top of the real exits: on 2026-08-25 Raffa's true 05:09
+// departure passed with a margin of ZERO on staging (10 trailing, limit 10) and 1 on prod — one extra
+// minute of a parent touching the bed would have skipped it and reported the wake ~2h late. Raising to
+// 20 changes no pick on any night on record; it only buys margin.
+//
+// NB: gap LENGTH is deliberately not used as a "this is the terminal one" test. It looks appealing but
+// the data disproves it — in-bed motion is sparse enough that MID-SLEEP empty runs of 226 min
+// (2026-08-23 Raffa) and 312 min (2026-08-25 Raffa, five hours before he actually got up) are normal.
+const MAX_POST_EXIT_ACTIVE_MIN = 20;
+// A bedtime is never a rigid clock time — a tired child can be asleep well before the window opens, and
+// clipping onset to window_start silently loses that sleep (and misreports the night's length). So the
+// timeline is built from this far BEFORE window_start; symmetric with WAKE_LOOKAHEAD_MS at the other
+// end. This costs nothing to collect: on an alerting (framediff) camera the sampling leg already runs
+// 24/7, so these minutes are already in activity_samples — measured at ~1437 of a possible 1440 rows
+// per camera per day. An early onset is only ACCEPTED under the two guards in computeNight (a real
+// into_bed, and sleep continuing into the window) — quiet alone is not evidence of a child, which is
+// the whole lesson of the empty-bed case below.
+const ONSET_LOOKBEHIND_MS = 3 * 60 * 60 * 1000;
+// An into_bed this long before a quiet run still counts as the put-down that started it (the child is
+// placed, fusses a little, then settles).
+const EARLY_ONSET_PUTDOWN_MS = 45 * 60 * 1000;
+// EMPTY BED. The activity-only algo cannot tell a quiet sleeping child from a bed nobody is in: an empty
+// room still yields samples (so coverage passes) and near-zero motion satisfies ONSET_QUIET_MIN, so a
+// night with no child in the bed reported a flawless 11h06m sleep with 0 wakes (2026-08-25, Renz away).
+// The assumption is written into MOTION_ACTIVE itself ("sleeping room ~0") — an EMPTY room is ~0 too.
+// Measured separation, empty vs 17 occupied prod nights: max in-bed motion_peak 0.0163 empty vs a floor
+// of 0.2883 occupied (usually ~1.0). 0.10 sits ~6x above the empty night and ~3x below the occupied
+// floor. Paired with the wake_count/awake_minutes test below, which no occupied night on record trips.
+const EMPTY_BED_MAX_PEAK = 0.1;
 // When the empty-bed run starts near a recorded bed transition, snap the wake to that transition's clock
 // time (its TIMING is trustworthy even though its in/out LABEL isn't — see the destination-state note).
 const WAKE_SNAP_MS = 5 * 60 * 1000;
@@ -78,7 +109,7 @@ const WINDOW_MARGIN_MS = 5 * 60 * 1000;
 // leg is gated on this so it only samples overnight, not all day — there's no point running it outside
 // each child's window. Returns false when the child doesn't track sleep. (Frame-diff ALERT legs are not
 // gated on this; they run 24/7 regardless — see motionDetector.motionLegWanted.)
-export function childWindowActiveNow(childId) {
+function windowOpenNow(childId, leadMs) {
   const cfg = childSleepConfig(childId);
   if (!cfg.track) return false;
   const tz = appSettings().timezone || 'UTC';
@@ -87,9 +118,28 @@ export function childWindowActiveNow(childId) {
   for (let delta = 0; delta >= -1; delta--) {
     const date = localDateStr(tz, delta);
     const { startUtc, endUtc } = windowBoundsUtc(date, tz, cfg.start, cfg.end);
-    if (now >= startUtc.getTime() - WINDOW_MARGIN_MS && now < endUtc.getTime() + WINDOW_MARGIN_MS) return true;
+    if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + WINDOW_MARGIN_MS) return true;
   }
   return false;
+}
+
+export function childWindowActiveNow(childId) {
+  return windowOpenNow(childId, WINDOW_MARGIN_MS);
+}
+
+// Should the activity-only SAMPLING leg be running now? Same window, but opened ONSET_LOOKBEHIND_MS
+// early so a child who goes down before their configured bedtime is already being sampled — otherwise
+// the lookbehind in computeNight has nothing to read and an early night is still clipped.
+//
+// Kept separate from childWindowActiveNow deliberately: that one also gates the timelapse, which should
+// keep starting at the configured bedtime rather than three hours before it. This only widens sampling.
+//
+// It costs nothing on a framediff-ALERTING camera, which is never window-gated (motionLegWanted returns
+// early for those) and already samples 24/7 — measured at ~1437 of a possible 1440 rows/camera/day, or
+// ~10.7 MB at the 30-day retention. It matters for the MQTT-source/alerts-off cameras that DO get gated,
+// where running 24/7 would burn detector CPU all day for no benefit.
+export function childSamplingActiveNow(childId) {
+  return windowOpenNow(childId, ONSET_LOOKBEHIND_MS);
 }
 
 // Offset (localWallClock - UTC) in ms for a given instant in a tz.
@@ -267,23 +317,34 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   if (cams.length === 0) return { ...base, status: 'no_data' };
 
   const placeholders = cams.map(() => '?').join(',');
+
+  // The timeline runs from ONSET_LOOKBEHIND_MS before the window opens, so a child who went down early
+  // is measured from when they actually fell asleep rather than from the window edge. Index 0 is that
+  // earlier origin; `preMin` is the index at which the configured window actually starts. Everything
+  // user-facing (coverage, the window bounds we report) still keys off the WINDOW, not this origin.
+  const analysisStartUtc = new Date(startUtc.getTime() - ONSET_LOOKBEHIND_MS);
+  const analysisStartSql = toSqlUtc(analysisStartUtc);
+  const preMin = Math.round(ONSET_LOOKBEHIND_MS / 60000);
+  const winMin = Math.max(0, Math.floor((effEndMs - startUtc.getTime()) / 60000));
+  if (winMin === 0) return { ...base, status: 'no_data' };
+  const totalMin = preMin + winMin;
+
   const rows = db
     .prepare(
       `SELECT bucket_start AS t, motion_peak, sound_peak, motion_out_peak FROM activity_samples
          WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
     )
-    .all(...cams, startSql, endSql);
+    .all(...cams, analysisStartSql, asOfSql);
 
-  const totalMin = Math.max(0, Math.floor((effEndMs - startUtc.getTime()) / 60000));
-  if (totalMin === 0) return { ...base, status: 'no_data' };
-
-  // Per-minute state over the whole window: null = no sample (gap), false = quiet, true = active. A
+  // Per-minute state over the whole timeline: null = no sample (gap), false = quiet, true = active. A
   // minute is active if ANY of the child's cameras saw in-bed movement, a clear noise, OR movement
   // outside the bed (someone in the room / the child out of bed). outAt[] marks the outside-bed
   // minutes so the timeline can surface them as room activity distinct from stirring in the bed.
   const state = new Array(totalMin).fill(null);
   const outAt = new Array(totalMin).fill(false);
-  const idxOf = (t) => Math.round((new Date(t.replace(' ', 'T') + 'Z').getTime() - startUtc.getTime()) / 60000);
+  const idxOf = (t) => Math.round((new Date(t.replace(' ', 'T') + 'Z').getTime() - analysisStartUtc.getTime()) / 60000);
+  // Strongest in-bed movement seen anywhere in the WINDOW — the empty-bed test below reads this.
+  let maxBedPeak = 0;
   for (const r of rows) {
     const i = idxOf(r.t);
     if (i < 0 || i >= totalMin) continue;
@@ -292,23 +353,99 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     if (state[i] === null) state[i] = active;
     else state[i] = state[i] || active;
     if (out) outAt[i] = true;
+    if (i >= preMin && r.motion_peak != null && r.motion_peak > maxBedPeak) maxBedPeak = r.motion_peak;
   }
-  const coverage = state.reduce((n, s) => n + (s !== null ? 1 : 0), 0);
+  // Coverage is a statement about the configured window ("did we watch the night"), so it counts only
+  // window minutes — the lookbehind must never inflate or dilute it.
+  let coverage = 0;
+  for (let i = preMin; i < totalMin; i++) if (state[i] !== null) coverage++;
   const result = { ...base, coverage_minutes: coverage };
-  if (coverage < totalMin * MIN_COVERAGE_FRAC) return { ...result, status: 'no_data' };
+  if (coverage < winMin * MIN_COVERAGE_FRAC) return { ...result, status: 'no_data' };
 
   // Treat a gap as quiet for continuity (detector momentarily down ≠ awake), but coverage above is what
   // gates confidence. active[] is the boolean working timeline.
   const active = state.map((s) => s === true);
 
-  // Onset: first index starting a quiet run of >= ONSET_QUIET_MIN.
-  let onset = -1;
-  for (let i = 0; i + ONSET_QUIET_MIN <= totalMin; i++) {
-    let quiet = true;
-    for (let j = i; j < i + ONSET_QUIET_MIN; j++) if (active[j]) { quiet = false; break; }
-    if (quiet) { onset = i; break; }
+  // Bed transitions across the whole timeline (lookbehind included, plus a lookahead past the window end
+  // for the morning exit on a completed night). Fetched once here because BOTH the early-bedtime guard
+  // below and the shadow wake block further down need them.
+  const lookahead = inProgress ? 0 : WAKE_LOOKAHEAD_MS;
+  const txEndSql = toSqlUtc(new Date(endUtc.getTime() + lookahead));
+  const transitions = getBedTransitions(cams, analysisStartSql, txEndSql);
+  const txMs = (t) => new Date(t.replace(' ', 'T') + 'Z').getTime();
+  const txIdx = (t) => Math.round((txMs(t) - analysisStartUtc.getTime()) / 60000);
+
+  // First index starting a quiet run of >= ONSET_QUIET_MIN at or after `from` (null if none).
+  const firstQuietRunFrom = (from) => {
+    for (let i = Math.max(0, from); i + ONSET_QUIET_MIN <= totalMin; i++) {
+      let quiet = true;
+      for (let j = i; j < i + ONSET_QUIET_MIN; j++) if (active[j]) { quiet = false; break; }
+      if (quiet) return i;
+    }
+    return null;
+  };
+
+  // Is there a qualifying awakening (>= WAKE_ACTIVE_MIN active minutes, bridging short quiet gaps)
+  // anywhere in [from, to)? Same run logic as the wake marking below, used as an early-onset guard.
+  const hasAwakening = (from, to) => {
+    for (let i = Math.max(0, from); i < to; ) {
+      if (!active[i]) { i++; continue; }
+      let count = 0;
+      let last = i;
+      let k = i;
+      while (k < to) {
+        if (active[k]) { last = k; count++; k++; continue; }
+        let g = k;
+        while (g < to && !active[g]) g++;
+        if (g < to && g - k <= WAKE_GAP_MIN) { k = g; continue; }
+        break;
+      }
+      if (count >= WAKE_ACTIVE_MIN) return true;
+      i = last + 1;
+    }
+    return false;
+  };
+
+  // Onset. The baseline is the historical rule — first sustained quiet run at or after the window opens.
+  let onset = firstQuietRunFrom(preMin);
+
+  // EARLY BEDTIME. Bedtime is never a rigid clock time: a tired child can be asleep before the window
+  // opens, and clipping onset to the window edge silently loses that sleep. If the first sustained quiet
+  // run of the whole timeline starts BEFORE the window, adopt it — but only under two guards, because a
+  // quiet room is not by itself evidence of a sleeping child (that is exactly how an empty bed reports a
+  // full night, see EMPTY_BED_MAX_PEAK):
+  //   1. a real into_bed put-down starts it — someone actually placed the child in the bed; and
+  //   2. that sleep runs CONTINUOUSLY into the window (no qualifying awakening in between).
+  // Guard 2 is what excludes a late-afternoon NAP: a nap the child got up from has an awakening between
+  // it and bedtime, so it can never be mistaken for the night's onset.
+  // Anchored on the PUT-DOWN, not on "the first quiet run in the lookbehind". That distinction is
+  // load-bearing: a minute with no sample is treated as quiet for continuity (see `active` above), so
+  // before sampling starts the timeline is one long fake quiet run — searching it for quiet would always
+  // land on the start of a data gap, never on a real bedtime. Walking the into_bed events instead means
+  // we only ever consider stretches an actual put-down began.
+  const maxSettleMin = EARLY_ONSET_PUTDOWN_MS / 60000;
+  const earlyPutDowns = transitions
+    .filter((t) => t.type === TRANSITION.INTO_BED)
+    .map((t) => txIdx(t.created_at))
+    .filter((idx) => idx >= 0 && idx < preMin)
+    .sort((a, b) => a - b);
+  for (const putDown of earlyPutDowns) {
+    const q = firstQuietRunFrom(putDown);
+    if (q == null || q >= preMin) continue; // never settled, or only settled after the window opened
+    if (q - putDown > maxSettleMin) continue; // settled far too long after this put-down to be its result
+    // Don't claim sleep we didn't actually observe: the settle minute must have a sample, and the
+    // stretch from there to the window must be mostly covered.
+    if (state[q] === null) continue;
+    let seen = 0;
+    for (let i = q; i < preMin; i++) if (state[i] !== null) seen++;
+    if (seen < (preMin - q) * MIN_COVERAGE_FRAC) continue;
+    // Guard 2: it has to still be the same sleep when the window opens. A nap the child got up from has
+    // an awakening between it and bedtime, so it can never be adopted as the night's onset.
+    if (hasAwakening(q, preMin)) continue;
+    onset = q;
+    break; // earliest qualifying put-down wins
   }
-  if (onset === -1) return { ...result, status: 'no_sleep' };
+  if (onset == null) return { ...result, status: 'no_sleep' };
 
   // Mark minutes that belong to a qualifying awakening after onset. A run bridges short quiet gaps
   // (<= WAKE_GAP_MIN) so intermittent noise/movement — a child fussing on and off, or moving in and out
@@ -359,7 +496,24 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     prevWake = inWake[i];
   }
 
-  const minuteTime = (i) => toSqlUtc(new Date(startUtc.getTime() + i * 60000));
+  const minuteTime = (i) => toSqlUtc(new Date(analysisStartUtc.getTime() + i * 60000));
+
+  // EMPTY BED — nobody slept here. Distinct from no_data ("we couldn't see"): coverage is fine, we
+  // watched all night, there was simply no child in the bed. Without this the algo reports a perfect
+  // night for an empty room, because an empty room is quiet and quiet is what it reads as sleep.
+  // Three independent signals must ALL hold, and no occupied night on record trips even one:
+  // essentially no in-bed movement all night, no awakenings, and not one awake minute. A real child —
+  // however still a sleeper — stirs: the quietest occupied night on record still peaked at 0.2883 with
+  // 1 awakening and 10 awake minutes.
+  if (maxBedPeak < EMPTY_BED_MAX_PEAK && wakeCount === 0 && awake === 0) {
+    return {
+      ...result,
+      status: 'empty',
+      // Deliberately no onset/wake/duration: reporting "11h06m asleep, 0 wakes" for a bed nobody was in
+      // is the bug being fixed. The night is a real observation, it just isn't a sleep.
+    };
+  }
+
   const out = {
     ...result,
     status: 'ok',
@@ -379,21 +533,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // numbers yet; stored in *_shadow columns so we can compare them to the algo night-by-night). The
   // activity-only algo can't tell an empty quiet bed from a sleeping child; the transitions can. ---
   {
-    // First quiet run of >= ONSET_QUIET_MIN starting at or after index `from` (null if none).
-    const firstQuietRunFrom = (from) => {
-      for (let i = Math.max(0, from); i + ONSET_QUIET_MIN <= totalMin; i++) {
-        let quiet = true;
-        for (let j = i; j < i + ONSET_QUIET_MIN; j++) if (active[j]) { quiet = false; break; }
-        if (quiet) return i;
-      }
-      return null;
-    };
-    // Transitions across the window, plus a lookahead past its end for the morning exit (completed
-    // nights only — mid-night we don't guess ahead).
-    const lookahead = inProgress ? 0 : WAKE_LOOKAHEAD_MS;
-    const txEndSql = toSqlUtc(new Date(endUtc.getTime() + lookahead));
-    const transitions = getBedTransitions(cams, startSql, txEndSql);
-    const txMs = (t) => new Date(t.replace(' ', 'T') + 'Z').getTime();
+    // `transitions`, `txMs`, `txIdx`, `lookahead`, `txEndSql` and `firstQuietRunFrom` are hoisted above —
+    // the early-bedtime onset guard needs them too, so they are computed once over the whole timeline.
 
     // Build the child-out intervals: open on an out_of_bed, close on the next into_bed. Consecutive
     // out_of_bed events (e.g. a morning cluster) stay one interval; an interval still open at the end of
@@ -419,7 +560,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     let onsetIdx = onset;
     for (const t of transitions) {
       if (t.type !== 'into_bed') continue;
-      const idx = Math.round((txMs(t.created_at) - startUtc.getTime()) / 60000);
+      const idx = txIdx(t.created_at);
       if (idx < 0 || idx >= totalMin) continue;
       const q = firstQuietRunFrom(idx);
       if (q != null) { onsetIdx = Math.max(q, onset); break; } // earliest qualifying into_bed wins
@@ -438,13 +579,15 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     // value is never worse than the live estimate when no clear departure is found.
     out.wake_at_shadow = out.wake_at;
     if (!inProgress) {
-      const totalMinExt = Math.max(totalMin, Math.round((endUtc.getTime() + lookahead - startUtc.getTime()) / 60000));
+      // Indices here share the timeline origin (analysisStartUtc) used by idxOf, so the lookbehind is
+      // included at the front and the lookahead past the window end at the back.
+      const totalMinExt = Math.max(totalMin, Math.round((endUtc.getTime() + lookahead - analysisStartUtc.getTime()) / 60000));
       const extRows = db
         .prepare(
           `SELECT bucket_start AS t, motion_peak FROM activity_samples
              WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
         )
-        .all(...cams, startSql, txEndSql);
+        .all(...cams, analysisStartSql, txEndSql);
       const cribActExt = new Array(totalMinExt).fill(false);
       for (const r of extRows) {
         const i = idxOf(r.t);
@@ -466,10 +609,14 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       // WAKE_SNAP_MS); otherwise we keep scanning for a later gap that is corroborated. Requiring that
       // second, independent signal matters because the gap test alone is knife-edge: on the night of
       // 2026-08-24 a single missing sample minute manufactured a 22-minute gap (threshold 20) carrying 9
-      // trailing active minutes (threshold 10) — both within 2 of flipping — which put the shadow wake 40
-      // minutes early on staging while prod, reading the same camera, got it exactly right. Scanning on
-      // rather than giving up at the first candidate is what lets that bogus gap be skipped and the real
-      // departure (the next gap, matching an actual exit event) still be found.
+      // trailing active minutes — within 2 of flipping — which put the shadow wake 40 minutes early on
+      // staging while prod, reading the same camera, got it exactly right. Scanning on rather than giving
+      // up at the first candidate is what lets that bogus gap be skipped and the real departure (the next
+      // gap, matching an actual exit event) still be found.
+      //
+      // Corroboration is doing most of the discriminating here — see MAX_POST_EXIT_ACTIVE_MIN for why
+      // that cap is 20 and not the 10 it started at (real exits leave 5-8 trailing minutes; the one
+      // corroborated mid-night impostor on record leaves 31).
       //
       // The transition must be an `out_of_bed` specifically: accepting any transition would let an
       // `into_bed` vouch for a departure, which is how the other child's shadow landed 53 minutes late
@@ -481,7 +628,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
         let j = i;
         while (j < totalMinExt && !cribActExt[j]) j++; // [i, j) is a maximal empty run
         if (j - i >= MORNING_ABSENCE_MIN && activeSuffix[i] <= MAX_POST_EXIT_ACTIVE_MIN) {
-          const emptyStartMs = startUtc.getTime() + i * 60000;
+          const emptyStartMs = analysisStartUtc.getTime() + i * 60000;
           let best = null;
           for (const t of transitions) {
             if (t.type !== TRANSITION.OUT_OF_BED) continue;
@@ -517,15 +664,20 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     // typed by whether it falls inside a child-out interval (out_of_bed→into_bed): 'child_out' = the child
     // themselves out of the bed; 'room' = movement while the child is still in the bed (someone in the
     // room). Shown distinctly from the child's own in-bed stirring/waking.
+    // The visible timeline starts at the window — or earlier if the child was already asleep before it
+    // opened, so an early bedtime is shown rather than silently cropped. It never starts at index 0,
+    // which would prepend the whole (usually empty) lookbehind to every night.
+    const displayStart = Math.min(onset, preMin);
+
     const overlapsOut = (a, b) => outIntervals.some(([s, e]) => a < e && s < b);
     const visits = [];
-    for (let i = 0; i < totalMin; ) {
+    for (let i = displayStart; i < totalMin; ) {
       if (!outAt[i]) { i++; continue; }
       let last = i;
       let k = i + 1;
       while (k < totalMin && (outAt[k] || (k + 1 < totalMin && outAt[k + 1]))) { if (outAt[k]) last = k; k++; }
-      const vStartMs = startUtc.getTime() + i * 60000;
-      const vEndMs = startUtc.getTime() + (last + 1) * 60000;
+      const vStartMs = analysisStartUtc.getTime() + i * 60000;
+      const vEndMs = analysisStartUtc.getTime() + (last + 1) * 60000;
       visits.push({
         start_at: minuteTime(i), end_at: minuteTime(last + 1), minutes: last - i + 1,
         type: overlapsOut(vStartMs, vEndMs) ? 'child_out' : 'room',
@@ -540,7 +692,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     const label = (i) =>
       i < onset ? 'settling' : i >= sleepEnd ? 'awake' : inWake[i] ? 'wake' : active[i] ? 'stir' : 'asleep';
     const segments = [];
-    for (let i = 0; i < totalMin; ) {
+    for (let i = displayStart; i < totalMin; ) {
       const l = label(i);
       let k = i;
       while (k < totalMin && label(k) === l) k++;

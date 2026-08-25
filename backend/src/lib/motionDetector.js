@@ -7,7 +7,7 @@ import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
 import { recordMotion, recordMotionOut } from './activityTracker.js';
 import { recordBedTransition, TRANSITION } from './bedTransitions.js';
-import { childWindowActiveNow } from './sleepAnalysis.js';
+import { childSamplingActiveNow } from './sleepAnalysis.js';
 
 // Server-side motion detection. Per camera with detection enabled, a cheap FFmpeg leg reads
 // the already-published MediaMTX stream (the sub-stream when there is one — far cheaper to
@@ -159,14 +159,16 @@ export function motionAlerting(camera) {
 // a child-assigned camera whose motion alerts come from MQTT (or has motion alerting off) still runs
 // the cheap leg to feed a continuous motion timeline (activityTracker) — but fires NO alerts, so it
 // doesn't reintroduce the false positives the MQTT source avoids. The activity-only leg runs only when
-// the child has sleep tracking ON *and* their sleep window is currently open (childWindowActiveNow), so
+// the child has sleep tracking ON *and* their sleep window is currently open (childSamplingActiveNow), so
 // it samples overnight instead of burning CPU all day; the 5-min reconcile starts it at bedtime and
 // stops it after wake. A camera with no child (or one outside its window) that isn't a framediff alerter
 // runs no leg. Frame-diff ALERT legs above are NOT window-gated — alerts run 24/7.
 export function motionLegWanted(camera) {
   if (!camera || camera.disabled) return false;
   if (motionAlerting(camera)) return true;
-  return !!camera.child_id && childWindowActiveNow(camera.child_id);
+  // childSamplingActiveNow, not childWindowActiveNow: sampling opens a few hours BEFORE the configured
+  // bedtime so an early night is captured (bedtime is never a rigid time). See its comment.
+  return !!camera.child_id && childSamplingActiveNow(camera.child_id);
 }
 
 export async function startMotionDetector(camera) {
