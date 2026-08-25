@@ -185,21 +185,7 @@ router.post('/login/mfa', loginLimiter, (req, res) => {
       db.prepare('UPDATE users SET mfa_backup_codes = ? WHERE id = ?').run(result.hashesJson, user.id);
     }
   }
-  if (!ok) {
-    // A secret enrolled before the otplib v13 upgrade is 80-bit and can no longer be verified at
-    // all (see lib/mfa.js). Their authenticator will keep showing codes that will never work, so
-    // say what's actually wrong rather than "Incorrect code", which sends people round in circles.
-    // Backup codes are bcrypt-hashed and unaffected, which is why they're the way back in.
-    if (isLegacySecret(user.mfa_secret)) {
-      return res.status(401).json({
-        error:
-          'Two-factor needs setting up again after a security update — your authenticator’s codes ' +
-          'will no longer work. Sign in with one of your backup codes, then turn two-factor off and ' +
-          'back on to re-scan the QR code.',
-      });
-    }
-    return res.status(401).json({ error: 'Incorrect code' });
-  }
+  if (!ok) return res.status(401).json({ error: 'Incorrect code' });
 
   const sessionId = createSession(user.id, req.headers['user-agent']);
   res.json({ token: sign(user, sessionId), user: toPublicUser(user) });
@@ -372,8 +358,8 @@ router.get('/me/mfa', requireAuth, (req, res) => {
   res.json({
     enabled: !!u?.mfa_enabled,
     backup_codes_remaining: backupCodesRemaining(u?.mfa_backup_codes),
-    // True for an account still on a pre-v13 secret: their authenticator codes can't be verified
-    // any more and they need to turn two-factor off and on again. See lib/mfa.js.
+    // True for an account still on a pre-0.26.0 (80-bit) secret. It keeps working — this is a
+    // prompt to re-enrol into a stronger one when convenient, not a lockout. See lib/mfa.js.
     needs_reenrolment: !!u?.mfa_enabled && isLegacySecret(u?.mfa_secret),
   });
 });
