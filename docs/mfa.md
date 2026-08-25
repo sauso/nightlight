@@ -50,6 +50,21 @@ Lost your authenticator? Use a **backup code** at login. If you're also out of b
   The affected user can then sign in with just their password. Replace `nightlight` with
   `nightlight-dev` for the staging container.
 
+## One-off: re-enrolling after the 0.26.0 upgrade
+
+Two-factor secrets created **before 0.26.0** were 80-bit. The OTP library was upgraded to a version
+that enforces the RFC 4226 minimum of 128 bits, and it refuses shorter secrets outright — so an
+authenticator enrolled before that upgrade will keep displaying codes that can never be accepted.
+
+If that's you, the app says so at login rather than reporting a wrong code. To fix it:
+
+1. Sign in with one of your **backup codes**.
+2. **Account → Two-factor authentication → Turn off two-factor** (needs your password).
+3. Turn it back on and scan the new QR code.
+
+Out of backup codes as well? Use the recovery routes above — an admin reset, or the console failsafe.
+This is a one-time step; secrets created from 0.26.0 onward are 160-bit and unaffected.
+
 ## Notes for operators
 
 - The TOTP secret and the (hashed) backup codes live in the `users` table of the app database
@@ -57,3 +72,5 @@ Lost your authenticator? Use a **backup code** at login. If you're also out of b
   (it also holds password hashes).
 - Verification tolerates ±30s of clock drift. If codes are consistently rejected, check the server's
   clock/timezone against the phone running the authenticator.
+- `GET /api/auth/me/mfa` returns `needs_reenrolment: true` for an account still on a pre-0.26.0
+  secret, which is the quickest way to check without attempting a login.
