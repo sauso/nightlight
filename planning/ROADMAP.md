@@ -83,9 +83,10 @@ Runbook for reading a night's markers: **`sleep-marker-review-runbook.md`**.
 ## 2. Specced, not built
 
 ### 2.1 Sub-stream sanity check — warn when "Low" isn't actually low — `SPECCED`
-Nothing verifies that a configured `sub_rtsp_url` is *smaller* than the main stream. Measured on prod
-2026-08-25: Renz's `ch1` serves **1920×1080 @ 15fps — identical to his main stream**, while Raffa's is a
-proper 640×360 @ 10fps. Two silent consequences, neither of which surfaces anywhere in the UI:
+Nothing verifies that a configured `sub_rtsp_url` is actually *smaller* than the main stream. Found on
+prod 2026-08-25: Renz's `/ch1` serves **1920×1080 @ 15fps — identical to his main stream** — while
+Raffa's identically-configured camera serves a proper 640×360 @ 10fps. Two silent consequences, neither
+of which surfaces anywhere in the UI:
 
 - The **Low** quality option delivers the same bitrate as High, so the feature does nothing for that
   camera while looking like it works.
@@ -93,11 +94,17 @@ proper 640×360 @ 10fps. Two silent consequences, neither of which surfaces anyw
   instead of 360p cost **5.9% of a core vs 1.2%** — the single largest FFmpeg line in the container,
   ~5× what it should be.
 
+**Note what this is not.** Both cameras are *configured* 640×360 on that channel (owner's web UI, and
+ONVIF `Profile_1` → `/ch1`); Renz's encoder simply isn't honouring it. So the check has to measure the
+**actual stream**, not read back configuration — a camera that lies about its own settings is exactly
+the case this catches, and it is invisible without probing.
+
 **Proposal:** probe the sub's resolution when a camera is saved (ffprobe already runs there via
-`validateRtspStream`) and store it. If the sub isn't meaningfully smaller than the main, say so on the
-camera's detail/diagnostics screen — "this sub-stream is the same size as the main stream; Low will not
-save bandwidth". A warning, not a block: it's a camera-side misconfiguration, so the fix is on the
-camera, and refusing to save would be unhelpful.
+`validateRtspStream`) and store it alongside the main's. If the sub isn't meaningfully smaller, say so
+on the camera's detail/diagnostics screen — "this sub-stream is delivering the same resolution as the
+main stream; Low won't save bandwidth". A warning, not a block: the fix is on the camera, and refusing
+to save would be unhelpful. Worth re-checking periodically, not only at save time, since a camera can
+drift into this state while running.
 
 ### 2.2 Cry classification — `SPECCED`
 Sound detection today alerts on **loudness** (FFmpeg `silencedetect`), not on what the noise *is*. The
