@@ -234,10 +234,10 @@ measurement**, and (like everything here) never a safety device — see the warn
 - **How it estimates.** Across the night it builds a per-minute movement + sound timeline from
   the child's camera(s): falling still for a sustained stretch reads as falling asleep,
   sustained movement or noise reads as an awakening (brief stirs don't count). If you've painted
-  a **crib zone** on the camera — the same area that scopes motion alerts — it also tracks
-  movement **outside** the crib (a parent coming in, or the child climbing out of bed) and shows
+  a **bed zone** on the camera — the same area that scopes motion alerts — it also tracks
+  movement **outside** the bed (a parent coming in, or the child climbing out of bed) and shows
   it separately as "in the room" activity, which catches a morning wake where the child has
-  already left the cot.
+  already left the bed.
 - **At a glance, and live.** Each child's page summarises last night — total sleep, wake-ups,
   longest stretch — and while a night is in progress it updates as **"Tonight · so far"**, so an
   early-morning wake appears within a minute or two rather than only after the window closes.

@@ -9,6 +9,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+- **One word for where your child sleeps: "bed".** The app had been using *crib*, *cot* and *bed*
+  interchangeably, and worst of all the sleep timeline labelled the same moment two different ways —
+  a marker saying "Out of bed" sat next to one saying "Child out of crib". Everything now says **bed**,
+  which is also what the app has always called it internally. The sleep timeline also now distinguishes
+  a **moment** from a **stretch of time**: "Got out of bed" is when it happened, "Out of bed" is how long
+  it lasted. And activity from someone *else* in the room now reads "Someone in the room", so it can't be
+  mistaken for your child.
+
 ## [0.25.2] - 2026-08-25
 
 ### Changed

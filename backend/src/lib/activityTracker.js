@@ -25,7 +25,7 @@ function slot(cameraId) {
   return s;
 }
 
-// Called by motionDetector for every analysis frame. `fraction` = 0..1 of the crib zone that changed.
+// Called by motionDetector for every analysis frame. `fraction` = 0..1 of the bed zone that changed.
 export function recordMotion(cameraId, fraction) {
   if (!(fraction >= 0)) return;
   const s = slot(cameraId);
@@ -34,9 +34,9 @@ export function recordMotion(cameraId, fraction) {
   s.motionFrames++;
 }
 
-// Called by motionDetector for every frame when the camera has a crib zone — `fraction` = 0..1 of the
-// area OUTSIDE the crib that changed (someone moving in the room / the child out of bed). Kept separate
-// from in-crib motion so the sleep timeline can tell stirring-in-bed from room activity.
+// Called by motionDetector for every frame when the camera has a bed zone — `fraction` = 0..1 of the
+// area OUTSIDE the bed that changed (someone moving in the room / the child out of bed). Kept separate
+// from in-bed motion so the sleep timeline can tell stirring-in-bed from room activity.
 export function recordMotionOut(cameraId, fraction) {
   if (!(fraction >= 0)) return;
   const s = slot(cameraId);

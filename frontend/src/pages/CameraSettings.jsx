@@ -190,7 +190,7 @@ export default function CameraSettings() {
             <div className="field">
               <label htmlFor="cam-name">Name</label>
               <input id="cam-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required placeholder="e.g. Crib cam" />
+                required placeholder="e.g. Nursery cam" />
             </div>
 
             <div className="onvif-box__row">
