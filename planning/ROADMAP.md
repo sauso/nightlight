@@ -22,29 +22,58 @@ building goes to §4 *with the evidence*, so it doesn't get re-proposed later.
 
 ## 1. Next up
 
-### 1.1 Fix Raffa's crib-zone discrimination — `NEXT`
-**This is the blocker for 1.2, and it is a camera-framing problem, not a code problem.**
+### 1.1 Fix Raffa's bed-zone discrimination — `NEXT`
+**This is the blocker for 1.3 (and feeds 1.2), and it is a camera-framing problem, not a code problem.**
 
 On the night of 2026-08-24→25 there was **no `out_of_bed` transition anywhere near Raffa's real 06:10
 exit** (the last one was 01:22), and the detector then logged three *false* `into_bed` events after he
-was already out (06:33, 06:43, 06:56). Crib-zone motion kept registering until 07:02 despite the crib
+was already out (06:33, 06:43, 06:56). Bed-zone motion kept registering until 07:02 despite the bed
 being empty from 06:10. Transition peaks are also much weaker than Renz's (0.013–0.037 vs up to 0.2).
 
 The zone covers ~19.5% of the frame, much of it bare wall, and misses most of the bed — so "inside the
-crib" and "outside the crib" aren't actually distinguishable for that camera.
+bed" and "outside the bed" aren't actually distinguishable for that camera.
 
-**Work:** re-aim the camera so the cot fills more of the frame and the floor beside it is visible, then
+**Work:** re-aim the camera so the bed fills more of the frame and the floor beside it is visible, then
 **redraw `detect_zone`** — it is stored as normalised frame fractions, so *moving the camera without
 redrawing points the zone at the wrong things and makes out-of-bed detection worse, not better*. The
-grid picker (paint the cells covering the cot) can follow a diagonal cot that the old rectangles
+grid picker (paint the cells covering the bed) can follow a diagonal bed that the old rectangles
 couldn't. Then review a few mornings against ground truth.
 
-### 1.2 Promote shadow sleep onset/wake to authoritative — `HELD` (was `NEXT`)
+### 1.2 Report a night where nobody was in the bed — `NEXT`
+**Today an empty bed reports a perfect night's sleep.** This is not a curiosity: children are away,
+sleep in a parent's bed, or are sick, and the app should say *"no one was in the bed"* rather than
+inventing eleven hours of sleep and filing it in the child's history.
+
+**Why it happens.** The pipeline has no notion of occupancy. An empty room still produces activity
+samples, so `coverage` passes; near-zero motion then satisfies `ONSET_QUIET_MIN` (15 continuous quiet
+minutes), so an onset is found and the night scores `status: 'ok'`. The assumption is written into the
+threshold itself — `MOTION_ACTIVE = 0.01 // in-bed per-frame changed-fraction above this = real
+movement (sleeping room ~0)`. If a sleeping room is ~0, so is an empty one.
+
+**Status vocabulary today** is `off` / `no_data` / `no_sleep` / `ok`. This needs a fifth: something like
+`empty` — "No one in the bed" — which is a *different statement* from `no_data` ("we couldn't see").
+Both the sleep report push and the child page should say it plainly.
+
+**Likely discriminators** (to be settled with data, not guessed):
+- **No `into_bed` transition for the whole window.** The strongest single signal — if nobody ever got
+  in, nobody's in it. Depends on the transition detector being reliable for that camera, which is
+  exactly what 1.1 is fixing.
+- **Essentially zero in-bed active minutes across the window.** A real sleeper stirs; the question is
+  what the floor actually looks like for an occupied bed versus an empty one.
+- Sound is probably a weak signal here — it's room-level, not bed-level.
+
+**Calibration data arrives 2026-08-26.** The night of 2026-08-25 is a natural experiment: Renz is away
+so his bed is empty all night, while Raffa is in his, on the same night, in the same house, with both
+cameras on the same firmware. Compare the two distributions of `activity_samples.motion_peak` before
+choosing a rule. Nothing extra needs building to capture it — the per-minute samples and
+`bed_transitions` are already recorded for both.
+
+### 1.3 Promote shadow sleep onset/wake to authoritative — `HELD` (was `NEXT`)
 Out-of-bed detection ships today in **shadow mode**: `sleep_nights.onset_at_shadow` / `wake_at_shadow`
 are computed from the `bed_transitions` table alongside the live motion+sound numbers, but the headline
 figures parents see still come from the old algorithm.
 
-**Why shadow exists:** motion-based tracking is blind to a child who *leaves* — an empty crib and a
+**Why shadow exists:** motion-based tracking is blind to a child who *leaves* — an empty bed and a
 sleeping child both read as "no motion". The bed transitions are what distinguish absence from sleep.
 
 **Why this is now HELD rather than NEXT.** The previous plan here was "eyeball it for a few mornings,
@@ -53,9 +82,9 @@ Renz on prod was exact (05:58), Renz on *staging* — same physical camera — w
 was 53 min late, i.e. **worse than the algorithm it was meant to replace**. Two distinct causes:
 
 - **Knife-edge thresholds.** Staging was missing a single sample minute that prod had, which
-  manufactured a 22-minute empty-crib gap (limit 20) with 9 minutes of trailing activity (limit 10).
+  manufactured a 22-minute empty-bed gap (limit 20) with 9 minutes of trailing activity (limit 10).
   Both margins within 2 → accepted. One sample minute flipped the answer for the same camera.
-- **Raffa's zone can't tell inside-crib from outside-crib** — see 1.1.
+- **Raffa's zone can't tell inside-bed from outside-bed** — see 1.1.
 
 **Mitigation shipped (0.25.0):** a qualifying gap is now only accepted when a real `out_of_bed`
 corroborates it within the snap window; otherwise the scan continues to a later gap, and failing that
@@ -73,7 +102,7 @@ staging 05:18 → 05:58 exact (the prod/staging divergence is gone), Raffa falls
 - Consider extending Renz's `sleep_window_end` — it closes 06:30 but real wake-up has been ~07:57.
 - Watch edge case **B** (child held ~30 min then put back down): a re-settle must require an
   *into-bed* transition before sustained quiet re-scores as sleep, or the held gap wrongly reads as
-  sleep. Edge case **A** (pre-bedtime quiet in an empty crib scoring as early onset) is handled — onset
+  sleep. Edge case **A** (pre-bedtime quiet in an empty bed scoring as early onset) is handled — onset
   can't precede the first into-bed event.
 
 Runbook for reading a night's markers: **`sleep-marker-review-runbook.md`**.

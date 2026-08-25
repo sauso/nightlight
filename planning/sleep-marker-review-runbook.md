@@ -95,12 +95,12 @@ ssh -i ~/.ssh/unraid_nightlight root@192.168.1.100 \
 ```
 
 Log lines are **AEST**. A confirmed line looks like:
-`[oob] "Renz Cam" OUT OF BED — motion left the crib, quiet 6000ms since, outside peak 6.3%`
+`[oob] "Renz Cam" OUT OF BED — motion left the bed, quiet 6000ms since, outside peak 6.3%`
 
 ## 5. Reading it
 
 - **Restless cluster** = many alternating out/into within an hour, low outside peaks
-  (<~11%) → stirring/re-settling in the crib, not actually on the floor. High outside
+  (<~11%) → stirring/re-settling in the bed, not actually on the floor. High outside
   peaks (>~15%) + a *terminal* out_of_bed followed by long quiet → genuinely up.
 - **Consecutive same-type** transitions (e.g. five `into_bed` in a row) = repeated
   re-entry/stir during a restless patch; they collapse to one interval in the analysis.
@@ -110,8 +110,8 @@ Log lines are **AEST**. A confirmed line looks like:
     so a ~4am re-settle after a mid-night waking masqueraded as onset (put onset at 4:20am on
     2026-08-23). Now takes the *earliest* qualifying into_bed — the first put-down that leads to
     sustained sleep. Mid-night re-settles no longer move it.
-  - **Wake**: the empty-crib heuristic is robust — on 2026-08-24 it correctly caught a 6:39 rise
-    that the *transition* detector missed (he climbed out without lighting the outside-crib zone
+  - **Wake**: the empty-bed heuristic is robust — on 2026-08-24 it correctly caught a 6:39 rise
+    that the *transition* detector missed (he climbed out without lighting the outside-bed zone
     enough to confirm an out_of_bed). Residual theoretical risk only if a child sleeps well past
     window+lookahead with truly no motion and no exit; watch for a wake that lands suspiciously
     early with no nearby transition.
