@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-08-25
+
 ### Added
 - **Recording now has its own Settings screen.** Settings → **Recording** replaces the recording block that
   was buried in General, and separates the two things that were previously tangled together: **Automatic
