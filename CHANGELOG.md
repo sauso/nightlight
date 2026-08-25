@@ -9,6 +9,28 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **Nights when nobody slept in the bed are now reported as exactly that.** Previously an empty bed
+  produced a flawless night's sleep — one night with a child away was reported as 11 hours 6 minutes
+  asleep with no wake-ups, because an empty room is quiet and quiet is what the app reads as sleep.
+  Such a night now says **"No one in the bed"**, which is deliberately a different message from "no
+  data": the cameras were watching all night, there simply wasn't anyone there. The nightly report says
+  it too, instead of inventing a night's sleep.
+
+### Fixed
+- **Bedtime no longer has to match the schedule.** Children don't go to bed at a fixed time — a tired
+  one can be asleep well before their sleep window opens. Sleep that started early was previously
+  clipped to the start of the window, so an early night was recorded as shorter than it really was.
+  Sleep is now measured from when your child actually went down. It only counts when the cameras saw
+  them being *put* into bed and they stayed asleep into the window, so a quiet empty room can't be
+  mistaken for an early bedtime, and an afternoon nap they woke up from can't be mistaken for the
+  start of the night.
+- **The morning wake-up time is more reliable.** The check that decides which quiet stretch is the
+  real "up for the day" was sitting right on the boundary of normal behaviour: on one night a true
+  05:09 wake-up was identified with **zero** margin, where a single extra minute of a parent tidying
+  the bed afterwards would have reported the wake-up roughly two hours late. The margin is now
+  comfortable. Verified against every night on record — no night's reported wake-up changed.
+
 ### Changed
 - **One word for where your child sleeps: "bed".** The app had been using *crib*, *cot* and *bed*
   interchangeably, and worst of all the sleep timeline labelled the same moment two different ways —
