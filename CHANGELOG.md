@@ -17,6 +17,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   data": the cameras were watching all night, there simply wasn't anyone there. The nightly report says
   it too, instead of inventing a night's sleep.
 
+### Changed
+- **Wake-up and bedtime now come from watching your child leave and enter the bed**, rather than from
+  movement and sound alone. The app could already detect the moment a child got out of bed, but only
+  showed it as a secondary note while the headline time came from the older method — so a night could
+  say "woke 6:38am" with "got out of bed 5:09am" written underneath it. The bed-based time is now the
+  one you see, and the night's length is measured to it: a morning that was recorded as 10h46m of sleep
+  is correctly 9h17m once it stops counting the 89 minutes after your child had already got up.
+  Where nothing confirms a bed exit, the old method is still used exactly as before, so no night gets a
+  worse answer than it used to. The detail page keeps showing what movement and sound alone would have
+  said, for comparison.
+
 ### Fixed
 - **Bedtime no longer has to match the schedule.** Children don't go to bed at a fixed time — a tired
   one can be asleep well before their sleep window opens. Sleep that started early was previously

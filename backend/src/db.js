@@ -606,13 +606,22 @@ if (!sleepNightsColumns.includes('avg_temperature')) {
   db.exec('ALTER TABLE sleep_nights ADD COLUMN avg_humidity REAL');
 }
 
-// SHADOW onset/wake: an alternative onset_at/wake_at derived from the out-of-bed / into-bed transition
-// events (bed_transitions below), computed alongside the primary activity-only values but NOT yet used
-// as the authoritative numbers. Lets us validate the transition-corrected sleep times against the live
-// algorithm night-by-night before promoting them. See lib/sleepAnalysis.js.
+// Onset/wake derived from the out-of-bed / into-bed transition events (bed_transitions below). These
+// were introduced as shadow values for validation; they are now what onset_at/wake_at are set from when
+// a transition corroborates them, and are still recorded separately so the promotion stays auditable
+// (and revertible). See lib/sleepAnalysis.js.
 if (!sleepNightsColumns.includes('onset_at_shadow')) {
   db.exec('ALTER TABLE sleep_nights ADD COLUMN onset_at_shadow TEXT');
   db.exec('ALTER TABLE sleep_nights ADD COLUMN wake_at_shadow TEXT');
+}
+
+// The transition-derived times are now the AUTHORITATIVE onset_at/wake_at (sleepAnalysis's
+// USE_TRANSITION_TIMES). These keep the movement-only figures the app used before that promotion, so the
+// two methods stay comparable night by night and a regression is visible rather than silent. Nullable:
+// rows computed before this migration simply have no algo value recorded.
+if (!sleepNightsColumns.includes('onset_at_algo')) {
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN onset_at_algo TEXT');
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN wake_at_algo TEXT');
 }
 
 // Quick-silence: a per-camera temporary mute of ALL alerts (motion/sound/ONVIF/MQTT), for when you're

@@ -27,11 +27,11 @@ const WAKE_ACTIVE_MIN = 5; // active minutes (within a run) to count as an awake
 const WAKE_GAP_MIN = 3; // bridge quiet gaps up to this long inside one awakening (intermittent noise/movement)
 const MIN_COVERAGE_FRAC = 0.5; // need activity samples for at least this fraction of the window, else no_data
 // How far PAST the window end to keep looking for the morning "out of bed" — a child can sleep past the
-// window edge, so the terminal exit that marks "up for the day" may fall a couple hours later. Only the
-// SHADOW wake uses this (the live algo still stops at the window). See computeNight's shadow block.
+// window edge, so the terminal exit that marks "up for the day" may fall a couple hours later. The
+// movement-only wake still stops at the window; the transition-derived departure uses this lookahead.
 const WAKE_LOOKAHEAD_MS = 3 * 60 * 60 * 1000;
-// SHADOW wake needs the bed to stay empty (no in-bed motion) at least this long after the last in-bed
-// movement to call it "up for the day" (vs a momentary lull while still asleep in the bed).
+// The morning departure needs the bed to stay empty (no in-bed motion) at least this long after the last
+// in-bed movement to call it "up for the day" (vs a momentary lull while still asleep in the bed).
 const MORNING_ABSENCE_MIN = 20;
 // A morning departure is a sustained empty-bed gap after which only a FEW isolated bed-active minutes
 // remain — a parent reaching into the empty bed after the child is already up (getting them, tidying).
@@ -71,6 +71,15 @@ const EARLY_ONSET_PUTDOWN_MS = 45 * 60 * 1000;
 // of 0.2883 occupied (usually ~1.0). 0.10 sits ~6x above the empty night and ~3x below the occupied
 // floor. Paired with the wake_count/awake_minutes test below, which no occupied night on record trips.
 const EMPTY_BED_MAX_PEAK = 0.1;
+// Use bed-transition-derived onset/wake as the AUTHORITATIVE times rather than merely showing them
+// alongside the movement-only figures. The movement timeline cannot distinguish an empty quiet bed from
+// a sleeping child; where a real transition supports a time it is simply the better estimate. Against
+// owner-confirmed ground truth the movement-only wake has been 55-89 minutes late every morning, while
+// the transition-derived one has been exact. Adoption is safe by construction - each value falls back to
+// the movement-only figure unless a transition corroborates it, so the uncorroborated case is exactly
+// the old behaviour. Both are stored either way (`*_algo` keeps the movement-only figures) so the two
+// methods stay comparable night by night. Flip this to false to revert to movement-only everywhere.
+const USE_TRANSITION_TIMES = true;
 // When the empty-bed run starts near a recorded bed transition, snap the wake to that transition's clock
 // time (its TIMING is trustworthy even though its in/out LABEL isn't — see the destination-state note).
 const WAKE_SNAP_MS = 5 * 60 * 1000;
@@ -306,6 +315,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     wake_at: null,
     onset_at_shadow: null,
     wake_at_shadow: null,
+    onset_at_algo: null,
+    wake_at_algo: null,
     asleep_minutes: null,
     awake_minutes: null,
     wake_count: null,
@@ -446,6 +457,104 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     break; // earliest qualifying put-down wins
   }
   if (onset == null) return { ...result, status: 'no_sleep' };
+  const algoOnset = onset;
+
+  // --- Bed-boundary onset/wake. Computed BEFORE the metrics because, once adopted, they define the span
+  // the metrics are measured over - promoting only the displayed times would leave the durations
+  // describing a different night from the times printed above them. ---
+
+  // Onset: an into_bed only ever DELAYS onset - before the child was actually placed in the bed the
+  // quiet is an empty bed, not sleep. Onset is a once-per-night event: the FIRST put-down that leads to
+  // sustained sleep. Take the EARLIEST into_bed whose following quiet run qualifies (firstQuietRunFrom
+  // already skips the evening fussing, so this lands on the settle, not the put-down instant); never move
+  // earlier than the movement-only onset. Using the earliest - not the latest - is deliberate: on a
+  // restless night the child is re-settled several times (into_bed at ~3am after a 2-4am waking), and the
+  // LAST such re-settle must not be mistaken for the night's onset (that bug put onset at 4:20am on
+  // 2026-08-23). The first qualifying sleep stretch is the onset; later re-settles are mid-night wakes.
+  let transitionOnset = null;
+  for (const t of transitions) {
+    if (t.type !== TRANSITION.INTO_BED) continue;
+    const idx = txIdx(t.created_at);
+    if (idx < 0 || idx >= totalMin) continue;
+    const q = firstQuietRunFrom(idx);
+    if (q != null) { transitionOnset = Math.max(q, algoOnset); break; } // earliest qualifying into_bed wins
+  }
+
+  // Wake: find the morning DEPARTURE from the bed-motion timeline, ignoring the unreliable in/out labels
+  // (the SAME 06:41 exit was labelled oppositely on two legs of one camera, 2026-08-23) AND ignoring a
+  // parent handling the bed after the child is already up. This deliberately does NOT use the LAST in-bed
+  // motion: on 2026-08-24 the child was up ~06:38 but a parent then reached into the bed (peaks 0.89/0.99
+  // at 07:22-08:11), which the old "last motion then empty" rule mistook for the wake. Completed nights
+  // only - mid-night we don't guess a morning wake.
+  // Kept as an exact timestamp, NOT a minute index: the reported wake time is this instant truncated to
+  // its minute, and rounding to the nearest index instead would report 05:10 for an exit recorded at
+  // 05:09:31. The index derived from it (for the metrics span) therefore FLOORS.
+  let transitionExitMs = null;
+  if (!inProgress) {
+    // Indices here share the timeline origin (analysisStartUtc) used by idxOf, so the lookbehind is
+    // included at the front and the lookahead past the window end at the back.
+    const totalMinExt = Math.max(totalMin, Math.round((endUtc.getTime() + lookahead - analysisStartUtc.getTime()) / 60000));
+    const extRows = db
+      .prepare(
+        `SELECT bucket_start AS t, motion_peak FROM activity_samples
+           WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
+      )
+      .all(...cams, analysisStartSql, txEndSql);
+    const cribActExt = new Array(totalMinExt).fill(false);
+    for (const r of extRows) {
+      const i = idxOf(r.t);
+      if (i >= 0 && i < totalMinExt && r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) cribActExt[i] = true;
+    }
+    // Suffix count of bed-active minutes from each index to the end, so we can cheaply ask "how much
+    // in-bed motion remains after this point?" for each candidate gap.
+    const activeSuffix = new Array(totalMinExt + 1).fill(0);
+    for (let i = totalMinExt - 1; i >= 0; i--) activeSuffix[i] = activeSuffix[i + 1] + (cribActExt[i] ? 1 : 0);
+
+    // Morning departure = the EARLIEST sustained empty-bed gap (>= MORNING_ABSENCE_MIN) at/after onset
+    // after which only a few isolated bed-active minutes remain (<= MAX_POST_EXIT_ACTIVE_MIN). Scanning
+    // for the FIRST such gap - rather than the last in-bed motion - is the fix for a parent handling the
+    // bed after the child is already up: those late hand-in-bed spikes fall AFTER the departure gap, so
+    // they no longer drag the wake later. The "few active minutes remain" test is what stops a mid-sleep
+    // lull (followed by lots more stirring) from being mistaken for the exit.
+    //
+    // A qualifying gap is only ACCEPTED if a real out-of-bed transition corroborates it (within
+    // WAKE_SNAP_MS); otherwise we keep scanning for a later gap that is corroborated. That second,
+    // independent signal matters because the gap test alone is knife-edge: on 2026-08-24 a single missing
+    // sample minute manufactured a 22-minute gap (threshold 20) carrying 9 trailing active minutes -
+    // within 2 of flipping - which put the wake 40 minutes early on staging while prod, reading the same
+    // camera, got it exactly right. Scanning on rather than giving up at the first candidate is what lets
+    // that bogus gap be skipped and the real departure still be found.
+    //
+    // Corroboration does most of the discriminating here - see MAX_POST_EXIT_ACTIVE_MIN for why that cap
+    // is 20 and not the 10 it started at (real exits leave 5-8 trailing minutes; the one corroborated
+    // mid-night impostor on record leaves 31).
+    //
+    // The transition must be an `out_of_bed` specifically: accepting any transition would let an
+    // `into_bed` vouch for a departure, which is how the other child's wake landed 53 minutes late (that
+    // bed kept registering motion long after the child was carried out, and the nearest marker was an
+    // into-bed). If nothing corroborates any gap we keep the movement-only wake rather than guess.
+    for (let i = Math.max(algoOnset, 0); i < totalMinExt; ) {
+      if (cribActExt[i]) { i++; continue; }
+      let j = i;
+      while (j < totalMinExt && !cribActExt[j]) j++; // [i, j) is a maximal empty run
+      if (j - i >= MORNING_ABSENCE_MIN && activeSuffix[i] <= MAX_POST_EXIT_ACTIVE_MIN) {
+        const emptyStartMs = analysisStartUtc.getTime() + i * 60000;
+        let best = null;
+        for (const t of transitions) {
+          if (t.type !== TRANSITION.OUT_OF_BED) continue;
+          const dt = Math.abs(txMs(t.created_at) - emptyStartMs);
+          if (dt <= WAKE_SNAP_MS && (best == null || dt < best.dt)) best = { dt, ms: txMs(t.created_at) };
+        }
+        if (best) { transitionExitMs = best.ms; break; } // corroborated departure - the morning exit
+      }
+      i = j;
+    }
+  }
+
+  const transitionExitIdx =
+    transitionExitMs == null ? null : Math.floor((transitionExitMs - analysisStartUtc.getTime()) / 60000);
+
+  if (USE_TRANSITION_TIMES && transitionOnset != null) onset = transitionOnset;
 
   // Mark minutes that belong to a qualifying awakening after onset. A run bridges short quiet gaps
   // (<= WAKE_GAP_MIN) so intermittent noise/movement — a child fussing on and off, or moving in and out
@@ -474,6 +583,13 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     let j = totalMin - 1;
     while (j >= onset && inWake[j]) j--;
     sleepEnd = j + 1;
+  }
+  const algoSleepEnd = sleepEnd;
+  if (USE_TRANSITION_TIMES && transitionExitIdx != null) {
+    // Clamped because the metrics can only count minutes we hold per-minute state for, while the
+    // departure scan deliberately looks PAST the window end (a child can sleep past it). The reported
+    // wake TIME is not clamped - see wake_at below.
+    sleepEnd = Math.min(Math.max(transitionExitIdx, onset), totalMin);
   }
 
   // Metrics over [onset, sleepEnd): asleep = minutes not in a wake run; awake = minutes in wake runs.
@@ -514,28 +630,34 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     };
   }
 
+  // A movement-only wake of null means "still asleep when the window closed". A transition-derived
+  // departure may legitimately fall past the window end and is reported as-is - knowing they got up at
+  // 07:10 beats reporting "still asleep".
+  const algoWakeAt = algoSleepEnd < totalMin ? minuteTime(algoSleepEnd) : null;
+  const transitionWakeAt = transitionExitMs != null ? toSqlUtc(new Date(transitionExitMs)) : null;
   const out = {
     ...result,
     status: 'ok',
     onset_at: minuteTime(onset),
-    wake_at: sleepEnd < totalMin ? minuteTime(sleepEnd) : null, // null = still asleep when the window closed
+    wake_at: (USE_TRANSITION_TIMES && transitionWakeAt) || (sleepEnd < totalMin ? minuteTime(sleepEnd) : null),
     asleep_minutes: asleep,
     awake_minutes: awake,
     wake_count: wakeCount,
     longest_stretch_minutes: longest,
+    // The movement-only figures, kept so the two methods stay comparable night by night.
+    onset_at_algo: minuteTime(algoOnset),
+    wake_at_algo: algoWakeAt,
   };
 
   // Periods the child is OUT of the bed — from an out_of_bed event until the next into_bed — used below
   // to classify each room-activity block as the child being out vs someone else in the room (child in bed).
   let outIntervals = [];
 
-  // --- SHADOW onset/wake from bed-boundary transitions (validation only — NOT the authoritative
-  // numbers yet; stored in *_shadow columns so we can compare them to the algo night-by-night). The
-  // activity-only algo can't tell an empty quiet bed from a sleeping child; the transitions can. ---
+  // --- Bed-boundary extras. The onset/wake themselves are computed further up (they define the span
+  // the metrics measure) and recorded below; what's left here is the out-of-bed intervals the timeline
+  // needs. `transitions`, `txMs`, `txIdx`, `lookahead`, `txEndSql` and `firstQuietRunFrom` are all
+  // hoisted above, because the early-bedtime onset guard needs them too. ---
   {
-    // `transitions`, `txMs`, `txIdx`, `lookahead`, `txEndSql` and `firstQuietRunFrom` are hoisted above —
-    // the early-bedtime onset guard needs them too, so they are computed once over the whole timeline.
-
     // Build the child-out intervals: open on an out_of_bed, close on the next into_bed. Consecutive
     // out_of_bed events (e.g. a morning cluster) stay one interval; an interval still open at the end of
     // the analysis means the child was out through to the end.
@@ -543,106 +665,17 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       let openOut = null;
       for (const t of transitions) {
         const ms = txMs(t.created_at);
-        if (t.type === 'out_of_bed') { if (openOut == null) openOut = ms; }
-        else if (t.type === 'into_bed') { if (openOut != null) { outIntervals.push([openOut, ms]); openOut = null; } }
+        if (t.type === TRANSITION.OUT_OF_BED) { if (openOut == null) openOut = ms; }
+        else if (t.type === TRANSITION.INTO_BED) { if (openOut != null) { outIntervals.push([openOut, ms]); openOut = null; } }
       }
       if (openOut != null) outIntervals.push([openOut, effEndMs]);
     }
 
-    // Onset: an into_bed only ever DELAYS onset — before the child was actually placed in the bed the
-    // quiet is an empty bed, not sleep. Onset is a once-per-night event: the FIRST put-down that leads to
-    // sustained sleep. Take the EARLIEST into_bed whose following quiet run qualifies (firstQuietRunFrom
-    // already skips the evening fussing, so this lands on the settle, not the put-down instant); never move
-    // earlier than the algo onset. Using the earliest — not the latest — is deliberate: on a restless night
-    // the child is re-settled into the bed several times (into_bed at ~3am after a 2–4am waking), and the
-    // LAST such re-settle must not be mistaken for the night's onset (that bug put onset at 4:20am on
-    // 2026-08-23). The first qualifying sleep stretch is the onset; later re-settles are mid-night wakes.
-    let onsetIdx = onset;
-    for (const t of transitions) {
-      if (t.type !== 'into_bed') continue;
-      const idx = txIdx(t.created_at);
-      if (idx < 0 || idx >= totalMin) continue;
-      const q = firstQuietRunFrom(idx);
-      if (q != null) { onsetIdx = Math.max(q, onset); break; } // earliest qualifying into_bed wins
-    }
-    out.onset_at_shadow = minuteTime(onsetIdx);
+    // The transition-derived times, recorded whether or not they were adopted. When USE_TRANSITION_TIMES
+    // is on these match onset_at/wake_at; the pair worth comparing is then *_algo vs the headline.
+    out.onset_at_shadow = transitionOnset != null ? minuteTime(transitionOnset) : minuteTime(algoOnset);
+    out.wake_at_shadow = transitionWakeAt || algoWakeAt;
 
-    // Wake: find the morning DEPARTURE from the bed-motion timeline, ignoring the unreliable in/out labels
-    // (the SAME 06:41 exit was labelled oppositely on two legs of one camera, 2026-08-23) AND ignoring a
-    // parent handling the bed after the child is already up. The departure is the earliest sustained
-    // empty-bed gap after which the bed stays essentially empty (only a few isolated hand-in-bed spikes)
-    // — see the scan below. This deliberately does NOT use the LAST in-bed motion: on 2026-08-24 the child
-    // was up ~06:38 but a parent then reached into the bed (peaks 0.89/0.99 at 07:22–08:11), which the
-    // old "last motion then empty" rule mistook for the wake (08:11). Only for a completed night (mid-night
-    // we don't guess a morning wake). Transition TIMING is still trustworthy, so we snap the departure to a
-    // nearby transition of either label for a crisp clock time. Defaults to the algo wake, so the shadow
-    // value is never worse than the live estimate when no clear departure is found.
-    out.wake_at_shadow = out.wake_at;
-    if (!inProgress) {
-      // Indices here share the timeline origin (analysisStartUtc) used by idxOf, so the lookbehind is
-      // included at the front and the lookahead past the window end at the back.
-      const totalMinExt = Math.max(totalMin, Math.round((endUtc.getTime() + lookahead - analysisStartUtc.getTime()) / 60000));
-      const extRows = db
-        .prepare(
-          `SELECT bucket_start AS t, motion_peak FROM activity_samples
-             WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
-        )
-        .all(...cams, analysisStartSql, txEndSql);
-      const cribActExt = new Array(totalMinExt).fill(false);
-      for (const r of extRows) {
-        const i = idxOf(r.t);
-        if (i >= 0 && i < totalMinExt && r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) cribActExt[i] = true;
-      }
-      // Suffix count of bed-active minutes from each index to the end, so we can cheaply ask "how much
-      // in-bed motion remains after this point?" for each candidate gap.
-      const activeSuffix = new Array(totalMinExt + 1).fill(0);
-      for (let i = totalMinExt - 1; i >= 0; i--) activeSuffix[i] = activeSuffix[i + 1] + (cribActExt[i] ? 1 : 0);
-
-      // Morning departure = the EARLIEST sustained empty-bed gap (>= MORNING_ABSENCE_MIN) at/after onset
-      // after which only a few isolated bed-active minutes remain (<= MAX_POST_EXIT_ACTIVE_MIN). Scanning
-      // for the FIRST such gap — rather than the last in-bed motion — is the fix for a parent handling the
-      // bed after the child is already up: those late hand-in-bed spikes fall AFTER the departure gap, so
-      // they no longer drag the wake later. And the "few active minutes remain" test is what stops a
-      // mid-sleep lull (followed by lots more stirring) from being mistaken for the exit.
-      //
-      // A qualifying gap is only ACCEPTED if a real out-of-bed transition corroborates it (within
-      // WAKE_SNAP_MS); otherwise we keep scanning for a later gap that is corroborated. Requiring that
-      // second, independent signal matters because the gap test alone is knife-edge: on the night of
-      // 2026-08-24 a single missing sample minute manufactured a 22-minute gap (threshold 20) carrying 9
-      // trailing active minutes — within 2 of flipping — which put the shadow wake 40 minutes early on
-      // staging while prod, reading the same camera, got it exactly right. Scanning on rather than giving
-      // up at the first candidate is what lets that bogus gap be skipped and the real departure (the next
-      // gap, matching an actual exit event) still be found.
-      //
-      // Corroboration is doing most of the discriminating here — see MAX_POST_EXIT_ACTIVE_MIN for why
-      // that cap is 20 and not the 10 it started at (real exits leave 5-8 trailing minutes; the one
-      // corroborated mid-night impostor on record leaves 31).
-      //
-      // The transition must be an `out_of_bed` specifically: accepting any transition would let an
-      // `into_bed` vouch for a departure, which is how the other child's shadow landed 53 minutes late
-      // (that bed kept registering motion long after the child was carried out, and the nearest marker was an
-      // into-bed). If nothing corroborates any gap we keep the algo's wake rather than guess.
-      let exitMs = null;
-      for (let i = Math.max(onset, 0); i < totalMinExt; ) {
-        if (cribActExt[i]) { i++; continue; }
-        let j = i;
-        while (j < totalMinExt && !cribActExt[j]) j++; // [i, j) is a maximal empty run
-        if (j - i >= MORNING_ABSENCE_MIN && activeSuffix[i] <= MAX_POST_EXIT_ACTIVE_MIN) {
-          const emptyStartMs = analysisStartUtc.getTime() + i * 60000;
-          let best = null;
-          for (const t of transitions) {
-            if (t.type !== TRANSITION.OUT_OF_BED) continue;
-            const dt = Math.abs(txMs(t.created_at) - emptyStartMs);
-            if (dt <= WAKE_SNAP_MS && (best == null || dt < best.dt)) best = { dt, ms: txMs(t.created_at) };
-          }
-          if (best) { exitMs = best.ms; break; } // corroborated departure — this is the morning exit
-        }
-        i = j;
-      }
-      if (exitMs != null) {
-        out.wake_at_shadow = toSqlUtc(new Date(exitMs));
-      }
-    }
 
     if (includeTimeline) out.transitions = transitions.map((t) => ({ type: t.type, at: t.created_at }));
   }
@@ -723,17 +756,18 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
 const upsertNight = db.prepare(
   `INSERT INTO sleep_nights
      (child_id, night_date, window_start, window_end, status, onset_at, wake_at,
-      onset_at_shadow, wake_at_shadow,
+      onset_at_shadow, wake_at_shadow, onset_at_algo, wake_at_algo,
       asleep_minutes, awake_minutes, wake_count, longest_stretch_minutes, coverage_minutes,
       avg_temperature, avg_humidity, computed_at)
    VALUES (@child_id, @night_date, @window_start, @window_end, @status, @onset_at, @wake_at,
-           @onset_at_shadow, @wake_at_shadow,
+           @onset_at_shadow, @wake_at_shadow, @onset_at_algo, @wake_at_algo,
            @asleep_minutes, @awake_minutes, @wake_count, @longest_stretch_minutes, @coverage_minutes,
            @avg_temperature, @avg_humidity, datetime('now'))
    ON CONFLICT(child_id, night_date) DO UPDATE SET
      window_start=excluded.window_start, window_end=excluded.window_end, status=excluded.status,
      onset_at=excluded.onset_at, wake_at=excluded.wake_at,
      onset_at_shadow=excluded.onset_at_shadow, wake_at_shadow=excluded.wake_at_shadow,
+     onset_at_algo=excluded.onset_at_algo, wake_at_algo=excluded.wake_at_algo,
      asleep_minutes=excluded.asleep_minutes,
      awake_minutes=excluded.awake_minutes, wake_count=excluded.wake_count,
      longest_stretch_minutes=excluded.longest_stretch_minutes, coverage_minutes=excluded.coverage_minutes,
