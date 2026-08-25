@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.25.2] - 2026-08-25
+
 ### Changed
 - **Two-factor keys are now twice as strong.** The library behind the 6-digit codes was updated, and
   new two-factor setups get a 160-bit key instead of 80-bit — matching the current standard
