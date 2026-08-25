@@ -9,6 +9,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-08-25
+
+### Changed
+- **The crib area is now painted, not boxed.** Setting the crib area used to mean dragging rectangles over
+  the camera view, which never fit a cot the camera looks down on at an angle — you either clipped the end
+  of the cot or swept in a slab of floor. The picker now lays a grid over the still and you just **drag
+  across the squares that cover the cot**, the way you'd colour them in; drag back over them to rub out.
+  It shows how much of the view you've covered as you go, and existing crib areas carry over automatically.
+
 ## [0.25.0] - 2026-08-25
 
 ### Added

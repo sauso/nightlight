@@ -93,10 +93,15 @@ function buildZoneMask(camera) {
   const mask = new Uint8Array(FW * FH);
   let count = 0;
   for (const z of rects) {
-    const x0 = Math.floor(clamp(z.x) * FW);
-    const y0 = Math.floor(clamp(z.y) * FH);
-    const x1 = Math.min(FW, Math.ceil(clamp(z.x + z.w) * FW));
-    const y1 = Math.min(FH, Math.ceil(clamp(z.y + z.h) * FH));
+    // Round to the NEAREST pixel edge, not outward (floor/ceil). The zone picker paints on a 32x18
+    // grid whose cells are exactly 10x10 pixels here, but its fractions are stored rounded, so an
+    // edge arrives as 10.0008 rather than 10 — rounding outward turned that into a whole extra row
+    // of pixels per rect. Nearest-edge absorbs the rounding and makes a painted zone pixel-exact.
+    // For an older hand-drawn box this shifts an edge by at most half a pixel.
+    const x0 = Math.round(clamp(z.x) * FW);
+    const y0 = Math.round(clamp(z.y) * FH);
+    const x1 = Math.min(FW, Math.round(clamp(z.x + z.w) * FW));
+    const y1 = Math.min(FH, Math.round(clamp(z.y + z.h) * FH));
     for (let y = y0; y < y1; y++) {
       let idx = y * FW + x0;
       for (let x = x0; x < x1; x++, idx++) {

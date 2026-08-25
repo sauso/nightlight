@@ -233,8 +233,8 @@ measurement**, and (like everything here) never a safety device — see the warn
   it entirely. A child can have more than one camera — their movement and sound are combined.
 - **How it estimates.** Across the night it builds a per-minute movement + sound timeline from
   the child's camera(s): falling still for a sustained stretch reads as falling asleep,
-  sustained movement or noise reads as an awakening (brief stirs don't count). If you've drawn
-  a **crib zone** on the camera — the same rectangle that scopes motion alerts — it also tracks
+  sustained movement or noise reads as an awakening (brief stirs don't count). If you've painted
+  a **crib zone** on the camera — the same area that scopes motion alerts — it also tracks
   movement **outside** the crib (a parent coming in, or the child climbing out of bed) and shows
   it separately as "in the room" activity, which catches a morning wake where the child has
   already left the cot.
