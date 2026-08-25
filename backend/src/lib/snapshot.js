@@ -42,7 +42,7 @@ export async function fetchHttpSnapshot(rawUrl, { timeoutMs = 5000 } = {}) {
 
 // Grab a single JPEG frame from an already-published MediaMTX path (the same local stream the
 // detector/viewer use, so no extra hit on the camera). Used to attach the triggering frame to a
-// motion notification, and reusable for a future snapshot endpoint / crib-zone picker.
+// motion notification, and reusable for a future snapshot endpoint / bed-zone picker.
 //
 // Best-effort: resolves to a JPEG Buffer, or null on any failure/timeout (a missing snapshot must
 // never block or break detection). One-shot ffmpeg, killed if it overruns.
