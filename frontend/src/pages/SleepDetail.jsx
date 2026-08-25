@@ -164,6 +164,16 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
   if (night.status === 'no_sleep') {
     return <div className="card"><div className="camera-tile__sub" style={{ padding: 14 }}>No clear sleep detected in this night’s window.</div></div>;
   }
+  if (night.status === 'empty') {
+    return (
+      <div className="card">
+        <div className="camera-tile__sub" style={{ padding: 14 }}>
+          No one in the bed for this night. The cameras watched the whole window
+          ({night.coverage_minutes} minutes covered) and saw no one sleeping here, so there’s no sleep to report.
+        </div>
+      </div>
+    );
+  }
 
   const range = night.in_progress
     ? night.wake_at
