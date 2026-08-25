@@ -925,6 +925,7 @@ body.in-pip .tile-menu-backdrop {
 .settings-btn,
 .fullscreen-btn,
 .ptz-btn,
+.rec-btn,
 .talk-btn {
   background: none;
   backdrop-filter: none;
@@ -1632,6 +1633,21 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   margin-bottom: 14px;
 }
 
+/* Two fields side by side (e.g. a pre-roll and an auto-stop). A plain flex row let the longer label
+   wrap onto a second line and shove its input down out of line with its neighbour; the grid gives both
+   columns an identical track, and `align-items: end` keeps the two inputs on the same line however the
+   labels above them happen to wrap. Stacks on very narrow screens rather than squeezing both. */
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-items: end;
+}
+.field-row > .field { margin-bottom: 0; }
+@media (max-width: 400px) {
+  .field-row { grid-template-columns: 1fr; gap: 12px; }
+}
+
 .field label {
   display: block;
   font-size: 12px;
@@ -2176,13 +2192,6 @@ input[type='range'] {
   padding: 3px 2px;
   text-align: center;
 }
-.timelapse-player {
-  width: 100%;
-  max-height: 70vh;
-  border-radius: 8px;
-  background: #000;
-}
-
 /* Pill toggle switch (see components/Switch.jsx) — for immediate-apply settings only.
    The real checkbox is stretched over the track and made invisible so it stays the hit
    target and keeps native label/keyboard behaviour; the track + thumb are the visuals. */
@@ -2517,3 +2526,45 @@ input[type='range'] {
 .push-banner__close:active {
   background: var(--bg-elevated);
 }
+
+
+/* Recordings strip on a child's page. Deliberately its OWN classes rather than reusing the timelapse
+   ones: .timelapse-play is absolutely positioned and .timelapse-strip__item never established a
+   containing block, so a recordings thumbnail's play badge escaped and anchored itself to the
+   timelapse card above instead. */
+.rec-strip { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+.rec-strip__item {
+  position: relative; /* the containing block the play badge needs */
+  flex: 0 0 auto; width: 108px; padding: 0;
+  border: 2px solid transparent; border-radius: 8px; overflow: hidden;
+  background: var(--bg-elevated-2); color: var(--text-secondary); cursor: pointer;
+}
+.rec-strip__item:hover { border-color: var(--peri); color: var(--text-primary); }
+.rec-strip__item img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+.rec-strip__item span:last-child { display: block; padding: 5px 6px; font-size: 11px; line-height: 1.25; }
+.rec-strip__play {
+  position: absolute; top: 34%; left: 50%; transform: translate(-50%, -50%);
+  width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; background: rgba(0, 0, 0, 0.5); color: #fff; pointer-events: none;
+}
+
+/* Record button on the camera tile. Sits with the other overlay controls (see the icon-only rule
+   above, which this joins) — white with a soft black glow, no chip. While recording it takes the
+   same "live" red chip treatment as the talk button, and widens to show the elapsed time. */
+.rec-btn {
+  position: absolute; top: 10px; right: 48px;
+  height: 30px; min-width: 30px; padding: 0 4px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  border: none; cursor: pointer; z-index: 2;
+}
+.rec-btn:disabled { opacity: 0.55; cursor: default; }
+.rec-btn__time { font-size: 12px; line-height: 1; font-variant-numeric: tabular-nums; }
+.rec-btn.rec-btn--active {
+  background: #e0555f; /* same "live" red as an active mic — unmistakably capturing */
+  color: #fff;
+  filter: none;
+  border-radius: 8px;
+  padding: 0 7px;
+  animation: talk-pulse 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) { .rec-btn.rec-btn--active { animation: none; } }

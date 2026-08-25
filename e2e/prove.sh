@@ -65,9 +65,14 @@ CAM_PATH=$(printf '%s' "$ADD" | field mediamtx_path)
 ok "camera added, mediamtx path: $CAM_PATH"
 
 say "Confirm playable frames out of the pipeline (HLS)"
-HLS="$BASE/hls/$CAM_PATH/index.m3u8?token=$TOKEN"
+# HLS segment URLs carry the token in the query string (Safari's native <video> can't set headers), and
+# the server only accepts a MEDIA-scoped token there — the session token is header-only. Mint one.
+MEDIA_TOKEN=$(curl -fsS -X POST "$BASE/api/auth/media-token" \
+  -H "Authorization: Bearer $TOKEN" | field token)
+[ -n "$MEDIA_TOKEN" ] || die "could not mint a media token"
+ok "media token minted"
 for i in $(seq 1 30); do
-  CODECS=$(ncexec ffprobe -v error -i "http://127.0.0.1:4000/hls/$CAM_PATH/index.m3u8?token=$TOKEN" \
+  CODECS=$(ncexec ffprobe -v error -i "http://127.0.0.1:4000/hls/$CAM_PATH/index.m3u8?token=$MEDIA_TOKEN" \
              -show_entries stream=codec_type -of csv=p=0 2>/dev/null | tr '\n' ',' || true)
   if printf '%s' "$CODECS" | grep -q video; then
     ok "HLS serving live media (streams: ${CODECS%,})"

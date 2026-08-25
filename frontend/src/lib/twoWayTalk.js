@@ -1,4 +1,4 @@
-import { getToken } from './api.js';
+import { getMediaToken } from './api.js';
 
 // Makeup gain applied to the mic before mu-law encoding. The camera's own speaker volume is the
 // bigger lever (set it high in the camera's web UI), but these speakers run quiet, so lift the
@@ -85,7 +85,7 @@ export function startTalk(cameraId, { onError, onReady } = {}) {
 
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(
-        `${proto}://${location.host}/api/talk?camera=${encodeURIComponent(cameraId)}&token=${encodeURIComponent(getToken())}`
+        `${proto}://${location.host}/api/talk?camera=${encodeURIComponent(cameraId)}&token=${encodeURIComponent(getMediaToken() || '')}`
       );
       ws.binaryType = 'arraybuffer';
       let ready = false;
