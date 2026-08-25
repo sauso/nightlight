@@ -13,8 +13,10 @@ import { startTranscoder, stopTranscoder, isRunning } from './transcoder.js';
 // a client watches Low) was considered and DROPPED after measuring prod — the motion detector prefers
 // the sub path and a framediff alerter runs 24/7, so the sub has a permanent consumer regardless of
 // viewers; a viewer-only trigger would push the detector onto the full-res main stream and cost more
-// than it saves. See planning/ROADMAP.md §4. If revisited, it must be reference-counted with the
-// detector holding a lease, not viewer-triggered.
+// than it saves. Decided against 2026-08-25 (planning/ROADMAP.md §4) — 72h of prod logs also showed
+// zero camera client-limit errors, so the risk it was meant to avoid isn't real here. If it is ever
+// revisited it must be reference-counted with the detector holding a lease, not viewer-triggered:
+// getPathStatus() already returns a MediaMTX `readers` count, so the plumbing exists.
 
 export function subCameraId(cameraId) {
   return `${cameraId}-sub`;
