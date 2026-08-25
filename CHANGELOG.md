@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-08-25
+
 ### Changed
 - **The crib area is now painted, not boxed.** Setting the crib area used to mean dragging rectangles over
   the camera view, which never fit a cot the camera looks down on at an angle — you either clipped the end
