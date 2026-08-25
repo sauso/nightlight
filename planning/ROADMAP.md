@@ -22,8 +22,14 @@ building goes to §4 *with the evidence*, so it doesn't get re-proposed later.
 
 ## 1. Next up
 
-### 1.1 Fix Raffa's bed-zone discrimination — `NEXT`
-**This is the blocker for 1.3 (and feeds 1.2), and it is a camera-framing problem, not a code problem.**
+### 1.1 Fix Raffa's bed-zone discrimination — `WATCHING` (was `NEXT`; the camera has been re-aimed)
+**Largely resolved.** The camera was re-aimed and `detect_zone` redrawn with the grid picker (12 rects,
+33.5% of frame). On the very next night (2026-08-25) it emitted a real `out_of_bed` at his true exit and
+the wake came out **exactly right (05:09, owner-confirmed) on both prod and staging** — so this is no
+longer a blocker for 1.3, which has now shipped. Keep watching a few more mornings before closing it:
+one good night on a re-aimed camera is one night. The original diagnosis is kept below.
+
+**It was a camera-framing problem, not a code problem.**
 
 On the night of 2026-08-24→25 there was **no `out_of_bed` transition anywhere near Raffa's real 06:10
 exit** (the last one was 01:22), and the detector then logged three *false* `into_bed` events after he
@@ -81,7 +87,25 @@ lookbehind before sampling starts is one long fake quiet run. Searching it for "
 always lands on the start of a data gap — the search must be anchored on the put-down instead. The first
 implementation had exactly this bug and was silently inert.
 
-### 1.3 Promote shadow sleep onset/wake to authoritative — `HELD` (was `NEXT`)
+### 1.3 Promote shadow sleep onset/wake to authoritative — `SHIPPED` (on dev, 2026-08-26)
+**Done.** `USE_TRANSITION_TIMES` in `sleepAnalysis.js` makes the transition-derived onset/wake the
+authoritative `onset_at`/`wake_at`; the movement-only figures are preserved in new `onset_at_algo` /
+`wake_at_algo` columns so the two methods stay comparable (and the promotion stays revertible by one
+flag). Adoption happens BEFORE the metrics, so durations measure to the real departure rather than
+leaving "asleep" counting minutes after the child had already left the bed.
+
+Verified by diffing against the deployed logic over every stored night: **17 of 20 unchanged**, and
+the 3 that moved all moved toward the truth — **2026-08-25 Raffa 06:38 → 05:09 (owner-confirmed exact,
+asleep 646 → 557)**, **2026-08-24 Renz 06:53 → 05:58 (owner-confirmed exact)**, and 2026-08-23 Renz
+06:50 → 07:40 (no ground truth, but Renz's real wake has been observed ~07:57, so closer).
+
+⚠️ **Caught in review, worth remembering:** converting the exit timestamp to a minute index with
+`Math.round` reported 05:10 for an exit recorded at 05:09:31. The reported time must come from the
+exact timestamp truncated to its minute; only the metrics index floors.
+
+The history below is kept because it explains why the thresholds are what they are.
+
+### 1.3a How it got here — `HISTORICAL`
 Out-of-bed detection ships today in **shadow mode**: `sleep_nights.onset_at_shadow` / `wake_at_shadow`
 are computed from the `bed_transitions` table alongside the live motion+sound numbers, but the headline
 figures parents see still come from the old algorithm.
