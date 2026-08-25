@@ -178,6 +178,33 @@ function pruneChild(childId) {
 
 // Assemble the sampled frames for one child-night into an MP4. Best-effort and idempotent: safe to
 // re-run (upserts the row, overwrites the file); cleans up the frame dir on success or a hard skip.
+// Throw away a night's collected frames without building anything. Used when the night turns out to
+// have had nobody in the bed: the frames are of an empty room, so a "memory" of it is just wasted disk
+// and a pointless card on the child's page. Sampling can't know this in advance — occupancy is only
+// decided once the night is scored — so the frames are collected and then discarded here.
+export function discardTimelapseFrames(childId, nightDate) {
+  const dir = frameDir(childId, nightDate);
+  const frames = safeReaddir(dir).filter((f) => /^f-\d+\.jpg$/.test(f));
+  rmrf(dir);
+  if (frames.length) logger.info(`[timelapse] child ${childId} ${nightDate}: discarded ${frames.length} frame(s) — no one in the bed`);
+  return frames.length;
+}
+
+// Delete one timelapse: the row, the MP4 and its thumbnail. Admin-only at the route. The files are
+// resolved through the same CLIPS_DIR jail as playback, so a tampered stored path can't escape it.
+export function deleteTimelapse(id) {
+  const row = db.prepare('SELECT id, path, thumb_path FROM timelapses WHERE id = ?').get(id);
+  if (!row) return false;
+  for (const rel of [row.path, row.thumb_path]) {
+    if (!rel) continue;
+    const f = jailedFile(rel);
+    if (f) { try { fs.unlinkSync(path.join(f.root, f.path)); } catch { /* already gone */ } }
+  }
+  db.prepare('DELETE FROM timelapses WHERE id = ?').run(id);
+  logger.info(`[timelapse] deleted timelapse ${id}`);
+  return true;
+}
+
 export async function assembleTimelapse(childId, nightDate) {
   if (!clipStorageReady()) return null;
   const dir = frameDir(childId, nightDate);
