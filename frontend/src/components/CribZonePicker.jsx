@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 
-// Paint the crib area onto a grid laid over a live camera still (detect_zone). The pixel-diff
+// NAMING: the component and its CSS classes are still `Crib*`/`.crib__*`, and the column is still
+// `detect_zone`, but all user-facing wording is "bed" — the rename deliberately stopped short of
+// identifiers and schema. Same concept, different vintage of name.
+// Paint the bed area onto a grid laid over a live camera still (detect_zone). The pixel-diff
 // motion + sleep-activity leg only looks inside the painted cells, so a fan or a parent walking
-// past outside the crib doesn't count as the baby moving. Nothing painted = whole frame.
+// past outside the bed doesn't count as the baby moving. Nothing painted = whole frame.
 //
-// This replaced a drag-a-rectangle picker: the cameras look down into the crib on a diagonal, and
-// an axis-aligned box either clips the cot or drags in a slab of floor and wall. Painting follows
+// This replaced a drag-a-rectangle picker: the cameras look down into the bed on a diagonal, and
+// an axis-aligned box either clips the bed or drags in a slab of floor and wall. Painting follows
 // the shape.
 //
 // The grid is 32x18 because the detector analyses a 320x180 gray frame (motionDetector.js), so one
@@ -262,7 +265,7 @@ export default function CribZonePicker({ cameraId, zone, onChange }) {
         <span className="camera-tile__sub">
           {count
             ? `Covering ${Math.round((count / N) * 100)}% of the view. Drag over painted squares to rub them out.`
-            : 'Drag across the squares covering the cot to paint the crib area. Drag back over them to rub out.'}
+            : 'Drag across the squares covering the bed to paint the bed area. Drag back over them to rub out.'}
         </span>
         <div className="crib__btns">
           <button type="button" className="btn btn-secondary btn-sm" onClick={refresh}>Refresh frame</button>

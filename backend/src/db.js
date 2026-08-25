@@ -156,9 +156,9 @@ db.exec(`
     UNIQUE (child_id, night_date)
   );
 
-  -- Crib-boundary transition events from the frame-diff detector: a child leaving the crib
-  -- ('out_of_bed') or being placed into it ('into_bed'), classified by the SEQUENCE of the in-crib vs
-  -- outside-crib motion channels (see lib/motionDetector.js). Low-rate signal, distinct from the
+  -- Bed-boundary transition events from the frame-diff detector: a child leaving the bed
+  -- ('out_of_bed') or being placed into it ('into_bed'), classified by the SEQUENCE of the in-bed vs
+  -- outside-bed motion channels (see lib/motionDetector.js). Low-rate signal, distinct from the
   -- cooldown-throttled detection_events alert feed and NOT surfaced there. sleepAnalysis reads these to
   -- correct onset (gate on the last into_bed before sleep) and wake (the terminal out_of_bed for the
   -- day, even past the window). Denormalized camera_id (no FK), pruned by age. Times are UTC text.
@@ -497,7 +497,7 @@ if (!camerasColumns.includes('sub_rtsp_url')) {
 // low-res/low-fps FFmpeg leg (off the sub-stream when there is one) frame-diffs the video
 // and logs a detection_event when movement is sustained past the confirmation delay, no
 // more than once per cooldown. detect_zone is an optional JSON {x,y,w,h} rectangle in
-// 0..1 frame fractions to restrict detection to (e.g. just the crib); null = whole frame.
+// 0..1 frame fractions to restrict detection to (e.g. just the bed); null = whole frame.
 // See lib/motionDetector.js.
 if (!camerasColumns.includes('detect_motion_enabled')) {
   db.exec('ALTER TABLE cameras ADD COLUMN detect_motion_enabled INTEGER NOT NULL DEFAULT 0');
@@ -585,10 +585,10 @@ if (!detectionEventsColumns.includes('clip_status')) {
   db.exec('ALTER TABLE detection_events ADD COLUMN clip_bytes INTEGER');
 }
 
-// Outside-the-crib motion channel on activity_samples (sleep tracking). When a camera has a crib zone,
+// Outside-the-bed motion channel on activity_samples (sleep tracking). When a camera has a bed zone,
 // the motion detector now also measures movement OUTSIDE that zone — a parent coming in, or the child
-// out of bed — kept separate from the in-crib motion so the sleep timeline can distinguish stirring in
-// the crib from someone moving around the room. Null when there's no crib zone (whole-frame = no
+// out of bed — kept separate from the in-bed motion so the sleep timeline can distinguish stirring in
+// the bed from someone moving around the room. Null when there's no bed zone (whole-frame = no
 // "outside") or the detector wasn't running. See lib/activityTracker.js + lib/motionDetector.js.
 const activitySamplesColumns = db.prepare('PRAGMA table_info(activity_samples)').all().map((c) => c.name);
 if (!activitySamplesColumns.includes('motion_out_peak')) {

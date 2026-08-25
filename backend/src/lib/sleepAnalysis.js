@@ -19,8 +19,8 @@ const REPORT_FRESH_MS = 2 * 60 * 60 * 1000;
 // All thresholds are deliberately conservative constants up here so we can tune against real nights
 // without schema/UI churn (they can graduate to settings later).
 
-const MOTION_ACTIVE = 0.01; // in-crib per-frame changed-fraction above this = real movement (sleeping room ~0)
-const MOTION_OUT_ACTIVE = 0.01; // outside-crib changed-fraction above this = someone in the room / out of bed
+const MOTION_ACTIVE = 0.01; // in-bed per-frame changed-fraction above this = real movement (sleeping room ~0)
+const MOTION_OUT_ACTIVE = 0.01; // outside-bed changed-fraction above this = someone in the room / out of bed
 const SOUND_ACTIVE = 6; // dB over ambient above this = a clear noise/cry
 const ONSET_QUIET_MIN = 15; // continuous quiet minutes to call it "asleep"
 const WAKE_ACTIVE_MIN = 5; // active minutes (within a run) to count as an awakening (vs a brief stir)
@@ -30,17 +30,17 @@ const MIN_COVERAGE_FRAC = 0.5; // need activity samples for at least this fracti
 // window edge, so the terminal exit that marks "up for the day" may fall a couple hours later. Only the
 // SHADOW wake uses this (the live algo still stops at the window). See computeNight's shadow block.
 const WAKE_LOOKAHEAD_MS = 3 * 60 * 60 * 1000;
-// SHADOW wake needs the crib to stay empty (no in-crib motion) at least this long after the last in-crib
-// movement to call it "up for the day" (vs a momentary lull while still asleep in the crib).
+// SHADOW wake needs the bed to stay empty (no in-bed motion) at least this long after the last in-bed
+// movement to call it "up for the day" (vs a momentary lull while still asleep in the bed).
 const MORNING_ABSENCE_MIN = 20;
-// A morning departure is a sustained empty-crib gap after which only a FEW isolated crib-active minutes
-// remain — a parent reaching into the empty crib after the child is already up (getting them, tidying).
-// A mid-sleep quiet gap, by contrast, is followed by lots more in-crib stirring. This cap is what keeps a
-// parent handling the crib post-wake from dragging the wake time out to the last hand-in-the-crib, and
+// A morning departure is a sustained empty-bed gap after which only a FEW isolated bed-active minutes
+// remain — a parent reaching into the empty bed after the child is already up (getting them, tidying).
+// A mid-sleep quiet gap, by contrast, is followed by lots more in-bed stirring. This cap is what keeps a
+// parent handling the bed post-wake from dragging the wake time out to the last hand-in-the-bed, and
 // keeps a long deep-sleep lull from reading as the morning exit. Tuned against real nights (2026-08-23
 // Renz: real exit ~06:38 leaves 7 active min after; the mid-sleep 05:14 lull leaves 22).
 const MAX_POST_EXIT_ACTIVE_MIN = 10;
-// When the empty-crib run starts near a recorded crib transition, snap the wake to that transition's clock
+// When the empty-bed run starts near a recorded bed transition, snap the wake to that transition's clock
 // time (its TIMING is trustworthy even though its in/out LABEL isn't — see the destination-state note).
 const WAKE_SNAP_MS = 5 * 60 * 1000;
 
@@ -278,9 +278,9 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   if (totalMin === 0) return { ...base, status: 'no_data' };
 
   // Per-minute state over the whole window: null = no sample (gap), false = quiet, true = active. A
-  // minute is active if ANY of the child's cameras saw in-crib movement, a clear noise, OR movement
-  // outside the crib (someone in the room / the child out of bed). outAt[] marks the outside-crib
-  // minutes so the timeline can surface them as room activity distinct from stirring in the crib.
+  // minute is active if ANY of the child's cameras saw in-bed movement, a clear noise, OR movement
+  // outside the bed (someone in the room / the child out of bed). outAt[] marks the outside-bed
+  // minutes so the timeline can surface them as room activity distinct from stirring in the bed.
   const state = new Array(totalMin).fill(null);
   const outAt = new Array(totalMin).fill(false);
   const idxOf = (t) => Math.round((new Date(t.replace(' ', 'T') + 'Z').getTime() - startUtc.getTime()) / 60000);
@@ -371,13 +371,13 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     longest_stretch_minutes: longest,
   };
 
-  // Periods the child is OUT of the crib — from an out_of_bed event until the next into_bed — used below
-  // to classify each room-activity block as the child being out vs someone else in the room (child in crib).
+  // Periods the child is OUT of the bed — from an out_of_bed event until the next into_bed — used below
+  // to classify each room-activity block as the child being out vs someone else in the room (child in bed).
   let outIntervals = [];
 
-  // --- SHADOW onset/wake from crib-boundary transitions (validation only — NOT the authoritative
+  // --- SHADOW onset/wake from bed-boundary transitions (validation only — NOT the authoritative
   // numbers yet; stored in *_shadow columns so we can compare them to the algo night-by-night). The
-  // activity-only algo can't tell an empty quiet crib from a sleeping child; the transitions can. ---
+  // activity-only algo can't tell an empty quiet bed from a sleeping child; the transitions can. ---
   {
     // First quiet run of >= ONSET_QUIET_MIN starting at or after index `from` (null if none).
     const firstQuietRunFrom = (from) => {
@@ -408,12 +408,12 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       if (openOut != null) outIntervals.push([openOut, effEndMs]);
     }
 
-    // Onset: an into_bed only ever DELAYS onset — before the child was actually placed in the crib the
-    // quiet is an empty crib, not sleep. Onset is a once-per-night event: the FIRST put-down that leads to
+    // Onset: an into_bed only ever DELAYS onset — before the child was actually placed in the bed the
+    // quiet is an empty bed, not sleep. Onset is a once-per-night event: the FIRST put-down that leads to
     // sustained sleep. Take the EARLIEST into_bed whose following quiet run qualifies (firstQuietRunFrom
     // already skips the evening fussing, so this lands on the settle, not the put-down instant); never move
     // earlier than the algo onset. Using the earliest — not the latest — is deliberate: on a restless night
-    // the child is re-settled into the crib several times (into_bed at ~3am after a 2–4am waking), and the
+    // the child is re-settled into the bed several times (into_bed at ~3am after a 2–4am waking), and the
     // LAST such re-settle must not be mistaken for the night's onset (that bug put onset at 4:20am on
     // 2026-08-23). The first qualifying sleep stretch is the onset; later re-settles are mid-night wakes.
     let onsetIdx = onset;
@@ -426,12 +426,12 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     }
     out.onset_at_shadow = minuteTime(onsetIdx);
 
-    // Wake: find the morning DEPARTURE from the crib-motion timeline, ignoring the unreliable in/out labels
+    // Wake: find the morning DEPARTURE from the bed-motion timeline, ignoring the unreliable in/out labels
     // (the SAME 06:41 exit was labelled oppositely on two legs of one camera, 2026-08-23) AND ignoring a
-    // parent handling the crib after the child is already up. The departure is the earliest sustained
-    // empty-crib gap after which the crib stays essentially empty (only a few isolated hand-in-crib spikes)
-    // — see the scan below. This deliberately does NOT use the LAST in-crib motion: on 2026-08-24 the child
-    // was up ~06:38 but a parent then reached into the crib (peaks 0.89/0.99 at 07:22–08:11), which the
+    // parent handling the bed after the child is already up. The departure is the earliest sustained
+    // empty-bed gap after which the bed stays essentially empty (only a few isolated hand-in-bed spikes)
+    // — see the scan below. This deliberately does NOT use the LAST in-bed motion: on 2026-08-24 the child
+    // was up ~06:38 but a parent then reached into the bed (peaks 0.89/0.99 at 07:22–08:11), which the
     // old "last motion then empty" rule mistook for the wake (08:11). Only for a completed night (mid-night
     // we don't guess a morning wake). Transition TIMING is still trustworthy, so we snap the departure to a
     // nearby transition of either label for a crisp clock time. Defaults to the algo wake, so the shadow
@@ -450,15 +450,15 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
         const i = idxOf(r.t);
         if (i >= 0 && i < totalMinExt && r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) cribActExt[i] = true;
       }
-      // Suffix count of crib-active minutes from each index to the end, so we can cheaply ask "how much
-      // in-crib motion remains after this point?" for each candidate gap.
+      // Suffix count of bed-active minutes from each index to the end, so we can cheaply ask "how much
+      // in-bed motion remains after this point?" for each candidate gap.
       const activeSuffix = new Array(totalMinExt + 1).fill(0);
       for (let i = totalMinExt - 1; i >= 0; i--) activeSuffix[i] = activeSuffix[i + 1] + (cribActExt[i] ? 1 : 0);
 
-      // Morning departure = the EARLIEST sustained empty-crib gap (>= MORNING_ABSENCE_MIN) at/after onset
-      // after which only a few isolated crib-active minutes remain (<= MAX_POST_EXIT_ACTIVE_MIN). Scanning
-      // for the FIRST such gap — rather than the last in-crib motion — is the fix for a parent handling the
-      // crib after the child is already up: those late hand-in-crib spikes fall AFTER the departure gap, so
+      // Morning departure = the EARLIEST sustained empty-bed gap (>= MORNING_ABSENCE_MIN) at/after onset
+      // after which only a few isolated bed-active minutes remain (<= MAX_POST_EXIT_ACTIVE_MIN). Scanning
+      // for the FIRST such gap — rather than the last in-bed motion — is the fix for a parent handling the
+      // bed after the child is already up: those late hand-in-bed spikes fall AFTER the departure gap, so
       // they no longer drag the wake later. And the "few active minutes remain" test is what stops a
       // mid-sleep lull (followed by lots more stirring) from being mistaken for the exit.
       //
@@ -473,7 +473,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       //
       // The transition must be an `out_of_bed` specifically: accepting any transition would let an
       // `into_bed` vouch for a departure, which is how the other child's shadow landed 53 minutes late
-      // (that crib kept registering motion long after the child was carried out, and the nearest marker was an
+      // (that bed kept registering motion long after the child was carried out, and the nearest marker was an
       // into-bed). If nothing corroborates any gap we keep the algo's wake rather than guess.
       let exitMs = null;
       for (let i = Math.max(onset, 0); i < totalMinExt; ) {
@@ -513,10 +513,10 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     }
     out.wakes = wakes;
 
-    // Outside-the-crib movement grouped into "room activity" events, bridging single-minute gaps. Each is
+    // Outside-the-bed movement grouped into "room activity" events, bridging single-minute gaps. Each is
     // typed by whether it falls inside a child-out interval (out_of_bed→into_bed): 'child_out' = the child
-    // themselves out of the crib; 'room' = movement while the child is still in the crib (someone in the
-    // room). Shown distinctly from the child's own in-crib stirring/waking.
+    // themselves out of the bed; 'room' = movement while the child is still in the bed (someone in the
+    // room). Shown distinctly from the child's own in-bed stirring/waking.
     const overlapsOut = (a, b) => outIntervals.some(([s, e]) => a < e && s < b);
     const visits = [];
     for (let i = 0; i < totalMin; ) {
@@ -535,7 +535,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     out.visits = visits;
 
     // Run-length segments across the WHOLE window for the to-scale bar. Each minute is labelled:
-    // settling (before onset), asleep (quiet), stir (brief in-crib movement/noise that didn't reach a
+    // settling (before onset), asleep (quiet), stir (brief in-bed movement/noise that didn't reach a
     // full awakening), wake (a counted awakening), or awake (morning, after the final wake).
     const label = (i) =>
       i < onset ? 'settling' : i >= sleepEnd ? 'awake' : inWake[i] ? 'wake' : active[i] ? 'stir' : 'asleep';

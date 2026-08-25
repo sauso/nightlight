@@ -244,11 +244,11 @@ function MotionForm({ d, apply, cameraId, cam }) {
             </div>
           </div>
 
-          <div className="section-title">Crib area</div>
+          <div className="section-title">Bed area</div>
           <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
             {d.source === 'framediff'
-              ? 'Limit motion detection — and sleep tracking — to the crib, so movement elsewhere in the room isn’t counted. Leave as the whole frame to watch everything.'
-              : 'For sleep tracking: limit the movement signal to the crib so a fan or someone walking past isn’t counted as the baby stirring. (Motion alerts still come from the camera.)'}
+              ? 'Limit motion detection — and sleep tracking — to the bed, so movement elsewhere in the room isn’t counted. Leave as the whole frame to watch everything.'
+              : 'For sleep tracking: limit the movement signal to the bed so a fan or someone walking past isn’t counted as the baby stirring. (Motion alerts still come from the camera.)'}
           </div>
           <CribZonePicker cameraId={cameraId} zone={d.zone} onChange={(zoneVal) => apply({ zone: zoneVal })} />
 

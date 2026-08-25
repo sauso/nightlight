@@ -12,7 +12,10 @@ import { childWindowActiveNow } from './sleepAnalysis.js';
 // Server-side motion detection. Per camera with detection enabled, a cheap FFmpeg leg reads
 // the already-published MediaMTX stream (the sub-stream when there is one — far cheaper to
 // decode), scaled tiny and grayscale at a low frame rate, and we frame-diff consecutive
-// frames inside an optional crib zone. Sustained movement past the confirmation delay logs a
+// NAMING: user-facing wording is "bed" throughout (see the 0.26.0 changelog). A few identifiers here
+// still read `crib*` (cribActive, cribLastActive) and the DB column is still `detect_zone` — those are
+// deliberately untouched to keep the rename free of schema and API churn. They mean the same thing.
+// frames inside an optional bed zone. Sustained movement past the confirmation delay logs a
 // detection_event, at most once per cooldown. This never touches the WebRTC/HLS pipeline —
 // it's a separate, low-cost sampler, mirroring transcoder.js's process supervision.
 
@@ -38,22 +41,22 @@ const PIXEL_DELTA = 24;
 // flickers frame to frame); only a gap longer than this ends the run.
 const ACTIVE_GRACE_MS = 1500;
 
-// --- "Out of bed" prototype (crib -> outside transition) ---
-// A child climbing out reads as motion in the crib FIRST, then motion OUTSIDE the crib while the crib
+// --- "Out of bed" prototype (bed -> outside transition) ---
+// A child climbing out reads as motion in the bed FIRST, then motion OUTSIDE the bed while the bed
 // goes and STAYS quiet (the child has left it). A parent entering is the reverse (outside first) or
-// leaves the child still stirring in the crib. Log-only for now while we tune it on staging.
-const OOB_LINK_MS = 8000; // crib must have been active within this long before the outside burst
-const OOB_CONFIRM_QUIET_MS = 6000; // ...and the crib must stay quiet this long after, to count as "left"
+// leaves the child still stirring in the bed. Log-only for now while we tune it on staging.
+const OOB_LINK_MS = 8000; // bed must have been active within this long before the outside burst
+const OOB_CONFIRM_QUIET_MS = 6000; // ...and the bed must stay quiet this long after, to count as "left"
 const OOB_COOLDOWN_MS = 120000; // don't re-log an exit more than once per this
 
-// --- "Into bed" twin (outside -> crib transition) ---
-// The mirror of out-of-bed: a child being placed INTO the crib reads as motion OUTSIDE first (parent
-// carrying/leaning in), then motion in the CRIB while the outside goes and STAYS quiet (the parent stepped
-// back, leaving the child settling in the crib alone). Same state machine as OOB with the two channels
+// --- "Into bed" twin (outside -> bed transition) ---
+// The mirror of out-of-bed: a child being placed INTO the bed reads as motion OUTSIDE first (parent
+// carrying/leaning in), then motion in the BED while the outside goes and STAYS quiet (the parent stepped
+// back, leaving the child settling in the bed alone). Same state machine as OOB with the two channels
 // swapped. Confirmed transitions are persisted to `bed_transitions` (see lib/bedTransitions.js) and feed
 // the SHADOW onset/wake columns; the headline sleep numbers still come from the motion+sound algorithm
 // until the shadow values are promoted — see planning/ROADMAP.md §1.1.
-const IB_LINK_MS = 8000; // outside must have been active within this long before the crib burst
+const IB_LINK_MS = 8000; // outside must have been active within this long before the bed burst
 const IB_CONFIRM_QUIET_MS = 6000; // ...and the outside must stay quiet this long after, to count as "placed in"
 const IB_COOLDOWN_MS = 120000; // don't re-log an entry more than once per this
 
@@ -210,25 +213,25 @@ export async function startMotionDetector(camera) {
     let lastActive = 0; // last frame that was above the active threshold
     let lastAlert = 0;
     // Out-of-bed prototype state (see OOB_* constants above).
-    let cribLastActive = 0; // last frame the crib zone itself moved
-    let oobPendingAt = 0; // when a crib->outside exit candidate opened (0 = none pending)
+    let cribLastActive = 0; // last frame the bed zone itself moved
+    let oobPendingAt = 0; // when a bed->outside exit candidate opened (0 = none pending)
     let oobPeakOut = 0; // peak outside-fraction seen during the pending candidate
     let oobLastLog = 0;
     // Into-bed twin state (see IB_* constants above) — mirror of OOB with the channels swapped.
-    let outLastActive = 0; // last frame the outside-crib area moved
-    let ibPendingAt = 0; // when an outside->crib entry candidate opened (0 = none pending)
-    let ibPeakCrib = 0; // peak crib-fraction seen during the pending candidate
+    let outLastActive = 0; // last frame the outside-bed area moved
+    let ibPendingAt = 0; // when an outside->bed entry candidate opened (0 = none pending)
+    let ibPeakCrib = 0; // peak bed-fraction seen during the pending candidate
     let ibLastLog = 0;
 
-    const outPixels = mask ? FRAME_BYTES - zonePixels : 0; // area outside the crib zone (0 = whole frame)
+    const outPixels = mask ? FRAME_BYTES - zonePixels : 0; // area outside the bed zone (0 = whole frame)
 
     function handleFrame(frame) {
       if (prev) {
         let changed = 0;
         let changedOut = 0;
-        // Count changed pixels inside the crib mask (any of its rectangles), or the whole frame when
+        // Count changed pixels inside the bed mask (any of its rectangles), or the whole frame when
         // there's no zone. The mask counts each pixel once, so overlapping/diagonal boxes are fine.
-        // With a crib zone, also count changes OUTSIDE it (parent/child-out-of-bed) as a separate channel.
+        // With a bed zone, also count changes OUTSIDE it (parent/child-out-of-bed) as a separate channel.
         if (mask) {
           for (let i = 0; i < FRAME_BYTES; i++) {
             const d = frame[i] - prev[i];
@@ -245,8 +248,8 @@ export async function startMotionDetector(camera) {
         // Feed the raw per-frame movement into the per-minute activity timeline (independent of the
         // alert threshold/cooldown below), so sleep tracking sees continuous motion, not just alerts.
         recordMotion(camera.id, fraction);
-        // Outside-crib movement (only meaningful when a crib zone carves out an "outside") — a separate
-        // channel so sleep tracking can flag someone in the room vs stirring in the crib.
+        // Outside-bed movement (only meaningful when a bed zone carves out an "outside") — a separate
+        // channel so sleep tracking can flag someone in the room vs stirring in the bed.
         if (outPixels > 0) {
           const outFraction = changedOut / outPixels;
           recordMotionOut(camera.id, outFraction);
@@ -258,27 +261,27 @@ export async function startMotionDetector(camera) {
           if (cribActive) cribLastActive = now;
           if (outActive) outLastActive = now;
           if (!oobPendingAt) {
-            // Candidate: outside just moved, the crib moved recently but is quiet NOW → motion left the crib.
+            // Candidate: outside just moved, the bed moved recently but is quiet NOW → motion left the bed.
             if (outActive && !cribActive && cribLastActive > 0 && now - cribLastActive <= OOB_LINK_MS) {
               oobPendingAt = now;
               oobPeakOut = outFraction;
               logger.info(
-                `[oob] "${camera.name}" exit candidate — crib active ${now - cribLastActive}ms ago, outside now ${(outFraction * 100).toFixed(1)}%`
+                `[oob] "${camera.name}" exit candidate — bed active ${now - cribLastActive}ms ago, outside now ${(outFraction * 100).toFixed(1)}%`
               );
             }
           } else {
             if (outFraction > oobPeakOut) oobPeakOut = outFraction;
             if (cribActive) {
-              // Crib moved again inside the confirm window — child's still in it (or a parent reached in).
-              logger.info(`[oob] "${camera.name}" candidate cancelled — crib re-active after ${now - oobPendingAt}ms`);
+              // Bed moved again inside the confirm window — child's still in it (or a parent reached in).
+              logger.info(`[oob] "${camera.name}" candidate cancelled — bed re-active after ${now - oobPendingAt}ms`);
               oobPendingAt = 0;
               oobPeakOut = 0;
             } else if (now - oobPendingAt >= OOB_CONFIRM_QUIET_MS) {
-              // Crib stayed quiet after the motion left it → treat as the child having climbed out.
+              // Bed stayed quiet after the motion left it → treat as the child having climbed out.
               if (now - oobLastLog >= OOB_COOLDOWN_MS) {
                 oobLastLog = now;
                 logger.info(
-                  `[oob] "${camera.name}" OUT OF BED — motion left the crib, quiet ${OOB_CONFIRM_QUIET_MS}ms since, outside peak ${(oobPeakOut * 100).toFixed(1)}%`
+                  `[oob] "${camera.name}" OUT OF BED — motion left the bed, quiet ${OOB_CONFIRM_QUIET_MS}ms since, outside peak ${(oobPeakOut * 100).toFixed(1)}%`
                 );
                 recordBedTransition(camera.id, TRANSITION.OUT_OF_BED, oobPeakOut);
               }
@@ -286,29 +289,29 @@ export async function startMotionDetector(camera) {
               oobPeakOut = 0;
             }
           }
-          // --- "Into bed" twin: outside->crib entry (child placed into the crib). Mirror of OOB. ---
+          // --- "Into bed" twin: outside->bed entry (child placed into the bed). Mirror of OOB. ---
           if (!ibPendingAt) {
-            // Candidate: crib just moved, the outside moved recently but is quiet NOW → motion entered the crib.
+            // Candidate: bed just moved, the outside moved recently but is quiet NOW → motion entered the bed.
             if (cribActive && !outActive && outLastActive > 0 && now - outLastActive <= IB_LINK_MS) {
               ibPendingAt = now;
               ibPeakCrib = fraction;
               logger.info(
-                `[intobed] "${camera.name}" entry candidate — outside active ${now - outLastActive}ms ago, crib now ${(fraction * 100).toFixed(1)}%`
+                `[intobed] "${camera.name}" entry candidate — outside active ${now - outLastActive}ms ago, bed now ${(fraction * 100).toFixed(1)}%`
               );
             }
           } else {
             if (fraction > ibPeakCrib) ibPeakCrib = fraction;
             if (outActive) {
-              // Outside moved again inside the confirm window — parent still at the crib / child not settled alone.
+              // Outside moved again inside the confirm window — parent still at the bed / child not settled alone.
               logger.info(`[intobed] "${camera.name}" candidate cancelled — outside re-active after ${now - ibPendingAt}ms`);
               ibPendingAt = 0;
               ibPeakCrib = 0;
             } else if (now - ibPendingAt >= IB_CONFIRM_QUIET_MS) {
-              // Outside stayed quiet after motion entered the crib → child placed in and the parent stepped back.
+              // Outside stayed quiet after motion entered the bed → child placed in and the parent stepped back.
               if (now - ibLastLog >= IB_COOLDOWN_MS) {
                 ibLastLog = now;
                 logger.info(
-                  `[intobed] "${camera.name}" INTO BED — motion entered the crib, outside quiet ${IB_CONFIRM_QUIET_MS}ms since, crib peak ${(ibPeakCrib * 100).toFixed(1)}%`
+                  `[intobed] "${camera.name}" INTO BED — motion entered the bed, outside quiet ${IB_CONFIRM_QUIET_MS}ms since, bed peak ${(ibPeakCrib * 100).toFixed(1)}%`
                 );
                 recordBedTransition(camera.id, TRANSITION.INTO_BED, ibPeakCrib);
               }

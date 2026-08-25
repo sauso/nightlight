@@ -58,7 +58,7 @@ router.get('/alerts/:id/clip', requireAuthQueryOrHeader, (req, res) => {
   res.sendFile(file.path, { root: file.root, dotfiles: 'deny' });
 });
 
-// Live still frame — the backdrop for the crib-zone picker. Query-token auth so an <img> can load it
+// Live still frame — the backdrop for the bed-zone picker. Query-token auth so an <img> can load it
 // (same reason as the alert snapshot). Prefers the camera's HTTP snapshot URL, else grabs one frame
 // off the local MediaMTX stream. Registered before requireAuth; the literal "snapshot" segment keeps
 // it clear of the other /:id routes.
@@ -112,8 +112,8 @@ function parseRtspComponents(url) {
 // Admins additionally get the address broken into fields (for the edit form) plus a
 // credential-free display URL and a flag for whether a password is set. ONVIF credentials
 // (used server-side for PTZ) are always stripped.
-// The crib zone is stored as a JSON string — a LIST of rectangles [{x,y,w,h}, ...] in 0..1 frame
-// fractions (null/empty = whole frame). Multiple rectangles let a crib on a diagonal be covered by a
+// The bed zone is stored as a JSON string — a LIST of rectangles [{x,y,w,h}, ...] in 0..1 frame
+// fractions (null/empty = whole frame). Multiple rectangles let a bed on a diagonal be covered by a
 // few boxes. A legacy single-object `{x,y,w,h}` still reads correctly (treated as a one-item list).
 // Parse leniently for output; null on anything malformed.
 function parseZone(raw) {
@@ -158,7 +158,7 @@ function publicCamera(cam, isAdmin) {
     // Can we power-cycle this camera over ONVIF (Device SystemReboot)? True only for ONVIF-added
     // cameras with a stored device endpoint — drives whether the tile shows a "Restart camera" button.
     reboot_capable: !!(cam.onvif_capable && cam.onvif_device_url),
-    // Parse the crib zone (stored as a JSON string) into an object for the client.
+    // Parse the bed zone (stored as a JSON string) into an object for the client.
     detect_zone: parseZone(cam.detect_zone),
     // On-demand recording state, so the tile can show Record vs a running Stop after a reload or on a
     // second device. `can_record` is false while the ring isn't up (camera offline / feature off), which
