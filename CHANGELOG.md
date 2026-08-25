@@ -9,6 +9,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.25.2] - 2026-08-25
+
+### Changed
+- **Two-factor keys are now twice as strong.** The library behind the 6-digit codes was updated, and
+  new two-factor setups get a 160-bit key instead of 80-bit — matching the current standard
+  recommendation. **If you already use two-factor, nothing changes and nothing breaks**: your existing
+  setup keeps working and your authenticator app needs no attention. To move to the stronger key, turn
+  two-factor off and back on whenever it suits you. See `docs/mfa.md`.
+
 ## [0.25.1] - 2026-08-25
 
 ### Changed

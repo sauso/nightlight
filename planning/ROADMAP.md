@@ -194,8 +194,16 @@ Recorded so they don't get re-litigated. Each was considered and consciously par
 - **LL-HLS** — `SHELVED`. WebRTC is already sub-second, so the win is small; the cost (fMP4 + HTTP/2 +
   HTTPS-only + proxy work) isn't worth it. Compatibility-mode lag was instead cut by shortening
   MediaMTX segments and addressing camera GOP.
-- **otplib 12 → 13 (Dependabot #128)** — `HELD`. A major bump that gates TOTP login; pinned until it can
-  be verified end-to-end on staging.
+- **otplib 12 → 13 (Dependabot #128)** — `DONE in 0.25.2`, but **closed rather than merged**, because the
+  bump alone would have taken the whole server down: v13 removes the `authenticator` singleton, so
+  `lib/mfa.js`'s top-level `authenticator.options = {...}` threw a `TypeError` at import, and
+  `index.js → routes/auth.js → lib/mfa.js` is the startup path. Ported to the v13 API instead (now
+  13.5.0). Two traps worth remembering if this ever comes up again: `epochTolerance` is in **seconds**,
+  not time steps (v12's `{window: 1}` is `epochTolerance: 30`), and `epoch` is in seconds too. v13
+  enforces a 16-byte minimum secret where v12 generated 10-byte ones — legacy secrets keep working via
+  `createGuardrails({ MIN_SECRET_BYTES: 10 })` on the verify path only, deliberately *not* forcing a
+  re-enrolment, since locking someone out of their own monitor is worse than an 80-bit secret they
+  already hold. New enrolments are 160-bit.
 - **Adaptive stream quality, beyond the manual selector** — `CLOSED 2026-08-25, not building`. High/Low
   per tile, remembered per camera, is the finished feature. Both phases once planned on top of it are
   decided against: **on-demand sub-stream transcoders** (measured on prod — the motion detector holds
