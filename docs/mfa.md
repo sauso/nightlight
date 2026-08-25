@@ -50,6 +50,20 @@ Lost your authenticator? Use a **backup code** at login. If you're also out of b
   The affected user can then sign in with just their password. Replace `nightlight` with
   `nightlight-dev` for the staging container.
 
+## Optional: strengthening a pre-0.26.0 secret
+
+Two-factor secrets created **before 0.26.0** were 80-bit. From 0.26.0 they're 160-bit, matching the
+RFC 4226 recommendation of at least 128 bits.
+
+**Nothing breaks if you do nothing** — an older secret keeps working exactly as before, and your
+authenticator app needs no attention. If you'd like the stronger secret, re-enrol at your convenience:
+
+1. **Account → Two-factor authentication → Turn off two-factor** (needs your password).
+2. Turn it back on and scan the new QR code.
+
+`GET /api/auth/me/mfa` reports `needs_reenrolment: true` for an account still on an older secret,
+which is the quickest way to check.
+
 ## Notes for operators
 
 - The TOTP secret and the (hashed) backup codes live in the `users` table of the app database

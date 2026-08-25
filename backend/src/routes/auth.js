@@ -6,7 +6,7 @@ import { v4 as uuid } from 'uuid';
 import db from '../db.js';
 import { requireAuth, requireAdmin, JWT_SECRET } from '../middleware/auth.js';
 import {
-  generateSecret, keyUri, verifyToken, qrDataUrl,
+  generateSecret, keyUri, verifyToken, qrDataUrl, isLegacySecret,
   generateBackupCodes, verifyAndConsumeBackupCode, backupCodesRemaining,
 } from '../lib/mfa.js';
 import { normalizePhoto } from '../lib/photo.js';
@@ -354,8 +354,14 @@ router.put('/me/password', requireAuth, loginLimiter, (req, res) => {
 
 // Current MFA state for the signed-in user (drives the Account toggle).
 router.get('/me/mfa', requireAuth, (req, res) => {
-  const u = db.prepare('SELECT mfa_enabled, mfa_backup_codes FROM users WHERE id = ?').get(req.user.id);
-  res.json({ enabled: !!u?.mfa_enabled, backup_codes_remaining: backupCodesRemaining(u?.mfa_backup_codes) });
+  const u = db.prepare('SELECT mfa_enabled, mfa_secret, mfa_backup_codes FROM users WHERE id = ?').get(req.user.id);
+  res.json({
+    enabled: !!u?.mfa_enabled,
+    backup_codes_remaining: backupCodesRemaining(u?.mfa_backup_codes),
+    // True for an account still on a pre-0.26.0 (80-bit) secret. It keeps working — this is a
+    // prompt to re-enrol into a stronger one when convenient, not a lockout. See lib/mfa.js.
+    needs_reenrolment: !!u?.mfa_enabled && isLegacySecret(u?.mfa_secret),
+  });
 });
 
 // Begin enrolment: generate + stash a secret (still disabled) and return the QR + manual key. The
