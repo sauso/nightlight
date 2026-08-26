@@ -29,7 +29,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   minute the moment it sees a flicker. When a wake-up starts, the app now saves a short clip of it and
   stays quiet — no push, nothing on your phone. Open the night's detail and a wake-up with a clip can be
   expanded to play it. A brief stir is still ignored, and nothing is recorded until your child is
-  actually asleep, so settling at bedtime is never captured. Clips are kept for 14 days.
+  actually asleep, so settling at bedtime is never captured. Under **Settings → Recording** you can
+  turn it off, change the clip length, and set how long the clips are kept (30 seconds and 14 days by
+  default); the Storage readout there now shows what they're using.
 - **Nights when nobody slept in the bed are now reported as exactly that.** Previously an empty bed
   produced a flawless night's sleep — one night with a child away was reported as 11 hours 6 minutes
   asleep with no wake-ups, because an empty room is quiet and quiet is what the app reads as sleep.

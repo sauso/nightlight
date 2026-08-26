@@ -379,6 +379,19 @@ if (!settingsColumns.includes('ondemand_enabled')) {
   db.exec('ALTER TABLE settings ADD COLUMN ondemand_max_duration_s INTEGER NOT NULL DEFAULT 120');
 }
 
+// Wake clips (roadmap 2.4): when the sleep tracker sees a wake-up, record a short clip and send
+// NOTHING. Measured over 101 prod wakes, 53% never raised an alert — an alert waits for 2-3 seconds
+// sustained so it doesn't disturb a parent for a creak, while sleep tracking counts a minute on the
+// first flicker — so most wake-ups had no footage to explain them.
+// wake_clip_seconds is the storage dial: capture runs ~172 KiB/s, so 30s is ~29 MiB/night per child.
+// Unlike on-demand recordings (keepsakes, never swept) these accrue nightly, hence their own retention.
+// Bounds enforced in routes/settings.js. See lib/wakeWatcher.js and lib/recordings.js.
+if (!settingsColumns.includes('wake_clips_enabled')) {
+  db.exec('ALTER TABLE settings ADD COLUMN wake_clips_enabled INTEGER NOT NULL DEFAULT 1');
+  db.exec('ALTER TABLE settings ADD COLUMN wake_clip_seconds INTEGER NOT NULL DEFAULT 30');
+  db.exec('ALTER TABLE settings ADD COLUMN wake_clip_retention_days INTEGER NOT NULL DEFAULT 14');
+}
+
 // Clip retention (Stage 1 phase 3): clips are deleted when EITHER bound is exceeded — older than
 // clip_retention_days, OR total clip size over clip_retention_max_gb (oldest deleted first). 0 =
 // that bound is off. Defaults 14 days / 5 GB. The cap is what makes sharing the SSD safe by default.

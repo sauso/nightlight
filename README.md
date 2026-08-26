@@ -63,9 +63,12 @@ docker run -d \
   sauso/nightlight:latest
 ```
 
-To have Nightlight save short **video clips** of motion/sound detections, see
-[docs/recording.md](docs/recording.md) — it's opt-in per camera. Clips default to `<data
-dir>/clips`; you can point them at your array instead with a `/recordings` mount + `CLIPS_DIR`.
+Nightlight records video three ways — **automatic clips** attached to motion/sound alerts (opt-in per
+camera), **wake clips** saved silently when your child wakes up, and **on-demand recordings** you
+capture with the Record button. They have different retention rules, so see
+[docs/recording.md](docs/recording.md) for all of it and for every setting under *Settings →
+Recording*. Video defaults to `<data dir>/clips`; you can point it at your array instead with a
+`/recordings` mount + `CLIPS_DIR`.
 
 PUID/PGID control which user/group owns files this container creates in your data
 directory - the defaults above (99/100) match Unraid's own "nobody"/"users" convention,

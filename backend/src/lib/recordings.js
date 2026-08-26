@@ -167,14 +167,27 @@ export async function stopAllRecordings() {
 // A wake detected by the sleep tracker gets a SHORT clip and no alert, so there is something to look
 // at in the morning. Deliberately bounded: the average wake is ~19 minutes and capture runs
 // ~172 KiB/s, so recording wakes end to end would be ~1.1 GiB/night. The opening is what explains
-// "why", so we take WAKE_CLIP_SEC from the wake's first active minute and stop.
-const WAKE_CLIP_SEC = 30;
+// "why", so we take wake_clip_seconds (default 30) from the wake's first active minute and stop.
 // A few seconds of lead-in, so the clip doesn't start on the very frame that tripped the threshold.
 const WAKE_CLIP_LEAD_SEC = 3;
 // The whole window is already in the past by the time a wake qualifies (5 active minutes later), so
 // there is no post-roll to wait out — just let the current segment close.
 const WAKE_SETTLE_MS = 5000;
-const WAKE_RETENTION_DAYS = 14;
+
+/** Admin-set wake-clip behaviour (Settings -> Recording). Bounds are enforced in routes/settings.js. */
+export function getWakeClipSettings() {
+  const s =
+    db.prepare('SELECT wake_clips_enabled, wake_clip_seconds, wake_clip_retention_days FROM settings WHERE id = ?')
+      .get('app') || {};
+  const secs = Number(s.wake_clip_seconds);
+  const days = Number(s.wake_clip_retention_days);
+  return {
+    enabled: s.wake_clips_enabled == null ? true : !!s.wake_clips_enabled,
+    clipSeconds: Number.isFinite(secs) && secs > 0 ? secs : 30,
+    // 0 is a deliberate value here ("keep forever"), so it must survive the fallback.
+    retentionDays: Number.isFinite(days) && days >= 0 ? days : 14,
+  };
+}
 
 /**
  * Cut the opening of a wake that has already happened. `wakeStartMs` is the wake's first active
@@ -184,6 +197,8 @@ const WAKE_RETENTION_DAYS = 14;
  * timer behind a detector, and a failed clip must not take the watcher down with it.
  */
 export async function captureWakeClip(camera, wakeStartMs) {
+  const { enabled, clipSeconds } = getWakeClipSettings();
+  if (!enabled) return null;
   if (!isSegmenterRunning(camera.id)) {
     logger.info(`[wake] no segmenter for "${camera.name}" — skipping wake clip`);
     return null;
@@ -204,14 +219,14 @@ export async function captureWakeClip(camera, wakeStartMs) {
       camera_id: camera.id,
       child_id: camera.child_id || null,
       started_at: startedAt,
-      duration_s: WAKE_CLIP_LEAD_SEC + WAKE_CLIP_SEC,
+      duration_s: WAKE_CLIP_LEAD_SEC + clipSeconds,
     });
   const id = info.lastInsertRowid;
 
   try {
     const res = await extractClip(camera.id, {
       preRollSec: WAKE_CLIP_LEAD_SEC,
-      postRollSec: WAKE_CLIP_SEC,
+      postRollSec: clipSeconds,
       at: wakeStartMs,
       outBase: `wake-${id}`,
       settleMs: WAKE_SETTLE_MS,
@@ -226,7 +241,7 @@ export async function captureWakeClip(camera, wakeStartMs) {
       thumb_path: rel(res.thumb),
       bytes: res.probe?.bytes ?? null,
       duration_s:
-        res.probe?.durationSec != null ? Math.round(res.probe.durationSec) : WAKE_CLIP_LEAD_SEC + WAKE_CLIP_SEC,
+        res.probe?.durationSec != null ? Math.round(res.probe.durationSec) : WAKE_CLIP_LEAD_SEC + clipSeconds,
     });
     logger.info(
       `[wake] clip ${id} ready for "${camera.name}" (${res.probe?.durationSec?.toFixed(1) ?? '?'}s from ${startedAt}Z)`
@@ -257,16 +272,28 @@ export function listChildWakeClips(childId, fromSqlUtc, toSqlUtc) {
  * are never swept — these accumulate every night unattended, so they age out like alert clips do.
  */
 export function pruneWakeClips() {
+  const { retentionDays } = getWakeClipSettings();
+  if (retentionDays === 0) return 0; // 0 = keep forever, same idiom as clip retention
   const rows = db
     .prepare(
       `SELECT id FROM recordings
         WHERE kind = 'wake' AND created_at < datetime('now', ?)`
     )
-    .all(`-${WAKE_RETENTION_DAYS} days`);
+    .all(`-${retentionDays} days`);
   let removed = 0;
   for (const r of rows) if (deleteRecording(r.id)) removed++;
-  if (removed > 0) logger.info(`[wake] retention removed ${removed} wake clip(s) older than ${WAKE_RETENTION_DAYS} days`);
+  if (removed > 0) logger.info(`[wake] retention removed ${removed} wake clip(s) older than ${retentionDays} days`);
   return removed;
+}
+
+/** Count + bytes of stored wake clips, for the Recording settings storage readout. */
+export function wakeClipStats() {
+  return db
+    .prepare(
+      `SELECT COUNT(*) AS count, COALESCE(SUM(bytes), 0) AS bytes
+         FROM recordings WHERE kind = 'wake' AND status = 'ready'`
+    )
+    .get();
 }
 
 export function listChildRecordings(childId, limit = 50) {

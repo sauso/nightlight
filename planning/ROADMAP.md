@@ -234,7 +234,10 @@ it never does.
 **★ DECIDED (owner, 2026-08-26): 30 s clip at the wake's start; stirs are NOT recorded; the 54
 already-missed wakes are not being chased.** Built accordingly — `lib/wakeWatcher.js` plus
 `captureWakeClip()`/`pruneWakeClips()` in `lib/recordings.js`, a `recordings.kind` column, and a clip
-row inside each wake on SleepDetail. 18 tests cover the state machine; the thresholds are IMPORTED from
+row inside each wake on SleepDetail, plus a **Wake clips** card in Settings -> Recording
+(`wake_clips_enabled` / `wake_clip_seconds` / `wake_clip_retention_days`), wake clips in the Storage
+readout, and `docs/recording.md` rewritten to cover all THREE recording kinds and every setting.
+30 tests cover the state machine and the settings round-trip; the thresholds are IMPORTED from
 `sleepAnalysis` (`SLEEP_THRESHOLDS`) so a clip exists exactly when the timeline shows a wake.
 ★ Writing those tests found a real leak: `activityTracker` only flushes cameras that saw signal, so a
 camera going offline mid-run would have held its ring open indefinitely — swept on a timer now
