@@ -15,6 +15,18 @@ const RETENTION_DAYS = 30;
 // camera_id -> { motionSum, motionPeak, motionFrames, soundSum, soundPeak, soundWindows }
 const buckets = new Map();
 
+// Listeners called once per camera per flushed minute, with the same peaks that were just written.
+// This is how lib/wakeWatcher.js sees activity LIVE: it needs the identical signal the nightly job
+// reads, and re-querying activity_samples every minute would be the same data a second time. Kept as
+// a subscription rather than a direct import so activityTracker has no dependency on its consumers.
+const minuteListeners = new Set();
+
+/** Subscribe to per-minute activity. cb({ cameraId, bucketStart, motionPeak, soundPeak }). */
+export function onMinuteFlushed(cb) {
+  minuteListeners.add(cb);
+  return () => minuteListeners.delete(cb);
+}
+
 function slot(cameraId) {
   let s = buckets.get(cameraId);
   if (!s) {
@@ -96,6 +108,20 @@ export function flushActivity() {
       written++;
     } catch {
       /* a single bad insert shouldn't drop the rest of the minute */
+    }
+    // Notify AFTER the row is safely written, and never let a listener's failure cost us the rest of
+    // the flush — this runs on a timer with nothing to catch what escapes.
+    for (const cb of minuteListeners) {
+      try {
+        cb({
+          cameraId,
+          bucketStart: bucket,
+          motionPeak: s.motionFrames ? s.motionPeak : null,
+          soundPeak: s.soundWindows ? s.soundPeak : null,
+        });
+      } catch (err) {
+        logger.error(`[activity] minute listener failed for ${cameraId}: ${err.message}`);
+      }
     }
   }
   return written;

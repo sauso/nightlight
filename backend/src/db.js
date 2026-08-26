@@ -379,6 +379,19 @@ if (!settingsColumns.includes('ondemand_enabled')) {
   db.exec('ALTER TABLE settings ADD COLUMN ondemand_max_duration_s INTEGER NOT NULL DEFAULT 120');
 }
 
+// Wake clips (roadmap 2.4): when the sleep tracker sees a wake-up, record a short clip and send
+// NOTHING. Measured over 101 prod wakes, 53% never raised an alert — an alert waits for 2-3 seconds
+// sustained so it doesn't disturb a parent for a creak, while sleep tracking counts a minute on the
+// first flicker — so most wake-ups had no footage to explain them.
+// wake_clip_seconds is the storage dial: capture runs ~172 KiB/s, so 30s is ~29 MiB/night per child.
+// Unlike on-demand recordings (keepsakes, never swept) these accrue nightly, hence their own retention.
+// Bounds enforced in routes/settings.js. See lib/wakeWatcher.js and lib/recordings.js.
+if (!settingsColumns.includes('wake_clips_enabled')) {
+  db.exec('ALTER TABLE settings ADD COLUMN wake_clips_enabled INTEGER NOT NULL DEFAULT 1');
+  db.exec('ALTER TABLE settings ADD COLUMN wake_clip_seconds INTEGER NOT NULL DEFAULT 30');
+  db.exec('ALTER TABLE settings ADD COLUMN wake_clip_retention_days INTEGER NOT NULL DEFAULT 14');
+}
+
 // Clip retention (Stage 1 phase 3): clips are deleted when EITHER bound is exceeded — older than
 // clip_retention_days, OR total clip size over clip_retention_max_gb (oldest deleted first). 0 =
 // that bound is off. Defaults 14 days / 5 GB. The cap is what makes sharing the SSD safe by default.
@@ -604,6 +617,18 @@ const sleepNightsColumns = db.prepare('PRAGMA table_info(sleep_nights)').all().m
 if (!sleepNightsColumns.includes('avg_temperature')) {
   db.exec('ALTER TABLE sleep_nights ADD COLUMN avg_temperature REAL');
   db.exec('ALTER TABLE sleep_nights ADD COLUMN avg_humidity REAL');
+}
+
+// Automatic wake clips (roadmap 2.4). A wake detected by the sleep tracker records a short clip so
+// there is something to look at in the morning, WITHOUT firing an alert — measured over 101 prod
+// wakes, 53% never alert, because the tracker counts a minute active on a ~200 ms blip while an alert
+// needs 2-3 seconds sustained. `kind` keeps those automatic clips out of the manual keepsakes list:
+// a manual recording is something a person chose to keep and is never auto-deleted, whereas wake clips
+// accumulate nightly and are pruned on a retention window like alert clips.
+const recordingsColumns = db.prepare('PRAGMA table_info(recordings)').all().map((c) => c.name);
+if (!recordingsColumns.includes('kind')) {
+  db.exec("ALTER TABLE recordings ADD COLUMN kind TEXT NOT NULL DEFAULT 'manual'");
+  db.exec('CREATE INDEX IF NOT EXISTS idx_recordings_kind ON recordings(kind, created_at DESC)');
 }
 
 // Onset/wake derived from the out-of-bed / into-bed transition events (bed_transitions below). These

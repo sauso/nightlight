@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
+import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Avatar from '../components/Avatar.jsx';
 import Modal from '../components/Modal.jsx';
@@ -18,6 +19,8 @@ export default function ChildSettings() {
   const navigate = useNavigate();
   const location = useLocation();
   const { kids, refresh } = useCameras();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const kid = isNew ? null : kids.find((k) => k.id === id);
 
   const [form, setForm] = useState({
@@ -172,7 +175,13 @@ export default function ChildSettings() {
                 <Switch checked={form.track_sleep} onChange={(e) => setForm({ ...form, track_sleep: e.target.checked })} />
               </label>
               <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-                Estimate this child's nightly sleep from their cameras' movement &amp; sound.
+                Estimate this child's nightly sleep from their cameras' movement &amp; sound. Wake-ups are
+                also recorded (without alerting you)
+                {isAdmin ? (
+                  <> — length and retention are under <Link to="/settings/recording">Settings › Recording</Link>.</>
+                ) : (
+                  <> — an admin can change their length and retention.</>
+                )}
               </div>
               {form.track_sleep && (
                 <>

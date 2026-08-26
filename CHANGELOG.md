@@ -9,6 +9,18 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **A wake-up is now recorded, without sending an alert.** More than half of the wake-ups on the sleep
+  timeline never raised an alert — over the last 18 nights, 54 of 101 — so there was nothing to look at
+  in the morning to explain them. That isn't an alerting fault: an alert deliberately waits for a couple
+  of seconds of sustained noise or movement before disturbing anyone, while sleep tracking counts a
+  minute the moment it sees a flicker. When a wake-up starts, the app now saves a short clip of it and
+  stays quiet — no push, nothing on your phone. Open the night's detail and a wake-up with a clip can be
+  expanded to play it. A brief stir is still ignored, and nothing is recorded until your child is
+  actually asleep, so settling at bedtime is never captured. Under **Settings → Recording** you can
+  turn it off, change the clip length, and set how long the clips are kept (30 seconds and 14 days by
+  default); the Storage readout there now shows what they're using.
+
 ## [0.26.1] - 2026-08-27
 
 ### Fixed
