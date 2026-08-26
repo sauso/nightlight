@@ -26,10 +26,21 @@ const DEFAULT_SETTINGS = {
   temp_unit: 'C',
 };
 
-export function renderAs(user, ui, { settings = {}, cameras = [], kids = [], route = '/' } = {}) {
-  const auth = { user, loading: false, login: vi.fn(), logout: vi.fn(), refresh: vi.fn() };
-  const settingsValue = { settings: { ...DEFAULT_SETTINGS, ...settings }, setSettings: vi.fn(), reload: vi.fn() };
-  const camerasValue = { cameras, kids, loading: false, reload: vi.fn(), refresh: vi.fn() };
+// The injected values MUST match the shape the real providers publish, or a screen can pass its test
+// while breaking in the app. These are taken from the providers themselves:
+//   AuthContext     -> { user, loading, login, logout, refresh }
+//   SettingsContext -> { settings, loading, refresh }
+//   CamerasContext  -> { kids, cameras, error, refresh }
+// (An earlier version of this helper published `setSettings`/`reload` and omitted `error`, none of
+// which the app ever produces — Cameras.jsx and CameraSettings.jsx both destructure `error`.)
+export function renderAs(
+  user,
+  ui,
+  { settings = {}, cameras = [], kids = [], error = '', loading = false, route = '/' } = {}
+) {
+  const auth = { user, loading, login: vi.fn(), logout: vi.fn(), refresh: vi.fn() };
+  const settingsValue = { settings: { ...DEFAULT_SETTINGS, ...settings }, loading, refresh: vi.fn() };
+  const camerasValue = { kids, cameras, error, refresh: vi.fn() };
 
   const result = render(
     <MemoryRouter initialEntries={[route]}>
