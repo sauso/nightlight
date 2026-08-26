@@ -27,12 +27,14 @@ const dirs = [];
 
 // Point DATA_DIR at a fresh temp dir and load the modules that depend on it. Call once per suite,
 // before importing anything from src/.
-export function useTempDataDir() {
+export function useTempDataDir({ jwtSecret = 'test-secret-not-used-anywhere-real' } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-test-'));
   dirs.push(dir);
   process.env.DATA_DIR = dir;
-  // A fixed secret keeps signed tokens reproducible and skips the random-secret file write.
-  process.env.JWT_SECRET = 'test-secret-not-used-anywhere-real';
+  // A fixed secret keeps signed tokens reproducible and skips the random-secret file write. Pass
+  // `{ jwtSecret: null }` to leave it unset and exercise the generate-and-persist bootstrap instead.
+  if (jwtSecret) process.env.JWT_SECRET = jwtSecret;
+  else delete process.env.JWT_SECRET;
   return dir;
 }
 

@@ -1,0 +1,56 @@
+name: Backend tests
+
+# Fast unit + integration tests (Node's built-in runner, no services). Cheap enough to run on every
+# push and every PR, unlike e2e.yml which spins up containers and a browser.
+#
+# Two jobs on purpose:
+#   * `unit`  — everything must pass. A red suite blocks the merge.
+#   * `core-coverage` — the CORE-LOGIC COVERAGE GATE. Nightlight's rule is that core logic stays at
+#     >= 95% line coverage, and that this is checked BEFORE code is promoted to production. Enforcing
+#     it here rather than in a checklist means it can't be forgotten during a release.
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+  workflow_dispatch: {}
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Run the test suite
+        working-directory: backend
+        run: npm test
+
+  core-coverage:
+    name: Core-logic coverage gate (>= 95%)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+      # Exits non-zero if the modules listed in the `test:core` script fall below the thresholds.
+      # The include list in backend/package.json IS the definition of "core logic" — extend it as
+      # each further module reaches the bar.
+      - name: Enforce core-logic coverage thresholds
+        working-directory: backend
+        run: npm run test:core
