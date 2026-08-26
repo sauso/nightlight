@@ -1,7 +1,9 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { api } from './api.js';
 
-const CamerasContext = createContext(null);
+// Exported so tests can inject a value directly — chiefly to render a screen as an admin and
+// again as a caregiver, since role gating is real in this UI and is where bugs hide.
+export const CamerasContext = createContext(null);
 
 // How many consecutive failed polls (15s apart) before we consider this a genuine
 // outage rather than a one-off network blip - roughly 45s of being unreachable.

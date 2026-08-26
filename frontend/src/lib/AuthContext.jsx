@@ -2,7 +2,9 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { api, getToken, setToken, refreshMediaToken, clearMediaToken } from './api.js';
 import { unregisterPushNotifications } from './pushNotifications.js';
 
-const AuthContext = createContext(null);
+// Exported so tests can inject a value directly — chiefly to render a screen as an admin and
+// again as a caregiver, since role gating is real in this UI and is where bugs hide.
+export const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
