@@ -606,6 +606,18 @@ if (!sleepNightsColumns.includes('avg_temperature')) {
   db.exec('ALTER TABLE sleep_nights ADD COLUMN avg_humidity REAL');
 }
 
+// Automatic wake clips (roadmap 2.4). A wake detected by the sleep tracker records a short clip so
+// there is something to look at in the morning, WITHOUT firing an alert — measured over 101 prod
+// wakes, 53% never alert, because the tracker counts a minute active on a ~200 ms blip while an alert
+// needs 2-3 seconds sustained. `kind` keeps those automatic clips out of the manual keepsakes list:
+// a manual recording is something a person chose to keep and is never auto-deleted, whereas wake clips
+// accumulate nightly and are pruned on a retention window like alert clips.
+const recordingsColumns = db.prepare('PRAGMA table_info(recordings)').all().map((c) => c.name);
+if (!recordingsColumns.includes('kind')) {
+  db.exec("ALTER TABLE recordings ADD COLUMN kind TEXT NOT NULL DEFAULT 'manual'");
+  db.exec('CREATE INDEX IF NOT EXISTS idx_recordings_kind ON recordings(kind, created_at DESC)');
+}
+
 // Onset/wake derived from the out-of-bed / into-bed transition events (bed_transitions below). These
 // were introduced as shadow values for validation; they are now what onset_at/wake_at are set from when
 // a transition corroborates them, and are still recorded separately so the promotion stays auditable

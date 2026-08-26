@@ -163,13 +163,119 @@ export async function stopAllRecordings() {
   await Promise.allSettled([...active.keys()].map((id) => stopRecording(id)));
 }
 
+// --- Automatic wake clips (roadmap 2.4) -------------------------------------------------------
+// A wake detected by the sleep tracker gets a SHORT clip and no alert, so there is something to look
+// at in the morning. Deliberately bounded: the average wake is ~19 minutes and capture runs
+// ~172 KiB/s, so recording wakes end to end would be ~1.1 GiB/night. The opening is what explains
+// "why", so we take WAKE_CLIP_SEC from the wake's first active minute and stop.
+const WAKE_CLIP_SEC = 30;
+// A few seconds of lead-in, so the clip doesn't start on the very frame that tripped the threshold.
+const WAKE_CLIP_LEAD_SEC = 3;
+// The whole window is already in the past by the time a wake qualifies (5 active minutes later), so
+// there is no post-roll to wait out — just let the current segment close.
+const WAKE_SETTLE_MS = 5000;
+const WAKE_RETENTION_DAYS = 14;
+
+/**
+ * Cut the opening of a wake that has already happened. `wakeStartMs` is the wake's first active
+ * minute, which by now is several minutes old — the caller is expected to have held the ring from
+ * that point (see lib/wakeWatcher.js), because the ring is only ~63s deep by default.
+ * Resolves the recordings row id, or null if nothing could be captured. Never throws: this runs on a
+ * timer behind a detector, and a failed clip must not take the watcher down with it.
+ */
+export async function captureWakeClip(camera, wakeStartMs) {
+  if (!isSegmenterRunning(camera.id)) {
+    logger.info(`[wake] no segmenter for "${camera.name}" — skipping wake clip`);
+    return null;
+  }
+  if (!hasMinFreeSpace()) {
+    logger.error(`[wake] low free space — skipping wake clip for "${camera.name}"`);
+    return null;
+  }
+
+  const startedAt = new Date(wakeStartMs - WAKE_CLIP_LEAD_SEC * 1000)
+    .toISOString().replace('T', ' ').slice(0, 19);
+  const info = db
+    .prepare(
+      `INSERT INTO recordings (camera_id, child_id, status, started_at, duration_s, kind, triggered_by)
+       VALUES (@camera_id, @child_id, 'pending', @started_at, @duration_s, 'wake', NULL)`
+    )
+    .run({
+      camera_id: camera.id,
+      child_id: camera.child_id || null,
+      started_at: startedAt,
+      duration_s: WAKE_CLIP_LEAD_SEC + WAKE_CLIP_SEC,
+    });
+  const id = info.lastInsertRowid;
+
+  try {
+    const res = await extractClip(camera.id, {
+      preRollSec: WAKE_CLIP_LEAD_SEC,
+      postRollSec: WAKE_CLIP_SEC,
+      at: wakeStartMs,
+      outBase: `wake-${id}`,
+      settleMs: WAKE_SETTLE_MS,
+    });
+    const rel = (abs) => (abs ? path.relative(CLIPS_DIR, abs).split(path.sep).join('/') : null);
+    db.prepare(
+      `UPDATE recordings SET status='ready', ended_at=datetime('now'), path=@path, thumb_path=@thumb_path,
+         bytes=@bytes, duration_s=@duration_s WHERE id=@id`
+    ).run({
+      id,
+      path: rel(res.file),
+      thumb_path: rel(res.thumb),
+      bytes: res.probe?.bytes ?? null,
+      duration_s:
+        res.probe?.durationSec != null ? Math.round(res.probe.durationSec) : WAKE_CLIP_LEAD_SEC + WAKE_CLIP_SEC,
+    });
+    logger.info(
+      `[wake] clip ${id} ready for "${camera.name}" (${res.probe?.durationSec?.toFixed(1) ?? '?'}s from ${startedAt}Z)`
+    );
+    return id;
+  } catch (err) {
+    db.prepare("UPDATE recordings SET status='failed' WHERE id=?").run(id);
+    logger.error(`[wake] clip ${id} failed for "${camera.name}": ${err.message}`);
+    return null;
+  }
+}
+
+/** Ready wake clips for a child whose start falls in [fromSqlUtc, toSqlUtc). */
+export function listChildWakeClips(childId, fromSqlUtc, toSqlUtc) {
+  return db
+    .prepare(
+      `SELECT id, camera_id, started_at, duration_s, bytes
+         FROM recordings
+        WHERE child_id = ? AND kind = 'wake' AND status = 'ready'
+          AND started_at >= ? AND started_at < ?
+        ORDER BY started_at ASC`
+    )
+    .all(childId, fromSqlUtc, toSqlUtc);
+}
+
+/**
+ * Retention for wake clips. Unlike manual recordings — which are keepsakes somebody chose to keep and
+ * are never swept — these accumulate every night unattended, so they age out like alert clips do.
+ */
+export function pruneWakeClips() {
+  const rows = db
+    .prepare(
+      `SELECT id FROM recordings
+        WHERE kind = 'wake' AND created_at < datetime('now', ?)`
+    )
+    .all(`-${WAKE_RETENTION_DAYS} days`);
+  let removed = 0;
+  for (const r of rows) if (deleteRecording(r.id)) removed++;
+  if (removed > 0) logger.info(`[wake] retention removed ${removed} wake clip(s) older than ${WAKE_RETENTION_DAYS} days`);
+  return removed;
+}
+
 export function listChildRecordings(childId, limit = 50) {
   return db
     .prepare(
       `SELECT r.id, r.camera_id, r.child_id, r.status, r.started_at, r.ended_at, r.duration_s, r.bytes,
               r.created_at, c.name AS camera_name
          FROM recordings r LEFT JOIN cameras c ON c.id = r.camera_id
-        WHERE r.child_id = ? AND r.status = 'ready'
+        WHERE r.child_id = ? AND r.status = 'ready' AND r.kind = 'manual'
         ORDER BY r.created_at DESC LIMIT ?`
     )
     .all(childId, Math.min(200, Math.max(1, limit)));

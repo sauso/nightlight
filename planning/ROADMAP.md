@@ -189,7 +189,7 @@ synthetic source a second path and assert the toggle swaps the stream.
 
 ---
 
-### 2.4 Record a wake without alerting — `SPECCED`
+### 2.4 Record a wake without alerting — `BUILT, awaiting release` (on a branch; deliberately NOT in 0.26.0)
 
 **The problem, measured.** Replaying the wake algorithm over all 18 'ok' prod nights (**101 wakes**)
 and matching each against the alert feed:
@@ -231,7 +231,16 @@ time, so it can apply the same active-minute test as `sleepAnalysis`, `holdRing`
 minute after onset, and cut a recording once the run reaches `WAKE_ACTIVE_MIN`, releasing the hold if
 it never does.
 
-**★ Decide before building: bounded clip, not the whole wake.** Average wake is ~19 min and clips run
+**★ DECIDED (owner, 2026-08-26): 30 s clip at the wake's start; stirs are NOT recorded; the 54
+already-missed wakes are not being chased.** Built accordingly — `lib/wakeWatcher.js` plus
+`captureWakeClip()`/`pruneWakeClips()` in `lib/recordings.js`, a `recordings.kind` column, and a clip
+row inside each wake on SleepDetail. 18 tests cover the state machine; the thresholds are IMPORTED from
+`sleepAnalysis` (`SLEEP_THRESHOLDS`) so a clip exists exactly when the timeline shows a wake.
+★ Writing those tests found a real leak: `activityTracker` only flushes cameras that saw signal, so a
+camera going offline mid-run would have held its ring open indefinitely — swept on a timer now
+(`sweepStaleRuns`). The original time backstop was unreachable dead code and was removed.
+
+**Original sizing note — bounded clip, not the whole wake.** Average wake is ~19 min and clips run
 ~172 KiB/s, so recording wakes end to end is **~1.1 GiB/night (~34 GiB at 30-day retention)** — on a
 `/app/data` that is already **98% full**. A **30 s clip at the wake's start** answers "why" and costs
 **~29 MiB/night (~0.85 GiB retained)**, roughly 40× less. Recommend the bounded clip, with its own

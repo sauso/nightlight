@@ -2,6 +2,7 @@ import db from '../db.js';
 import { logger } from './logger.js';
 import { notifySleepReports } from './sleepReportAlert.js';
 import { getBedTransitions, TRANSITION } from './bedTransitions.js';
+import { listChildWakeClips } from './recordings.js';
 
 // A computed night is "fresh" (worth notifying about) only if its window closed within this long — so a
 // mid-day container restart that re-computes an already-seen night does NOT re-send the report push.
@@ -25,6 +26,18 @@ const SOUND_ACTIVE = 6; // dB over ambient above this = a clear noise/cry
 const ONSET_QUIET_MIN = 15; // continuous quiet minutes to call it "asleep"
 const WAKE_ACTIVE_MIN = 5; // active minutes (within a run) to count as an awakening (vs a brief stir)
 const WAKE_GAP_MIN = 3; // bridge quiet gaps up to this long inside one awakening (intermittent noise/movement)
+// Exported so the LIVE wake watcher (lib/wakeWatcher.js) decides "active minute", "asleep" and
+// "this run is a wake, not a stir" with the EXACT same numbers this nightly job uses. If the two ever
+// drift, a clip appears for a wake the timeline doesn't show, or a shown wake has no clip — which is
+// the confusion the feature exists to remove. One definition, imported, never copied.
+export const SLEEP_THRESHOLDS = Object.freeze({
+  MOTION_ACTIVE,
+  SOUND_ACTIVE,
+  ONSET_QUIET_MIN,
+  WAKE_ACTIVE_MIN,
+  WAKE_GAP_MIN,
+});
+
 const MIN_COVERAGE_FRAC = 0.5; // need activity samples for at least this fraction of the window, else no_data
 // How far PAST the window end to keep looking for the morning "out of bed" — a child can sleep past the
 // window edge, so the terminal exit that marks "up for the day" may fall a couple hours later. The
@@ -878,6 +891,12 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
           )
           .all(...cams, startSql, endSql)
       : [];
+
+    // Automatic wake clips (roadmap 2.4). These deliberately have no detection_events row — they are
+    // recorded WITHOUT alerting — so they can't come from the query above. Returned alongside the
+    // wakes so the detail view can put a clip against a wake that never produced an alert, which is
+    // more than half of them.
+    out.wakeClips = listChildWakeClips(childId, startSql, endSql);
   }
   return out;
 }
