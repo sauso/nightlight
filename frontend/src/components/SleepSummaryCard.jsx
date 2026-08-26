@@ -77,6 +77,17 @@ export default function SleepSummaryCard({ childId }) {
         <div className="night__soon">{tonight ? 'Not asleep yet.' : 'No clear sleep detected overnight.'}</div>
       </>
     );
+  } else if (night.status === 'empty') {
+    // Deliberately different from no_data: the cameras watched all night and saw the bed stay empty.
+    // Saying "no one in the bed" is the honest answer — the old behaviour invented a full night's sleep.
+    body = (
+      <>
+        <div className="night__sleep-head">{tonight ? 'Tonight' : `Last night · ${fmtDate(night.night_date)}`}</div>
+        <div className="night__soon">
+          {tonight ? 'No one in the bed.' : 'No one in the bed — nothing to report for this night.'}
+        </div>
+      </>
+    );
   } else {
     // status ok
     const head = tonight ? 'Tonight · so far' : `Last night · ${fmtDate(night.night_date)}`;

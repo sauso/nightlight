@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { requireAuth, requireAuthQueryOrHeader } from '../middleware/auth.js';
-import { listChildTimelapses, getTimelapseVideoFile, getTimelapseThumbFile } from '../lib/timelapse.js';
+import { requireAuth, requireAdmin, requireAuthQueryOrHeader } from '../middleware/auth.js';
+import { listChildTimelapses, getTimelapseVideoFile, getTimelapseThumbFile, deleteTimelapse } from '../lib/timelapse.js';
 
 // Nightly "memories" timelapses (lib/timelapse.js). Kept out of the clip/alert routes because a
 // timelapse is neither an alert nor a recorded clip — it's a per-child keepsake with its own table.
@@ -23,6 +23,16 @@ router.get('/:id/thumb', requireAuthQueryOrHeader, (req, res) => {
   const file = getTimelapseThumbFile(req.params.id);
   if (!file) return res.status(404).json({ error: 'No thumbnail for this id' });
   res.sendFile(file.path, { root: file.root, dotfiles: 'deny' });
+});
+
+// Delete a timelapse (row + MP4 + thumbnail). Admin-only: a timelapse is a shared keepsake of someone
+// else's child, so removing one is not a caregiver-level action. Irreversible — the frames it was built
+// from are long gone, so the UI confirms in-app first.
+// requireAuth BEFORE requireAdmin: this router has no router-level `router.use(requireAuth)` (unlike
+// cameras.js), so requireAdmin alone would read an unpopulated req.user and 403 every caller.
+router.delete('/:id', requireAuth, requireAdmin, (req, res) => {
+  if (!deleteTimelapse(req.params.id)) return res.status(404).json({ error: 'No timelapse for this id' });
+  res.json({ ok: true });
 });
 
 export default router;

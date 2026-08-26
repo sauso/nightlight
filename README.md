@@ -228,23 +228,37 @@ hear — no wearables, no extra hardware. It's a **sleep-pattern guide, not a me
 measurement**, and (like everything here) never a safety device — see the warning at the top.
 
 - **Turn it on per child.** Each child has a **Track sleep** toggle in their settings, with
-  their own **bedtime** and **wake time**. Sleep is estimated over exactly that overnight
-  window; the background sampler only runs during the window, and turning tracking off stops
-  it entirely. A child can have more than one camera — their movement and sound are combined.
+  their own **bedtime** and **wake time**. Turning tracking off stops it entirely. A child can
+  have more than one camera — their movement and sound are combined.
+- **Bedtime is a guide, not a boundary.** Real bedtimes move night to night, and you shouldn't
+  have to edit the setting each evening. If your child was already asleep **before** the window
+  opened, that sleep is counted and the night's timeline starts at the real bedtime rather than
+  at the setting. This only happens when the camera saw the child actually **put into bed** and
+  they stayed asleep into the window — a quiet room on its own is never read as a sleeping
+  child. The same applies at the other end: a morning wake is still found if it comes after the
+  configured wake time.
 - **How it estimates.** Across the night it builds a per-minute movement + sound timeline from
   the child's camera(s): falling still for a sustained stretch reads as falling asleep,
   sustained movement or noise reads as an awakening (brief stirs don't count). If you've painted
-  a **crib zone** on the camera — the same area that scopes motion alerts — it also tracks
-  movement **outside** the crib (a parent coming in, or the child climbing out of bed) and shows
-  it separately as "in the room" activity, which catches a morning wake where the child has
-  already left the cot.
+  a **bed zone** on the camera — the same area that scopes motion alerts — it also tracks
+  movement **outside** the bed and lists it separately, which catches a morning wake where the
+  child has already left the bed.
+- **Noise on its own doesn't delay bedtime.** A bedroom microphone hears the whole house, and
+  bedtime is usually its loudest hour — a sibling being settled, a TV, adults talking. So when
+  working out **when your child fell asleep**, a noisy minute counts as awake only if that room
+  also *moved* at around the same time. Once they're asleep the rule no longer applies: a cry
+  with no movement still counts as a wake-up.
 - **At a glance, and live.** Each child's page summarises last night — total sleep, wake-ups,
   longest stretch — and while a night is in progress it updates as **"Tonight · so far"**, so an
   early-morning wake appears within a minute or two rather than only after the window closes.
 - **The detail view.** Tap the sleep summary for the full **night timeline**: a to-scale bar of
   asleep / stirring / awake stretches on a real time axis, every wake-up listed with its time
-  and length, an "in the room" list, and a date picker to step back through roughly the last
-  month of nights.
+  and length, a **movement outside the bed** list, and a date picker to step back through
+  roughly the last month of nights. Two moment markers sit on the bar — **got into bed** and
+  **got out of bed** — and they are deliberately the only two shown: they're the put-down and
+  the morning departure the night's times were actually derived from. A single camera can see
+  that something crossed the edge of the bed, but not *who*, so movement in between is reported
+  as exactly that and never attributed to a person.
 - **Room temperature (optional).** If a camera reports temperature/humidity over **MQTT** (set
   up under **Settings → MQTT**, e.g. via Zigbee2MQTT — the readings also show on the camera
   tile), the sleep detail overlays the night's room temperature beneath the timeline, aligned to

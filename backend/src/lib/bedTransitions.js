@@ -1,7 +1,7 @@
 import db from '../db.js';
 import { logger } from './logger.js';
 
-// Persisted crib-boundary transitions from the frame-diff detector — a child leaving the crib
+// Persisted bed-boundary transitions from the frame-diff detector — a child leaving the bed
 // ('out_of_bed') or being placed into it ('into_bed'). These are the durable form of the [oob]/[intobed]
 // log lines: a low-rate, meaningful signal (not raw motion), kept in their own table so they never
 // pollute the cooldown-throttled detection_events alert feed. sleepAnalysis.js reads them to correct the

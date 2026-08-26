@@ -7,6 +7,8 @@ name: End-to-end tests
 #   - on a dev -> main PR   : gates the production release
 #   - nightly on dev        : catches drift between releases
 #   - manual (dispatch)     : on demand
+#
+# The stack always runs an image built from the checked-out commit (Phase 4), never a published tag.
 on:
   pull_request:
     branches: [main]
@@ -30,6 +32,22 @@ jobs:
           # the branch we actually want covered between releases. PR/dispatch use their
           # own triggering ref.
           ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
+
+      # Phase 4: build the app image from THIS commit and tag it as the one the compose stack
+      # references. Without this the suite tests whatever `sauso/nightlight:dev` currently points at,
+      # which is a real race: on a dev -> main PR that tag is the PREVIOUS dev build until the publish
+      # workflow finishes, so a green e2e run could be proving the wrong code. Building here also means
+      # a PR is tested before its image is published at all.
+      #
+      # Local runs need the same step — `bash e2e/test.sh` alone will silently exercise the last
+      # published image, not your working tree.
+      - name: Phase 4 — build the app image from this commit
+        run: docker build -t sauso/nightlight:dev .
+
+      - name: Record which image the stack will run
+        run: |
+          echo "commit: ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          docker image inspect sauso/nightlight:dev --format 'image id: {{.Id}}' >> "$GITHUB_STEP_SUMMARY"
 
       # Phase 1: the whole pipeline (transcoder -> MediaMTX -> HLS) delivers playable
       # frames from the synthetic camera. Self-contained: brings the stack up and tears

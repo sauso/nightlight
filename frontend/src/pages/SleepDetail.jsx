@@ -164,6 +164,16 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
   if (night.status === 'no_sleep') {
     return <div className="card"><div className="camera-tile__sub" style={{ padding: 14 }}>No clear sleep detected in this night’s window.</div></div>;
   }
+  if (night.status === 'empty') {
+    return (
+      <div className="card">
+        <div className="camera-tile__sub" style={{ padding: 14 }}>
+          No one in the bed for this night. The cameras watched the whole window
+          ({night.coverage_minutes} minutes covered) and saw no one sleeping here, so there’s no sleep to report.
+        </div>
+      </div>
+    );
+  }
 
   const range = night.in_progress
     ? night.wake_at
@@ -202,14 +212,14 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
           <span><i className="sleep-legend__sw sleep-seg--stir" /> Stirring</span>
           <span><i className="sleep-legend__sw sleep-seg--wake" /> Awake</span>
           <span><i className="sleep-legend__sw sleep-seg--awake" /> Before/after sleep</span>
-          {hasRoom && <span><i className="sleep-legend__sw sleep-legend__sw--visit" /> In the room</span>}
-          {hasChildOut && <span><i className="sleep-legend__sw sleep-legend__sw--out" /> Out of crib</span>}
+          {hasRoom && <span><i className="sleep-legend__sw sleep-legend__sw--visit" /> Movement outside the bed</span>}
+          {hasChildOut && <span><i className="sleep-legend__sw sleep-legend__sw--out" /> Out of bed</span>}
           {(night.transitions || []).length > 0 && (
-            <span><i className="sleep-tl__tx sleep-tl__tx--in" style={{ position: 'static', display: 'inline-block', transform: 'none', margin: '0 4px 1px 0', verticalAlign: 'middle' }} /> Into bed
-              <i className="sleep-tl__tx sleep-tl__tx--out" style={{ position: 'static', display: 'inline-block', transform: 'none', margin: '0 4px 0 10px', verticalAlign: 'middle' }} /> Out of bed</span>
+            <span><i className="sleep-tl__tx sleep-tl__tx--in" style={{ position: 'static', display: 'inline-block', transform: 'none', margin: '0 4px 1px 0', verticalAlign: 'middle' }} /> Got into bed
+              <i className="sleep-tl__tx sleep-tl__tx--out" style={{ position: 'static', display: 'inline-block', transform: 'none', margin: '0 4px 0 10px', verticalAlign: 'middle' }} /> Got out of bed</span>
           )}
         </div>
-        <ClimateTrack night={night} startMs={utcMs(night.window_start)} endMs={utcMs(night.window_end)} tempUnit={tempUnit} />
+        <ClimateTrack night={night} startMs={utcMs(night.display_start || night.window_start)} endMs={utcMs(night.display_end || night.window_end)} tempUnit={tempUnit} />
       </div>
 
       <div className="card">
@@ -229,7 +239,7 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
       {visits.length > 0 && (
         <div className="card">
           <div className="sleep-detail__section-title"><DoorOpen size={15} aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: 6 }} />Room activity · {visits.length}</div>
-          <div className="camera-tile__sub" style={{ margin: '-6px 0 10px' }}>Movement outside the crib — the child out of the crib, or someone else in the room.</div>
+          <div className="camera-tile__sub" style={{ margin: '-6px 0 10px' }}>Movement the camera saw away from the bed. Before your child settles and after they get up it&rsquo;s them; in between, it could be them or someone else — the camera can&rsquo;t tell who.</div>
           <ul className="sleep-wakes">
             {visits.map((v, i) => {
               const isOut = v.type === 'child_out';
@@ -237,7 +247,7 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
                 <li key={i} className="sleep-wakes__row">
                   <span className="sleep-wakes__time">{fmtTime(v.start_at)}{v.minutes > 1 ? ` – ${fmtTime(v.end_at)}` : ''}</span>
                   <span className="sleep-visit-right">
-                    <span className={`sleep-visit-tag${isOut ? ' sleep-visit-tag--out' : ''}`}>{isOut ? 'Out of crib' : 'In the room'}</span>
+                    <span className={`sleep-visit-tag${isOut ? ' sleep-visit-tag--out' : ''}`}>{isOut ? 'Out of bed' : 'Movement outside the bed'}</span>
                     <span className={`sleep-wakes__dur ${isOut ? 'sleep-wakes__dur--out' : 'sleep-wakes__dur--visit'}`}>{fmtDur(v.minutes)}</span>
                   </span>
                 </li>
@@ -330,27 +340,28 @@ function Stat({ label, value }) {
   );
 }
 
-// The out-of-bed-corrected onset/wake, shown only when they DIFFER from the live estimate — so we can
-// eyeball the transition-based times against the movement-only algorithm each morning while they're
-// being validated. Flagged experimental; the headline numbers above are still the live algorithm's.
+// The headline times now come from bed entry/exit detection where a real transition supports them. This
+// strip shows what movement & sound ALONE would have reported, and only when the two differ — so the two
+// methods can still be compared each morning now that the better one is the default. Older nights
+// (computed before the promotion) have no *_algo values and simply show nothing.
 function RefinedTimes({ night, fmtTime }) {
-  const onsetDiff = night.onset_at_shadow && night.onset_at_shadow !== night.onset_at;
-  const wakeDiff = night.wake_at_shadow && night.wake_at_shadow !== night.wake_at;
+  const onsetDiff = night.onset_at_algo && night.onset_at_algo !== night.onset_at;
+  const wakeDiff = night.wake_at_algo && night.wake_at_algo !== night.wake_at;
   if (!onsetDiff && !wakeDiff) return null;
   return (
     <div className="sleep-refined">
-      <span className="sleep-refined__label"><DoorOpen size={13} aria-hidden="true" /> Out-of-bed estimate</span>
+      <span className="sleep-refined__label"><DoorOpen size={13} aria-hidden="true" /> Movement-only estimate</span>
       {onsetDiff && (
         <span className="sleep-refined__item">
-          Asleep <span className="sleep-refined__old">{fmtTime(night.onset_at)}</span><b>{fmtTime(night.onset_at_shadow)}</b>
+          Asleep <span className="sleep-refined__old">{fmtTime(night.onset_at_algo)}</span><b>{fmtTime(night.onset_at)}</b>
         </span>
       )}
       {wakeDiff && (
         <span className="sleep-refined__item">
-          Woke <span className="sleep-refined__old">{night.wake_at ? fmtTime(night.wake_at) : '—'}</span><b>{fmtTime(night.wake_at_shadow)}</b>
+          Woke <span className="sleep-refined__old">{fmtTime(night.wake_at_algo)}</span><b>{night.wake_at ? fmtTime(night.wake_at) : '—'}</b>
         </span>
       )}
-      <span className="sleep-refined__note">Experimental — refined from crib entry/exit detection. The figures above still use movement &amp; sound.</span>
+      <span className="sleep-refined__note">The times above use bed entry/exit detection. Struck through is what movement &amp; sound alone would have reported.</span>
     </div>
   );
 }
@@ -358,8 +369,10 @@ function RefinedTimes({ night, fmtTime }) {
 // The to-scale bar: each segment positioned by its share of the window, plus hour tick labels and
 // onset/wake markers so the wake-ups read against a real time axis.
 function Timeline({ night, fmtTime, tz, tempUnit }) {
-  const startMs = utcMs(night.window_start);
-  const endMs = utcMs(night.window_end);
+  // The bar spans the night that was actually SLEPT, which can start before the configured window — see
+  // display_start in sleepAnalysis. Falls back to the window for an older payload that has neither.
+  const startMs = utcMs(night.display_start || night.window_start);
+  const endMs = utcMs(night.display_end || night.window_end);
   const totalMs = Math.max(1, endMs - startMs);
   const segs = night.segments || [];
 
@@ -416,7 +429,7 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
   const wakePct = night.wake_at ? pctOf(night.wake_at, startMs, totalMs) : null;
   const nowPct = night.in_progress && night.as_of ? pctOf(night.as_of, startMs, totalMs) : null;
   const visits = night.visits || [];
-  // Crib entry/exit transitions — clamp to [0,100] since the morning exit can land just past the window
+  // Bed entry/exit transitions — clamp to [0,100] since the morning exit can land just past the window
   // end (the shadow-wake lookahead), and drop any that fall well outside the bar.
   const transitions = (night.transitions || [])
     .map((t) => ({ ...t, pct: pctOf(t.at, startMs, totalMs) }))
@@ -425,23 +438,24 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
 
   return (
     <div className="sleep-tl">
-      {/* Crib entry (▼ into bed) / exit (▲ out of bed) markers from the frame-diff detector. */}
+      {/* Moment markers: ▼ got into bed / ▲ got out of bed, from the frame-diff detector. These are
+          instants; the round markers below are spans, which is why the wording differs. */}
       {transitions.length > 0 && (
         <div className="sleep-tl__txs">
           {transitions.map((t, i) => (
             <span key={i} className={`sleep-tl__tx ${t.type === 'into_bed' ? 'sleep-tl__tx--in' : 'sleep-tl__tx--out'}`}
               style={{ left: `${t.pct}%` }}
-              title={`${t.type === 'into_bed' ? 'Into bed' : 'Out of bed'} · ${fmtTime(t.at)}`} />
+              title={`${t.type === 'into_bed' ? 'Got into bed' : 'Got out of bed'} · ${fmtTime(t.at)}`} />
           ))}
         </div>
       )}
-      {/* Room-activity (outside-crib) markers sit above the bar so they read as events, not sleep state. */}
+      {/* Room-activity (outside-bed) markers sit above the bar so they read as events, not sleep state. */}
       {visits.length > 0 && (
         <div className="sleep-tl__visits">
           {visits.map((v, i) => (
             <span key={i} className={`sleep-tl__visit${v.type === 'child_out' ? ' sleep-tl__visit--out' : ''}`}
               style={{ left: `${pctOf(v.start_at, startMs, totalMs)}%` }}
-              title={`${v.type === 'child_out' ? 'Child out of crib' : 'In the room'} · ${fmtTime(v.start_at)}`} />
+              title={`${v.type === 'child_out' ? 'Out of bed' : 'Movement outside the bed'} · ${fmtTime(v.start_at)}`} />
           ))}
         </div>
       )}

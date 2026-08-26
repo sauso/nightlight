@@ -2,7 +2,9 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { api } from './api.js';
 import { FONT_PRESETS, DEFAULT_FONT_CHOICE } from './fonts.js';
 
-const SettingsContext = createContext(null);
+// Exported so tests can inject a value directly — chiefly to render a screen as an admin and
+// again as a caregiver, since role gating is real in this UI and is where bugs hide.
+export const SettingsContext = createContext(null);
 
 const DEFAULTS = {
   app_name: 'Nightlight',

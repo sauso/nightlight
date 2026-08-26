@@ -9,6 +9,80 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-08-27
+
+### Added
+- **Nights when nobody slept in the bed are now reported as exactly that.** Previously an empty bed
+  produced a flawless night's sleep — one night with a child away was reported as 11 hours 6 minutes
+  asleep with no wake-ups, because an empty room is quiet and quiet is what the app reads as sleep.
+  Such a night now says **"No one in the bed"**, which is deliberately a different message from "no
+  data": the cameras were watching all night, there simply wasn't anyone there. The nightly report says
+  it too, instead of inventing a night's sleep.
+- **Admins can delete a timelapse.** Open it and use the bin icon in the corner of the player, the same
+  way an alert clip is removed. It asks first — unlike a clip, a timelapse can't be rebuilt, because the
+  frames it was made from are deleted once it's assembled.
+
+### Changed
+- **Videos play in a proper window on a desktop browser.** The player was sized for a phone, so on a
+  large screen a clip or timelapse played in a small panel at the bottom with most of the screen unused.
+  On a desktop-sized window it is now a centred dialog that uses the space. On a phone it is unchanged.
+- **Wake-up and bedtime now come from watching your child leave and enter the bed**, rather than from
+  movement and sound alone. The app could already detect the moment a child got out of bed, but only
+  showed it as a secondary note while the headline time came from the older method — so a night could
+  say "woke 6:38am" with "got out of bed 5:09am" written underneath it. The bed-based time is now the
+  one you see, and the night's length is measured to it: a morning that was recorded as 10h46m of sleep
+  is correctly 9h17m once it stops counting the 89 minutes after your child had already got up.
+  Where nothing confirms a bed exit, the old method is still used exactly as before, so no night gets a
+  worse answer than it used to. The detail page keeps showing what movement and sound alone would have
+  said, for comparison.
+- **One word for where your child sleeps: "bed".** The app had been using *crib*, *cot* and *bed*
+  interchangeably, and worst of all the sleep timeline labelled the same moment two different ways —
+  a marker saying "Out of bed" sat next to one saying "Child out of crib". Everything now says **bed**,
+  which is also what the app has always called it internally. The sleep timeline also now distinguishes
+  a **moment** from a **stretch of time**: "Got out of bed" is when it happened, "Out of bed" is how long
+  it lasted.
+- **The night timeline only claims what it can actually tell.** It used to mark every crossing of the
+  bed's edge the cameras thought they saw, and to label movement away from the bed as "Someone in the
+  room". Neither survived contact with a real night: a child rolling over reads as an arrival, so one
+  night showed four "got into bed" markers with no "got out of bed" between any of them — impossible —
+  plus three visits from someone who was never there, and four and a half hours of a child asleep in
+  bed labelled as out of it. One camera can see that something crossed the edge of the bed, but not
+  *who*. The bar now shows just two markers — the put-down that started the night and the morning
+  departure, which are the two the reported times are actually derived from — and anything else is
+  reported as **movement outside the bed**, which is what was measured.
+- **Your child's real bedtime is used, even when it isn't the bedtime you configured.** Bedtimes move
+  night to night and nobody wants to edit a setting each evening, so the configured bedtime is now
+  treated as a guide. A child put down before the window opened has that sleep counted, and the night's
+  timeline is drawn over the sleep that actually happened rather than over the setting — previously
+  everything before the window edge was silently cut off, so a child who went to bed at 7:11pm against a
+  7:30pm setting showed neither his bedtime nor the parent leaving the room, though both had been
+  detected correctly. Sleep before the window still only counts when the camera saw the child put into
+  bed and they stayed asleep into the window.
+- **Noise from elsewhere in the house no longer delays your child's bedtime.** A bedroom microphone
+  hears the whole house, and bedtime is its loudest hour. One child, asleep and motionless from 6:50pm,
+  was recorded as awake until 7:50pm — of the minutes holding it back, most were simultaneously loud in
+  his brother's room next door while his own bed never moved. Once the camera has seen a child put into
+  bed, a noisy minute counts as awake only if that room also *moved* around the same time; on the night
+  above the two children's bedtimes now land within a minute of what their parents recorded. This
+  applies only to working out when sleep began — a cry with no movement still counts as a wake-up.
+
+### Fixed
+- **No timelapse is made for a night nobody slept there.** A night with an empty bed was still producing
+  a "memory" of an empty room, and leaving it on the child's page. Those nights are now skipped and their
+  frames discarded.
+- **Bedtime no longer has to match the schedule.** Children don't go to bed at a fixed time — a tired
+  one can be asleep well before their sleep window opens. Sleep that started early was previously
+  clipped to the start of the window, so an early night was recorded as shorter than it really was.
+  Sleep is now measured from when your child actually went down. It only counts when the cameras saw
+  them being *put* into bed and they stayed asleep into the window, so a quiet empty room can't be
+  mistaken for an early bedtime, and an afternoon nap they woke up from can't be mistaken for the
+  start of the night.
+- **The morning wake-up time is more reliable.** The check that decides which quiet stretch is the
+  real "up for the day" was sitting right on the boundary of normal behaviour: on one night a true
+  05:09 wake-up was identified with **zero** margin, where a single extra minute of a parent tidying
+  the bed afterwards would have reported the wake-up roughly two hours late. The margin is now
+  comfortable. Verified against every night on record — no night's reported wake-up changed.
+
 ## [0.25.2] - 2026-08-25
 
 ### Changed
@@ -93,22 +167,6 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [0.24.0] - 2026-08-24
 
-### Changed
-- **Simpler camera menu.** The detection quick-toggles for **Motion**, **Sound** and **Alerts** are now three
-  compact icon buttons on a single row (tap each to turn it on/off), replacing the stacked switch rows.
-  **Silence alerts** is now one button that reveals **15 min / 30 min / 1 hour** options when tapped (was a
-  row of 30 min / 1 hour / 2 hours); while muted it becomes a one-tap un-mute.
-
-### Fixed
-- **Camera readings stay visible on a phone in landscape.** In landscape the top bar, bottom nav, and a full
-  16:9 camera tile used to overflow the short screen, hiding each camera's temperature/humidity readings below
-  the video. The header and nav are now slimmer and the video is capped in landscape so the whole tile — video
-  plus readings — fits on screen.
-- **Two-way audio no longer silently downgrades on ONVIF cameras.** For a camera that supports the ONVIF/RTSP
-  audio backchannel (Thingino/Sonoff and most ONVIF cams), talk-back always uses the backchannel with the
-  camera's stream credentials — a value left in the two-way-audio username field can no longer force the
-  Hikvision ISAPI backend and quietly break talk on a plain edit. Applies on both add and edit.
-
 ### Added
 - **Nightly sleep timelapse ("memories").** While a child's sleep window is open, Nightlight now samples a
   still from their camera every couple of minutes and, once the window closes, assembles the night into a
@@ -128,6 +186,22 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   are computed alongside the existing movement-based estimate and shown on the Sleep detail view (with
   ▼ into-bed / ▲ out-of-bed markers on the night timeline) for validation; the headline figures still use
   the movement &amp; sound estimate for now.
+
+### Changed
+- **Simpler camera menu.** The detection quick-toggles for **Motion**, **Sound** and **Alerts** are now three
+  compact icon buttons on a single row (tap each to turn it on/off), replacing the stacked switch rows.
+  **Silence alerts** is now one button that reveals **15 min / 30 min / 1 hour** options when tapped (was a
+  row of 30 min / 1 hour / 2 hours); while muted it becomes a one-tap un-mute.
+
+### Fixed
+- **Camera readings stay visible on a phone in landscape.** In landscape the top bar, bottom nav, and a full
+  16:9 camera tile used to overflow the short screen, hiding each camera's temperature/humidity readings below
+  the video. The header and nav are now slimmer and the video is capped in landscape so the whole tile — video
+  plus readings — fits on screen.
+- **Two-way audio no longer silently downgrades on ONVIF cameras.** For a camera that supports the ONVIF/RTSP
+  audio backchannel (Thingino/Sonoff and most ONVIF cams), talk-back always uses the backchannel with the
+  camera's stream credentials — a value left in the two-way-audio username field can no longer force the
+  Hikvision ISAPI backend and quietly break talk on a plain edit. Applies on both add and edit.
 
 ## [0.23.0] - 2026-08-22
 
@@ -257,7 +331,6 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   night goes, so an early-morning wake shows within a minute or two instead of only after the 7am window
   close. The detail timeline marks "as of now" and refreshes live; the final stored summary is still
   written when the window closes.
-
 - **Room temperature on the sleep timeline, and a temperature-vs-sleep insight.** For a child whose
   camera has an MQTT temperature/humidity sensor, the sleep detail view now draws the night's room
   temperature as a line beneath the sleep timeline (on the same time axis, so you can see how warm the
@@ -402,17 +475,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [0.15.1] - 2026-08-16
 
-### Security
-- Patched dependency security advisories surfaced by `npm audit`. **react-router → 7.18.2** clears a
-  client-side CSRF advisory (specific to server/RSC routing, which Nightlight's client-only routing
-  doesn't use — patched regardless). **ip-address → 10.5.0** clears SSRF/address-parsing advisories;
-  it's pulled in transitively by the login rate-limiter and the MQTT client.
-
 ### Changed
 - Dependency and toolchain maintenance: **better-sqlite3 11 → 13** (a ground-up N-API rewrite), plus
   lucide-react, vite, hls.js, express-rate-limit, @vitejs/plugin-react, ws, and CI action updates.
 - The container's Node runtime is no longer pinned to 24.18.1. better-sqlite3 13's rewrite resolves the
   shutdown crash that forced the pin, so the image now tracks the Node 24 line (`node:24-alpine`).
+
+### Security
+- Patched dependency security advisories surfaced by `npm audit`. **react-router → 7.18.2** clears a
+  client-side CSRF advisory (specific to server/RSC routing, which Nightlight's client-only routing
+  doesn't use — patched regardless). **ip-address → 10.5.0** clears SSRF/address-parsing advisories;
+  it's pulled in transitively by the login rate-limiter and the MQTT client.
 
 ## [0.15.0] - 2026-08-14
 
@@ -591,17 +664,6 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [0.10.0] - 2026-08-09
 
-### Fixed
-- **PTZ now works on cameras whose ONVIF user is password-protected.** PTZ commands skip the ONVIF
-  connect handshake (to tolerate minimal cameras), which also skipped the WS-Security clock sync — so
-  authenticated moves carried a stale ~1970 timestamp that cameras enforcing auth rejected. PTZ now
-  seeds the clock (from the camera's own time, falling back to the server's) before each move.
-- **PTZ nudges are steadier and no longer "run away" past a tap.** Each nudge's Stop was best-effort
-  with no retry, so a single dropped/rejected Stop let the move coast to its ~3s failsafe; the Stop is
-  now retried and logged and the failsafe shortened. Nudge speed was also lowered so cameras with slow,
-  variable ONVIF response (e.g. Sonoff-hack) travel a smaller, more consistent amount per tap. PTZ now
-  logs a per-nudge line (velocity, timing, Stop result) for troubleshooting.
-
 ### Added
 - **Per-camera alert schedule ("only alert during set hours").** In a camera's Motion detection
   settings you can now restrict alerts to a time window — e.g. 20:00 to 07:00 (overnight windows
@@ -612,6 +674,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   Configure an application token + user/group key in **Settings → Push notifications**; it validates
   with Pushover on save and has a **Send test** button. Motion alerts include a **snapshot** of the
   frame that triggered them and a deep link to open the Nightlight app. Firebase remains available.
+
+### Fixed
+- **PTZ now works on cameras whose ONVIF user is password-protected.** PTZ commands skip the ONVIF
+  connect handshake (to tolerate minimal cameras), which also skipped the WS-Security clock sync — so
+  authenticated moves carried a stale ~1970 timestamp that cameras enforcing auth rejected. PTZ now
+  seeds the clock (from the camera's own time, falling back to the server's) before each move.
+- **PTZ nudges are steadier and no longer "run away" past a tap.** Each nudge's Stop was best-effort
+  with no retry, so a single dropped/rejected Stop let the move coast to its ~3s failsafe; the Stop is
+  now retried and logged and the failsafe shortened. Nudge speed was also lowered so cameras with slow,
+  variable ONVIF response (e.g. Sonoff-hack) travel a smaller, more consistent amount per tap. PTZ now
+  logs a per-nudge line (velocity, timing, Stop result) for troubleshooting.
 
 ## [0.9.0] - 2026-08-04
 
@@ -881,13 +954,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [0.4.8] - 2026-07-27
 
+### Changed
+- Softened the camera tile corners a little less aggressively (16px → 10px radius).
+
 ### Fixed
 - Camera tiles are now 16:9 (were 16:10), matching the native aspect ratio of virtually all
   IP cameras. The taller tile made `object-fit: cover` crop the left/right edges, which was
   hiding the camera's own on-screen timestamp; at 16:9 the full frame shows.
-
-### Changed
-- Softened the camera tile corners a little less aggressively (16px → 10px radius).
 
 ## [0.4.7] - 2026-07-27
 
@@ -1082,7 +1155,6 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - Docker builds install from committed lockfiles (`npm ci`) for a reproducible,
   auditable dependency tree; vite upgraded 5 → 8 (clears dev-server advisories); both
   packages audit clean.
-
 [Unreleased]: https://github.com/sauso/nightlight/compare/v0.11.0...HEAD
 [0.11.0]: https://github.com/sauso/nightlight/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/sauso/nightlight/compare/v0.9.0...v0.10.0
