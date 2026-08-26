@@ -23,6 +23,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   frames it was made from are deleted once it's assembled.
 
 ### Changed
+- **Videos play in a proper window on a desktop browser.** The player was sized for a phone, so on a
+  large screen a clip or timelapse played in a small panel at the bottom with most of the screen unused.
+  On a desktop-sized window it is now a centred dialog that uses the space. On a phone it is unchanged.
 - **Wake-up and bedtime now come from watching your child leave and enter the bed**, rather than from
   movement and sound alone. The app could already detect the moment a child got out of bed, but only
   showed it as a secondary note while the headline time came from the older method — so a night could

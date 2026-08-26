@@ -356,9 +356,18 @@ at **1.4s** (connecting, urgent), `--offline` static with no ring. The tempo car
 if you add a state, pick its tempo deliberately.
 
 ### Modal (`components/Modal.jsx`)
-A **sheet**, not a centred dialog: overlay `rgba(10, 13, 28, 0.7)`, card `max-width: 440`, hugging
-the bottom edge (`placement="top"` for the top), rounded 20px on the inner side only, title 18px,
-`✕` close button with `aria-label="Close"`.
+On phone widths a **sheet**, not a centred dialog: overlay `rgba(10, 13, 28, 0.7)`, card
+`max-width: 440`, hugging the bottom edge (`placement="top"` for the top), rounded 20px on the inner
+side only, title 18px, `✕` close button with `aria-label="Close"`.
+
+**`wide` opts a modal into a desktop treatment**: at ≥1024px it becomes a centred dialog,
+`max-width: min(1040px, 92vw)`, `max-height: 92vh`, 16px all round. Only the video player uses it — a
+440px sheet wastes a desktop screen on a video, but a confirmation must stay narrow at any width. Don't
+add `wide` to a modal that is mostly text or a short form.
+
+Layout lives in **CSS** (`.modal-overlay` / `.modal-card`), not inline styles. That is load-bearing: a
+media query cannot reach an inline style, and inline styles beat stylesheet rules, so the desktop rules
+would silently lose. Only the two values the visual-viewport effect computes stay inline.
 
 It sizes itself to `window.visualViewport` and scrolls internally so the on-screen keyboard can't
 push a focused field out of view, and it pads for `env(safe-area-inset-top)`. Both behaviours were
@@ -468,7 +477,6 @@ Recorded honestly so it isn't mistaken for intent, and so it can be cleaned up d
 - Half-pixel font sizes (`12.5`, `13.5`, `14.5`, `11.5`, `10.5`) — a handful of one-offs.
 - 20 distinct `border-radius` values across the stylesheet, against the ~6 the system needs.
 - `theme-color` (`#12172B`) is one shade off `--bar` (`#12143a`).
-- `Modal.jsx` styles itself with inline objects while everything else uses classes.
 - The camera-tile CSS family is split across `.camera-tile*` and `.cam-*` prefixes.
 
 None of these are bugs. Match the **rule**, not the nearest drifted example.
