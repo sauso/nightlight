@@ -217,3 +217,136 @@ test('a night with too few samples is no_data, not empty', () => {
   const night = computeNight(CHILD, DATE);
   assert.equal(night.status, 'no_data');
 });
+
+// --- Household noise vs. the child's own stillness -------------------------------------------------
+//
+// A bedroom mic hears the whole house, and bedtime is the loudest part of the evening. Sound travels
+// through walls; movement does not. These cover the rule that falls out of that (see
+// ONSET_SOUND_MOTION_WITHIN_MIN) and, just as importantly, the two places it must NOT reach.
+
+const insertFull = db.prepare(
+  `INSERT INTO activity_samples (camera_id, bucket_start, motion_level, motion_peak, sound_level,
+     sound_peak, motion_frames, sound_windows, motion_out_level, motion_out_peak)
+   VALUES (?, ?, ?, ?, 0, ?, 1, 1, 0, ?)`
+);
+
+// One sample per minute across [from, to), driving each channel independently — which `laySamples`
+// can't do, since it moves motion and sound together and every interesting case here pulls them apart.
+//   move  = real movement in the bed        noise = a clear sound with NOTHING moving
+//   out   = movement outside the bed (someone in the room, or the child out of it)
+function layNight(from, to, { move = [], noise = [], out = [] } = {}) {
+  const within = (t, ranges) => ranges.some(([a, b]) => t >= a && t < b);
+  for (let t = from; t < to; t = new Date(t.getTime() + 60000)) {
+    insertFull.run(
+      CAM, sqlTime(t),
+      within(t, move) ? 0.4 : 0.0002,
+      within(t, move) ? 0.4 : 0.0002,
+      within(t, noise) ? 20 : 0.5,
+      within(t, out) ? 0.3 : 0.0004
+    );
+  }
+}
+
+test('a still child in a noisy house is asleep once a put-down proves they are in bed', () => {
+  // The real 2026-08-26 night: down at 18:38, then motionless while the house stays loud for another
+  // hour (the other child's bedtime, through the wall). Owner-confirmed asleep from the put-down; the
+  // movement-only rule reported onset an hour late because it counted every one of those minutes awake.
+  layNight(at(18, 20), at(7, 0, 1), { noise: [[at(18, 40), at(19, 40)]] });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 38)));
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.status, 'ok');
+  assert.equal(hhmm(night.onset_at), '18:38', 'noise with nothing moving must not hold onset back');
+});
+
+test('household noise alone cannot invent a bedtime without a put-down', () => {
+  // The same stillness-plus-noise, but no into_bed — and someone is plainly in the room at 20:00.
+  // Discounting sound here would call the child asleep at 19:30, before they were even in the bed.
+  // (Renz, 2026-08-21: movement in the room until ~20:00; an earlier cut of this change said 19:00.)
+  // This is why the discount is scoped to the put-down-anchored search: quiet is not evidence of a
+  // child, which is the same lesson EMPTY_BED_MAX_PEAK exists for.
+  layNight(at(18, 20), at(7, 0, 1), {
+    noise: [[at(19, 30), at(20, 0)]],
+    move: [[at(20, 0), at(20, 5)]],
+  });
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(hhmm(night.onset_at), '20:05', 'onset must wait for the room to actually settle');
+});
+
+test('a child who cries without moving still counts as an awakening', () => {
+  // The discount is deliberately confined to onset. Mid-night the house is quiet, so noise in a bedroom
+  // is most likely the child's own — and a cry with no movement is precisely the wake-up a parent wants
+  // counted. If this ever fails, the rule has leaked out of the onset search into wake detection.
+  layNight(at(18, 20), at(7, 0, 1), { noise: [[at(2, 0, 1), at(2, 10, 1)]] });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 38)));
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.wake_count, 1, 'a sound-only cry is still a wake-up');
+  assert.ok(night.awake_minutes >= 10);
+});
+
+// --- What the timeline is allowed to claim ---------------------------------------------------------
+
+// A night with the shape real ones have: settling, a few stirs, a departure at 05:09, then a parent
+// handling the empty bed. Stirring matters — a bed with NO in-bed movement at all is an empty bed, and
+// the morning departure needs a sustained empty gap to sit at the end of.
+function layTimelineNight({ out = [] } = {}) {
+  layNight(at(18, 20), at(7, 0, 1), {
+    move: [
+      [at(19, 30), at(19, 40)],
+      [at(23, 0), at(23, 6)],
+      [at(2, 0, 1), at(2, 8, 1)],
+      [at(5, 0, 1), at(5, 9, 1)],
+      [at(6, 45, 1), at(7, 0, 1)],
+    ],
+    out,
+  });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 38)));
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(5, 9, 1)));
+}
+
+test('the timeline draws only the two transitions the analysis adopted', () => {
+  // A child rolling over reads as an arrival to the frame-diff classifier, so a normal night produces a
+  // stream of them: on 2026-08-26 Renz's timeline showed FOUR "got into bed" markers with no "got out of
+  // bed" between any of them — impossible — on a night nobody entered his room. Only the put-down that
+  // began the sleep and the corroborated morning exit may be drawn.
+  layTimelineNight();
+  for (const h of [22, 23]) insertTransition.run(CAM, 'into_bed', 0.03, sqlTime(at(h, 12)));
+  for (const h of [1, 2]) insertTransition.run(CAM, 'into_bed', 0.03, sqlTime(at(h, 12, 1)));
+
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(night.transitions.length, 2, 'exactly one put-down and one departure');
+  assert.deepEqual(night.transitions.map((t) => t.type), ['into_bed', 'out_of_bed']);
+  assert.equal(hhmm(night.transitions[0].at), '18:38', 'the put-down that started the sleep');
+  assert.equal(hhmm(night.transitions[1].at), '05:09', 'the corroborated departure');
+});
+
+test('the timeline is drawn over the sleep, not over the configured window', () => {
+  // Bedtimes move nightly and nobody is going to edit the setting each evening, so a night that began
+  // before the window must still be shown whole. Raffa, 2026-08-26: put down at 19:11, window opens
+  // 19:30 — the put-down and his mother leaving the room were both detected, then clipped off the left
+  // edge of a bar that started at the setting.
+  layTimelineNight({ out: [[at(18, 38), at(18, 48)]] });
+
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(hhmm(night.display_start), '18:38', 'the bar starts at the put-down');
+  assert.ok(night.display_start < night.window_start, 'and therefore before the window opens');
+  assert.equal(night.segments[0].from_at, night.display_start, 'segments must cover the bar');
+  assert.ok(
+    night.visits.some((v) => hhmm(v.start_at) === '18:38'),
+    'the parent settling them, before the window, must be shown rather than clipped'
+  );
+});
+
+test('movement while the child is in bed is not reported as the child being out of bed', () => {
+  // Two blocks of outside-the-bed movement: a parent in the room mid-sleep, and the child themselves
+  // after the morning departure. Only the second is the child out of bed — the camera cannot tell who is
+  // moving, so in between it may only say that something moved.
+  layTimelineNight({ out: [[at(1, 0, 1), at(1, 5, 1)], [at(6, 0, 1), at(6, 5, 1)]] });
+
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  const typeAt = (hm) => night.visits.find((v) => hhmm(v.start_at) === hm)?.type;
+  assert.equal(typeAt('01:00'), 'room', 'mid-sleep movement must not be attributed to the child');
+  assert.equal(typeAt('06:00'), 'child_out', 'after the departure it really is the child');
+});
