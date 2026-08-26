@@ -22,61 +22,85 @@ building goes to §4 *with the evidence*, so it doesn't get re-proposed later.
 
 ## 1. Next up
 
-### 1.1 Fix Raffa's crib-zone discrimination — `NEXT`
-**This is the blocker for 1.2, and it is a camera-framing problem, not a code problem.**
+### 1.1 Fix Raffa's bed-zone discrimination — `WATCHING` (was `NEXT`; the camera has been re-aimed)
+**Largely resolved.** The camera was re-aimed and `detect_zone` redrawn with the grid picker (12 rects,
+33.5% of frame). On the very next night (2026-08-25) it emitted a real `out_of_bed` at his true exit and
+the wake came out **exactly right (05:09, owner-confirmed) on both prod and staging** — so this is no
+longer a blocker for 1.3, which has now shipped. Keep watching a few more mornings before closing it:
+one good night on a re-aimed camera is one night. The original diagnosis is kept below.
+
+**It was a camera-framing problem, not a code problem.**
 
 On the night of 2026-08-24→25 there was **no `out_of_bed` transition anywhere near Raffa's real 06:10
 exit** (the last one was 01:22), and the detector then logged three *false* `into_bed` events after he
-was already out (06:33, 06:43, 06:56). Crib-zone motion kept registering until 07:02 despite the crib
+was already out (06:33, 06:43, 06:56). Bed-zone motion kept registering until 07:02 despite the bed
 being empty from 06:10. Transition peaks are also much weaker than Renz's (0.013–0.037 vs up to 0.2).
 
 The zone covers ~19.5% of the frame, much of it bare wall, and misses most of the bed — so "inside the
-crib" and "outside the crib" aren't actually distinguishable for that camera.
+bed" and "outside the bed" aren't actually distinguishable for that camera.
 
-**Work:** re-aim the camera so the cot fills more of the frame and the floor beside it is visible, then
+**Work:** re-aim the camera so the bed fills more of the frame and the floor beside it is visible, then
 **redraw `detect_zone`** — it is stored as normalised frame fractions, so *moving the camera without
 redrawing points the zone at the wrong things and makes out-of-bed detection worse, not better*. The
-grid picker (paint the cells covering the cot) can follow a diagonal cot that the old rectangles
+grid picker (paint the cells covering the bed) can follow a diagonal bed that the old rectangles
 couldn't. Then review a few mornings against ground truth.
 
-### 1.2 Promote shadow sleep onset/wake to authoritative — `HELD` (was `NEXT`)
-Out-of-bed detection ships today in **shadow mode**: `sleep_nights.onset_at_shadow` / `wake_at_shadow`
-are computed from the `bed_transitions` table alongside the live motion+sound numbers, but the headline
-figures parents see still come from the old algorithm.
+**Update 2026-08-27.** Second clean night in a row: Raffa's wake came out at **05:53, owner-confirmed
+exact**, and his put-down at 19:11 matched an observed 19:10. The re-aim worked. But the false
+`into_bed` events this section blamed on Raffa's framing turned up on **Renz's** camera the same night
+(four of them), so that failure mode is **not** a per-camera framing problem — see 1.2. Close 1.1 on
+the framing question; the classifier is tracked separately.
 
-**Why shadow exists:** motion-based tracking is blind to a child who *leaves* — an empty crib and a
-sleeping child both read as "no motion". The bed transitions are what distinguish absence from sleep.
+### 1.2 Harden the bed-transition classifier — `NEXT`
+**The remaining piece of the sleep work.** 0.26.0 stopped the timeline *claiming* things this detector
+can't support (only the two adopted transitions are drawn, everything else is "movement outside the
+bed"). That is a containment, not a fix — the underlying classifier is still wrong often enough that its
+per-event output can't be shown.
 
-**Why this is now HELD rather than NEXT.** The previous plan here was "eyeball it for a few mornings,
-then flip a line". Measured against owner ground truth on 2026-08-24→25, shadow wake scored **1 of 3**:
-Renz on prod was exact (05:58), Renz on *staging* — same physical camera — was 40 min early, and Raffa
-was 53 min late, i.e. **worse than the algorithm it was meant to replace**. Two distinct causes:
+**What's wrong**, measured on 2026-08-26 against owner ground truth (nobody entered Renz's room all
+night; Raffa put down 19:10, his mother out at 19:19):
 
-- **Knife-edge thresholds.** Staging was missing a single sample minute that prod had, which
-  manufactured a 22-minute empty-crib gap (limit 20) with 9 minutes of trailing activity (limit 10).
-  Both margins within 2 → accepted. One sample minute flipped the answer for the same camera.
-- **Raffa's zone can't tell inside-crib from outside-crib** — see 1.1.
+- **No occupancy state.** `motionDetector.js` runs the out-of-bed and into-bed detectors as independent
+  stateless twins, so nothing stops two arrivals in a row. Renz's night emitted **four consecutive
+  `into_bed` with no `out_of_bed` between any of them** — physically impossible, and the cheapest
+  possible check isn't there.
+- **A child rolling over reads as an arrival.** The false events had bed peaks 0.020–0.042; Raffa's
+  *genuine* put-down was 0.014. **Magnitude alone cannot separate them** — a naive floor would delete
+  the true positives. What differs is the *outside* channel: a person entering produces a large,
+  sustained out-of-zone signal, a stir produces essentially none. Today `into_bed` records only
+  `ibPeakCrib` (the bed side), so the discriminating evidence is thrown away at the moment of capture.
+- **A parent walking away is indistinguishable from a child climbing out.** Both are "bed moved, then
+  outside moved, then bed went quiet". Renz's 18:50 `out_of_bed` was his father leaving the room, and it
+  opened a child-out interval that ran until the first false arrival at 23:12.
 
-**Mitigation shipped (0.25.0):** a qualifying gap is now only accepted when a real `out_of_bed`
-corroborates it within the snap window; otherwise the scan continues to a later gap, and failing that
-the algorithm's wake stands. It must be an `out_of_bed` specifically — matching any polarity let an
-`into_bed` vouch for a departure. Replayed against that night's real data: Renz prod 05:58 exact, Renz
-staging 05:18 → 05:58 exact (the prod/staging divergence is gone), Raffa falls back to the algorithm
-(11 min early, rather than 53 min late).
+**Work:**
+1. Track believed occupancy; ignore an `into_bed` while already in bed and an `out_of_bed` while already
+   out. (Alone this collapses the four arrivals to one.)
+2. Record the outside channel's **peak and duration** alongside each transition — new columns on
+   `bed_transitions` — and require substantial outside evidence for `into_bed`, symmetric for
+   `out_of_bed`.
+3. Separate "parent leaves" from "child exits". Retrospective is fine: the nightly job runs after the
+   night, so an `out_of_bed` followed by continued in-bed micro-motion is a parent leaving.
 
-**Remaining work, in order:**
-- **1.1 first.** Shadow can't produce a refined time for Raffa at all until his zone emits a real
-  `out_of_bed` at the actual exit.
-- Then re-check several mornings against ground truth on *both* children before flipping anything.
-- When it consistently wins: flip to authoritative (~1 line) and point the nightly sleep-report push at
-  the shadow values.
-- Consider extending Renz's `sleep_window_end` — it closes 06:30 but real wake-up has been ~07:57.
-- Watch edge case **B** (child held ~30 min then put back down): a re-settle must require an
-  *into-bed* transition before sustained quiet re-scores as sleep, or the held gap wrongly reads as
-  sleep. Edge case **A** (pre-bedtime quiet in an empty crib scoring as early onset) is handled — onset
-  can't precede the first into-bed event.
+**Tune it offline, don't guess.** `bed_transitions` retains 45 days and `activity_samples` 30, so there
+is a real corpus already on staging. Add the evidence columns first, then let a week accumulate before
+choosing thresholds — the same discipline that produced `EMPTY_BED_MAX_PEAK` and
+`MAX_POST_EXIT_ACTIVE_MIN`.
 
-Runbook for reading a night's markers: **`sleep-marker-review-runbook.md`**.
+**Done when** a night's per-event markers are trustworthy enough to draw again, i.e. no impossible
+sequences across a week and the put-down/departure pair still matches ground truth.
+
+### 1.3 Sound is not a per-room signal — `IDEA`
+Fallout from the same night. A bedroom mic hears the whole house: 16 of the 19 sound-active minutes
+that were holding Renz's onset an hour late were simultaneously loud in his brother's room, while his
+own bed never moved. 0.26.0 handles this for **onset** only (a sound-only minute counts as awake only
+once a put-down proves the child is in the bed, and only if that room also moved nearby).
+
+The same confusion must still affect **wake counts** — deliberately left alone, because mid-night the
+house is quiet and a cry with no movement is exactly the wake-up a parent wants counted. Worth
+measuring before touching: across all nights on record, how many counted wakes are sound-only *and*
+simultaneous with noise in the sibling's room? If that number is large, the wake rule needs the same
+treatment. If it's small, leave it alone. **Measure first.**
 
 ---
 
@@ -120,16 +144,43 @@ problem. A spare **USB Coral** may accelerate it, but it must stay **optional an
 with a CPU fallback — the app has to run fully without one, and everything shipped so far is
 deliberately Node + FFmpeg only (no Python in the runtime image).
 
-### 2.3 E2E testing — Phase 4 & Phase 5 — `SPECCED`
-Phases 1–3 shipped: the synthetic-camera stack, the Playwright UI suite, and auto-generated docs
-screenshots, all green in `e2e.yml`.
+### 2.3 Testing — `IN PROGRESS`
 
-- **Phase 4 — build the image from the PR commit in CI**, rather than testing whatever the `:dev` tag
-  currently points at. Removes a real race between merge and image publish.
-- **Phase 5 — Android instrumented tests (Espresso)** in `nightlight-mobile`. Only the Capacitor
-  scaffold stub (`ExampleInstrumentedTest.java`) exists today. Local emulators were unusable (no
-  nested virt) but **GitHub Linux runners have KVM**, so a CI emulator is realistic. Target the
-  genuinely native bits: the foreground service surviving screen-off, and the notification Stop action.
+**Target (owner, 2026-08-26): core logic at >= 95% line coverage, checked before promoting to
+production. A TARGET, not a hard blocker** — breadth is still being built out, so an uncovered module
+does not stop a release. What is enforced is a **ratchet**: `backend/package.json`'s `test:core` script
+pins thresholds over an explicit include list, CI runs it on every push and PR
+(`.github/workflows/test.yml`), and the `release` skill checks it. It fails only when coverage
+*regresses* on a module already in the list. **That include list IS the definition of "core logic" —
+extend it as each module reaches the bar, and never shrink it to make the check go green.**
+
+In the gate today at **96.4% lines**: `db.js`, `middleware/auth.js`, `lib/mfa.js`,
+`lib/detectionEvents.js`, `routes/timelapses.js`.
+
+**Still to bring up to the bar and add to the list**, in priority order:
+- `routes/cameras.js` (1,036 lines) — the biggest surface, and the one with real authz branching
+- `routes/auth.js` (422) — login, the two-step MFA exchange, session lifecycle
+- `lib/sleepAnalysis.js` — at 69.5%; the gap is the nightly job and the climate/series helpers
+- `lib/clipStorage.js` + `lib/motionDetector.js` — retention maths and zone-mask maths
+
+**Deliberately NOT in the gate:** the I/O glue — FFmpeg spawning, ONVIF SOAP, MQTT, the four push
+senders, RTSP probing. Testing those means asserting that mocks were called with the right arguments,
+which passes forever and catches nothing; their real failure mode is "the camera answered with
+something odd", which only the e2e stack reproduces.
+
+- **Phase 4 — build the image from the commit under test — `SHIPPED` (2026-08-26).** `e2e.yml` now
+  builds `sauso/nightlight:dev` from the checked-out commit before bringing the stack up. Previously the
+  suite ran whatever the published tag pointed at, so on a dev -> main PR a green run could be proving
+  the PREVIOUS build. **The same applies locally**: `bash e2e/test.sh` on its own tests the last
+  published image, not your working tree — build first.
+- **Phase 5 — front-end testing — `NEXT`.** Target **>= 80% of the front end**, exercised in BOTH roles
+  (admin and caregiver), since role gating is real in the UI (`isAdmin` branches in the tiles, camera
+  pages and settings) and is exactly where the timelapse-delete bug hid. Two layers: component tests for
+  logic and rendering, and role-based Playwright flows for what a person actually does.
+- **Phase 6 — Android instrumented tests (Espresso)** in `nightlight-mobile` — `SPECCED`, was Phase 5.
+  Only the Capacitor scaffold stub exists. Local emulators were unusable (no nested virt) but **GitHub
+  Linux runners have KVM**, so a CI emulator is realistic. Target the genuinely native bits: the
+  foreground service surviving screen-off, and the notification Stop action.
 
 Harder-to-fake features, deliberately deferred within the suite: **two-way audio** (Playwright can fake
 a mic and assert the WebSocket connects and bytes flow, but never that the camera physically plays it)
@@ -137,6 +188,58 @@ and **PTZ/ONVIF** (needs a camera to respond). **The High/Low selector is testab
 synthetic source a second path and assert the toggle swaps the stream.
 
 ---
+
+### 2.4 Record a wake without alerting — `SPECCED`
+
+**The problem, measured.** Replaying the wake algorithm over all 18 'ok' prod nights (**101 wakes**)
+and matching each against the alert feed:
+
+| wake type | wakes | no alert at all | alert fired but no clip |
+|---|---|---|---|
+| motion + sound | 85 | 40 | **0** |
+| motion only | 6 | 6 | **0** |
+| sound only | 10 | 8 | **0** |
+
+**53% of wakes produce no alert, so there is nothing to look at in the morning.** The recorder itself
+is faultless — zero cases of "alerted but no clip" in 101 wakes; the gap is entirely upstream.
+
+Two causes, and only one of them is a bug:
+- **14 wakes fell outside the alert schedule** — all Renz, whose alert window opens 19:30 while his
+  *sleep* window opens 19:00. **Config, fixable in-app, no code.**
+- **40 fell inside the schedule with alerting armed and nothing fired.** The two subsystems measure
+  different things and always will: sleep counts a minute active on any ~200 ms blip above 1% of zone
+  or 6 dB, while an alert needs **2–3 seconds sustained**. A child who shifts for a second every minute
+  for ten minutes is ten active minutes and never one sustained alert.
+
+**This is deliberately NOT "make it alert more."** Owner, 2026-08-26: *"I don't want to necessarily
+send an alert. That actually works fine. But we should have a way to record these and not alert so if
+you wake up in the morning and see that they were awake for 5 mins you can see why."* Alerting stays
+exactly as tuned; what's missing is **evidence**.
+
+**Almost all the machinery already exists** — this is wiring, not new subsystems:
+- `lib/recordings.js` + the `recordings` table already record with **no push and no `detection_events`
+  row**, and the table already carries a **`triggered_by`** column to distinguish this from a manual
+  recording.
+- `clipRecorder.holdRing(cameraId, fromMs)` already protects ring segments from pruning retroactively.
+  **This dissolves what looked like the blocker**: the ring is only ~63 s deep, but a hold placed on the
+  *first active minute* keeps the wake's opening available until the run qualifies minutes later.
+- `SleepDetail`'s wake list already renders an inline clip player per wake (#107) — the natural home,
+  and exactly the "see why" surface the owner described.
+
+New work is a **live wake watcher**: `activityTracker` already buckets motion/sound per minute in real
+time, so it can apply the same active-minute test as `sleepAnalysis`, `holdRing` on the first active
+minute after onset, and cut a recording once the run reaches `WAKE_ACTIVE_MIN`, releasing the hold if
+it never does.
+
+**★ Decide before building: bounded clip, not the whole wake.** Average wake is ~19 min and clips run
+~172 KiB/s, so recording wakes end to end is **~1.1 GiB/night (~34 GiB at 30-day retention)** — on a
+`/app/data` that is already **98% full**. A **30 s clip at the wake's start** answers "why" and costs
+**~29 MiB/night (~0.85 GiB retained)**, roughly 40× less. Recommend the bounded clip, with its own
+retention/prune path like alert clips, and its own storage guard via `hasMinFreeSpace()`.
+
+Open questions: whether a non-qualifying stir should keep its capture or discard it; whether the hold
+needs a hard cap (a wake bridging many gaps can hold ~17 min of ring, ~176 MiB transiently).
+
 
 ## 3. Idea backlog
 

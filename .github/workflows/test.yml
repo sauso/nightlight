@@ -1,0 +1,94 @@
+name: Tests and checks
+
+# Fast unit + integration tests (Node's built-in runner, no services) plus cheap static checks. Cheap
+# enough to run on every push and every PR, unlike e2e.yml which spins up containers and a browser.
+#
+# Separate jobs on purpose:
+#   * `unit`  — everything must pass. A red suite blocks the merge.
+#   * `changelog` — CHANGELOG.md structure. Duplicate `### Added` blocks are invisible in a PR diff
+#     (each looks like a correct single addition on its own) and only show up when someone reads the
+#     whole rendered section, which nobody does every time. It happened across #179-#186.
+#   * `core-coverage` — the CORE-LOGIC COVERAGE GATE. Nightlight's rule is that core logic stays at
+#     >= 95% line coverage, and that this is checked BEFORE code is promoted to production. Enforcing
+#     it here rather than in a checklist means it can't be forgotten during a release.
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+  workflow_dispatch: {}
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Run the test suite
+        working-directory: backend
+        run: npm test
+
+  core-coverage:
+    name: Core-logic coverage gate (>= 95%)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+      # Exits non-zero if the modules listed in the `test:core` script fall below the thresholds.
+      # The include list in backend/package.json IS the definition of "core logic" — extend it as
+      # each further module reaches the bar.
+      - name: Enforce core-logic coverage thresholds
+        working-directory: backend
+        run: npm run test:core
+
+  frontend:
+    name: Front-end component tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install front-end dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run component tests
+        working-directory: frontend
+        run: npm test
+      # NOTE: the >= 80% front-end coverage threshold is configured in vite.config.js but is NOT a
+      # blocking gate yet - the suite is at the very start of Phase 5 and would fail every run, which
+      # would train everyone to ignore it. Promote this to `npm run test:coverage` once the target is
+      # actually met, the same way the backend core-logic gate was only switched on once it passed.
+
+  changelog:
+    name: CHANGELOG structure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      # No dependencies and no install step - it reads one file. Checks structure only: one heading
+      # per type per version, Keep a Changelog order, released sections dated, no version listed
+      # twice. It has no opinion about wording and never rewrites the file.
+      - name: Check CHANGELOG.md structure
+        run: node scripts/check-changelog.mjs

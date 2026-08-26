@@ -15,7 +15,8 @@ are different values for the same kid. Look them up fresh if unsure:
 | Camera (staging) | camera_id | child_id |
 |---|---|---|
 | Renz Cam | `501ca6c2-5688-4381-940d-edfa0d1e721d` | `884974cd-b11c-4393-9608-dde3099779f0` |
-| Test Cam | `902098f5-4982-4844-8cf8-575387b326da` | `c75ed329-de89-42ca-83aa-edaf692295b6` |
+| Raffa Room | `96f35fdc-f12f-4a6b-9c82-887be7e95108` | `c75ed329-de89-42ca-83aa-edaf692295b6` |
+| Test Cam | `902098f5-4982-4844-8cf8-575387b326da` | *(none — no child assigned)* |
 | Test | `01248e86-7715-44dc-984f-40fa838ea8ae` | *(none — no child assigned)* |
 
 Verified against the staging DB 2026-08-24.
@@ -95,12 +96,12 @@ ssh -i ~/.ssh/unraid_nightlight root@192.168.1.100 \
 ```
 
 Log lines are **AEST**. A confirmed line looks like:
-`[oob] "Renz Cam" OUT OF BED — motion left the crib, quiet 6000ms since, outside peak 6.3%`
+`[oob] "Renz Cam" OUT OF BED — motion left the bed, quiet 6000ms since, outside peak 6.3%`
 
 ## 5. Reading it
 
 - **Restless cluster** = many alternating out/into within an hour, low outside peaks
-  (<~11%) → stirring/re-settling in the crib, not actually on the floor. High outside
+  (<~11%) → stirring/re-settling in the bed, not actually on the floor. High outside
   peaks (>~15%) + a *terminal* out_of_bed followed by long quiet → genuinely up.
 - **Consecutive same-type** transitions (e.g. five `into_bed` in a row) = repeated
   re-entry/stir during a restless patch; they collapse to one interval in the analysis.
@@ -110,8 +111,8 @@ Log lines are **AEST**. A confirmed line looks like:
     so a ~4am re-settle after a mid-night waking masqueraded as onset (put onset at 4:20am on
     2026-08-23). Now takes the *earliest* qualifying into_bed — the first put-down that leads to
     sustained sleep. Mid-night re-settles no longer move it.
-  - **Wake**: the empty-crib heuristic is robust — on 2026-08-24 it correctly caught a 6:39 rise
-    that the *transition* detector missed (he climbed out without lighting the outside-crib zone
+  - **Wake**: the empty-bed heuristic is robust — on 2026-08-24 it correctly caught a 6:39 rise
+    that the *transition* detector missed (he climbed out without lighting the outside-bed zone
     enough to confirm an out_of_bed). Residual theoretical risk only if a child sleeps well past
     window+lookahead with truly no motion and no exit; watch for a wake that lands suspiciously
     early with no nearby transition.
