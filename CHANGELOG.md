@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-08-27
+
 ### Added
 - **Nights when nobody slept in the bed are now reported as exactly that.** Previously an empty bed
   produced a flawless night's sleep — one night with a child away was reported as 11 hours 6 minutes
