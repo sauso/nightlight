@@ -11,7 +11,10 @@ one FFmpeg process per camera.
 
 Every user-visible change must be recorded under `[Unreleased]` in `CHANGELOG.md` in the
 same commit (Keep a Changelog format, semver — see the changelog's own header for the
-release procedure).
+release procedure). **Add your entry under the EXISTING `### Added`/`### Changed`/`### Fixed`
+heading — don't append a second one.** Duplicate headings are invisible in a PR diff and
+[Unreleased] collected four of them across #179-#186 before anyone noticed;
+`node scripts/check-changelog.mjs` now fails CI on that (structure only — it never touches wording).
 
 ## Commands
 
@@ -33,6 +36,10 @@ npm run test:core            # THE CORE-LOGIC COVERAGE GATE. Fails if the module
                               # That include list is the DEFINITION of core logic — grow it as
                               # modules qualify, never shrink it to go green.
 npm run test:coverage        # full coverage report, no thresholds (for finding the next gap)
+
+# Repo-level checks (no install needed, run from the repo root)
+node scripts/check-changelog.mjs   # CHANGELOG.md structure: one heading per type per version, in
+                                   # Keep a Changelog order, released sections dated. Runs in CI.
 npm start                    # node src/index.js — expects MediaMTX/ffmpeg binaries on PATH,
                               # so in practice this is normally run inside the Docker image
                               # rather than bare on a dev machine
