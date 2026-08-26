@@ -9,6 +9,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-08-27
+
+### Fixed
+- **A night could be reported as "slept 0 minutes" when a parent left the room at bedtime.** With your
+  child's real bedtime now detected (0.26.0), the search for the morning "got out of bed" could latch
+  onto the parent walking away from the bed moments *before* the child fell asleep, and report that as
+  the morning wake-up — so one night came back as waking at 7:20pm having slept nothing at all. A
+  departure that happens before your child fell asleep is no longer treated as one. Only nights on a
+  camera that sees very little movement in the bed were affected, and only from 0.26.0.
+
 ## [0.26.0] - 2026-08-27
 
 ### Added
