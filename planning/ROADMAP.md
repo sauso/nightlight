@@ -244,6 +244,58 @@ synthetic source a second path and assert the toggle swaps the stream.
 
 ---
 
+### 2.4 Record a wake without alerting — `SPECCED`
+
+**The problem, measured.** Replaying the wake algorithm over all 18 'ok' prod nights (**101 wakes**)
+and matching each against the alert feed:
+
+| wake type | wakes | no alert at all | alert fired but no clip |
+|---|---|---|---|
+| motion + sound | 85 | 40 | **0** |
+| motion only | 6 | 6 | **0** |
+| sound only | 10 | 8 | **0** |
+
+**53% of wakes produce no alert, so there is nothing to look at in the morning.** The recorder itself
+is faultless — zero cases of "alerted but no clip" in 101 wakes; the gap is entirely upstream.
+
+Two causes, and only one of them is a bug:
+- **14 wakes fell outside the alert schedule** — all Renz, whose alert window opens 19:30 while his
+  *sleep* window opens 19:00. **Config, fixable in-app, no code.**
+- **40 fell inside the schedule with alerting armed and nothing fired.** The two subsystems measure
+  different things and always will: sleep counts a minute active on any ~200 ms blip above 1% of zone
+  or 6 dB, while an alert needs **2–3 seconds sustained**. A child who shifts for a second every minute
+  for ten minutes is ten active minutes and never one sustained alert.
+
+**This is deliberately NOT "make it alert more."** Owner, 2026-08-26: *"I don't want to necessarily
+send an alert. That actually works fine. But we should have a way to record these and not alert so if
+you wake up in the morning and see that they were awake for 5 mins you can see why."* Alerting stays
+exactly as tuned; what's missing is **evidence**.
+
+**Almost all the machinery already exists** — this is wiring, not new subsystems:
+- `lib/recordings.js` + the `recordings` table already record with **no push and no `detection_events`
+  row**, and the table already carries a **`triggered_by`** column to distinguish this from a manual
+  recording.
+- `clipRecorder.holdRing(cameraId, fromMs)` already protects ring segments from pruning retroactively.
+  **This dissolves what looked like the blocker**: the ring is only ~63 s deep, but a hold placed on the
+  *first active minute* keeps the wake's opening available until the run qualifies minutes later.
+- `SleepDetail`'s wake list already renders an inline clip player per wake (#107) — the natural home,
+  and exactly the "see why" surface the owner described.
+
+New work is a **live wake watcher**: `activityTracker` already buckets motion/sound per minute in real
+time, so it can apply the same active-minute test as `sleepAnalysis`, `holdRing` on the first active
+minute after onset, and cut a recording once the run reaches `WAKE_ACTIVE_MIN`, releasing the hold if
+it never does.
+
+**★ Decide before building: bounded clip, not the whole wake.** Average wake is ~19 min and clips run
+~172 KiB/s, so recording wakes end to end is **~1.1 GiB/night (~34 GiB at 30-day retention)** — on a
+`/app/data` that is already **98% full**. A **30 s clip at the wake's start** answers "why" and costs
+**~29 MiB/night (~0.85 GiB retained)**, roughly 40× less. Recommend the bounded clip, with its own
+retention/prune path like alert clips, and its own storage guard via `hasMinFreeSpace()`.
+
+Open questions: whether a non-qualifying stir should keep its capture or discard it; whether the hold
+needs a hard cap (a wake bridging many gaps can hold ~17 min of ring, ~176 MiB transiently).
+
+
 ## 3. Idea backlog
 
 Not committed — each is specced far enough to start, ordered by value-for-effort. Suggested first
