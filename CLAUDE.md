@@ -24,8 +24,15 @@ configured in either. `backend/` has a unit test suite (Node's built-in runner, 
 cd backend && npm install
 npm test                     # node --test — unit tests, no container/network needed. Points DATA_DIR
                               # at a temp dir, so it never touches a real database. Prefer this over
-                              # replaying logic inside a deployed container: it runs in ~0.5s and
-                              # covers the branches real data can't reach (early bedtime, empty bed).
+                              # replaying logic inside a deployed container: it runs in ~3s and covers
+                              # the branches real data can't reach (early bedtime, empty bed).
+npm run test:core            # THE CORE-LOGIC COVERAGE GATE. Fails if the modules listed in this
+                              # script's --test-coverage-include flags drop below 95% lines. Core
+                              # logic must clear that bar BEFORE anything is promoted to production;
+                              # CI runs it on every push/PR and the release flow runs it as a gate.
+                              # That include list is the DEFINITION of core logic — grow it as
+                              # modules qualify, never shrink it to go green.
+npm run test:coverage        # full coverage report, no thresholds (for finding the next gap)
 npm start                    # node src/index.js — expects MediaMTX/ffmpeg binaries on PATH,
                               # so in practice this is normally run inside the Docker image
                               # rather than bare on a dev machine

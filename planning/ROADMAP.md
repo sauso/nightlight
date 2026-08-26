@@ -199,16 +199,42 @@ problem. A spare **USB Coral** may accelerate it, but it must stay **optional an
 with a CPU fallback — the app has to run fully without one, and everything shipped so far is
 deliberately Node + FFmpeg only (no Python in the runtime image).
 
-### 2.3 E2E testing — Phase 4 & Phase 5 — `SPECCED`
-Phases 1–3 shipped: the synthetic-camera stack, the Playwright UI suite, and auto-generated docs
-screenshots, all green in `e2e.yml`.
+### 2.3 Testing — `IN PROGRESS`
 
-- **Phase 4 — build the image from the PR commit in CI**, rather than testing whatever the `:dev` tag
-  currently points at. Removes a real race between merge and image publish.
-- **Phase 5 — Android instrumented tests (Espresso)** in `nightlight-mobile`. Only the Capacitor
-  scaffold stub (`ExampleInstrumentedTest.java`) exists today. Local emulators were unusable (no
-  nested virt) but **GitHub Linux runners have KVM**, so a CI emulator is realistic. Target the
-  genuinely native bits: the foreground service surviving screen-off, and the notification Stop action.
+**Standing rule (owner, 2026-08-26): core logic stays at >= 95% line coverage, and that is verified
+BEFORE any promotion to production.** Enforced as code, not as a checklist item: `backend/package.json`'s
+`test:core` script pins the thresholds and the include list, CI runs it on every push and PR
+(`.github/workflows/test.yml`), and the `release` skill runs it as a preflight gate. **The include list
+IS the definition of "core logic" — extend it as each module reaches the bar, and never shrink it to
+make the gate go green.**
+
+In the gate today at **96.4% lines**: `db.js`, `middleware/auth.js`, `lib/mfa.js`,
+`lib/detectionEvents.js`, `routes/timelapses.js`.
+
+**Still to bring up to the bar and add to the list**, in priority order:
+- `routes/cameras.js` (1,036 lines) — the biggest surface, and the one with real authz branching
+- `routes/auth.js` (422) — login, the two-step MFA exchange, session lifecycle
+- `lib/sleepAnalysis.js` — at 69.5%; the gap is the nightly job and the climate/series helpers
+- `lib/clipStorage.js` + `lib/motionDetector.js` — retention maths and zone-mask maths
+
+**Deliberately NOT in the gate:** the I/O glue — FFmpeg spawning, ONVIF SOAP, MQTT, the four push
+senders, RTSP probing. Testing those means asserting that mocks were called with the right arguments,
+which passes forever and catches nothing; their real failure mode is "the camera answered with
+something odd", which only the e2e stack reproduces.
+
+- **Phase 4 — build the image from the commit under test — `SHIPPED` (2026-08-26).** `e2e.yml` now
+  builds `sauso/nightlight:dev` from the checked-out commit before bringing the stack up. Previously the
+  suite ran whatever the published tag pointed at, so on a dev -> main PR a green run could be proving
+  the PREVIOUS build. **The same applies locally**: `bash e2e/test.sh` on its own tests the last
+  published image, not your working tree — build first.
+- **Phase 5 — front-end testing — `NEXT`.** Target **>= 80% of the front end**, exercised in BOTH roles
+  (admin and caregiver), since role gating is real in the UI (`isAdmin` branches in the tiles, camera
+  pages and settings) and is exactly where the timelapse-delete bug hid. Two layers: component tests for
+  logic and rendering, and role-based Playwright flows for what a person actually does.
+- **Phase 6 — Android instrumented tests (Espresso)** in `nightlight-mobile` — `SPECCED`, was Phase 5.
+  Only the Capacitor scaffold stub exists. Local emulators were unusable (no nested virt) but **GitHub
+  Linux runners have KVM**, so a CI emulator is realistic. Target the genuinely native bits: the
+  foreground service surviving screen-off, and the notification Stop action.
 
 Harder-to-fake features, deliberately deferred within the suite: **two-way audio** (Playwright can fake
 a mic and assert the WebSocket connects and bytes flow, but never that the camera physically plays it)
