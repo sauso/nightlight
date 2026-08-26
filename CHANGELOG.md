@@ -38,8 +38,31 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   a marker saying "Out of bed" sat next to one saying "Child out of crib". Everything now says **bed**,
   which is also what the app has always called it internally. The sleep timeline also now distinguishes
   a **moment** from a **stretch of time**: "Got out of bed" is when it happened, "Out of bed" is how long
-  it lasted. And activity from someone *else* in the room now reads "Someone in the room", so it can't be
-  mistaken for your child.
+  it lasted.
+- **The night timeline only claims what it can actually tell.** It used to mark every crossing of the
+  bed's edge the cameras thought they saw, and to label movement away from the bed as "Someone in the
+  room". Neither survived contact with a real night: a child rolling over reads as an arrival, so one
+  night showed four "got into bed" markers with no "got out of bed" between any of them — impossible —
+  plus three visits from someone who was never there, and four and a half hours of a child asleep in
+  bed labelled as out of it. One camera can see that something crossed the edge of the bed, but not
+  *who*. The bar now shows just two markers — the put-down that started the night and the morning
+  departure, which are the two the reported times are actually derived from — and anything else is
+  reported as **movement outside the bed**, which is what was measured.
+- **Your child's real bedtime is used, even when it isn't the bedtime you configured.** Bedtimes move
+  night to night and nobody wants to edit a setting each evening, so the configured bedtime is now
+  treated as a guide. A child put down before the window opened has that sleep counted, and the night's
+  timeline is drawn over the sleep that actually happened rather than over the setting — previously
+  everything before the window edge was silently cut off, so a child who went to bed at 7:11pm against a
+  7:30pm setting showed neither his bedtime nor the parent leaving the room, though both had been
+  detected correctly. Sleep before the window still only counts when the camera saw the child put into
+  bed and they stayed asleep into the window.
+- **Noise from elsewhere in the house no longer delays your child's bedtime.** A bedroom microphone
+  hears the whole house, and bedtime is its loudest hour. One child, asleep and motionless from 6:50pm,
+  was recorded as awake until 7:50pm — of the minutes holding it back, most were simultaneously loud in
+  his brother's room next door while his own bed never moved. Once the camera has seen a child put into
+  bed, a noisy minute counts as awake only if that room also *moved* around the same time; on the night
+  above the two children's bedtimes now land within a minute of what their parents recorded. This
+  applies only to working out when sleep began — a cry with no movement still counts as a wake-up.
 
 ### Fixed
 - **No timelapse is made for a night nobody slept there.** A night with an empty bed was still producing

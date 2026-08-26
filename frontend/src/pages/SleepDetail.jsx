@@ -212,14 +212,14 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
           <span><i className="sleep-legend__sw sleep-seg--stir" /> Stirring</span>
           <span><i className="sleep-legend__sw sleep-seg--wake" /> Awake</span>
           <span><i className="sleep-legend__sw sleep-seg--awake" /> Before/after sleep</span>
-          {hasRoom && <span><i className="sleep-legend__sw sleep-legend__sw--visit" /> Someone in the room</span>}
+          {hasRoom && <span><i className="sleep-legend__sw sleep-legend__sw--visit" /> Movement outside the bed</span>}
           {hasChildOut && <span><i className="sleep-legend__sw sleep-legend__sw--out" /> Out of bed</span>}
           {(night.transitions || []).length > 0 && (
             <span><i className="sleep-tl__tx sleep-tl__tx--in" style={{ position: 'static', display: 'inline-block', transform: 'none', margin: '0 4px 1px 0', verticalAlign: 'middle' }} /> Got into bed
               <i className="sleep-tl__tx sleep-tl__tx--out" style={{ position: 'static', display: 'inline-block', transform: 'none', margin: '0 4px 0 10px', verticalAlign: 'middle' }} /> Got out of bed</span>
           )}
         </div>
-        <ClimateTrack night={night} startMs={utcMs(night.window_start)} endMs={utcMs(night.window_end)} tempUnit={tempUnit} />
+        <ClimateTrack night={night} startMs={utcMs(night.display_start || night.window_start)} endMs={utcMs(night.display_end || night.window_end)} tempUnit={tempUnit} />
       </div>
 
       <div className="card">
@@ -239,7 +239,7 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
       {visits.length > 0 && (
         <div className="card">
           <div className="sleep-detail__section-title"><DoorOpen size={15} aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: 6 }} />Room activity · {visits.length}</div>
-          <div className="camera-tile__sub" style={{ margin: '-6px 0 10px' }}>Movement away from the bed — the child out of bed, or someone else in the room.</div>
+          <div className="camera-tile__sub" style={{ margin: '-6px 0 10px' }}>Movement the camera saw away from the bed. Before your child settles and after they get up it&rsquo;s them; in between, it could be them or someone else — the camera can&rsquo;t tell who.</div>
           <ul className="sleep-wakes">
             {visits.map((v, i) => {
               const isOut = v.type === 'child_out';
@@ -247,7 +247,7 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
                 <li key={i} className="sleep-wakes__row">
                   <span className="sleep-wakes__time">{fmtTime(v.start_at)}{v.minutes > 1 ? ` – ${fmtTime(v.end_at)}` : ''}</span>
                   <span className="sleep-visit-right">
-                    <span className={`sleep-visit-tag${isOut ? ' sleep-visit-tag--out' : ''}`}>{isOut ? 'Out of bed' : 'Someone in the room'}</span>
+                    <span className={`sleep-visit-tag${isOut ? ' sleep-visit-tag--out' : ''}`}>{isOut ? 'Out of bed' : 'Movement outside the bed'}</span>
                     <span className={`sleep-wakes__dur ${isOut ? 'sleep-wakes__dur--out' : 'sleep-wakes__dur--visit'}`}>{fmtDur(v.minutes)}</span>
                   </span>
                 </li>
@@ -369,8 +369,10 @@ function RefinedTimes({ night, fmtTime }) {
 // The to-scale bar: each segment positioned by its share of the window, plus hour tick labels and
 // onset/wake markers so the wake-ups read against a real time axis.
 function Timeline({ night, fmtTime, tz, tempUnit }) {
-  const startMs = utcMs(night.window_start);
-  const endMs = utcMs(night.window_end);
+  // The bar spans the night that was actually SLEPT, which can start before the configured window — see
+  // display_start in sleepAnalysis. Falls back to the window for an older payload that has neither.
+  const startMs = utcMs(night.display_start || night.window_start);
+  const endMs = utcMs(night.display_end || night.window_end);
   const totalMs = Math.max(1, endMs - startMs);
   const segs = night.segments || [];
 
@@ -453,7 +455,7 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
           {visits.map((v, i) => (
             <span key={i} className={`sleep-tl__visit${v.type === 'child_out' ? ' sleep-tl__visit--out' : ''}`}
               style={{ left: `${pctOf(v.start_at, startMs, totalMs)}%` }}
-              title={`${v.type === 'child_out' ? 'Out of bed' : 'Someone in the room'} · ${fmtTime(v.start_at)}`} />
+              title={`${v.type === 'child_out' ? 'Out of bed' : 'Movement outside the bed'} · ${fmtTime(v.start_at)}`} />
           ))}
         </div>
       )}
