@@ -350,3 +350,26 @@ test('movement while the child is in bed is not reported as the child being out 
   assert.equal(typeAt('01:00'), 'room', 'mid-sleep movement must not be attributed to the child');
   assert.equal(typeAt('06:00'), 'child_out', 'after the departure it really is the child');
 });
+
+test('the parent walking away at bedtime is not the morning departure', () => {
+  // Found on production within the hour 0.26.0 shipped, on a camera whose bed registers very little
+  // movement overnight. Raffa was put down at 19:11, his mother left at 19:20, he was asleep by 19:23 —
+  // and the empty-bed gap that opens AT onset was corroborated by that three-minutes-EARLIER out_of_bed,
+  // which sits inside the snap window. The night came back "woke 19:20, slept 0h00m".
+  //
+  // Reproducing it needs the same shape: so little in-bed motion that the gap starting at onset passes
+  // the trailing-activity test, and an out_of_bed just before onset. The gap already had to begin at or
+  // after onset; the snap window reaching backwards past it was the hole.
+  layNight(at(18, 20), at(7, 0, 1), {
+    move: [[at(5, 0, 1), at(5, 9, 1)]],
+    out: [[at(18, 38), at(18, 48)]],
+  });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 38)));
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(18, 47))); // the parent leaving, NOT a wake
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(5, 9, 1))); // the real morning departure
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(hhmm(night.onset_at), '18:48');
+  assert.equal(hhmm(night.wake_at), '05:09', 'the morning exit, not the parent leaving at bedtime');
+  assert.ok(night.asleep_minutes > 500, `a full night, not ${night.asleep_minutes} minutes`);
+});
