@@ -53,7 +53,9 @@ export default function MediaPlayerModal({
   }
 
   return (
-    <Modal title={title} onClose={onClose} headerAction={headerAction}>
+    // `wide`: on a desktop window this becomes a centred dialog instead of a 440px phone sheet, so the
+    // video actually uses the screen. No effect below the breakpoint — phones keep the sheet.
+    <Modal title={title} onClose={onClose} headerAction={headerAction} wide>
       <video
         className="clip-player"
         src={api.url(videoPath)}
