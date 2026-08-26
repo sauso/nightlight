@@ -45,117 +45,62 @@ redrawing points the zone at the wrong things and makes out-of-bed detection wor
 grid picker (paint the cells covering the bed) can follow a diagonal bed that the old rectangles
 couldn't. Then review a few mornings against ground truth.
 
-### 1.2 Report a night where nobody was in the bed — `SHIPPED` (on dev, 2026-08-26)
-A fifth status `empty` — "No one in the bed" — now sits alongside `off` / `no_data` / `no_sleep` / `ok`,
-and is deliberately a different statement from `no_data` ("we couldn't see"). Surfaced on the child
-page, the sleep detail page and in the nightly report push. The night is stored with no onset/wake and
-no durations: inventing "11h06m asleep, 0 wakes" for an empty bed was the bug.
+**Update 2026-08-27.** Second clean night in a row: Raffa's wake came out at **05:53, owner-confirmed
+exact**, and his put-down at 19:11 matched an observed 19:10. The re-aim worked. But the false
+`into_bed` events this section blamed on Raffa's framing turned up on **Renz's** camera the same night
+(four of them), so that failure mode is **not** a per-camera framing problem — see 1.2. Close 1.1 on
+the framing question; the classifier is tracked separately.
 
-**Rule, chosen from the 2026-08-25 A/B** (Renz away = empty bed, Raffa in his, same night, same house,
-same firmware) measured against **17 occupied prod nights**. All three must hold:
-`max in-bed motion_peak < 0.10` **and** `wake_count == 0` **and** `awake_minutes == 0`.
+### 1.2 Harden the bed-transition classifier — `NEXT`
+**The remaining piece of the sleep work.** 0.26.0 stopped the timeline *claiming* things this detector
+can't support (only the two adopted transitions are drawn, everything else is "movement outside the
+bed"). That is a containment, not a fix — the underlying classifier is still wrong often enough that its
+per-event output can't be shown.
 
-| signal | empty | occupied floor | separation |
-|---|---|---|---|
-| max in-bed `motion_peak` | 0.0163 | 0.2883 (usually ~1.0) | **18x** |
-| `wake_count` | 0 | >= 1 every night | clean |
-| `awake_minutes` | 0 | >= 10 every night | clean |
+**What's wrong**, measured on 2026-08-26 against owner ground truth (nobody entered Renz's room all
+night; Raffa put down 19:10, his mother out at 19:19):
 
-No occupied night on record trips even one of the three. **The "no `into_bed` all window" discriminator
-this section originally proposed was tested and DISCARDED** — it would have flagged Raffa's genuinely
-occupied night as empty, because his put-downs happened at 19:14-19:28 and his window opens at 19:30,
-so the count *inside the window* was zero. A child is usually put to bed before the window opens;
-transition counts inside the window are not a sound occupancy signal. Magnitude is.
+- **No occupancy state.** `motionDetector.js` runs the out-of-bed and into-bed detectors as independent
+  stateless twins, so nothing stops two arrivals in a row. Renz's night emitted **four consecutive
+  `into_bed` with no `out_of_bed` between any of them** — physically impossible, and the cheapest
+  possible check isn't there.
+- **A child rolling over reads as an arrival.** The false events had bed peaks 0.020–0.042; Raffa's
+  *genuine* put-down was 0.014. **Magnitude alone cannot separate them** — a naive floor would delete
+  the true positives. What differs is the *outside* channel: a person entering produces a large,
+  sustained out-of-zone signal, a stir produces essentially none. Today `into_bed` records only
+  `ibPeakCrib` (the bed side), so the discriminating evidence is thrown away at the moment of capture.
+- **A parent walking away is indistinguishable from a child climbing out.** Both are "bed moved, then
+  outside moved, then bed went quiet". Renz's 18:50 `out_of_bed` was his father leaving the room, and it
+  opened a child-out interval that ran until the first false arrival at 23:12.
 
-⚠️ **n = 1 for the empty case.** The separation is large, but one empty night is one sample — hence the
-conservative 0.10 threshold. Keep an eye on the occupied floor (0.2883) as more nights accumulate.
+**Work:**
+1. Track believed occupancy; ignore an `into_bed` while already in bed and an `out_of_bed` while already
+   out. (Alone this collapses the four arrivals to one.)
+2. Record the outside channel's **peak and duration** alongside each transition — new columns on
+   `bed_transitions` — and require substantial outside evidence for `into_bed`, symmetric for
+   `out_of_bed`.
+3. Separate "parent leaves" from "child exits". Retrospective is fine: the nightly job runs after the
+   night, so an `out_of_bed` followed by continued in-bed micro-motion is a parent leaving.
 
-### 1.2a Bedtime is not a fixed time — `SHIPPED` (on dev, 2026-08-26)
-Sleep that started **before** the window opened was clipped to the window edge, under-reporting an early
-night. The analysis timeline now begins `ONSET_LOOKBEHIND_MS` (3h) before the window, and an early onset
-is adopted only when anchored to a real `into_bed` put-down **and** the sleep continues into the window
-(no awakening in between, which is what excludes an afternoon nap), **and** those minutes were actually
-observed (the settle minute has a sample; the stretch is >= 50% covered).
+**Tune it offline, don't guess.** `bed_transitions` retains 45 days and `activity_samples` 30, so there
+is a real corpus already on staging. Add the evidence columns first, then let a week accumulate before
+choosing thresholds — the same discipline that produced `EMPTY_BED_MAX_PEAK` and
+`MAX_POST_EXIT_ACTIVE_MIN`.
 
-Costs nothing to collect: a framediff-**alerting** camera is never window-gated and already samples 24/7
-— measured at ~1437 of a possible 1440 rows/camera/day, ~10.7 MB at the 30-day retention. Only the
-activity-only leg (MQTT-source / alerts-off cameras) is gated, and it now opens the same 3h early via
-`childSamplingActiveNow` rather than running all day.
+**Done when** a night's per-event markers are trustworthy enough to draw again, i.e. no impossible
+sequences across a week and the put-down/departure pair still matches ground truth.
 
-**Trap worth remembering:** a minute with no sample is treated as *quiet* for continuity, so the
-lookbehind before sampling starts is one long fake quiet run. Searching it for "the first quiet run"
-always lands on the start of a data gap — the search must be anchored on the put-down instead. The first
-implementation had exactly this bug and was silently inert.
+### 1.3 Sound is not a per-room signal — `IDEA`
+Fallout from the same night. A bedroom mic hears the whole house: 16 of the 19 sound-active minutes
+that were holding Renz's onset an hour late were simultaneously loud in his brother's room, while his
+own bed never moved. 0.26.0 handles this for **onset** only (a sound-only minute counts as awake only
+once a put-down proves the child is in the bed, and only if that room also moved nearby).
 
-### 1.3 Promote shadow sleep onset/wake to authoritative — `SHIPPED` (on dev, 2026-08-26)
-**Done.** `USE_TRANSITION_TIMES` in `sleepAnalysis.js` makes the transition-derived onset/wake the
-authoritative `onset_at`/`wake_at`; the movement-only figures are preserved in new `onset_at_algo` /
-`wake_at_algo` columns so the two methods stay comparable (and the promotion stays revertible by one
-flag). Adoption happens BEFORE the metrics, so durations measure to the real departure rather than
-leaving "asleep" counting minutes after the child had already left the bed.
-
-Verified by diffing against the deployed logic over every stored night: **17 of 20 unchanged**, and
-the 3 that moved all moved toward the truth — **2026-08-25 Raffa 06:38 → 05:09 (owner-confirmed exact,
-asleep 646 → 557)**, **2026-08-24 Renz 06:53 → 05:58 (owner-confirmed exact)**, and 2026-08-23 Renz
-06:50 → 07:40 (no ground truth, but Renz's real wake has been observed ~07:57, so closer).
-
-⚠️ **Caught in review, worth remembering:** converting the exit timestamp to a minute index with
-`Math.round` reported 05:10 for an exit recorded at 05:09:31. The reported time must come from the
-exact timestamp truncated to its minute; only the metrics index floors.
-
-The history below is kept because it explains why the thresholds are what they are.
-
-### 1.3a How it got here — `HISTORICAL`
-Out-of-bed detection ships today in **shadow mode**: `sleep_nights.onset_at_shadow` / `wake_at_shadow`
-are computed from the `bed_transitions` table alongside the live motion+sound numbers, but the headline
-figures parents see still come from the old algorithm.
-
-**Why shadow exists:** motion-based tracking is blind to a child who *leaves* — an empty bed and a
-sleeping child both read as "no motion". The bed transitions are what distinguish absence from sleep.
-
-**Why this is now HELD rather than NEXT.** The previous plan here was "eyeball it for a few mornings,
-then flip a line". Measured against owner ground truth on 2026-08-24→25, shadow wake scored **1 of 3**:
-Renz on prod was exact (05:58), Renz on *staging* — same physical camera — was 40 min early, and Raffa
-was 53 min late, i.e. **worse than the algorithm it was meant to replace**. Two distinct causes:
-
-- **Knife-edge thresholds.** Staging was missing a single sample minute that prod had, which
-  manufactured a 22-minute empty-bed gap (limit 20) with 9 minutes of trailing activity (limit 10).
-  Both margins within 2 → accepted. One sample minute flipped the answer for the same camera.
-- **Raffa's zone can't tell inside-bed from outside-bed** — see 1.1.
-
-**Mitigation shipped (0.25.0):** a qualifying gap is now only accepted when a real `out_of_bed`
-corroborates it within the snap window; otherwise the scan continues to a later gap, and failing that
-the algorithm's wake stands. It must be an `out_of_bed` specifically — matching any polarity let an
-`into_bed` vouch for a departure. Replayed against that night's real data: Renz prod 05:58 exact, Renz
-staging 05:18 → 05:58 exact (the prod/staging divergence is gone), Raffa falls back to the algorithm
-(11 min early, rather than 53 min late).
-
-**Scorecard update — night of 2026-08-25→26 (ground truth: Raffa out of bed 05:09, never returned):**
-shadow was **EXACT on both prod and staging** (05:09), against an algorithm that was 89 minutes late
-(06:38). Prod and staging agreed to the minute all night, so the camera re-sync closed the divergence,
-and Raffa's zone *did* emit a real `out_of_bed` at his true exit — clearing 1.1's blocker for that night.
-
-**But it survived on a margin of ZERO, which is why this stays HELD.** The accept test allowed <= 10
-trailing bed-active minutes; the true departure left exactly 10 on staging and 9 on prod. One more
-minute of a parent tidying the bed and the scan would have skipped it and reported the wake ~2h late —
-the same knife-edge as before, landing the right way. **Fixed on dev 2026-08-26:** the cap is now 20,
-chosen from the measured separation (real exits leave 5-8 trailing minutes; the one corroborated
-mid-night impostor on record leaves 31). Verified: no night on record changes its reported wake.
-Also disproven while picking it — **gap *length* is not a "this is the terminal one" signal**: mid-sleep
-empty runs of 226 and 312 minutes are normal, the latter five hours before the child actually got up.
-
-**Remaining work, in order:**
-- **More mornings of ground truth**, on *both* children, now that the margin is comfortable — one exact
-  night is one night. 1.1 is no longer a hard blocker but Raffa's zone should be watched.
-- When it consistently wins: flip to authoritative (~1 line) and point the nightly sleep-report push at
-  the shadow values.
-- Consider extending Renz's `sleep_window_end` — it closes 06:30 but real wake-up has been ~07:57.
-- Watch edge case **B** (child held ~30 min then put back down): a re-settle must require an
-  *into-bed* transition before sustained quiet re-scores as sleep, or the held gap wrongly reads as
-  sleep. Edge case **A** (pre-bedtime quiet in an empty bed scoring as early onset) is handled — onset
-  can't precede the first into-bed event.
-
-Runbook for reading a night's markers: **`sleep-marker-review-runbook.md`**.
+The same confusion must still affect **wake counts** — deliberately left alone, because mid-night the
+house is quiet and a cry with no movement is exactly the wake-up a parent wants counted. Worth
+measuring before touching: across all nights on record, how many counted wakes are sound-only *and*
+simultaneous with noise in the sibling's room? If that number is large, the wake rule needs the same
+treatment. If it's small, leave it alone. **Measure first.**
 
 ---
 

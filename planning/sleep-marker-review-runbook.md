@@ -15,7 +15,8 @@ are different values for the same kid. Look them up fresh if unsure:
 | Camera (staging) | camera_id | child_id |
 |---|---|---|
 | Renz Cam | `501ca6c2-5688-4381-940d-edfa0d1e721d` | `884974cd-b11c-4393-9608-dde3099779f0` |
-| Test Cam | `902098f5-4982-4844-8cf8-575387b326da` | `c75ed329-de89-42ca-83aa-edaf692295b6` |
+| Raffa Room | `96f35fdc-f12f-4a6b-9c82-887be7e95108` | `c75ed329-de89-42ca-83aa-edaf692295b6` |
+| Test Cam | `902098f5-4982-4844-8cf8-575387b326da` | *(none — no child assigned)* |
 | Test | `01248e86-7715-44dc-984f-40fa838ea8ae` | *(none — no child assigned)* |
 
 Verified against the staging DB 2026-08-24.
