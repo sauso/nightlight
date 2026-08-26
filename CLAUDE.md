@@ -16,6 +16,33 @@ heading — don't append a second one.** Duplicate headings are invisible in a P
 [Unreleased] collected four of them across #179-#186 before anyone noticed;
 `node scripts/check-changelog.mjs` now fails CI on that (structure only — it never touches wording).
 
+## Definition of done
+
+Every change ships its tests, its docs and its changelog entry **in the same commit as the code** —
+see the workspace `CLAUDE.md` for the rule and why it exists. What that means concretely here:
+
+**Tests** live in `backend/test/*.test.js` (Node's built-in runner, no dependencies — keep it that way)
+and `frontend/test/**/*.test.{js,jsx}` (vitest + RTL). `test/helpers/harness.js` gives you a real temp
+database and real HTTP with **no mocks**; `frontend/test/helpers/render.jsx` renders a screen as
+**both** an admin and a caregiver, which is where role-gating bugs hide. A fix gets a regression test
+you have watched fail without the fix.
+
+**Docs** live in `docs/`, one file per user-facing area (`recording.md`, `notifications.md`, `mfa.md`,
+`design-language.md`), with `README.md` for anything that changes setup or deployment. Rules of thumb:
+- A new **setting** is documented where its neighbours are, **with its default and its range**.
+- When a new thing behaves *differently* from the thing beside it — kept for a different length of
+  time, notifies when the other doesn't, appears somewhere else — **say so explicitly**. That contrast
+  is what people get wrong, and a table beats prose for it.
+- Changing a **settings path or a control's label** means grepping `docs/` and `README.md` for the old
+  wording. A doc that names a screen that no longer exists is worse than no doc.
+
+**Before opening a PR:**
+```bash
+cd backend && npm test && npm run test:core   # suite green + core coverage not regressed
+cd ../frontend && npm test
+node scripts/check-changelog.mjs              # from the repo root
+```
+
 ## Commands
 
 There is no root-level build — `backend/` and `frontend/` are independent npm projects. No linter is
