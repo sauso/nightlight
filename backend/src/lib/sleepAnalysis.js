@@ -598,6 +598,14 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
         let best = null;
         for (const t of transitions) {
           if (t.type !== TRANSITION.OUT_OF_BED) continue;
+          // The corroborating exit must not PRE-DATE onset. The gap already starts at or after onset,
+          // but the snap window let a transition up to WAKE_SNAP_MS EARLIER vouch for it — and at
+          // bedtime the nearest out_of_bed is the parent walking away from the bed they have just put
+          // the child into. Prod, 2026-08-26: onset 19:23, the mother left at 19:20, and that
+          // three-minutes-earlier event corroborated a gap starting at onset — reporting the morning
+          // wake as 19:20 and the whole night as 0h00m asleep. A departure before the child fell asleep
+          // is not a departure. Latent until onset moved earlier; the earlier onset merely exposed it.
+          if (txMs(t.created_at) < analysisStartUtc.getTime() + algoOnset * 60000) continue;
           const dt = Math.abs(txMs(t.created_at) - emptyStartMs);
           if (dt <= WAKE_SNAP_MS && (best == null || dt < best.dt)) best = { dt, ms: txMs(t.created_at), at: t.created_at };
         }
