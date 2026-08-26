@@ -55,6 +55,9 @@ export default function SettingsRecording() {
         clip_post_roll_s: form.clip_post_roll_s,
         clip_retention_days: form.clip_retention_days,
         clip_retention_max_gb: form.clip_retention_max_gb,
+        wake_clips_enabled: wakeClipsOn,
+        wake_clip_seconds: form.wake_clip_seconds,
+        wake_clip_retention_days: form.wake_clip_retention_days,
         ondemand_pre_roll_s: form.ondemand_pre_roll_s,
         ondemand_max_duration_s: form.ondemand_max_duration_s,
       });
@@ -70,6 +73,7 @@ export default function SettingsRecording() {
   }
 
   const ondemandOn = form.ondemand_enabled ?? true;
+  const wakeClipsOn = form.wake_clips_enabled ?? true;
 
   return (
     <>
@@ -126,6 +130,55 @@ export default function SettingsRecording() {
             </div>
           </div>
 
+          {/* --- Wake clips (sleep-tracker triggered, deliberately silent) --- */}
+          <div className="card">
+            <div className="card-title">Wake clips</div>
+            <div className="list-row" style={{ padding: 0 }}>
+              <div>
+                <div>Record wake-ups without alerting</div>
+                <div className="camera-tile__sub">
+                  Save a short clip when your child wakes, and send nothing.
+                </div>
+              </div>
+              <Switch
+                checked={wakeClipsOn}
+                onChange={(e) => setForm({ ...form, wake_clips_enabled: e.target.checked })}
+                aria-label="Record wake-ups without alerting"
+              />
+            </div>
+
+            {wakeClipsOn && (
+              <>
+                <div className="field-row" style={{ marginTop: 16 }}>
+                  <div className="field">
+                    <label htmlFor="wake-secs">Clip length (seconds)</label>
+                    <input id="wake-secs" type="number" min="5" max="120"
+                      value={form.wake_clip_seconds ?? 30}
+                      onChange={(e) => setForm({ ...form, wake_clip_seconds: e.target.value })} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="wake-days">Keep wake clips for (days)</label>
+                    <input id="wake-days" type="number" min="0" max="365"
+                      value={form.wake_clip_retention_days ?? 14}
+                      onChange={(e) => setForm({ ...form, wake_clip_retention_days: e.target.value })} />
+                  </div>
+                </div>
+                <div className="camera-tile__sub" style={{ marginTop: 10 }}>
+                  Most wake-ups never raise an alert — an alert waits for a couple of seconds of
+                  sustained noise or movement before disturbing you, while sleep tracking reacts to the
+                  first flicker. This records those wake-ups instead of announcing them, so there is
+                  something to look at in the morning. Open a night on the child’s page and a wake-up
+                  with a clip can be expanded to play it.
+                </div>
+                <div className="camera-tile__sub" style={{ marginTop: 8 }}>
+                  Only for children with <strong>Track sleep</strong> on, and only once your child is
+                  asleep — settling at bedtime is never recorded, and a brief stir is ignored. Longer
+                  clips use proportionally more disk (0 days keeps them forever).
+                </div>
+              </>
+            )}
+          </div>
+
           {/* --- On-demand (the Record button) --- */}
           <div className="card">
             <div className="card-title">On-demand recording</div>
@@ -177,6 +230,7 @@ export default function SettingsRecording() {
                   <strong>{fmtBytes(storage.usedBytes)}</strong> used
                   {typeof storage.clipCount === 'number' ? ` · ${storage.clipCount} clip${storage.clipCount === 1 ? '' : 's'}` : ''}
                   {typeof storage.recordingCount === 'number' ? ` · ${storage.recordingCount} recording${storage.recordingCount === 1 ? '' : 's'} (${fmtBytes(storage.recordingBytes)})` : ''}
+                  {storage.wakeClips?.count ? ` · ${storage.wakeClips.count} wake clip${storage.wakeClips.count === 1 ? '' : 's'} (${fmtBytes(storage.wakeClips.bytes)})` : ''}
                   {typeof storage.freeBytes === 'number' && isFinite(storage.freeBytes) ? ` · ${fmtBytes(storage.freeBytes)} free` : ''}
                 </div>
                 <div className="camera-tile__sub" style={{ wordBreak: 'break-all' }}>

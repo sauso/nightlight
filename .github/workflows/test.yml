@@ -92,3 +92,48 @@ jobs:
       # twice. It has no opinion about wording and never rewrites the file.
       - name: Check CHANGELOG.md structure
         run: node scripts/check-changelog.mjs
+
+  definition-of-done:
+    name: Docs + tests reminder
+    # PRs only: it compares against the base branch, and on a plain push there is nothing meaningful
+    # to compare against.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Deliberately a WARNING, never a failure. It cannot tell a feature from a refactor, so it will
+      # sometimes be wrong — and a check that cries wolf is one people learn to click past, which is
+      # worse than no check at all. It exists to make "I'll document it later" a visible decision
+      # rather than an invisible one. The real gates are the human ones in CLAUDE.md and the release
+      # skill; this is just the nudge at the moment it's cheapest to act on.
+      - name: Check that behaviour changes bring docs and tests
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          CHANGED=$(git diff --name-only "$BASE"...HEAD)
+          echo "$CHANGED" | sed 's/^/  /'
+
+          has() { echo "$CHANGED" | grep -qE "$1"; }
+
+          # Did this PR change what the app DOES? Test files and stories don't count as behaviour.
+          BEHAVIOUR=$(echo "$CHANGED" | grep -E '^(backend/src/|frontend/src/)' | grep -vE '/test/' || true)
+          [ -z "$BEHAVIOUR" ] && { echo "No behaviour change — nothing to remind about."; exit 0; }
+
+          if ! has '^(backend/test/|frontend/test/)'; then
+            echo "::warning::This PR changes backend/src or frontend/src but adds no tests. New behaviour needs a test; a fix needs a regression test you have watched fail without the fix. If that genuinely doesn't apply here, say why in the PR."
+          fi
+
+          # A changelog entry means a user can see the change — so a user can probably also read about it.
+          if has '^CHANGELOG\.md' && ! has '^(docs/|README\.md)'; then
+            echo "::warning::This PR adds a changelog entry (so a user will notice it) but touches no docs. A new setting needs its default and range; behaviour that differs from its neighbours needs that difference stated. See the Definition of done in CLAUDE.md."
+          fi
+
+          # A settings column almost always implies a documented setting.
+          if git diff "$BASE"...HEAD -- backend/src/db.js | grep -q 'ALTER TABLE settings ADD COLUMN'; then
+            if ! has '^(docs/|README\.md)'; then
+              echo "::warning::This PR adds a settings column but changes no docs. Every user-facing setting is documented with its default and its range."
+            fi
+          fi
+          echo "Reminder check complete (warnings above, if any, do not fail the build)."
+
