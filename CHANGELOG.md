@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-08-27
+
 ### Fixed
 - **A night could be reported as "slept 0 minutes" when a parent left the room at bedtime.** With your
   child's real bedtime now detected (0.26.0), the search for the morning "got out of bed" could latch
