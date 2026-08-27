@@ -21,7 +21,22 @@ const REPORT_FRESH_MS = 2 * 60 * 60 * 1000;
 // without schema/UI churn (they can graduate to settings later).
 
 const MOTION_ACTIVE = 0.01; // in-bed per-frame changed-fraction above this = real movement (sleeping room ~0)
-const MOTION_OUT_ACTIVE = 0.01; // outside-bed changed-fraction above this = someone in the room / out of bed
+// Outside-bed changed-fraction above this = real activity outside the bed (someone in the room, or the
+// child out of it). Deliberately HIGHER than MOTION_ACTIVE, and not for symmetry's sake: the outside
+// area is most of the frame, so it collects far more incidental change (IR gain shifts, a shadow,
+// compression noise) than the small bed rectangle does, and every false 'movement outside the bed' block
+// on the timeline has come from a reading barely over the old 0.01.
+//
+// Measured over the nights of 2026-08-27 (owner-confirmed nobody entered either room after bedtime):
+// the five spurious outside blocks read 0.010, 0.013, 0.013, 0.014, 0.018 and 0.023, while the one
+// genuine event of the night - Renz climbing out at 05:53 - read 0.104 and 0.074, and a parent in the
+// room reads 0.1-1.0. 0.03 clears the highest false reading on record with room to spare and sits well
+// below the quietest genuine one.
+//
+// NB: this is the per-MINUTE display/analysis threshold, deliberately independent of the per-FRAME
+// threshold the detector uses to open a bed-transition candidate (motionDetector.js, from
+// detect_sensitivity). They answer different questions and are not kept in step.
+const MOTION_OUT_ACTIVE = 0.03;
 const SOUND_ACTIVE = 6; // dB over ambient above this = a clear noise/cry
 const ONSET_QUIET_MIN = 15; // continuous quiet minutes to call it "asleep"
 const WAKE_ACTIVE_MIN = 5; // active minutes (within a run) to count as an awakening (vs a brief stir)
@@ -91,6 +106,30 @@ const EARLY_ONSET_PUTDOWN_MS = 45 * 60 * 1000;
 // so a noise in a bedroom is far more likely to be the child's own, and a child who cries without moving
 // is exactly the wake-up a parent most wants counted.
 const ONSET_SOUND_MOTION_WITHIN_MIN = 2;
+// The same witness rule, applied to the FIRST wake run after onset for this long. Onset and the wake
+// finder read the timeline with different rules, and that seam produces a contradiction at exactly the
+// moment the cross-talk is loudest: once onset correctly ignores the sibling's bedtime next door, the
+// very same sound-only minutes are picked up moments later as the child's first awakening. Measured on
+// prod, 2026-08-27: Renz's onset moves 19:52 -> 19:21 (right), and the noise that had been delaying it
+// immediately reappears as a 10-minute 'wake' at 19:21-19:31 (wrong) - he did not stir once.
+//
+// Scoped to a grace period, not applied to the night, because the argument for discounting sound is
+// entirely about WHEN: bedtime is when the rest of the house is awake and loud. Mid-night it is quiet,
+// a noise in a bedroom is most likely the child's own, and a cry without movement is precisely the
+// wake-up a parent wants counted - so past this grace the plain rule returns. 30 minutes covers the
+// other child's bedtime routine (measured 19:19-19:51 on 2026-08-27).
+//
+// What this can cost: a genuine cry in the first half hour that produces NO movement in the bed at all
+// goes uncounted as an awakening. That is a narrow case (a child who cries almost always moves), and it
+// costs nothing in alerting - sound alerts and their pushes are a separate path and still fire.
+const POST_ONSET_SOUND_WITNESS_MIN = 30;
+// Consecutive into_bed events closer together than this are ONE settling episode, not several arrivals.
+// A child is put down, fusses, is picked up and re-settled — the detector logs each re-settle, but the
+// bedtime a parent would name is when the episode STARTED, and that is the marker the timeline draws.
+// Measured on the nights on record: within an episode the events sit 2-8 minutes apart (2026-08-27
+// Raffa 19:29/19:31/19:34/19:36, Renz 18:30/18:33/18:37/18:39; 2026-08-26 Raffa 19:11/19:19), while the
+// nearest unrelated into_bed is hours away. 10 minutes separates those two populations with margin.
+const PUTDOWN_EPISODE_GAP_MIN = 10;
 // EMPTY BED. The activity-only algo cannot tell a quiet sleeping child from a bed nobody is in: an empty
 // room still yields samples (so coverage passes) and near-zero motion satisfies ONSET_QUIET_MIN, so a
 // night with no child in the bed reported a flawless 11h06m sleep with 0 wakes (2026-08-25, Renz away).
@@ -481,34 +520,45 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
 
   // Onset. The baseline is the historical rule — first sustained quiet run at or after the window opens.
   let onset = firstQuietRunFrom(preMin);
-  // Set only if the early-bedtime path below adopts a put-down; resolved into onsetTransitionAt later.
-  let onsetPutDownAt = null;
 
-  // EARLY BEDTIME. Bedtime is never a rigid clock time: a tired child can be asleep before the window
-  // opens, and clipping onset to the window edge silently loses that sleep. If the first sustained quiet
-  // run of the whole timeline starts BEFORE the window, adopt it — but only under two guards, because a
+  // PUT-DOWN-ANCHORED ONSET. Bedtime is never a rigid clock time. It moves nightly, and nobody is going
+  // to edit the configured window to match it, so the window is a guide and the put-down is the evidence:
+  // onset is the settle that follows the into_bed which actually started the sleep, wherever that lands
+  // relative to the window edge. Adopt the quiet run that follows it — but only under guards, because a
   // quiet room is not by itself evidence of a sleeping child (that is exactly how an empty bed reports a
   // full night, see EMPTY_BED_MAX_PEAK):
   //   1. a real into_bed put-down starts it — someone actually placed the child in the bed; and
   //   2. that sleep runs CONTINUOUSLY into the window (no qualifying awakening in between).
   // Guard 2 is what excludes a late-afternoon NAP: a nap the child got up from has an awakening between
-  // it and bedtime, so it can never be mistaken for the night's onset.
+  // it and bedtime, so it can never be mistaken for the night's onset. It is vacuous for a settle that
+  // lands after the window has already opened (there is no nap to confuse with a bedtime by then); what
+  // bounds those is the "earlier only" test below.
+  //
+  // This deliberately does NOT require the settle to land before the window opens. It used to, and that
+  // one clause silently disabled ONSET_SOUND_MOTION_WITHIN_MIN for every ordinary bedtime: the discount
+  // is only ever applied to a search anchored on a put-down, and this was the only anchored search there
+  // was. Measured on prod, 2026-08-27, both children: the anchored search computed 19:20 and 19:38
+  // (ground truth 19:13 and 19:36), both were discarded for settling after the window had opened, and
+  // the reported onsets fell back to the raw search at 19:52 and 19:51 — 39 and 15 minutes late.
   // Anchored on the PUT-DOWN, not on "the first quiet run in the lookbehind". That distinction is
   // load-bearing: a minute with no sample is treated as quiet for continuity (see `active` above), so
   // before sampling starts the timeline is one long fake quiet run — searching it for quiet would always
   // land on the start of a data gap, never on a real bedtime. Walking the into_bed events instead means
   // we only ever consider stretches an actual put-down began.
   const maxSettleMin = EARLY_ONSET_PUTDOWN_MS / 60000;
-  // Kept as {idx, at} rather than bare indices: whichever of these the guards accept is the put-down
-  // that began the night's sleep, and it is the only marker the timeline may draw for onset.
   const earlyPutDowns = transitions
     .filter((t) => t.type === TRANSITION.INTO_BED)
-    .map((t) => ({ idx: txIdx(t.created_at), at: t.created_at }))
-    .filter((p) => p.idx >= 0 && p.idx < preMin)
+    .map((t) => ({ idx: txIdx(t.created_at) }))
+    .filter((p) => p.idx >= 0 && p.idx < totalMin)
     .sort((a, b) => a.idx - b.idx);
-  for (const { idx: putDown, at: putDownAt } of earlyPutDowns) {
+  for (const { idx: putDown } of earlyPutDowns) {
     const q = firstQuietRunFrom(putDown, true);
-    if (q == null || q >= preMin) continue; // never settled, or only settled after the window opened
+    if (q == null) continue; // never settled after this put-down
+    // Only ever EARLIER than the plain search. The put-down anchor exists to recover sleep the plain
+    // search loses to household noise; it must never push onset later. It is also what stops a 3am
+    // re-settle — whose own following quiet run qualifies just as well — from being adopted as the
+    // night's bedtime on a night where every evening put-down failed its guards.
+    if (onset != null && q >= onset) continue;
     if (q - putDown > maxSettleMin) continue; // settled far too long after this put-down to be its result
     // Don't claim sleep we didn't actually observe: the settle minute must have a sample, and the
     // stretch from there to the window must be mostly covered.
@@ -520,7 +570,6 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     // an awakening between it and bedtime, so it can never be adopted as the night's onset.
     if (hasAwakening(q, preMin)) continue;
     onset = q;
-    onsetPutDownAt = putDownAt;
     break; // earliest qualifying put-down wins
   }
   if (onset == null) return { ...result, status: 'no_sleep' };
@@ -538,11 +587,19 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // restless night the child is re-settled several times (into_bed at ~3am after a 2-4am waking), and the
   // LAST such re-settle must not be mistaken for the night's onset (that bug put onset at 4:20am on
   // 2026-08-23). The first qualifying sleep stretch is the onset; later re-settles are mid-night wakes.
+  //
+  // Bounded to put-downs within maxSettleMin of the movement-only onset, because "an into_bed only ever
+  // delays onset" is only true of the put-down that STARTED this sleep. Put-downs are missed often
+  // enough for that to matter — on 2026-08-27 the real 19:13 put-down was recorded as an out_of_bed, so
+  // the night had no bedtime into_bed at all. On a night like that the earliest into_bed on the timeline
+  // can be a 2am re-settle, and delaying onset to it reports a 10-hour night as a 5-hour one. A
+  // put-down hours after the room went quiet is not the one that began the sleep.
   let transitionOnset = null;
   for (const t of transitions) {
     if (t.type !== TRANSITION.INTO_BED) continue;
     const idx = txIdx(t.created_at);
     if (idx < 0 || idx >= totalMin) continue;
+    if (idx > algoOnset + maxSettleMin) continue; // too late to be the put-down that started this sleep
     const q = firstQuietRunFrom(idx, true);
     if (q != null) { transitionOnset = Math.max(q, algoOnset); break; } // earliest qualifying into_bed wins
   }
@@ -634,38 +691,56 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   if (USE_TRANSITION_TIMES && transitionOnset != null) onset = transitionOnset;
 
   // The single into_bed the timeline may draw for onset: the put-down that actually started this sleep.
-  // When the early-bedtime path fired it already identified one under its guards, so use that. Otherwise
-  // take the LATEST into_bed at or before onset that is close enough to have caused it — the same
-  // put-down-to-settle relationship, just inside the window rather than before it.
+  // Take the LATEST into_bed at or before onset that is close enough to have caused it, then walk BACK
+  // through the settling episode it belongs to (see PUTDOWN_EPISODE_GAP_MIN) and draw the START of that
+  // episode — the moment a parent would call bedtime.
+  //
+  // Neither end of that alone is right, which is why it is both. Taking the latest event reports the
+  // last re-settle as the bedtime (2026-08-26 Raffa: put down 19:10, marker 19:19 — which was actually
+  // his mother leaving, misread as an arrival). Taking the earliest that passes the onset guards reports
+  // the first attempt on a night with several (2026-08-27 Raffa: marker 19:29 for a 19:36 put-down).
+  // Anchoring on the latest and then walking back over the episode gets 2026-08-26 Raffa to 19:11
+  // (observed 19:10) and 2026-08-27 Raffa to 19:29 (observed 19:28).
   //
   // Deliberately NOT the into_bed that transitionOnset iterates to. That loop stops at the EARLIEST
   // into_bed with any qualifying quiet run after it, then clamps the result up to algoOnset, so its
   // marker can be hours adrift of the sleep it dated (on 2026-08-26 it pointed at a 16:33 afternoon
   // event). Harmless while the value was only clamped; wrong the moment it is drawn on a timeline.
-  let onsetTransitionAt = onsetPutDownAt;
-  if (onsetTransitionAt == null) {
-    for (const t of transitions) {
-      if (t.type !== TRANSITION.INTO_BED) continue;
-      const idx = txIdx(t.created_at);
-      if (idx > onset || onset - idx > maxSettleMin) continue;
-      onsetTransitionAt = t.created_at; // keep walking; the last match is the closest put-down
-    }
+  const putDownsBeforeOnset = transitions
+    .filter((t) => t.type === TRANSITION.INTO_BED)
+    .map((t) => ({ at: t.created_at, idx: txIdx(t.created_at) }))
+    .filter((p) => p.idx <= onset && onset - p.idx <= maxSettleMin)
+    .sort((a, b) => a.idx - b.idx);
+  let onsetTransitionAt = null;
+  if (putDownsBeforeOnset.length) {
+    let first = putDownsBeforeOnset.length - 1; // the closest put-down before the settle
+    while (first > 0 && putDownsBeforeOnset[first].idx - putDownsBeforeOnset[first - 1].idx <= PUTDOWN_EPISODE_GAP_MIN) first--;
+    onsetTransitionAt = putDownsBeforeOnset[first].at;
   }
 
   // Mark minutes that belong to a qualifying awakening after onset. A run bridges short quiet gaps
   // (<= WAKE_GAP_MIN) so intermittent noise/movement — a child fussing on and off, or moving in and out
   // of view — reads as ONE wake rather than being split into sub-threshold stirs. A run qualifies when
   // it contains >= WAKE_ACTIVE_MIN active minutes; it's trimmed to its first/last active minute.
+  //
+  // Reads `active` everywhere EXCEPT the first POST_ONSET_SOUND_WITNESS_MIN minutes after onset, where
+  // it reads the witnessed view for the same reason onset does — see POST_ONSET_SOUND_WITNESS_MIN. This
+  // is one view, not a branch inside the run walk, so a run that starts inside the grace and continues
+  // past it is still detected as one run (it simply stops discounting sound at the boundary).
+  const graceEnd = Math.min(totalMin, onset + POST_ONSET_SOUND_WITNESS_MIN);
+  const activeForWake = new Array(totalMin);
+  for (let i = 0; i < totalMin; i++) activeForWake[i] = i >= onset && i < graceEnd ? activeForOnset[i] : active[i];
+
   const inWake = new Array(totalMin).fill(false);
   for (let i = onset; i < totalMin; ) {
-    if (!active[i]) { i++; continue; }
+    if (!activeForWake[i]) { i++; continue; }
     let last = i;
     let count = 0;
     let k = i;
     while (k < totalMin) {
-      if (active[k]) { last = k; count++; k++; continue; }
+      if (activeForWake[k]) { last = k; count++; k++; continue; }
       let g = k;
-      while (g < totalMin && !active[g]) g++;
+      while (g < totalMin && !activeForWake[g]) g++;
       if (g < totalMin && g - k <= WAKE_GAP_MIN) { k = g; continue; } // bridge a short quiet gap
       break;
     }
