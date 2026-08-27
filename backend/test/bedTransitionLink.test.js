@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { oobLinkKind } from '../src/lib/motionDetector.js';
+import { oobLinkKind } from '../src/lib/bedTransitionRules.js';
 
 test('an adult lifting a child out links instantly', () => {
   // One continuous movement: the bed and the outside area are active within a few hundred ms of each

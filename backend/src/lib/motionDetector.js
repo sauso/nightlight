@@ -7,6 +7,7 @@ import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
 import { recordMotion, recordMotionOut } from './activityTracker.js';
 import { recordBedTransition, TRANSITION } from './bedTransitions.js';
+import { oobLinkKind, OOB_LINK_MS, OOB_LINK_SLOW_MS, OOB_SLOW_OUT_MIN } from './bedTransitionRules.js';
 import { childSamplingActiveNow } from './sleepAnalysis.js';
 
 // Server-side motion detection. Per camera with detection enabled, a cheap FFmpeg leg reads
@@ -48,39 +49,13 @@ const ACTIVE_GRACE_MS = 1500;
 // and are AUTHORITATIVE for the reported wake time (see USE_TRANSITION_TIMES in sleepAnalysis.js), so a
 // missed exit here is a wrong wake time on the child's night, not just a missing marker.
 //
-// TWO link windows, because the two ways a body leaves a bed do not look alike:
+// The link windows themselves live in `bedTransitionRules.js` — pure, importable, and therefore
+// testable without ffmpeg or a stream. See there for why there are two of them.
 //
-//   - An adult LIFTING a child out is one continuous movement, so the bed and the outside area are in
-//     motion within a few hundred milliseconds of each other. Every confirmed exit on record links in
-//     190-620 ms, comfortably inside the fast window.
-//   - A child climbing out HIMSELF shakes the bed, then stands on the floor, and only moves across the
-//     room some seconds later. Nothing bridges that pause, so the fast window never sees a candidate at
-//     all. Prod, 2026-08-28: Renz got out at 05:52 (bed 0.050, outside quiet), was moving around the
-//     room by 05:53 (outside 0.104, bed quiet) and gone by 05:55. No `[oob]` candidate was logged, his
-//     wake was reported as 07:14 instead of 05:52, and the whole night's numbers hung off that.
-//
-// So a SLOW link is allowed up to OOB_LINK_SLOW_MS, but only for a substantial outside burst. That floor
-// is what keeps the wider window from admitting noise, and it is measured rather than guessed: across
-// 10.7 days of retained samples on both cameras, the "bed active, then outside-only the next minute"
-// shape occurs four times — three at outside 0.010-0.012 (nobody in either room) and one at 0.104 (the
-// real exit above). 0.05 separates them with a wide margin on both sides.
-const OOB_LINK_MS = 8000; // bed active within this long before the outside burst = a lift-out
-const OOB_LINK_SLOW_MS = 60000; // ...or this long, if the outside burst is big enough to be a body
-const OOB_SLOW_OUT_MIN = 0.05; // outside changed-fraction required to use the slow window
 // A rejected link is logged (rate-limited) up to this far back, so the real gap distribution stays
 // measurable from the logs rather than being invisible the way the 05:52 miss was.
 const OOB_NEARMISS_MS = 180000;
 const OOB_NEARMISS_LOG_MS = 30000;
-
-// Which link window (if any) lets this outside burst be read as motion that LEFT the bed. Exported and
-// pure so the rule can be tested directly: the frame loop it lives in needs ffmpeg and a real stream,
-// which is exactly how the 8000ms-only version shipped able to miss every unaided climb-out unnoticed.
-// Returns 'fast' | 'slow' | null.
-export function oobLinkKind(sinceMs, outFraction) {
-  if (sinceMs <= OOB_LINK_MS) return 'fast';
-  if (sinceMs <= OOB_LINK_SLOW_MS && outFraction >= OOB_SLOW_OUT_MIN) return 'slow';
-  return null;
-}
 const OOB_CONFIRM_QUIET_MS = 6000; // ...and the bed must stay quiet this long after, to count as "left"
 const OOB_COOLDOWN_MS = 120000; // don't re-log an exit more than once per this
 
