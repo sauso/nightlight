@@ -57,6 +57,14 @@ can't support (only the two adopted transitions are drawn, everything else is "m
 bed"). That is a containment, not a fix — the underlying classifier is still wrong often enough that its
 per-event output can't be shown.
 
+**Two of the three causes below have since been addressed; item 2 has not.** The owner enlarged Renz's
+bed zone on 2026-08-27 after spotting in the timelapse that he sleeps with his head outside it, and the
+night of 2026-08-27 measured **zero** false `into_bed` events during sleep against four the night
+before, with outside-only minutes going 0 → 8. A zone that cuts through the sleeping child was the
+upstream cause of the false arrivals, not the classifier's thresholds. Separately the exit rule now has
+a slow link window (see the entry under `[Unreleased]`), which fixes the missed unaided climb-out.
+What remains is the occupancy state and telling a parent leaving from a child getting out.
+
 **What's wrong**, measured on 2026-08-26 against owner ground truth (nobody entered Renz's room all
 night; Raffa put down 19:10, his mother out at 19:19):
 
@@ -75,12 +83,20 @@ night; Raffa put down 19:10, his mother out at 19:19):
 
 **Work:**
 1. Track believed occupancy; ignore an `into_bed` while already in bed and an `out_of_bed` while already
-   out. (Alone this collapses the four arrivals to one.)
+   out. (Alone this collapses the four arrivals to one.) — **still open**, and still the cheapest win.
 2. Record the outside channel's **peak and duration** alongside each transition — new columns on
    `bed_transitions` — and require substantial outside evidence for `into_bed`, symmetric for
-   `out_of_bed`.
+   `out_of_bed`. — **lower priority now**: the zone fix removed the false arrivals this was aimed at,
+   and the evidence columns are still worth having, but no longer urgent.
 3. Separate "parent leaves" from "child exits". Retrospective is fine: the nightly job runs after the
-   night, so an `out_of_bed` followed by continued in-bed micro-motion is a parent leaving.
+   night, so an `out_of_bed` followed by continued in-bed micro-motion is a parent leaving. — **still
+   open, and now the most valuable item.** Measured 2026-08-27: the real put-down at 19:14 was recorded
+   as an `out_of_bed` (the parent's hands leaving the bed), so that night had no bedtime `into_bed` at
+   all and the drawn marker was 40 minutes adrift. The reported bedtime survived it, but only because
+   the sleep analysis no longer depends on the label being right.
+4. **New: log-driven tuning is now possible.** The exit rule logs rejected links (`[oob] … link
+   rejected`) with the actual gap and outside magnitude, so the real distribution can be read off a
+   week of logs rather than guessed. Read it before moving `OOB_LINK_SLOW_MS` or `OOB_SLOW_OUT_MIN`.
 
 **Tune it offline, don't guess.** `bed_transitions` retains 45 days and `activity_samples` 30, so there
 is a real corpus already on staging. Add the evidence columns first, then let a week accumulate before
@@ -96,11 +112,17 @@ that were holding Renz's onset an hour late were simultaneously loud in his brot
 own bed never moved. 0.26.0 handles this for **onset** only (a sound-only minute counts as awake only
 once a put-down proves the child is in the bed, and only if that room also moved nearby).
 
-The same confusion must still affect **wake counts** — deliberately left alone, because mid-night the
-house is quiet and a cry with no movement is exactly the wake-up a parent wants counted. Worth
-measuring before touching: across all nights on record, how many counted wakes are sound-only *and*
-simultaneous with noise in the sibling's room? If that number is large, the wake rule needs the same
-treatment. If it's small, leave it alone. **Measure first.**
+**Partly closed since.** The first *half hour* after onset now uses the same witness rule, because
+fixing bedtime moved the problem rather than removing it: the noise that had been delaying onset
+reappeared immediately as the first wake-up. Across all stored nights that removed exactly three
+counted wakes, every one of them 15–22 minutes after onset, and one of them owner-confirmed false
+(2026-08-26 Renz, asleep and motionless, nobody in the room).
+
+What is still open is the **rest of the night** — deliberately left alone, because mid-night the house
+is quiet and a cry with no movement is exactly the wake-up a parent wants counted. Worth measuring
+before touching: across all nights on record, how many counted wakes are sound-only *and* simultaneous
+with noise in the sibling's room? If that number is large, the wake rule needs the same treatment. If
+it's small, leave it alone. **Measure first.**
 
 ---
 

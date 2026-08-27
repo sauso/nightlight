@@ -41,11 +41,46 @@ const PIXEL_DELTA = 24;
 // flickers frame to frame); only a gap longer than this ends the run.
 const ACTIVE_GRACE_MS = 1500;
 
-// --- "Out of bed" prototype (bed -> outside transition) ---
+// --- "Out of bed" (bed -> outside transition) ---
 // A child climbing out reads as motion in the bed FIRST, then motion OUTSIDE the bed while the bed
 // goes and STAYS quiet (the child has left it). A parent entering is the reverse (outside first) or
-// leaves the child still stirring in the bed. Log-only for now while we tune it on staging.
-const OOB_LINK_MS = 8000; // bed must have been active within this long before the outside burst
+// leaves the child still stirring in the bed. Confirmed transitions are persisted to `bed_transitions`
+// and are AUTHORITATIVE for the reported wake time (see USE_TRANSITION_TIMES in sleepAnalysis.js), so a
+// missed exit here is a wrong wake time on the child's night, not just a missing marker.
+//
+// TWO link windows, because the two ways a body leaves a bed do not look alike:
+//
+//   - An adult LIFTING a child out is one continuous movement, so the bed and the outside area are in
+//     motion within a few hundred milliseconds of each other. Every confirmed exit on record links in
+//     190-620 ms, comfortably inside the fast window.
+//   - A child climbing out HIMSELF shakes the bed, then stands on the floor, and only moves across the
+//     room some seconds later. Nothing bridges that pause, so the fast window never sees a candidate at
+//     all. Prod, 2026-08-28: Renz got out at 05:52 (bed 0.050, outside quiet), was moving around the
+//     room by 05:53 (outside 0.104, bed quiet) and gone by 05:55. No `[oob]` candidate was logged, his
+//     wake was reported as 07:14 instead of 05:52, and the whole night's numbers hung off that.
+//
+// So a SLOW link is allowed up to OOB_LINK_SLOW_MS, but only for a substantial outside burst. That floor
+// is what keeps the wider window from admitting noise, and it is measured rather than guessed: across
+// 10.7 days of retained samples on both cameras, the "bed active, then outside-only the next minute"
+// shape occurs four times — three at outside 0.010-0.012 (nobody in either room) and one at 0.104 (the
+// real exit above). 0.05 separates them with a wide margin on both sides.
+const OOB_LINK_MS = 8000; // bed active within this long before the outside burst = a lift-out
+const OOB_LINK_SLOW_MS = 60000; // ...or this long, if the outside burst is big enough to be a body
+const OOB_SLOW_OUT_MIN = 0.05; // outside changed-fraction required to use the slow window
+// A rejected link is logged (rate-limited) up to this far back, so the real gap distribution stays
+// measurable from the logs rather than being invisible the way the 05:52 miss was.
+const OOB_NEARMISS_MS = 180000;
+const OOB_NEARMISS_LOG_MS = 30000;
+
+// Which link window (if any) lets this outside burst be read as motion that LEFT the bed. Exported and
+// pure so the rule can be tested directly: the frame loop it lives in needs ffmpeg and a real stream,
+// which is exactly how the 8000ms-only version shipped able to miss every unaided climb-out unnoticed.
+// Returns 'fast' | 'slow' | null.
+export function oobLinkKind(sinceMs, outFraction) {
+  if (sinceMs <= OOB_LINK_MS) return 'fast';
+  if (sinceMs <= OOB_LINK_SLOW_MS && outFraction >= OOB_SLOW_OUT_MIN) return 'slow';
+  return null;
+}
 const OOB_CONFIRM_QUIET_MS = 6000; // ...and the bed must stay quiet this long after, to count as "left"
 const OOB_COOLDOWN_MS = 120000; // don't re-log an exit more than once per this
 
@@ -53,9 +88,12 @@ const OOB_COOLDOWN_MS = 120000; // don't re-log an exit more than once per this
 // The mirror of out-of-bed: a child being placed INTO the bed reads as motion OUTSIDE first (parent
 // carrying/leaning in), then motion in the BED while the outside goes and STAYS quiet (the parent stepped
 // back, leaving the child settling in the bed alone). Same state machine as OOB with the two channels
-// swapped. Confirmed transitions are persisted to `bed_transitions` (see lib/bedTransitions.js) and feed
-// the SHADOW onset/wake columns; the headline sleep numbers still come from the motion+sound algorithm
-// until the shadow values are promoted — see planning/ROADMAP.md §1.1.
+// swapped. Confirmed transitions are persisted to `bed_transitions` (see lib/bedTransitions.js).
+//
+// NOT given the slow window its twin has. The asymmetry is the point: the slow link exists for a child
+// climbing out unaided, and there is no matching event on the way in — a child cannot put himself to
+// bed, so an entry is always someone carrying him, which is continuous motion. Widening this side would
+// only admit more of the false arrivals this detector is already prone to (see ROADMAP §1.2).
 const IB_LINK_MS = 8000; // outside must have been active within this long before the bed burst
 const IB_CONFIRM_QUIET_MS = 6000; // ...and the outside must stay quiet this long after, to count as "placed in"
 const IB_COOLDOWN_MS = 120000; // don't re-log an entry more than once per this
@@ -219,6 +257,7 @@ export async function startMotionDetector(camera) {
     let oobPendingAt = 0; // when a bed->outside exit candidate opened (0 = none pending)
     let oobPeakOut = 0; // peak outside-fraction seen during the pending candidate
     let oobLastLog = 0;
+    let oobLastNearMiss = 0; // rate-limit for the rejected-link diagnostic
     // Into-bed twin state (see IB_* constants above) — mirror of OOB with the channels swapped.
     let outLastActive = 0; // last frame the outside-bed area moved
     let ibPendingAt = 0; // when an outside->bed entry candidate opened (0 = none pending)
@@ -264,12 +303,21 @@ export async function startMotionDetector(camera) {
           if (outActive) outLastActive = now;
           if (!oobPendingAt) {
             // Candidate: outside just moved, the bed moved recently but is quiet NOW → motion left the bed.
-            if (outActive && !cribActive && cribLastActive > 0 && now - cribLastActive <= OOB_LINK_MS) {
-              oobPendingAt = now;
-              oobPeakOut = outFraction;
-              logger.info(
-                `[oob] "${camera.name}" exit candidate — bed active ${now - cribLastActive}ms ago, outside now ${(outFraction * 100).toFixed(1)}%`
-              );
+            if (outActive && !cribActive && cribLastActive > 0) {
+              const since = now - cribLastActive;
+              const link = oobLinkKind(since, outFraction);
+              if (link) {
+                oobPendingAt = now;
+                oobPeakOut = outFraction;
+                logger.info(
+                  `[oob] "${camera.name}" exit candidate (${link}) — bed active ${since}ms ago, outside now ${(outFraction * 100).toFixed(1)}%`
+                );
+              } else if (since <= OOB_NEARMISS_MS && now - oobLastNearMiss >= OOB_NEARMISS_LOG_MS) {
+                oobLastNearMiss = now;
+                logger.info(
+                  `[oob] "${camera.name}" link rejected — bed active ${since}ms ago, outside ${(outFraction * 100).toFixed(1)}% (need <=${OOB_LINK_MS}ms, or <=${OOB_LINK_SLOW_MS}ms at >=${(OOB_SLOW_OUT_MIN * 100).toFixed(0)}%)`
+                );
+              }
             }
           } else {
             if (outFraction > oobPeakOut) oobPeakOut = outFraction;

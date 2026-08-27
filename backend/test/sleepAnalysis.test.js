@@ -373,3 +373,127 @@ test('the parent walking away at bedtime is not the morning departure', () => {
   assert.equal(hhmm(night.wake_at), '05:09', 'the morning exit, not the parent leaving at bedtime');
   assert.ok(night.asleep_minutes > 500, `a full night, not ${night.asleep_minutes} minutes`);
 });
+
+// --- Bedtime after the window opens (the ordinary case) ---------------------------------------------
+
+// `layNight` drives the outside channel at 0.3 — plainly a person. `layNightOut` is the same but lets a
+// test pick the magnitude, so the marginal readings that produced false "movement outside the bed"
+// blocks can be reproduced.
+function layNightOut(from, to, { move = [], noise = [], out = [] } = {}, outPeak = 0.3) {
+  const within = (t, ranges) => ranges.some(([a, b]) => t >= a && t < b);
+  for (let t = from; t < to; t = new Date(t.getTime() + 60000)) {
+    insertFull.run(
+      CAM, sqlTime(t),
+      within(t, move) ? 0.4 : 0.0002,
+      within(t, move) ? 0.4 : 0.0002,
+      within(t, noise) ? 20 : 0.5,
+      within(t, out) ? outPeak : 0.0004
+    );
+  }
+}
+
+test('a put-down AFTER the window opens still gets the benefit of the sound rule', () => {
+  // The bug this exists for: the sound-witness rule was only ever reachable from the early-bedtime
+  // path, which required the child to have settled BEFORE the window opened. Every ordinary bedtime —
+  // window 19:30, asleep 19:41 — fell through to the raw search and was held back by household noise.
+  // Prod 2026-08-27: Renz went down at 19:13 and was reported asleep at 19:52, 39 minutes late.
+  //
+  // Down at 19:38, still by 19:41, and the house loud until 20:25 with NOTHING moving in his room.
+  layNightOut(at(18, 20), at(7, 0, 1), {
+    move: [[at(19, 38), at(19, 41)]],
+    noise: [[at(19, 45), at(20, 25)]],
+  });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(19, 38)));
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.status, 'ok');
+  assert.equal(hhmm(night.onset_at), '19:41', 'onset must follow the put-down, not the end of the noise');
+});
+
+test('a mid-night re-settle can never become the night bedtime', () => {
+  // The put-down anchor walks every into_bed, so a 2am re-settle has a qualifying quiet run after it
+  // just as the evening one does. Only the "earlier than the plain search" test stops it being adopted
+  // as the night's onset — without it, a night whose evening put-down failed its guards would report
+  // bedtime at 2am.
+  layNightOut(at(18, 20), at(7, 0, 1), {
+    move: [[at(19, 20), at(20, 5)], [at(2, 0, 1), at(2, 5, 1)]],
+  });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(2, 5, 1)));
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(hhmm(night.onset_at), '20:05', 'the evening settle, not the 2am re-settle');
+});
+
+test('household noise just after bedtime is not the first awakening', () => {
+  // The seam between the two rules. Once onset correctly ignores the other child's bedtime next door,
+  // the very same sound-only minutes get picked up moments later as this child's first wake-up —
+  // measured on prod 2026-08-27, where fixing Renz's onset invented a 10-minute "wake" at 19:21.
+  // Nothing moved in this room at all; the noise is through the wall.
+  layNightOut(at(18, 20), at(7, 0, 1), {
+    move: [[at(19, 38), at(19, 41)]],
+    noise: [[at(20, 0), at(20, 12)]],
+  });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(19, 38)));
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(hhmm(night.onset_at), '19:41');
+  assert.equal(night.wake_count, 0, 'noise with nothing moving, minutes after falling asleep, is not a wake');
+});
+
+test('the grace is a grace, not a licence: the same noise later IS a wake', () => {
+  // Guard on the test above. Past POST_ONSET_SOUND_WITNESS_MIN the plain rule returns, because
+  // mid-night the house is quiet and a noise in a bedroom is most likely the child's own.
+  layNightOut(at(18, 20), at(7, 0, 1), {
+    move: [[at(19, 38), at(19, 41)]],
+    noise: [[at(21, 0), at(21, 12)]],
+  });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(19, 38)));
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.wake_count, 1, 'a cry an hour later is a wake-up, discount or no discount');
+});
+
+test('the onset marker is the START of the settling episode, not the last re-settle', () => {
+  // A child put down, fussing, and re-settled logs an into_bed each time. The bedtime a parent would
+  // name is when that episode began. Drawing the last one reported 19:19 for a 19:10 put-down
+  // (2026-08-26 Raffa — and 19:19 was actually his mother leaving, misread as an arrival); drawing the
+  // earliest that passes the onset guards reported the first attempt on a night with several.
+  layNightOut(at(18, 20), at(7, 0, 1), { move: [[at(19, 20), at(19, 41)]] });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(17, 0))); // hours earlier — a different episode
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(19, 20)));
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(19, 26)));
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(19, 33)));
+
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  const into = night.transitions.filter((t) => t.type === 'into_bed');
+  assert.equal(into.length, 1, 'exactly one put-down marker is drawn');
+  assert.equal(hhmm(into[0].at), '19:20', 'the start of the episode');
+});
+
+test('a marginal outside reading is not reported as movement outside the bed', () => {
+  // Every false "movement outside the bed" block on record came from a reading barely over the old
+  // 0.01: 0.010-0.023 on nights the owner confirmed nobody entered either room, against 0.07-1.0 for
+  // real events. The outside area is most of the frame, so it collects far more incidental change
+  // (IR gain, a shadow) than the small bed rectangle does.
+  layNightOut(at(18, 20), at(7, 0, 1), {
+    move: [[at(19, 38), at(19, 41)]],
+    out: [[at(1, 0, 1), at(1, 3, 1)]],
+  }, 0.02);
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(19, 38)));
+
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(night.visits.length, 0, 'a 0.02 outside reading is noise, not someone in the room');
+});
+
+test('a real outside reading still is', () => {
+  // Guard on the test above — the floor must not silence the channel it exists to clean up.
+  layNightOut(at(18, 20), at(7, 0, 1), {
+    move: [[at(19, 38), at(19, 41)]],
+    out: [[at(1, 0, 1), at(1, 3, 1)]],
+  }, 0.10);
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(19, 38)));
+
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(night.visits.length, 1);
+  assert.equal(hhmm(night.visits[0].start_at), '01:00');
+});
