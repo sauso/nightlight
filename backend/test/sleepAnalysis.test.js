@@ -44,10 +44,20 @@ const insertTransition = db.prepare(
 
 // One sample per minute across [from, to). Minutes inside an `active` range carry real movement; the
 // rest are the near-zero readings a quiet room produces.
-function laySamples(from, to, activeRanges = []) {
+// `still` is the in-bed peak on a minute with nothing happening, and it is NOT a throwaway number: it
+// is the whole difference between a motionless child and an empty bed (see OCCUPANCY_MIN_PEAK).
+// Measured over the 14 nights on record, max in-bed peak in the 150 min after onset: 0.0045 for the
+// stillest genuine bedtime, 0.0001 for the empty room that was misreported as one. STILL_OCCUPIED sits
+// between them — quiet enough to stay under MOTION_ACTIVE, alive enough to prove somebody is there.
+const STILL_OCCUPIED = 0.004;
+const STILL_EMPTY = 0.0002;
+
+// Default is STILL_EMPTY, because the empty-bed tests below depend on this floor. A test asserting a
+// child is actually IN the bed across a still stretch has to pass STILL_OCCUPIED and mean it.
+function laySamples(from, to, activeRanges = [], still = STILL_EMPTY) {
   for (let t = from; t < to; t = new Date(t.getTime() + 60000)) {
     const moving = activeRanges.some(([a, b]) => t >= a && t < b);
-    insertSample.run(CAM, sqlTime(t), moving ? 0.4 : 0.0002, moving ? 0.6 : 0.0004);
+    insertSample.run(CAM, sqlTime(t), moving ? 0.4 : still, moving ? 0.6 : still);
   }
 }
 
@@ -72,7 +82,9 @@ after(() => {
 
 test('early bedtime: sleep starting before the window is measured from when it started', () => {
   // Put down at 18:38, 52 minutes before the 19:30 window opens; sleeps through, stirs once at 02:00.
-  laySamples(at(18, 20), at(7, 0, 1), [[at(2, 0, 1), at(2, 8, 1)]]);
+  // STILL_OCCUPIED, not the default floor: the child IS in this bed, and an early bedtime now has to
+  // show it (an empty room satisfies every other early-bedtime guard — that is the 2026-08-28 bug).
+  laySamples(at(18, 20), at(7, 0, 1), [[at(2, 0, 1), at(2, 8, 1)]], STILL_OCCUPIED);
   insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 38)));
 
   const night = computeNight(CHILD, DATE);
@@ -234,13 +246,13 @@ const insertFull = db.prepare(
 // can't do, since it moves motion and sound together and every interesting case here pulls them apart.
 //   move  = real movement in the bed        noise = a clear sound with NOTHING moving
 //   out   = movement outside the bed (someone in the room, or the child out of it)
-function layNight(from, to, { move = [], noise = [], out = [] } = {}) {
+function layNight(from, to, { move = [], noise = [], out = [], still = STILL_OCCUPIED } = {}) {
   const within = (t, ranges) => ranges.some(([a, b]) => t >= a && t < b);
   for (let t = from; t < to; t = new Date(t.getTime() + 60000)) {
     insertFull.run(
       CAM, sqlTime(t),
-      within(t, move) ? 0.4 : 0.0002,
-      within(t, move) ? 0.4 : 0.0002,
+      within(t, move) ? 0.4 : still,
+      within(t, move) ? 0.4 : still,
       within(t, noise) ? 20 : 0.5,
       within(t, out) ? 0.3 : 0.0004
     );
@@ -379,13 +391,13 @@ test('the parent walking away at bedtime is not the morning departure', () => {
 // `layNight` drives the outside channel at 0.3 — plainly a person. `layNightOut` is the same but lets a
 // test pick the magnitude, so the marginal readings that produced false "movement outside the bed"
 // blocks can be reproduced.
-function layNightOut(from, to, { move = [], noise = [], out = [] } = {}, outPeak = 0.3) {
+function layNightOut(from, to, { move = [], noise = [], out = [], still = STILL_OCCUPIED } = {}, outPeak = 0.3) {
   const within = (t, ranges) => ranges.some(([a, b]) => t >= a && t < b);
   for (let t = from; t < to; t = new Date(t.getTime() + 60000)) {
     insertFull.run(
       CAM, sqlTime(t),
-      within(t, move) ? 0.4 : 0.0002,
-      within(t, move) ? 0.4 : 0.0002,
+      within(t, move) ? 0.4 : still,
+      within(t, move) ? 0.4 : still,
       within(t, noise) ? 20 : 0.5,
       within(t, out) ? outPeak : 0.0004
     );
@@ -496,4 +508,38 @@ test('a real outside reading still is', () => {
   const night = computeNight(CHILD, DATE, { includeTimeline: true });
   assert.equal(night.visits.length, 1);
   assert.equal(hhmm(night.visits[0].start_at), '01:00');
+});
+
+test('a stray put-down over an empty bed cannot become the bedtime', () => {
+  // Raffa, 2026-08-28, reported asleep at 16:56 when he actually went to bed at 19:51 — 2h55m early.
+  // A stray into_bed at 16:52 was undone by an out_of_bed 23 seconds later and the room then sat empty
+  // until his real bedtime. Every existing guard passed, and passed for the same reason: an empty room
+  // is quiet, an empty room never wakes, and an empty room still yields samples. The household noise
+  // that would have broken the quiet run was discounted by ONSET_SOUND_MOTION_WITHIN_MIN — which is
+  // correct behaviour once a put-down proves the child is in the bed, and is exactly why a FALSE
+  // put-down disables every safeguard at once. Only positive evidence of occupancy separates them.
+  layNight(at(16, 30), at(19, 51), { noise: [[at(17, 0), at(19, 30)]], still: STILL_EMPTY });
+  layNight(at(19, 51), at(7, 0, 1), { move: [[at(19, 51), at(19, 58)]], still: STILL_OCCUPIED });
+  insertTransition.run(CAM, 'into_bed', 0.076, sqlTime(at(16, 52)));
+  insertTransition.run(CAM, 'out_of_bed', 0.016, sqlTime(at(16, 53)));
+  insertTransition.run(CAM, 'into_bed', 0.121, sqlTime(at(19, 51)));
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.status, 'ok');
+  assert.ok(
+    hhmm(night.onset_at) >= '19:30',
+    `onset ${hhmm(night.onset_at)} came from the stray afternoon put-down, not the real bedtime`
+  );
+});
+
+test('a genuinely still child is still occupied: the empty-bed guard must not eat a real bedtime', () => {
+  // The other side of the guard above, and the reason its floor is 0.002 rather than something safer-
+  // sounding. Raffa under a blanket is the stillest bed on record — max in-bed peak 0.0045 across the
+  // 150 minutes after onset. A guard set anywhere above that would report NO bedtime on a real night.
+  layNight(at(18, 20), at(7, 0, 1), { move: [[at(19, 30), at(19, 40)]], still: 0.0045 });
+  insertTransition.run(CAM, 'into_bed', 0.121, sqlTime(at(19, 38)));
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.status, 'ok');
+  assert.equal(hhmm(night.onset_at), '19:40', 'the stillest real bed on record must still read as occupied');
 });
