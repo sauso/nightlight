@@ -84,6 +84,8 @@ night; Raffa put down 19:10, his mother out at 19:19):
 **Work:**
 1. Track believed occupancy; ignore an `into_bed` while already in bed and an `out_of_bed` while already
    out. (Alone this collapses the four arrivals to one.) — **still open**, and still the cheapest win.
+   ★ This is *inferred* occupancy and needs no model — do it regardless of §2.5, which would supply the
+   same fact as independent evidence from the camera. They are complementary; neither waits on the other.
 2. Record the outside channel's **peak and duration** alongside each transition — new columns on
    `bed_transitions` — and require substantial outside evidence for `into_bed`, symmetric for
    `out_of_bed`. — **lower priority now**: the zone fix removed the false arrivals this was aimed at,
@@ -274,6 +276,109 @@ retention/prune path like alert clips, and its own storage guard via `hasMinFree
 Open questions: whether a non-qualifying stir should keep its capture or discard it; whether the hold
 needs a hard cap (a wake bridging many gaps can hold ~17 min of ring, ~176 MiB transiently).
 
+
+### 2.5 Bed occupancy from the camera — `SPECCED` · *do not build yet, see the gate*
+
+**Why.** Every open item in §1.2 is downstream of one missing fact: **is there actually a child in the
+bed?** The detector infers it from motion in two zones, which is why a parent's hands leaving the bed
+reads as an exit, a stir reads as an arrival, and an empty bed once reported a flawless 11h06m sleep.
+Motion cannot answer the question; a picture can. A generic person-detector cannot either — Raffa
+sleeps under a blanket and Renz in a sleep suit, so frequently **only a head is visible**.
+
+**Approach: distil, don't run a VLM.** A vision-language model (Qwen2.5-VL via Ollama) labels frames
+**offline, on the owner's desktop**, and is then thrown away. What ships is a MobileNetV3-Small
+classifier, **~6 MB ONNX**, ~10 ms per frame, ~2.5 CPU-seconds/day at the rate transitions actually
+occur — against the existing detector's ~13,000. The VLM never runs in the container and never could:
+`/var/lib/docker` has **6.8 GB free of a fixed 40 GB vdisk** and a 3B model is ~3.5 GB. The Coral is
+not a way around this either (int8-only, **8 MB on-chip**).
+
+**Status: the owner is running the labelling lab himself, no deadline.** Full instructions live outside
+this repo (Claude artifact, "Bed Occupancy Lab", 6 stages). Nothing here is committed until the gate
+below passes.
+
+#### 2.5a The gate — one experiment, before any of this is built
+
+A model trained on Renz and Raffa learns *this* cot, *this* angle, *this* IR illuminator. It would fail
+on someone else's camera **confidently**, silently corrupting their sleep data. So the design below
+assumes per-install calibration — and that assumption must be tested first:
+
+> Train on Renz + Raffa, then fit a head on the **staging Hikvision** (a third camera, different make,
+> different angle, same house). Fit it at 10 / 20 / 40 / 80 labelled frames and plot where accuracy
+> stops improving.
+
+That single experiment answers both open questions at once: whether per-install calibration is needed
+at all, and **how many frames the wizard should ask for**. The "~20 frames" figure used below is an
+estimate, not a measurement — expectation is 40–60, constrained by the empty class. **Do not build the
+wizard around a guessed number.**
+
+**Also settled, so it isn't re-proposed:** collecting frames from *other people's* beds is the wrong
+move. A handful of extra scenes lands in the dead zone — too varied to master the two cameras we can
+actually verify against, and nowhere near the hundreds of distinct scenes real cross-home
+generalisation needs. The generalising is already done by MobileNet's ImageNet pretraining (1.2M
+photographs); four bedrooms adds nothing on top of that. The variety **worth** having is *within* an
+install: both lighting regimes (IR and daylight), a deliberate camera reposition, blanket and
+sleep-suit variation, seasons. All of it accumulates for free as nights pass.
+
+#### 2.5b How it works for someone else installing Nightlight
+
+**Split the model in two.** The backbone (MobileNetV3 minus its final layer) ships once, frozen,
+identical for everyone; it turns a frame into 576 numbers. The head is a single 576→2 layer — **1,154
+numbers, ~5 KB of JSON** — and is the only per-install part.
+
+That split is what makes this shippable: fitting a 1,154-parameter logistic regression on a few dozen
+examples is a few hundred gradient steps of plain arithmetic, **well under a second in Node with no new
+dependency**. `onnxruntime` is needed for inference anyway, and feature extraction is the same forward
+pass. **No Python, no PyTorch, nothing new in the image beyond the backbone.**
+
+**⚠️ Prerequisite: Nightlight stores no images today.** Motion and sound are sampled 24/7 (~1,437
+rows/camera/day) but the only JPEGs on disk are alert snapshots — a fresh install has none, and they
+would be biased toward "occupied and moving" anyway. Calibration therefore needs its own capture mode:
+one snapshot every ~10 min for 2–3 nights, ~250 frames, ~20 MB, using the existing per-camera
+`snapshot_url`. Useful asymmetry: **empty frames are trivial** (daytime, before bedtime, after the
+morning wake); only the occupied class needs a night.
+
+**The flow:**
+1. *"Improve bed detection"* in camera settings — **off by default, clearly optional**.
+2. Capture runs 2–3 nights, with a quiet progress banner.
+3. **Labelling screen.** Frames are chosen deliberately, not at random: spread across the clock so both
+   IR and daylight appear, and roughly balanced between likely-empty and likely-occupied times. Large
+   image, two buttons, ~40 taps, about two minutes.
+   ★ **The wording is load-bearing: "Is the child in the bed *right now*?"** — not "is a child
+   visible?". A parent holding a child beside the bed is `empty`. The owner hit exactly this trap in
+   his own labelling; every user will.
+4. **Fit, then report honestly.** Hold back a quarter of the labels as an exam the head never sees, and
+   show **both error types separately** — a head that always answers "occupied" scores well on an
+   imbalanced set and is worthless, since catching the empty case is the entire point.
+5. **Shadow for a week.** Log the verdict beside each bed transition, change no reported number, then
+   show "agreed with the detector on 94 of 97 transitions" and let the user decide. Same discipline that
+   caught the dead sound rule in 0.26.0.
+
+**Guardrails, in from the start:**
+- **Veto-only.** Occupancy never *creates* a transition, only suppresses one it disbelieves. A broken
+  classifier then costs missed vetoes, never fabricated bedtimes.
+- **Fails off.** No calibration, a poor exam score, or a load error → the feature is simply absent and
+  behaviour is exactly as today.
+- **Recalibration triggers.** A moved camera, a new bed, a cot→bed transition, or a child who has grown
+  all invalidate the head. Needs an explicit "recalibrate" action; possibly a drift signal when
+  disagreement with confirmed transitions rises.
+- **Frames never leave the box**, and say so in the UI. These are pictures of sleeping children.
+- **Keep the labelled frames.** Forty JPEGs is nothing, and they make re-fitting after a camera move a
+  five-second job instead of another two-night wait.
+
+**⚠️ The data trap, already measured — it would have poisoned the first model.** The 503 stored alert
+snapshots are two populations: **362 at 1920×1080 and 141 at 640×360** (the small ones are sub-stream
+grabs from when the snapshot URL was broken), while every empty frame grabbed today is a sharp
+1920×1080. So **"blurry" predicts "occupied"** with no child involved, and a network always takes the
+easy rule. Every image must be forced through a common small size (320×180) before training. Any future
+capture path has the same exposure.
+
+**Relationship to §1.2.** Complementary, not a replacement. §1.2 item 1 (believed-occupancy state
+machine) is the cheap win and stays worth doing on its own — it needs no model and collapses impossible
+sequences immediately. This section is the *independent evidence* that would also close item 3 (parent
+leaving vs child climbing out), which motion alone cannot separate.
+
+**Done when** the gate experiment has a number, the shadow week shows agreement on a real corpus, and a
+second install can calibrate without help.
 
 ## 3. Idea backlog
 
