@@ -239,8 +239,11 @@ measurement**, and (like everything here) never a safety device — see the warn
   the window opens or an hour into it. If your child was already asleep **before** the window,
   that sleep is counted and the night's timeline starts at the real bedtime rather than at the
   setting. Either way it only happens when the camera saw the child actually **put into bed** —
-  a quiet room on its own is never read as a sleeping child. The same applies at the other end:
-  a morning wake is still found if it comes after the configured wake time.
+  a quiet room on its own is never read as a sleeping child, and neither is a *put-down* on its
+  own: the bed also has to go on showing signs of being occupied afterwards. A sleeping child is
+  never perfectly still for hours, so a bed that registers nothing at all is an empty one, and
+  the bedtime it seemed to start is discarded. The same applies at the other end: a morning wake
+  is still found if it comes after the configured wake time.
 - **How it estimates.** Across the night it builds a per-minute movement + sound timeline from
   the child's camera(s): falling still for a sustained stretch reads as falling asleep,
   sustained movement or noise reads as an awakening (brief stirs don't count). If you've painted
@@ -261,6 +264,10 @@ measurement**, and (like everything here) never a safety device — see the warn
 - **At a glance, and live.** Each child's page summarises last night — total sleep, wake-ups,
   longest stretch — and while a night is in progress it updates as **"Tonight · so far"**, so an
   early-morning wake appears within a minute or two rather than only after the window closes.
+  Treat those live figures as provisional: a night in progress is judged only on what has
+  happened so far, so a bedtime can be revised later in the evening and the morning wake isn't
+  looked for at all until the night is complete. The settled numbers are the ones on the card the
+  following day.
 - **The detail view.** Tap the sleep summary for the full **night timeline**: a to-scale bar of
   asleep / stirring / awake stretches on a real time axis, every wake-up listed with its time
   and length, a **movement outside the bed** list, and a date picker to step back through
