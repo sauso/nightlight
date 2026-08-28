@@ -138,6 +138,28 @@ const PUTDOWN_EPISODE_GAP_MIN = 10;
 // of 0.2883 occupied (usually ~1.0). 0.10 sits ~6x above the empty night and ~3x below the occupied
 // floor. Paired with the wake_count/awake_minutes test below, which no occupied night on record trips.
 const EMPTY_BED_MAX_PEAK = 0.1;
+// EMPTY BED, part two: the same trap one candidate at a time. EMPTY_BED_MAX_PEAK judges the WHOLE night,
+// so it is blind to a night that really did contain sleep but whose onset was anchored on a put-down
+// hours before the child was in the bed. Measured 2026-08-28 (Raffa): a stray into_bed at 16:52 was
+// undone by an out_of_bed 23 seconds later, the room then sat empty until his real 19:51 bedtime, and
+// onset was reported at 16:56 — 2h55m early. Every existing guard passed. The quiet run passed because
+// an empty room is quiet; the nap guard passed because an empty room never wakes; coverage passed
+// because an empty room still yields samples. Household noise would have broken the run, but the
+// put-down anchor discounts uncorroborated sound (ONSET_SOUND_MOTION_WITHIN_MIN) — correctly, when the
+// put-down is real. So a FALSE put-down turns every safeguard off at once.
+//
+// The evidence that separates them is positive, not negative: an occupied bed is never perfectly still
+// for hours, and an empty one is. Measured across the 14 stored nights, max in-bed motion_peak in the
+// 150 minutes after the reported onset:
+//   the false 16:56 onset ......... 0.0001   (the sensor floor — no frame differed, at all)
+//   quietest genuine onset ........ 0.0045   (2026-08-27 Raffa, under a blanket)
+//   loudest genuine onset ......... 0.6730
+// 0.002 sits ~20x above the false night and ~2x below the quietest true one. NB the *fraction* of still
+// minutes does NOT separate these (0.993 false vs 0.960 true) — only the maximum does. 150 minutes is
+// long enough that even the stillest child on record clears it, and short enough to fit between a
+// spurious afternoon put-down and a real bedtime.
+const OCCUPANCY_WITNESS_MIN = 150;
+const OCCUPANCY_MIN_PEAK = 0.002;
 // Use bed-transition-derived onset/wake as the AUTHORITATIVE times rather than merely showing them
 // alongside the movement-only figures. The movement timeline cannot distinguish an empty quiet bed from
 // a sleeping child; where a real transition supports a time it is simply the better estimate. Against
@@ -427,6 +449,10 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   const idxOf = (t) => Math.round((new Date(t.replace(' ', 'T') + 'Z').getTime() - analysisStartUtc.getTime()) / 60000);
   // Strongest in-bed movement seen anywhere in the WINDOW — the empty-bed test below reads this.
   let maxBedPeak = 0;
+  // Strongest in-bed movement per MINUTE, over the whole timeline including the lookbehind. The
+  // whole-night maxBedPeak cannot answer "was the bed occupied at this candidate onset" — that needs the
+  // peaks kept where they happened (see OCCUPANCY_MIN_PEAK).
+  const bedPeakAt = new Array(totalMin).fill(0);
   for (const r of rows) {
     const i = idxOf(r.t);
     if (i < 0 || i >= totalMin) continue;
@@ -440,6 +466,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     if (moved) motionAt[i] = true;
     if (heard) soundAt[i] = true;
     if (i >= preMin && r.motion_peak != null && r.motion_peak > maxBedPeak) maxBedPeak = r.motion_peak;
+    if (r.motion_peak != null && r.motion_peak > bedPeakAt[i]) bedPeakAt[i] = r.motion_peak;
   }
   // Coverage is a statement about the configured window ("did we watch the night"), so it counts only
   // window minutes — the lookbehind must never inflate or dilute it.
@@ -493,6 +520,24 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       if (quiet) return i;
     }
     return null;
+  };
+
+  // Did the bed show any sign of being OCCUPIED in the OCCUPANCY_WITNESS_MIN minutes from `from`? A
+  // sleeping child produces an occasional twitch; an empty bed produces nothing at all. See
+  // OCCUPANCY_MIN_PEAK for the measured separation.
+  //
+  // Returns TRUE when it cannot tell — a window that runs off the end of the data (an in-progress night,
+  // or a bedtime close to the morning) is not evidence of an empty bed. That is the safe direction: this
+  // guard only ever REJECTS an onset, so failing open leaves today's behaviour untouched rather than
+  // inventing a later bedtime from missing data.
+  const bedOccupiedAfter = (from) => {
+    const to = from + OCCUPANCY_WITNESS_MIN;
+    if (to > totalMin) return true; // not enough timeline left to judge
+    for (let i = from; i < to; i++) {
+      if (state[i] === null) return true; // a gap: can't prove the bed was empty through it
+      if (bedPeakAt[i] >= OCCUPANCY_MIN_PEAK) return true;
+    }
+    return false;
   };
 
   // Is there a qualifying awakening (>= WAKE_ACTIVE_MIN active minutes, bridging short quiet gaps)
@@ -569,6 +614,14 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     // Guard 2: it has to still be the same sleep when the window opens. A nap the child got up from has
     // an awakening between it and bedtime, so it can never be adopted as the night's onset.
     if (hasAwakening(q, preMin)) continue;
+    // Guard 3: the bed has to look OCCUPIED afterwards. Guards 1 and 2 both rest on the put-down being
+    // real, and a put-down the detector got wrong satisfies them trivially — an empty room never wakes,
+    // so guard 2 in particular passes vacuously. This is the only guard that asks for positive evidence
+    // of a child rather than an absence of contradiction. Applied HERE and not to the plain search
+    // above, because the plain search reads the undiscounted `active` view, where household noise
+    // already breaks the quiet run over an empty bed; it is the sound discount that this search turns on
+    // — correctly, for a real put-down — that removes that protection.
+    if (!bedOccupiedAfter(q)) continue;
     onset = q;
     break; // earliest qualifying put-down wins
   }

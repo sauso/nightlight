@@ -22,6 +22,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   default); the Storage readout there now shows what they're using.
 
 ### Fixed
+- **An empty bed could be reported as a very early bedtime.** If the camera briefly mistook something
+  for your child being put into bed — on one measured night a stray reading in the late afternoon, undone
+  again 23 seconds later — and the room then sat empty until the real bedtime, that empty stretch was
+  reported as sleep. One child's bedtime came out as 16:56 when he actually went down at 19:51, nearly
+  three hours early, and the evening was credited with wake-ups nobody had. An empty room defeated every
+  check at once, because an empty room is quiet, never wakes, and is still being watched. Sleep tracking
+  now asks for positive evidence instead: after a put-down the bed has to go on showing signs of being
+  occupied, because a sleeping child is never perfectly still for hours while an empty bed is. Replayed
+  over every night on record, this changed that one night and nothing else.
 - **Bedtime was reported late on a noisy evening.** Sleep tracking already knew to ignore household
   noise when nothing was moving in your child's room — a sibling being settled next door, a TV — but
   only for a child who was asleep *before* their bedtime setting. For every ordinary bedtime, where
