@@ -234,11 +234,19 @@ test('each child is computed on their OWN window, not a shared one', () => {
   assert.notEqual(a.window_start, b.window_start, 'the two children must not share a window');
 });
 
-test('the nightly job swallows a failure instead of taking the scheduler down', () => {
-  // It runs on a 30-minute interval; an uncaught throw would kill every later run, so a broken night
-  // must not be able to stop the next one. Forced by pointing the child at an unparseable window.
+test('an unparseable sleep window falls back to a default instead of crashing the job', () => {
+  // Renamed after coverage caught this test passing for the wrong reason. It was called "the nightly
+  // job swallows a failure", asserting doesNotThrow — but parseHm defaults a garbage window to 19:00,
+  // so nothing ever threw and the catch-all it claimed to cover never ran. What it DOES verify is
+  // worth keeping: bad config degrades to the default window rather than taking the night down.
+  //
+  // The job's outer try/catch is still unexercised (sleepAnalysis.js:1216-1218). Reaching it needs a
+  // failure inside better-sqlite3 itself, which is not worth contorting a real database to fake — so
+  // it is knowingly uncovered rather than covered by a test that proves nothing. Noted in ROADMAP 2.3.
   db.prepare('UPDATE children SET sleep_window_start = ? WHERE id = ?').run('not-a-time', KID);
   assert.doesNotThrow(() => runNightlySleepJob());
+  const row = db.prepare('SELECT window_start FROM sleep_nights WHERE child_id = ?').get(KID);
+  assert.ok(row, 'the night is still computed, on the fallback window');
   db.prepare('UPDATE children SET sleep_window_start = ? WHERE id = ?').run('19:00', KID);
 });
 

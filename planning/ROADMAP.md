@@ -189,12 +189,17 @@ the FIXTURES asserting a physical impossibility (a still in-bed minute at a moti
 occupied bed on record, i.e. the empty-bed signature). **When a new guard breaks old tests, check the
 fixture is physically possible before touching the code.**
 
-**Tranche B — what is left in `sleepAnalysis.js`** (4 uncovered spots, all inside `computeNight`; the
-gate is already met, so these are for correctness, not for the number):
-1. **The multi-camera merge** (`state[i] = state[i] || active`) has never run in a test. ★★ **Do NOT
-   write that test — delete the branch instead**; see §2.6, which removes multi-camera analysis.
+**Tranche B is effectively CLOSED — Tranche A absorbed it.** Six uncovered lines remain and the gate is
+met with headroom, so what is left is deliberate, not pending:
+1. `lastCompletedNightDate`'s 4-day fallback — unreachable unless every candidate window is still open.
 2. `firstQuietRunFrom` returning null (a night that never settles) and `hasAwakening` returning false.
-3. `lastCompletedNightDate`'s 4-day fallback — reachable only when every candidate window is still open.
+3. **The nightly job's outer try/catch** — knowingly uncovered. Reaching it needs a failure inside
+   better-sqlite3, which is not worth faking. ★ **Coverage caught a test of mine claiming to cover this
+   and passing for the wrong reason**: it asserted `doesNotThrow` against a garbage sleep window, but
+   `parseHm` defaults that to 19:00 so nothing ever threw. Renamed to what it actually verifies. **A
+   green test is not evidence the branch ran — read the uncovered-line list, not the tick.**
+4. The **multi-camera merge** is now covered incidentally (the climate tests use two cameras). §2.6 still
+   deletes it — on design grounds, no longer on coverage grounds.
 
 **Still to bring up to the bar and add to the list**, in priority order:
 - `routes/cameras.js` (1,036 lines) — the biggest surface, and the one with real authz branching
