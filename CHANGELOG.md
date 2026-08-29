@@ -9,6 +9,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-08-29
+
+### Fixed
+- **"Recompute this night" always said there was nothing to change.** It compared the sleep detail page
+  against itself. That page already works the night out fresh every time you open it, so both halves of
+  the comparison were the same calculation and could never differ — while the summary on the child's
+  page, which is the saved copy and the only thing a recompute can actually change, stayed wrong. It now
+  compares against what is saved, which is what it should have done from the start. A night that has
+  never been saved offers to record it.
+
 ## [0.28.0] - 2026-08-29
 
 ### Added
