@@ -9,6 +9,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **A still frame is now saved whenever your child gets into or out of bed.** Sleep tracking works this
+  out from movement, and it gets it wrong often enough to matter — across 238 recorded transitions, 147
+  of them were physically impossible on sequence alone (two “got into bed” in a row, or two “got out of
+  bed”, with nothing in between). Until now there was no way to see what the camera was actually
+  looking at when it decided. These frames are never shown in the app and never notify you; they are
+  kept for 45 days alongside the transitions themselves and deleted with them, and cost roughly 5 MB a
+  night. See **docs/recording.md** for where they live and how to remove them.
+
 ## [0.28.1] - 2026-08-29
 
 ### Fixed
