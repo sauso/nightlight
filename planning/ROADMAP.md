@@ -178,14 +178,39 @@ pins thresholds over an explicit include list, CI runs it on every push and PR
 *regresses* on a module already in the list. **That include list IS the definition of "core logic" —
 extend it as each module reaches the bar, and never shrink it to make the check go green.**
 
-In the gate today at **96.4% lines**: `db.js`, `middleware/auth.js`, `lib/mfa.js`,
-`lib/detectionEvents.js`, `routes/timelapses.js`.
+In the gate today at **97.8% lines**: `db.js`, `middleware/auth.js`, `lib/mfa.js`,
+`lib/detectionEvents.js`, `routes/timelapses.js`, `lib/wakeWatcher.js`, `lib/bedTransitionRules.js`,
+**`lib/sleepAnalysis.js`** (added 2026-08-29 at 99.5% lines / 97.4% functions).
+
+**Tranche A of the sleepAnalysis work is DONE** (84.1% -> 99.5%): `sleepInsights` + `pearson`,
+`runNightlySleepJob` + `startSleepJob`, `getStoredNights`, the window gates, and `nightClimate`'s
+5-minute series. ★ It found a real bug on the way in — see "daylight saving" below. ★ It also found
+the FIXTURES asserting a physical impossibility (a still in-bed minute at a motion peak below any
+occupied bed on record, i.e. the empty-bed signature). **When a new guard breaks old tests, check the
+fixture is physically possible before touching the code.**
+
+**Tranche B — what is left in `sleepAnalysis.js`** (4 uncovered spots, all inside `computeNight`; the
+gate is already met, so these are for correctness, not for the number):
+1. **The multi-camera merge** (`state[i] = state[i] || active`) has never run in a test. ★★ **Do NOT
+   write that test — delete the branch instead**; see §2.6, which removes multi-camera analysis.
+2. `firstQuietRunFrom` returning null (a night that never settles) and `hasAwakening` returning false.
+3. `lastCompletedNightDate`'s 4-day fallback — reachable only when every candidate window is still open.
 
 **Still to bring up to the bar and add to the list**, in priority order:
 - `routes/cameras.js` (1,036 lines) — the biggest surface, and the one with real authz branching
 - `routes/auth.js` (422) — login, the two-step MFA exchange, session lifecycle
-- `lib/sleepAnalysis.js` — at 69.5%; the gap is the nightly job and the climate/series helpers
 - `lib/clipStorage.js` + `lib/motionDetector.js` — retention maths and zone-mask maths
+
+**★ Daylight saving — FOUND AND FIXED 2026-08-29, and worth remembering as a pattern.** `localDateStr`
+shifted days by adding 86,400,000 ms and reading the local date off the result. A day is not 24 hours
+twice a year, so for Australia/Melbourne it returned the WRONG date for a full hour each time:
+spring-forward (00:00-00:59 on 2026-10-05) **skipped** a day, fall-back (23:00-23:59 on 2026-04-05)
+**repeated** one. It shipped as a bug in `currentNightDate` only — the live "tonight so far" view would
+have vanished for that hour — and the reason is worth knowing: **`currentNightDate` walks only TWO
+candidate dates (0..-1), so one bad candidate is fatal, while `lastCompletedNightDate` walks FOUR and
+had a spare.** Widening a loop is therefore never a substitute for the date arithmetic being right.
+Any future date-window code gets the same treatment: shift the local Y/M/D on the calendar, never the
+instant. Both edges are now pinned by tests using `mock.timers`.
 
 **Deliberately NOT in the gate:** the I/O glue — FFmpeg spawning, ONVIF SOAP, MQTT, the four push
 senders, RTSP probing. Testing those means asserting that mocks were called with the right arguments,
@@ -379,6 +404,49 @@ leaving vs child climbing out), which motion alone cannot separate.
 
 **Done when** the gate experiment has a number, the shadow week shows agreement on a real corpus, and a
 second install can calibrate without help.
+
+### 2.6 Sleep analysis reads ONE camera — `SPECCED` (owner's call, 2026-08-29)
+
+**The decision.** A child may have several cameras and all of them keep working — streaming, alerting,
+recording, PTZ, two-way audio. But **sleep analysis reads exactly one: the child's main camera.**
+Secondary cameras are *supported*, not *analysed*.
+
+**Why it is the right call, and not just a simplification.** Today `computeNight` ORs every camera's
+timeline together, so a minute is "active" if *any* camera saw something. That sounds conservative and
+isn't: it means the noisiest camera decides the night. A second camera pointed at the doorway, or one
+with a wider `detect_zone`, silently drags bedtime later and manufactures wake-ups, and nothing in the
+UI says which camera caused it. There is no way to tune that — the zone advice in the README ("draw it
+so it comfortably contains the child") is per-camera advice that a merge quietly defeats. One camera is
+also the only configuration anyone can reason about when a night comes out wrong, which is most of what
+this section of the roadmap has been about.
+
+**No schema change needed.** `cameras.sort_order` already exists (added with the camera reordering UI).
+The main camera is the child's enabled camera with the lowest `sort_order`.
+
+**Work:**
+1. Select one camera in `computeNight` instead of all: `WHERE child_id = ? AND disabled = 0
+   ORDER BY sort_order, id LIMIT 1`. ⚠️ Note the current query filters **neither** `disabled` nor
+   anything else — a disabled camera's historical samples are being merged into the analysis today.
+2. Same for `getBedTransitions`. Transitions are already per-camera and the twin-detector state is
+   per-camera, so two cameras can and do emit contradictory pairs for one event.
+3. **Delete the merge branch** (`state[i] = state[i] || active`) rather than test it — that closes
+   Tranche B item 1 in §2.3 by removing the code instead of covering it.
+4. **Decide climate separately and say so in the docs.** `nightClimate` averaging two sensors in one
+   room is *correct* and should stay — the argument above is about a merge that can only ever add
+   activity, which doesn't apply to an average. Two tests already pin the averaging behaviour.
+5. Surface it: the camera list should mark which camera is the main one, and the sleep detail view
+   should name the camera the night was scored from. A silent choice is the thing that makes a wrong
+   night unexplainable.
+6. Docs: the sleep section of `README.md` currently says "the child's camera(s)" — that becomes one
+   camera, with a sentence on how it is chosen and how to change it.
+
+**⚠️ Cannot be validated against real data here.** Both children have exactly one enabled camera, so
+this is a no-op on every night on record — the A/B will show zero changed lines and that proves
+nothing. It has to be covered by tests: a child with two cameras where the SECOND one is noisy, asserting
+the night matches the main camera alone.
+
+**Done when** a two-camera child scores identically to that child with the secondary camera removed, and
+the detail view names the camera it used.
 
 ## 3. Idea backlog
 
