@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-08-30
+
 ### Added
 - **A still frame is now saved whenever your child gets into or out of bed.** Sleep tracking works this
   out from movement, and it gets it wrong often enough to matter — across 238 recorded transitions, 147
