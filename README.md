@@ -262,6 +262,12 @@ measurement**, and (like everything here) never a safety device — see the warn
   over register as movement outside the bed, and can stop a real climb-out being recognised.
   Only clearly-outside-the-bed movement is listed; faint changes (a shadow, the camera's
   night-vision adjusting) are ignored rather than reported as someone in the room.
+- **Getting up for the day.** The morning wake is the point the bed empties and stays empty, rather
+  than the last movement seen in it — otherwise a parent stripping the bed an hour later would be
+  reported as the child waking. A single stray minute of movement in an otherwise still bed (an adult
+  reaching in for a toy or a blanket) does not restart that count; several minutes together do, because
+  that is a person at the bed rather than a passing arm. The wake is only accepted where a recorded
+  **got out of bed** backs it up, so a quiet spell alone can never end the night early.
 - **Noise on its own doesn't delay bedtime.** A bedroom microphone hears the whole house, and
   bedtime is usually its loudest hour — a sibling being settled, a TV, adults talking. So when
   working out **when your child fell asleep**, a noisy minute counts as awake only if that room

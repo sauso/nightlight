@@ -769,10 +769,13 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     // `into_bed` vouch for a departure, which is how the other child's wake landed 53 minutes late (that
     // bed kept registering motion long after the child was carried out, and the nearest marker was an
     // into-bed). If nothing corroborates any gap we keep the movement-only wake rather than guess.
-    for (let i = Math.max(algoOnset, 0); i < totalMinExt; ) {
-      if (cribActExt[i]) { i++; continue; }
+    const bridged = (i) => cribActExt[i] && !(cribActExt[i - 1] || cribActExt[i + 1]);
+    const firstMin = Math.max(algoOnset, 0);
+    for (let i = firstMin; i < totalMinExt; i++) {
+      if (cribActExt[i]) continue;
+      if (i > firstMin && !cribActExt[i - 1]) continue;
       let j = i;
-      while (j < totalMinExt && !cribActExt[j]) j++; // [i, j) is a maximal empty run
+      while (j < totalMinExt && (!cribActExt[j] || bridged(j))) j++; // [i, j) is an empty run
       if (j - i >= MORNING_ABSENCE_MIN && activeSuffix[i] <= MAX_POST_EXIT_ACTIVE_MIN) {
         const emptyStartMs = analysisStartUtc.getTime() + i * 60000;
         let best = null;
@@ -791,7 +794,6 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
         }
         if (best) { transitionExitMs = best.ms; exitTransitionAt = best.at; break; } // corroborated departure - the morning exit
       }
-      i = j;
     }
   }
 

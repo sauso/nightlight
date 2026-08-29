@@ -18,6 +18,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   kept for 45 days alongside the transitions themselves and deleted with them, and cost roughly 5 MB a
   night. See **docs/recording.md** for where they live and how to remove them.
 
+### Fixed
+- **A morning wake could be reported up to an hour late when a parent handled the bed afterwards.**
+  Getting up for the day is detected as the bed emptying and staying empty, but a single stray minute of
+  movement — an adult reaching in — split that stretch into pieces too short to count, so the real
+  departure was never considered and the wake landed on whatever happened next. Observed on 2026-08-29:
+  a child up at 06:00 reported as waking at 06:47. Isolated minutes no longer break the stretch, and the
+  whole of it is now examined rather than only where it starts.
+
 ## [0.28.1] - 2026-08-29
 
 ### Fixed
