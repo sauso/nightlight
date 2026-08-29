@@ -543,3 +543,42 @@ test('a genuinely still child is still occupied: the empty-bed guard must not ea
   assert.equal(night.status, 'ok');
   assert.equal(hhmm(night.onset_at), '19:40', 'the stillest real bed on record must still read as occupied');
 });
+
+test('a single blip in an empty room is not evidence the bed is occupied', () => {
+  // THE PROD ESCAPE, 2026-08-29. The first cut of the empty-bed guard thresholded the MAXIMUM in-bed
+  // peak over the window. It passed its tests and an A/B over 26 staging nights, shipped in 0.27.0, and
+  // did nothing at all on prod: the same empty room had recorded ONE minute at 0.0045 — a shadow, or
+  // the night-vision adjusting — which cleared a maximum-based bar on its own.
+  //
+  // Staging and prod run independent detectors against the same cameras, so they are not the same data.
+  // The rule now counts MINUTES of movement, because an empty room blips and an occupied one keeps
+  // moving. Here: one blip in an otherwise dead room must not rescue the stray 16:52 put-down.
+  layNight(at(16, 30), at(19, 51), { noise: [[at(17, 0), at(19, 30)]], still: STILL_EMPTY });
+  insertFull.run(CAM, sqlTime(at(17, 30)), 0.0045, 0.0045, 0.5, 0.0004); // the one blip
+  layNight(at(19, 51), at(7, 0, 1), { move: [[at(19, 51), at(19, 58)]], still: STILL_OCCUPIED });
+  insertTransition.run(CAM, 'into_bed', 0.076, sqlTime(at(16, 52)));
+  insertTransition.run(CAM, 'out_of_bed', 0.016, sqlTime(at(16, 53)));
+  insertTransition.run(CAM, 'into_bed', 0.121, sqlTime(at(19, 51)));
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.status, 'ok');
+  assert.ok(
+    hhmm(night.onset_at) >= '19:30',
+    `onset ${hhmm(night.onset_at)} — one blip in an empty room was treated as an occupied bed`
+  );
+});
+
+test('a child who moves just three times in two and a half hours still counts as present', () => {
+  // The other edge, and why the threshold is 3 rather than something more comfortable. The quietest
+  // genuine bedtime on record (Raffa, under a blanket) shows only 5 qualifying minutes in the window;
+  // a guard set much higher would report NO bedtime on a real night. Three movements must be enough.
+  layNight(at(18, 20), at(7, 0, 1), { move: [[at(19, 30), at(19, 40)]], still: STILL_EMPTY });
+  for (const m of [55, 70, 95]) {
+    insertFull.run(CAM, sqlTime(new Date(at(19, 40).getTime() + m * 60000)), 0.001, 0.001, 0.5, 0.0004);
+  }
+  insertTransition.run(CAM, 'into_bed', 0.121, sqlTime(at(19, 38)));
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.status, 'ok');
+  assert.equal(hhmm(night.onset_at), '19:40', 'three small movements is a child, not an empty bed');
+});
