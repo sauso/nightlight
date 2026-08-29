@@ -38,6 +38,7 @@ import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
 import { startSensorSampler } from './lib/sensorSampler.js';
 import { startActivityTracker } from './lib/activityTracker.js';
 import { startSleepJob } from './lib/sleepAnalysis.js';
+import { startWakeWatcher } from './lib/wakeWatcher.js';
 import { startTimelapseSampler } from './lib/timelapse.js';
 import { logger } from './lib/logger.js';
 import { recordCameraEvent, EVENT } from './lib/cameraEvents.js';
@@ -60,6 +61,7 @@ refreshMqttConnection(); // no-ops if no broker is configured
 startSensorSampler(); // persist MQTT temp/humidity over time (Stage-2 sleep-tracking groundwork)
 startActivityTracker(); // bucket motion/sound activity per minute (Stage-2 sleep-tracking timeline)
 startSleepJob(); // compute the nightly per-child sleep summary from that timeline
+startWakeWatcher(); // record a short clip when a wake starts — deliberately WITHOUT alerting
 
 const app = express();
 

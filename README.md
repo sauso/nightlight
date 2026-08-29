@@ -63,9 +63,12 @@ docker run -d \
   sauso/nightlight:latest
 ```
 
-To have Nightlight save short **video clips** of motion/sound detections, see
-[docs/recording.md](docs/recording.md) — it's opt-in per camera. Clips default to `<data
-dir>/clips`; you can point them at your array instead with a `/recordings` mount + `CLIPS_DIR`.
+Nightlight records video three ways — **automatic clips** attached to motion/sound alerts (opt-in per
+camera), **wake clips** saved silently when your child wakes up, and **on-demand recordings** you
+capture with the Record button. They have different retention rules, so see
+[docs/recording.md](docs/recording.md) for all of it and for every setting under *Settings →
+Recording*. Video defaults to `<data dir>/clips`; you can point it at your array instead with a
+`/recordings` mount + `CLIPS_DIR`.
 
 PUID/PGID control which user/group owns files this container creates in your data
 directory - the defaults above (99/100) match Unraid's own "nobody"/"users" convention,
@@ -231,26 +234,40 @@ measurement**, and (like everything here) never a safety device — see the warn
   their own **bedtime** and **wake time**. Turning tracking off stops it entirely. A child can
   have more than one camera — their movement and sound are combined.
 - **Bedtime is a guide, not a boundary.** Real bedtimes move night to night, and you shouldn't
-  have to edit the setting each evening. If your child was already asleep **before** the window
-  opened, that sleep is counted and the night's timeline starts at the real bedtime rather than
-  at the setting. This only happens when the camera saw the child actually **put into bed** and
-  they stayed asleep into the window — a quiet room on its own is never read as a sleeping
-  child. The same applies at the other end: a morning wake is still found if it comes after the
-  configured wake time.
+  have to edit the setting each evening. The bedtime that gets reported is the one the camera
+  actually saw — the **put-down**, and the child settling after it — whether that happens before
+  the window opens or an hour into it. If your child was already asleep **before** the window,
+  that sleep is counted and the night's timeline starts at the real bedtime rather than at the
+  setting. Either way it only happens when the camera saw the child actually **put into bed** —
+  a quiet room on its own is never read as a sleeping child, and neither is a *put-down* on its
+  own: the bed also has to go on showing signs of being occupied afterwards. A sleeping child is
+  never perfectly still for hours, so a bed that registers nothing at all is an empty one, and
+  the bedtime it seemed to start is discarded. The same applies at the other end: a morning wake
+  is still found if it comes after the configured wake time.
 - **How it estimates.** Across the night it builds a per-minute movement + sound timeline from
   the child's camera(s): falling still for a sustained stretch reads as falling asleep,
   sustained movement or noise reads as an awakening (brief stirs don't count). If you've painted
   a **bed zone** on the camera — the same area that scopes motion alerts — it also tracks
   movement **outside** the bed and lists it separately, which catches a morning wake where the
-  child has already left the bed.
+  child has already left the bed. Draw the zone so it comfortably contains the child **including
+  where their head ends up** — a zone that cuts through a sleeping child makes their own rolling
+  over register as movement outside the bed, and can stop a real climb-out being recognised.
+  Only clearly-outside-the-bed movement is listed; faint changes (a shadow, the camera's
+  night-vision adjusting) are ignored rather than reported as someone in the room.
 - **Noise on its own doesn't delay bedtime.** A bedroom microphone hears the whole house, and
   bedtime is usually its loudest hour — a sibling being settled, a TV, adults talking. So when
   working out **when your child fell asleep**, a noisy minute counts as awake only if that room
-  also *moved* at around the same time. Once they're asleep the rule no longer applies: a cry
-  with no movement still counts as a wake-up.
+  also *moved* at around the same time. The same holds for the **first half hour** after they
+  fall asleep, so the tail of the household's evening isn't reported as their first wake-up.
+  After that the rule stops: mid-night the house is quiet, so a cry with no movement counts as a
+  wake-up as you'd expect.
 - **At a glance, and live.** Each child's page summarises last night — total sleep, wake-ups,
   longest stretch — and while a night is in progress it updates as **"Tonight · so far"**, so an
   early-morning wake appears within a minute or two rather than only after the window closes.
+  Treat those live figures as provisional: a night in progress is judged only on what has
+  happened so far, so a bedtime can be revised later in the evening and the morning wake isn't
+  looked for at all until the night is complete. The settled numbers are the ones on the card the
+  following day.
 - **The detail view.** Tap the sleep summary for the full **night timeline**: a to-scale bar of
   asleep / stirring / awake stretches on a real time axis, every wake-up listed with its time
   and length, a **movement outside the bed** list, and a date picker to step back through
