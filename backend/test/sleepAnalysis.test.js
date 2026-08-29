@@ -221,6 +221,100 @@ test('with nothing corroborating it, the wake falls back to the movement-only va
   assert.equal(night.wake_at, night.wake_at_algo, 'must be identical to the movement-only figure');
 });
 
+// --- A parent's arm in an empty bed must not hide the departure ------------------------------------
+//
+// The real 2026-08-29 morning (Raffa, prod). He was up for the day at 06:00 and the bed then read
+// EXACTLY 0.0000 for 47 minutes — broken by two lone minutes, 06:14 at 0.018 and 06:33 at 0.449, an
+// adult reaching in. Those two minutes chopped the one real absence into runs of 13, 18 and 9, none of
+// them reaching MORNING_ABSENCE_MIN, so the true departure was never even offered as a candidate and
+// the wake was reported at 06:47 — 47 minutes late — on the next gap long enough to qualify.
+function layBlippedDepartureNight() {
+  // Occupied until 06:00, empty after: one still level across a departure would assert a bed that is
+  // simultaneously empty and warm, which is the fixture bug that hid this for so long.
+  laySamples(at(19, 30), at(6, 0, 1), [[at(19, 30), at(19, 40)]], STILL_OCCUPIED);
+  laySamples(at(6, 0, 1), at(7, 30, 1), [
+    [at(6, 0, 1), at(6, 1, 1)], // getting him out
+    [at(6, 14, 1), at(6, 15, 1)], // a lone reach into the empty bed
+    [at(6, 33, 1), at(6, 34, 1)], // and another
+    [at(6, 43, 1), at(6, 48, 1)], // stripping the bed — five minutes, not a blip
+  ], STILL_EMPTY);
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(6, 0, 1))); // the real departure
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(6, 47, 1))); // the parent, 47 min later
+}
+
+test('a lone minute of a parent reaching in does not break the morning absence', () => {
+  layBlippedDepartureNight();
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.status, 'ok');
+  assert.equal(hhmm(night.wake_at), '06:00', 'the departure, not the bed-stripping 47 minutes later');
+});
+
+test('a run of active minutes is NOT bridged — only isolated ones are', () => {
+  // The counterpart to the test above, and the reason bridging is safe: TWO consecutive minutes of
+  // movement is a person at the bed, not a passing arm, and must still end an absence.
+  //
+  // Deliberately sitting one minute under the threshold rather than comfortably clear of it. An earlier
+  // version of this test used a five-minute run against a thirteen-minute absence — an eight-minute
+  // margin — and an implementation that happily bridged runs of two, three or FOUR consecutive minutes
+  // passed it, along with every other test in the repo. The invariant the whole change rests on had no
+  // coverage at all. Here the absence from 06:01 is 19 minutes against a threshold of 20, so bridging
+  // the pair at 06:20 is the difference between reporting 06:00 and reporting 06:22.
+  laySamples(at(19, 30), at(6, 0, 1), [[at(19, 30), at(19, 40)]], STILL_OCCUPIED);
+  laySamples(at(6, 0, 1), at(7, 30, 1), [
+    [at(6, 0, 1), at(6, 1, 1)], // getting him out
+    [at(6, 20, 1), at(6, 22, 1)], // exactly two consecutive minutes: a person, not a blip
+  ], STILL_EMPTY);
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(6, 0, 1)));
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(6, 22, 1)));
+
+  assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:22', 'the 19-minute absence must not qualify');
+});
+
+test('the last minute of the timeline cannot pad an absence to length', () => {
+  // `bridged` looks at both neighbours, and at the final minute of the extended timeline the right-hand
+  // one does not exist. Reading past the end yields undefined, which is falsy — so without a bounds
+  // guard that last minute counts as isolated, gets bridged, and a 19-minute absence measures 20.
+  // MORNING_ABSENCE_MIN is then cleared on a minute of evidence that was never observed.
+  //
+  // The window is 19:30-07:00 and the scan runs three hours past it, so the timeline's last minute is
+  // 09:59. The room is busy from 06:30 to 09:40, which disqualifies the real 06:00 departure on trailing
+  // activity; then exactly 19 quiet minutes, then that final active minute.
+  laySamples(at(19, 30), at(6, 0, 1), [[at(19, 30), at(19, 40)]], STILL_OCCUPIED);
+  laySamples(at(6, 0, 1), at(10, 0, 1), [
+    [at(6, 0, 1), at(6, 1, 1)],
+    [at(6, 30, 1), at(9, 40, 1)], // a busy morning room
+    [at(9, 59, 1), at(10, 0, 1)], // the very last minute of the timeline
+  ], STILL_EMPTY);
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(6, 0, 1)));
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(9, 40, 1)));
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(
+    night.wake_at, night.wake_at_algo,
+    'nothing corroborated: the wake must fall back to the movement-only figure, not adopt 09:40'
+  );
+});
+
+test('a departure INSIDE a bridged absence is still found', () => {
+  // Bridging makes absences longer, and a longer absence can contain a later, better candidate. The
+  // scan therefore reconsiders every minute the bed falls quiet rather than stepping over a whole
+  // absence once it has looked at its start. Measured 2026-08-25 on prod data: without this, bridging
+  // joined the night into one 431-minute absence from 23:57 that swallowed the true 05:09 departure
+  // whole, and the wake came back at 07:09 — two hours late.
+  //
+  // Here the isolated blip at 02:00 joins the sleeping hours into one long absence; the real departure
+  // at 05:09 sits inside it and must still win.
+  laySamples(at(19, 30), at(5, 9, 1), [
+    [at(19, 30), at(19, 40)],
+    [at(2, 0, 1), at(2, 1, 1)], // one isolated minute mid-sleep
+  ], STILL_OCCUPIED);
+  laySamples(at(5, 9, 1), at(7, 30, 1), [[at(5, 9, 1), at(5, 10, 1)]], STILL_EMPTY);
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(5, 9, 1)));
+
+  assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '05:09');
+});
+
 test('a night with too few samples is no_data, not empty', () => {
   // Coverage gates confidence and is checked first: "we could not see" must never be reported as
   // "nobody was in the bed".

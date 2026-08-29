@@ -102,9 +102,27 @@ night; Raffa put down 19:10, his mother out at 19:19):
   outside moved, then bed went quiet". Renz's 18:50 `out_of_bed` was his father leaving the room, and it
   opened a child-out interval that ran until the first false arrival at 23:12.
 
+★★ **MEASURED 2026-08-29, and item 1 now has a hard target.** Across the 238 transitions then stored
+on prod, **147 (62%) are the same type twice in a row** with nothing between — Raffa Room 61 of 109
+(56%), Renz Room 86 of 129 (67%). You cannot get into a bed you are already in, so at least one of every
+pair is wrong. `getImpossibleTransitions()` in `lib/bedTransitions.js` returns them, each naming the
+event it contradicts, per camera. **Item 1 should collapse most of those 147, and that is now a number
+this work can be scored against rather than an argument.**
+
+★★ **0.29.0 ships the missing evidence: a saved frame at every transition** (`bed_transitions.snapshot`
++ `transition-snapshots/`, 45-day retention in lockstep). Until now the detector recorded *when* it
+thought the bed changed with no way to see what it was looking at when it decided. Combined with the
+query above, the wrong events now collect themselves with a picture attached — which is both the way to
+diagnose item 3 and the only honest test set for §2.5.
+
+⚠️ These bad transitions do **not** currently corrupt reported sleep — the analysis uses episode grouping
+and the occupancy guard rather than trusting raw event labels. They are why per-event markers still
+cannot be drawn, which is exactly what "done when" below asks for.
+
 **Work:**
 1. Track believed occupancy; ignore an `into_bed` while already in bed and an `out_of_bed` while already
    out. (Alone this collapses the four arrivals to one.) — **still open**, and still the cheapest win.
+   ★ Target: the 147 impossible pairs above.
    ★ This is *inferred* occupancy and needs no model — do it regardless of §2.5, which would supply the
    same fact as independent evidence from the camera. They are complementary; neither waits on the other.
 2. Record the outside channel's **peak and duration** alongside each transition — new columns on

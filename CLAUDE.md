@@ -36,12 +36,34 @@ you have watched fail without the fix.
 - Changing a **settings path or a control's label** means grepping `docs/` and `README.md` for the old
   wording. A doc that names a screen that no longer exists is worse than no doc.
 
+**Comments** carry the **why**, in the code, beside the code — and where a number or a rule came from a
+measurement or an incident, they say which. `sleepAnalysis.js` is the reference: it is still readable
+after a dozen threshold changes precisely because every constant states the night that set it. This is
+not "comment every line" — `// increment i` is noise. The test is whether the next person can tell a
+deliberate choice from an accident.
+
 **Before opening a PR:**
 ```bash
 cd backend && npm test && npm run test:core   # suite green + core coverage not regressed
 cd ../frontend && npm test
 node scripts/check-changelog.mjs              # from the repo root
+git show HEAD                                 # READ IT: is the reasoning actually in the code?
 ```
+That last line is not ceremony. PR #229 shipped eight lines of bare index arithmetic with its whole
+rationale in the commit message only — the comments were written, then lost to a `git checkout --` that
+reverted an over-fitted attempt, and nothing caught it.
+
+**Then have a subagent attack it.** Required for anything touching the `test:core` include list,
+non-trivial control flow, or detection/sleep analysis; skippable for docs-only or a one-line config
+change, but say so in the PR. Point it at the PR body and tell it to *falsify* the claims, not confirm
+them — and to **mutate the source and check the tests actually kill the mutants**. The full contract is
+in the workspace `CLAUDE.md`.
+
+★ Why this earns its keep: it found two real defects in #229 that a green 231-test suite and **99.54%
+line coverage on those exact lines** did not — an out-of-bounds read that let a 19-minute absence
+measure 20, and a test whose *name* stated the invariant the entire change rested on while its fixture
+sat eight minutes clear of that boundary, so an implementation violating the invariant passed it.
+**Coverage measures execution; mutation testing measures discrimination.**
 
 ## Commands
 
