@@ -368,48 +368,26 @@ leaving vs child climbing out), which motion alone cannot separate.
 **Done when** the gate experiment has a number, the shadow week shows agreement on a real corpus, and a
 second install can calibrate without help.
 
-### 2.6 Sleep analysis reads ONE camera — `SPECCED` (owner's call, 2026-08-29)
+### 2.6 Sleep analysis reads ONE camera — `SHIPPED` (2026-08-29, in `[Unreleased]`)
 
-**The decision.** A child may have several cameras and all of them keep working — streaming, alerting,
-recording, PTZ, two-way audio. But **sleep analysis reads exactly one: the child's main camera.**
-Secondary cameras are *supported*, not *analysed*.
+Sleep is scored from the child's **main camera** — the enabled one with the lowest `sort_order`. No
+schema change was needed. Secondary cameras keep streaming, alerting, recording, PTZ and two-way audio;
+they are supported, not analysed. Two deliberate exceptions stay multi-camera because both AVERAGE or
+LIST rather than combine, so neither can be dragged the way an OR could: **room climate** (two sensors
+in a room is better information) and the **alert list** on the detail view (context, not scoring).
 
-**Why it is the right call, and not just a simplification.** Today `computeNight` ORs every camera's
-timeline together, so a minute is "active" if *any* camera saw something. That sounds conservative and
-isn't: it means the noisiest camera decides the night. A second camera pointed at the doorway, or one
-with a wider `detect_zone`, silently drags bedtime later and manufactures wake-ups, and nothing in the
-UI says which camera caused it. There is no way to tune that — the zone advice in the README ("draw it
-so it comfortably contains the child") is per-camera advice that a merge quietly defeats. One camera is
-also the only configuration anyone can reason about when a night comes out wrong, which is most of what
-this section of the roadmap has been about.
+Also fixed on the way through: the old query filtered neither `disabled` nor anything else, so a camera
+the user had **turned off** was still contributing its historical samples to the analysis.
 
-**No schema change needed.** `cameras.sort_order` already exists (added with the camera reordering UI).
-The main camera is the child's enabled camera with the lowest `sort_order`.
+⚠️ **Verified by tests, NOT by an A/B — and that was expected.** Both children have exactly one enabled
+camera, so replaying every stored night shows zero changed lines on both prod and staging. A no-op A/B
+is the *correct* result here and it proves nothing about the change; `test/sleepSingleCamera.test.js`
+is the actual evidence. Its key case gives the second camera seven hours of continuous motion and
+asserts the night is unmoved — reverting to the cross-camera merge fails six of its eight tests.
 
-**Work:**
-1. Select one camera in `computeNight` instead of all: `WHERE child_id = ? AND disabled = 0
-   ORDER BY sort_order, id LIMIT 1`. ⚠️ Note the current query filters **neither** `disabled` nor
-   anything else — a disabled camera's historical samples are being merged into the analysis today.
-2. Same for `getBedTransitions`. Transitions are already per-camera and the twin-detector state is
-   per-camera, so two cameras can and do emit contradictory pairs for one event.
-3. **Delete the merge branch** (`state[i] = state[i] || active`) rather than test it — that closes
-   Tranche B item 1 in §2.3 by removing the code instead of covering it.
-4. **Decide climate separately and say so in the docs.** `nightClimate` averaging two sensors in one
-   room is *correct* and should stay — the argument above is about a merge that can only ever add
-   activity, which doesn't apply to an average. Two tests already pin the averaging behaviour.
-5. Surface it: the camera list should mark which camera is the main one, and the sleep detail view
-   should name the camera the night was scored from. A silent choice is the thing that makes a wrong
-   night unexplainable.
-6. Docs: the sleep section of `README.md` currently says "the child's camera(s)" — that becomes one
-   camera, with a sentence on how it is chosen and how to change it.
-
-**⚠️ Cannot be validated against real data here.** Both children have exactly one enabled camera, so
-this is a no-op on every night on record — the A/B will show zero changed lines and that proves
-nothing. It has to be covered by tests: a child with two cameras where the SECOND one is noisy, asserting
-the night matches the main camera alone.
-
-**Done when** a two-camera child scores identically to that child with the secondary camera removed, and
-the detail view names the camera it used.
+**Still open, deliberately:** the camera list does not yet mark which camera is the main one. The sleep
+detail view names it ("Measured from ..."), which covers the case that matters — tracing a wrong night
+to the camera that produced it — but the setting is still implicit in the drag order.
 
 ## 3. Idea backlog
 
