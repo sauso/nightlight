@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-08-29
+
 ### Fixed
 - **The empty-bed bedtime fix from 0.27.0 didn't work on production.** The check asked whether the bed's
   *strongest* movement after a put-down cleared a threshold — and a single flicker, a shadow or the
