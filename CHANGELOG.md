@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-08-29
+
 ### Added
 - **A wake-up is now recorded, without sending an alert.** More than half of the wake-ups on the sleep
   timeline never raised an alert — over the last 18 nights, 54 of 101 — so there was nothing to look at

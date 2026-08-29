@@ -22,12 +22,14 @@ building goes to §4 *with the evidence*, so it doesn't get re-proposed later.
 
 ## 1. Next up
 
-### 1.1 Fix Raffa's bed-zone discrimination — `WATCHING` (was `NEXT`; the camera has been re-aimed)
-**Largely resolved.** The camera was re-aimed and `detect_zone` redrawn with the grid picker (12 rects,
-33.5% of frame). On the very next night (2026-08-25) it emitted a real `out_of_bed` at his true exit and
-the wake came out **exactly right (05:09, owner-confirmed) on both prod and staging** — so this is no
-longer a blocker for 1.3, which has now shipped. Keep watching a few more mornings before closing it:
-one good night on a re-aimed camera is one night. The original diagnosis is kept below.
+### 1.1 Fix Raffa's bed-zone discrimination — `CLOSED` (shipped in 0.27.0; kept for the diagnosis)
+**Closed 2026-08-29.** Four consecutive owner-confirmed mornings on the re-aimed camera: 05:09
+(08-25), 05:53 (08-27), 05:54 (08-28) and 05:20 (08-29), every one exact. The framing question is
+settled — re-aiming plus redrawing `detect_zone` fixed it. ⚠️ The false `into_bed` events this section
+originally blamed on Raffa's framing later appeared on **Renz's** camera too, so that failure mode was
+never per-camera; it is tracked in 1.2 and its own cause (a bed zone cutting through a sleeping child)
+was fixed by enlarging the zone. **Kept rather than deleted because the diagnosis below is the worked
+example of "moving a camera without redrawing the zone makes detection worse, not better".**
 
 **It was a camera-framing problem, not a code problem.**
 
@@ -52,10 +54,21 @@ exact**, and his put-down at 19:11 matched an observed 19:10. The re-aim worked.
 the framing question; the classifier is tracked separately.
 
 ### 1.2 Harden the bed-transition classifier — `NEXT`
-**The remaining piece of the sleep work.** 0.26.0 stopped the timeline *claiming* things this detector
-can't support (only the two adopted transitions are drawn, everything else is "movement outside the
-bed"). That is a containment, not a fix — the underlying classifier is still wrong often enough that its
-per-event output can't be shown.
+**Most of this shipped in 0.27.0. What remains is items 1 and 3 below.** 0.26.0 stopped the timeline
+*claiming* things this detector can't support (only the two adopted transitions are drawn, everything
+else is "movement outside the bed"). That was a containment; 0.27.0 fixed several of the underlying
+causes — the slow-link exit rule, the outside-channel threshold, the settling-episode marker, and the
+empty-bed onset guard.
+
+**Measured after 0.27.0, against owner ground truth (2026-08-28):** Renz exact on both onset (20:17)
+and wake (05:29); Raffa's marker exact (in@19:51), wake exact (05:20), wake count exact (0), onset 18
+minutes after his mother left the room. That is the best the classifier has ever measured — but it is
+two children on one night, which is why this stays `NEXT` rather than closing.
+
+⚠️ **The remaining failure mode is the one no amount of threshold work fixes:** the detector cannot
+tell a parent's hands leaving the bed from a child climbing out, because motion in two zones is all it
+has. That is item 3, and it is the same gap §2.5 (camera occupancy) exists to close from the other
+side.
 
 **Two of the three causes below have since been addressed; item 2 has not.** The owner enlarged Renz's
 bed zone on 2026-08-27 after spotting in the timelapse that he sleeps with his head outside it, and the
@@ -114,7 +127,8 @@ that were holding Renz's onset an hour late were simultaneously loud in his brot
 own bed never moved. 0.26.0 handles this for **onset** only (a sound-only minute counts as awake only
 once a put-down proves the child is in the bed, and only if that room also moved nearby).
 
-**Partly closed since.** The first *half hour* after onset now uses the same witness rule, because
+**Partly closed — SHIPPED in 0.27.0.** The first *half hour* after onset now uses the same witness rule,
+because
 fixing bedtime moved the problem rather than removing it: the noise that had been delaying onset
 reappeared immediately as the first wake-up. Across all stored nights that removed exactly three
 counted wakes, every one of them 15–22 minutes after onset, and one of them owner-confirmed false
@@ -242,70 +256,6 @@ and **PTZ/ONVIF** (needs a camera to respond). **The High/Low selector is testab
 synthetic source a second path and assert the toggle swaps the stream.
 
 ---
-
-### 2.4 Record a wake without alerting — `BUILT, awaiting release` (on a branch; deliberately NOT in 0.26.0)
-
-**The problem, measured.** Replaying the wake algorithm over all 18 'ok' prod nights (**101 wakes**)
-and matching each against the alert feed:
-
-| wake type | wakes | no alert at all | alert fired but no clip |
-|---|---|---|---|
-| motion + sound | 85 | 40 | **0** |
-| motion only | 6 | 6 | **0** |
-| sound only | 10 | 8 | **0** |
-
-**53% of wakes produce no alert, so there is nothing to look at in the morning.** The recorder itself
-is faultless — zero cases of "alerted but no clip" in 101 wakes; the gap is entirely upstream.
-
-Two causes, and only one of them is a bug:
-- **14 wakes fell outside the alert schedule** — all Renz, whose alert window opens 19:30 while his
-  *sleep* window opens 19:00. **Config, fixable in-app, no code.**
-- **40 fell inside the schedule with alerting armed and nothing fired.** The two subsystems measure
-  different things and always will: sleep counts a minute active on any ~200 ms blip above 1% of zone
-  or 6 dB, while an alert needs **2–3 seconds sustained**. A child who shifts for a second every minute
-  for ten minutes is ten active minutes and never one sustained alert.
-
-**This is deliberately NOT "make it alert more."** Owner, 2026-08-26: *"I don't want to necessarily
-send an alert. That actually works fine. But we should have a way to record these and not alert so if
-you wake up in the morning and see that they were awake for 5 mins you can see why."* Alerting stays
-exactly as tuned; what's missing is **evidence**.
-
-**Almost all the machinery already exists** — this is wiring, not new subsystems:
-- `lib/recordings.js` + the `recordings` table already record with **no push and no `detection_events`
-  row**, and the table already carries a **`triggered_by`** column to distinguish this from a manual
-  recording.
-- `clipRecorder.holdRing(cameraId, fromMs)` already protects ring segments from pruning retroactively.
-  **This dissolves what looked like the blocker**: the ring is only ~63 s deep, but a hold placed on the
-  *first active minute* keeps the wake's opening available until the run qualifies minutes later.
-- `SleepDetail`'s wake list already renders an inline clip player per wake (#107) — the natural home,
-  and exactly the "see why" surface the owner described.
-
-New work is a **live wake watcher**: `activityTracker` already buckets motion/sound per minute in real
-time, so it can apply the same active-minute test as `sleepAnalysis`, `holdRing` on the first active
-minute after onset, and cut a recording once the run reaches `WAKE_ACTIVE_MIN`, releasing the hold if
-it never does.
-
-**★ DECIDED (owner, 2026-08-26): 30 s clip at the wake's start; stirs are NOT recorded; the 54
-already-missed wakes are not being chased.** Built accordingly — `lib/wakeWatcher.js` plus
-`captureWakeClip()`/`pruneWakeClips()` in `lib/recordings.js`, a `recordings.kind` column, and a clip
-row inside each wake on SleepDetail, plus a **Wake clips** card in Settings -> Recording
-(`wake_clips_enabled` / `wake_clip_seconds` / `wake_clip_retention_days`), wake clips in the Storage
-readout, and `docs/recording.md` rewritten to cover all THREE recording kinds and every setting.
-30 tests cover the state machine and the settings round-trip; the thresholds are IMPORTED from
-`sleepAnalysis` (`SLEEP_THRESHOLDS`) so a clip exists exactly when the timeline shows a wake.
-★ Writing those tests found a real leak: `activityTracker` only flushes cameras that saw signal, so a
-camera going offline mid-run would have held its ring open indefinitely — swept on a timer now
-(`sweepStaleRuns`). The original time backstop was unreachable dead code and was removed.
-
-**Original sizing note — bounded clip, not the whole wake.** Average wake is ~19 min and clips run
-~172 KiB/s, so recording wakes end to end is **~1.1 GiB/night (~34 GiB at 30-day retention)** — on a
-`/app/data` that is already **98% full**. A **30 s clip at the wake's start** answers "why" and costs
-**~29 MiB/night (~0.85 GiB retained)**, roughly 40× less. Recommend the bounded clip, with its own
-retention/prune path like alert clips, and its own storage guard via `hasMinFreeSpace()`.
-
-Open questions: whether a non-qualifying stir should keep its capture or discard it; whether the hold
-needs a hard cap (a wake bridging many gaps can hold ~17 min of ring, ~176 MiB transiently).
-
 
 ### 2.5 Bed occupancy from the camera — `SPECCED` · *do not build yet, see the gate*
 
