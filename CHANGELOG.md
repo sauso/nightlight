@@ -9,6 +9,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-08-29
+
+### Fixed
+- **The empty-bed bedtime fix from 0.27.0 didn't work on production.** The check asked whether the bed's
+  *strongest* movement after a put-down cleared a threshold — and a single flicker, a shadow or the
+  camera's night vision adjusting, was enough to clear it on its own. On the night it was written for it
+  still reported a bedtime of 16:56 instead of 19:51. It now asks how *often* the bed moved rather than
+  how hard: an empty room produces the odd blip, a child in a bed keeps moving. Rechecked against every
+  night on both the production and staging databases, this corrects that one night and changes nothing
+  else.
+
 ## [0.27.0] - 2026-08-29
 
 ### Added
