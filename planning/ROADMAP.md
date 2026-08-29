@@ -223,6 +223,14 @@ met with headroom, so what is left is deliberate, not pending:
 4. The **multi-camera merge** is now covered incidentally (the climate tests use two cameras). §2.6 still
    deletes it — on design grounds, no longer on coverage grounds.
 
+**Landed alongside this in 0.28.0:** the admin "Recompute this night" control and, more importantly,
+the `allowDowngrade` guard in `computeAndStoreNight`. ★ That guard is the worked example of a hazard
+that only exists once a feature makes it reachable: `activity_samples` retention (30 days) and the date
+picker's range (30 days) are the same number, so the oldest browsable night sits ON the boundary and
+recomputing it would have replaced a permanently-kept scored row with `no_data`. Nothing could reach
+that path until a person could ask for a recompute. **When adding a control, look for the code path it
+newly makes reachable.**
+
 **Still to bring up to the bar and add to the list**, in priority order:
 - `routes/cameras.js` (1,036 lines) — the biggest surface, and the one with real authz branching
 - `routes/auth.js` (422) — login, the two-step MFA exchange, session lifecycle
@@ -368,26 +376,18 @@ leaving vs child climbing out), which motion alone cannot separate.
 **Done when** the gate experiment has a number, the shadow week shows agreement on a real corpus, and a
 second install can calibrate without help.
 
-### 2.6 Sleep analysis reads ONE camera — `SHIPPED` (2026-08-29, in `[Unreleased]`)
+### 2.6 Mark the main camera in the camera list — `IDEA` · *small*
 
-Sleep is scored from the child's **main camera** — the enabled one with the lowest `sort_order`. No
-schema change was needed. Secondary cameras keep streaming, alerting, recording, PTZ and two-way audio;
-they are supported, not analysed. Two deliberate exceptions stay multi-camera because both AVERAGE or
-LIST rather than combine, so neither can be dragged the way an OR could: **room climate** (two sensors
-in a room is better information) and the **alert list** on the detail view (context, not scoring).
+All that is left of the old 2.6. **Single-camera sleep analysis shipped in 0.28.0**: sleep is scored
+from the child's main camera (enabled, lowest `sort_order`), climate and the alert list stay
+multi-camera because they average or list rather than combine, and the sleep detail view names the
+camera it measured from.
 
-Also fixed on the way through: the old query filtered neither `disabled` nor anything else, so a camera
-the user had **turned off** was still contributing its historical samples to the analysis.
-
-⚠️ **Verified by tests, NOT by an A/B — and that was expected.** Both children have exactly one enabled
-camera, so replaying every stored night shows zero changed lines on both prod and staging. A no-op A/B
-is the *correct* result here and it proves nothing about the change; `test/sleepSingleCamera.test.js`
-is the actual evidence. Its key case gives the second camera seven hours of continuous motion and
-asserts the night is unmoved — reverting to the cross-camera merge fails six of its eight tests.
-
-**Still open, deliberately:** the camera list does not yet mark which camera is the main one. The sleep
-detail view names it ("Measured from ..."), which covers the case that matters — tracing a wrong night
-to the camera that produced it — but the setting is still implicit in the drag order.
+What is still implicit is the *setting*: the camera list does not mark which camera is the main one, so
+the choice lives silently in the drag order. Naming it on the detail view covers the case that matters
+(tracing a wrong night to the camera that produced it), which is why this is an idea and not a defect.
+⚠️ Only bites a household with two cameras on one child — nobody here has that, so it cannot be
+observed locally.
 
 ## 3. Idea backlog
 

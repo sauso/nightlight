@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-08-29
+
 ### Added
 - **"Recompute this night" on the sleep detail page (admins).** A night's summary is worked out once and
   then kept, so when sleep detection improves, an already-recorded night keeps showing the old answer
