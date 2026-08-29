@@ -284,12 +284,25 @@ function windowBoundsUtc(nightDate, tz, startHM, endHM) {
 }
 
 // The local calendar date (YYYY-MM-DD) currently in tz, offset by `deltaDays`.
+//
+// The shift is CALENDAR arithmetic on the local date, not "subtract 86400000 ms and see where you
+// land" — a day is not 24 hours on the two nights a year the clocks move, and the old form was wrong
+// for a full hour on each of them. Measured for Australia/Melbourne:
+//   spring forward — at 00:00-00:59 on 2026-10-05, deltaDays -1 returned 2026-10-03, SKIPPING 10-04
+//   fall back      — at 23:00-23:59 on 2026-04-05, deltaDays -1 returned 2026-04-05, TODAY again
+// Both matter because the callers below walk `delta` down as a list of candidate nights: a skipped
+// date is a night never considered, and a repeated one wastes the only other slot. currentNightDate
+// tries just 0 and -1, so on the morning after the spring-forward it found no in-progress night at all
+// and the live "tonight so far" view vanished for an hour.
+//
+// Doing it on the date parts is exact: pull the local Y/M/D, then add days in UTC where every day IS
+// 24 hours, and read the date straight back. No instant is ever converted, so no offset can be applied.
 function localDateStr(tz, deltaDays = 0) {
-  const now = new Date(Date.now() + deltaDays * 86400000);
   const p = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' })
-    .formatToParts(now)
+    .formatToParts(new Date())
     .reduce((a, x) => ((a[x.type] = x.value), a), {});
-  return `${p.year}-${p.month}-${p.day}`;
+  if (!deltaDays) return `${p.year}-${p.month}-${p.day}`;
+  return new Date(Date.UTC(+p.year, +p.month - 1, +p.day + deltaDays)).toISOString().slice(0, 10);
 }
 
 // The start date of the child's night currently IN PROGRESS (their window contains 'now'), or null in

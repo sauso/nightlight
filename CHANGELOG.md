@@ -22,6 +22,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   default); the Storage readout there now shows what they're using.
 
 ### Fixed
+- **The live "tonight so far" view would have disappeared for an hour after the clocks change.** On the
+  night the clocks go forward, the app worked out "yesterday" by subtracting 24 hours — but that night
+  is only 23 hours long, so between midnight and 1am it skipped a day entirely and could no longer find
+  the night in progress. For that hour the sleep card would have shown nothing at all. It now counts
+  days on the calendar instead of by the clock, and the same fix covers the night the clocks go back,
+  where a day was counted twice. In Australia this would first have shown up on 5 October 2026.
 - **An empty bed could be reported as a very early bedtime.** If the camera briefly mistook something
   for your child being put into bed — on one measured night a stray reading in the late afternoon, undone
   again 23 seconds later — and the room then sat empty until the real bedtime, that empty stretch was
