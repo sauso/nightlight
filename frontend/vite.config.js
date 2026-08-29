@@ -9,7 +9,13 @@ export default defineConfig({
   plugins: [react({ include: /\.(js|jsx)$/ })],
   // Belt and braces for the automatic JSX runtime: without this, test files outside src/ were
   // compiled with the classic runtime and every render threw "React is not defined".
-  esbuild: { jsx: 'automatic', jsxImportSource: 'react' },
+  //
+  // This was `esbuild: { jsx: 'automatic', jsxImportSource: 'react' }` until vitest 4 / vite 8, which
+  // transform with oxc instead and IGNORED the esbuild block — announcing it only as a startup notice
+  // ("Both esbuild and oxc options were set... esbuild options will be ignored"). Tests kept passing,
+  // because the React plugin above does the transform on its own, so the safety net had quietly
+  // stopped existing without anything failing. Restated for oxc so it means something again.
+  oxc: { jsx: { runtime: 'automatic', importSource: 'react' } },
   server: {
     host: true,
     port: 5173,

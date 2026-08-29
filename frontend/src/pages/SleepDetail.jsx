@@ -7,6 +7,7 @@ import { useSettings } from '../lib/SettingsContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import ClipPlayerModal from '../components/ClipPlayerModal.jsx';
 import MediaPlayerModal from '../components/MediaPlayerModal.jsx';
+import RecomputeNight from '../components/RecomputeNight.jsx';
 
 // Sleep detail: a to-scale timeline of one night for a child, with the wake-ups marked, plus a date
 // picker to browse back through the retained nights (~30 days of activity_samples). Reached by tapping
@@ -125,7 +126,8 @@ export default function SleepDetail() {
           </button>
         </div>
 
-        <NightBody night={night} fmtTime={fmtTime} tz={tz} tempUnit={settings.temp_unit} />
+        <NightBody night={night} fmtTime={fmtTime} tz={tz} tempUnit={settings.temp_unit}
+          childId={id} date={date} onRecomputed={setNight} />
 
         <SleepInsights childId={id} tempUnit={settings.temp_unit} childName={kid?.name} />
 
@@ -138,7 +140,7 @@ export default function SleepDetail() {
   );
 }
 
-function NightBody({ night, fmtTime, tz, tempUnit }) {
+function NightBody({ night, fmtTime, tz, tempUnit, childId, date, onRecomputed }) {
   // The wake↔alert clip currently open in the shared player (or null). Lives here so it survives a
   // 2-min live refresh of `night` without tearing the modal down mid-watch.
   const [clipFor, setClipFor] = useState(null);
@@ -205,6 +207,12 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
           <Stat label="Coverage" value={`${covPct}%`} />
         </div>
         <RefinedTimes night={night} fmtTime={fmtTime} />
+        {night.analysis_camera_name && (
+          <div className="sleep-detail__source">
+            Measured from <strong>{night.analysis_camera_name}</strong>
+          </div>
+        )}
+        <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime} onRecomputed={onRecomputed} />
       </div>
 
       <div className="card">

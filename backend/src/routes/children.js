@@ -129,9 +129,22 @@ router.get('/:id/sleep/:date', (req, res) => {
   if (!child) return res.status(404).json({ error: 'Child not found' });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(req.params.date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
   const wantStore = req.query.store === '1' && req.user?.role === 'admin';
-  const summary = wantStore
-    ? computeAndStoreNight(req.params.id, req.params.date)
-    : computeNight(req.params.id, req.params.date, { includeTimeline: req.query.debug === '1' || req.query.detail === '1' });
+  if (!wantStore) {
+    return res.json(computeNight(req.params.id, req.params.date, {
+      includeTimeline: req.query.debug === '1' || req.query.detail === '1',
+    }));
+  }
+  // Storing a recompute can only ever improve or re-score a night, never un-score one — see the
+  // allowDowngrade guard in computeAndStoreNight. A refusal is the user's fault only in the sense that
+  // the night is too old, so it is a 4xx with a readable reason: a 5xx would have its body stripped by
+  // Cloudflare and the user would see nothing at all.
+  const summary = computeAndStoreNight(req.params.id, req.params.date, { allowDowngrade: false });
+  if (summary.refused === 'would_downgrade') {
+    return res.status(409).json({
+      error: "This night can't be re-scored: its minute-by-minute data has aged out (kept 30 days). "
+        + 'The saved summary has been left as it is.',
+    });
+  }
   res.json(summary);
 });
 
