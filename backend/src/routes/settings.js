@@ -4,6 +4,7 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { refreshMqttConnection, mqttStatus } from '../lib/mqttClient.js';
 import { restartClipCapture } from '../lib/clipCapture.js';
 import { clipStorageStats, sweepClips } from '../lib/clipStorage.js';
+import { wakeClipStats } from '../lib/recordings.js';
 
 const router = Router();
 
@@ -50,7 +51,10 @@ router.get('/mqtt/status', requireAuth, requireAdmin, (req, res) => {
 
 // Admin-only: recording storage usage + where clips live, for the Settings → Recording display.
 router.get('/clip-storage', requireAuth, requireAdmin, (req, res) => {
-  res.json(clipStorageStats());
+  // Wake clips are reported alongside the alert clips they sit next to on disk: they are a NEW
+  // automatic consumer, and their length/retention settings only mean something if you can see what
+  // they are actually costing.
+  res.json({ ...clipStorageStats(), wakeClips: wakeClipStats() });
 });
 
 function isValidTimezone(tz) {
@@ -69,6 +73,7 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     temp_unit, mqtt_enabled, mqtt_host, mqtt_port, mqtt_username, mqtt_password,
     ptz_step, clip_pre_roll_s, clip_post_roll_s, clip_retention_days, clip_retention_max_gb,
     ondemand_enabled, ondemand_pre_roll_s, ondemand_max_duration_s,
+    wake_clips_enabled, wake_clip_seconds, wake_clip_retention_days,
     camera_offline_alert_enabled, camera_offline_alert_minutes,
   } = req.body || {};
 
@@ -165,6 +170,29 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
   const retentionChanged =
     retentionDays !== existing.clip_retention_days || retentionGb !== existing.clip_retention_max_gb;
 
+  // Wake clips: on/off, clip length, and their own retention. Length is bounded at 120s because the
+  // whole point is a bounded clip — an average wake runs ~19 minutes, and capturing wakes end to end
+  // would be ~1.1 GiB a night. Retention takes 0 = keep forever, matching the clip-retention idiom
+  // above, but note wake clips accrue every night whether or not anyone looks at them.
+  let wakeEnabled = existing.wake_clips_enabled;
+  if (wake_clips_enabled !== undefined) wakeEnabled = wake_clips_enabled ? 1 : 0;
+  let wakeSeconds = existing.wake_clip_seconds;
+  if (wake_clip_seconds !== undefined) {
+    const n = parseInt(wake_clip_seconds, 10);
+    if (!Number.isFinite(n) || n < 5 || n > 120) {
+      return res.status(400).json({ error: 'Wake clip length must be between 5 and 120 seconds' });
+    }
+    wakeSeconds = n;
+  }
+  let wakeRetentionDays = existing.wake_clip_retention_days;
+  if (wake_clip_retention_days !== undefined) {
+    const n = parseInt(wake_clip_retention_days, 10);
+    if (!Number.isFinite(n) || n < 0 || n > 365) {
+      return res.status(400).json({ error: 'Keep wake clips for must be between 0 and 365 days (0 = keep forever)' });
+    }
+    wakeRetentionDays = n;
+  }
+
   // Offline-camera alert: enable flag + threshold in whole minutes (1–1440).
   let offlineAlertEnabled = existing.camera_offline_alert_enabled;
   if (camera_offline_alert_enabled !== undefined) {
@@ -185,7 +213,8 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
          temp_unit = ?, mqtt_enabled = ?, mqtt_host = ?, mqtt_port = ?, mqtt_username = ?, mqtt_password = ?,
          ptz_step = ?, clip_pre_roll_s = ?, clip_post_roll_s = ?, clip_retention_days = ?, clip_retention_max_gb = ?,
          camera_offline_alert_enabled = ?, camera_offline_alert_minutes = ?,
-         ondemand_enabled = ?, ondemand_pre_roll_s = ?, ondemand_max_duration_s = ?
+         ondemand_enabled = ?, ondemand_pre_roll_s = ?, ondemand_max_duration_s = ?,
+         wake_clips_enabled = ?, wake_clip_seconds = ?, wake_clip_retention_days = ?
      WHERE id = ?`
   ).run(
     app_name?.trim() || existing.app_name,
@@ -210,6 +239,9 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     ondEnabled,
     ondPreRoll,
     ondMaxDur,
+    wakeEnabled,
+    wakeSeconds,
+    wakeRetentionDays,
     'app'
   );
   refreshMqttConnection();

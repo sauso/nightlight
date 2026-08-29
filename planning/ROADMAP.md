@@ -22,12 +22,14 @@ building goes to §4 *with the evidence*, so it doesn't get re-proposed later.
 
 ## 1. Next up
 
-### 1.1 Fix Raffa's bed-zone discrimination — `WATCHING` (was `NEXT`; the camera has been re-aimed)
-**Largely resolved.** The camera was re-aimed and `detect_zone` redrawn with the grid picker (12 rects,
-33.5% of frame). On the very next night (2026-08-25) it emitted a real `out_of_bed` at his true exit and
-the wake came out **exactly right (05:09, owner-confirmed) on both prod and staging** — so this is no
-longer a blocker for 1.3, which has now shipped. Keep watching a few more mornings before closing it:
-one good night on a re-aimed camera is one night. The original diagnosis is kept below.
+### 1.1 Fix Raffa's bed-zone discrimination — `CLOSED` (shipped in 0.27.0; kept for the diagnosis)
+**Closed 2026-08-29.** Four consecutive owner-confirmed mornings on the re-aimed camera: 05:09
+(08-25), 05:53 (08-27), 05:54 (08-28) and 05:20 (08-29), every one exact. The framing question is
+settled — re-aiming plus redrawing `detect_zone` fixed it. ⚠️ The false `into_bed` events this section
+originally blamed on Raffa's framing later appeared on **Renz's** camera too, so that failure mode was
+never per-camera; it is tracked in 1.2 and its own cause (a bed zone cutting through a sleeping child)
+was fixed by enlarging the zone. **Kept rather than deleted because the diagnosis below is the worked
+example of "moving a camera without redrawing the zone makes detection worse, not better".**
 
 **It was a camera-framing problem, not a code problem.**
 
@@ -52,10 +54,29 @@ exact**, and his put-down at 19:11 matched an observed 19:10. The re-aim worked.
 the framing question; the classifier is tracked separately.
 
 ### 1.2 Harden the bed-transition classifier — `NEXT`
-**The remaining piece of the sleep work.** 0.26.0 stopped the timeline *claiming* things this detector
-can't support (only the two adopted transitions are drawn, everything else is "movement outside the
-bed"). That is a containment, not a fix — the underlying classifier is still wrong often enough that its
-per-event output can't be shown.
+**Most of this shipped in 0.27.0. What remains is items 1 and 3 below.** 0.26.0 stopped the timeline
+*claiming* things this detector can't support (only the two adopted transitions are drawn, everything
+else is "movement outside the bed"). That was a containment; 0.27.0 fixed several of the underlying
+causes — the slow-link exit rule, the outside-channel threshold, the settling-episode marker, and the
+empty-bed onset guard.
+
+**Measured after 0.27.0, against owner ground truth (2026-08-28):** Renz exact on both onset (20:17)
+and wake (05:29); Raffa's marker exact (in@19:51), wake exact (05:20), wake count exact (0), onset 18
+minutes after his mother left the room. That is the best the classifier has ever measured — but it is
+two children on one night, which is why this stays `NEXT` rather than closing.
+
+⚠️ **The remaining failure mode is the one no amount of threshold work fixes:** the detector cannot
+tell a parent's hands leaving the bed from a child climbing out, because motion in two zones is all it
+has. That is item 3, and it is the same gap §2.5 (camera occupancy) exists to close from the other
+side.
+
+**Two of the three causes below have since been addressed; item 2 has not.** The owner enlarged Renz's
+bed zone on 2026-08-27 after spotting in the timelapse that he sleeps with his head outside it, and the
+night of 2026-08-27 measured **zero** false `into_bed` events during sleep against four the night
+before, with outside-only minutes going 0 → 8. A zone that cuts through the sleeping child was the
+upstream cause of the false arrivals, not the classifier's thresholds. Separately the exit rule now has
+a slow link window (see the entry under `[Unreleased]`), which fixes the missed unaided climb-out.
+What remains is the occupancy state and telling a parent leaving from a child getting out.
 
 **What's wrong**, measured on 2026-08-26 against owner ground truth (nobody entered Renz's room all
 night; Raffa put down 19:10, his mother out at 19:19):
@@ -75,12 +96,22 @@ night; Raffa put down 19:10, his mother out at 19:19):
 
 **Work:**
 1. Track believed occupancy; ignore an `into_bed` while already in bed and an `out_of_bed` while already
-   out. (Alone this collapses the four arrivals to one.)
+   out. (Alone this collapses the four arrivals to one.) — **still open**, and still the cheapest win.
+   ★ This is *inferred* occupancy and needs no model — do it regardless of §2.5, which would supply the
+   same fact as independent evidence from the camera. They are complementary; neither waits on the other.
 2. Record the outside channel's **peak and duration** alongside each transition — new columns on
    `bed_transitions` — and require substantial outside evidence for `into_bed`, symmetric for
-   `out_of_bed`.
+   `out_of_bed`. — **lower priority now**: the zone fix removed the false arrivals this was aimed at,
+   and the evidence columns are still worth having, but no longer urgent.
 3. Separate "parent leaves" from "child exits". Retrospective is fine: the nightly job runs after the
-   night, so an `out_of_bed` followed by continued in-bed micro-motion is a parent leaving.
+   night, so an `out_of_bed` followed by continued in-bed micro-motion is a parent leaving. — **still
+   open, and now the most valuable item.** Measured 2026-08-27: the real put-down at 19:14 was recorded
+   as an `out_of_bed` (the parent's hands leaving the bed), so that night had no bedtime `into_bed` at
+   all and the drawn marker was 40 minutes adrift. The reported bedtime survived it, but only because
+   the sleep analysis no longer depends on the label being right.
+4. **New: log-driven tuning is now possible.** The exit rule logs rejected links (`[oob] … link
+   rejected`) with the actual gap and outside magnitude, so the real distribution can be read off a
+   week of logs rather than guessed. Read it before moving `OOB_LINK_SLOW_MS` or `OOB_SLOW_OUT_MIN`.
 
 **Tune it offline, don't guess.** `bed_transitions` retains 45 days and `activity_samples` 30, so there
 is a real corpus already on staging. Add the evidence columns first, then let a week accumulate before
@@ -96,11 +127,18 @@ that were holding Renz's onset an hour late were simultaneously loud in his brot
 own bed never moved. 0.26.0 handles this for **onset** only (a sound-only minute counts as awake only
 once a put-down proves the child is in the bed, and only if that room also moved nearby).
 
-The same confusion must still affect **wake counts** — deliberately left alone, because mid-night the
-house is quiet and a cry with no movement is exactly the wake-up a parent wants counted. Worth
-measuring before touching: across all nights on record, how many counted wakes are sound-only *and*
-simultaneous with noise in the sibling's room? If that number is large, the wake rule needs the same
-treatment. If it's small, leave it alone. **Measure first.**
+**Partly closed — SHIPPED in 0.27.0.** The first *half hour* after onset now uses the same witness rule,
+because
+fixing bedtime moved the problem rather than removing it: the noise that had been delaying onset
+reappeared immediately as the first wake-up. Across all stored nights that removed exactly three
+counted wakes, every one of them 15–22 minutes after onset, and one of them owner-confirmed false
+(2026-08-26 Renz, asleep and motionless, nobody in the room).
+
+What is still open is the **rest of the night** — deliberately left alone, because mid-night the house
+is quiet and a cry with no movement is exactly the wake-up a parent wants counted. Worth measuring
+before touching: across all nights on record, how many counted wakes are sound-only *and* simultaneous
+with noise in the sibling's room? If that number is large, the wake rule needs the same treatment. If
+it's small, leave it alone. **Measure first.**
 
 ---
 
@@ -154,14 +192,44 @@ pins thresholds over an explicit include list, CI runs it on every push and PR
 *regresses* on a module already in the list. **That include list IS the definition of "core logic" —
 extend it as each module reaches the bar, and never shrink it to make the check go green.**
 
-In the gate today at **96.4% lines**: `db.js`, `middleware/auth.js`, `lib/mfa.js`,
-`lib/detectionEvents.js`, `routes/timelapses.js`.
+In the gate today at **97.8% lines**: `db.js`, `middleware/auth.js`, `lib/mfa.js`,
+`lib/detectionEvents.js`, `routes/timelapses.js`, `lib/wakeWatcher.js`, `lib/bedTransitionRules.js`,
+**`lib/sleepAnalysis.js`** (added 2026-08-29 at 99.5% lines / 97.4% functions).
+
+**Tranche A of the sleepAnalysis work is DONE** (84.1% -> 99.5%): `sleepInsights` + `pearson`,
+`runNightlySleepJob` + `startSleepJob`, `getStoredNights`, the window gates, and `nightClimate`'s
+5-minute series. ★ It found a real bug on the way in — see "daylight saving" below. ★ It also found
+the FIXTURES asserting a physical impossibility (a still in-bed minute at a motion peak below any
+occupied bed on record, i.e. the empty-bed signature). **When a new guard breaks old tests, check the
+fixture is physically possible before touching the code.**
+
+**Tranche B is effectively CLOSED — Tranche A absorbed it.** Six uncovered lines remain and the gate is
+met with headroom, so what is left is deliberate, not pending:
+1. `lastCompletedNightDate`'s 4-day fallback — unreachable unless every candidate window is still open.
+2. `firstQuietRunFrom` returning null (a night that never settles) and `hasAwakening` returning false.
+3. **The nightly job's outer try/catch** — knowingly uncovered. Reaching it needs a failure inside
+   better-sqlite3, which is not worth faking. ★ **Coverage caught a test of mine claiming to cover this
+   and passing for the wrong reason**: it asserted `doesNotThrow` against a garbage sleep window, but
+   `parseHm` defaults that to 19:00 so nothing ever threw. Renamed to what it actually verifies. **A
+   green test is not evidence the branch ran — read the uncovered-line list, not the tick.**
+4. The **multi-camera merge** is now covered incidentally (the climate tests use two cameras). §2.6 still
+   deletes it — on design grounds, no longer on coverage grounds.
 
 **Still to bring up to the bar and add to the list**, in priority order:
 - `routes/cameras.js` (1,036 lines) — the biggest surface, and the one with real authz branching
 - `routes/auth.js` (422) — login, the two-step MFA exchange, session lifecycle
-- `lib/sleepAnalysis.js` — at 69.5%; the gap is the nightly job and the climate/series helpers
 - `lib/clipStorage.js` + `lib/motionDetector.js` — retention maths and zone-mask maths
+
+**★ Daylight saving — FOUND AND FIXED 2026-08-29, and worth remembering as a pattern.** `localDateStr`
+shifted days by adding 86,400,000 ms and reading the local date off the result. A day is not 24 hours
+twice a year, so for Australia/Melbourne it returned the WRONG date for a full hour each time:
+spring-forward (00:00-00:59 on 2026-10-05) **skipped** a day, fall-back (23:00-23:59 on 2026-04-05)
+**repeated** one. It shipped as a bug in `currentNightDate` only — the live "tonight so far" view would
+have vanished for that hour — and the reason is worth knowing: **`currentNightDate` walks only TWO
+candidate dates (0..-1), so one bad candidate is fatal, while `lastCompletedNightDate` walks FOUR and
+had a spare.** Widening a loop is therefore never a substitute for the date arithmetic being right.
+Any future date-window code gets the same treatment: shift the local Y/M/D on the calendar, never the
+instant. Both edges are now pinned by tests using `mock.timers`.
 
 **Deliberately NOT in the gate:** the I/O glue — FFmpeg spawning, ONVIF SOAP, MQTT, the four push
 senders, RTSP probing. Testing those means asserting that mocks were called with the right arguments,
@@ -189,57 +257,151 @@ synthetic source a second path and assert the toggle swaps the stream.
 
 ---
 
-### 2.4 Record a wake without alerting — `SPECCED`
+### 2.5 Bed occupancy from the camera — `SPECCED` · *do not build yet, see the gate*
 
-**The problem, measured.** Replaying the wake algorithm over all 18 'ok' prod nights (**101 wakes**)
-and matching each against the alert feed:
+**Why.** Every open item in §1.2 is downstream of one missing fact: **is there actually a child in the
+bed?** The detector infers it from motion in two zones, which is why a parent's hands leaving the bed
+reads as an exit, a stir reads as an arrival, and an empty bed once reported a flawless 11h06m sleep.
+Motion cannot answer the question; a picture can. A generic person-detector cannot either — Raffa
+sleeps under a blanket and Renz in a sleep suit, so frequently **only a head is visible**.
 
-| wake type | wakes | no alert at all | alert fired but no clip |
-|---|---|---|---|
-| motion + sound | 85 | 40 | **0** |
-| motion only | 6 | 6 | **0** |
-| sound only | 10 | 8 | **0** |
+**Approach: distil, don't run a VLM.** A vision-language model (Qwen2.5-VL via Ollama) labels frames
+**offline, on the owner's desktop**, and is then thrown away. What ships is a MobileNetV3-Small
+classifier, **~6 MB ONNX**, ~10 ms per frame, ~2.5 CPU-seconds/day at the rate transitions actually
+occur — against the existing detector's ~13,000. The VLM never runs in the container and never could:
+`/var/lib/docker` has **6.8 GB free of a fixed 40 GB vdisk** and a 3B model is ~3.5 GB. The Coral is
+not a way around this either (int8-only, **8 MB on-chip**).
 
-**53% of wakes produce no alert, so there is nothing to look at in the morning.** The recorder itself
-is faultless — zero cases of "alerted but no clip" in 101 wakes; the gap is entirely upstream.
+**Status: the owner is running the labelling lab himself, no deadline.** Full instructions live outside
+this repo (Claude artifact, "Bed Occupancy Lab", 6 stages). Nothing here is committed until the gate
+below passes.
 
-Two causes, and only one of them is a bug:
-- **14 wakes fell outside the alert schedule** — all Renz, whose alert window opens 19:30 while his
-  *sleep* window opens 19:00. **Config, fixable in-app, no code.**
-- **40 fell inside the schedule with alerting armed and nothing fired.** The two subsystems measure
-  different things and always will: sleep counts a minute active on any ~200 ms blip above 1% of zone
-  or 6 dB, while an alert needs **2–3 seconds sustained**. A child who shifts for a second every minute
-  for ten minutes is ten active minutes and never one sustained alert.
+#### 2.5a The gate — one experiment, before any of this is built
 
-**This is deliberately NOT "make it alert more."** Owner, 2026-08-26: *"I don't want to necessarily
-send an alert. That actually works fine. But we should have a way to record these and not alert so if
-you wake up in the morning and see that they were awake for 5 mins you can see why."* Alerting stays
-exactly as tuned; what's missing is **evidence**.
+A model trained on Renz and Raffa learns *this* cot, *this* angle, *this* IR illuminator. It would fail
+on someone else's camera **confidently**, silently corrupting their sleep data. So the design below
+assumes per-install calibration — and that assumption must be tested first:
 
-**Almost all the machinery already exists** — this is wiring, not new subsystems:
-- `lib/recordings.js` + the `recordings` table already record with **no push and no `detection_events`
-  row**, and the table already carries a **`triggered_by`** column to distinguish this from a manual
-  recording.
-- `clipRecorder.holdRing(cameraId, fromMs)` already protects ring segments from pruning retroactively.
-  **This dissolves what looked like the blocker**: the ring is only ~63 s deep, but a hold placed on the
-  *first active minute* keeps the wake's opening available until the run qualifies minutes later.
-- `SleepDetail`'s wake list already renders an inline clip player per wake (#107) — the natural home,
-  and exactly the "see why" surface the owner described.
+> Train on Renz + Raffa, then fit a head on the **staging Hikvision** (a third camera, different make,
+> different angle, same house). Fit it at 10 / 20 / 40 / 80 labelled frames and plot where accuracy
+> stops improving.
 
-New work is a **live wake watcher**: `activityTracker` already buckets motion/sound per minute in real
-time, so it can apply the same active-minute test as `sleepAnalysis`, `holdRing` on the first active
-minute after onset, and cut a recording once the run reaches `WAKE_ACTIVE_MIN`, releasing the hold if
-it never does.
+That single experiment answers both open questions at once: whether per-install calibration is needed
+at all, and **how many frames the wizard should ask for**. The "~20 frames" figure used below is an
+estimate, not a measurement — expectation is 40–60, constrained by the empty class. **Do not build the
+wizard around a guessed number.**
 
-**★ Decide before building: bounded clip, not the whole wake.** Average wake is ~19 min and clips run
-~172 KiB/s, so recording wakes end to end is **~1.1 GiB/night (~34 GiB at 30-day retention)** — on a
-`/app/data` that is already **98% full**. A **30 s clip at the wake's start** answers "why" and costs
-**~29 MiB/night (~0.85 GiB retained)**, roughly 40× less. Recommend the bounded clip, with its own
-retention/prune path like alert clips, and its own storage guard via `hasMinFreeSpace()`.
+**Also settled, so it isn't re-proposed:** collecting frames from *other people's* beds is the wrong
+move. A handful of extra scenes lands in the dead zone — too varied to master the two cameras we can
+actually verify against, and nowhere near the hundreds of distinct scenes real cross-home
+generalisation needs. The generalising is already done by MobileNet's ImageNet pretraining (1.2M
+photographs); four bedrooms adds nothing on top of that. The variety **worth** having is *within* an
+install: both lighting regimes (IR and daylight), a deliberate camera reposition, blanket and
+sleep-suit variation, seasons. All of it accumulates for free as nights pass.
 
-Open questions: whether a non-qualifying stir should keep its capture or discard it; whether the hold
-needs a hard cap (a wake bridging many gaps can hold ~17 min of ring, ~176 MiB transiently).
+#### 2.5b How it works for someone else installing Nightlight
 
+**Split the model in two.** The backbone (MobileNetV3 minus its final layer) ships once, frozen,
+identical for everyone; it turns a frame into 576 numbers. The head is a single 576→2 layer — **1,154
+numbers, ~5 KB of JSON** — and is the only per-install part.
+
+That split is what makes this shippable: fitting a 1,154-parameter logistic regression on a few dozen
+examples is a few hundred gradient steps of plain arithmetic, **well under a second in Node with no new
+dependency**. `onnxruntime` is needed for inference anyway, and feature extraction is the same forward
+pass. **No Python, no PyTorch, nothing new in the image beyond the backbone.**
+
+**⚠️ Prerequisite: Nightlight stores no images today.** Motion and sound are sampled 24/7 (~1,437
+rows/camera/day) but the only JPEGs on disk are alert snapshots — a fresh install has none, and they
+would be biased toward "occupied and moving" anyway. Calibration therefore needs its own capture mode:
+one snapshot every ~10 min for 2–3 nights, ~250 frames, ~20 MB, using the existing per-camera
+`snapshot_url`. Useful asymmetry: **empty frames are trivial** (daytime, before bedtime, after the
+morning wake); only the occupied class needs a night.
+
+**The flow:**
+1. *"Improve bed detection"* in camera settings — **off by default, clearly optional**.
+2. Capture runs 2–3 nights, with a quiet progress banner.
+3. **Labelling screen.** Frames are chosen deliberately, not at random: spread across the clock so both
+   IR and daylight appear, and roughly balanced between likely-empty and likely-occupied times. Large
+   image, two buttons, ~40 taps, about two minutes.
+   ★ **The wording is load-bearing: "Is the child in the bed *right now*?"** — not "is a child
+   visible?". A parent holding a child beside the bed is `empty`. The owner hit exactly this trap in
+   his own labelling; every user will.
+4. **Fit, then report honestly.** Hold back a quarter of the labels as an exam the head never sees, and
+   show **both error types separately** — a head that always answers "occupied" scores well on an
+   imbalanced set and is worthless, since catching the empty case is the entire point.
+5. **Shadow for a week.** Log the verdict beside each bed transition, change no reported number, then
+   show "agreed with the detector on 94 of 97 transitions" and let the user decide. Same discipline that
+   caught the dead sound rule in 0.26.0.
+
+**Guardrails, in from the start:**
+- **Veto-only.** Occupancy never *creates* a transition, only suppresses one it disbelieves. A broken
+  classifier then costs missed vetoes, never fabricated bedtimes.
+- **Fails off.** No calibration, a poor exam score, or a load error → the feature is simply absent and
+  behaviour is exactly as today.
+- **Recalibration triggers.** A moved camera, a new bed, a cot→bed transition, or a child who has grown
+  all invalidate the head. Needs an explicit "recalibrate" action; possibly a drift signal when
+  disagreement with confirmed transitions rises.
+- **Frames never leave the box**, and say so in the UI. These are pictures of sleeping children.
+- **Keep the labelled frames.** Forty JPEGs is nothing, and they make re-fitting after a camera move a
+  five-second job instead of another two-night wait.
+
+**⚠️ The data trap, already measured — it would have poisoned the first model.** The 503 stored alert
+snapshots are two populations: **362 at 1920×1080 and 141 at 640×360** (the small ones are sub-stream
+grabs from when the snapshot URL was broken), while every empty frame grabbed today is a sharp
+1920×1080. So **"blurry" predicts "occupied"** with no child involved, and a network always takes the
+easy rule. Every image must be forced through a common small size (320×180) before training. Any future
+capture path has the same exposure.
+
+**Relationship to §1.2.** Complementary, not a replacement. §1.2 item 1 (believed-occupancy state
+machine) is the cheap win and stays worth doing on its own — it needs no model and collapses impossible
+sequences immediately. This section is the *independent evidence* that would also close item 3 (parent
+leaving vs child climbing out), which motion alone cannot separate.
+
+**Done when** the gate experiment has a number, the shadow week shows agreement on a real corpus, and a
+second install can calibrate without help.
+
+### 2.6 Sleep analysis reads ONE camera — `SPECCED` (owner's call, 2026-08-29)
+
+**The decision.** A child may have several cameras and all of them keep working — streaming, alerting,
+recording, PTZ, two-way audio. But **sleep analysis reads exactly one: the child's main camera.**
+Secondary cameras are *supported*, not *analysed*.
+
+**Why it is the right call, and not just a simplification.** Today `computeNight` ORs every camera's
+timeline together, so a minute is "active" if *any* camera saw something. That sounds conservative and
+isn't: it means the noisiest camera decides the night. A second camera pointed at the doorway, or one
+with a wider `detect_zone`, silently drags bedtime later and manufactures wake-ups, and nothing in the
+UI says which camera caused it. There is no way to tune that — the zone advice in the README ("draw it
+so it comfortably contains the child") is per-camera advice that a merge quietly defeats. One camera is
+also the only configuration anyone can reason about when a night comes out wrong, which is most of what
+this section of the roadmap has been about.
+
+**No schema change needed.** `cameras.sort_order` already exists (added with the camera reordering UI).
+The main camera is the child's enabled camera with the lowest `sort_order`.
+
+**Work:**
+1. Select one camera in `computeNight` instead of all: `WHERE child_id = ? AND disabled = 0
+   ORDER BY sort_order, id LIMIT 1`. ⚠️ Note the current query filters **neither** `disabled` nor
+   anything else — a disabled camera's historical samples are being merged into the analysis today.
+2. Same for `getBedTransitions`. Transitions are already per-camera and the twin-detector state is
+   per-camera, so two cameras can and do emit contradictory pairs for one event.
+3. **Delete the merge branch** (`state[i] = state[i] || active`) rather than test it — that closes
+   Tranche B item 1 in §2.3 by removing the code instead of covering it.
+4. **Decide climate separately and say so in the docs.** `nightClimate` averaging two sensors in one
+   room is *correct* and should stay — the argument above is about a merge that can only ever add
+   activity, which doesn't apply to an average. Two tests already pin the averaging behaviour.
+5. Surface it: the camera list should mark which camera is the main one, and the sleep detail view
+   should name the camera the night was scored from. A silent choice is the thing that makes a wrong
+   night unexplainable.
+6. Docs: the sleep section of `README.md` currently says "the child's camera(s)" — that becomes one
+   camera, with a sentence on how it is chosen and how to change it.
+
+**⚠️ Cannot be validated against real data here.** Both children have exactly one enabled camera, so
+this is a no-op on every night on record — the A/B will show zero changed lines and that proves
+nothing. It has to be covered by tests: a child with two cameras where the SECOND one is noisy, asserting
+the night matches the main camera alone.
+
+**Done when** a two-camera child scores identically to that child with the secondary camera removed, and
+the detail view names the camera it used.
 
 ## 3. Idea backlog
 

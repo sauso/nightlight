@@ -9,6 +9,67 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-08-29
+
+### Added
+- **A wake-up is now recorded, without sending an alert.** More than half of the wake-ups on the sleep
+  timeline never raised an alert — over the last 18 nights, 54 of 101 — so there was nothing to look at
+  in the morning to explain them. That isn't an alerting fault: an alert deliberately waits for a couple
+  of seconds of sustained noise or movement before disturbing anyone, while sleep tracking counts a
+  minute the moment it sees a flicker. When a wake-up starts, the app now saves a short clip of it and
+  stays quiet — no push, nothing on your phone. Open the night's detail and a wake-up with a clip can be
+  expanded to play it. A brief stir is still ignored, and nothing is recorded until your child is
+  actually asleep, so settling at bedtime is never captured. Under **Settings → Recording** you can
+  turn it off, change the clip length, and set how long the clips are kept (30 seconds and 14 days by
+  default); the Storage readout there now shows what they're using.
+
+### Fixed
+- **The live "tonight so far" view would have disappeared for an hour after the clocks change.** On the
+  night the clocks go forward, the app worked out "yesterday" by subtracting 24 hours — but that night
+  is only 23 hours long, so between midnight and 1am it skipped a day entirely and could no longer find
+  the night in progress. For that hour the sleep card would have shown nothing at all. It now counts
+  days on the calendar instead of by the clock, and the same fix covers the night the clocks go back,
+  where a day was counted twice. In Australia this would first have shown up on 5 October 2026.
+- **An empty bed could be reported as a very early bedtime.** If the camera briefly mistook something
+  for your child being put into bed — on one measured night a stray reading in the late afternoon, undone
+  again 23 seconds later — and the room then sat empty until the real bedtime, that empty stretch was
+  reported as sleep. One child's bedtime came out as 16:56 when he actually went down at 19:51, nearly
+  three hours early, and the evening was credited with wake-ups nobody had. An empty room defeated every
+  check at once, because an empty room is quiet, never wakes, and is still being watched. Sleep tracking
+  now asks for positive evidence instead: after a put-down the bed has to go on showing signs of being
+  occupied, because a sleeping child is never perfectly still for hours while an empty bed is. Replayed
+  over every night on record, this changed that one night and nothing else.
+- **Bedtime was reported late on a noisy evening.** Sleep tracking already knew to ignore household
+  noise when nothing was moving in your child's room — a sibling being settled next door, a TV — but
+  only for a child who was asleep *before* their bedtime setting. For every ordinary bedtime, where
+  they go down after the window opens, the rule never ran and the reported bedtime waited for the house
+  to fall quiet. On one measured night that put one child's bedtime 39 minutes late and the other's 15
+  minutes late; both now land within a few minutes of when they actually went down. The bedtime you see
+  is the put-down the camera saw and the settle that followed it, wherever it falls relative to the
+  setting.
+- **Noise in the house just after bedtime was counted as your child's first wake-up.** With bedtimes
+  now landing correctly, the same noise that used to delay bedtime instead reappeared moments later as
+  an awakening — one child was shown waking for 10 minutes having not stirred once. For the first half
+  hour after your child falls asleep, a noisy minute only counts if their room also moved. After that,
+  and for the rest of the night, a cry with no movement counts as a wake-up as before.
+- **A child who climbed out of bed by themselves wasn't detected.** "Got out of bed" was only
+  recognised when the movement in the bed and the movement beside it were near-simultaneous — which is
+  what an adult lifting a child out looks like. A child getting out unaided shakes the bed, stands
+  still for a few seconds, and only then moves across the room, and nothing in between joined the two
+  up. The result was worse than a missing marker: with no departure to confirm it, the morning wake-up
+  was reported hours late (one measured night, up at 5:52am, reported as 7:14am). A slower, larger
+  movement away from the bed now counts, while faint ones still don't.
+- **Faint changes outside the bed were reported as movement in the room.** A shadow or the camera's
+  night-vision adjusting could read as someone beside the bed, so nights where nobody entered the room
+  still listed several visits. The threshold for the area outside the bed is now set well clear of
+  those readings and comfortably below a real one.
+- **The "got into bed" marker could point at the wrong moment, or be missing entirely.** On a night
+  with several attempts at settling, it landed on the last re-settle rather than when bedtime began;
+  it now marks the start of that settling. Separately, on a night where the bedtime put-down wasn't
+  recognised at all, a re-settle in the small hours could be adopted as the night's bedtime and shorten
+  the reported sleep by hours — a put-down long after the room went quiet is no longer treated as the
+  one that started the night.
+
 ## [0.26.1] - 2026-08-27
 
 ### Fixed

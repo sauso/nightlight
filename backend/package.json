@@ -1,13 +1,13 @@
 {
   "name": "babymonitor-backend",
-  "version": "0.26.1",
+  "version": "0.27.0",
   "private": true,
   "type": "module",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "test": "node --test --test-force-exit test/*.test.js",
-    "test:core": "node --test --experimental-test-coverage --test-force-exit --test-coverage-lines=95 --test-coverage-functions=90 --test-coverage-branches=80 --test-coverage-include=src/db.js --test-coverage-include=src/middleware/auth.js --test-coverage-include=src/lib/mfa.js --test-coverage-include=src/lib/detectionEvents.js --test-coverage-include=src/routes/timelapses.js test/*.test.js",
+    "test:core": "node --test --experimental-test-coverage --test-force-exit --test-coverage-lines=95 --test-coverage-functions=90 --test-coverage-branches=80 --test-coverage-include=src/db.js --test-coverage-include=src/middleware/auth.js --test-coverage-include=src/lib/mfa.js --test-coverage-include=src/lib/detectionEvents.js --test-coverage-include=src/routes/timelapses.js --test-coverage-include=src/lib/wakeWatcher.js --test-coverage-include=src/lib/bedTransitionRules.js --test-coverage-include=src/lib/sleepAnalysis.js test/*.test.js",
     "test:coverage": "node --test --experimental-test-coverage --test-force-exit test/*.test.js"
   },
   "dependencies": {

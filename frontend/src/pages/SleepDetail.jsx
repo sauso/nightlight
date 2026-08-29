@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, ChevronDown, Moon, DoorOpen, Thermometer, Sparkles, Zap, AudioLines, Play } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Moon, DoorOpen, Thermometer, Sparkles, Zap, AudioLines, Play, Video } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import ClipPlayerModal from '../components/ClipPlayerModal.jsx';
+import MediaPlayerModal from '../components/MediaPlayerModal.jsx';
 
 // Sleep detail: a to-scale timeline of one night for a child, with the wake-ups marked, plus a date
 // picker to browse back through the retained nights (~30 days of activity_samples). Reached by tapping
@@ -141,6 +142,7 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
   // The wake↔alert clip currently open in the shared player (or null). Lives here so it survives a
   // 2-min live refresh of `night` without tearing the modal down mid-watch.
   const [clipFor, setClipFor] = useState(null);
+  const [wakeClip, setWakeClip] = useState(null);
   if (night === undefined) return <div className="card"><div className="empty-state" style={{ padding: 20 }}>Loading night…</div></div>;
   if (night && night.status === 'off') {
     return (
@@ -187,6 +189,7 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
   const hasChildOut = visits.some((v) => v.type === 'child_out');
   const hasRoom = visits.some((v) => v.type !== 'child_out');
   const alerts = night.alerts || [];
+  const wakeClips = night.wakeClips || [];
   // Coverage is measured against elapsed time so far for a live night, not the full window.
   const covEnd = night.in_progress && night.as_of ? night.as_of : night.window_end;
   const covPct = Math.round((night.coverage_minutes / Math.max(1, Math.round((utcMs(covEnd) - utcMs(night.window_start)) / 60000))) * 100);
@@ -230,7 +233,8 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
           <ul className="sleep-wakes">
             {wakes.map((w, i) => (
               <WakeItem key={i} wake={w} hits={alertsInRange(alerts, w.start_at, w.end_at)}
-                fmtTime={fmtTime} onPlay={setClipFor} />
+                clip={clipForWake(wakeClips, w.start_at, w.end_at)}
+                fmtTime={fmtTime} onPlay={setClipFor} onPlayWake={setWakeClip} />
             ))}
           </ul>
         )}
@@ -258,24 +262,43 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
       )}
 
       {clipFor && <ClipPlayerModal ev={clipFor} onClose={() => setClipFor(null)} />}
+      {wakeClip && (
+        <MediaPlayerModal
+          title={`Wake-up · ${fmtTime(wakeClip.started_at)}`}
+          videoPath={`/recordings/${wakeClip.id}/video`}
+          posterPath={`/recordings/${wakeClip.id}/thumb`}
+          filename={`wake-${wakeClip.id}.mp4`}
+          meta={`Recorded automatically${wakeClip.duration_s ? ` · ${wakeClip.duration_s}s` : ''}`}
+          onClose={() => setWakeClip(null)}
+        />
+      )}
     </>
   );
 }
 
-// One wake-up row. Collapsed by default (just time + duration + an alert-count chip); when it has
-// correlated alerts you can expand it to see them and play any recorded clip inline. A wake with no
-// alerts isn't expandable — it stays a plain row.
-function WakeItem({ wake, hits, fmtTime, onPlay }) {
+// One wake-up row. Collapsed by default (time + duration + chips); expand it to see the correlated
+// alerts and play whatever was recorded.
+//
+// Most wakes have no alert at all — measured over 101 nights, 53% of them — because the sleep tracker
+// counts a minute active on a ~200 ms blip while an alert waits for 2-3 seconds sustained. That used to
+// leave a row you couldn't investigate. The automatic wake clip (roadmap 2.4) fills exactly that gap,
+// so a wake is expandable when it has EITHER an alert or a clip.
+function WakeItem({ wake, hits, clip, fmtTime, onPlay, onPlayWake }) {
   const [open, setOpen] = useState(false);
-  const expandable = hits.length > 0;
+  const expandable = hits.length > 0 || !!clip;
   const head = (
     <>
       <span className="sleep-wakes__time">{fmtTime(wake.start_at)} – {fmtTime(wake.end_at)}</span>
       <span className="sleep-wakes__headright">
         <span className="sleep-wakes__dur">{fmtDur(wake.minutes)} awake</span>
-        {expandable && (
+        {hits.length > 0 && (
           <span className="sleep-wakes__badge">
             <Zap size={11} aria-hidden="true" />{hits.length} alert{hits.length === 1 ? '' : 's'}
+          </span>
+        )}
+        {clip && (
+          <span className="sleep-wakes__badge" title="Recorded automatically — this wake did not raise an alert">
+            <Video size={11} aria-hidden="true" />clip
           </span>
         )}
         {expandable && <ChevronDown size={16} className={`sleep-wakes__chev${open ? ' is-open' : ''}`} aria-hidden="true" />}
@@ -293,6 +316,7 @@ function WakeItem({ wake, hits, fmtTime, onPlay }) {
       )}
       {open && (
         <ul className="sleep-wakes__alerts">
+          {clip && <WakeClipRow clip={clip} fmtTime={fmtTime} onPlay={onPlayWake} />}
           {hits.map((a) => <AlertRow key={a.id} a={a} fmtTime={fmtTime} onPlay={onPlay} />)}
         </ul>
       )}
@@ -622,6 +646,45 @@ function SleepInsights({ childId, tempUnit, childName }) {
 
 // --- small helpers ---
 const utcMs = (s) => new Date(String(s).replace(' ', 'T') + 'Z').getTime();
+
+// The automatic clip recorded at the start of a wake. Deliberately reads as a recording, not an alert:
+// nothing was sent to anyone's phone, it was captured so there is something to look at in the morning.
+function WakeClipRow({ clip, fmtTime, onPlay }) {
+  return (
+    <li className="sleep-wakes__alert">
+      <button
+        type="button"
+        className="sleep-wakes__thumbwrap"
+        onClick={() => onPlay(clip)}
+        aria-label="Play the clip recorded at the start of this wake"
+      >
+        <img className="sleep-wakes__thumb" src={api.url(`/recordings/${clip.id}/thumb`)} alt="" loading="lazy" />
+        <Play size={14} className="sleep-wakes__play" aria-hidden="true" />
+      </button>
+      <div className="sleep-wakes__alert-main">
+        <div className="sleep-wakes__alert-title">
+          <Video size={13} className="sleep-wakes__alert-ico" aria-hidden="true" />
+          Recorded at the start of this wake
+        </div>
+        <div className="sleep-wakes__alert-sub">
+          {fmtTime(clip.started_at)}
+          {clip.duration_s ? ` · ${clip.duration_s}s` : ''} · no alert was sent
+        </div>
+      </div>
+    </li>
+  );
+}
+
+// The automatic clip belonging to a wake, if one was captured. Matched on time like the alerts are:
+// the clip is anchored on the wake's first active minute, so it lands at the very start of the span.
+function clipForWake(clips, startAt, endAt) {
+  const s = utcMs(startAt) - ALERT_MARGIN_MS;
+  const e = utcMs(endAt) + ALERT_MARGIN_MS;
+  return clips.find((c) => {
+    const t = utcMs(c.started_at);
+    return t >= s && t <= e;
+  }) || null;
+}
 
 // Detection alerts that fired within a wake's window, allowing a few minutes either side (a wake run is
 // trimmed to its active minutes, and an alert can fire just before/after). Keeps ascending order.
