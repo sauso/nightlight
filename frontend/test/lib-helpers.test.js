@@ -44,10 +44,18 @@ describe('ageLabel', () => {
     expect(ageLabel('2022-08-26')).toBe('4 years');
   });
 
-  test('rounds years down rather than to nearest', () => {
+  test('keeps the months past two years, where they still carry the information', () => {
+    // "3 years" spans a year over which a child's sleep changes completely, so the months stay.
+    freeze('2026-08-26T10:00:00Z');
+    expect(ageLabel('2023-06-26')).toBe('3 years 2 months');
+    expect(ageLabel('2023-07-26')).toBe('3 years 1 month'); // singular
+    expect(ageLabel('2020-01-26')).toBe('6 years 7 months');
+  });
+
+  test('a whole number of years drops the months rather than printing zero', () => {
     freeze('2026-08-26T10:00:00Z');
     expect(ageLabel('2023-08-26')).toBe('3 years');
-    expect(ageLabel('2023-02-26')).toBe('3 years'); // 3y6m is still "3 years"
+    expect(ageLabel('2024-08-26')).toBe('2 years');
   });
 });
 

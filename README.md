@@ -269,6 +269,16 @@ measurement**, and (like everything here) never a safety device — see the warn
   fall asleep, so the tail of the household's evening isn't reported as their first wake-up.
   After that the rule stops: mid-night the house is quiet, so a cry with no movement counts as a
   wake-up as you'd expect.
+- **Re-working out a night (admins).** A night's summary is worked out once, the morning after, and
+  then kept as it is — so if sleep detection is improved later, an already-recorded night keeps showing
+  the old answer while the detail view, which works the night out fresh each time you open it, shows the
+  new one. **Recompute this night** on the sleep detail page reconciles them. It shows you what would
+  change (bedtime, wake time, how long they slept, how many wake-ups) *before* anything is saved, and
+  you can cancel. Admins only.
+  **It can never make a night worse:** the minute-by-minute data behind a night is only kept for 30
+  days — the same span the date picker offers — so the oldest night you can browse sits right on that
+  edge. If its data has aged out, the recompute is refused and the saved summary is left alone, rather
+  than being replaced with "no data".
 - **At a glance, and live.** Each child's page summarises last night — total sleep, wake-ups,
   longest stretch — and while a night is in progress it updates as **"Tonight · so far"**, so an
   early-morning wake appears within a minute or two rather than only after the window closes.
