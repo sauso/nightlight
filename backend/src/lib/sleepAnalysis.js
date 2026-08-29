@@ -413,9 +413,36 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   const effEndMs = inProgress ? nowMs : endUtc.getTime();
   const asOfSql = toSqlUtc(new Date(effEndMs));
 
+  // TWO camera sets, and the split is deliberate.
+  //
+  // `cams` — every camera the child has. Used only for CONTEXT: room climate, and the alert list on the
+  // detail view. Both are things where more cameras genuinely means more information, and neither can
+  // move a reported time.
+  //
+  // `scoreCams` — the ONE camera the night is actually SCORED from: the child's main camera, meaning
+  // the enabled one with the lowest sort_order (the order shown in the UI). Motion, sound and bed
+  // transitions all come from it and nothing else.
+  //
+  // Why one and not all (owner's call, 2026-08-29): the old code ORed every camera's timeline together,
+  // so a minute counted as active if ANY camera saw something. That is not the conservative choice it
+  // looks like — it means the NOISIEST camera decides the night. A second camera pointed at the doorway,
+  // or one with a wider detect_zone, silently drags bedtime later and manufactures wake-ups, with
+  // nothing in the UI saying which camera caused it. The README's per-camera advice ("draw the bed zone
+  // so it comfortably contains the child") is per-camera advice that a merge quietly defeats, and a
+  // night that comes out wrong becomes unexplainable. Secondary cameras keep streaming, alerting,
+  // recording and everything else — they are supported, just not analysed.
+  //
+  // NB this also fixes a quieter bug: the old query filtered nothing at all, so a DISABLED camera's
+  // historical samples were still being merged into the analysis.
   const cams = db.prepare('SELECT id FROM cameras WHERE child_id = ?').all(childId).map((c) => c.id);
+  const mainCam = db
+    .prepare('SELECT id, name FROM cameras WHERE child_id = ? AND disabled = 0 ORDER BY sort_order, id LIMIT 1')
+    .get(childId);
+  const scoreCams = mainCam ? [mainCam.id] : [];
   // Room climate over the window so far — present on every non-off status (independent of whether we
   // detected sleep). The bigger per-5-min series only when a timeline is asked for (the detail view).
+  // Deliberately ALL cameras: nightClimate AVERAGES its sensors, and an average cannot be dragged the
+  // way an OR can, so two sensors in one room is strictly better information than one.
   const climate = nightClimate(cams, startSql, asOfSql, { includeSeries: includeTimeline });
   const base = {
     night_date: nightDate,
@@ -423,6 +450,10 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     window_end: endSql,
     in_progress: inProgress,
     as_of: asOfSql,
+    // Which camera these numbers came from. Surfaced so a night that looks wrong can be traced to the
+    // camera that produced it — a silent choice is what makes a wrong night unexplainable.
+    analysis_camera_id: mainCam ? mainCam.id : null,
+    analysis_camera_name: mainCam ? mainCam.name : null,
     onset_at: null,
     wake_at: null,
     onset_at_shadow: null,
@@ -437,9 +468,9 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     climate,
   };
   if (!cfg.track) return { ...base, status: 'off' };
-  if (cams.length === 0) return { ...base, status: 'no_data' };
+  if (scoreCams.length === 0) return { ...base, status: 'no_data' };
 
-  const placeholders = cams.map(() => '?').join(',');
+  const placeholders = scoreCams.map(() => '?').join(',');
 
   // The timeline runs from ONSET_LOOKBEHIND_MS before the window opens, so a child who went down early
   // is measured from when they actually fell asleep rather than from the window edge. Index 0 is that
@@ -457,12 +488,15 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       `SELECT bucket_start AS t, motion_peak, sound_peak, motion_out_peak FROM activity_samples
          WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
     )
-    .all(...cams, analysisStartSql, asOfSql);
+    .all(...scoreCams, analysisStartSql, asOfSql);
 
   // Per-minute state over the whole timeline: null = no sample (gap), false = quiet, true = active. A
-  // minute is active if ANY of the child's cameras saw in-bed movement, a clear noise, OR movement
-  // outside the bed (someone in the room / the child out of bed). outAt[] marks the outside-bed
-  // minutes so the timeline can surface them as room activity distinct from stirring in the bed.
+  // minute is active if the main camera saw in-bed movement, a clear noise, OR movement outside the bed
+  // (someone in the room / the child out of bed). outAt[] marks the outside-bed minutes so the timeline
+  // can surface them as room activity distinct from stirring in the bed.
+  //
+  // One camera, so one row per minute and nothing to combine. This used to OR across cameras; that OR
+  // is exactly how a second camera could add activity the child never produced (see scoreCams above).
   const state = new Array(totalMin).fill(null);
   const outAt = new Array(totalMin).fill(false);
   // The two channels kept apart as well as combined: the onset search below has to ask "did anything
@@ -483,8 +517,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     const moved = (r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) || out;
     const heard = r.sound_peak != null && r.sound_peak > SOUND_ACTIVE;
     const active = moved || heard;
-    if (state[i] === null) state[i] = active;
-    else state[i] = state[i] || active;
+    state[i] = state[i] === null ? active : state[i] || active;
     if (out) outAt[i] = true;
     if (moved) motionAt[i] = true;
     if (heard) soundAt[i] = true;
@@ -522,7 +555,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // below and the shadow wake block further down need them.
   const lookahead = inProgress ? 0 : WAKE_LOOKAHEAD_MS;
   const txEndSql = toSqlUtc(new Date(endUtc.getTime() + lookahead));
-  const transitions = getBedTransitions(cams, analysisStartSql, txEndSql);
+  const transitions = getBedTransitions(scoreCams, analysisStartSql, txEndSql);
   const txMs = (t) => new Date(t.replace(' ', 'T') + 'Z').getTime();
   const txIdx = (t) => Math.round((txMs(t) - analysisStartUtc.getTime()) / 60000);
 
@@ -702,7 +735,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
         `SELECT bucket_start AS t, motion_peak FROM activity_samples
            WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
       )
-      .all(...cams, analysisStartSql, txEndSql);
+      .all(...scoreCams, analysisStartSql, txEndSql);
     const cribActExt = new Array(totalMinExt).fill(false);
     for (const r of extRows) {
       const i = idxOf(r.t);
