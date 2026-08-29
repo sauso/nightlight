@@ -179,3 +179,45 @@ test('reading a night without store=1 never writes anything', async () => {
   assert.equal(res.body.status, 'ok');
   assert.equal(db.prepare('SELECT COUNT(*) c FROM sleep_nights WHERE child_id = ?').get(CHILD).c, 0);
 });
+
+// --- ?stored=1: the baseline the dialog compares against ------------------------------------------
+
+test('stored=1 returns the SAVED row, not a fresh computation', () => {
+  // This is the endpoint the recompute dialog reads for its "before" column, and the distinction is the
+  // whole feature: everything else on this route recomputes, so comparing against any of them compares
+  // a recompute with a recompute and can never differ. That shipped once and made the button inert.
+  return (async () => {
+    laySamples();
+    computeAndStoreNight(CHILD, DATE);
+    // Now make the SAVED row disagree with what a fresh computation would produce.
+    db.prepare('UPDATE sleep_nights SET onset_at = ?, asleep_minutes = 1, wake_count = 9 WHERE child_id = ?')
+      .run('2026-07-01 06:56:00', CHILD);
+
+    const stored = await call(`${server.url}/api/children/${CHILD}/sleep/${DATE}?stored=1`, { token: adminToken });
+    assert.equal(stored.status, 200);
+    assert.equal(stored.body.night.onset_at, '2026-07-01 06:56:00', 'must be the saved row, verbatim');
+    assert.equal(stored.body.night.wake_count, 9);
+
+    const fresh = await call(`${server.url}/api/children/${CHILD}/sleep/${DATE}`, { token: adminToken });
+    assert.notEqual(fresh.body.onset_at, stored.body.night.onset_at,
+      'the fresh computation must differ — otherwise this test proves nothing');
+  })();
+});
+
+test('stored=1 returns null for a night that was never saved', () => {
+  return (async () => {
+    laySamples();
+    const res = await call(`${server.url}/api/children/${CHILD}/sleep/${DATE}?stored=1`, { token: adminToken });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.night, null, 'no row yet is null, not an error');
+  })();
+});
+
+test('stored=1 never writes anything', () => {
+  return (async () => {
+    laySamples();
+    await call(`${server.url}/api/children/${CHILD}/sleep/${DATE}?stored=1&store=1`, { token: adminToken });
+    assert.equal(db.prepare('SELECT COUNT(*) c FROM sleep_nights WHERE child_id = ?').get(CHILD).c, 0,
+      'reading the saved row must not create one, even with store=1 also set');
+  })();
+});

@@ -272,9 +272,10 @@ measurement**, and (like everything here) never a safety device — see the warn
 - **Re-working out a night (admins).** A night's summary is worked out once, the morning after, and
   then kept as it is — so if sleep detection is improved later, an already-recorded night keeps showing
   the old answer while the detail view, which works the night out fresh each time you open it, shows the
-  new one. **Recompute this night** on the sleep detail page reconciles them. It shows you what would
-  change (bedtime, wake time, how long they slept, how many wake-ups) *before* anything is saved, and
-  you can cancel. Admins only.
+  new one. **Recompute this night** on the sleep detail page reconciles them. It compares what is
+  *saved* — the summary on the child's page — against what the recorded movement now says, and shows
+  you exactly what would change (bedtime, wake time, how long they slept, how many wake-ups) *before*
+  anything is saved. You can cancel. Admins only.
   **It can never make a night worse:** the minute-by-minute data behind a night is only kept for 30
   days — the same span the date picker offers — so the oldest night you can browse sits right on that
   edge. If its data has aged out, the recompute is refused and the saved summary is left alone, rather

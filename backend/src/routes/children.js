@@ -123,11 +123,22 @@ router.get('/:id/sleep', (req, res) => {
 
 // Compute one night on demand for a specific LOCAL start date ('YYYY-MM-DD'). ?detail=1 includes the
 // timeline segments + wake list for the Sleep detail view; ?debug=1 also adds the raw per-minute
-// timeline (tuning); ?store=1 (admin) persists the recompute.
+// timeline (tuning); ?store=1 (admin) persists the recompute; ?stored=1 returns the SAVED row instead
+// of computing anything.
 router.get('/:id/sleep/:date', (req, res) => {
   const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(req.params.date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+  // The SAVED row, computed once the morning after and never revisited. This is what the child's
+  // "last night" card shows, and it is the only thing a recompute can actually change — so it is the
+  // only honest "before" to compare against. Everything else on this route recomputes, and comparing a
+  // recompute against a recompute can never differ.
+  if (req.query.stored === '1') {
+    const row = db
+      .prepare('SELECT * FROM sleep_nights WHERE child_id = ? AND night_date = ?')
+      .get(req.params.id, req.params.date);
+    return res.json({ night: row || null });
+  }
   const wantStore = req.query.store === '1' && req.user?.role === 'admin';
   if (!wantStore) {
     return res.json(computeNight(req.params.id, req.params.date, {
