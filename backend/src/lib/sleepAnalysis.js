@@ -1108,15 +1108,41 @@ const upsertNight = db.prepare(
      computed_at=datetime('now')`
 );
 
-export function computeAndStoreNight(childId, nightDate) {
+// A night that was actually scored. Anything else is an absence of data, not a measurement.
+const SCORED = new Set(['ok', 'empty']);
+
+// Compute a night and store it, upserting over whatever was there.
+//
+// ⚠️ `allowDowngrade: false` is THE data-loss guard, and it exists because recomputing is now something
+// a person can ask for (the admin "Recompute" control on the sleep detail view). Two retention numbers
+// sit exactly on top of each other: `activity_samples` are kept 30 days (RETENTION_DAYS,
+// activityTracker.js) and the sleep detail date picker offers exactly 30 days (HISTORY_DAYS,
+// SleepDetail.jsx). So THE OLDEST NIGHT A USER CAN BROWSE IS SITTING ON THE RETENTION BOUNDARY —
+// recompute it and the minutes behind it are already gone, so it comes back `no_data` and overwrites a
+// perfectly good scored row that is kept forever. Irreversible: the samples that produced the original
+// no longer exist.
+//
+// So a recompute may improve a night, or re-score it differently, but it may never turn a night that
+// WAS scored into one that isn't. The guard lives here rather than in the route so it protects every
+// caller. `runNightlySleepJob` deliberately keeps the default: it writes a first-time `no_data`
+// legitimately, and there is no existing row to protect.
+export function computeAndStoreNight(childId, nightDate, { allowDowngrade = true } = {}) {
   const summary = computeNight(childId, nightDate);
+  if (!allowDowngrade && !SCORED.has(summary.status)) {
+    const existing = db
+      .prepare('SELECT status FROM sleep_nights WHERE child_id = ? AND night_date = ?')
+      .get(childId, nightDate);
+    if (existing && SCORED.has(existing.status)) {
+      return { ...summary, stored: false, refused: 'would_downgrade', stored_status: existing.status };
+    }
+  }
   upsertNight.run({
     child_id: childId,
     ...summary,
     avg_temperature: summary.climate?.temp_avg ?? null,
     avg_humidity: summary.climate?.humidity_avg ?? null,
   });
-  return summary;
+  return { ...summary, stored: true };
 }
 
 export function getStoredNights(childId, limit = 14) {
