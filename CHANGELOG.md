@@ -9,6 +9,33 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-08-29
+
+### Added
+- **"Recompute this night" on the sleep detail page (admins).** A night's summary is worked out once and
+  then kept, so when sleep detection improves, an already-recorded night keeps showing the old answer
+  while the detail view — which works the night out fresh every time you open it — shows the new one.
+  The card and the page then disagree and never catch up. This reconciles them, one night at a time. It
+  shows exactly what would change before anything is saved, so you can see the improvement rather than
+  take it on trust, and you can cancel. **It can never make a night worse:** the minute-by-minute data is
+  kept for 30 days, which is also how far the date picker goes back, so the oldest night you can browse
+  is sitting on that edge — if its data has aged out the recompute is refused and the saved summary is
+  left exactly as it was.
+
+### Changed
+- **Ages now include the months past two years.** A child shown as "3 years" could be anywhere across a
+  twelve-month span over which their sleep changes completely; they now read as "3 years 2 months". A
+  whole number of years still reads plainly as "3 years", and under two years is unchanged ("18 months").
+- **Sleep is now measured from one camera per child, not all of them.** If a child has more than one
+  camera, their **main camera** — the first in the order you've arranged them, skipping any turned off —
+  is the one the night is worked out from, and the night's detail view names it. Previously every camera
+  was combined, and a minute counted as activity if *any* of them saw something, which meant the noisiest
+  camera decided the night: one facing a doorway, or with a wider bed zone, would push bedtime later and
+  add wake-ups nobody had, with nothing saying which camera was responsible. Secondary cameras are
+  unaffected in every other way — they keep streaming, alerting and recording. Room temperature and
+  humidity still read every sensor in the room, since those are averaged rather than combined. This also
+  fixes a camera you'd **turned off** still contributing its old readings to the analysis.
+
 ## [0.27.1] - 2026-08-29
 
 ### Fixed

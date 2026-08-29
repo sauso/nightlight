@@ -244,8 +244,16 @@ measurement**, and (like everything here) never a safety device — see the warn
   never perfectly still for hours — they move a little, repeatedly — so a bed that stirs once and
   then nothing is an empty one, and the bedtime it seemed to start is discarded. The same applies at the other end: a morning wake
   is still found if it comes after the configured wake time.
+- **One camera does the measuring.** If a child has several cameras, sleep is worked out from their
+  **main camera** — the first one in the order you've arranged them, skipping any that are turned off.
+  The others carry on streaming, alerting and recording as normal; they just don't affect the numbers.
+  This is deliberate: if every camera were combined, the *noisiest* one would decide the night — a
+  camera facing the doorway would push bedtime later and add wake-ups that never happened, with nothing
+  saying which camera was responsible. The night's detail view names the camera it measured from. Room
+  temperature and humidity are the exception and still come from every sensor in the room, because
+  those are averaged rather than combined.
 - **How it estimates.** Across the night it builds a per-minute movement + sound timeline from
-  the child's camera(s): falling still for a sustained stretch reads as falling asleep,
+  the child's main camera: falling still for a sustained stretch reads as falling asleep,
   sustained movement or noise reads as an awakening (brief stirs don't count). If you've painted
   a **bed zone** on the camera — the same area that scopes motion alerts — it also tracks
   movement **outside** the bed and lists it separately, which catches a morning wake where the
@@ -261,6 +269,16 @@ measurement**, and (like everything here) never a safety device — see the warn
   fall asleep, so the tail of the household's evening isn't reported as their first wake-up.
   After that the rule stops: mid-night the house is quiet, so a cry with no movement counts as a
   wake-up as you'd expect.
+- **Re-working out a night (admins).** A night's summary is worked out once, the morning after, and
+  then kept as it is — so if sleep detection is improved later, an already-recorded night keeps showing
+  the old answer while the detail view, which works the night out fresh each time you open it, shows the
+  new one. **Recompute this night** on the sleep detail page reconciles them. It shows you what would
+  change (bedtime, wake time, how long they slept, how many wake-ups) *before* anything is saved, and
+  you can cancel. Admins only.
+  **It can never make a night worse:** the minute-by-minute data behind a night is only kept for 30
+  days — the same span the date picker offers — so the oldest night you can browse sits right on that
+  edge. If its data has aged out, the recompute is refused and the saved summary is left alone, rather
+  than being replaced with "no data".
 - **At a glance, and live.** Each child's page summarises last night — total sleep, wake-ups,
   longest stretch — and while a night is in progress it updates as **"Tonight · so far"**, so an
   early-morning wake appears within a minute or two rather than only after the window closes.
