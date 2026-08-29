@@ -251,19 +251,49 @@ test('a lone minute of a parent reaching in does not break the morning absence',
 });
 
 test('a run of active minutes is NOT bridged — only isolated ones are', () => {
-  // The counterpart to the test above, and the reason bridging is safe: five consecutive minutes of
-  // movement is a person, and must still end an absence. Here the child gets up at 06:00 and a parent
-  // works at the bed from 06:14 for five minutes, so the absence that opens at 06:01 is only 13 minutes
-  // long and cannot be the departure — the corroborated one at 06:20 is.
+  // The counterpart to the test above, and the reason bridging is safe: TWO consecutive minutes of
+  // movement is a person at the bed, not a passing arm, and must still end an absence.
+  //
+  // Deliberately sitting one minute under the threshold rather than comfortably clear of it. An earlier
+  // version of this test used a five-minute run against a thirteen-minute absence — an eight-minute
+  // margin — and an implementation that happily bridged runs of two, three or FOUR consecutive minutes
+  // passed it, along with every other test in the repo. The invariant the whole change rests on had no
+  // coverage at all. Here the absence from 06:01 is 19 minutes against a threshold of 20, so bridging
+  // the pair at 06:20 is the difference between reporting 06:00 and reporting 06:22.
   laySamples(at(19, 30), at(6, 0, 1), [[at(19, 30), at(19, 40)]], STILL_OCCUPIED);
   laySamples(at(6, 0, 1), at(7, 30, 1), [
-    [at(6, 0, 1), at(6, 1, 1)],
-    [at(6, 14, 1), at(6, 19, 1)], // five consecutive minutes: not a blip
+    [at(6, 0, 1), at(6, 1, 1)], // getting him out
+    [at(6, 20, 1), at(6, 22, 1)], // exactly two consecutive minutes: a person, not a blip
   ], STILL_EMPTY);
   insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(6, 0, 1)));
-  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(6, 19, 1)));
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(6, 22, 1)));
 
-  assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:19');
+  assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:22', 'the 19-minute absence must not qualify');
+});
+
+test('the last minute of the timeline cannot pad an absence to length', () => {
+  // `bridged` looks at both neighbours, and at the final minute of the extended timeline the right-hand
+  // one does not exist. Reading past the end yields undefined, which is falsy — so without a bounds
+  // guard that last minute counts as isolated, gets bridged, and a 19-minute absence measures 20.
+  // MORNING_ABSENCE_MIN is then cleared on a minute of evidence that was never observed.
+  //
+  // The window is 19:30-07:00 and the scan runs three hours past it, so the timeline's last minute is
+  // 09:59. The room is busy from 06:30 to 09:40, which disqualifies the real 06:00 departure on trailing
+  // activity; then exactly 19 quiet minutes, then that final active minute.
+  laySamples(at(19, 30), at(6, 0, 1), [[at(19, 30), at(19, 40)]], STILL_OCCUPIED);
+  laySamples(at(6, 0, 1), at(10, 0, 1), [
+    [at(6, 0, 1), at(6, 1, 1)],
+    [at(6, 30, 1), at(9, 40, 1)], // a busy morning room
+    [at(9, 59, 1), at(10, 0, 1)], // the very last minute of the timeline
+  ], STILL_EMPTY);
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(6, 0, 1)));
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(9, 40, 1)));
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(
+    night.wake_at, night.wake_at_algo,
+    'nothing corroborated: the wake must fall back to the movement-only figure, not adopt 09:40'
+  );
 });
 
 test('a departure INSIDE a bridged absence is still found', () => {
