@@ -9,6 +9,27 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-08-30
+
+### Added
+- **A still frame is now saved whenever your child gets into or out of bed.** Sleep tracking works this
+  out from movement, and it gets it wrong often enough to matter — across 238 recorded transitions, 147
+  of them were physically impossible on sequence alone (two “got into bed” in a row, or two “got out of
+  bed”, with nothing in between). Until now there was no way to see what the camera was actually
+  looking at when it decided. These frames are never shown in the app and never notify you; they are
+  kept for 45 days alongside the transitions themselves and deleted with them, and cost roughly 5 MB a
+  night. See **docs/recording.md** for where they live and how to remove them.
+
+### Fixed
+- **A morning wake could be reported up to an hour late when a parent handled the bed afterwards.**
+  Getting up for the day is detected as the bed emptying and staying empty, but a single stray minute of
+  movement — an adult reaching in — split that stretch into pieces too short to count, so the real
+  departure was never considered and the wake landed on whatever happened next. Observed on 2026-08-29:
+  a child up at 06:00 reported as waking at 06:47. Isolated minutes no longer break the stretch, and the
+  whole of it is now examined rather than only where it starts.
+  A follow-up review found the same rule could also be satisfied by the very last minute of the
+  night's data, one minute short of the evidence it needed; that is now closed too.
+
 ## [0.28.1] - 2026-08-29
 
 ### Fixed
