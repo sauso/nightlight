@@ -9,6 +9,7 @@ which is which.
 | **Automatic clips** | A motion/sound **alert** | Yes — it's an alert | 14 days / 5 GB (both configurable) | On the alert, in the Alerts feed |
 | **Wake clips** | Your child **waking up** | **No — silent by design** | 14 days (configurable) | On the wake-up, in the night's sleep detail |
 | **On-demand recordings** | You pressing **Record** | No | **Forever, until you delete them** | The **Recordings** card on the child's page |
+| **Bed-transition frames** | Your child getting **into or out of bed** | No | 45 days | Not shown — diagnostic only |
 
 All three are configured under **Settings → Recording** (admin only), and all three write to the same
 place on disk — see [Where recordings are stored](#where-recordings-are-stored).
@@ -82,6 +83,29 @@ night. The average wake-up runs ~19 minutes, so recording wake-ups *end to end* 
 night — which is why the clip is deliberately bounded to its opening rather than the whole wake-up.
 
 ---
+
+## Bed-transition frames (diagnostic, not shown anywhere)
+
+Whenever sleep tracking decides your child has got **into** or **out of** bed, a single still frame is
+saved alongside that decision. These are not clips, are never shown in the app, and never notify you.
+They exist so that a sleep timeline which looks wrong can be *looked at* rather than guessed about.
+
+- **One JPEG per transition**, roughly 20–40 a night across two cameras — in the region of 5 MB a
+  night, and about **220 MB** once the 45-day retention is full.
+- **Kept for 45 days**, matching the transitions themselves, and deleted with them. Not configurable:
+  they are bounded, small, and useless once the transition they belong to has aged out.
+- **Stored in `transition-snapshots/` in your data directory**, named by the transition's id. Deleting
+  the folder is safe — the app recreates it and simply has no pictures for older transitions.
+
+**Why they are worth the disk.** The detector infers a transition from motion in two zones, and it gets
+it wrong often enough to matter: measured across 238 stored transitions, **147 of them (62%) were
+physically impossible on sequence alone** — two “got into bed” in a row, or two “got out of bed”, with
+nothing in between. At least one of every such pair must be wrong. Knowing *that* needed only the
+timestamps; understanding *why* needs the picture.
+
+This is also the only honest way to judge whether an automatic bed-occupancy check would be worth
+adding later. The question that decides it is not “how accurate is it on ordinary frames” but “is it
+right on the frames the detector got wrong” — and those frames now collect themselves.
 
 ## On-demand recordings (the Record button)
 

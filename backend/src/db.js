@@ -274,6 +274,16 @@ if (!camerasColumns.includes('sort_order')) {
   existing.forEach((cam, index) => setOrder.run(index, cam.id));
 }
 
+// A frame captured at the moment each bed transition fired, so a transition that looks wrong can be
+// LOOKED AT rather than argued about. Measured on 2026-08-29: 62% of stored transitions are physically
+// impossible on sequence alone (two `into_bed` in a row, or two `out_of_bed`), so at least one of every
+// such pair is wrong — but with no image there was no way to see WHY. Flag column only; the JPEG lives
+// on disk beside it (same split as detection_events.snapshot) so the SQLite file stays small.
+const bedTxColumns = db.prepare('PRAGMA table_info(bed_transitions)').all().map((c) => c.name);
+if (!bedTxColumns.includes('snapshot')) {
+  db.exec('ALTER TABLE bed_transitions ADD COLUMN snapshot INTEGER NOT NULL DEFAULT 0');
+}
+
 const settingsColumns = db.prepare('PRAGMA table_info(settings)').all().map((c) => c.name);
 if (!settingsColumns.includes('timezone')) {
   db.exec("ALTER TABLE settings ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC'");
