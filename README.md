@@ -241,8 +241,8 @@ measurement**, and (like everything here) never a safety device — see the warn
   setting. Either way it only happens when the camera saw the child actually **put into bed** —
   a quiet room on its own is never read as a sleeping child, and neither is a *put-down* on its
   own: the bed also has to go on showing signs of being occupied afterwards. A sleeping child is
-  never perfectly still for hours, so a bed that registers nothing at all is an empty one, and
-  the bedtime it seemed to start is discarded. The same applies at the other end: a morning wake
+  never perfectly still for hours — they move a little, repeatedly — so a bed that stirs once and
+  then nothing is an empty one, and the bedtime it seemed to start is discarded. The same applies at the other end: a morning wake
   is still found if it comes after the configured wake time.
 - **How it estimates.** Across the night it builds a per-minute movement + sound timeline from
   the child's camera(s): falling still for a sustained stretch reads as falling asleep,

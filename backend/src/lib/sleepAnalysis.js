@@ -149,17 +149,27 @@ const EMPTY_BED_MAX_PEAK = 0.1;
 // put-down is real. So a FALSE put-down turns every safeguard off at once.
 //
 // The evidence that separates them is positive, not negative: an occupied bed is never perfectly still
-// for hours, and an empty one is. Measured across the 14 stored nights, max in-bed motion_peak in the
-// 150 minutes after the reported onset:
-//   the false 16:56 onset ......... 0.0001   (the sensor floor — no frame differed, at all)
-//   quietest genuine onset ........ 0.0045   (2026-08-27 Raffa, under a blanket)
-//   loudest genuine onset ......... 0.6730
-// 0.002 sits ~20x above the false night and ~2x below the quietest true one. NB the *fraction* of still
-// minutes does NOT separate these (0.993 false vs 0.960 true) — only the maximum does. 150 minutes is
-// long enough that even the stillest child on record clears it, and short enough to fit between a
-// spurious afternoon put-down and a real bedtime.
+// for hours, and an empty one is. What matters is HOW OFTEN it moves, not how hard.
+//
+// ⚠️ THE FIRST CUT OF THIS GOT IT WRONG, and the way it was wrong is the lesson. It thresholded the
+// MAXIMUM peak in the window at 0.002, tuned on staging where the empty stretch maxed at 0.0001. That
+// passed its tests, passed an A/B over 26 staging nights, shipped in 0.27.0 — and did nothing on prod,
+// where the SAME empty room recorded a single 0.0045 blip and cleared the bar. Prod and staging run
+// independent detectors against the same cameras, so their samples are not the same data; and a
+// maximum is decided by one minute, which is exactly what a shadow or an IR adjustment produces.
+//
+// Measured properly afterwards, over 24 prod nights and 14 staging nights — MINUTES in the 150 with an
+// in-bed peak at or above 0.0005:
+//   empty room / empty bed (4 windows) ........ 0, 0, 1, 1
+//   quietest genuine onsets ................... 5, 6, 7, 8, 9
+//   typical genuine onset ..................... 16-38
+// 3 minutes sits between them with the same margin either way (2 above the worst empty, 2 below the
+// quietest real). The 0.0005 floor is load-bearing too: at 0.002 the quietest real night falls to 1-2
+// minutes and the separation is gone. 150 minutes is long enough that the stillest child on record
+// clears it, and short enough to fit between a spurious afternoon put-down and a real bedtime.
 const OCCUPANCY_WITNESS_MIN = 150;
-const OCCUPANCY_MIN_PEAK = 0.002;
+const OCCUPANCY_MIN_PEAK = 0.0005;
+const OCCUPANCY_MIN_MINUTES = 3;
 // Use bed-transition-derived onset/wake as the AUTHORITATIVE times rather than merely showing them
 // alongside the movement-only figures. The movement timeline cannot distinguish an empty quiet bed from
 // a sleeping child; where a real transition supports a time it is simply the better estimate. Against
@@ -546,9 +556,10 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   const bedOccupiedAfter = (from) => {
     const to = from + OCCUPANCY_WITNESS_MIN;
     if (to > totalMin) return true; // not enough timeline left to judge
+    let moved = 0;
     for (let i = from; i < to; i++) {
       if (state[i] === null) return true; // a gap: can't prove the bed was empty through it
-      if (bedPeakAt[i] >= OCCUPANCY_MIN_PEAK) return true;
+      if (bedPeakAt[i] >= OCCUPANCY_MIN_PEAK && ++moved >= OCCUPANCY_MIN_MINUTES) return true;
     }
     return false;
   };
