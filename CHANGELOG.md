@@ -25,6 +25,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   departure was never considered and the wake landed on whatever happened next. Observed on 2026-08-29:
   a child up at 06:00 reported as waking at 06:47. Isolated minutes no longer break the stretch, and the
   whole of it is now examined rather than only where it starts.
+  A follow-up review found the same rule could also be satisfied by the very last minute of the
+  night's data, one minute short of the evidence it needed; that is now closed too.
 
 ## [0.28.1] - 2026-08-29
 
