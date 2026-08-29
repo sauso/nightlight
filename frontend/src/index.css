@@ -1144,6 +1144,19 @@ body.in-pip .tile-menu-backdrop {
 /* Which camera the night was scored from. Only one camera is analysed, so when a child has several this says which. */
 .sleep-detail__source { font-size: 12px; color: var(--text-secondary); }
 .sleep-detail__source strong { font-weight: 600; color: var(--text-primary); }
+/* Admin-only recompute control, and the before -> after table it shows. Every colour comes from a
+   token so both themes follow; `is-changed` is what the eye should land on, so only that row uses
+   the accent. Digits are tabular so the two columns line up. */
+.sleep-detail__recompute { width: auto; align-self: flex-start; margin-top: 2px; }
+.sleep-detail__recompute-error { font-size: 12px; color: var(--danger, #c0392b); margin-top: 6px; }
+.recompute-diff { display: flex; flex-direction: column; gap: 2px; margin: 12px 0 16px; font-variant-numeric: tabular-nums; }
+.recompute-diff__row { display: grid; grid-template-columns: 1fr auto 16px auto; align-items: baseline; gap: 8px; padding: 7px 10px; border-radius: 8px; font-size: 13px; }
+.recompute-diff__row.is-changed { background: var(--surface-2, rgba(127, 127, 127, 0.08)); }
+.recompute-diff__label { color: var(--text-secondary); }
+.recompute-diff__was { color: var(--text-secondary); text-decoration: line-through; }
+.recompute-diff__arrow { color: var(--text-secondary); text-align: center; }
+.recompute-diff__now { color: var(--text-primary); font-weight: 600; }
+.recompute-diff__row.is-changed .recompute-diff__now { color: var(--accent); }
 .sleep-detail__section-title { font-size: 13px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-secondary); margin: 0 0 12px; }
 
 .sleep-tl { padding-top: 2px; }
