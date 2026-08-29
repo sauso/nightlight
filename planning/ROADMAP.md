@@ -60,10 +60,18 @@ else is "movement outside the bed"). That was a containment; 0.27.0 fixed severa
 causes — the slow-link exit rule, the outside-channel threshold, the settling-episode marker, and the
 empty-bed onset guard.
 
-**Measured after 0.27.0, against owner ground truth (2026-08-28):** Renz exact on both onset (20:17)
+**Measured after 0.27.1, against owner ground truth (2026-08-28):** Renz exact on both onset (20:17)
 and wake (05:29); Raffa's marker exact (in@19:51), wake exact (05:20), wake count exact (0), onset 18
 minutes after his mother left the room. That is the best the classifier has ever measured — but it is
 two children on one night, which is why this stays `NEXT` rather than closing.
+
+⚠️⚠️ **0.27.0 shipped the empty-bed guard BROKEN and the numbers above were staging-only.** The guard
+thresholded the *maximum* in-bed peak; prod's samples for the same empty room held one 0.0045 blip and
+cleared it, so prod still reported that night as 16:56. Fixed in 0.27.1 by counting *minutes* of
+movement rather than magnitude. **Two rules came out of it and both are now standing practice: an A/B
+must run against BOTH databases, because prod and staging run independent detectors against the same
+cameras and their `activity_samples` are different data; and "is anyone in this bed" is a question
+about how OFTEN it moves, never how hard.**
 
 ⚠️ **The remaining failure mode is the one no amount of threshold work fixes:** the detector cannot
 tell a parent's hands leaving the bed from a child climbing out, because motion in two zones is all it
