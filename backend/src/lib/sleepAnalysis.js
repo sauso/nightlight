@@ -769,11 +769,46 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     // `into_bed` vouch for a departure, which is how the other child's wake landed 53 minutes late (that
     // bed kept registering motion long after the child was carried out, and the nearest marker was an
     // into-bed). If nothing corroborates any gap we keep the movement-only wake rather than guess.
-    const bridged = (i) => cribActExt[i] && !(cribActExt[i - 1] || cribActExt[i + 1]);
+    // A single active minute inside an otherwise dead-flat bed does not mean the bed is occupied — it
+    // means somebody reached into it. Measured 2026-08-29 (Raffa, prod): the child was up for the day
+    // at 06:00 and the bed then read EXACTLY 0.0000 for 47 minutes, broken by two lone minutes (06:14
+    // at 0.018 and 06:33 at 0.449 — an adult's arm). Those two chopped one real 47-minute absence into
+    // runs of 13, 18 and 9, none reaching MORNING_ABSENCE_MIN, so the true departure was never offered
+    // as a candidate at all and the wake landed on the next gap that happened to be long enough: 06:47,
+    // 47 minutes late.
+    //
+    // Only an ISOLATED minute is bridged. Two consecutive active minutes are a person at the bed, not a
+    // passing arm, and still end the absence — that boundary is the whole safety argument here, so it is
+    // pinned by a test sitting one minute under the threshold rather than comfortably clear of it.
+    //
+    // Both neighbours must be in range. At the very last minute of the extended timeline there is no
+    // right-hand neighbour, and reading `undefined` there silently counts as "quiet" — which bridges the
+    // final minute and lets a 19-minute absence measure 20, clearing MORNING_ABSENCE_MIN on evidence
+    // that does not exist. Bridging rests on quiet BOTH sides; where a side cannot be observed, the
+    // minute is not isolated. (`i - 1` is provably safe — `bridged` is only ever reached with j > i >= 0
+    // — but it is guarded too, so the rule reads the same from either end.)
+    //
+    // The left-hand term is deliberately kept although it can never fire HERE, and no test can kill it:
+    // for the scan below to reach an active minute j, minute j-1 must have passed the same condition,
+    // and j-1 cannot have been bridged (bridging j-1 requires j to be quiet), so j-1 is always quiet by
+    // the time this is asked. It states the rule — isolated means quiet on BOTH sides — rather than the
+    // half of it this particular caller happens to need, and it stays correct if the scan is ever
+    // restructured. Do not "simplify" it away on the evidence of a passing suite.
+    const bridged = (i) =>
+      i > 0 && i < totalMinExt - 1 && cribActExt[i] && !(cribActExt[i - 1] || cribActExt[i + 1]);
+
+    // Every minute the bed falls quiet is its own candidate departure. This is not a widening of the
+    // candidate set — it is what PRESERVES it. The old scan walked maximal quiet runs and stepped to the
+    // end of each, which was equivalent while a run ended at the first active minute; once bridging lets
+    // a run jump over active minutes, that step skips candidates the old code would have examined.
+    // Measured on prod's 2026-08-25 night: bridging joined the night into one 431-minute absence from
+    // 23:57 which swallowed the true 05:09 departure whole, reporting the wake at 07:09 — two hours
+    // late. Verified over 400k random timelines that the candidate START set is identical to the old
+    // one, bridged or not; only the run extents differ.
     const firstMin = Math.max(algoOnset, 0);
     for (let i = firstMin; i < totalMinExt; i++) {
-      if (cribActExt[i]) continue;
-      if (i > firstMin && !cribActExt[i - 1]) continue;
+      if (cribActExt[i]) continue; // an absence begins on a quiet minute
+      if (i > firstMin && !cribActExt[i - 1]) continue; // ...and only on the FIRST quiet one of a lull
       let j = i;
       while (j < totalMinExt && (!cribActExt[j] || bridged(j))) j++; // [i, j) is an empty run
       if (j - i >= MORNING_ABSENCE_MIN && activeSuffix[i] <= MAX_POST_EXIT_ACTIVE_MIN) {
