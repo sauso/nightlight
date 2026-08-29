@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-08-29
+
 ### Fixed
 - **"Recompute this night" always said there was nothing to change.** It compared the sleep detail page
   against itself. That page already works the night out fresh every time you open it, so both halves of
