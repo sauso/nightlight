@@ -205,6 +205,11 @@ function NightBody({ night, fmtTime, tz, tempUnit }) {
           <Stat label="Coverage" value={`${covPct}%`} />
         </div>
         <RefinedTimes night={night} fmtTime={fmtTime} />
+        {night.analysis_camera_name && (
+          <div className="sleep-detail__source">
+            Measured from <strong>{night.analysis_camera_name}</strong>
+          </div>
+        )}
       </div>
 
       <div className="card">

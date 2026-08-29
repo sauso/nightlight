@@ -1141,6 +1141,9 @@ body.in-pip .tile-menu-backdrop {
    sections, and settings tiles so titles are consistent everywhere. Sits as the first line inside a card. */
 .card-title,
 .sensor-card__title,
+/* Which camera the night was scored from. Only one camera is analysed, so when a child has several this says which. */
+.sleep-detail__source { font-size: 12px; color: var(--text-secondary); }
+.sleep-detail__source strong { font-weight: 600; color: var(--text-primary); }
 .sleep-detail__section-title { font-size: 13px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-secondary); margin: 0 0 12px; }
 
 .sleep-tl { padding-top: 2px; }
