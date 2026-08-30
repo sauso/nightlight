@@ -178,6 +178,46 @@ export function applyVerdicts(childId, nightDate, verdicts) {
   return { applied };
 }
 
+// A night as it should be SHOWN: the algorithm's answer with any human correction laid over the top.
+//
+// ⚠️ This is the difference between a feature and a chore. Correcting a night and then watching the
+// card keep showing the old, wrong time reads as the app having ignored you — the owner's words on
+// first use were "this is actually worse". If a person has told us when their child actually woke,
+// that IS the best information available and it is what we should display.
+//
+// It is NOT fed back into detection: `sleep_nights` still holds the algorithm's own answer, untouched,
+// and it is returned alongside as `algo_*` so a future change can still be scored against ground truth.
+// Overlaying at display time rather than overwriting the row is what keeps both facts.
+//
+// `asleep_minutes` is re-derived from the corrected span because the two must agree — a card reading
+// "up at 05:29" above "slept 10h 15m" is visibly self-contradictory. Awake minutes are kept as measured
+// (we cannot know how a correction redistributes them) and the result is floored at zero.
+export function applyCorrection(childId, night) {
+  if (!night || !night.night_date) return night;
+  const r = getReviewStmt.get(childId, night.night_date);
+  if (!r || (!r.true_onset_at && !r.true_wake_at)) return night;
+
+  const onset = r.true_onset_at || night.onset_at;
+  const wake = r.true_wake_at || night.wake_at;
+  const out = {
+    ...night,
+    onset_at: onset,
+    wake_at: wake,
+    corrected: true,
+    algo_onset_at: night.onset_at ?? null,
+    algo_wake_at: night.wake_at ?? null,
+  };
+  if (onset && wake) {
+    const span = Math.round((Date.parse(`${wake.replace(' ', 'T')}Z`) - Date.parse(`${onset.replace(' ', 'T')}Z`)) / 60000);
+    out.asleep_minutes = Math.max(0, span - (night.awake_minutes ?? 0));
+  }
+  return out;
+}
+
+export function applyCorrections(childId, nights) {
+  return (nights || []).map((n) => applyCorrection(childId, n));
+}
+
 // Is there a night waiting to be reviewed? Drives the card on the child's page.
 //
 // The most recent scored, unreviewed night within the last week — NOT simply "yesterday". Anchoring on
@@ -218,5 +258,31 @@ export function pendingReview(childId) {
     onset_at: stored.onset_at,
     wake_at: stored.wake_at,
     transition_count: transitionsFor(childId, stored.night_date).length,
+  };
+}
+
+// What the card on the child's page should show. Three states, and the middle one exists because a
+// prompt that simply VANISHES on save is indistinguishable from one that failed: the owner's first
+// report was "it then disappeared and the card didn't update". Answering now leaves a short
+// confirmation with a way back in, so a mistake is correctable and a success is visible.
+//
+//   { state: 'none' }  nothing to say
+//   { state: 'ask'  }  a night is waiting to be reviewed
+//   { state: 'done' }  last night has been reviewed — show what was recorded, and let them change it
+export function reviewCardState(childId) {
+  const pending = pendingReview(childId);
+  if (pending) return { state: 'ask', ...pending };
+  if (!childTracksSleep(childId)) return { state: 'none' };
+  const nightDate = lastCompletedNightDate(childId);
+  if (!nightDate) return { state: 'none' };
+  const r = getReviewStmt.get(childId, nightDate);
+  // A dismissal is not an answer: there is nothing to confirm back, and re-showing it would defeat
+  // the dismissal.
+  if (!r || r.dismissed || (!r.true_onset_at && !r.true_wake_at)) return { state: 'none' };
+  return {
+    state: 'done',
+    night_date: nightDate,
+    true_onset_at: r.true_onset_at,
+    true_wake_at: r.true_wake_at,
   };
 }

@@ -2696,3 +2696,23 @@ input[type='range'] {
 }
 .review-chip:hover { color: var(--text-primary); border-color: var(--peri-soft); }
 .review-chip--on { background: var(--peri); border-color: var(--peri); color: #fff; }
+
+/* The review card's answered state, and the confirm-or-correct block on the review screen. */
+.review-card--done .review-card__body { padding-right: 4px; }
+
+.review-card__icon--done { color: var(--live); background: rgba(127, 191, 163, 0.14); }
+
+.review-shown { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 14px; }
+.review-shown > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.review-shown__label { color: var(--text-secondary); font-size: 13.5px; }
+.review-shown strong { font-size: 17px; font-variant-numeric: tabular-nums; }
+
+.review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.review-actions .btn { flex: 1 1 auto; }
+
+/* "You corrected this" — shown wherever a night's times came from a person rather than the detector. */
+.sleep-corrected {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; font-weight: 600; color: var(--peri);
+  background: rgba(124, 131, 219, 0.12); padding: 2px 9px; border-radius: 999px;
+}
