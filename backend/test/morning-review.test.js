@@ -162,24 +162,32 @@ test('a scored, unreviewed night is offered for review', () => {
   assert.equal(p.night_date, night);
 });
 
-test('a night from a few days ago is still offered — a morning you did not look is not lost', () => {
-  // Anchoring on "yesterday" alone would drop it silently, and the nights worth asking about are
-  // exactly the ones from the days you were too busy to open the app.
+test('the card only ever asks about LAST night, never an older one', () => {
+  // An earlier version offered the most recent UNREVIEWED night within a week. Every answer or
+  // dismissal then made the card jump further back, so it walked away through the week while the night
+  // you actually wanted was no longer on offer — "the card I originally selected for 5.49 is now
+  // gone". Older nights are reached from the sleep detail page instead, which can reach any of them.
   const anchor = lastCompletedNightDate(CHILD);
   const [y, m, d] = anchor.split('-').map(Number);
   const threeNightsAgo = new Date(Date.UTC(y, m - 1, d - 3)).toISOString().slice(0, 10);
+
   storeNight(threeNightsAgo);
-  assert.equal(pendingReview(CHILD)?.night_date, threeNightsAgo);
+  assert.equal(pendingReview(CHILD), null, 'an older unreviewed night is NOT offered');
+
+  storeNight(anchor);
+  assert.equal(pendingReview(CHILD).night_date, anchor, 'last night is');
 });
 
-test('a night older than the backlog is left alone', () => {
-  // Past a week, recollection is no better than the detector's own guess — and a bad ground-truth row
-  // is worse than none, because everything else gets scored against it.
+test('answering last night does not make the card jump to an older one', () => {
   const anchor = lastCompletedNightDate(CHILD);
   const [y, m, d] = anchor.split('-').map(Number);
-  const longAgo = new Date(Date.UTC(y, m - 1, d - 30)).toISOString().slice(0, 10);
-  storeNight(longAgo);
-  assert.equal(pendingReview(CHILD), null);
+  storeNight(new Date(Date.UTC(y, m - 1, d - 2)).toISOString().slice(0, 10));
+  storeNight(anchor);
+
+  saveNightReview(CHILD, anchor, { trueWakeAt: exactSql(at(5, 29, 1)) });
+
+  assert.equal(pendingReview(CHILD), null, 'nothing left to ask about');
+  assert.equal(reviewCardState(CHILD).state, 'done', 'it shows the receipt for last night instead');
 });
 
 test('the most recent unreviewed night is the one offered', () => {
@@ -374,22 +382,6 @@ test('noon decides which calendar day a bare time belongs to', () => {
   assert.equal(localHmToUtcSql(DATE, '11:59'), '2026-07-02 01:59:00', 'a minute earlier is the morning after');
   assert.equal(localHmToUtcSql(DATE, '00:00'), '2026-07-01 14:00:00', 'midnight is the morning after');
   assert.equal(localHmToUtcSql(DATE, '23:59'), '2026-07-01 13:59:00', 'just before midnight is the night itself');
-});
-
-test('the backlog is exactly seven nights, counted on the calendar', () => {
-  // Named boundaries get tested ON the boundary. A fixture 30 days out would pass for any backlog up
-  // to 29 nights while claiming to pin 7.
-  const anchor = lastCompletedNightDate(CHILD);
-  const [y, m, d] = anchor.split('-').map(Number);
-  const nightsAgo = (n) => new Date(Date.UTC(y, m - 1, d - n)).toISOString().slice(0, 10);
-
-  db.prepare('DELETE FROM sleep_nights').run();
-  storeNight(nightsAgo(6));
-  assert.equal(pendingReview(CHILD) && pendingReview(CHILD).night_date, nightsAgo(6), 'six nights ago is inside');
-
-  db.prepare('DELETE FROM sleep_nights').run();
-  storeNight(nightsAgo(7));
-  assert.equal(pendingReview(CHILD), null, 'seven nights ago is outside it');
 });
 
 // --- verdicts belong to a night, and to a child ----------------------------------------------------

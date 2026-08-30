@@ -218,46 +218,35 @@ export function applyCorrections(childId, nights) {
   return (nights || []).map((n) => applyCorrection(childId, n));
 }
 
-// Is there a night waiting to be reviewed? Drives the card on the child's page.
+// Is last night waiting to be reviewed? Drives the card on the child's page.
 //
-// The most recent scored, unreviewed night within the last week — NOT simply "yesterday". Anchoring on
-// yesterday alone means a morning you don't open the app loses that night permanently, and the nights
-// most worth asking about are exactly the ones on the days you were too busy to look. A week's backlog
-// is the compromise: recent enough that you still remember it, forgiving enough to survive a weekend
-// away. Older than that and recollection is no better than the detector's guess, which would poison the
-// ground truth this whole table exists to hold.
-const REVIEW_BACKLOG_NIGHTS = 7;
-
-const pendingStmt = db.prepare(
-  `SELECT n.night_date, n.onset_at, n.wake_at
-     FROM sleep_nights n
-     LEFT JOIN sleep_reviews r ON r.child_id = n.child_id AND r.night_date = n.night_date
-    WHERE n.child_id = ? AND n.status = 'ok' AND n.night_date >= ? AND r.child_id IS NULL
-    ORDER BY n.night_date DESC
-    LIMIT 1`
-);
-
+// ⚠️ THE CARD IS ABOUT THE LAST COMPLETED NIGHT AND NOTHING ELSE. An earlier version offered the most
+// recent UNREVIEWED night within a week, which sounded generous and behaved terribly: every answer or
+// dismissal made the card jump to an older night, so it walked backwards through the week while the
+// night you actually wanted was no longer on offer. The owner hit exactly that — "the card I
+// originally selected for 5.49 is now gone" — with the night they wanted to correct unreachable.
+//
+// A card that is always about last night is predictable. Older nights are reached from the sleep
+// detail page's own button (ReviewNightButton), which is where you already are when you notice a night
+// looks wrong, and which can reach ANY night the date picker offers rather than only unreviewed ones.
 export function pendingReview(childId) {
   if (!childTracksSleep(childId)) return null;
-  // Anchored on the last completed night rather than on `new Date()` so the cutoff uses the app's
-  // configured timezone — the same calendar the nights themselves are dated in. Shifting the DATE on
-  // the calendar, never the instant: subtracting milliseconds crosses a daylight-saving boundary twice
-  // a year and silently drops or repeats a night.
-  const anchor = lastCompletedNightDate(childId);
-  if (!anchor) return null;
-  const [y, m, d] = anchor.split('-').map(Number);
-  const cutoff = new Date(Date.UTC(y, m - 1, d - (REVIEW_BACKLOG_NIGHTS - 1))).toISOString().slice(0, 10);
+  const nightDate = lastCompletedNightDate(childId);
+  if (!nightDate) return null;
+  if (getReviewStmt.get(childId, nightDate)) return null; // answered or dismissed — stop asking
 
-  // Only nights there is something to be right or wrong about: 'no_data' and 'empty' carry no times to
+  // Only a night there is something to be right or wrong about. 'no_data' and 'empty' carry no times to
   // confirm, and asking anyway would teach the habit of dismissing the card unread — which would cost
-  // exactly the nights that matter. The LEFT JOIN excludes anything already answered OR dismissed.
-  const stored = pendingStmt.get(childId, cutoff);
+  // exactly the nights that matter.
+  const stored = db
+    .prepare("SELECT status, onset_at, wake_at FROM sleep_nights WHERE child_id = ? AND night_date = ? AND status = 'ok'")
+    .get(childId, nightDate);
   if (!stored) return null;
   return {
-    night_date: stored.night_date,
+    night_date: nightDate,
     onset_at: stored.onset_at,
     wake_at: stored.wake_at,
-    transition_count: transitionsFor(childId, stored.night_date).length,
+    transition_count: transitionsFor(childId, nightDate).length,
   };
 }
 
