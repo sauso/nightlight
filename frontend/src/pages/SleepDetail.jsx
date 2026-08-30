@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, ChevronDown, Moon, DoorOpen, Thermometer, Sparkles, Zap, AudioLines, Play, Video } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
@@ -38,6 +38,7 @@ const SEG_CLASS = {
 
 export default function SleepDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { settings } = useSettings();
   const tz = settings.timezone || 'UTC';
   const { kids } = useCameras();
@@ -211,6 +212,19 @@ function NightBody({ night, fmtTime, tz, tempUnit, childId, date, onRecomputed }
           <div className="sleep-detail__source">
             Measured from <strong>{night.analysis_camera_name}</strong>
           </div>
+        )}
+        {/* The ONLY way into a review for a night other than the one the card happens to be offering.
+            Without it a mistake is permanent: the card asks about the most recent UNreviewed night, so
+            a night you have already answered — wrongly — becomes unreachable. That happened on the
+            first day: a drifted 08:29 was recorded as truth and there was no way back to it. */}
+        {!night.in_progress && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-block sleep-detail__review"
+            onClick={() => navigate(`/children/${childId}/review/${date}`)}
+          >
+            {night.corrected ? 'Change what you told us about this night' : 'Was this night right?'}
+          </button>
         )}
         <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime} onRecomputed={onRecomputed} />
       </div>

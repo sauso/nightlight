@@ -23,6 +23,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
     buttons on purpose: times Nightlight guessed are never one stray tap from being recorded as fact.
   - The prompt shows once per night and becomes a short receipt once answered, which you can tap to
     change your mind. Dismissing it stops it coming back for that night.
+  - **Any night can be reviewed**, not just last night — the sleep detail page has **Was this night
+    right?** for whichever night you are looking at, which is how you change a night you already
+    answered.
   - Reviews are kept forever, and an event you have judged keeps its frame past the usual 45 days.
   - See **README → Sleep tracking**.
 
