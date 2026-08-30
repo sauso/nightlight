@@ -11,6 +11,7 @@ import { startMotionDetector, stopMotionDetector, motionLegWanted } from '../lib
 import { startOnvifMotion, stopOnvifMotion, onvifMotionWanted } from '../lib/onvifMotion.js';
 import { startSoundDetector, stopSoundDetector } from '../lib/soundDetector.js';
 import { startClipCapture, stopClipCapture, isClipCapturing } from '../lib/clipCapture.js';
+import { transitionSnapshotPath } from '../lib/bedTransitions.js';
 import {
   getRecentDetectionEvents,
   clearDetectionEvents,
@@ -46,6 +47,17 @@ router.get('/alerts/:id/snapshot', requireAuthQueryOrHeader, (req, res) => {
   // { root, path } form: Express jails the send under root and rejects any `..`, on top of the
   // integer-only id validation upstream (belt-and-suspenders against path traversal).
   res.sendFile(file.path, { root: file.root, dotfiles: 'deny' });
+});
+
+// The frame captured at one bed transition. Query-token auth like the alert snapshot above, for the
+// same reason: an <img> cannot attach an Authorization header. These are diagnostic stills behind the
+// morning review — see lib/bedTransitions.js for why they are collected at all.
+router.get('/bed-transitions/:id/snapshot', requireAuthQueryOrHeader, (req, res) => {
+  const file = transitionSnapshotPath(req.params.id);
+  if (!file) return res.status(404).json({ error: 'No frame for this transition' });
+  // transitionSnapshotPath coerces the id to a positive integer and builds the path itself, so nothing
+  // user-supplied reaches the filesystem; sendFile's dotfile guard is the second layer.
+  res.sendFile(file, { dotfiles: 'deny' });
 });
 
 // Recorded clip for an alert — same query-token auth as the snapshot above (a <video> element
