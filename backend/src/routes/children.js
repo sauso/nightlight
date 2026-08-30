@@ -5,11 +5,14 @@ import { requireAuth } from '../middleware/auth.js';
 import { normalizePhoto } from '../lib/photo.js';
 import { getStoredNights, computeNight, computeAndStoreNight, currentNightDate, childTracksSleep, sleepInsights } from '../lib/sleepAnalysis.js';
 import { startMotionDetector } from '../lib/motionDetector.js';
+import { getNightReview, saveNightReview, pendingReview, localHmToUtcSql, VERDICTS } from '../lib/sleepReviews.js';
+import { setTransitionVerdict } from '../lib/bedTransitions.js';
 
 const router = Router();
 router.use(requireAuth);
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
 function withCameras(child) {
   const cameras = db
@@ -157,6 +160,61 @@ router.get('/:id/sleep/:date', (req, res) => {
     });
   }
   res.json(summary);
+});
+
+// --- Morning review: what actually happened, from the person who was there --------------------------
+//
+// Deliberately separate from /sleep/:date. That route is the app's OWN answer and recomputes on every
+// call; this one records a human's, and never changes once given. Keeping them apart is what stops the
+// ground truth being quietly re-derived from the thing it is supposed to be judging.
+
+// Is there a night waiting to be reviewed? Drives the card on the child's page. Always 200 — "nothing
+// to review" is a normal answer, not an error, and a 404 here would light up the console every morning.
+router.get('/:id/review/pending', (req, res) => {
+  const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
+  if (!child) return res.status(404).json({ error: 'Child not found' });
+  res.json({ pending: pendingReview(req.params.id) });
+});
+
+router.get('/:id/review/:date', (req, res) => {
+  const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
+  if (!child) return res.status(404).json({ error: 'Child not found' });
+  if (!DATE_ONLY.test(req.params.date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+  res.json(getNightReview(req.params.id, req.params.date));
+});
+
+// Save the night's true times, any per-transition verdicts, and/or a dismissal. Every field is
+// optional: dismissing is just a save with nothing else in it, which is why one route covers both.
+router.put('/:id/review/:date', (req, res) => {
+  const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
+  if (!child) return res.status(404).json({ error: 'Child not found' });
+  if (!DATE_ONLY.test(req.params.date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+
+  const { true_onset_local: onsetHm, true_wake_local: wakeHm, note, dismissed, verdicts } = req.body || {};
+  // The client sends what the person typed — a wall-clock 'HH:MM' — and the server resolves it against
+  // the app's configured timezone and the night's date. See localHmToUtcSql: `undefined` means the
+  // value was malformed, which is NOT the same as `null` (nothing recorded) and must not be stored as
+  // if it were, or a garbled entry would silently become "no ground truth for this night".
+  const onset = localHmToUtcSql(req.params.date, onsetHm);
+  const wake = localHmToUtcSql(req.params.date, wakeHm);
+  for (const [label, v] of [['true_onset_local', onset], ['true_wake_local', wake]]) {
+    if (v === undefined) return res.status(400).json({ error: `${label} must be a time like 19:33` });
+  }
+  // Verdicts are rejected as a batch rather than partially applied: a half-saved review would leave the
+  // person unable to tell which of their answers landed, and these are the labels everything else gets
+  // measured against. A 4xx, not a 5xx — Cloudflare strips 5xx bodies and the reason would be lost.
+  const entries = Object.entries(verdicts || {});
+  for (const [id, verdict] of entries) {
+    if (!/^[1-9]\d*$/.test(id) || (verdict != null && !VERDICTS.includes(verdict))) {
+      return res.status(400).json({ error: `Not a valid verdict for transition ${id}` });
+    }
+  }
+  const review = saveNightReview(req.params.id, req.params.date, {
+    trueOnsetAt: onset, trueWakeAt: wake, note, dismissed,
+  });
+  let applied = 0;
+  for (const [id, verdict] of entries) if (setTransitionVerdict(id, verdict)) applied++;
+  res.json({ review, verdicts_applied: applied });
 });
 
 router.delete('/:id', (req, res) => {
