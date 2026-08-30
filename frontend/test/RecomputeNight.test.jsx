@@ -55,6 +55,21 @@ const setup = (renderer, props = {}) =>
 beforeEach(() => mockApi());
 afterEach(() => vi.restoreAllMocks());
 
+describe('a night the person has corrected', () => {
+  test('says why recomputing will not change what is shown', async () => {
+    // A corrected night displays the person's times, so recompute changes the detector's answer
+    // underneath while the display keeps the correction — the button looks broken otherwise. The owner
+    // pressed it expecting a wrong time to be replaced and nothing visible happened.
+    setup(renderAsAdmin, { night: { ...FRESH, corrected: true } });
+    expect(await screen.findByText(/will\s+not change what is shown/)).toBeInTheDocument();
+  });
+
+  test('and says nothing of the sort on an ordinary night', () => {
+    setup(renderAsAdmin);
+    expect(screen.queryByText(/not change what is shown/)).not.toBeInTheDocument();
+  });
+});
+
 describe('the baseline is what is SAVED, not what the page is showing', () => {
   test('it reads the stored row rather than recomputing a second time', async () => {
     const { user } = setup(renderAsAdmin);
