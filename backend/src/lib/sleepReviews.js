@@ -269,18 +269,26 @@ export function pendingReview(childId) {
 //   { state: 'none' }  nothing to say
 //   { state: 'ask'  }  a night is waiting to be reviewed
 //   { state: 'done' }  last night has been reviewed — show what was recorded, and let them change it
+// ⚠️ `pending` is repeated alongside `state` FOR THE CLIENT THAT IS ALREADY OPEN. This response used
+// to be `{ pending }` and nothing else; adding `state` and dropping `pending` silently blanked the card
+// on every page that had been loaded before the deploy — a phone left open on the child's screen simply
+// lost the feature, with no error and nothing to click. The owner hit exactly that, minutes after
+// telling me it "feels like a real backwards step", and they were right.
+//
+// A running SPA is a deployed client you cannot update. Add to a response shape; never take away.
 export function reviewCardState(childId) {
   const pending = pendingReview(childId);
-  if (pending) return { state: 'ask', ...pending };
-  if (!childTracksSleep(childId)) return { state: 'none' };
+  if (pending) return { state: 'ask', pending, ...pending };
+  if (!childTracksSleep(childId)) return { state: 'none', pending: null };
   const nightDate = lastCompletedNightDate(childId);
-  if (!nightDate) return { state: 'none' };
+  if (!nightDate) return { state: 'none', pending: null };
   const r = getReviewStmt.get(childId, nightDate);
   // A dismissal is not an answer: there is nothing to confirm back, and re-showing it would defeat
   // the dismissal.
-  if (!r || r.dismissed || (!r.true_onset_at && !r.true_wake_at)) return { state: 'none' };
+  if (!r || r.dismissed || (!r.true_onset_at && !r.true_wake_at)) return { state: 'none', pending: null };
   return {
     state: 'done',
+    pending: null,
     night_date: nightDate,
     true_onset_at: r.true_onset_at,
     true_wake_at: r.true_wake_at,
