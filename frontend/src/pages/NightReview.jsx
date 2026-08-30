@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Check, X, HelpCircle } from 'lucide-react';
+import { Check, X, HelpCircle, Moon } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
@@ -56,6 +56,9 @@ export default function NightReview() {
   const [wake, setWake] = useState('');
   const [note, setNote] = useState('');
   const [verdicts, setVerdicts] = useState({});
+  // The recorded events named as the bedtime and the morning departure, if any were picked.
+  const [onsetFrame, setOnsetFrame] = useState(null);
+  const [wakeFrame, setWakeFrame] = useState(null);
   // Has the person actually touched the form? Nothing may overwrite their typing once they have.
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -87,6 +90,8 @@ export default function NightReview() {
     setVerdicts(Object.fromEntries((data.transitions || []).filter((t) => t.verdict).map((t) => [t.id, t.verdict])));
     // A night already answered opens straight into its recorded values, so coming back to change
     // something does not make you confirm from scratch.
+    setOnsetFrame(data.review?.true_onset_transition_id ?? null);
+    setWakeFrame(data.review?.true_wake_transition_id ?? null);
     setEditing(Boolean(data.review?.true_onset_at || data.review?.true_wake_at));
   }, [data, tz, touched]);
 
@@ -100,6 +105,11 @@ export default function NightReview() {
       await api.put(`/children/${id}/review/${date}`, {
         true_onset_local: withTimes ? (onsetHm || null) : undefined,
         true_wake_local: withTimes ? (wakeHm || null) : undefined,
+        // A named frame wins over a typed time on the server — it is second-accurate rather than
+        // rounded from memory, and it records which picture means "they got up". Editing a time by
+        // hand clears the id, so exactly one of the two is ever the answer.
+        true_onset_transition_id: withTimes ? onsetFrame : undefined,
+        true_wake_transition_id: withTimes ? wakeFrame : undefined,
         note: note.trim() || null,
         // ⚠️ WHAT WE SHOWED THIS PERSON, sent back so the server records it beside their answer. The
         // server deliberately does not recompute it: a night's answer drifts while the page is open
@@ -188,14 +198,15 @@ export default function NightReview() {
               <div className="camera-tile__sub">
                 {hasOpinion && `We said ${shownOnset || '—'} to ${shownWake || '—'}. `}
                 Put in what actually happened — your times are what {kid?.name || 'their'}’s card will show.
+                {(onsetFrame || wakeFrame) && ' Times you picked from a frame are exact to the second.'}
               </div>
               <label className="field">
                 <span className="field__label">Fell asleep</span>
-                <input type="time" value={onset} onChange={(e) => { setTouched(true); setOnset(e.target.value); }} />
+                <input type="time" value={onset} onChange={(e) => { setTouched(true); setOnsetFrame(null); setOnset(e.target.value); }} />
               </label>
               <label className="field">
                 <span className="field__label">Got up for the day</span>
-                <input type="time" value={wake} onChange={(e) => { setTouched(true); setWake(e.target.value); }} />
+                <input type="time" value={wake} onChange={(e) => { setTouched(true); setWakeFrame(null); setWake(e.target.value); }} />
               </label>
               <label className="field">
                 <span className="field__label">Anything else worth noting</span>
@@ -259,6 +270,37 @@ export default function NightReview() {
                   <strong>{t.type === 'into_bed' ? 'got into bed' : 'got out of bed'}</strong>
                 </div>
                 {t.camera_name && <div className="camera-tile__sub">{t.camera_name}</div>}
+                {/* Naming the moment, which is a DIFFERENT claim from "this event is correct". An exit
+                    can be perfectly real and still not be the end of the night — 05:45 was a genuine
+                    got-out-of-bed on a morning the child went back and got up again at 06:00. Tying
+                    the wake to the "correct" verdict would have ended that night at the wrong one. */}
+                <div className="review-event__verdicts">
+                  <button
+                    type="button"
+                    className={`review-chip review-chip--moment${
+                      (t.type === 'into_bed' ? onsetFrame : wakeFrame) === t.id ? ' review-chip--on' : ''}`}
+                    aria-pressed={(t.type === 'into_bed' ? onsetFrame : wakeFrame) === t.id}
+                    onClick={() => {
+                      setTouched(true);
+                      // Naming a frame IS correcting the night, so open the times for review: the
+                      // filled value has to be visible and there has to be something to press. Without
+                      // this the screen stayed on "That's right / Not quite" and the pick led nowhere.
+                      setEditing(true);
+                      const time = fmtEvent(t);
+                      if (t.type === 'into_bed') {
+                        const on = onsetFrame === t.id;
+                        setOnsetFrame(on ? null : t.id);
+                        if (!on) setOnset(time);
+                      } else {
+                        const on = wakeFrame === t.id;
+                        setWakeFrame(on ? null : t.id);
+                        if (!on) setWake(time);
+                      }
+                    }}
+                  >
+                    <Moon size={16} /> {t.type === 'into_bed' ? 'Put down here' : 'Up for the day here'}
+                  </button>
+                </div>
                 <div className="review-event__verdicts">
                   {VERDICTS.map(({ key, label, Icon }) => (
                     <button

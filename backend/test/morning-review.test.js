@@ -20,7 +20,7 @@ useTempDataDir();
 const { default: db } = await import('../src/db.js');
 const { computeAndStoreNight } = await import('../src/lib/sleepAnalysis.js');
 const { pendingReview, getNightReview, saveNightReview, localHmToUtcSql, applyCorrection,
-  reviewCardState } = await import('../src/lib/sleepReviews.js');
+  reviewCardState, transitionInstant } = await import('../src/lib/sleepReviews.js');
 const { recordBedTransition, setTransitionVerdict, TRANSITION } = await import('../src/lib/bedTransitions.js');
 const { lastCompletedNightDate } = await import('../src/lib/sleepAnalysis.js');
 const { default: childrenRouter } = await import('../src/routes/children.js');
@@ -529,4 +529,77 @@ test('a dismissed night stays quiet — no prompt and no receipt', () => {
   storeNight(night);
   saveNightReview(CHILD, night, { dismissed: true });
   assert.equal(reviewCardState(CHILD).state, 'none');
+});
+
+// --- naming a frame as the moment ------------------------------------------------------------------
+
+// Inserted directly: recordBedTransition sweeps rows older than 45 days on every insert, and this
+// fixture's night is months in the past.
+function layTransition(type, when) {
+  return db.prepare('INSERT INTO bed_transitions (camera_id, type, peak, created_at) VALUES (?, ?, 0.4, ?)')
+    .run(CAM, type, when).lastInsertRowid;
+}
+
+test('naming a frame records the moment to the SECOND, not to the typed minute', async () => {
+  // The whole reason to point at a picture rather than type: the event carries an exact instant, and a
+  // person types a rounded recollection. 05:52:37 is what happened; "05:52" is what anyone would type.
+  laySamples();
+  const id = layTransition(TRANSITION.OUT_OF_BED, '2026-07-01 19:52:37');
+
+  const res = await call(server.url + '/api/children/' + CHILD + '/review/' + DATE, {
+    method: 'PUT', token, body: { true_wake_transition_id: id, true_wake_local: '05:52' },
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.review.true_wake_at, '2026-07-01 19:52:37', 'the frame wins over the typed time');
+  assert.equal(res.body.review.true_wake_transition_id, id, 'and WHICH frame is remembered');
+});
+
+test('a named frame is what the card then shows', () => {
+  // End to end: pointing at a picture has to move the number on the child's page, or it is data entry
+  // for its own sake.
+  const id = layTransition(TRANSITION.OUT_OF_BED, '2026-07-01 19:52:37');
+  saveNightReview(CHILD, DATE, { trueWakeAt: '2026-07-01 19:52:37', trueWakeTransitionId: id });
+  const shown = applyCorrection(CHILD, {
+    night_date: DATE, onset_at: exactSql(at(19, 30)), wake_at: exactSql(at(7, 0, 1)), asleep_minutes: 690, awake_minutes: 0,
+  });
+  assert.equal(shown.wake_at, '2026-07-01 19:52:37');
+  assert.equal(shown.corrected, true);
+});
+
+test('a put-down frame sets the bedtime, not the wake', () => {
+  const id = layTransition(TRANSITION.INTO_BED, '2026-07-01 09:31:12');
+  const saved = saveNightReview(CHILD, DATE, { trueOnsetAt: '2026-07-01 09:31:12', trueOnsetTransitionId: id });
+  assert.equal(saved.true_onset_at, '2026-07-01 09:31:12');
+  assert.equal(saved.true_wake_at, null);
+});
+
+test('a frame from another night or another child is refused', async () => {
+  // Same scoping as verdicts: an unchecked id would let a review claim another child's event as the
+  // moment their child woke, in the table everything else gets measured against.
+  db.prepare("INSERT INTO children (id, name, track_sleep, sleep_window_start, sleep_window_end)"
+    + " VALUES ('other-kid', 'Other', 1, '19:30', '07:00')").run();
+  db.prepare("INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path, sort_order, disabled)"
+    + " VALUES ('other-cam', 'Other Cam', 'rtsp://x', 'other-kid', 'other-p', 0, 0)").run();
+  const foreign = db.prepare('INSERT INTO bed_transitions (camera_id, type, peak, created_at) VALUES (?, ?, 0.4, ?)')
+    .run('other-cam', TRANSITION.OUT_OF_BED, '2026-07-01 19:52:37').lastInsertRowid;
+
+  for (const bad of [foreign, 999999, 0, -1, 'abc']) {
+    const res = await call(server.url + '/api/children/' + CHILD + '/review/' + DATE, {
+      method: 'PUT', token, body: { true_wake_transition_id: bad },
+    });
+    assert.equal(res.status, 400, bad + ' must be refused');
+  }
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM sleep_reviews').get().c, 0, 'and nothing was stored');
+});
+
+test('transitionInstant tells "no frame named" apart from "not this night\'s frame"', () => {
+  // null must not collapse into undefined: one means "they typed a time instead", the other is an
+  // error the caller has to reject rather than store as no answer.
+  const id = layTransition(TRANSITION.OUT_OF_BED, '2026-07-01 19:52:37');
+  assert.equal(transitionInstant(CHILD, DATE, null), null);
+  assert.equal(transitionInstant(CHILD, DATE, ''), null);
+  assert.equal(transitionInstant(CHILD, DATE, id), '2026-07-01 19:52:37');
+  assert.equal(transitionInstant(CHILD, DATE, id + 1000), undefined);
+  assert.equal(transitionInstant(CHILD, DATE, 'nonsense'), undefined);
 });
