@@ -51,6 +51,7 @@ export default function NightReview() {
 
   const [data, setData] = useState(null);
   const [editing, setEditing] = useState(false);
+  const [showEvents, setShowEvents] = useState(false);
   const [onset, setOnset] = useState('');
   const [wake, setWake] = useState('');
   const [note, setNote] = useState('');
@@ -196,16 +197,38 @@ export default function NightReview() {
           )}
         </div>
 
+        {/* Collapsed by default, and that is the point. A night carries 20-35 recorded transitions —
+            Raffa's 2026-08-29 had 31 — and opening the screen straight into a wall of frames buries
+            the two times that actually matter. The owner's words on first use: "it's also flooded with
+            in and out of bed". Confirming the night is the job; judging frames is optional extra
+            credit for when there is time. */}
         <div className="card tight">
-          <div className="card-title">
-            Events we recorded {transitions.length > 0 && `· ${transitions.length}`}
-          </div>
-          {transitions.length === 0 && (
-            <div className="camera-tile__sub">
-              Nothing was recorded for this night — so there is nothing here to check.
-            </div>
+          {transitions.length === 0 ? (
+            <>
+              <div className="card-title">Events we recorded</div>
+              <div className="camera-tile__sub">
+                Nothing was recorded for this night — so there is nothing here to check.
+              </div>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="review-events__toggle"
+              aria-expanded={showEvents}
+              onClick={() => setShowEvents((v) => !v)}
+            >
+              <span className="review-events__toggle-text">
+                <span className="card-title">
+                  {showEvents ? 'Hide the recorded events' : `Check the ${transitions.length} recorded events`}
+                </span>
+                <span className="camera-tile__sub">
+                  Optional — it helps us work out which ones we got wrong
+                </span>
+              </span>
+              <span className="review-card__go" aria-hidden="true">{showEvents ? '⌃' : '›'}</span>
+            </button>
           )}
-          {transitions.map((t) => (
+          {showEvents && transitions.map((t) => (
             <div key={t.id} className="review-event">
               {t.snapshot ? (
                 <img
@@ -248,7 +271,7 @@ export default function NightReview() {
           <button type="button" className="btn btn-primary btn-block" disabled={busy} onClick={() => save(true)}>
             {busy ? 'Saving…' : 'Save review'}
           </button>
-        ) : transitions.length > 0 && (
+        ) : showEvents && transitions.length > 0 && (
           <button type="button" className="btn btn-secondary btn-block" disabled={busy} onClick={() => save(false)}>
             {busy ? 'Saving…' : 'Save just the event answers'}
           </button>

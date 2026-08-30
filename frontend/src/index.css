@@ -2716,3 +2716,9 @@ input[type='range'] {
   font-size: 11.5px; font-weight: 600; color: var(--peri);
   background: rgba(124, 131, 219, 0.12); padding: 2px 9px; border-radius: 999px;
 }
+
+.review-events__toggle {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 4px 0; background: none; border: 0; cursor: pointer; text-align: left;
+}
+.review-events__toggle-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
