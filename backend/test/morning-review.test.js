@@ -515,6 +515,23 @@ test('the card confirms an answered night instead of vanishing', () => {
   assert.equal(done.true_wake_at, exactSql(at(5, 29, 1)), 'and shows back what was recorded');
 });
 
+test('the response keeps the OLD shape as well as the new one', () => {
+  // A running page is a deployed client you cannot update. This response used to be `{ pending }`;
+  // adding `state` and dropping `pending` silently blanked the card on every page loaded before the
+  // deploy — no error, nothing to click, the feature simply gone. That is exactly what happened, on a
+  // phone left open on the child's screen. Add to a response shape; never take away.
+  const night = lastCompletedNightDate(CHILD);
+  storeNight(night);
+  const asking = reviewCardState(CHILD);
+  assert.equal(asking.state, 'ask');
+  assert.equal(asking.pending?.night_date, night, 'an older client still finds `pending`');
+
+  saveNightReview(CHILD, night, { trueWakeAt: exactSql(at(5, 29, 1)) });
+  const done = reviewCardState(CHILD);
+  assert.equal(done.state, 'done');
+  assert.equal(done.pending, null, 'and correctly sees nothing to ask about');
+});
+
 test('a dismissed night stays quiet — no prompt and no receipt', () => {
   const night = lastCompletedNightDate(CHILD);
   storeNight(night);

@@ -138,6 +138,11 @@ describe('the review screen', () => {
   const at = (renderer = renderAsAdmin) =>
     renderer(routed, { route: '/children/c-1/review/2026-08-29', kids: [{ id: 'c-1', name: 'Raffa' }] });
 
+  // The event list is collapsed by default — a night carries 20-35 transitions and opening straight
+  // into a wall of frames buries the two times that matter. Tests that care about events open it.
+  const openEvents = async (user) =>
+    user.click(await screen.findByRole('button', { name: /recorded events/ }));
+
   test("it shows the app's own answer, and confirming it is one tap", async () => {
     // "We were right" is the most valuable record and the one nobody writes down unaided — so it has
     // to be a single deliberate button, not a form you scroll past.
@@ -148,7 +153,8 @@ describe('the review screen', () => {
   });
 
   test('an event with a frame shows it; one without says so', async () => {
-    at();
+    const { user } = at();
+    await openEvents(user);
     await screen.findByText(/got out of bed/);
     const img = document.querySelector('.review-event__frame:not(.review-event__frame--none)');
     expect(img).toHaveAttribute('src', '/api/cameras/bed-transitions/11/snapshot?token=t');
@@ -204,6 +210,7 @@ describe('the review screen', () => {
     // A mis-tap has to be undoable: a wrong label is worse than a missing one, because everything else
     // gets scored against it.
     const { user } = at();
+    await openEvents(user);
     await screen.findByText(/got out of bed/);
     const yes = screen.getAllByRole('button', { name: /Yes/ })[0];
 
@@ -219,6 +226,7 @@ describe('the review screen', () => {
 
   test('verdicts are sent keyed by transition id', async () => {
     const { user } = at();
+    await openEvents(user);
     await screen.findByText(/got out of bed/);
     await user.click(screen.getAllByRole('button', { name: /^No$/ })[0]);
     await user.click(screen.getByRole('button', { name: /Save just the event answers/ }));
@@ -232,12 +240,24 @@ describe('the review screen', () => {
       review: { true_onset_at: '2026-08-29 09:30:00', true_wake_at: '2026-08-29 19:45:00', note: 'dressed on the bed' },
       transitions: [{ ...NIGHT.transitions[0], verdict: 'wrong' }],
     });
-    at();
+    const { user } = at();
     // Already answered, so it opens straight into the values it recorded — coming back to change one
     // thing must not make you confirm from scratch.
     await waitFor(() => expect(screen.getByLabelText(/Fell asleep/)).toHaveValue('19:30'));
     expect(screen.getByLabelText(/worth noting/)).toHaveValue('dressed on the bed');
+    await openEvents(user);
     expect(screen.getAllByRole('button', { name: /^No$/ })[0]).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('the event list is collapsed until asked for, so the times are not buried', async () => {
+    // 31 events on a real night. Opening into that wall is what the owner called "flooded with in and
+    // out of bed" — and it hid the two times the screen exists to confirm.
+    const { user } = at();
+    expect(await screen.findByRole('button', { name: /Check the 2 recorded events/ })).toBeInTheDocument();
+    expect(screen.queryByText(/got out of bed/)).not.toBeInTheDocument();
+
+    await openEvents(user);
+    expect(await screen.findByText(/got out of bed/)).toBeInTheDocument();
   });
 
   test('a night with no recorded events says so instead of showing an empty list', async () => {
@@ -256,6 +276,7 @@ describe('the review screen', () => {
   test('a failed save surfaces the reason and leaves the form usable', async () => {
     api.put.mockRejectedValue(new Error('Not a valid verdict for transition 11'));
     const { user } = at();
+    await openEvents(user);
     await screen.findByText(/got out of bed/);
     await user.click(screen.getByRole('button', { name: /Save just the event answers/ }));
     expect(await screen.findByText(/Not a valid verdict/)).toBeInTheDocument();

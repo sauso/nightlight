@@ -26,6 +26,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   - **Any night can be reviewed**, not just last night — the sleep detail page has **Was this night
     right?** for whichever night you are looking at, which is how you change a night you already
     answered.
+  - **The event list stays out of the way** until you ask for it — a night carries twenty to thirty-five
+    recorded in-and-out-of-bed events, and the two times are the point.
   - Reviews are kept forever, and an event you have judged keeps its frame past the usual 45 days.
   - See **README → Sleep tracking**.
 
