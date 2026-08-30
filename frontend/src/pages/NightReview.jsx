@@ -20,9 +20,8 @@ import AppHeader from '../components/AppHeader.jsx';
 // physically impossible on sequence alone, and knowing WHICH of a contradictory pair is the wrong one
 // needs a person to look at the picture.
 //
-// ⚠️ Times are typed as local wall-clock and sent as UTC, the way everything else in this database is
-// stored. Converting here rather than on the server is deliberate: only the browser knows what clock
-// the person was reading when they typed it.
+// ⚠️ Times are typed as local wall-clock and sent AS TYPED. The server resolves them against the app's
+// configured timezone — see toLocalHhmm below for why that direction is deliberate.
 
 const VERDICTS = [
   { key: 'correct', label: 'Yes', Icon: Check },

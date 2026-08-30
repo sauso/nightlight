@@ -19,8 +19,8 @@ useTempDataDir();
 
 const { default: db } = await import('../src/db.js');
 const { computeAndStoreNight } = await import('../src/lib/sleepAnalysis.js');
-const { pendingReview, getNightReview, saveNightReview } = await import('../src/lib/sleepReviews.js');
-const { recordBedTransition, TRANSITION } = await import('../src/lib/bedTransitions.js');
+const { pendingReview, getNightReview, saveNightReview, localHmToUtcSql } = await import('../src/lib/sleepReviews.js');
+const { recordBedTransition, setTransitionVerdict, TRANSITION } = await import('../src/lib/bedTransitions.js');
 const { lastCompletedNightDate } = await import('../src/lib/sleepAnalysis.js');
 const { default: childrenRouter } = await import('../src/routes/children.js');
 
@@ -76,26 +76,45 @@ after(async () => {
 
 // --- what the review stores ---------------------------------------------------------------------
 
-test("the app's answer is frozen at the moment it is judged", () => {
-  // THE regression test for this feature. Save a review, then change what the analysis would say, then
-  // read the review back: the recorded `computed_*` must still be what was on screen when the person
-  // answered. Without this, "we were right about this night" re-decides itself later.
+test("the app's answer is frozen as what was ON SCREEN, not recomputed at save time", async () => {
+  // THE regression test for this feature, and it must go through the REAL path: GET fills the form,
+  // the night drifts while the page is open, PUT saves. An earlier version called computeNight AGAIN
+  // at save time and stored that, so a person confirming "yes, 19:40 was right" had the row record the
+  // app as having said nothing at all — a confirmation silently becoming a disagreement, in the one
+  // table meant to settle such questions. Saving directly through the lib does NOT catch this.
   laySamples();
-  const saved = saveNightReview(CHILD, DATE, { trueWakeAt: exactSql(at(6, 0, 1)) });
-  assert.ok(saved.computed_onset_at, 'the app had an answer, and it was recorded');
-  const judged = { onset: saved.computed_onset_at, wake: saved.computed_wake_at };
+  const shown = (await call(`${server.url}/api/children/${CHILD}/review/${DATE}`, { token })).body.computed;
+  assert.ok(shown.onset_at, 'the app had an answer on screen');
 
-  // The night now looks entirely different — as it genuinely does when morning activity accumulates.
-  db.prepare('DELETE FROM activity_samples').run();
-  for (let t = at(18, 20); t < at(10, 0, 1); t = new Date(t.getTime() + 60000)) {
-    insertSample.run(CAM, sqlTime(t), 0.4, 0.4);
-  }
+  db.prepare('DELETE FROM activity_samples').run(); // the night moves while the page is open
 
-  const reread = getNightReview(CHILD, DATE);
-  assert.notEqual(reread.computed.onset_at, judged.onset, 'the LIVE answer really has moved');
-  assert.equal(reread.review.computed_onset_at, judged.onset, 'but the judged answer must not');
-  assert.equal(reread.review.computed_wake_at, judged.wake);
-  assert.equal(reread.review.true_wake_at, exactSql(at(6, 0, 1)), 'nor the truth');
+  const res = await call(`${server.url}/api/children/${CHILD}/review/${DATE}`, {
+    method: 'PUT',
+    token,
+    body: {
+      true_onset_local: '19:40',
+      computed_onset_at: shown.onset_at,
+      computed_wake_at: shown.wake_at,
+    },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.review.computed_onset_at, shown.onset_at, 'what was judged, not what is true now');
+});
+
+test('a completed review is not blanked by a later partial save', async () => {
+  // The two-phones case this app is built for: a stale card on a second device sends {dismissed:true}
+  // after a parent has carefully filled the form on the first. Only supplied fields may be written.
+  laySamples();
+  await call(`${server.url}/api/children/${CHILD}/review/${DATE}`, {
+    method: 'PUT', token, body: { true_onset_local: '19:40', true_wake_local: '06:00', note: 'kept' },
+  });
+  await call(`${server.url}/api/children/${CHILD}/review/${DATE}`, {
+    method: 'PUT', token, body: { dismissed: true },
+  });
+  const row = db.prepare('SELECT * FROM sleep_reviews WHERE child_id = ?').get(CHILD);
+  assert.equal(row.note, 'kept', 'the note survives');
+  assert.ok(row.true_onset_at, 'and so do the times');
+  assert.equal(row.dismissed, 1, 'and the dismissal is actually recorded, not merely implied');
 });
 
 test('a second review of the same night replaces the first rather than duplicating it', () => {
@@ -115,7 +134,7 @@ test('a review can record the truth even when the app had no opinion', () => {
   const saved = saveNightReview(CHILD, DATE, {
     trueOnsetAt: exactSql(at(19, 40)), trueWakeAt: exactSql(at(6, 10, 1)),
   });
-  assert.equal(saved.computed_onset_at, null);
+  assert.equal(saved.computed_onset_at, null, 'the app had nothing to say, and that is recorded');
   assert.equal(saved.true_onset_at, exactSql(at(19, 40)));
 });
 
@@ -305,4 +324,113 @@ test('"nothing to review" is a 200, not a 404', async () => {
   const res = await call(`${server.url}/api/children/${CHILD}/review/pending`, { token });
   assert.equal(res.status, 200);
   assert.equal(res.body.pending, null);
+});
+
+// --- the boundaries the rules are stated in terms of -----------------------------------------------
+
+test('the review window follows the app timezone, not a hard-coded one', () => {
+  // An earlier version anchored the window on a literal 04:00 UTC — midday only in Melbourne.
+  // settings.timezone defaults to 'UTC', so on a default install that window ended before dawn and
+  // EVERY morning transition was silently missing from the review: the exact events this screen exists
+  // to collect, absent, with the screen looking like it was working on a quiet night.
+  for (const [tz, offsetH] of [['Australia/Melbourne', 10], ['UTC', 0], ['America/New_York', -4]]) {
+    db.prepare("UPDATE settings SET timezone = ? WHERE id = 'app'").run(tz);
+    db.prepare('DELETE FROM bed_transitions').run();
+    // A bedtime at 19:00 and a morning wake at 06:00, as they would be stored for a night of DATE in tz.
+    const utcFor = (localH, dayShift) =>
+      new Date(Date.UTC(2026, 6, 1 + dayShift, localH - offsetH, 0)).toISOString().slice(0, 19).replace('T', ' ');
+    // Inserted directly, NOT via recordBedTransition: every insert sweeps rows older than 45 days, and
+    // this fixture's night is months in the past, so the second call would prune the first row and the
+    // test would "fail" for a reason that has nothing to do with timezones.
+    for (const [type, when] of [[TRANSITION.INTO_BED, utcFor(19, 0)], [TRANSITION.OUT_OF_BED, utcFor(6, 1)]]) {
+      db.prepare('INSERT INTO bed_transitions (camera_id, type, peak, created_at) VALUES (?, ?, 0.4, ?)')
+        .run(CAM, type, when);
+    }
+    assert.equal(getNightReview(CHILD, DATE).transitions.length, 2, tz + ' must show both events');
+  }
+  db.prepare("UPDATE settings SET timezone = ? WHERE id = 'app'").run(TZ);
+});
+
+test('noon decides which calendar day a bare time belongs to', () => {
+  // The night spans midnight, so 'HH:MM' alone is ambiguous. The rule is "at or after noon belongs to
+  // the night's own date" — pinned ON the boundary, not comfortably either side of it. Melbourne is
+  // UTC+10 in July.
+  assert.equal(localHmToUtcSql(DATE, '12:00'), '2026-07-01 02:00:00', 'noon is the night itself');
+  assert.equal(localHmToUtcSql(DATE, '11:59'), '2026-07-02 01:59:00', 'a minute earlier is the morning after');
+  assert.equal(localHmToUtcSql(DATE, '00:00'), '2026-07-01 14:00:00', 'midnight is the morning after');
+  assert.equal(localHmToUtcSql(DATE, '23:59'), '2026-07-01 13:59:00', 'just before midnight is the night itself');
+});
+
+test('the backlog is exactly seven nights, counted on the calendar', () => {
+  // Named boundaries get tested ON the boundary. A fixture 30 days out would pass for any backlog up
+  // to 29 nights while claiming to pin 7.
+  const anchor = lastCompletedNightDate(CHILD);
+  const [y, m, d] = anchor.split('-').map(Number);
+  const nightsAgo = (n) => new Date(Date.UTC(y, m - 1, d - n)).toISOString().slice(0, 10);
+
+  db.prepare('DELETE FROM sleep_nights').run();
+  storeNight(nightsAgo(6));
+  assert.equal(pendingReview(CHILD) && pendingReview(CHILD).night_date, nightsAgo(6), 'six nights ago is inside');
+
+  db.prepare('DELETE FROM sleep_nights').run();
+  storeNight(nightsAgo(7));
+  assert.equal(pendingReview(CHILD), null, 'seven nights ago is outside it');
+});
+
+// --- verdicts belong to a night, and to a child ----------------------------------------------------
+
+test('a verdict cannot be stamped on another child event, or another night', async () => {
+  // setTransitionVerdict updates by primary key alone, so the SCOPING is the protection. Without it any
+  // authenticated caller could label another child's event from another month — and because a verdict
+  // exempts a row from the 45-day prune, could pin arbitrary rows and their JPEGs on disk forever.
+  db.prepare("INSERT INTO children (id, name, track_sleep, sleep_window_start, sleep_window_end)"
+    + " VALUES ('other-kid', 'Other', 1, '19:30', '07:00')").run();
+  db.prepare("INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path, sort_order, disabled)"
+    + " VALUES ('other-cam', 'Other Cam', 'rtsp://x', 'other-kid', 'other-p', 0, 0)").run();
+  const foreign = recordBedTransition('other-cam', TRANSITION.OUT_OF_BED, 0.4);
+  db.prepare("UPDATE bed_transitions SET created_at = '2026-01-01 00:00:00' WHERE id = ?").run(foreign);
+
+  const res = await call(server.url + '/api/children/' + CHILD + '/review/' + DATE, {
+    method: 'PUT', token, body: { verdicts: { [foreign]: 'wrong' } },
+  });
+
+  assert.equal(res.status, 400);
+  assert.equal(db.prepare('SELECT verdict FROM bed_transitions WHERE id = ?').get(foreign).verdict, null);
+});
+
+test('the lib refuses an invalid verdict on its own, not only via the route', () => {
+  // Two layers, because these labels are what everything else gets measured against and the lib is
+  // reachable from anywhere in the backend.
+  const id = recordBedTransition(CAM, TRANSITION.OUT_OF_BED, 0.4);
+  assert.equal(setTransitionVerdict(id, 'definitely-maybe'), false);
+  assert.equal(setTransitionVerdict(id, 'correct'), true);
+  assert.equal(setTransitionVerdict(id, null), true, 'and a verdict can be cleared again');
+  assert.equal(db.prepare('SELECT verdict FROM bed_transitions WHERE id = ?').get(id).verdict, null);
+});
+
+// --- input that should be a 4xx, never a 5xx --------------------------------------------------------
+
+test('junk in a field is refused, not turned into a 500 with the body stripped', async () => {
+  // Cloudflare strips 5xx bodies, so an unbindable value reaching SQLite means the user sees nothing at
+  // all. Every one of these has to be a readable 4xx.
+  const cases = [
+    { note: { a: 1 } },
+    { note: 12345 },
+    { computed_onset_at: 'yesterday' },
+    { computed_wake_at: '2026-07-02T06:00:00Z' },
+  ];
+  for (const body of cases) {
+    const res = await call(server.url + '/api/children/' + CHILD + '/review/' + DATE, { method: 'PUT', token, body });
+    assert.equal(res.status, 400, JSON.stringify(body) + ' must be a 4xx');
+  }
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM sleep_reviews').get().c, 0, 'and nothing was stored');
+});
+
+test('a bad date is refused on the PUT as well as the GET', async () => {
+  // Without this the string becomes a night_date primary key and files ground truth under nonsense.
+  const res = await call(server.url + '/api/children/' + CHILD + '/review/not-a-date', {
+    method: 'PUT', token, body: { true_wake_local: '06:00' },
+  });
+  assert.equal(res.status, 400);
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM sleep_reviews').get().c, 0);
 });

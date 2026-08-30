@@ -168,12 +168,15 @@ export function getImpossibleTransitions({ limit = 200 } = {}) {
 // it again. Anything else is rejected rather than stored, because these values are the labels a future
 // occupancy check gets measured against and a typo'd one is worse than a missing one. Returns whether
 // a row was actually updated.
-const VERDICTS = new Set(['correct', 'wrong', 'unclear']);
+// The single source of truth for what a verdict may be. Exported so the route, the lib and the UI all
+// validate against ONE list — a second copy would drift, and a typo'd label is worse than a missing one
+// because everything else gets measured against these.
+export const VERDICTS = Object.freeze(['correct', 'wrong', 'unclear']);
 const setVerdictStmt = db.prepare('UPDATE bed_transitions SET verdict = ? WHERE id = ?');
 
 export function setTransitionVerdict(id, verdict) {
   const n = Number(id);
   if (!Number.isInteger(n) || n <= 0) return false;
-  if (verdict != null && !VERDICTS.has(verdict)) return false;
+  if (verdict != null && !VERDICTS.includes(verdict)) return false;
   return setVerdictStmt.run(verdict ?? null, n).changes > 0;
 }

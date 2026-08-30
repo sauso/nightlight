@@ -4,10 +4,11 @@
 //   1. THE CARD MUST GO AWAY AND STAY AWAY. Dismissing has to be as final as answering. A prompt that
 //      reappears after being dismissed teaches the habit of ignoring it, and then the nights that
 //      actually matter get ignored too — which would quietly destroy the feature's whole purpose.
-//   2. THE LOCAL→UTC CONVERSION SPANS MIDNIGHT. A bedtime belongs to the night's date and a wake to
-//      the morning after, and which one it is depends on the FIELD, not on the value. Getting this
-//      wrong puts ground truth on the wrong day — silently, and in the data everything else is
-//      scored against.
+//   2. THE BROWSER MUST NOT CONVERT TIMES. It sends the wall-clock 'HH:MM' that was typed and the
+//      server resolves it against the app's configured timezone (the noon rule that decides which side
+//      of midnight a bare time falls on is tested in backend/test/morning-review.test.js). Converting
+//      here would use the PHONE's zone, so a review typed while travelling would disagree with the very
+//      card it was correcting — silently, in the data everything else is scored against.
 
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
@@ -37,7 +38,9 @@ describe('the card that asks', () => {
   test('it offers the night, for either role', async () => {
     // Deliberately not admin-gated: the person who was in the room at 5am is the one who knows what
     // happened, and that is at least as likely to be a caregiver as the account holder.
-    forEachRole(async (name, who) => {
+    // AWAITED — see forEachRole. Unawaited, this test resolved before its only assertion ran and
+    // passed against a card that rendered nothing at all.
+    await forEachRole(async (name, who) => {
       const { unmount } = renderAs(who, <MorningReviewCard childId="c-1" fmtTime={fmtTime} />);
       expect(await screen.findByText(/Was last night right\?/)).toBeInTheDocument();
       unmount();

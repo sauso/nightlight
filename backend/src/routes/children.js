@@ -5,14 +5,16 @@ import { requireAuth } from '../middleware/auth.js';
 import { normalizePhoto } from '../lib/photo.js';
 import { getStoredNights, computeNight, computeAndStoreNight, currentNightDate, childTracksSleep, sleepInsights } from '../lib/sleepAnalysis.js';
 import { startMotionDetector } from '../lib/motionDetector.js';
-import { getNightReview, saveNightReview, pendingReview, localHmToUtcSql, VERDICTS } from '../lib/sleepReviews.js';
-import { setTransitionVerdict } from '../lib/bedTransitions.js';
+import { getNightReview, saveNightReview, pendingReview, localHmToUtcSql, applyVerdicts } from '../lib/sleepReviews.js';
 
 const router = Router();
 router.use(requireAuth);
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+// The UTC shape every timestamp in this database uses. Only used to sanity-check the values the
+// client echoes back as "what you showed me"; times a person TYPES arrive as wall-clock 'HH:MM'.
+const UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
 function withCameras(child) {
   const cameras = db
@@ -190,9 +192,11 @@ router.put('/:id/review/:date', (req, res) => {
   if (!child) return res.status(404).json({ error: 'Child not found' });
   if (!DATE_ONLY.test(req.params.date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
 
-  const { true_onset_local: onsetHm, true_wake_local: wakeHm, note, dismissed, verdicts } = req.body || {};
+  const body = req.body || {};
+  const { true_onset_local: onsetHm, true_wake_local: wakeHm, note, dismissed, verdicts } = body;
+
   // The client sends what the person typed — a wall-clock 'HH:MM' — and the server resolves it against
-  // the app's configured timezone and the night's date. See localHmToUtcSql: `undefined` means the
+  // the app's configured timezone and the night's date. `undefined` back from localHmToUtcSql means the
   // value was malformed, which is NOT the same as `null` (nothing recorded) and must not be stored as
   // if it were, or a garbled entry would silently become "no ground truth for this night".
   const onset = localHmToUtcSql(req.params.date, onsetHm);
@@ -200,21 +204,34 @@ router.put('/:id/review/:date', (req, res) => {
   for (const [label, v] of [['true_onset_local', onset], ['true_wake_local', wake]]) {
     if (v === undefined) return res.status(400).json({ error: `${label} must be a time like 19:33` });
   }
-  // Verdicts are rejected as a batch rather than partially applied: a half-saved review would leave the
-  // person unable to tell which of their answers landed, and these are the labels everything else gets
-  // measured against. A 4xx, not a 5xx — Cloudflare strips 5xx bodies and the reason would be lost.
-  const entries = Object.entries(verdicts || {});
-  for (const [id, verdict] of entries) {
-    if (!/^[1-9]\d*$/.test(id) || (verdict != null && !VERDICTS.includes(verdict))) {
-      return res.status(400).json({ error: `Not a valid verdict for transition ${id}` });
+  if (note != null && typeof note !== 'string') {
+    return res.status(400).json({ error: 'note must be text' });
+  }
+  // Anything not a string reaches better-sqlite3 as an unbindable value and comes back as a 500 whose
+  // body Cloudflare strips — the user would see nothing at all. Same reasoning as the verdict check.
+  for (const [label, v] of [['computed_onset_at', body.computed_onset_at], ['computed_wake_at', body.computed_wake_at]]) {
+    if (v != null && !UTC_TIMESTAMP.test(String(v))) {
+      return res.status(400).json({ error: `${label} must be 'YYYY-MM-DD HH:MM:SS' in UTC` });
     }
   }
+
+  // Verdicts are scoped to THIS child and THIS night inside applyVerdicts, and rejected as a batch.
+  const check = applyVerdicts(req.params.id, req.params.date, verdicts);
+  if (check.error) return res.status(400).json({ error: check.error });
+
   const review = saveNightReview(req.params.id, req.params.date, {
-    trueOnsetAt: onset, trueWakeAt: wake, note, dismissed,
+    // `undefined` means "not supplied, keep what is stored" — a stale card on a second phone sending
+    // only `{dismissed:true}` must not blank times a parent entered on the first.
+    trueOnsetAt: onsetHm === undefined ? undefined : onset,
+    trueWakeAt: wakeHm === undefined ? undefined : wake,
+    // What the person was LOOKING at when they judged, echoed back from the GET. Deliberately not
+    // recomputed here — see saveNightReview.
+    computedOnsetAt: body.computed_onset_at,
+    computedWakeAt: body.computed_wake_at,
+    note,
+    dismissed,
   });
-  let applied = 0;
-  for (const [id, verdict] of entries) if (setTransitionVerdict(id, verdict)) applied++;
-  res.json({ review, verdicts_applied: applied });
+  res.json({ review, verdicts_applied: check.applied });
 });
 
 router.delete('/:id', (req, res) => {
