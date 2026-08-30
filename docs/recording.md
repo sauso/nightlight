@@ -9,7 +9,7 @@ which is which.
 | **Automatic clips** | A motion/sound **alert** | Yes — it's an alert | 14 days / 5 GB (both configurable) | On the alert, in the Alerts feed |
 | **Wake clips** | Your child **waking up** | **No — silent by design** | 14 days (configurable) | On the wake-up, in the night's sleep detail |
 | **On-demand recordings** | You pressing **Record** | No | **Forever, until you delete them** | The **Recordings** card on the child's page |
-| **Bed-transition frames** | Your child getting **into or out of bed** | No | 45 days | Not shown — diagnostic only |
+| **Bed-transition frames** | Your child getting **into or out of bed** | No | 45 days — **or forever once you judge one** | The morning review on the child's page |
 
 All three are configured under **Settings → Recording** (admin only), and all three write to the same
 place on disk — see [Where recordings are stored](#where-recordings-are-stored).
@@ -92,8 +92,11 @@ They exist so that a sleep timeline which looks wrong can be *looked at* rather 
 
 - **One JPEG per transition**, roughly 20–40 a night across two cameras — in the region of 5 MB a
   night, and about **220 MB** once the 45-day retention is full.
-- **Kept for 45 days**, matching the transitions themselves, and deleted with them. Not configurable:
-  they are bounded, small, and useless once the transition they belong to has aged out.
+- **Kept for 45 days**, matching the transitions themselves, and deleted with them — *unless you have
+  marked that event right or wrong in the morning review, in which case the event and its frame are
+  kept indefinitely.* A frame somebody has looked at and labelled is the scarce thing here; deleting
+  one on a timer would throw away the only record of what the camera actually saw. Unjudged frames
+  still age out, so the folder stays bounded in normal use.
 - **Stored in `transition-snapshots/` in your data directory**, named by the transition's id. Deleting
   the folder is safe — the app recreates it and simply has no pictures for older transitions.
 

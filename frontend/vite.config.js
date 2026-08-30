@@ -32,6 +32,11 @@ export default defineConfig({
   // admin-only route that 403'd everyone, invisible until someone clicked it.
   test: {
     environment: 'jsdom',
+    // Pinned so the suite does not give a different verdict on a different developer's clock. Without
+    // it, a mutant that formatted times in the BROWSER's zone instead of the app's configured one
+    // survived here — because this machine happens to share Melbourne's offset. This repo has already
+    // shipped one daylight-saving bug; a timezone-dependent test suite is how the next one gets missed.
+    env: { TZ: 'UTC' },
     globals: true,
     setupFiles: ['./test/setup.js'],
     include: ['test/**/*.test.{js,jsx}'],

@@ -171,6 +171,28 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_bed_transitions_cam_time ON bed_transitions(camera_id, created_at);
 
+  -- What actually happened, as told by the person who was there. The detector's own numbers drift and
+  -- get re-derived; this table never does. It is the ground truth every future change is scored
+  -- against, so it is deliberately NOT pruned — a night's worth of it is a few hundred bytes.
+  --
+  -- computed_* records what the app was SAYING at the moment it was judged, which is not the same as
+  -- what it says now: measured 2026-08-29, a completed night's wake moved from 05:51 to 08:31 over the
+  -- course of one morning as ordinary daytime activity accumulated inside the analysis lookahead. A
+  -- ground-truth row that stored only the true time would silently re-score itself against a different
+  -- answer later, and "we were right about this night" would quietly become true or false on its own.
+  CREATE TABLE IF NOT EXISTS sleep_reviews (
+    child_id TEXT NOT NULL,
+    night_date TEXT NOT NULL,
+    true_onset_at TEXT,
+    true_wake_at TEXT,
+    computed_onset_at TEXT,
+    computed_wake_at TEXT,
+    note TEXT,
+    dismissed INTEGER NOT NULL DEFAULT 0,
+    reviewed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (child_id, night_date)
+  );
+
   -- One "memories" timelapse per child per night (spec A3): the sleep window's sampled frames
   -- assembled into a short MP4. Kept in its OWN table (not detection_events) so keepsakes never
   -- leak into the alert feed / clip-management list and aren't swept by clip retention — they get
@@ -282,6 +304,15 @@ if (!camerasColumns.includes('sort_order')) {
 const bedTxColumns = db.prepare('PRAGMA table_info(bed_transitions)').all().map((c) => c.name);
 if (!bedTxColumns.includes('snapshot')) {
   db.exec('ALTER TABLE bed_transitions ADD COLUMN snapshot INTEGER NOT NULL DEFAULT 0');
+}
+
+// A person's verdict on one recorded transition: 'correct', 'wrong', or 'unclear'. NULL = not yet
+// reviewed. Kept on the transition itself rather than in its own table so a verdict cannot outlive the
+// event it judges — but see the prune in lib/bedTransitions.js: a transition that HAS a verdict is
+// retained past the 45-day window, because a labelled frame is the scarce thing here and dropping one
+// on a timer would defeat the point of collecting them.
+if (!bedTxColumns.includes('verdict')) {
+  db.exec('ALTER TABLE bed_transitions ADD COLUMN verdict TEXT');
 }
 
 const settingsColumns = db.prepare('PRAGMA table_info(settings)').all().map((c) => c.name);

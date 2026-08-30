@@ -2643,3 +2643,56 @@ input[type='range'] {
      desktop dialog there's room to let it use the height it's given. */
   .modal-overlay--wide .clip-player { max-height: 74vh; }
 }
+
+/* Morning review — the "was last night right?" card and the screen behind it.
+   Chrome is --peri (this is something to interact with), not --accent: it is an invitation, not the
+   primary action on the page. The card must read as dismissable at a glance or it becomes nagging. */
+.review-card { display: flex; align-items: stretch; padding: 0; overflow: hidden; }
+
+.review-card__body {
+  flex: 1; display: flex; align-items: center; gap: 12px;
+  padding: 14px 4px 14px 16px; background: none; border: 0; cursor: pointer; text-align: left;
+}
+
+.review-card__icon {
+  flex-shrink: 0; width: 34px; height: 34px; border-radius: 10px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--peri); background: rgba(124, 131, 219, 0.12);
+}
+
+.review-card__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.review-card__go { color: var(--peri); font-size: 20px; padding-right: 12px; }
+
+.review-card__dismiss {
+  order: 2; align-self: flex-start; flex-shrink: 0;
+  padding: 10px 12px; background: none; border: 0; cursor: pointer; color: var(--text-secondary);
+}
+.review-card__dismiss:hover { color: var(--text-primary); }
+
+.review-event {
+  display: flex; gap: 12px; padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+.review-event:first-of-type { border-top: 0; }
+
+.review-event__frame {
+  width: 96px; height: 72px; flex-shrink: 0;
+  object-fit: cover; border-radius: 8px; background: var(--bg-elevated);
+}
+.review-event__frame--none {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; color: var(--text-secondary); border: 1px dashed var(--border);
+}
+
+.review-event__body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.review-event__when { font-size: 13.5px; color: var(--text-primary); }
+.review-event__verdicts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+
+.review-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; line-height: 1; padding: 6px 11px;
+  border-radius: 999px; border: 1px solid var(--border);
+  background: var(--bg-elevated); color: var(--text-secondary); cursor: pointer;
+}
+.review-chip:hover { color: var(--text-primary); border-color: var(--peri-soft); }
+.review-chip--on { background: var(--peri); border-color: var(--peri); color: #fff; }

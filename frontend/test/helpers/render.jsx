@@ -58,6 +58,13 @@ export const renderAsAdmin = (ui, opts) => renderAs(ADMIN, ui, opts);
 export const renderAsCaregiver = (ui, opts) => renderAs(CAREGIVER, ui, opts);
 
 // Run the same assertions for both roles without duplicating the body.
-export function forEachRole(fn) {
-  for (const [name, who] of [['admin', ADMIN], ['caregiver', CAREGIVER]]) fn(name, who);
+//
+// ⚠️ RETURNS A PROMISE — `await forEachRole(...)` whenever the body is async. It did not, once, and an
+// async body's assertions then ran after the test had already resolved: the test passed against a
+// component that rendered NOTHING AT ALL. A helper that silently discards a rejected promise turns
+// every test written with it into a decoration, so it now collects them and the caller can await.
+// Sequential, not Promise.all: each role renders into the SAME document, so running them concurrently
+// puts two copies of the screen on the page and every query becomes ambiguous.
+export async function forEachRole(fn) {
+  for (const [name, who] of [['admin', ADMIN], ['caregiver', CAREGIVER]]) await fn(name, who);
 }

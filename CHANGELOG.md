@@ -9,6 +9,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **Tell Nightlight when it got a night wrong.** The morning after, a child's page offers **Was last
+  night right?** — confirm the sleep and wake times or correct them, and mark each recorded *got into /
+  out of bed* event right, wrong or "can't tell" against the still frame it was decided from. It shows
+  once per night and goes for good once answered or dismissed. Confirming a night was *right* matters
+  as much as correcting one: it is what makes a future change to sleep detection provable instead of
+  arguable. Reviews are kept forever, and an event you have judged keeps its frame past the usual 45
+  days. Nothing here changes a night's reported numbers — see **README → Sleep tracking**.
+
 ## [0.29.0] - 2026-08-30
 
 ### Added

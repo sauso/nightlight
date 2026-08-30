@@ -15,6 +15,7 @@ import PushBanner from './components/PushBanner.jsx';
 import Login from './pages/Login.jsx';
 import Children from './pages/Children.jsx';
 import ChildDetail from './pages/ChildDetail.jsx';
+import NightReview from './pages/NightReview.jsx';
 import SleepDetail from './pages/SleepDetail.jsx';
 import ChildSettings from './pages/ChildSettings.jsx';
 import Cameras from './pages/Cameras.jsx';
@@ -132,6 +133,7 @@ function Shell() {
                     <Route path="/children/new" element={<ChildSettings />} />
                     <Route path="/children/:id" element={<ChildDetail />} />
                     <Route path="/children/:id/sleep" element={<SleepDetail />} />
+                    <Route path="/children/:id/review/:date" element={<NightReview />} />
                     <Route path="/children/:id/edit" element={<ChildSettings />} />
                     <Route path="/cameras" element={<Cameras />} />
                     {/* Per-camera settings + split detection screens are admin-only (camera

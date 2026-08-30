@@ -268,6 +268,21 @@ measurement**, and (like everything here) never a safety device — see the warn
   reaching in for a toy or a blanket) does not restart that count; several minutes together do, because
   that is a person at the bed rather than a passing arm. The wake is only accepted where a recorded
   **got out of bed** backs it up, so a quiet spell alone can never end the night early.
+- **Tell it when it got a night wrong.** The morning after, the child's page offers **Was last night
+  right?** — confirm the times or correct them, and mark any recorded *got into / out of bed* event as
+  right, wrong, or "can't tell" against the still frame it was decided from. It appears once per night
+  and goes for good once answered **or dismissed**; nothing is asked about nights with no times to
+  confirm. Either an admin or a caregiver can answer, deliberately — the person who was in the room at
+  5am is the one who knows. Type times on your own clock; they are recorded against the timezone in
+  Settings, the same one the sleep card displays.
+  - **Confirming that a night was right is worth as much as correcting one** — it is what makes a
+    future change to sleep detection provable rather than arguable.
+  - **Nothing here changes the night's reported numbers.** It records what was true; use **Recompute
+    this night** on the sleep detail page if you want the stored summary itself redone.
+  - **Reviews are kept forever** — unlike the sleep minute-data behind them (30 days) or the recorded
+    events (45 days). They are a few hundred bytes a night, and their whole value is being comparable
+    years later. A recorded event you have **judged** is also kept past the usual 45 days, along with
+    its frame, so a labelled picture is never deleted on a timer.
 - **Noise on its own doesn't delay bedtime.** A bedroom microphone hears the whole house, and
   bedtime is usually its loudest hour — a sibling being settled, a TV, adults talking. So when
   working out **when your child fell asleep**, a noisy minute counts as awake only if that room

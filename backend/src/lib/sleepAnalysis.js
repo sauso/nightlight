@@ -263,7 +263,7 @@ function tzOffsetMs(instant, tz) {
 
 // A wall-clock local time (moZero is 0-based) in tz -> the corresponding UTC Date. One refinement pass
 // handles DST edges cleanly enough for a night window.
-function zonedToUtc(y, moZero, d, h, mi, tz) {
+export function zonedToUtc(y, moZero, d, h, mi, tz) {
   const guess = Date.UTC(y, moZero, d, h, mi, 0);
   let off = tzOffsetMs(new Date(guess), tz);
   off = tzOffsetMs(new Date(guess - off), tz);
@@ -272,7 +272,7 @@ function zonedToUtc(y, moZero, d, h, mi, tz) {
 
 const pad = (n) => String(n).padStart(2, '0');
 // Format a Date as the UTC 'YYYY-MM-DD HH:MM:00' string that matches activity_samples.bucket_start.
-function toSqlUtc(date) {
+export function toSqlUtc(date) {
   return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:00`;
 }
 function parseHm(s) {
