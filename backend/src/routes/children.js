@@ -6,7 +6,7 @@ import { normalizePhoto } from '../lib/photo.js';
 import { getStoredNights, computeNight, computeAndStoreNight, currentNightDate, childTracksSleep, sleepInsights } from '../lib/sleepAnalysis.js';
 import { startMotionDetector } from '../lib/motionDetector.js';
 import { getNightReview, saveNightReview, reviewCardState, localHmToUtcSql, applyVerdicts,
-  applyCorrection, applyCorrections } from '../lib/sleepReviews.js';
+  applyCorrection, applyCorrections, transitionInstant } from '../lib/sleepReviews.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -202,11 +202,23 @@ router.put('/:id/review/:date', (req, res) => {
   // the app's configured timezone and the night's date. `undefined` back from localHmToUtcSql means the
   // value was malformed, which is NOT the same as `null` (nothing recorded) and must not be stored as
   // if it were, or a garbled entry would silently become "no ground truth for this night".
-  const onset = localHmToUtcSql(req.params.date, onsetHm);
-  const wake = localHmToUtcSql(req.params.date, wakeHm);
-  for (const [label, v] of [['true_onset_local', onset], ['true_wake_local', wake]]) {
+  const onsetHm2 = localHmToUtcSql(req.params.date, onsetHm);
+  const wakeHm2 = localHmToUtcSql(req.params.date, wakeHm);
+  for (const [label, v] of [['true_onset_local', onsetHm2], ['true_wake_local', wakeHm2]]) {
     if (v === undefined) return res.status(400).json({ error: `${label} must be a time like 19:33` });
   }
+
+  // Naming a recorded frame beats typing a time: it is second-accurate rather than rounded from
+  // memory, and it records WHICH picture means "they got up". So when a frame is named it WINS over
+  // any typed value — the client clears the id the moment somebody edits the time by hand, which keeps
+  // exactly one source of truth for each of the two moments.
+  const onsetFromFrame = transitionInstant(req.params.id, req.params.date, body.true_onset_transition_id);
+  const wakeFromFrame = transitionInstant(req.params.id, req.params.date, body.true_wake_transition_id);
+  for (const [label, v] of [['true_onset_transition_id', onsetFromFrame], ['true_wake_transition_id', wakeFromFrame]]) {
+    if (v === undefined) return res.status(400).json({ error: `${label} is not an event of this night` });
+  }
+  const onset = onsetFromFrame ?? onsetHm2;
+  const wake = wakeFromFrame ?? wakeHm2;
   if (note != null && typeof note !== 'string') {
     return res.status(400).json({ error: 'note must be text' });
   }
@@ -225,8 +237,12 @@ router.put('/:id/review/:date', (req, res) => {
   const review = saveNightReview(req.params.id, req.params.date, {
     // `undefined` means "not supplied, keep what is stored" — a stale card on a second phone sending
     // only `{dismissed:true}` must not blank times a parent entered on the first.
-    trueOnsetAt: onsetHm === undefined ? undefined : onset,
-    trueWakeAt: wakeHm === undefined ? undefined : wake,
+    trueOnsetAt: onsetHm === undefined && body.true_onset_transition_id === undefined ? undefined : onset,
+    trueWakeAt: wakeHm === undefined && body.true_wake_transition_id === undefined ? undefined : wake,
+    trueOnsetTransitionId: body.true_onset_transition_id === undefined
+      ? undefined : (body.true_onset_transition_id == null ? null : Number(body.true_onset_transition_id)),
+    trueWakeTransitionId: body.true_wake_transition_id === undefined
+      ? undefined : (body.true_wake_transition_id == null ? null : Number(body.true_wake_transition_id)),
     // What the person was LOOKING at when they judged, echoed back from the GET. Deliberately not
     // recomputed here — see saveNightReview.
     computedOnsetAt: body.computed_onset_at,

@@ -21,18 +21,21 @@ const getReviewStmt = db.prepare('SELECT * FROM sleep_reviews WHERE child_id = ?
 
 const upsertReviewStmt = db.prepare(
   `INSERT INTO sleep_reviews
-     (child_id, night_date, true_onset_at, true_wake_at, computed_onset_at, computed_wake_at, note,
-      dismissed, reviewed_at)
-   VALUES (@child_id, @night_date, @true_onset_at, @true_wake_at, @computed_onset_at, @computed_wake_at,
-           @note, @dismissed, datetime('now'))
+     (child_id, night_date, true_onset_at, true_wake_at, true_onset_transition_id,
+      true_wake_transition_id, computed_onset_at, computed_wake_at, note, dismissed, reviewed_at)
+   VALUES (@child_id, @night_date, @true_onset_at, @true_wake_at, @true_onset_transition_id,
+           @true_wake_transition_id, @computed_onset_at, @computed_wake_at, @note, @dismissed,
+           datetime('now'))
    ON CONFLICT(child_id, night_date) DO UPDATE SET
-     true_onset_at     = excluded.true_onset_at,
-     true_wake_at      = excluded.true_wake_at,
-     computed_onset_at = excluded.computed_onset_at,
-     computed_wake_at  = excluded.computed_wake_at,
-     note              = excluded.note,
-     dismissed         = excluded.dismissed,
-     reviewed_at       = datetime('now')`
+     true_onset_at            = excluded.true_onset_at,
+     true_wake_at             = excluded.true_wake_at,
+     true_onset_transition_id = excluded.true_onset_transition_id,
+     true_wake_transition_id  = excluded.true_wake_transition_id,
+     computed_onset_at        = excluded.computed_onset_at,
+     computed_wake_at         = excluded.computed_wake_at,
+     note                     = excluded.note,
+     dismissed                = excluded.dismissed,
+     reviewed_at              = datetime('now')`
 );
 
 // The child's cameras in the same order the analysis picks its scoring camera, so the frames shown are
@@ -91,6 +94,24 @@ export function localHmToUtcSql(nightDate, hhmm) {
   return toSqlUtc(zonedToUtc(y, mo - 1, d + (h < 12 ? 1 : 0), h, mi, appTz()));
 }
 
+// The exact instant of a transition the person NAMED as the bedtime or the morning departure, if it
+// really belongs to this child and this night.
+//
+// Pointing at a frame beats typing a time on both counts that matter: it is second-accurate where a
+// person rounds from memory, and it records WHICH picture means "they got up", which is the labelled
+// pair the detector work needs. The scoping is not optional — an unchecked id would let a review claim
+// another child's event, in the one table everything else gets measured against.
+//
+// Returns the UTC timestamp, null when no frame was named, or undefined when the id is not a
+// transition of this night — which the caller must reject rather than quietly store as "no answer".
+export function transitionInstant(childId, nightDate, id) {
+  if (id == null || id === '') return null;
+  const n = Number(id);
+  if (!Number.isInteger(n) || n <= 0) return undefined;
+  const match = transitionsFor(childId, nightDate).find((t) => t.id === n);
+  return match ? match.created_at : undefined;
+}
+
 function transitionsFor(childId, nightDate) {
   const cams = camsForChild.all(childId);
   const byId = new Map(cams.map((c) => [c.id, c.name]));
@@ -146,6 +167,8 @@ export function saveNightReview(childId, nightDate, patch = {}) {
     night_date: nightDate,
     true_onset_at: pick('true_onset_at', patch.trueOnsetAt),
     true_wake_at: pick('true_wake_at', patch.trueWakeAt),
+    true_onset_transition_id: pick('true_onset_transition_id', patch.trueOnsetTransitionId),
+    true_wake_transition_id: pick('true_wake_transition_id', patch.trueWakeTransitionId),
     computed_onset_at: pick('computed_onset_at', patch.computedOnsetAt),
     computed_wake_at: pick('computed_wake_at', patch.computedWakeAt),
     note: pick('note', patch.note),

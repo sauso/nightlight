@@ -279,6 +279,13 @@ measurement**, and (like everything here) never a safety device — see the warn
     future change to sleep detection provable rather than arguable. Confirming and correcting are
     separate buttons on purpose: the times we guessed are never one stray tap from being recorded as
     fact.
+  - **Point at the picture instead of typing.** Each recorded event has **Put down here** /
+    **Up for the day here** — tap the frame that shows the real moment and the time is taken from
+    it, exact to the second rather than rounded from memory. Typing a time by hand instead clears
+    the picked frame, so only one of them is ever the answer.
+    - This is **not** the same as marking an event *correct*. An exit can be perfectly real and
+      still not be the end of the night — a child who gets out at 5:45, goes back, and gets up
+      again at 6:00 had two genuine exits and only one of them ended the night.
   - **Your times become the ones shown.** Once you correct a night, the child's card, the history list
     and the sleep detail page all show *your* times, marked **You corrected this**, with the total
     sleep recalculated to match. This is different from **Recompute this night**, which re-runs the

@@ -2727,3 +2727,8 @@ input[type='range'] {
   margin-top: 8px; font-size: 12.5px; line-height: 1.5;
   color: var(--text-secondary);
 }
+
+/* "Up for the day here" — naming the moment, as distinct from judging the event. Given the accent
+   rather than the periwinkle chrome because it is the one action on this row that changes the night. */
+.review-chip--moment { border-color: var(--accent-dim); color: var(--text-primary); }
+.review-chip--moment.review-chip--on { background: var(--accent); border-color: var(--accent); color: #2b2118; }

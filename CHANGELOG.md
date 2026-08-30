@@ -13,6 +13,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - **Tell Nightlight when it got a night wrong.** The morning after, a child's page asks **Was last night
   right?** — confirm the sleep and wake times with one tap, or correct them; and mark each recorded *got
   into / out of bed* event right, wrong or "can't tell" against the still frame it was decided from.
+  - **Point at the picture instead of typing a time.** Each recorded event offers **Put down here**
+    / **Up for the day here** — tap the frame showing the real moment and the time comes from it,
+    exact to the second. Which frame you picked is remembered, not just the time it produced.
+    This is deliberately separate from marking an event *correct*: an exit can be real and still
+    not be the end of the night.
   - **Your times become the ones shown.** Once you correct a night, the child's card, the sleep history
     and the detail page all show *your* times, marked **You corrected this**, with total sleep
     recalculated to match. This is different from **Recompute this night**, which re-runs the detector:
