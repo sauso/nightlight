@@ -284,6 +284,56 @@ describe('the review screen', () => {
     await waitFor(() => expect(screen.getByLabelText(/Got up for the day/)).toHaveValue('05:52'));
   });
 
+  test('naming a frame fills the time and sends WHICH frame it was', async () => {
+    const { user } = at();
+    await openEvents(user);
+    await user.click(await screen.findByRole('button', { name: /Up for the day here/ }));
+
+    await user.click(screen.getByRole('button', { name: /Save review/ }));
+    await waitFor(() => expect(api.put).toHaveBeenCalled());
+    expect(api.put.mock.calls[0][1]).toMatchObject({ true_wake_transition_id: 11 });
+  });
+
+  test('naming a frame is a DIFFERENT act from saying the event is correct', async () => {
+    // An exit can be perfectly real and still not be the end of the night: 05:45 was a genuine
+    // got-out-of-bed on a morning the child went back and got up again at 06:00. Tying the wake to the
+    // "correct" verdict would have ended that night at the wrong one.
+    const { user } = at();
+    await openEvents(user);
+    await user.click(screen.getAllByRole('button', { name: /Yes/ })[0]);
+
+    await user.click(screen.getByRole('button', { name: /Save just the event answers/ }));
+    await waitFor(() => expect(api.put).toHaveBeenCalled());
+    const body = api.put.mock.calls[0][1];
+    expect(body.verdicts).toMatchObject({ 11: 'correct' });
+    expect(body.true_wake_transition_id).toBeUndefined();
+  });
+
+  test('a put-down frame fills the bedtime, an exit fills the wake', async () => {
+    const { user } = at();
+    await openEvents(user);
+    await user.click(screen.getByRole('button', { name: /Put down here/ }));
+    await user.click(screen.getByRole('button', { name: /Save review/ }));
+    await waitFor(() => expect(api.put).toHaveBeenCalled());
+    expect(api.put.mock.calls[0][1]).toMatchObject({ true_onset_transition_id: 12 });
+  });
+
+  test('typing a time by hand clears the named frame, so only one of them is the answer', async () => {
+    const { user } = at();
+    await openEvents(user);
+    await user.click(await screen.findByRole('button', { name: /Up for the day here/ }));
+
+    const wake = screen.getByLabelText(/Got up for the day/);
+    await user.clear(wake);
+    await user.type(wake, '06:10');
+
+    await user.click(screen.getByRole('button', { name: /Save review/ }));
+    await waitFor(() => expect(api.put).toHaveBeenCalled());
+    const body = api.put.mock.calls[0][1];
+    expect(body.true_wake_transition_id).toBeNull();
+    expect(body.true_wake_local).toBe('06:10');
+  });
+
   test('a night with no recorded events says so instead of showing an empty list', async () => {
     api.get.mockResolvedValue({ ...NIGHT, transitions: [] });
     at();

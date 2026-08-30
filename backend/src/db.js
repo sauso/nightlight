@@ -185,6 +185,8 @@ db.exec(`
     night_date TEXT NOT NULL,
     true_onset_at TEXT,
     true_wake_at TEXT,
+    true_onset_transition_id INTEGER,
+    true_wake_transition_id INTEGER,
     computed_onset_at TEXT,
     computed_wake_at TEXT,
     note TEXT,
@@ -313,6 +315,15 @@ if (!bedTxColumns.includes('snapshot')) {
 // on a timer would defeat the point of collecting them.
 if (!bedTxColumns.includes('verdict')) {
   db.exec('ALTER TABLE bed_transitions ADD COLUMN verdict TEXT');
+}
+
+// Which recorded transition the person named as the bedtime or the morning departure, when they chose
+// one instead of typing a time. Worth storing beyond the time it produced: a frame somebody has
+// identified as "this is the moment they got up" is a LABELLED EXAMPLE, and that pairing — picture to
+// meaning — is the thing an occupancy check would have to be measured against. The time alone loses it.
+const sleepReviewColumns = db.prepare('PRAGMA table_info(sleep_reviews)').all().map((c) => c.name);
+for (const col of ['true_onset_transition_id', 'true_wake_transition_id']) {
+  if (!sleepReviewColumns.includes(col)) db.exec(`ALTER TABLE sleep_reviews ADD COLUMN ${col} INTEGER`);
 }
 
 const settingsColumns = db.prepare('PRAGMA table_info(settings)').all().map((c) => c.name);
