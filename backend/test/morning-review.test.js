@@ -19,7 +19,8 @@ useTempDataDir();
 
 const { default: db } = await import('../src/db.js');
 const { computeAndStoreNight } = await import('../src/lib/sleepAnalysis.js');
-const { pendingReview, getNightReview, saveNightReview, localHmToUtcSql } = await import('../src/lib/sleepReviews.js');
+const { pendingReview, getNightReview, saveNightReview, localHmToUtcSql, applyCorrection,
+  reviewCardState } = await import('../src/lib/sleepReviews.js');
 const { recordBedTransition, setTransitionVerdict, TRANSITION } = await import('../src/lib/bedTransitions.js');
 const { lastCompletedNightDate } = await import('../src/lib/sleepAnalysis.js');
 const { default: childrenRouter } = await import('../src/routes/children.js');
@@ -323,7 +324,7 @@ test('"nothing to review" is a 200, not a 404', async () => {
   // browser console every morning and train everyone to ignore the real ones.
   const res = await call(`${server.url}/api/children/${CHILD}/review/pending`, { token });
   assert.equal(res.status, 200);
-  assert.equal(res.body.pending, null);
+  assert.equal(res.body.state, 'none');
 });
 
 // --- the boundaries the rules are stated in terms of -----------------------------------------------
@@ -447,4 +448,76 @@ test('a bad date is refused on the PUT as well as the GET', async () => {
   });
   assert.equal(res.status, 400);
   assert.equal(db.prepare('SELECT COUNT(*) c FROM sleep_reviews').get().c, 0);
+});
+
+// --- a correction is what gets SHOWN -----------------------------------------------------------------
+
+test('a corrected night displays the corrected times, not the detector\'s', async () => {
+  // The owner's first real use: they told the app when their child got up, the card kept showing the
+  // old time, and they said "this is actually worse". Correcting a night and seeing nothing change
+  // reads as the app having ignored you — and the corrected time IS the best information available.
+  laySamples();
+  computeAndStoreNight(CHILD, DATE);
+  const before = db.prepare('SELECT * FROM sleep_nights WHERE child_id = ?').get(CHILD);
+
+  await call(server.url + '/api/children/' + CHILD + '/review/' + DATE, {
+    method: 'PUT', token, body: { true_wake_local: '05:29' },
+  });
+
+  const res = await call(server.url + '/api/children/' + CHILD + '/sleep?nights=1', { token });
+  const shown = res.body.nights[0];
+  assert.equal(shown.wake_at, '2026-07-01 19:29:00', 'the card shows what the person said');
+  assert.equal(shown.corrected, true, 'and says so');
+  assert.equal(shown.algo_wake_at, before.wake_at, 'the detector\'s own answer is kept alongside');
+  assert.equal(
+    db.prepare('SELECT wake_at FROM sleep_nights WHERE child_id = ?').get(CHILD).wake_at, before.wake_at,
+    'the stored row is NOT overwritten — it is still what a future change gets scored against'
+  );
+});
+
+test('asleep minutes are re-derived so the card cannot contradict itself', () => {
+  // "Up at 05:29" above "slept 10h 15m" is visibly wrong to anyone reading it.
+  const night = {
+    night_date: DATE, onset_at: exactSql(at(19, 30)), wake_at: exactSql(at(7, 0, 1)),
+    asleep_minutes: 690, awake_minutes: 0,
+  };
+  saveNightReview(CHILD, DATE, { trueWakeAt: exactSql(at(5, 29, 1)) });
+  const out = applyCorrection(CHILD, night);
+  assert.equal(out.asleep_minutes, 599, '19:30 to 05:29 is 9h59m');
+});
+
+test('a night nobody corrected is passed through untouched', () => {
+  const night = { night_date: DATE, onset_at: 'x', wake_at: 'y', asleep_minutes: 1 };
+  assert.deepEqual(applyCorrection(CHILD, night), night);
+});
+
+test('a dismissal is not a correction', () => {
+  // Dismissing records "I do not want to answer", which must never become a claim about the night.
+  const night = { night_date: DATE, onset_at: 'x', wake_at: 'y', asleep_minutes: 1 };
+  saveNightReview(CHILD, DATE, { dismissed: true });
+  assert.deepEqual(applyCorrection(CHILD, night), night);
+});
+
+// --- the card says what happened to your answer -----------------------------------------------------
+
+test('the card confirms an answered night instead of vanishing', () => {
+  // A prompt that simply disappears on save is indistinguishable from one that failed, which is
+  // precisely how this first landed: "it then disappeared and the card didn't update".
+  const night = lastCompletedNightDate(CHILD);
+  storeNight(night);
+  assert.equal(reviewCardState(CHILD).state, 'ask');
+
+  saveNightReview(CHILD, night, { trueWakeAt: exactSql(at(5, 29, 1)) });
+
+  const done = reviewCardState(CHILD);
+  assert.equal(done.state, 'done');
+  assert.equal(done.night_date, night);
+  assert.equal(done.true_wake_at, exactSql(at(5, 29, 1)), 'and shows back what was recorded');
+});
+
+test('a dismissed night stays quiet — no prompt and no receipt', () => {
+  const night = lastCompletedNightDate(CHILD);
+  storeNight(night);
+  saveNightReview(CHILD, night, { dismissed: true });
+  assert.equal(reviewCardState(CHILD).state, 'none');
 });

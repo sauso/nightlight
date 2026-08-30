@@ -15,10 +15,9 @@ import AppHeader from '../components/AppHeader.jsx';
 // dated, captured while it is fresh, and never rewritten afterwards.
 //
 // Two things are collected, and they answer different questions. The TIMES give a scored ground-truth
-// set — "was the app right about this night" — which is what makes a future change provable instead of
-// arguable. The per-event VERDICTS give labelled frames: 62% of recorded bed transitions are
-// physically impossible on sequence alone, and knowing WHICH of a contradictory pair is the wrong one
-// needs a person to look at the picture.
+// set, and are also what the child's card then displays. The per-event VERDICTS give labelled frames:
+// 62% of recorded bed transitions are physically impossible on sequence alone, and knowing WHICH of a
+// contradictory pair is wrong needs a person to look at the picture.
 //
 // ⚠️ Times are typed as local wall-clock and sent AS TYPED. The server resolves them against the app's
 // configured timezone — see toLocalHhmm below for why that direction is deliberate.
@@ -29,8 +28,8 @@ const VERDICTS = [
   { key: 'unclear', label: "Can't tell", Icon: HelpCircle },
 ];
 
-// UTC 'YYYY-MM-DD HH:MM:SS' -> the 'HH:MM' shown in the app's configured timezone — the same zone
-// the sleep card renders in, so the review and the thing it is correcting always agree.
+// UTC 'YYYY-MM-DD HH:MM:SS' -> the 'HH:MM' shown in the app's configured timezone — the same zone the
+// sleep card renders in, so the review and the thing it is correcting always agree.
 //
 // The reverse direction is deliberately NOT done here. The server resolves what was typed against the
 // app timezone and the night's date, because that is where the timezone setting lives and where the
@@ -51,6 +50,7 @@ export default function NightReview() {
   const kid = kids.find((k) => k.id === id);
 
   const [data, setData] = useState(null);
+  const [editing, setEditing] = useState(false);
   const [onset, setOnset] = useState('');
   const [wake, setWake] = useState('');
   const [note, setNote] = useState('');
@@ -64,13 +64,13 @@ export default function NightReview() {
       .then((r) => {
         if (!live) return;
         setData(r);
-        // Pre-fill with the app's own answer. Confirming it unchanged is a real and common outcome —
-        // and the most valuable one to record, because "we were right" is exactly what a scored set
-        // needs and exactly what nobody bothers to write down.
         setOnset(toLocalHhmm(r.review?.true_onset_at || r.computed?.onset_at, tz));
         setWake(toLocalHhmm(r.review?.true_wake_at || r.computed?.wake_at, tz));
         setNote(r.review?.note || '');
         setVerdicts(Object.fromEntries((r.transitions || []).filter((t) => t.verdict).map((t) => [t.id, t.verdict])));
+        // A night already answered opens straight into its recorded values, so coming back to change
+        // something does not make you confirm from scratch.
+        setEditing(Boolean(r.review?.true_onset_at || r.review?.true_wake_at));
       })
       .catch((e) => live && setError(e.message || 'Could not load that night'));
     return () => { live = false; };
@@ -78,14 +78,22 @@ export default function NightReview() {
 
   const fmtEvent = useMemo(() => (t) => toLocalHhmm(t.created_at, tz), [tz]);
 
-  const save = async () => {
+  // `withTimes` false saves only the verdicts and leaves any recorded times alone.
+  const save = async (withTimes, onsetHm = onset, wakeHm = wake) => {
     setBusy(true);
     setError(null);
     try {
       await api.put(`/children/${id}/review/${date}`, {
-        true_onset_local: onset || null,
-        true_wake_local: wake || null,
+        true_onset_local: withTimes ? (onsetHm || null) : undefined,
+        true_wake_local: withTimes ? (wakeHm || null) : undefined,
         note: note.trim() || null,
+        // ⚠️ WHAT WE SHOWED THIS PERSON, sent back so the server records it beside their answer. The
+        // server deliberately does not recompute it: a night's answer drifts while the page is open
+        // (05:51 at 08:16 → 08:31 at 09:50), so recomputing at save time filed a confirmation as a
+        // disagreement. Omitting these is just as bad and is what actually shipped — every stored
+        // review then read "the app had no opinion", which was false for every one of them.
+        computed_onset_at: data?.computed?.onset_at ?? null,
+        computed_wake_at: data?.computed?.wake_at ?? null,
         verdicts,
       });
       navigate(`/children/${id}`);
@@ -114,33 +122,78 @@ export default function NightReview() {
   }
 
   const transitions = data.transitions || [];
+  const shownOnset = toLocalHhmm(data.computed?.onset_at, tz);
+  const shownWake = toLocalHhmm(data.computed?.wake_at, tz);
+  const hasOpinion = Boolean(shownOnset || shownWake);
+
   return (
     <>
       <AppHeader title="Was this right?" back={back} />
       <main className="app-main">
         <div className="card">
           <div className="card-title">What we recorded</div>
-          <div className="camera-tile__sub">
-            Correct anything that is wrong. If it is already right, just save — knowing we got a night
-            right is worth as much as knowing we got it wrong.
-          </div>
-          <label className="field">
-            <span className="field__label">Fell asleep</span>
-            <input type="time" value={onset} onChange={(e) => setOnset(e.target.value)} />
-          </label>
-          <label className="field">
-            <span className="field__label">Got up for the day</span>
-            <input type="time" value={wake} onChange={(e) => setWake(e.target.value)} />
-          </label>
-          <label className="field">
-            <span className="field__label">Anything else worth noting</span>
-            <input
-              type="text"
-              value={note}
-              placeholder="e.g. put back on the bed to get dressed at 5:45"
-              onChange={(e) => setNote(e.target.value)}
-            />
-          </label>
+
+          {/* Confirm-or-correct, deliberately NOT a pre-filled form you can save by reflex. A pre-filled
+              form puts the app's own answer one tap from becoming "ground truth" — and that answer is
+              sometimes badly wrong (a drifted wake of 08:29 against a real 06:00). Blessing it by
+              accident poisons the very data this screen exists to collect, and on first real use that
+              is exactly what happened. */}
+          {!editing && (
+            <>
+              {hasOpinion ? (
+                <div className="review-shown">
+                  <div><span className="review-shown__label">Fell asleep</span><strong>{shownOnset || '—'}</strong></div>
+                  <div><span className="review-shown__label">Got up for the day</span><strong>{shownWake || '—'}</strong></div>
+                </div>
+              ) : (
+                <div className="camera-tile__sub">
+                  We didn’t work out any times for this night. If you know them, add them — a night we
+                  saw nothing on is the most useful one of all to have on record.
+                </div>
+              )}
+              <div className="review-actions">
+                {hasOpinion && (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={busy}
+                    onClick={() => save(true, shownOnset, shownWake)}
+                  >
+                    {busy ? 'Saving…' : 'That’s right'}
+                  </button>
+                )}
+                <button type="button" className="btn btn-secondary" onClick={() => setEditing(true)}>
+                  {hasOpinion ? 'Not quite…' : 'Add the times'}
+                </button>
+              </div>
+            </>
+          )}
+
+          {editing && (
+            <>
+              <div className="camera-tile__sub">
+                {hasOpinion && `We said ${shownOnset || '—'} to ${shownWake || '—'}. `}
+                Put in what actually happened — your times are what {kid?.name || 'their'}’s card will show.
+              </div>
+              <label className="field">
+                <span className="field__label">Fell asleep</span>
+                <input type="time" value={onset} onChange={(e) => setOnset(e.target.value)} />
+              </label>
+              <label className="field">
+                <span className="field__label">Got up for the day</span>
+                <input type="time" value={wake} onChange={(e) => setWake(e.target.value)} />
+              </label>
+              <label className="field">
+                <span className="field__label">Anything else worth noting</span>
+                <input
+                  type="text"
+                  value={note}
+                  placeholder="e.g. put back on the bed to get dressed at 5:45"
+                  onChange={(e) => setNote(e.target.value)}
+                />
+              </label>
+            </>
+          )}
         </div>
 
         <div className="card tight">
@@ -191,9 +244,15 @@ export default function NightReview() {
         </div>
 
         {error && <div className="error-banner">{error}</div>}
-        <button type="button" className="btn btn-primary btn-block" disabled={busy} onClick={save}>
-          {busy ? 'Saving…' : 'Save review'}
-        </button>
+        {editing ? (
+          <button type="button" className="btn btn-primary btn-block" disabled={busy} onClick={() => save(true)}>
+            {busy ? 'Saving…' : 'Save review'}
+          </button>
+        ) : transitions.length > 0 && (
+          <button type="button" className="btn btn-secondary btn-block" disabled={busy} onClick={() => save(false)}>
+            {busy ? 'Saving…' : 'Save just the event answers'}
+          </button>
+        )}
       </main>
     </>
   );

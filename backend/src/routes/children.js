@@ -5,7 +5,8 @@ import { requireAuth } from '../middleware/auth.js';
 import { normalizePhoto } from '../lib/photo.js';
 import { getStoredNights, computeNight, computeAndStoreNight, currentNightDate, childTracksSleep, sleepInsights } from '../lib/sleepAnalysis.js';
 import { startMotionDetector } from '../lib/motionDetector.js';
-import { getNightReview, saveNightReview, pendingReview, localHmToUtcSql, applyVerdicts } from '../lib/sleepReviews.js';
+import { getNightReview, saveNightReview, reviewCardState, localHmToUtcSql, applyVerdicts,
+  applyCorrection, applyCorrections } from '../lib/sleepReviews.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -105,7 +106,9 @@ router.get('/:id/sleep/live', (req, res) => {
   if (current) {
     return res.json({ scope: 'tonight', night: computeNight(req.params.id, current) });
   }
-  const nights = getStoredNights(req.params.id, 1);
+  // Corrections are laid over the stored row — see applyCorrection. A night somebody has told us
+  // the truth about must not keep showing the algorithm's version of it.
+  const nights = applyCorrections(req.params.id, getStoredNights(req.params.id, 1));
   return res.json({ scope: 'last', night: nights[0] || null });
 });
 
@@ -123,7 +126,7 @@ router.get('/:id/sleep', (req, res) => {
   const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
   const nights = Math.min(60, Math.max(1, parseInt(req.query.nights, 10) || 14));
-  res.json({ nights: getStoredNights(req.params.id, nights) });
+  res.json({ nights: applyCorrections(req.params.id, getStoredNights(req.params.id, nights)) });
 });
 
 // Compute one night on demand for a specific LOCAL start date ('YYYY-MM-DD'). ?detail=1 includes the
@@ -146,9 +149,9 @@ router.get('/:id/sleep/:date', (req, res) => {
   }
   const wantStore = req.query.store === '1' && req.user?.role === 'admin';
   if (!wantStore) {
-    return res.json(computeNight(req.params.id, req.params.date, {
+    return res.json(applyCorrection(req.params.id, computeNight(req.params.id, req.params.date, {
       includeTimeline: req.query.debug === '1' || req.query.detail === '1',
-    }));
+    })));
   }
   // Storing a recompute can only ever improve or re-score a night, never un-score one — see the
   // allowDowngrade guard in computeAndStoreNight. A refusal is the user's fault only in the sense that
@@ -175,7 +178,7 @@ router.get('/:id/sleep/:date', (req, res) => {
 router.get('/:id/review/pending', (req, res) => {
   const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
-  res.json({ pending: pendingReview(req.params.id) });
+  res.json(reviewCardState(req.params.id));
 });
 
 router.get('/:id/review/:date', (req, res) => {

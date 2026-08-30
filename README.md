@@ -276,9 +276,17 @@ measurement**, and (like everything here) never a safety device — see the warn
   5am is the one who knows. Type times on your own clock; they are recorded against the timezone in
   Settings, the same one the sleep card displays.
   - **Confirming that a night was right is worth as much as correcting one** — it is what makes a
-    future change to sleep detection provable rather than arguable.
-  - **Nothing here changes the night's reported numbers.** It records what was true; use **Recompute
-    this night** on the sleep detail page if you want the stored summary itself redone.
+    future change to sleep detection provable rather than arguable. Confirming and correcting are
+    separate buttons on purpose: the times we guessed are never one stray tap from being recorded as
+    fact.
+  - **Your times become the ones shown.** Once you correct a night, the child's card, the history list
+    and the sleep detail page all show *your* times, marked **You corrected this**, with the total
+    sleep recalculated to match. This is different from **Recompute this night**, which re-runs the
+    detector: correcting records what *you* know, recomputing re-asks the *app*.
+  - **The detector's own answer is kept underneath, not overwritten.** That is deliberate — it is what
+    a future improvement gets scored against. Nothing you enter here changes how sleep is detected.
+  - **The card confirms it.** After you answer, the prompt becomes a short receipt showing what you
+    recorded, and tapping it lets you change your mind.
   - **Reviews are kept forever** — unlike the sleep minute-data behind them (30 days) or the recorded
     events (45 days). They are a few hundred bytes a night, and their whole value is being comparable
     years later. A recorded event you have **judged** is also kept past the usual 45 days, along with
