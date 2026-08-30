@@ -287,6 +287,9 @@ measurement**, and (like everything here) never a safety device — see the warn
     a future improvement gets scored against. Nothing you enter here changes how sleep is detected.
   - **The card confirms it.** After you answer, the prompt becomes a short receipt showing what you
     recorded, and tapping it lets you change your mind.
+  - **Any night can be reviewed, not just last night.** The sleep detail page has **Was this night
+    right?** for whichever night you are looking at — that is how you correct a night you already
+    answered, since the card only ever offers nights you haven't.
   - **Reviews are kept forever** — unlike the sleep minute-data behind them (30 days) or the recorded
     events (45 days). They are a few hundred bytes a night, and their whole value is being comparable
     years later. A recorded event you have **judged** is also kept past the usual 45 days, along with
