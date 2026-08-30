@@ -10,13 +10,21 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Added
-- **Tell Nightlight when it got a night wrong.** The morning after, a child's page offers **Was last
-  night right?** — confirm the sleep and wake times or correct them, and mark each recorded *got into /
-  out of bed* event right, wrong or "can't tell" against the still frame it was decided from. It shows
-  once per night and goes for good once answered or dismissed. Confirming a night was *right* matters
-  as much as correcting one: it is what makes a future change to sleep detection provable instead of
-  arguable. Reviews are kept forever, and an event you have judged keeps its frame past the usual 45
-  days. Nothing here changes a night's reported numbers — see **README → Sleep tracking**.
+- **Tell Nightlight when it got a night wrong.** The morning after, a child's page asks **Was last night
+  right?** — confirm the sleep and wake times with one tap, or correct them; and mark each recorded *got
+  into / out of bed* event right, wrong or "can't tell" against the still frame it was decided from.
+  - **Your times become the ones shown.** Once you correct a night, the child's card, the sleep history
+    and the detail page all show *your* times, marked **You corrected this**, with total sleep
+    recalculated to match. This is different from **Recompute this night**, which re-runs the detector:
+    correcting records what *you* know, recomputing re-asks the *app*.
+  - **The detector's own answer is kept underneath, not overwritten** — it is what a future improvement
+    gets scored against. Nothing you enter changes how sleep is detected.
+  - **Confirming that a night was right matters as much as correcting one**, and the two are separate
+    buttons on purpose: times Nightlight guessed are never one stray tap from being recorded as fact.
+  - The prompt shows once per night and becomes a short receipt once answered, which you can tap to
+    change your mind. Dismissing it stops it coming back for that night.
+  - Reviews are kept forever, and an event you have judged keeps its frame past the usual 45 days.
+  - See **README → Sleep tracking**.
 
 ## [0.29.0] - 2026-08-30
 

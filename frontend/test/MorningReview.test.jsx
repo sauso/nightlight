@@ -19,6 +19,7 @@ import NightReview from '../src/pages/NightReview.jsx';
 import { api } from '../src/lib/api.js';
 
 const PENDING = {
+  state: 'ask',
   night_date: '2026-08-29',
   onset_at: '2026-08-29 09:33:00', // 19:33 Melbourne
   wake_at: '2026-08-29 19:48:00', // 05:48 Melbourne, the morning after
@@ -31,7 +32,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe('the card that asks', () => {
   beforeEach(() => {
-    vi.spyOn(api, 'get').mockResolvedValue({ pending: PENDING });
+    vi.spyOn(api, 'get').mockResolvedValue(PENDING);
     vi.spyOn(api, 'put').mockResolvedValue({});
   });
 
@@ -54,7 +55,7 @@ describe('the card that asks', () => {
   });
 
   test('one event reads "event", not "1 events"', async () => {
-    api.get.mockResolvedValue({ pending: { ...PENDING, transition_count: 1 } });
+    api.get.mockResolvedValue({ ...PENDING, transition_count: 1 });
     renderAsAdmin(<MorningReviewCard childId="c-1" fmtTime={fmtTime} />);
     expect(await screen.findByText(/1 recorded event(?!s)/)).toBeInTheDocument();
   });
@@ -85,10 +86,23 @@ describe('the card that asks', () => {
   });
 
   test('nothing renders when there is nothing to review', async () => {
-    api.get.mockResolvedValue({ pending: null });
+    api.get.mockResolvedValue({ state: 'none' });
     const { container } = renderAsAdmin(<MorningReviewCard childId="c-1" fmtTime={fmtTime} />);
     await waitFor(() => expect(api.get).toHaveBeenCalled());
     expect(container.querySelector('.review-card')).toBeNull();
+  });
+
+  test('an answered night shows a receipt with a way back in, not nothing', async () => {
+    // Vanishing on save is indistinguishable from failing, which is how this first landed.
+    api.get.mockResolvedValue({
+      state: 'done',
+      night_date: '2026-08-29',
+      true_onset_at: '2026-08-29 09:33:00',
+      true_wake_at: '2026-08-29 19:29:00',
+    });
+    renderAsAdmin(<MorningReviewCard childId="c-1" fmtTime={fmtTime} />);
+    expect(await screen.findByText(/that.s recorded/i)).toBeInTheDocument();
+    expect(screen.getByText(/Tap to change it/)).toBeInTheDocument();
   });
 
   test('a failed load renders nothing rather than an error', async () => {
@@ -124,11 +138,13 @@ describe('the review screen', () => {
   const at = (renderer = renderAsAdmin) =>
     renderer(routed, { route: '/children/c-1/review/2026-08-29', kids: [{ id: 'c-1', name: 'Raffa' }] });
 
-  test("it pre-fills with the app's own answer so confirming it is one tap", async () => {
-    // "We were right" is the most valuable record and the one nobody writes down unaided.
+  test("it shows the app's own answer, and confirming it is one tap", async () => {
+    // "We were right" is the most valuable record and the one nobody writes down unaided — so it has
+    // to be a single deliberate button, not a form you scroll past.
     at();
-    await waitFor(() => expect(screen.getByLabelText(/Fell asleep/)).toHaveValue('19:33'));
-    expect(screen.getByLabelText(/Got up for the day/)).toHaveValue('05:48');
+    expect(await screen.findByRole('button', { name: /That.s right/ })).toBeInTheDocument();
+    expect(screen.getByText('19:33')).toBeInTheDocument();
+    expect(screen.getByText('05:48')).toBeInTheDocument();
   });
 
   test('an event with a frame shows it; one without says so', async () => {
@@ -144,6 +160,7 @@ describe('the review screen', () => {
     // configured timezone, so resolving 19:33 and 05:48 to instants is the server's job — doing it
     // here would use the phone's zone and disagree with the card being corrected.
     const { user } = at();
+    await user.click(await screen.findByRole('button', { name: /Not quite/ }));
     await waitFor(() => expect(screen.getByLabelText(/Fell asleep/)).toHaveValue('19:33'));
 
     await user.click(screen.getByRole('button', { name: /Save review/ }));
@@ -152,6 +169,35 @@ describe('the review screen', () => {
     const [url, body] = api.put.mock.calls[0];
     expect(url).toBe('/children/c-1/review/2026-08-29');
     expect(body).toMatchObject({ true_onset_local: '19:33', true_wake_local: '05:48' });
+  });
+
+  test('it sends back WHAT IT SHOWED, so the server can record it beside the answer', async () => {
+    // This is the assertion whose absence let a broken feature ship. The server was changed to store
+    // the client's echo instead of recomputing — and the client was never changed to send it, so every
+    // review recorded "the app had no opinion", which was false for every single one of them. The
+    // backend tests passed because they send the fields explicitly.
+    const { user } = at();
+    await screen.findByRole('button', { name: /That.s right/ });
+    await user.click(screen.getByRole('button', { name: /That.s right/ }));
+
+    await waitFor(() => expect(api.put).toHaveBeenCalled());
+    expect(api.put.mock.calls[0][1]).toMatchObject({
+      computed_onset_at: '2026-08-29 09:33:00',
+      computed_wake_at: '2026-08-29 19:48:00',
+    });
+  });
+
+  test('the app\'s answer is NOT one reflex tap from becoming ground truth', async () => {
+    // A pre-filled form saves by reflex, and the app's answer is sometimes badly wrong — a drifted
+    // wake of 08:29 against a real 06:00. On first real use exactly that got blessed as "truth".
+    // Confirming and correcting are now separate, deliberate acts.
+    at();
+    await screen.findByRole('button', { name: /That.s right/ });
+    expect(screen.queryByLabelText(/Fell asleep/)).not.toBeInTheDocument();
+
+    const { user } = { user: (await import('@testing-library/user-event')).default.setup() };
+    await user.click(screen.getByRole('button', { name: /Not quite/ }));
+    expect(await screen.findByLabelText(/Fell asleep/)).toHaveValue('19:33');
   });
 
   test('a verdict can be set and un-set by tapping it again', async () => {
@@ -166,7 +212,7 @@ describe('the review screen', () => {
     await user.click(yes);
     expect(yes).toHaveAttribute('aria-pressed', 'false');
 
-    await user.click(screen.getByRole('button', { name: /Save review/ }));
+    await user.click(screen.getByRole('button', { name: /Save just the event answers/ }));
     await waitFor(() => expect(api.put).toHaveBeenCalled());
     expect(api.put.mock.calls[0][1].verdicts[11]).toBeNull();
   });
@@ -174,8 +220,8 @@ describe('the review screen', () => {
   test('verdicts are sent keyed by transition id', async () => {
     const { user } = at();
     await screen.findByText(/got out of bed/);
-    await user.click(screen.getAllByRole('button', { name: /No/ })[0]);
-    await user.click(screen.getByRole('button', { name: /Save review/ }));
+    await user.click(screen.getAllByRole('button', { name: /^No$/ })[0]);
+    await user.click(screen.getByRole('button', { name: /Save just the event answers/ }));
     await waitFor(() => expect(api.put).toHaveBeenCalled());
     expect(api.put.mock.calls[0][1].verdicts).toMatchObject({ 11: 'wrong' });
   });
@@ -187,9 +233,11 @@ describe('the review screen', () => {
       transitions: [{ ...NIGHT.transitions[0], verdict: 'wrong' }],
     });
     at();
+    // Already answered, so it opens straight into the values it recorded — coming back to change one
+    // thing must not make you confirm from scratch.
     await waitFor(() => expect(screen.getByLabelText(/Fell asleep/)).toHaveValue('19:30'));
     expect(screen.getByLabelText(/worth noting/)).toHaveValue('dressed on the bed');
-    expect(screen.getAllByRole('button', { name: /No/ })[0]).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getAllByRole('button', { name: /^No$/ })[0]).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('a night with no recorded events says so instead of showing an empty list', async () => {
@@ -202,15 +250,15 @@ describe('the review screen', () => {
     // The person who was in the room at 5am knows what happened; gating this to admins would lose
     // exactly the nights worth recording.
     at(renderAsCaregiver);
-    expect(await screen.findByRole('button', { name: /Save review/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /That.s right/ })).toBeInTheDocument();
   });
 
   test('a failed save surfaces the reason and leaves the form usable', async () => {
     api.put.mockRejectedValue(new Error('Not a valid verdict for transition 11'));
     const { user } = at();
     await screen.findByText(/got out of bed/);
-    await user.click(screen.getByRole('button', { name: /Save review/ }));
+    await user.click(screen.getByRole('button', { name: /Save just the event answers/ }));
     expect(await screen.findByText(/Not a valid verdict/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Save review/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Save just the event answers/ })).toBeEnabled();
   });
 });
