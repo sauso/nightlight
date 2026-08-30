@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, ChevronDown, Moon, DoorOpen, Thermometer, Sparkles, Zap, AudioLines, Play, Video } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
@@ -8,6 +8,7 @@ import AppHeader from '../components/AppHeader.jsx';
 import ClipPlayerModal from '../components/ClipPlayerModal.jsx';
 import MediaPlayerModal from '../components/MediaPlayerModal.jsx';
 import RecomputeNight from '../components/RecomputeNight.jsx';
+import ReviewNightButton from '../components/ReviewNightButton.jsx';
 
 // Sleep detail: a to-scale timeline of one night for a child, with the wake-ups marked, plus a date
 // picker to browse back through the retained nights (~30 days of activity_samples). Reached by tapping
@@ -38,7 +39,6 @@ const SEG_CLASS = {
 
 export default function SleepDetail() {
   const { id } = useParams();
-  const navigate = useNavigate();
   const { settings } = useSettings();
   const tz = settings.timezone || 'UTC';
   const { kids } = useCameras();
@@ -213,18 +213,11 @@ function NightBody({ night, fmtTime, tz, tempUnit, childId, date, onRecomputed }
             Measured from <strong>{night.analysis_camera_name}</strong>
           </div>
         )}
-        {/* The ONLY way into a review for a night other than the one the card happens to be offering.
-            Without it a mistake is permanent: the card asks about the most recent UNreviewed night, so
-            a night you have already answered — wrongly — becomes unreachable. That happened on the
-            first day: a drifted 08:29 was recorded as truth and there was no way back to it. */}
+        {/* The way into a review for any night, not just the one the card is offering. Without it a
+            mistake is permanent. Its own component because `navigate` belongs to whichever component
+            calls the hook — inline here it was out of scope and the button silently did nothing. */}
         {!night.in_progress && (
-          <button
-            type="button"
-            className="btn btn-secondary btn-block sleep-detail__review"
-            onClick={() => navigate(`/children/${childId}/review/${date}`)}
-          >
-            {night.corrected ? 'Change what you told us about this night' : 'Was this night right?'}
-          </button>
+          <ReviewNightButton childId={childId} date={date} corrected={night.corrected} />
         )}
         <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime} onRecomputed={onRecomputed} />
       </div>
