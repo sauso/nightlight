@@ -119,6 +119,35 @@ diagnose item 3 and the only honest test set for §2.5.
 and the occupancy guard rather than trusting raw event labels. They are why per-event markers still
 cannot be drawn, which is exactly what "done when" below asks for.
 
+★★★ **MEASURED 2026-08-30 — RENZ'S ZONE DOES NOT SIT ON HIS BED, AND NOTHING CHECKS THAT IT DOES.**
+Drawn over a real transition snapshot, his painted `detect_zone` is a rough rectangle over the LEFT of
+the room. It includes wall and **a curtain that moves**, and it stops at x=62% while the bed runs to
+about x=80% — excluding the foot end past where the safety rail stops, which is the gap he climbs out
+through. So his exits appear as motion *outside* the bed, the exit rule has no bed motion to link from,
+and the curtain manufactures transitions that never happened.
+
+| | body moving in the room (outside ≥ 0.05) | ...with the bed **exactly 0.0000** | linkable |
+|---|---|---|---|
+| Raffa | 308 min | **5 (2%)** | 97% |
+| Renz | 636 min | **41 (6%)** | 77% |
+
+2026-08-29: last bed motion 05:52, bed then **0.0000**, a plain body burst outside at 05:59 (0.070) —
+seven minutes later, far outside even the slow window, so no candidate ever opened. Next recorded exit
+**07:36** against an observed ~06:00.
+
+⚠️⚠️ **His zone is 38.5% of frame — LARGER than Raffa's 23.4%. Every number said it was fine.** Area and
+rect count prove nothing about whether a zone is in the right *place*. This was only visible by drawing
+it over a frame, which the transition snapshots now make possible.
+
+**Two pieces of work, and the first is free:**
+0. **Repaint the zone** to follow the mattress and exclude the curtain. No code. Do this first, then
+   re-measure the table above before building anything — it may move most of the gap on its own.
+1b. **Warn when a zone looks wrong.** Nothing today tells anyone their zone excludes the bed; it fails
+   silently and looks like a detector problem. Candidates: flag a zone whose area overlaps little of
+   where in-bed motion actually occurs, or simply show the zone over a recent frame in settings.
+   ★ This is the generalisable half — every installation paints its own zone, and every one of them can
+   be wrong in exactly this way.
+
 **Work:**
 1. Track believed occupancy; ignore an `into_bed` while already in bed and an `out_of_bed` while already
    out. (Alone this collapses the four arrivals to one.) — **still open**, and still the cheapest win.

@@ -53,6 +53,24 @@ That last line is not ceremony. PR #229 shipped eight lines of bare index arithm
 rationale in the commit message only — the comments were written, then lost to a `git checkout --` that
 reverted an over-fitted attempt, and nothing caught it.
 
+**It has to work for someone else.** This image is publicly distributed, and every threshold in
+`sleepAnalysis.js` / `bedTransitionRules.js` was measured on **two cameras in one house**. Before
+shipping, ask what the change assumes about whoever installs it:
+- **Environment** — never hard-code a timezone, offset or locale. Read `settings.timezone` and use the
+  DST-safe `zonedToUtc` / `toSqlUtc` in `sleepAnalysis.js`. A review window anchored on a literal
+  `04:00Z` shipped once; it is midday only in Melbourne, and on a default install (`timezone` defaults
+  to `'UTC'`) it hid every morning transition.
+- **Per-installation setup** — the detector only sees what the painted `detect_zone` covers, and nothing
+  validates that the zone sits on the bed. Renz's is 38.5% of frame (larger than Raffa's), so every
+  number said it was fine; drawn over a real frame it includes a moving curtain and stops short of the
+  foot end of the bed, which is exactly where he climbs out. Area and rect count prove nothing —
+  **draw the zone over a transition snapshot and look at it.**
+- **Calibrated numbers** — fine to ship, but say which nights set them, and prefer deriving a threshold
+  from the room over hard-coding it.
+
+⚠️ If the justification for a value is one night, one camera or one child, write the sentence about
+what happens to everyone else. "Known limit, documented" is an acceptable answer; silence is not.
+
 **Then have a subagent attack it.** Required for anything touching the `test:core` include list,
 non-trivial control flow, or detection/sleep analysis; skippable for docs-only or a one-line config
 change, but say so in the PR. Point it at the PR body and tell it to *falsify* the claims, not confirm
