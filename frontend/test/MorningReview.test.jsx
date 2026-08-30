@@ -289,6 +289,10 @@ describe('the review screen', () => {
     await openEvents(user);
     await user.click(await screen.findByRole('button', { name: /Up for the day here/ }));
 
+    // The filled time has to be VISIBLE — otherwise there is no way to tell which frame you picked, or
+    // that picking one did anything at all. The event is 19:45:22 UTC, which is 05:45 in Melbourne.
+    expect(screen.getByLabelText(/Got up for the day/)).toHaveValue('05:45');
+
     await user.click(screen.getByRole('button', { name: /Save review/ }));
     await waitFor(() => expect(api.put).toHaveBeenCalled());
     expect(api.put.mock.calls[0][1]).toMatchObject({ true_wake_transition_id: 11 });
@@ -313,6 +317,7 @@ describe('the review screen', () => {
     const { user } = at();
     await openEvents(user);
     await user.click(screen.getByRole('button', { name: /Put down here/ }));
+    expect(screen.getByLabelText(/Fell asleep/)).toHaveValue('05:47');
     await user.click(screen.getByRole('button', { name: /Save review/ }));
     await waitFor(() => expect(api.put).toHaveBeenCalled());
     expect(api.put.mock.calls[0][1]).toMatchObject({ true_onset_transition_id: 12 });
