@@ -56,26 +56,39 @@ export default function NightReview() {
   const [wake, setWake] = useState('');
   const [note, setNote] = useState('');
   const [verdicts, setVerdicts] = useState({});
+  // Has the person actually touched the form? Nothing may overwrite their typing once they have.
+  const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
+  // ⚠️ FETCH ON [id, date] ONLY. `tz` must NOT be in here.
+  //
+  // SettingsContext starts at its defaults (timezone 'UTC') and replaces them when /settings resolves,
+  // so `tz` CHANGES a moment after the app boots. With `tz` in these dependencies the effect re-ran,
+  // re-fetched, and re-seeded the inputs — silently discarding whatever had been typed in between. The
+  // owner corrected a wake to 05:52, watched it save as 08:29, and had no way of knowing why: the form
+  // had quietly reset itself back to the server's value under their hands.
   useEffect(() => {
     let live = true;
     api.get(`/children/${id}/review/${date}`)
-      .then((r) => {
-        if (!live) return;
-        setData(r);
-        setOnset(toLocalHhmm(r.review?.true_onset_at || r.computed?.onset_at, tz));
-        setWake(toLocalHhmm(r.review?.true_wake_at || r.computed?.wake_at, tz));
-        setNote(r.review?.note || '');
-        setVerdicts(Object.fromEntries((r.transitions || []).filter((t) => t.verdict).map((t) => [t.id, t.verdict])));
-        // A night already answered opens straight into its recorded values, so coming back to change
-        // something does not make you confirm from scratch.
-        setEditing(Boolean(r.review?.true_onset_at || r.review?.true_wake_at));
-      })
+      .then((r) => { if (live) setData(r); })
       .catch((e) => live && setError(e.message || 'Could not load that night'));
     return () => { live = false; };
-  }, [id, date, tz]);
+  }, [id, date]);
+
+  // Seeding the form is a SEPARATE concern from fetching it, and it stops the moment the person types.
+  // It still depends on `tz` because the times have to be shown in the app's zone, not the browser's —
+  // which is exactly why re-running it had to stop clobbering their input rather than simply not run.
+  useEffect(() => {
+    if (!data || touched) return;
+    setOnset(toLocalHhmm(data.review?.true_onset_at || data.computed?.onset_at, tz));
+    setWake(toLocalHhmm(data.review?.true_wake_at || data.computed?.wake_at, tz));
+    setNote(data.review?.note || '');
+    setVerdicts(Object.fromEntries((data.transitions || []).filter((t) => t.verdict).map((t) => [t.id, t.verdict])));
+    // A night already answered opens straight into its recorded values, so coming back to change
+    // something does not make you confirm from scratch.
+    setEditing(Boolean(data.review?.true_onset_at || data.review?.true_wake_at));
+  }, [data, tz, touched]);
 
   const fmtEvent = useMemo(() => (t) => toLocalHhmm(t.created_at, tz), [tz]);
 
@@ -178,11 +191,11 @@ export default function NightReview() {
               </div>
               <label className="field">
                 <span className="field__label">Fell asleep</span>
-                <input type="time" value={onset} onChange={(e) => setOnset(e.target.value)} />
+                <input type="time" value={onset} onChange={(e) => { setTouched(true); setOnset(e.target.value); }} />
               </label>
               <label className="field">
                 <span className="field__label">Got up for the day</span>
-                <input type="time" value={wake} onChange={(e) => setWake(e.target.value)} />
+                <input type="time" value={wake} onChange={(e) => { setTouched(true); setWake(e.target.value); }} />
               </label>
               <label className="field">
                 <span className="field__label">Anything else worth noting</span>
@@ -190,7 +203,7 @@ export default function NightReview() {
                   type="text"
                   value={note}
                   placeholder="e.g. put back on the bed to get dressed at 5:45"
-                  onChange={(e) => setNote(e.target.value)}
+                  onChange={(e) => { setTouched(true); setNote(e.target.value); }}
                 />
               </label>
             </>
@@ -255,7 +268,7 @@ export default function NightReview() {
                       aria-pressed={verdicts[t.id] === key}
                       // Tapping the chosen verdict again clears it: a mis-tap must be undoable, because
                       // a wrong label is worse than a missing one — everything else gets scored on it.
-                      onClick={() => setVerdicts((v) => ({ ...v, [t.id]: v[t.id] === key ? null : key }))}
+                      onClick={() => { setTouched(true); setVerdicts((v) => ({ ...v, [t.id]: v[t.id] === key ? null : key })); }}
                     >
                       <Icon size={16} /> {label}
                     </button>

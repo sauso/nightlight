@@ -2722,3 +2722,8 @@ input[type='range'] {
   padding: 4px 0; background: none; border: 0; cursor: pointer; text-align: left;
 }
 .review-events__toggle-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+
+.sleep-detail__recompute-note {
+  margin-top: 8px; font-size: 12.5px; line-height: 1.5;
+  color: var(--text-secondary);
+}

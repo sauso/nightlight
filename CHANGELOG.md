@@ -27,6 +27,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
     you have, and stays quiet if you dismissed it. **Any other night is reviewed from the sleep
     detail page**, which has **Was this night right?** for whichever night you are looking at — that
     is also how you change a night you already answered.
+  - **Recompute says when it won't help.** On a night you have corrected, the times shown are yours,
+    so recomputing re-runs the detector underneath without changing what you see — the sleep detail
+    page now says so rather than leaving the button looking broken.
   - **The event list stays out of the way** until you ask for it — a night carries twenty to thirty-five
     recorded in-and-out-of-bed events, and the two times are the point.
   - Reviews are kept forever, and an event you have judged keeps its frame past the usual 45 days.
