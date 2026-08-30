@@ -342,11 +342,25 @@ test('the review window follows the app timezone, not a hard-coded one', () => {
     // Inserted directly, NOT via recordBedTransition: every insert sweeps rows older than 45 days, and
     // this fixture's night is months in the past, so the second call would prune the first row and the
     // test would "fail" for a reason that has nothing to do with timezones.
-    for (const [type, when] of [[TRANSITION.INTO_BED, utcFor(19, 0)], [TRANSITION.OUT_OF_BED, utcFor(6, 1)]]) {
+    //
+    // Three events, and the third pins the START of the window as the other two pin the end: 08:00 on
+    // the night's own date is the PREVIOUS night's morning, and must not appear. Without it, a window
+    // whose start was hard-coded early still passed — it only over-collected, which is invisible when
+    // every fixture event belongs to the night being asked about.
+    const events = [
+      [TRANSITION.OUT_OF_BED, utcFor(8, 0), false],  // yesterday morning — before this night begins
+      [TRANSITION.INTO_BED, utcFor(19, 0), true],    // bedtime
+      [TRANSITION.OUT_OF_BED, utcFor(6, 1), true],   // this morning's wake
+    ];
+    for (const [type, when] of events) {
       db.prepare('INSERT INTO bed_transitions (camera_id, type, peak, created_at) VALUES (?, ?, 0.4, ?)')
         .run(CAM, type, when);
     }
-    assert.equal(getNightReview(CHILD, DATE).transitions.length, 2, tz + ' must show both events');
+    const shown = getNightReview(CHILD, DATE).transitions.map((t) => t.created_at);
+    for (const [, when, expected] of events) {
+      assert.equal(shown.includes(when), expected,
+        `${tz}: ${when} should ${expected ? '' : 'NOT '}be in the review`);
+    }
   }
   db.prepare("UPDATE settings SET timezone = ? WHERE id = 'app'").run(TZ);
 });
