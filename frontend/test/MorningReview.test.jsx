@@ -260,6 +260,30 @@ describe('the review screen', () => {
     expect(await screen.findByText(/got out of bed/)).toBeInTheDocument();
   });
 
+  test('typing survives the timezone arriving — the form must not reset under you', async () => {
+    // THE regression test for a real data loss. SettingsContext starts at its defaults (timezone
+    // 'UTC') and replaces them when /settings resolves, so `tz` changes a moment after boot. With `tz`
+    // in the fetch effect's dependencies, that re-ran, re-fetched and re-seeded the inputs — silently
+    // discarding whatever had been typed in between. The owner corrected a wake to 05:52, watched it
+    // save as 08:29, and had no way of knowing why.
+    const { user, rerenderWith } = renderAsAdmin(routed, {
+      route: '/children/c-1/review/2026-08-29',
+      kids: [{ id: 'c-1', name: 'Raffa' }],
+      settings: { timezone: 'UTC' }, // as it is for the first moments after a reload
+    });
+
+    await user.click(await screen.findByRole('button', { name: /Not quite/ }));
+    const wake = screen.getByLabelText(/Got up for the day/);
+    await user.clear(wake);
+    await user.type(wake, '05:52');
+    expect(wake).toHaveValue('05:52');
+
+    // /settings resolves and the real zone replaces the placeholder.
+    rerenderWith({ settings: { timezone: 'Australia/Melbourne' } });
+
+    await waitFor(() => expect(screen.getByLabelText(/Got up for the day/)).toHaveValue('05:52'));
+  });
+
   test('a night with no recorded events says so instead of showing an empty list', async () => {
     api.get.mockResolvedValue({ ...NIGHT, transitions: [] });
     at();

@@ -38,20 +38,39 @@ export function renderAs(
   ui,
   { settings = {}, cameras = [], kids = [], error = '', loading = false, route = '/' } = {}
 ) {
-  const auth = { user, loading, login: vi.fn(), logout: vi.fn(), refresh: vi.fn() };
-  const settingsValue = { settings: { ...DEFAULT_SETTINGS, ...settings }, loading, refresh: vi.fn() };
-  const camerasValue = { kids, cameras, error, refresh: vi.fn() };
+  // Kept in scope so the returned handles always refer to the CURRENT render, not the first one.
+  let auth;
+  let settingsValue;
+  let camerasValue;
+  const build = (opts) => {
+    auth = { user, loading: opts.loading, login: vi.fn(), logout: vi.fn(), refresh: vi.fn() };
+    settingsValue = { settings: { ...DEFAULT_SETTINGS, ...opts.settings }, loading: opts.loading, refresh: vi.fn() };
+    camerasValue = { kids: opts.kids, cameras: opts.cameras, error: opts.error, refresh: vi.fn() };
+    return (
+      <MemoryRouter initialEntries={[opts.route]}>
+        <AuthContext.Provider value={auth}>
+          <SettingsContext.Provider value={settingsValue}>
+            <CamerasContext.Provider value={camerasValue}>{opts.ui}</CamerasContext.Provider>
+          </SettingsContext.Provider>
+        </AuthContext.Provider>
+      </MemoryRouter>
+    );
+  };
 
-  const result = render(
-    <MemoryRouter initialEntries={[route]}>
-      <AuthContext.Provider value={auth}>
-        <SettingsContext.Provider value={settingsValue}>
-          <CamerasContext.Provider value={camerasValue}>{ui}</CamerasContext.Provider>
-        </SettingsContext.Provider>
-      </AuthContext.Provider>
-    </MemoryRouter>
-  );
-  return { ...result, user: userEvent.setup(), auth, settingsValue, camerasValue };
+  let opts = { settings, cameras, kids, error, loading, route, ui };
+  const result = render(build(opts));
+
+  // ⚠️ RTL's own `rerender` replaces the tree WITHOUT the providers, so anything using a context
+  // explodes. `rerenderWith` re-renders the same screen inside the same providers with some values
+  // changed — which is the only way to test what happens when a context value ARRIVES, as
+  // SettingsContext's real timezone does a moment after boot. That transition silently destroyed a
+  // user's typing once; a test for it needs to be able to reproduce it.
+  const rerenderWith = (changes) => {
+    opts = { ...opts, ...changes };
+    result.rerender(build(opts));
+  };
+
+  return { ...result, rerenderWith, user: userEvent.setup(), auth, settingsValue, camerasValue };
 }
 
 export const renderAsAdmin = (ui, opts) => renderAs(ADMIN, ui, opts);
