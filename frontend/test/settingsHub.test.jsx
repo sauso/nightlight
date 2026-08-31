@@ -8,7 +8,7 @@
 // The other thing worth pinning is that a caregiver never even REQUESTS the MQTT status. It is an
 // admin-only endpoint, so asking would produce a pointless 403 on every visit to Settings.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
 import Settings from '../src/pages/Settings.jsx';
 import { api } from '../src/lib/api.js';
@@ -75,25 +75,33 @@ describe('the MQTT status badge', () => {
     await waitFor(() => expect(api.get).toHaveBeenCalledWith('/settings/mqtt/status'));
   });
 
+  // The badge must be ON THE MQTT ROW, not merely somewhere on the page. Asserting the text globally
+  // let a mutant that hangs the badge off the "Logs" row pass — the status would have been reported
+  // against the wrong setting entirely, which is worse than showing no status at all.
+  const mqttRow = async () => {
+    const label = await screen.findByText('MQTT');
+    return within(label.closest('.list-row'));
+  };
+
   // Three states, and the middle one is the one that matters: "enabled but not connected" is the
   // broken case a person needs to see, and it must not read the same as "deliberately switched off".
-  test('connected reads as Connected', async () => {
+  test('connected reads as Connected, on the MQTT row', async () => {
     mockApi({ mqtt: { enabled: true, connected: true } });
     renderAsAdmin(<Settings />);
-    expect(await screen.findByText('Connected')).toBeTruthy();
+    await waitFor(async () => expect((await mqttRow()).getByText('Connected')).toBeTruthy());
   });
 
   test('enabled but not connected reads as Disconnected, not Off', async () => {
     mockApi({ mqtt: { enabled: true, connected: false } });
     renderAsAdmin(<Settings />);
-    expect(await screen.findByText('Disconnected')).toBeTruthy();
+    await waitFor(async () => expect((await mqttRow()).getByText('Disconnected')).toBeTruthy());
     expect(screen.queryByText('Off')).toBeNull();
   });
 
   test('switched off reads as Off, not Disconnected', async () => {
     mockApi({ mqtt: { enabled: false, connected: false } });
     renderAsAdmin(<Settings />);
-    expect(await screen.findByText('Off')).toBeTruthy();
+    await waitFor(async () => expect((await mqttRow()).getByText('Off')).toBeTruthy());
     expect(screen.queryByText('Disconnected')).toBeNull();
   });
 
@@ -113,9 +121,14 @@ describe('the version', () => {
   });
 
   test('a failed version lookup leaves the menu usable', async () => {
+    // ⚠️ 'About' and 'General' are on screen at first paint, so asserting only those would pass
+    // whether or not the rejection was handled. Wait for the request to have gone out and settle
+    // first, then assert the menu survived AND no version was rendered.
     vi.spyOn(api, 'get').mockRejectedValue(new Error('offline'));
     renderAsAdmin(<Settings />);
-    expect(screen.getByText('About')).toBeTruthy();
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/about'));
+    await waitFor(() => expect(screen.getByText('About')).toBeTruthy());
     expect(screen.getByText('General')).toBeTruthy();
+    expect(screen.queryByText('0.29.0')).toBeNull();
   });
 });

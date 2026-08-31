@@ -43,11 +43,14 @@ export function detectionPayload(cam, patch) {
 export function readingParts(mqtt, tempUnit) {
   if (!mqtt) return [];
   const parts = [];
-  if (typeof mqtt.temperature === 'number') {
+  // Number.isFinite, not `typeof === 'number'`: NaN and ±Infinity are both numbers by typeof, and a
+  // malformed MQTT payload parsed with Number() yields NaN readily. That put the literal text
+  // "NaN°C" on the tile — a reading that is missing must render as nothing, not as a broken number.
+  if (Number.isFinite(mqtt.temperature)) {
     const value = tempUnit === 'F' ? (mqtt.temperature * 9) / 5 + 32 : mqtt.temperature;
     parts.push({ key: 'temp', Icon: Thermometer, text: `${value.toFixed(1)}°${tempUnit}` });
   }
-  if (typeof mqtt.humidity === 'number') {
+  if (Number.isFinite(mqtt.humidity)) {
     parts.push({ key: 'humidity', Icon: Droplet, text: `${Math.round(mqtt.humidity)}%` });
   }
   return parts;

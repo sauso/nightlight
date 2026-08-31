@@ -49,6 +49,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **A camera tile could show “NaN°C” instead of a temperature.** A malformed MQTT sensor
+  payload parses to `NaN`, which counts as a number, so it was rendered rather than skipped. A
+  reading that cannot be read now shows nothing at all, which is what a missing reading looked
+  like everywhere else.
 - **The “impossible transitions” diagnostic could hide one child entirely.** The report of
   contradictory bed events (the same type twice in a row) was ordered by camera before being
   trimmed to its row limit, so once one camera had filled that limit the other camera’s events

@@ -58,7 +58,7 @@ describe('detectionPayload — a quick toggle must not rewrite everything else',
   test('the patch is applied last, so it wins over the current value', () => {
     const out = detectionPayload(FULL_CAM, { motion_enabled: false });
     expect(out.motion_enabled).toBe(false);
-    expect(out.sensitivity).toBe(90, 'and nothing else moved');
+    expect(out.sensitivity).toBe(90); // and nothing else moved
   });
 
   // ⚠️ These fallbacks only fire when a field is ABSENT from the API response — the columns are all
@@ -88,13 +88,26 @@ describe('detectionPayload — a quick toggle must not rewrite everything else',
     });
   });
 
-  test('zero is kept, not swallowed by the fallback', () => {
-    // `??` rather than `||` matters here: a sensitivity of 0 is not "unset", and a cooldown of 0 is a
-    // real choice. `||` would quietly replace both with the defaults.
-    const out = detectionPayload({ detect_sensitivity: 0, detect_cooldown_s: 0, detect_start: 0 }, {});
-    expect(out.sensitivity).toBe(0);
-    expect(out.cooldown_s).toBe(0);
-    expect(out.start).toBe(0);
+  test('zero is kept on EVERY numeric field, not swallowed by the fallback', () => {
+    // `??` rather than `||`: a sensitivity of 0 is not "unset", a cooldown of 0 means no cooldown, and
+    // an end time of 0 is midnight. `||` would quietly replace each with a default.
+    //
+    // ⚠️ All eight are listed on purpose. An earlier version passed zero for only three of them, so
+    // switching the other five to `||` changed real behaviour with the suite still green.
+    const out = detectionPayload({
+      detect_sensitivity: 0,
+      detect_cooldown_s: 0,
+      detect_confirm_s: 0,
+      detect_start: 0,
+      detect_end: 0,
+      sound_sensitivity: 0,
+      sound_confirm_s: 0,
+      sound_cooldown_s: 0,
+    }, {});
+    expect(out).toMatchObject({
+      sensitivity: 0, cooldown_s: 0, confirm_s: 0, start: 0, end: 0,
+      sound_sensitivity: 0, sound_confirm_s: 0, sound_cooldown_s: 0,
+    });
   });
 
   test('the source is restricted to the three the server knows', () => {
@@ -145,10 +158,15 @@ describe('readingParts — room temperature and humidity', () => {
   });
 
   test('a non-numeric reading is skipped rather than rendered as text', () => {
-    // MQTT payloads are strings until something parses them; "22.5" must not reach the screen as a
-    // temperature, or "NaN°C" shows up in the tile.
+    // MQTT payloads are strings until something parses them, and Number() on a malformed one yields
+    // NaN. Neither may reach the screen: a missing reading renders as nothing, not as "NaN°C".
+    //
+    // ⚠️ The NaN half is why this test exists. It previously ASSERTED that 'NaN°C' was produced —
+    // under a name saying the opposite — which locked the leak in and would have failed the moment
+    // anyone fixed it. `typeof NaN === 'number'`, so the old guard let it straight through.
     expect(readingParts({ temperature: '22.5', humidity: '50' }, 'C')).toEqual([]);
-    expect(readingParts({ temperature: NaN }, 'C')[0].text).toBe('NaN°C');
+    expect(readingParts({ temperature: NaN, humidity: NaN }, 'C')).toEqual([]);
+    expect(readingParts({ temperature: Infinity, humidity: -Infinity }, 'C')).toEqual([]);
   });
 
   test('zero is a real reading, not a missing one', () => {

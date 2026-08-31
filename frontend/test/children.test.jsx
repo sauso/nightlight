@@ -172,6 +172,27 @@ describe('the alerts feed on a child screen', () => {
     expect(screen.getAllByText('Motion').length).toBe(20);
   });
 
+  // ★ The cap and the filter must be crossed in ONE fixture, or their ORDER is untested. The two
+  // tests above are disjoint — three alerts (never reaching the cap) and twenty-five all belonging to
+  // this child (nothing to filter) — so swapping `.filter().slice(20)` to `.slice(20).filter()` left
+  // the whole suite green.
+  //
+  // That order matters a great deal in practice: /cameras/alerts returns the newest 200 house-wide,
+  // both children. Trim first and a restless sibling filling the newest twenty makes this child's page
+  // read "No alerts yet" while he has alerts — the exact inverse of the bug this file exists to stop.
+  test('a busy sibling cannot push this child out of his own feed', async () => {
+    mockApi({
+      alerts: [
+        ...Array.from({ length: 25 }, (_, i) => alert('cam-b1', i)), // the sibling's night, newest
+        alert('cam-a1', 100),
+        alert('cam-a1', 101),
+      ],
+    });
+    renderAsAdmin(detailRoutes, atChild('kid-1'));
+    await waitFor(() => expect(screen.getAllByText('Motion').length).toBe(2));
+    expect(screen.queryByText(/No alerts for Raffa yet/)).toBeNull();
+  });
+
   test('a response that is not a list leaves the page usable', async () => {
     // The server has changed a response shape out from under a running client before, and a page that
     // throws here is a blank screen for someone who cannot reload the app.
@@ -187,10 +208,16 @@ describe('the alerts feed on a child screen', () => {
   });
 
   test('a failed alerts request leaves the rest of the page intact', async () => {
+    // ⚠️ 'Raffa Room' is on screen at first paint, so asserting only that would pass whether or not
+    // the rejection was ever handled. Wait for the request to have been made AND rejected first, so
+    // this is a statement about the settled screen.
     vi.spyOn(api, 'get').mockImplementation((path) =>
       String(path).includes('/cameras/alerts') ? Promise.reject(new Error('offline')) : Promise.resolve(null));
     renderAsAdmin(detailRoutes, atChild('kid-1'));
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/cameras/alerts'));
+    await waitFor(() => expect(screen.getByText(/No alerts for Raffa yet/)).toBeTruthy());
     // The cameras card still renders — a dead feed must not take the screen down with it.
-    expect(await screen.findByText('Raffa Room')).toBeTruthy();
+    expect(screen.getByText('Raffa Room')).toBeTruthy();
+    expect(screen.getByText('Cameras · 2')).toBeTruthy();
   });
 });
