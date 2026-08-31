@@ -161,7 +161,24 @@ export function getImpossibleTransitions({ limit = 200 } = {}) {
     if (before && before.type === r.type) out.push({ ...r, contradicts: before.id, contradicts_at: before.created_at });
     prev.set(r.camera_id, r);
   }
-  return out.reverse().slice(0, Math.min(500, Math.max(1, limit)));
+  // Newest first ACROSS ALL CAMERAS, then trim. The query orders by camera_id first, so `out` comes
+  // out grouped by camera and only then by time. Reversing THAT yields every row of one camera
+  // before any row of another, so the slice dropped whole cameras rather than old rows: with two
+  // children and the limit reached, one child's transitions came back and the other child's were
+  // silently absent. Measured 2026-08-31 at ~197 pairs against a limit of 200.
+  //
+  // (The scan itself does NOT depend on that grouping — `prev` is keyed on camera_id, so a pair is
+  // confined to one camera by the map key, not by row order. Sorting here rather than changing the
+  // query keeps the two concerns separate.)
+  //
+  // ⚠️ Nothing in the app calls this yet — it is invoked ad hoc while diagnosing the classifier, and
+  // is the report the zone repaint gets scored against at the end of a monitor phase. Wire it to a
+  // route or move it to scripts/ before it drifts.
+  //
+  // Sort on the timestamp itself, tie-broken by id so the order is total and a page is stable when
+  // two cameras fire inside the same second.
+  out.sort((a, b) => (a.created_at === b.created_at ? b.id - a.id : a.created_at < b.created_at ? 1 : -1));
+  return out.slice(0, Math.min(500, Math.max(1, limit)));
 }
 
 // Record what a person said about one transition: 'correct', 'wrong', or 'unclear' — or null to clear

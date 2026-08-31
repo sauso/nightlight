@@ -40,6 +40,21 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   - Reviews are kept forever, and an event you have judged keeps its frame past the usual 45 days.
   - See **README → Sleep tracking**.
 
+- **Camera detection settings are documented** — motion and sound sensitivity, confirm and
+  cooldown, each with its default and its range, plus what sound sensitivity means in dB over a
+  room’s own ambient level. Includes a **known limitation**: a constant noise source such as a
+  white-noise machine or fan can, at certain sensitivity settings, be counted as continuous noise
+  and inflate the reported awake time — with how to recognise it in the log and what to do about
+  it. Sleep and wake *times* are unaffected; only the awake/asleep totals are.
+
+### Fixed
+
+- **The “impossible transitions” diagnostic could hide one child entirely.** The report of
+  contradictory bed events (the same type twice in a row) was ordered by camera before being
+  trimmed to its row limit, so once one camera had filled that limit the other camera’s events
+  were dropped wholesale instead of the oldest events being dropped. It is now newest-first
+  across all cameras. Detection itself is unchanged — this affected only the diagnostic report.
+
 ## [0.29.0] - 2026-08-30
 
 ### Added

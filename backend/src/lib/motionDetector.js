@@ -81,9 +81,12 @@ const READY_POLL_MS = 2000;
 
 // Map 1..100 sensitivity to the fraction of zone pixels that must change for a frame to count
 // as "active". Higher sensitivity => smaller fraction => easier to trigger.
-function activeFractionThreshold(sensitivity) {
+// Exported for tests only — it and buildZoneMask below are the two pure functions on this path, and
+// everything else here is welded to a spawned ffmpeg process.
+export function activeFractionThreshold(sensitivity) {
   const s = Math.min(100, Math.max(1, sensitivity || 50));
-  // ~10% of the zone at sensitivity 1, ~2.5% at 50, ~0.2% at 100.
+  // Linear in sensitivity: 10% of the zone at 1, ~5.2% at 50, ~1.2% at 90, 0.2% at 100.
+  // (This line previously said "~2.5% at 50", which the formula has never produced.)
   return 0.002 + (0.1 - 0.002) * ((100 - s) / 99);
 }
 
@@ -92,7 +95,7 @@ function activeFractionThreshold(sensitivity) {
 // diagonal boxes are handled correctly, each pixel counted once). Returns { mask, zonePixels }: mask
 // is a Uint8Array(FW*FH) of 0/1, or null when the whole frame is used (no/degenerate zone), in which
 // case zonePixels is the full frame. A legacy single-object zone still works (treated as one rect).
-function buildZoneMask(camera) {
+export function buildZoneMask(camera) {
   let rects = null;
   if (camera.detect_zone) {
     try {
