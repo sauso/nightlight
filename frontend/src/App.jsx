@@ -81,14 +81,18 @@ function useReloadAfterBackground() {
   }, []);
 }
 
-function Protected({ children }) {
+// Exported for tests. These two are the ONLY thing standing between a caregiver and every
+// admin screen, and the loading branch matters as much as the role one: returning null rather
+// than redirecting is what stops a page refresh bouncing a signed-in user to the login screen
+// while auth is still resolving.
+export function Protected({ children }) {
   const { user, loading } = useAuth();
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
   return children;
 }
 
-function AdminProtected({ children }) {
+export function AdminProtected({ children }) {
   const { user, loading } = useAuth();
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
