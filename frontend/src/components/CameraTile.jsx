@@ -14,7 +14,9 @@ import BreathingDot from './BreathingDot.jsx';
 // The /detection endpoint replaces the whole detection config at once, so a quick motion/sound
 // toggle from the tile must resend every field (from the camera row) with just its flag flipped —
 // the same full-payload shape DetectionSettings uses. start/end are stored minutes; pass through.
-function detectionPayload(cam, patch) {
+// The three helpers below are exported for tests. The tile itself cannot be rendered in jsdom —
+// it mounts live WebRTC/HLS players — but these carry real logic and are worth pinning.
+export function detectionPayload(cam, patch) {
   return {
     motion_enabled: !!cam.detect_motion_enabled,
     sensitivity: cam.detect_sensitivity ?? 50,
@@ -38,21 +40,24 @@ function detectionPayload(cam, patch) {
 // Room temperature / humidity from MQTT, one entry per available reading, each with its own
 // icon (thermometer / droplet) so the two values read at a glance instead of running together
 // as a "22.5°C · 45%" string.
-function readingParts(mqtt, tempUnit) {
+export function readingParts(mqtt, tempUnit) {
   if (!mqtt) return [];
   const parts = [];
-  if (typeof mqtt.temperature === 'number') {
+  // Number.isFinite, not `typeof === 'number'`: NaN and ±Infinity are both numbers by typeof, and a
+  // malformed MQTT payload parsed with Number() yields NaN readily. That put the literal text
+  // "NaN°C" on the tile — a reading that is missing must render as nothing, not as a broken number.
+  if (Number.isFinite(mqtt.temperature)) {
     const value = tempUnit === 'F' ? (mqtt.temperature * 9) / 5 + 32 : mqtt.temperature;
     parts.push({ key: 'temp', Icon: Thermometer, text: `${value.toFixed(1)}°${tempUnit}` });
   }
-  if (typeof mqtt.humidity === 'number') {
+  if (Number.isFinite(mqtt.humidity)) {
     parts.push({ key: 'humidity', Icon: Droplet, text: `${Math.round(mqtt.humidity)}%` });
   }
   return parts;
 }
 
 // MM:SS for the running recording timer.
-function fmtElapsed(sec) {
+export function fmtElapsed(sec) {
   const s = Math.max(0, Math.round(sec));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
