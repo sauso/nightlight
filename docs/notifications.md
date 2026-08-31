@@ -150,6 +150,56 @@ Nightlight app. Only the short message + snapshot pass through ntfy — never yo
 Gotify alerts are **text only** (no image — Gotify has no native attachments); tapping one opens the
 camera. Only the short message passes through your Gotify server.
 
+## Detection settings on a camera
+
+**Cameras → edit** a camera. Motion and sound are independent detectors — either can be enabled
+without the other, and each has its own sensitivity, confirmation delay and cooldown.
+
+| Setting | Default | Range | What it does |
+|---|---|---|---|
+| **Motion sensitivity** | 50 | 1–100 | How much of the detection zone must change between frames. Higher = more sensitive. |
+| **Motion confirm** | 0 s | 0 or more | Motion must persist this long before alerting. 0 alerts on the first frame. |
+| **Motion cooldown** | 60 s | 1 or more | Minimum gap between motion alerts from this camera. |
+| **Sound sensitivity** | 50 | 1–100 | How far above the room's own ambient level a noise must rise. Higher = smaller margin = easier to trigger: roughly **+18 dB at 1, +11 dB at 50, +4 dB at 100**. |
+| **Sound confirm** | 4 s | 0 or more | Loudness must stay above that margin, *on average*, for this long — so a pulsing cry still counts while a single bang does not. |
+| **Sound cooldown** | 120 s | 1 or more | Minimum gap between sound alerts from this camera. |
+
+Sound is measured **relative to each room's own ambient level**, which the app learns continuously —
+not as an absolute loudness. A room next to a busy road and a silent room both settle at "0 over
+ambient", so the same sensitivity means the same thing in both.
+
+### ⚠️ Sound sensitivity also changes sleep tracking
+
+This is the one that surprises people, because motion sensitivity does **not** work this way — it only
+affects alerts. Sound sensitivity affects **both**. The same margin that decides when to notify you
+also decides when a *steady* background noise gets absorbed into the room's ambient level, and sleep
+tracking counts a minute as "awake" partly from sound.
+
+**Known limit.** A constant broadband source — a white-noise machine, fan, air purifier or heater —
+whose level settles **between half the margin and the full margin** above the learned ambient is
+neither absorbed into the ambient nor tracked by it, so it reads as continuous noise for as long as it
+runs. Sleep tracking then reports the child as awake while they are asleep and perfectly still.
+
+Measured on a real install (2026-08-31): a white-noise machine roughly 9 dB over ambient, at sound
+sensitivity 49, marked **66% of one night's minutes as active with no motion at all** and produced a
+seven-hour "awake" span that never happened. Sleep and wake *times* were unaffected — only the
+awake/asleep totals.
+
+**How to tell.** The container log prints a level line every 15 seconds per camera:
+
+```
+[sound] "Nursery" ambient=-63.5dB peak=-55.2dB maxAvgOver=+7.8 (fires at +11)
+```
+
+If `ambient=` sits at exactly the same value for hours while `maxAvgOver` stays between half and all
+of the "fires at" figure, the ambient level is stuck and this is what you are seeing. A working camera's
+`ambient=` drifts by a few tenths of a dB continuously.
+
+**What to do about it.** Raising that camera's sound sensitivity to **90 or above** lets the noise be
+absorbed normally. The trade is a smaller alert margin, so expect more sound notifications from that
+camera. Moving the camera further from the noise source works too. This is a known limitation rather
+than a setting to get right — a proper fix is planned.
+
 ## Troubleshooting
 
 - **Server log says Firebase initialized, but no notification arrives.** Make sure the phone opted in

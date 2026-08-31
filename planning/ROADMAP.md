@@ -139,6 +139,14 @@ seven minutes later, far outside even the slow window, so no candidate ever open
 rect count prove nothing about whether a zone is in the right *place*. This was only visible by drawing
 it over a frame, which the transition snapshots now make possible.
 
+★★★ **UPDATE 2026-08-30 — step 0 below is DONE, and every measurement in this section above
+is PRE-REPAINT.** Both zones were redrawn over real frames and mirrored prod → staging
+(byte-identical: Raffa sha `22feeadf13ca7dc1`, Renz sha `cfa17b32a5368d7f`). Renz went 38.5% →
+**22.57%** of frame, Raffa 23.4% → **13.02%**. A **10-day monitor phase runs to ~2026-09-09 as a
+HOLDOUT** — those nights are deliberately not tuned on, and the tables above are re-measured at the
+end with identical arithmetic. Until then treat the 62% / 38.5% / 23.4% figures and the minute
+counts as **historical**, not as the current state.
+
 **Two pieces of work, and the first is free:**
 0. **Repaint the zone** to follow the mattress and exclude the curtain. No code. Do this first, then
    re-measure the table above before building anything — it may move most of the gap on its own.
@@ -196,6 +204,59 @@ with noise in the sibling's room? If that number is large, the wake rule needs t
 it's small, leave it alone. **Measure first.**
 
 ---
+
+### 1.4 The ambient sound baseline can freeze — `NEXT`
+
+★★★ **VERIFIED 2026-08-31 in production logs, not inferred.** One camera’s ambient baseline sat at
+exactly `-63.5 dB` for **1891 consecutive log lines — 7.9 unbroken hours** — while the room ran
+8–12 dB above it. The working camera in the same house shows a dispersed cluster of baseline values
+(an EMA hunting a floor); the stuck one shows an isolated spike with no adjacent values at all.
+
+**The mechanism.** `soundDetector.js` takes exactly one of three paths per reading, keyed on `over`
+(trailing-average loudness minus baseline), where `margin = marginDb(sound_sensitivity)`:
+
+| `over` | what happens to the baseline |
+|---|---|
+| `< margin/2` | the EMA tracks the room |
+| `[margin/2, margin)` | **nothing at all** |
+| `>= margin`, held 45 s | absorbed into the baseline |
+
+The middle band is an **absorbing state**: the only thing that lowers `over` is the baseline rising,
+and the baseline only rises in the other two branches. The guard is also one-sided — a room *below*
+the baseline always pulls it down — so the floor ratchets toward the quiet level and cannot climb
+back. `loudSince` resets on any dip under `margin`, so a source hovering around the margin never
+completes the 45 s clock. It is a **step response**: a slow ramp is absorbed fine, an instant step is
+not — and a white-noise machine switched on at bedtime against a daytime baseline re-arms it nightly.
+
+⚠⚠ **This is not one house.** The trap band sits *below* the alert margin and *above* sleep’s
+`SOUND_ACTIVE`, so it produces no alert, no log line and no error while marking every minute active.
+The shipped default `sound_sensitivity = 50` puts the band at 5.5–11.1 dB — squarely where a nursery
+white-noise machine or fan lands. Turning sensitivity *down* to reduce alerts moves the band *up*.
+
+★★★ **THE ROOT CAUSE IS DEEPER THAN THE FREEZE, and it decides the fix.** `sound_peak` is the
+per-minute **MAXIMUM** of ~300 windows (`activityTracker.js`) measured against a floor that tracks a
+**central tendency**, so `max - mean ≈ 2.9σ`: sleep’s 6 dB threshold is really a statement about the
+room’s **variance**, not its loudness. Simulated on a stationary, silent room, share of minutes
+reading “active”: at σ = 2.0, **36%** with a correctly-tracking EMA and **100%** with a p10 floor.
+❌ **Do not just swap the floor** — a low-percentile floor under a MAX recorder is *worse*, and it
+reproduces the corruption it was meant to remove. ✅ **Match the statistics**: record a percentile or
+mean of the minute’s excursion rather than its max, or define the floor at whatever statistic the
+recorder uses. That fixes the freeze and the variance problem together.
+
+**Measured on the affected room**: even with a perfectly healthy baseline it would still read ~41% of
+minutes active (against 19% for the other room), so fixing only the freeze is a partial fix.
+
+**Prerequisite work.** `soundDetector.js` has **no tests** and is not in the `test:core` include
+list; `handleReading` is a closure inside `launch()` inside `startSoundDetector`, so nothing is
+reachable from a test. Extract the reading pipeline behind an injectable clock first.
+⚠️ **Tests must discriminate, not merely pass.** “Step the level, assert it decays” is passed by a
+2-minute window, by a median floor and by a p90 floor alike. The test that kills all three is
+**“a 6-minute continuous cry must stay above `SOUND_ACTIVE`”**, plus asserting the floor’s exact
+value at a known time after a known step (which is what pins the window length).
+
+**Held until the monitor phase ends (~2026-09-09)**: the fix changes the input to the frozen sleep
+algorithm, and a mid-holdout change to `activityTracker` would perturb the very measurement the
+phase exists to take. Documented as a known limitation in `docs/notifications.md` meanwhile.
 
 ## 2. Specced, not built
 
