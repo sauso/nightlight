@@ -158,11 +158,11 @@ without the other, and each has its own sensitivity, confirmation delay and cool
 | Setting | Default | Range | What it does |
 |---|---|---|---|
 | **Motion sensitivity** | 50 | 1–100 | How much of the detection zone must change between frames. Higher = more sensitive. |
-| **Motion confirm** | 0 s | 0 or more | Motion must persist this long before alerting. 0 alerts on the first frame. |
-| **Motion cooldown** | 60 s | 1 or more | Minimum gap between motion alerts from this camera. |
+| **Motion confirm** | 3 s | 0–30 s | Motion must persist this long before alerting. 0 alerts on the first frame. |
+| **Motion cooldown** | 60 s | 1–3600 s | Minimum gap between motion alerts from this camera. |
 | **Sound sensitivity** | 50 | 1–100 | How far above the room's own ambient level a noise must rise. Higher = smaller margin = easier to trigger: roughly **+18 dB at 1, +11 dB at 50, +4 dB at 100**. |
-| **Sound confirm** | 4 s | 0 or more | Loudness must stay above that margin, *on average*, for this long — so a pulsing cry still counts while a single bang does not. |
-| **Sound cooldown** | 120 s | 1 or more | Minimum gap between sound alerts from this camera. |
+| **Sound confirm** | 4 s | 0–30 s | Loudness must stay above that margin, *on average*, for this long — so a pulsing cry still counts while a single bang does not. |
+| **Sound cooldown** | 120 s | 1–3600 s | Minimum gap between sound alerts from this camera. |
 
 Sound is measured **relative to each room's own ambient level**, which the app learns continuously —
 not as an absolute loudness. A room next to a busy road and a silent room both settle at "0 over

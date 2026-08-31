@@ -161,14 +161,22 @@ export function getImpossibleTransitions({ limit = 200 } = {}) {
     if (before && before.type === r.type) out.push({ ...r, contradicts: before.id, contradicts_at: before.created_at });
     prev.set(r.camera_id, r);
   }
-  // Newest first ACROSS ALL CAMERAS, then trim. The query above groups by camera_id so each camera's
-  // chain is contiguous (the scan needs that — a pair is only a pair within one camera), which means
-  // `out` comes out ordered by camera, then by time. Reversing THAT yields every row of one camera
-  // before any row of another, so the slice drops whole cameras rather than old rows: with two
-  // children and the limit reached, one child's transitions were returned and the other child's were
-  // silently absent. Measured 2026-08-31 at ~197 pairs against a limit of 200 — days away from
-  // hiding a child from the very report used to score the detector. Sort on the timestamp itself,
-  // tie-broken by id so the order is total and a page is stable when two cameras fire in one second.
+  // Newest first ACROSS ALL CAMERAS, then trim. The query orders by camera_id first, so `out` comes
+  // out grouped by camera and only then by time. Reversing THAT yields every row of one camera
+  // before any row of another, so the slice dropped whole cameras rather than old rows: with two
+  // children and the limit reached, one child's transitions came back and the other child's were
+  // silently absent. Measured 2026-08-31 at ~197 pairs against a limit of 200.
+  //
+  // (The scan itself does NOT depend on that grouping — `prev` is keyed on camera_id, so a pair is
+  // confined to one camera by the map key, not by row order. Sorting here rather than changing the
+  // query keeps the two concerns separate.)
+  //
+  // ⚠️ Nothing in the app calls this yet — it is invoked ad hoc while diagnosing the classifier, and
+  // is the report the zone repaint gets scored against at the end of a monitor phase. Wire it to a
+  // route or move it to scripts/ before it drifts.
+  //
+  // Sort on the timestamp itself, tie-broken by id so the order is total and a page is stable when
+  // two cameras fire inside the same second.
   out.sort((a, b) => (a.created_at === b.created_at ? b.id - a.id : a.created_at < b.created_at ? 1 : -1));
   return out.slice(0, Math.min(500, Math.max(1, limit)));
 }

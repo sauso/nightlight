@@ -1,16 +1,21 @@
 // bed_transitions: the durable record of a child leaving or being put into the bed.
 //
-// This module had NO tests, and it is not an ordinary store: sleepAnalysis.js reads these rows to
-// correct sleep onset and morning wake, and `getImpossibleTransitions` is the report used to judge how
-// well the detector is doing. A defect here is invisible in the app and corrupts the measurement we
-// judge everything else by — which is exactly what happened (see the ordering test below).
+// EXTENDS `bed-transition-snapshots.test.js`, which already covers recording, the snapshot lifecycle
+// and the age sweep. This file adds the parts that were NOT covered: report ordering and its limit,
+// verdicts, the judged-row exemption, and the path-traversal guard. Fixing a bug in this module will
+// usually mean looking at both files.
+//
+// Why it matters more than its size suggests: sleepAnalysis.js reads these rows to correct sleep onset
+// and morning wake, and `getImpossibleTransitions` is the report the detector gets judged by. A defect
+// here is invisible in the app and corrupts the measurement everything else is scored against — which
+// is exactly what happened (see the ordering test below).
 //
 // Invariants worth pinning hard:
 //   * `getImpossibleTransitions` must be newest-first ACROSS CAMERAS, or the limit hides a whole child.
 //   * A pair is only a pair WITHIN one camera. Two children are not evidence about each other.
 //   * A JUDGED transition is exempt from the age sweep — a human label is the scarce thing here.
 //   * Snapshot paths are derived from an integer id only, so no row can escape the snapshot directory.
-import { test, before, after, beforeEach } from 'node:test';
+import { test, before, after, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -21,6 +26,7 @@ useTempDataDir();
 
 const { default: db } = await import('../src/db.js');
 const bt = await import('../src/lib/bedTransitions.js');
+const { logger } = await import('../src/lib/logger.js');
 
 const SNAPSHOT_DIR = path.join(process.env.DATA_DIR, 'transition-snapshots');
 
@@ -101,10 +107,12 @@ test('a reachable camera URL attaches the frame and marks the row', async () => 
   assert.equal(bt.transitionSnapshotPath(id), path.join(SNAPSHOT_DIR, `${id}.jpg`));
 });
 
-test('with no camera URL it falls back to the local stream, and survives that failing too', async () => {
-  // Second source preference: a one-shot ffmpeg grab off the already-published stream, so a camera
-  // without an HTTP endpoint still gets frames without an extra hit on the camera itself. There is no
-  // stream (or ffmpeg) in a unit test, so this exercises the failure path.
+test('a camera with only a stream path records the transition and ends with no snapshot', async () => {
+  // ⚠️ This does NOT discriminate the ffmpeg fallback itself. `captureSnapshot` only ever RESOLVES
+  // (never rejects), and there is no stream or ffmpeg here, so deleting the fallback line entirely
+  // produces the same observable result: snapshot stays 0. Verifying that the fallback is actually
+  // attempted needs an injection seam this module does not have — noted rather than faked, since a
+  // test that cannot fail is worse than no test.
   makeCamera(db, { id: 'cam-mtx', name: 'Stream only', path: 'cam-mtx-path' });
   const id = bt.recordBedTransition('cam-mtx', bt.TRANSITION.INTO_BED, 0.5);
   assert.ok(id, 'the transition is recorded regardless');
@@ -112,11 +120,26 @@ test('with no camera URL it falls back to the local stream, and survives that fa
   assert.equal(db.prepare('SELECT snapshot FROM bed_transitions WHERE id = ?').get(id).snapshot, 0);
 });
 
-test('a transition for an unknown camera still records, and skips the snapshot', async () => {
-  const id = bt.recordBedTransition('cam-does-not-exist', bt.TRANSITION.INTO_BED, 0.3);
-  assert.ok(id);
-  await new Promise((r) => setTimeout(r, 50));
-  assert.equal(db.prepare('SELECT snapshot FROM bed_transitions WHERE id = ?').get(id).snapshot, 0);
+test('a transition for an unknown camera skips the snapshot cleanly, without throwing', async () => {
+  // The `if (!cam) return` guard is what makes this clean. Without it, `cam.snapshot_url` throws a
+  // TypeError that the outer catch swallows and LOGS — same snapshot=0 either way, so asserting only
+  // on the row would pass with the guard removed. Watching the log is what separates "skipped" from
+  // "threw and was swallowed".
+  const failures = [];
+  const spy = mock.method(logger, 'info', (msg) => { failures.push(String(msg)); });
+  try {
+    const id = bt.recordBedTransition('cam-does-not-exist', bt.TRANSITION.INTO_BED, 0.3);
+    assert.ok(id);
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(db.prepare('SELECT snapshot FROM bed_transitions WHERE id = ?').get(id).snapshot, 0);
+    assert.equal(
+      failures.filter((m) => /snapshot for transition .* failed/.test(m)).length,
+      0,
+      'nothing failed — the unknown camera was recognised and skipped, not blundered into'
+    );
+  } finally {
+    spy.mock.restore();
+  }
 });
 
 // --- reading a window -------------------------------------------------------------------------
@@ -203,11 +226,39 @@ test('impossible pairs are newest-first ACROSS cameras, so the limit never hides
   assert.deepEqual(all.map((r) => r.id), [aNewest, bNew, bOld]);
 });
 
-test('limit is clamped to at least 1 and at most 500', () => {
+test('rows sharing a timestamp are ordered by id, newest first', () => {
+  // Two cameras can fire inside the same second. Without a tie-break the sort is not total and the
+  // page order can shift between calls on identical data, which makes a paged report untrustworthy.
+  seed('cam-a', 'into_bed', '2026-03-01 10:00:00');
+  const a = seed('cam-a', 'into_bed', '2026-03-01 10:05:00');
+  seed('cam-b', 'out_of_bed', '2026-03-01 10:00:00');
+  const b = seed('cam-b', 'out_of_bed', '2026-03-01 10:05:00');
+  assert.ok(b > a, 'cam-b was seeded second, so it holds the higher id');
+  assert.deepEqual(bt.getImpossibleTransitions().map((r) => r.id), [b, a]);
+});
+
+test('limit has a floor of 1', () => {
   for (let i = 0; i < 4; i++) seed('cam-a', 'into_bed', `2026-03-01 10:0${i}:00`);
   assert.equal(bt.getImpossibleTransitions({ limit: 0 }).length, 1, '0 would otherwise return nothing');
   assert.equal(bt.getImpossibleTransitions({ limit: -5 }).length, 1);
-  assert.equal(bt.getImpossibleTransitions({ limit: 9999 }).length, 3, 'capped, but there are only 3');
+});
+
+test('limit is capped at 500 however many pairs exist, and however large the ask', () => {
+  // Seeded past the cap on purpose. The previous version of this test named the 500 cap while seeding
+  // three pairs, so `Math.min(500, …)` could be widened to 5000 and it still passed — the test asserted
+  // "there are only 3", which says nothing about the cap. That is the same defect this repo has shipped
+  // before: a test whose NAME states the invariant while its fixture cannot reach it.
+  const insert = db.prepare(
+    `INSERT INTO bed_transitions (camera_id, type, created_at) VALUES ('cam-a', 'into_bed', ?)`
+  );
+  db.transaction(() => {
+    // 520 identical-type rows in a row => 519 impossible pairs, comfortably past the cap.
+    for (let i = 0; i < 520; i++) {
+      insert.run(`2026-04-01 ${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}:00`);
+    }
+  })();
+  assert.equal(bt.getImpossibleTransitions({ limit: 9999 }).length, 500, 'the ask is capped at 500');
+  assert.equal(bt.getImpossibleTransitions({ limit: 400 }).length, 400, 'a smaller ask is honoured');
 });
 
 // --- verdicts ---------------------------------------------------------------------------------
@@ -242,12 +293,16 @@ test('a malformed or missing id updates nothing', () => {
 
 // --- retention --------------------------------------------------------------------------------
 
-test('aged unjudged rows are swept, and their snapshots go with them', () => {
+test('the age sweep cuts at 45 days, and snapshots go with the rows', () => {
+  // The keeper sits at 44 days, one day INSIDE the window, so the fixture brackets the constant from
+  // both sides. With a 1-day-old keeper the 45 could be lowered to 30 and this still passed — the
+  // documented 45-day retention (deliberately longer than activity_samples' 30) was only bounded
+  // from above.
   fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
   const old = seed('cam-a', 'into_bed', daysAgo(46), { snapshot: 1 });
   const file = path.join(SNAPSHOT_DIR, `${old}.jpg`);
   fs.writeFileSync(file, 'jpeg-bytes');
-  const fresh = seed('cam-a', 'out_of_bed', daysAgo(1));
+  const fresh = seed('cam-a', 'out_of_bed', daysAgo(44));
 
   bt.recordBedTransition('cam-a', bt.TRANSITION.INTO_BED, 0.1); // the insert drives the sweep
 
@@ -282,8 +337,16 @@ test('transitionSnapshotPath returns a path only when the file is really there',
 });
 
 test('a snapshot path can never escape the snapshot directory', () => {
-  // The id names the file, so anything that is not a positive integer must resolve to nothing.
-  for (const bad of ['../../etc/passwd', '..', 0, -1, 1.5, 'abc', null, undefined, '1/../../x']) {
+  // The id names the file, so anything that is not a POSITIVE integer must resolve to nothing.
+  //
+  // The files below exist on purpose. Without them, `0` and `-1` returned null only because
+  // fs.existsSync was false — so dropping the `n <= 0` half of the guard left the test green. Putting
+  // real files where those ids would point is what makes the guard, rather than the filesystem, the
+  // thing being tested.
+  fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
+  for (const name of ['0.jpg', '-1.jpg']) fs.writeFileSync(path.join(SNAPSHOT_DIR, name), 'x');
+
+  for (const bad of ['../../etc/passwd', '..', 0, -1, '-1', 1.5, 'abc', null, undefined, '1/../../x']) {
     assert.equal(bt.transitionSnapshotPath(bad), null, `rejected: ${JSON.stringify(bad)}`);
   }
 });

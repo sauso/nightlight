@@ -11,7 +11,7 @@
 //     distinguishable from "we looked and it was still".
 //   * The bucket map is swapped out BEFORE the insert, so a signal arriving mid-flush lands in the
 //     next minute rather than being lost or double-counted.
-import { test, before, after, beforeEach } from 'node:test';
+import { test, before, after, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { useTempDataDir, cleanupTempDataDirs, makeCamera } from './helpers/harness.js';
 
@@ -70,8 +70,8 @@ test('sound is accumulated as dB over ambient', () => {
   assert.equal(r.sound_windows, 3);
 });
 
-test('non-numeric and negative samples are ignored rather than poisoning the average', () => {
-  // `!(v >= 0)` also rejects NaN, which is the one that matters: a NaN reaching motionSum would make
+test('negative and clearly non-numeric samples are rejected', () => {
+  // `!(v >= 0)` rejects NaN, which is the one that matters most: a NaN reaching motionSum would make
   // the whole minute's level NaN, and nothing downstream would notice.
   for (const bad of [-0.1, NaN, undefined, 'x', {}, [1, 2]]) {
     at.recordMotion('cam-1', bad);
@@ -84,33 +84,90 @@ test('non-numeric and negative samples are ignored rather than poisoning the ave
   assert.equal(rowFor('cam-1').motion_frames, 1, 'zero IS a valid sample — a still room is data');
 });
 
-// ⚠️ CHARACTERISATION, not an endorsement. `null >= 0` is TRUE in JavaScript (null coerces to 0 in a
-// relational comparison), so `null` slips through the `!(v >= 0)` guard that stops every other
-// non-number, and lands as a zero sample: it bumps *_frames and drags *_level toward zero. That is the
-// precise distinction this module works hard to preserve everywhere else — a channel with no samples
-// writes NULL, not 0, so "we did not look" stays separable from "we looked and it was still".
-// No current caller passes null (motionDetector and soundDetector both compute a number), so this is
-// latent rather than live, and it is left alone deliberately while the sleep holdout is running.
-// Pinned here so the behaviour is visible and a future fix is a deliberate change, not a surprise.
-test('KNOWN QUIRK: null passes the numeric guard and is counted as a zero sample', () => {
-  at.recordMotion('cam-1', null);
-  assert.equal(at.flushActivity(), 1, 'a row is written for what was really "no reading"');
+// ⚠️ CHARACTERISATION, not an endorsement, and deliberately NOT fixed while the sleep holdout runs.
+//
+// `!(v >= 0)` is a coercion test, not a type test, so every value JavaScript coerces to a number ≥ 0
+// gets through: `null`, `false`, `''` and `[]` all become 0, and a numeric STRING gets through as
+// itself. That last one is the worst of them — `motionSum += '5'` CONCATENATES, so two '5' samples
+// give a sum of "055" and a mean of 27.5 rather than 5.
+//
+// This matters because it destroys the distinction the module works hard to preserve everywhere else:
+// a channel with no samples writes NULL, not 0, so "we did not look" stays separable from "we looked
+// and it was still". A null sample quietly becomes the second of those.
+//
+// No current caller can pass any of these — motionDetector passes `changed / zonePixels` and
+// soundDetector passes `Math.max(0, rms - baseline)`, both always real numbers — so this is latent,
+// not live. Pinned here so the next person sees it, and so a future fix is a deliberate change rather
+// than a surprise. The fix, when it happens, is `Number.isFinite(v) && v >= 0`.
+test('KNOWN QUIRK: anything coercible to a non-negative number passes the guard', () => {
+  for (const v of [null, false, '', []]) {
+    at.recordMotion('cam-1', v);
+    assert.equal(at.flushActivity(), 1, `${JSON.stringify(v)} was recorded as a real sample`);
+    const r = rowFor('cam-1');
+    assert.equal(r.motion_frames, 1);
+    assert.equal(r.motion_peak, 0, 'it lands as zero motion, i.e. "the room was still"');
+    db.prepare('DELETE FROM activity_samples').run();
+  }
+});
+
+test('KNOWN QUIRK: a numeric string concatenates instead of adding', () => {
+  at.recordMotion('cam-1', '5');
+  at.recordMotion('cam-1', '5');
+  at.flushActivity();
   const r = rowFor('cam-1');
-  assert.equal(r.motion_frames, 1);
-  assert.equal(r.motion_peak, 0);
-  assert.equal(r.motion_level, 0);
+  assert.equal(r.motion_frames, 2);
+  assert.equal(r.motion_level, 27.5, 'sum was "0"+"5"+"5" = "055", divided by 2 — not 5');
 });
 
 // --- flushing ---------------------------------------------------------------------------------
 
-test('a channel with no samples writes NULL, not zero', () => {
+test('a channel with no samples writes NULL, not zero — both directions', () => {
   at.recordMotion('cam-1', 0.3);
   at.flushActivity();
-  const r = rowFor('cam-1');
-  assert.equal(r.sound_peak, null, '"we did not listen" must not read as "it was silent"');
-  assert.equal(r.sound_level, null);
-  assert.equal(r.sound_windows, 0);
-  assert.equal(r.motion_out_peak, null, 'no zone painted means no out-of-bed channel at all');
+  const motionOnly = rowFor('cam-1');
+  assert.equal(motionOnly.sound_peak, null, '"we did not listen" must not read as "it was silent"');
+  assert.equal(motionOnly.sound_level, null);
+  assert.equal(motionOnly.sound_windows, 0);
+  assert.equal(motionOnly.motion_out_peak, null, 'no zone painted means no out-of-bed channel at all');
+  db.prepare('DELETE FROM activity_samples').run();
+
+  // The mirror case: a sound-only minute must leave the MOTION columns null, not 0. Without this the
+  // whole invariant is only half pinned, and a sleep threshold comparing motion_peak against a
+  // number would read "perfectly still" for a camera that was never watched.
+  at.recordSound('cam-1', 4);
+  at.flushActivity();
+  const soundOnly = rowFor('cam-1');
+  assert.equal(soundOnly.motion_peak, null);
+  assert.equal(soundOnly.motion_level, null);
+  assert.equal(soundOnly.motion_frames, 0);
+});
+
+test('the live listener carries NULL for an unsampled channel too', () => {
+  // wakeWatcher consumes this payload rather than re-reading the row, so the same "we did not look"
+  // distinction has to survive the hand-off. Recording BOTH channels — as the other listener test
+  // does — never exercises this, because then neither side is null.
+  const seen = [];
+  listen((e) => seen.push(e));
+  at.recordMotion('cam-1', 0.2);
+  at.flushActivity();
+  assert.equal(seen.at(-1).soundPeak, null, 'nothing was heard, and that is not the same as silence');
+
+  at.recordSound('cam-2', 9);
+  at.flushActivity();
+  assert.equal(seen.at(-1).motionPeak, null, 'nothing was seen, and that is not the same as stillness');
+  assert.equal(seen.at(-1).soundPeak, 9);
+});
+
+// ⚠️ CHARACTERISATION of a real gap, pinned rather than fixed (the holdout freezes this module).
+// A minute is written only when motionFrames or soundWindows is non-zero — motionOutFrames is not
+// consulted. So a minute in which ONLY out-of-bed motion was recorded is silently discarded, and the
+// out-of-bed channel is precisely the one the exit rule depends on. No live caller can reach it today
+// (motionDetector always records in-bed motion alongside out-of-bed motion, so motionFrames > 0
+// whenever motionOutFrames > 0), which is why it has never bitten.
+test('KNOWN GAP: a minute of only out-of-bed motion is dropped entirely', () => {
+  at.recordMotionOut('cam-1', 0.9);
+  assert.equal(at.flushActivity(), 0, 'no row at all, and the sample is gone');
+  assert.equal(rows().length, 0);
 });
 
 test('flushActivity writes one row per camera that saw something, and returns the count', () => {
@@ -183,24 +240,43 @@ test('a listener that throws cannot cost us the rest of the flush', () => {
 
 // --- retention --------------------------------------------------------------------------------
 
-test('pruneActivitySamples drops rows past the 30-day window and keeps the rest', () => {
-  const insert = (cam, ago) =>
+test('pruneActivitySamples cuts exactly at the 30-day line', () => {
+  // Straddle the boundary by an hour on each side rather than by days. A fixture sitting comfortably
+  // clear of the line does not test the line: with -31/-29 days, moving RETENTION_DAYS to 29 still
+  // passed. An hour is tight enough to pin the constant and wide enough that the wall clock ticking
+  // mid-test cannot flip the result.
+  const insert = (ago) =>
     db.prepare(
       `INSERT INTO activity_samples (camera_id, bucket_start, motion_frames, sound_windows, created_at)
-       VALUES (?, ?, 1, 0, datetime('now', ?))`
-    ).run(cam, '2026-01-01 00:00:00', ago);
-  insert('cam-1', '-31 days');
-  insert('cam-1', '-29 days');
+       VALUES ('cam-1', '2026-01-01 00:00:00', 1, 0, datetime('now', ?, ?))`
+    ).run('-30 days', ago);
+  insert('-1 hour'); // just past the window — must go
+  insert('+1 hour'); // just inside it — must stay
   at.pruneActivitySamples();
-  assert.equal(rows().length, 1, 'the 31-day-old row goes, the 29-day-old row stays');
+  assert.equal(rows().length, 1, 'exactly one row survives, and it is the newer one');
+  const kept = rows()[0].created_at;
+  const cut = db.prepare("SELECT datetime('now', '-30 days') AS t").get().t;
+  assert.ok(kept > cut, `kept row ${kept} must be newer than the ${cut} cutoff`);
 });
 
-test('startActivityTracker prunes immediately and is idempotent', () => {
+test('startActivityTracker prunes immediately, and a second call starts no second timer', () => {
   db.prepare(
     `INSERT INTO activity_samples (camera_id, bucket_start, motion_frames, sound_windows, created_at)
      VALUES ('cam-1', '2026-01-01 00:00:00', 1, 0, datetime('now', '-90 days'))`
   ).run();
-  at.startActivityTracker();
-  assert.equal(rows().length, 0, 'startup sweeps stale rows without waiting a day for the timer');
-  at.startActivityTracker(); // second call must not stack a second interval
+
+  // Count real setInterval calls. Asserting the guard needs something observable: without it a second
+  // flusher and a second pruner are registered and never cleared, and the previous version of this
+  // test asserted nothing at all about that — replacing `if (flushTimer) return` with `if (false)`
+  // left the whole suite green.
+  const spy = mock.method(globalThis, 'setInterval');
+  try {
+    at.startActivityTracker();
+    assert.equal(rows().length, 0, 'startup sweeps stale rows without waiting a day for the timer');
+    assert.equal(spy.mock.callCount(), 2, 'one flush timer and one prune timer');
+    at.startActivityTracker();
+    assert.equal(spy.mock.callCount(), 2, 'the second call is a no-op, not a second pair of timers');
+  } finally {
+    spy.mock.restore();
+  }
 });
