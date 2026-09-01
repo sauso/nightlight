@@ -49,6 +49,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **The Record button never appeared on a fresh install.** Recording on demand reaches *backward* in
+  time, so it needs the camera to already be buffering — and the button hides itself when it isn't.
+  Buffering was being started only for cameras that had **detection clips** switched on, which is off
+  by default and lives on a different screen, so a newly added camera never buffered and the button
+  never showed. Adding a camera didn't start it at all, and a restart took it away again. Every camera
+  now buffers whenever **Show a Record button on each camera** is on, as the setting has always
+  claimed. (Invisible to anyone who had also turned on detection clips, which armed the buffer for the
+  other reason.)
 - **A camera tile could show “NaN°C” instead of a temperature.** A malformed MQTT sensor
   payload parses to `NaN`, which counts as a number, so it was rendered rather than skipped. A
   reading that cannot be read now shows nothing at all, which is what a missing reading looked

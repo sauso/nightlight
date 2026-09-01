@@ -127,6 +127,21 @@ Recordings appear in the **Recordings** card on the child's page. **They are nev
 automatically** — unlike the other two kinds, these are keepsakes someone chose to keep, so deleting
 one is the only way to reclaim its space.
 
+**When the buffering starts.** As soon as a camera is added, and again whenever Nightlight restarts —
+you don't have to turn anything else on. Note what this costs, since it applies to *every* camera while
+this setting is on: one extra FFmpeg process per camera, reading the stream Nightlight already pulls
+(no second connection to the camera itself), writing a rolling few-minutes buffer under
+`clips/.ring/`. Old segments are continuously discarded, so it doesn't grow. Turning **Show a Record
+button on each camera** off stops the buffering on every camera that isn't also saving detection clips.
+
+**No Record button on a camera?** The button hides itself when that camera isn't buffering, because
+reaching backward is the whole point and there'd be nothing to reach into. Check that on-demand
+recording is on above, that the camera isn't disabled, and that clip storage came up — a start-up
+problem with the clips folder is reported in the container log as `[clips] storage`. *(Older versions
+only started buffering a camera that also had **detection** clips switched on — which is off by
+default — so on a fresh install the button never appeared at all. If you are on one of those, turning
+detection clips on for that camera, or re-saving the camera, brings it back.)*
+
 ---
 
 ## Where recordings are stored
