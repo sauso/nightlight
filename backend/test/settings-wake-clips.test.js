@@ -76,6 +76,28 @@ describe('saving', () => {
     assert.equal(s.wake_clips_enabled, 1);
   });
 
+  test('★ a General-page save leaves the ON-DEMAND settings alone', async () => {
+    // The front end relies on this, so it is worth its own test rather than being assumed from the
+    // wake-clip case above. The General settings screen used to post ondemand_enabled,
+    // ondemand_pre_roll_s and ondemand_max_duration_s — left behind when on-demand recording moved to
+    // its own page — which meant a stale General form could silently revert a Record-button toggle
+    // somebody had just made elsewhere. Those keys were removed from its payload, and that removal is
+    // only safe because this route falls back to each field's STORED value when a key is absent.
+    // Take that fallback away and the fix turns into the bug it replaced, with the setting reset on
+    // every visit to General.
+    await put({ ondemand_enabled: false, ondemand_pre_roll_s: 12, ondemand_max_duration_s: 90 });
+
+    // Exactly what the General screen sends now: its own seven fields, none of them on-demand.
+    const r = await put({ app_name: 'Casa', timezone: 'Australia/Melbourne', temp_unit: 'F' });
+    assert.equal(r.status, 200);
+
+    const s = get();
+    assert.equal(s.app_name, 'Casa');
+    assert.equal(s.ondemand_enabled, 0, 'a save that omits the Record-button switch must not turn it back on');
+    assert.equal(s.ondemand_pre_roll_s, 12, 'nor reset the pre-roll');
+    assert.equal(s.ondemand_max_duration_s, 90, 'nor the auto-stop');
+  });
+
   test('0 days is accepted and means keep forever', async () => {
     const r = await put({ wake_clip_retention_days: 0 });
     assert.equal(r.status, 200);

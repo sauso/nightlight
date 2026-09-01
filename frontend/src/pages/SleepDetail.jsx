@@ -17,14 +17,14 @@ import ReviewNightButton from '../components/ReviewNightButton.jsx';
 
 const HISTORY_DAYS = 30; // how far back the underlying activity_samples are retained
 
-function addDays(dateStr, n) {
+export function addDays(dateStr, n) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d));
   dt.setUTCDate(dt.getUTCDate() + n);
   return dt.toISOString().slice(0, 10);
 }
 
-function fmtDur(min) {
+export function fmtDur(min) {
   if (min == null) return '';
   const h = Math.floor(min / 60);
   const m = min % 60;
@@ -660,7 +660,7 @@ function SleepInsights({ childId, tempUnit, childName }) {
 }
 
 // --- small helpers ---
-const utcMs = (s) => new Date(String(s).replace(' ', 'T') + 'Z').getTime();
+export const utcMs = (s) => new Date(String(s).replace(' ', 'T') + 'Z').getTime();
 
 // The automatic clip recorded at the start of a wake. Deliberately reads as a recording, not an alert:
 // nothing was sent to anyone's phone, it was captured so there is something to look at in the morning.
@@ -692,7 +692,7 @@ function WakeClipRow({ clip, fmtTime, onPlay }) {
 
 // The automatic clip belonging to a wake, if one was captured. Matched on time like the alerts are:
 // the clip is anchored on the wake's first active minute, so it lands at the very start of the span.
-function clipForWake(clips, startAt, endAt) {
+export function clipForWake(clips, startAt, endAt) {
   const s = utcMs(startAt) - ALERT_MARGIN_MS;
   const e = utcMs(endAt) + ALERT_MARGIN_MS;
   return clips.find((c) => {
@@ -704,7 +704,7 @@ function clipForWake(clips, startAt, endAt) {
 // Detection alerts that fired within a wake's window, allowing a few minutes either side (a wake run is
 // trimmed to its active minutes, and an alert can fire just before/after). Keeps ascending order.
 const ALERT_MARGIN_MS = 3 * 60000;
-function alertsInRange(alerts, startAt, endAt) {
+export function alertsInRange(alerts, startAt, endAt) {
   const s = utcMs(startAt) - ALERT_MARGIN_MS;
   const e = utcMs(endAt) + ALERT_MARGIN_MS;
   return alerts.filter((a) => {
@@ -712,22 +712,22 @@ function alertsInRange(alerts, startAt, endAt) {
     return t >= s && t <= e;
   });
 }
-const alertLabel = (type) => (type === 'sound' ? 'Sound' : type === 'motion' ? 'Motion' : type || 'Alert');
+export const alertLabel = (type) => (type === 'sound' ? 'Sound' : type === 'motion' ? 'Motion' : type || 'Alert');
 function AlertTypeIcon({ type }) {
   const Icon = type === 'sound' ? AudioLines : Zap;
   return <Icon size={13} className="sleep-wakes__alert-ico" aria-hidden="true" />;
 }
 
-const pctOf = (s, startMs, totalMs) => (s ? ((utcMs(s) - startMs) / totalMs) * 100 : null);
-const labelFor = (state) => (state === 'asleep' ? 'asleep' : state === 'stir' ? 'stirring' : state === 'wake' ? 'awake' : 'before/after sleep');
-function shortHour(ms, tz) {
+export const pctOf = (s, startMs, totalMs) => (s ? ((utcMs(s) - startMs) / totalMs) * 100 : null);
+export const labelFor = (state) => (state === 'asleep' ? 'asleep' : state === 'stir' ? 'stirring' : state === 'wake' ? 'awake' : 'before/after sleep');
+export function shortHour(ms, tz) {
   const s = new Intl.DateTimeFormat([], { timeZone: tz, hour: 'numeric', hour12: true }).format(new Date(ms));
   return s.replace(/\s?AM/i, 'a').replace(/\s?PM/i, 'p');
 }
-function fmtDurBig(min) {
+export function fmtDurBig(min) {
   if (min == null) return '—';
   const h = Math.floor(min / 60);
   const m = min % 60;
   return h ? `${h}h ${m}m` : `${m}m`;
 }
-function fmtDurAbbr(min) { return min ? fmtDurBig(min) : '—'; }
+export function fmtDurAbbr(min) { return min ? fmtDurBig(min) : '—'; }
