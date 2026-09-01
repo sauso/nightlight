@@ -48,11 +48,12 @@ const getJson = async (page, path) => {
 test('a camera can record the moment it is added, with nobody editing it first', async ({ page }) => {
   // ★ THE REGRESSION TEST. On-demand recording reaches BACKWARD in time, so it only works if the
   // camera is already buffering — and the Record button hides itself (`can_record`) when it isn't.
-  // Four of the five places that start that buffering used to ask only whether DETECTION clips were
-  // turned on, which is off by default and configured on a different screen. The result: on a default
-  // install the ring never started, the Record button never appeared, and the feature was inert for
-  // anyone who hadn't also enabled detection clips. It worked in the house it was written in because
-  // both cameras there had detection clips on, which armed the ring for the other reason.
+  // Three of the five places that start that buffering used to ask only whether DETECTION clips were
+  // turned on — which is off by default and configured on a different screen — and a fourth, adding a
+  // camera, never started it at all. The result: on a default install the ring never started, the
+  // Record button never appeared, and the feature was inert for anyone who hadn't also enabled
+  // detection clips. It worked in the house it was written in because both cameras there had
+  // detection clips on, which armed the ring for the other reason.
   //
   // So: add a camera, touch nothing else, and require the button to be there. This test fails against
   // the code as it was — verified by reverting the fix and running it.
@@ -82,6 +83,40 @@ test('a camera can record the moment it is added, with nobody editing it first',
   await page.goto('/');
   const tile = page.locator('.camera-tile', { hasText: CAM.name }).first();
   await expect(tile.getByRole('button', { name: `Record ${CAM.name}`, exact: true })).toBeVisible();
+});
+
+test('turning a camera off and on again brings the ring back with it', async ({ page }) => {
+  // ★ Found by an adversarial review of the fix above, which was itself wrong here. `PUT /:id/enabled`
+  // reads the camera row at the top of the handler and writes `disabled` at the bottom, so everything
+  // in between saw `disabled: 1` — and motionLegWanted, onvifMotionWanted, startSoundDetector and
+  // clipRingWanted all bail out for a disabled camera. Re-enabling therefore restarted the stream and
+  // nothing else; the ring, motion, ONVIF motion and sound detection all stayed down until the
+  // five-minute reconcile tick swept them up, which is far longer than anyone watches a screen for.
+  //
+  // The ring is the half this spec can see, and it is the strictest of the four: the assertion is that
+  // it comes back QUICKLY. A generous timeout here would pass on the reconcile tick alone and prove
+  // nothing, so it deliberately sits far below 5 minutes.
+  await auth(page);
+  const off = await page.request.put(`/api/cameras/${cameraId}/enabled`, {
+    ...(await auth(page)),
+    data: { enabled: false },
+  });
+  expect(off.status()).toBe(200);
+  expect((await off.json()).can_record, 'a disabled camera cannot record').toBeFalsy();
+
+  const on = await page.request.put(`/api/cameras/${cameraId}/enabled`, {
+    ...(await auth(page)),
+    data: { enabled: true },
+  });
+  expect(on.status(), await on.text()).toBe(200);
+
+  await expect
+    .poll(async () => (await getJson(page, '/api/cameras')).find((c) => c.id === cameraId)?.can_record, {
+      timeout: 30_000,
+      intervals: [1000],
+      message: 're-enabling a camera should restart its ring, not wait for the reconcile tick',
+    })
+    .toBe(true);
 });
 
 test('recording through the tile produces a playable video on the child’s page', async ({ page }) => {
@@ -195,13 +230,17 @@ test('deleting an alert’s clip keeps the alert, its time and its snapshot', as
   // happened, and the still image captured at the moment are all kept. The tempting implementation —
   // deleting the row — passes every "the clip is gone" check while quietly erasing history, and the
   // person who tidied up their clips would never be told the alerts went with them.
-  // ⚠️ QUIETEN THE CAMERA FIRST. Everything below compares two reads of the alert feed, and that feed
-  // is a capped, newest-first list — so leaving the detector firing means asserting about a list that
-  // is moving underneath the assertions. A run of this spec failed exactly once with the target alert
-  // present in the first read and absent from the second, which no code path in the app explains
-  // (deleting a clip is an UPDATE, and both prunes are far out of reach at 2000 rows and 30 days). I
-  // could not reproduce it, so rather than leave a flake sitting on the invariant this whole file is
-  // for, the test now removes the only thing that was changing.
+  // ⚠️ QUIETEN THE CAMERA FIRST. Everything below compares two reads of the alert feed, and
+  // `GET /api/cameras/alerts` is `getRecentDetectionEvents(200)` — a newest-first list with a LIMIT.
+  // Leaving the detector firing means asserting about a list that is moving underneath the assertions,
+  // and an alert can leave that window without anything having deleted it.
+  // This spec failed exactly once, on a clean run, with the target alert present in the first read and
+  // absent from the second. Falling off the 200-row window is the only mechanism of the right shape —
+  // deleting a clip is an UPDATE, and the two prunes are far out of reach at 2000 rows and 30 days —
+  // though at a 5s cooldown it should take ~17 minutes of firing to get there, so I could not
+  // reproduce it and cannot claim it as the cause. Either way the fix is the same: stop asserting
+  // against a moving list. Turning the detector off is also what a person deleting old clips would
+  // realistically be doing.
   const quiet = await page.request.put(`/api/cameras/${cameraId}/detection`, {
     ...(await auth(page)),
     data: { motion_enabled: false },

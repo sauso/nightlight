@@ -886,14 +886,26 @@ router.put('/:id/enabled', requireAdmin, async (req, res) => {
     } catch (e) {
       return res.status(502).json({ error: `Could not re-register stream with MediaMTX: ${e.message}` });
     }
-    await startTranscoder(req.params.id, existing.rtsp_url, existing.mediamtx_path, existing.name);
-    if (subConfigured(existing)) await startSubStream(existing).catch((e) => logger.error(`[substream] enable failed: ${e.message}`));
-    if (motionLegWanted(existing)) await startMotionDetector(existing).catch(() => {});
-    if (onvifMotionWanted(existing)) await startOnvifMotion(existing).catch(() => {});
-    if (existing.detect_sound_enabled) await startSoundDetector(existing).catch(() => {});
+    // ⚠️ THE START CALLS MUST SEE THE CAMERA AS IT IS ABOUT TO BE, NOT AS IT IS. `existing` was read
+    // at the top of this handler, before the UPDATE at the bottom, so its `disabled` is still 1 — and
+    // `motionLegWanted`, `onvifMotionWanted`, `startSoundDetector` and `clipRingWanted` ALL return
+    // early for a disabled camera. Handing them `existing` made four of the five restarts below
+    // silent no-ops: re-enabling a camera brought its stream back but left motion detection, ONVIF
+    // motion, sound detection and the recording ring stopped until `reconcileCameraPaths` noticed —
+    // up to 5 minutes later, and for the ring (before this change) never, since reconcile pre-gated
+    // it on detect_record_clips. Only the transcoder and sub-stream, which don't check the flag,
+    // actually came back.
+    // The UPDATE deliberately stays at the bottom: a failed upsertPath above returns 502 and must
+    // leave the camera recorded as disabled, so the flag is corrected here rather than written early.
+    const cam = { ...existing, disabled: 0 };
+    await startTranscoder(req.params.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
+    if (subConfigured(cam)) await startSubStream(cam).catch((e) => logger.error(`[substream] enable failed: ${e.message}`));
+    if (motionLegWanted(cam)) await startMotionDetector(cam).catch(() => {});
+    if (onvifMotionWanted(cam)) await startOnvifMotion(cam).catch(() => {});
+    if (cam.detect_sound_enabled) await startSoundDetector(cam).catch(() => {});
     // Re-arm the ring on whichever grounds want it (clipRingWanted, not detect_record_clips alone —
     // otherwise re-enabling a camera silently left its Record button missing).
-    startClipCapture(existing);
+    startClipCapture(cam);
   } else {
     await stopTranscoder(req.params.id);
     await stopSubStream(existing).catch(() => {});

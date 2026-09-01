@@ -57,6 +57,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   now buffers whenever **Show a Record button on each camera** is on, as the setting has always
   claimed. (Invisible to anyone who had also turned on detection clips, which armed the buffer for the
   other reason.)
+- **Turning a camera back on only restarted its video.** Re-enabling a camera brought the stream back
+  but left motion detection, camera-reported (ONVIF) motion, sound detection and clip buffering
+  stopped, because each of them checks whether the camera is disabled and was being asked before the
+  camera had been marked enabled. They came back on their own within five minutes, when the periodic
+  reconcile noticed — but nothing appeared to be wrong in the meantime, so a camera that had just been
+  switched on silently missed anything that happened in those minutes.
 - **A camera tile could show “NaN°C” instead of a temperature.** A malformed MQTT sensor
   payload parses to `NaN`, which counts as a number, so it was rendered rather than skipped. A
   reading that cannot be read now shows nothing at all, which is what a missing reading looked

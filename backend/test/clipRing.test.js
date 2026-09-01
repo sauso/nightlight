@@ -2,11 +2,15 @@
 // detection clips turned on".
 //
 // ★ WHAT THIS LOCKS AND WHAT IT CANNOT. The ring feeds two independent features, and the defect this
-// file exists for was that four of the five places that start it tested only the FIRST of them
+// file exists for was that most of the places that start it tested only the FIRST of them
 // (`detect_record_clips`, which defaults to 0) — so on a default install the second, on-demand
-// recording, never got a ring and the tile's Record button never appeared. The condition had been
-// duplicated at each call site and the copies drifted apart; pulling it into one predicate is the fix,
-// and these tests are what stop it drifting again.
+// recording, never got a ring and the tile's Record button never appeared. Of the five call sites on
+// `dev`: THREE pre-gated on `detect_record_clips` (reconcile in index.js, re-enabling a camera, and
+// saving detection settings), ONE was missing entirely (adding a camera), and TWO had the rule right
+// (`PUT /:id` and the global settings save — whose comment even spells it out: "Every enabled camera,
+// not just the clip-recording ones"). The condition had been duplicated at each call site and the
+// copies drifted apart; pulling it into one predicate is the fix, and these tests stop it drifting
+// again.
 //
 // ⚠️ HONEST LIMIT, because the distinction matters: these tests lock the RULE, not the CALL SITES. The
 // bug was never in the rule — `startClipCapture` had it right all along — it was in four callers

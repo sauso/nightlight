@@ -213,6 +213,15 @@ test('a camera saved with the wrong password never goes live — the check above
   expect(res.status()).toBe(201);
   const bad = await res.json();
 
+  // ⚠️ The poll below treats a TIMEOUT as the pass, so anything that merely stops the observation from
+  // happening — a bad id, a broken camera list — would look like success. Pin the preconditions first
+  // so the timeout can only mean what it is supposed to mean: the camera exists, is listed, and is not
+  // disabled (which would keep it from streaming for an unrelated reason).
+  expect(bad.id).toBeTruthy();
+  const listed = (await cameras(page)).find((c) => c.id === bad.id);
+  expect(listed, 'the wrong-password camera must be in the list for its absence from live to mean anything').toBeTruthy();
+  expect(listed.disabled).toBeFalsy();
+
   try {
     // Long enough to be past the transcoder's start and its first retries. A correct password reaches
     // ready in a few seconds (the tests above wait far less), so a wait this long failing to find one
