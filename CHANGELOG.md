@@ -40,6 +40,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   - Reviews are kept forever, and an event you have judged keeps its frame past the usual 45 days.
   - See **README → Sleep tracking**.
 
+- **The alert schedule is documented** — its default, that the window is shared by motion and sound,
+  that overnight windows work, and that it uses the app timezone (which is **UTC** until you set it).
+  With the contrast that catches people out: it silences *alerts* only — **sleep tracking keeps
+  recording through the quiet hours**, unlike turning a detector off. Also documents Pushover's
+  **Device** field (where a blank value *clears* rather than keeps) and Gotify's **Priority** default.
+
 - **Camera detection settings are documented** — motion and sound sensitivity, confirm and
   cooldown, each with its default and its range, plus what sound sensitivity means in dB over a
   room’s own ambient level. Includes a **known limitation**: a constant noise source such as a
@@ -48,6 +54,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   it. Sleep and wake *times* are unaffected; only the awake/asleep totals are.
 
 ### Fixed
+
+- **The detection sensitivity sliders had no name a screen reader could read.** The label beside them
+  was not attached to the control, so both announced only "slider, 50" with nothing to say what they
+  adjusted.
 
 - **Gotify settings could silently discard what you typed.** The **Server URL** and **Priority** boxes
   accepted input before the saved config had finished loading, and the arriving config then replaced

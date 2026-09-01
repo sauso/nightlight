@@ -171,6 +171,26 @@ without the other, and each has its own sensitivity, confirmation delay and cool
 | **Sound confirm** | 4 s | 0–30 s | Loudness must stay above that margin, *on average*, for this long — so a pulsing cry still counts while a single bang does not. |
 | **Sound cooldown** | 120 s | 1–3600 s | Minimum gap between sound alerts from this camera. |
 
+### Alert schedule (quiet hours)
+
+**Cameras → edit a camera → Alert schedule.** Off by default, which means the camera alerts 24/7.
+Turn on **Only alert during set hours** and set a **From** and **To** time.
+
+| Setting | Default | What it does |
+|---|---|---|
+| **Only alert during set hours** | Off (alerting 24/7) | Restricts alerts to the window below. |
+| **From / To** | 20:00 – 07:00 offered on a camera that has never had a schedule | The window during which alerts are allowed. |
+
+- **Overnight windows work.** From 20:00 to 07:00 is one window that crosses midnight, not an empty one.
+- **The window is shared by motion and sound** — there is not one schedule each.
+- **Times are in the app timezone** (**Settings → General**), not the browser's or the camera's. On a
+  fresh install that timezone is **UTC** until you set it, so set it before relying on a schedule.
+- ⚠️ **It suppresses alerts, not detection.** Outside the window there is no push *and* no in-app
+  alert, but the camera is still watched: **sleep tracking keeps recording normally**, so a night is
+  unaffected by the schedule. This is the opposite of turning motion or sound detection off, which
+  does stop the signal sleep tracking uses.
+- A window whose From and To are the same time is treated as **always on**, not "never".
+
 Sound is measured **relative to each room's own ambient level**, which the app learns continuously —
 not as an absolute loudness. A room next to a busy road and a silent room both settle at "0 over
 ambient", so the same sensitivity means the same thing in both.
