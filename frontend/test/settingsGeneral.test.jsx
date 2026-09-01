@@ -158,29 +158,32 @@ describe('saving', () => {
     expect(screen.queryByText('Saved ✓')).toBeNull();
   });
 
-  test('⚠️ ALSO writes three on-demand recording settings this screen does not show', async () => {
-    // PINNED AS-IS, AND FLAGGED — this is not an endorsement.
+  test('★ does NOT write the on-demand settings, which live on the Recording page', async () => {
+    // This screen used to post ondemand_enabled, ondemand_pre_roll_s and ondemand_max_duration_s —
+    // left behind when on-demand recording moved out to its own page (see SettingsRecording.jsx's
+    // header: keeping it here "read as one confusing feature with two pre-rolls"). The fields went;
+    // these three lines of the payload did not.
     //
-    // On-demand recording moved to its own Recording page (see SettingsRecording.jsx's header comment:
-    // keeping it here "read as one confusing feature with two pre-rolls"). The fields went; these three
-    // lines of the save payload did not. So this screen writes back whatever on-demand values it held
-    // at mount, for settings it neither renders nor lets anyone change.
+    // Writing back a setting nobody can see here is never useful, and is occasionally harmful: the
+    // Recording page's switch applies the INSTANT it is flipped, so a General page still holding the
+    // old value would silently revert it on its next Save. Omitting them is safe because the settings
+    // route falls back to each field's stored value when the key is absent (routes/settings.js).
     //
-    // Harmless while the values are current — and a lost update when they are not. The Recording page's
-    // switch applies the instant it is flipped, so a General page left open on a second device or a
-    // second tab will quietly revert it on its next Save, with nothing shown to either person.
-    //
-    // Not removed here because this is a test-only change and the hazard is unproven rather than
-    // demonstrated. This test is the record of it: if the payload is ever cleaned up, this test fails
-    // and the person doing it reads why it was there.
-    const { user } = renderWith({ app_name: 'Nightlight', ondemand_enabled: true, ondemand_pre_roll_s: 30 });
+    // Deliberately fed values that WOULD be sent if the lines came back, so this fails loudly rather
+    // than passing on an empty fixture.
+    const { user } = renderWith({
+      app_name: 'Nightlight',
+      ondemand_enabled: true,
+      ondemand_pre_roll_s: 30,
+      ondemand_max_duration_s: 120,
+    });
     await user.click(await screen.findByRole('button', { name: /Save/ }));
 
     await waitFor(() => expect(putSpy).toHaveBeenCalled());
     const body = putSpy.mock.calls[0][1];
-    expect(body).toHaveProperty('ondemand_enabled', true);
-    expect(body).toHaveProperty('ondemand_pre_roll_s', 30);
-    expect(body).toHaveProperty('ondemand_max_duration_s');
+    expect(body).not.toHaveProperty('ondemand_enabled');
+    expect(body).not.toHaveProperty('ondemand_pre_roll_s');
+    expect(body).not.toHaveProperty('ondemand_max_duration_s');
   });
 
   test('sends the general fields it does own', async () => {

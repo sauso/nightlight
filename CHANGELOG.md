@@ -49,6 +49,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **Saving General settings could undo a Recording setting you had just changed.** The General screen
+  was still writing back the three on-demand recording settings — the Record button switch, its
+  capture-before and its auto-stop — even though those moved to their own **Recording** screen and are
+  no longer shown on General. If one of them changed after General was opened (from another device, or
+  another tab), saving General silently put the old value back, with nothing shown to either person.
+  General now saves only the settings it actually shows.
 - **A camera tile could show “NaN°C” instead of a temperature.** A malformed MQTT sensor
   payload parses to `NaN`, which counts as a number, so it was rendered rather than skipped. A
   reading that cannot be read now shows nothing at all, which is what a missing reading looked
