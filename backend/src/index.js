@@ -29,7 +29,7 @@ import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder
 import { startMotionDetector, stopMotionDetector, isDetecting, stopAllMotionDetectors, motionLegWanted } from './lib/motionDetector.js';
 import { startOnvifMotion, stopOnvifMotion, isOnvifMotion, onvifMotionWanted, stopAllOnvifMotion } from './lib/onvifMotion.js';
 import { startSoundDetector, isSoundDetecting, stopAllSoundDetectors } from './lib/soundDetector.js';
-import { startClipCapture, isClipCapturing, stopAllClipCapture } from './lib/clipCapture.js';
+import { startClipCapture, clipRingWanted, isClipCapturing, stopAllClipCapture } from './lib/clipCapture.js';
 import { stopAllRecordings } from './lib/recordings.js';
 import { startClipStorage } from './lib/clipStorage.js';
 import { initPush } from './lib/push.js';
@@ -536,8 +536,10 @@ async function reconcileCameraPaths(attempt = 1) {
       if (cam.detect_sound_enabled && !isSoundDetecting(cam.id)) {
         await startSoundDetector(cam).catch((e) => logger.error(`[sound] start failed: ${e.message}`));
       }
-      // Keep the optional clip-recording segmenter alive the same way (its own ring off the same path).
-      if (cam.detect_record_clips && !isClipCapturing(cam.id)) {
+      // Keep the clip/recording ring alive the same way (its own leg off the same path). The condition
+      // lives in clipRingWanted — this used to test `detect_record_clips` alone, which left on-demand
+      // recording unarmed on every restart for anyone who hadn't also turned on detection clips.
+      if (clipRingWanted(cam) && !isClipCapturing(cam.id)) {
         startClipCapture(cam);
       }
     }

@@ -127,6 +127,27 @@ Recordings appear in the **Recordings** card on the child's page. **They are nev
 automatically** — unlike the other two kinds, these are keepsakes someone chose to keep, so deleting
 one is the only way to reclaim its space.
 
+**When the buffering starts.** As soon as a camera is added, and again whenever Nightlight restarts —
+you don't have to turn anything else on. Note what this costs, since it applies to *every* camera while
+this setting is on: one extra FFmpeg process per camera, reading the stream Nightlight already pulls
+(no second connection to the camera itself), writing a rolling buffer under `clips/.ring/`. The buffer
+is sized to the deeper of the two pre-rolls plus a small margin — about **a minute** at the default
+settings — and old segments are continuously discarded, so it doesn't grow. Turning **Show a Record
+button on each camera** off stops the buffering on every camera that isn't also saving detection clips.
+
+**No Record button on a camera?** The button hides itself when that camera isn't buffering, because
+reaching backward is the whole point and there'd be nothing to reach into. Check that on-demand
+recording is on above, and that the camera isn't disabled. If the clips folder itself failed its
+start-up check, the container log says so with a line beginning `[clips] CLIPS_DIR` — either *not
+writable* or *NOT a mapped volume*; see [Where recordings are stored](#where-recordings-are-stored).
+*(Older versions only started buffering a camera that also had **detection** clips switched on — which
+is off by default — so on a fresh install the button never appeared at all. If you are on one of those,
+turning detection clips on for that camera, or re-saving the camera, brings it back.)*
+
+**Record on a camera that's offline** will start and then save nothing — the buffer exists but has no
+frames in it, so the recording ends up marked failed rather than appearing on the child's page. The
+button doesn't currently distinguish "buffering" from "buffering something".
+
 ---
 
 ## Where recordings are stored
