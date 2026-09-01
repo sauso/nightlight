@@ -49,6 +49,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **Gotify settings could silently discard what you typed.** The **Server URL** and **Priority** boxes
+  accepted input before the saved config had finished loading, and the arriving config then replaced
+  it — your text vanished with nothing on screen to explain why. Both now wait for the load, like the
+  other fields on that page always did.
+- **The Firebase page went blank-and-dead with no explanation** when it couldn't reach the server to
+  ask whether push was set up: every control stayed greyed out and nothing said why. It now shows the
+  reason. The controls deliberately stay disabled — with the status unknown, the page will not guess
+  and tell you your Firebase files are missing when they may be perfectly fine.
+
 - **The Record button never appeared on a fresh install.** Recording on demand reaches *backward* in
   time, so it needs the camera to already be buffering — and the button hides itself when it isn't.
   Buffering was being started only for cameras that had **detection clips** switched on, which is off

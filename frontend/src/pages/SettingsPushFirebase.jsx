@@ -13,7 +13,15 @@ export default function SettingsPushFirebase() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    api.get('/push/status').then((s) => { setPushStatus(s); setFbEnabled(!!s.push_enabled); }).catch(() => {});
+    // ⚠️ On failure the page stays disabled ON PURPOSE, and that is the half worth protecting.
+    // `pushStatus` is both the data and the ready signal, so there is no safe default to fall back to:
+    // guessing `configured: false` would put "your Firebase files aren't detected" on screen — a
+    // specific, actionable, and quite possibly false claim — when the truth is that we do not know.
+    // A greyed-out page is the honest state. What was wrong was swallowing the reason with it, which
+    // left nothing on screen to explain why nothing worked; the error is now shown.
+    api.get('/push/status')
+      .then((s) => { setPushStatus(s); setFbEnabled(!!s.push_enabled); })
+      .catch((err) => setError(err.message));
   }, []);
 
   async function save(e) {
