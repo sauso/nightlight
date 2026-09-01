@@ -10,7 +10,7 @@ import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.j
 import { startMotionDetector, stopMotionDetector, motionLegWanted } from '../lib/motionDetector.js';
 import { startOnvifMotion, stopOnvifMotion, onvifMotionWanted } from '../lib/onvifMotion.js';
 import { startSoundDetector, stopSoundDetector } from '../lib/soundDetector.js';
-import { startClipCapture, stopClipCapture, isClipCapturing } from '../lib/clipCapture.js';
+import { startClipCapture, stopClipCapture, clipRingWanted, isClipCapturing } from '../lib/clipCapture.js';
 import { transitionSnapshotPath } from '../lib/bedTransitions.js';
 import {
   getRecentDetectionEvents,
@@ -686,6 +686,13 @@ router.post('/', requireAdmin, async (req, res) => {
   await startTranscoder(id, rtsp_url, mediamtx_path, name.trim());
   const added = db.prepare('SELECT * FROM cameras WHERE id = ?').get(id);
   if (subConfigured(added)) await startSubStream(added).catch((e) => logger.error(`[substream] add failed: ${e.message}`));
+  // Start buffering straight away. This call was simply MISSING: a new camera got no ring until
+  // something else happened to start one, so with on-demand recording on (the default) and detection
+  // clips off (also the default) the tile's Record button never appeared on a newly added camera —
+  // `can_record` stays false while nothing is buffering. Detection clips are off at this point by
+  // definition (they're configured later, on the detection screen), so on-demand is the only reason
+  // the ring can be wanted here — which is exactly the case that was missed.
+  startClipCapture(added);
   subscribeAllCameraTopics();
   res.status(201).json(publicCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(id), true));
 });
@@ -879,12 +886,26 @@ router.put('/:id/enabled', requireAdmin, async (req, res) => {
     } catch (e) {
       return res.status(502).json({ error: `Could not re-register stream with MediaMTX: ${e.message}` });
     }
-    await startTranscoder(req.params.id, existing.rtsp_url, existing.mediamtx_path, existing.name);
-    if (subConfigured(existing)) await startSubStream(existing).catch((e) => logger.error(`[substream] enable failed: ${e.message}`));
-    if (motionLegWanted(existing)) await startMotionDetector(existing).catch(() => {});
-    if (onvifMotionWanted(existing)) await startOnvifMotion(existing).catch(() => {});
-    if (existing.detect_sound_enabled) await startSoundDetector(existing).catch(() => {});
-    if (existing.detect_record_clips) startClipCapture(existing);
+    // ⚠️ THE START CALLS MUST SEE THE CAMERA AS IT IS ABOUT TO BE, NOT AS IT IS. `existing` was read
+    // at the top of this handler, before the UPDATE at the bottom, so its `disabled` is still 1 — and
+    // `motionLegWanted`, `onvifMotionWanted`, `startSoundDetector` and `clipRingWanted` ALL return
+    // early for a disabled camera. Handing them `existing` made four of the five restarts below
+    // silent no-ops: re-enabling a camera brought its stream back but left motion detection, ONVIF
+    // motion, sound detection and the recording ring stopped until `reconcileCameraPaths` noticed —
+    // up to 5 minutes later, and for the ring (before this change) never, since reconcile pre-gated
+    // it on detect_record_clips. Only the transcoder and sub-stream, which don't check the flag,
+    // actually came back.
+    // The UPDATE deliberately stays at the bottom: a failed upsertPath above returns 502 and must
+    // leave the camera recorded as disabled, so the flag is corrected here rather than written early.
+    const cam = { ...existing, disabled: 0 };
+    await startTranscoder(req.params.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
+    if (subConfigured(cam)) await startSubStream(cam).catch((e) => logger.error(`[substream] enable failed: ${e.message}`));
+    if (motionLegWanted(cam)) await startMotionDetector(cam).catch(() => {});
+    if (onvifMotionWanted(cam)) await startOnvifMotion(cam).catch(() => {});
+    if (cam.detect_sound_enabled) await startSoundDetector(cam).catch(() => {});
+    // Re-arm the ring on whichever grounds want it (clipRingWanted, not detect_record_clips alone —
+    // otherwise re-enabling a camera silently left its Record button missing).
+    startClipCapture(cam);
   } else {
     await stopTranscoder(req.params.id);
     await stopSubStream(existing).catch(() => {});
@@ -996,8 +1017,9 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
     } else {
       await stopSoundDetector(updated.id).catch(() => {});
     }
-    // Clip-recording segmenter follows its own opt-in.
-    if (updated.detect_record_clips) startClipCapture(updated);
+    // The ring follows BOTH the per-camera clip opt-in just saved and the global on-demand setting —
+    // turning detection clips off must not take the Record button away with them.
+    if (clipRingWanted(updated)) startClipCapture(updated);
     else stopClipCapture(updated.id);
   }
   // Re-subscribe MQTT so a new/changed/removed motion topic takes effect immediately.
