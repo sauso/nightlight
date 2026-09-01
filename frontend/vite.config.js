@@ -36,7 +36,24 @@ export default defineConfig({
     // it, a mutant that formatted times in the BROWSER's zone instead of the app's configured one
     // survived here — because this machine happens to share Melbourne's offset. This repo has already
     // shipped one daylight-saving bug; a timezone-dependent test suite is how the next one gets missed.
-    env: { TZ: 'UTC' },
+    //
+    // ⚠️⚠️ IT IS PINNED TO A ZONE THAT IS NOT UTC, AND THAT IS THE WHOLE POINT. It was `UTC`, which
+    // is deterministic but blind: under UTC, "parse this timestamp as local" and "parse it as UTC"
+    // are THE SAME OPERATION, so no test could ever catch the two being confused — and that confusion
+    // is exactly what shipped here before (a review window anchored on a literal `04:00Z`, and a
+    // daylight-saving bug). Measured 2026-09-01: with `TZ: 'UTC'`, a mutant dropping the `Z` from
+    // `utcMs` and a mutant building `addDays` in local time BOTH survived the whole suite. Under this
+    // zone both die.
+    //
+    // The choice is deliberate on three counts, and a replacement needs all three:
+    //   * NOT UTC — so local-vs-UTC confusion is visible at all;
+    //   * AHEAD of UTC — so local midnight falls on the PREVIOUS UTC day, which is what exposes
+    //     date-arithmetic that formats a local Date with `toISOString()`;
+    //   * NOT a zone any test passes as the app's own timezone — otherwise the original mutant this
+    //     pinning was introduced for (format in the browser's zone rather than the app's) comes back
+    //     to life, because the two zones would agree again.
+    // Pacific/Auckland is UTC+12/+13, observes DST, and is used nowhere as an app timezone.
+    env: { TZ: 'Pacific/Auckland' },
     globals: true,
     setupFiles: ['./test/setup.js'],
     include: ['test/**/*.test.{js,jsx}'],
