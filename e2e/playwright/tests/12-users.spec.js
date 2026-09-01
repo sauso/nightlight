@@ -104,10 +104,18 @@ test('the admin-only screen is not reachable in the caregiver’s browser either
   const view = await ctx.newPage();
   await view.goto('/#/settings/users');
 
+  // ⚠️ ORDER MATTERS, and getting it wrong makes this test worthless. `Shell` and `AdminProtected`
+  // both `return null` while auth is still loading (App.jsx), so for the first few hundred
+  // milliseconds after `goto` the page renders NOTHING — and an absence check would pass instantly,
+  // for a reason that has nothing to do with role gating. Removing `<AdminProtected>` entirely would
+  // still pass, because the button appears only after the assertion has already returned.
+  // So: wait for the app to have actually rendered FIRST, then assert what is missing from it.
+  // (Caught by an adversarial review; 08-recompute-night.spec.js already had this right.)
+  await expect(view.getByRole('link', { name: 'Live' }), 'they should still be signed in, just not here').toBeVisible();
+
   // AdminProtected sends them away rather than rendering. Asserting on the absence of the screen's
   // own control, not on where they land, keeps this about the gate rather than the redirect target.
   await expect(view.getByRole('button', { name: 'Add caregiver' })).toHaveCount(0);
-  await expect(view.getByRole('link', { name: 'Live' }), 'they should still be signed in, just not here').toBeVisible();
   await ctx.close();
 });
 

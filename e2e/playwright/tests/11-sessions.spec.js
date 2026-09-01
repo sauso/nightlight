@@ -137,6 +137,15 @@ test('changing my password signs my OTHER devices out and keeps this one', async
   });
   expect(evicted.status(), 'every OTHER device must be signed out').toBe(401);
 
+  // ★ ...and NOBODY ELSE'S session was touched. Added after an adversarial review pointed out that
+  // the two assertions above do not actually pin the `user_id = ?` half of that DELETE: without it,
+  // `DELETE FROM sessions WHERE id != ?` still keeps the changer's session and still evicts the other
+  // device, so both pass — while quietly signing out every other ACCOUNT in the house. It was caught
+  // only as collateral damage in a later test, which reads as an unrelated failure. This is the
+  // assertion that fails in place, for the right reason.
+  const admin = await page.request.get('/api/auth/me', await auth(page));
+  expect(admin.status(), 'one person changing their password must not sign everyone else out').toBe(200);
+
   // The old password no longer opens the account — which is the evidence the stored hash really
   // changed, rather than the request merely returning 200. (Only this direction is checked, not a
   // fresh login with the NEW password: the login budget is tight, and a password that had failed to

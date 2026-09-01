@@ -17,22 +17,28 @@ const { totp } = require('./totp');
 // admin via storageState; putting a second factor on that account would change how every later spec
 // would have to authenticate, and a failure mid-file would leave it stranded.
 //
-// ⚠️⚠️ THE LOGIN BUDGET — read this before adding a test here. `/login`, `/login/mfa`, `/me/password`
-// and `/me/mfa/disable` all sit behind the same rate limiter: **20 requests per 15 minutes, keyed by
-// IP** (routes/auth.js). Every request in the e2e stack arrives from the one Playwright container
-// through the one proxy, so specs 11, 12 and 13 share a SINGLE budget across the whole run, and the
-// run is well inside one window. Exceeding it produces a 429 in whichever test happens to be last —
-// which looks like a bug in that test and is not one. This file is deliberately economical for that
-// reason: assertions that would cost a login are made from `/auth/me/mfa` instead wherever they can
-// be. **MEASURED after a full run: 17 of the 20 spent, 3 to spare** (read it yourself with
-// `ratelimit-remaining` on any /login response made THROUGH the proxy — a request straight to the
-// app's published port lands in a different bucket and will tell you nothing).
+// ⚠️⚠️ THE LOGIN BUDGET — read this before adding a test here. ONE `loginLimiter` instance covers
+// FIVE routes — `/setup`, `/login`, `/login/mfa`, `/me/password` and `/me/mfa/disable` — at **20
+// requests per 15 minutes, keyed by `req.ip`** (routes/auth.js). Every request in the e2e stack
+// reaches the app from the one Caddy sidecar, so it all keys as a single client and the whole run
+// shares one budget: `01-first-run` spends one on `/setup`, then 08, 09, 11, 12 and 13 spend the
+// rest, inside a single 15-minute window. Exceeding it produces a 429 in whichever test happens to
+// be last — which looks like a bug in that test and is not one. This file is deliberately economical
+// for that reason: assertions that would cost a login are made from `/auth/me/mfa` instead wherever
+// they can be. (`/me/mfa/disable` is on the limiter but no spec calls it; enrolment — `/me/mfa/setup`
+// and `/me/mfa/enable` — is NOT limited, so those are free.)
+// **MEASURED after a full run: 17 of the 20 spent with #246's specs present, 16 without** — read it
+// yourself with `ratelimit-remaining` on a /login response made THROUGH the proxy; straight to the
+// app's published port is a different bucket and will tell you nothing.
 // **If you add a login here, take one out.**
 //
-// ⚠️ This is an E2E ARTIFACT, not a production limit. The app sets `trust proxy: 'loopback'`, so
-// behind the Caddy sidecar — which is a separate container, not loopback — every request looks
-// like it came from one client. In production the tunnel IS local, so each real client is keyed
-// separately and nobody shares a household's 20 attempts.
+// ⚠️ The SHARING is an e2e artifact — but do not read that as "production is fine". The app sets
+// `trust proxy: 'loopback'`, so `X-Forwarded-For` is honoured only when the proxy connects over
+// loopback. README.md's documented remote-access setup has SWAG reaching Nightlight **by LAN IP, not
+// by container name**, which is not loopback — so on that topology every remote user in the household
+// shares the same 20 attempts, exactly as they do here. Verified against express's `'loopback'` trust
+// function: a proxy at 172.18.0.5 or 192.168.1.100 yields `req.ip` = the proxy; only 127.0.0.1 yields
+// the real client. Tracked as its own issue rather than worked around here.
 //
 // ⚠️ Which is also why there is NO test that the limiter itself engages: proving it would mean
 // spending the budget it is protecting, and would 429 everything that ran afterwards. It is covered
@@ -119,13 +125,10 @@ test('enrolling through the Account screen turns two-factor on', async ({ browse
   await ctx.close();
 });
 
-test('a code from the WRONG secret is refused at enrolment time too', async ({ page }) => {
-  // Guards the enrolment check itself. `/me/mfa/enable` must verify against the pending secret rather
-  // than accept any six digits — and this account is already enrolled, so it must also refuse to
-  // re-enrol without turning the existing factor off first.
-  const res = await page.request.post('/api/auth/me/mfa/setup', {
-    headers: { Authorization: `Bearer ${userToken}` },
-  });
+test('an enrolled account cannot start a second enrolment', async ({ page }) => {
+  // Re-enrolling silently would replace a working secret with a pending one the user hasn't scanned
+  // yet, so the factor has to be turned off deliberately first.
+  const res = await page.request.post('/api/auth/me/mfa/setup', asUser());
   expect(res.status(), 'starting a second enrolment on an enrolled account must be refused').toBe(400);
   expect((await res.json()).error).toMatch(/already on/i);
 });
@@ -218,6 +221,48 @@ test('an admin can clear two-factor for someone locked out', async ({ page }) =>
   const after = await (await page.request.get('/api/auth/me/mfa', asUser())).json();
   expect(after.enabled, 'a reset must clear the second factor').toBe(false);
   expect(after.backup_codes_remaining, 'the old backup codes must go with it').toBe(0);
+});
+
+test('★ enrolment refuses a code that does not match the pending secret', async ({ page }) => {
+  // ★ ADDED AFTER AN ADVERSARIAL REVIEW, which found that `/me/mfa/enable`'s check —
+  // `if (!verifyToken(user.mfa_secret, code)) return 400` — was tested by NOTHING in this repo. The
+  // enrolment test above supplies a CORRECT code, so it passes whether or not that check exists;
+  // delete the check and a stranger who got hold of a signed-in session could switch two-factor on
+  // with any six digits, locking the real owner out of their own account.
+  //
+  // It runs last because it needs an UN-enrolled account, which is what the reset above just produced.
+  // Neither /me/mfa/setup nor /me/mfa/enable is rate limited, so this costs nothing from the login
+  // budget.
+  const setup = await page.request.post('/api/auth/me/mfa/setup', asUser());
+  expect(setup.status()).toBe(200);
+  const pending = (await setup.json()).secret;
+  expect(pending, 'a fresh enrolment should hand back a new secret').toMatch(/^[A-Z2-7]{16,}$/);
+
+  // A wrong code, chosen deterministically rather than at random. The server tolerates ±1 time step
+  // of clock drift, so "wrong" has to mean "not the code for the previous, current OR next step" —
+  // a random six digits would pass this test ~999999 times in a million and fail the other time.
+  const now = Date.now();
+  const accepted = [now - 30_000, now, now + 30_000].map((t) => totp(pending, t));
+  let wrong = String((Number(accepted[1]) + 1) % 1_000_000).padStart(6, '0');
+  while (accepted.includes(wrong)) wrong = String((Number(wrong) + 1) % 1_000_000).padStart(6, '0');
+
+  const refused = await page.request.post('/api/auth/me/mfa/enable', { ...asUser(), data: { code: wrong } });
+  expect(refused.status(), 'a code that does not match the pending secret must be refused').toBe(400);
+  // ⚠️ Matched around the apostrophe, not through it: the source uses a straight `'` here while most
+  // user-facing strings in this app use a typographic `’`, and a regex that assumes either one fails
+  // on a message that is perfectly correct.
+  expect((await refused.json()).error).toMatch(/code did.{0,3}t match/i);
+
+  // And the refusal left the factor off, rather than half-on.
+  const state = await (await page.request.get('/api/auth/me/mfa', asUser())).json();
+  expect(state.enabled, 'a refused code must not enable two-factor').toBe(false);
+
+  // The matching code still works, so the check discriminates rather than refusing everything.
+  const ok = await page.request.post('/api/auth/me/mfa/enable', {
+    ...asUser(),
+    data: { code: totp(pending) },
+  });
+  expect(ok.status(), 'the correct code must still enrol').toBe(200);
 });
 
 test.afterAll(async ({ browser }) => {
