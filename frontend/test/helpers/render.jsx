@@ -43,7 +43,12 @@ export function renderAs(
   let settingsValue;
   let camerasValue;
   const build = (opts) => {
-    auth = { user, loading: opts.loading, login: vi.fn(), logout: vi.fn(), refresh: vi.fn() };
+    // ⚠️ `opts.user`, not the `user` argument, so `rerenderWith({ user })` can publish a user that
+    // was not there at first paint. That transition is real — AuthContext resolves asynchronously, so
+    // every screen renders once with `user: null` — and a form that fails to pick the user up when it
+    // lands stays empty and then saves those blanks over the real values.
+    // The spies are rebuilt each time, so grab handles from the returned `auth` AFTER a rerenderWith.
+    auth = { user: opts.user, loading: opts.loading, login: vi.fn(), logout: vi.fn(), refresh: vi.fn() };
     settingsValue = { settings: { ...DEFAULT_SETTINGS, ...opts.settings }, loading: opts.loading, refresh: vi.fn() };
     camerasValue = { kids: opts.kids, cameras: opts.cameras, error: opts.error, refresh: vi.fn() };
     return (
@@ -57,7 +62,7 @@ export function renderAs(
     );
   };
 
-  let opts = { settings, cameras, kids, error, loading, route, ui };
+  let opts = { settings, cameras, kids, error, loading, route, ui, user };
   const result = render(build(opts));
 
   // ⚠️ RTL's own `rerender` replaces the tree WITHOUT the providers, so anything using a context

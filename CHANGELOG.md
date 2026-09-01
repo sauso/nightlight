@@ -58,6 +58,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - **The detection sensitivity sliders had no name a screen reader could read.** The label beside them
   was not attached to the control, so both announced only "slider, 50" with nothing to say what they
   adjusted.
+- **Pop-up dialogs were not announced as dialogs.** Every modal in the app — including the ones that
+  confirm a deletion or ask for your password — was read by assistive technology as just another part
+  of the page behind it. They are now proper dialogs, labelled by their own heading.
 
 - **Gotify settings could silently discard what you typed.** The **Server URL** and **Priority** boxes
   accepted input before the saved config had finished loading, and the arriving config then replaced
