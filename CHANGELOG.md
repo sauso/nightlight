@@ -49,6 +49,20 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **The Record button never appeared on a fresh install.** Recording on demand reaches *backward* in
+  time, so it needs the camera to already be buffering — and the button hides itself when it isn't.
+  Buffering was being started only for cameras that had **detection clips** switched on, which is off
+  by default and lives on a different screen, so a newly added camera never buffered and the button
+  never showed. Adding a camera didn't start it at all, and a restart took it away again. Every camera
+  now buffers whenever **Show a Record button on each camera** is on, as the setting has always
+  claimed. (Invisible to anyone who had also turned on detection clips, which armed the buffer for the
+  other reason.)
+- **Turning a camera back on only restarted its video.** Re-enabling a camera brought the stream back
+  but left motion detection, camera-reported (ONVIF) motion, sound detection and clip buffering
+  stopped, because each of them checks whether the camera is disabled and was being asked before the
+  camera had been marked enabled. They came back on their own within five minutes, when the periodic
+  reconcile noticed — but nothing appeared to be wrong in the meantime, so a camera that had just been
+  switched on silently missed anything that happened in those minutes.
 - **Saving General settings could undo a Recording setting you had just changed.** The General screen
   was still writing back the three on-demand recording settings — the Record button switch, its
   capture-before and its auto-stop — even though those moved to their own **Recording** screen and are
