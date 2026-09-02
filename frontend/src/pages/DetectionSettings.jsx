@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
@@ -14,9 +14,19 @@ const hhmmToMin = (s) => {
 
 const TITLES = { motion: 'Motion detection', sound: 'Sound detection', schedule: 'Alert schedule' };
 
-// Build the full detection state (all three slices) from a camera row — the /detection endpoint
-// replaces every field at once, so each screen must send the whole payload with only its slice
-// changed, preserving the others.
+// Build the full detection state (all three slices) from a camera row.
+//
+// Each screen sends the WHOLE payload with only its own slice changed. ⚠️ Not because the route
+// demands it: `PUT /:id/detection` keeps any field it is not sent — **with one exception,
+// `motion_enabled`, which is read as `motion_enabled ? 1 : 0` with no undefined check, so omitting it
+// switches motion OFF.** Both halves are verified in backend/test/detection-route.test.js. The
+// keep-on-absent rule is why the camera tile's quick toggles can get away with omitting `zone` and
+// `record_clips`; the exception is why no caller may omit `motion_enabled`. It is because this
+// component holds all three slices
+// in one state object and has no way to know which fields the user actually touched. That makes the
+// round-trip load-bearing: whatever `fromCam` reads, `toPayload` writes back — so a field misread
+// here is not dropped, it is sent back WRONG, and an edit on the sound screen rewrites the motion
+// zone or the alert window with nothing on screen to show it.
 function fromCam(cam) {
   const hasWindow = cam.detect_start !== cam.detect_end;
   return {
@@ -152,10 +162,15 @@ function EnableToggle({ checked, onChange, label, sub }) {
 }
 
 function Slider({ label, value, onChange, lowLabel, highLabel }) {
+  // The label is tied to the input with a generated id. Without the association the range control has
+  // NO accessible name — a screen reader announces "slider, 50" with no indication of what it adjusts,
+  // and the two sliders on this screen's sibling routes are indistinguishable. useId rather than a
+  // hand-written id because this component is rendered on more than one screen.
+  const id = useId();
   return (
     <div className="field" style={{ marginTop: 12 }}>
-      <label>{label}: {value}</label>
-      <input type="range" min="1" max="100" value={value} onChange={(e) => onChange(Number(e.target.value))} />
+      <label htmlFor={id}>{label}: {value}</label>
+      <input id={id} type="range" min="1" max="100" value={value} onChange={(e) => onChange(Number(e.target.value))} />
       <div className="slider-legend"><span>{lowLabel}</span><span>{highLabel}</span></div>
     </div>
   );

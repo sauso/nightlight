@@ -40,6 +40,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   - Reviews are kept forever, and an event you have judged keeps its frame past the usual 45 days.
   - See **README → Sleep tracking**.
 
+- **The alert schedule is documented** — its default, that the window is shared by motion and sound,
+  that overnight windows work, and that it uses the app timezone (which is **UTC** until you set it).
+  With the contrast that catches people out: it silences *alerts* only — **sleep tracking keeps
+  recording through the quiet hours**, unlike turning a detector off. Also documents Pushover's
+  **Device** field (where a blank value *clears* rather than keeps) and Gotify's **Priority** default.
+
 - **Camera detection settings are documented** — motion and sound sensitivity, confirm and
   cooldown, each with its default and its range, plus what sound sensitivity means in dB over a
   room’s own ambient level. Includes a **known limitation**: a constant noise source such as a
@@ -48,6 +54,27 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   it. Sleep and wake *times* are unaffected; only the awake/asleep totals are.
 
 ### Fixed
+
+- **Two-factor could tell you it was off when it simply couldn't check.** If the account screen failed
+  to reach the server, the two-factor card read a confident **Off** — to an account that may well have
+  had it on. It now says **Unknown** and explains why, rather than claiming an account is unprotected
+  on no evidence.
+
+- **The detection sensitivity sliders had no name a screen reader could read.** The label beside them
+  was not attached to the control, so both announced only "slider, 50" with nothing to say what they
+  adjusted.
+- **Pop-up dialogs were not announced as dialogs.** Every modal in the app — including the ones that
+  confirm a deletion or ask for your password — was read by assistive technology as just another part
+  of the page behind it. They are now proper dialogs, labelled by their own heading.
+
+- **Gotify settings could silently discard what you typed.** The **Server URL** and **Priority** boxes
+  accepted input before the saved config had finished loading, and the arriving config then replaced
+  it — your text vanished with nothing on screen to explain why. Both now wait for the load, like the
+  other fields on that page always did.
+- **The Firebase page went blank-and-dead with no explanation** when it couldn't reach the server to
+  ask whether push was set up: every control stayed greyed out and nothing said why. It now shows the
+  reason. The controls deliberately stay disabled — with the status unknown, the page will not guess
+  and tell you your Firebase files are missing when they may be perfectly fine.
 
 - **The Record button never appeared on a fresh install.** Recording on demand reaches *backward* in
   time, so it needs the camera to already be buffering — and the button hides itself when it isn't.
