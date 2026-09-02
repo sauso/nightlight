@@ -83,6 +83,14 @@ export default defineConfig({
         // A dnd-kit wrapper that renders CameraTile — mounting it mounts the whole player stack, so it
         // inherits the exclusion above rather than being untestable in itself.
         'src/components/SortableCameraTile.jsx',
+        // ⚠️ LiveMonitor.jsx was listed here and has been REMOVED, deliberately, as a worked example
+        // of the rule above. The stated reason was "it mounts the player stack, so jsdom cannot run
+        // it" — and that turned out to be simply FALSE: it renders fine under jsdom, real
+        // CameraTile and all (jsdom logs a "Not implemented: HTMLMediaElement.load()" notice and
+        // nothing throws). It was excluded because it LOOKS untestable, which is exactly the
+        // reasoning this list is supposed to forbid. It is now tested (liveMonitor.test.jsx).
+        // The lesson, since it nearly cost a real piece of logic its coverage: an entry here has to
+        // be VERIFIED by trying to render the thing, not assumed from what it imports.
         'src/components/InstallPrompt.jsx', // the `beforeinstallprompt` PWA event
         // --- native shell: Capacitor plugins are simply absent outside the APK ---
         'src/lib/nativeBridge.js',

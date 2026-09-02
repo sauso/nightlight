@@ -76,6 +76,14 @@ export default function TwoFactorSection() {
   }
 
   const enabled = !!status?.enabled;
+  // ⚠️ "not on" and "we could not find out" are different, and only one of them is safe to assert.
+  // `enabled` is false in both cases, so without this the card said a confident **Off** — and
+  // "Require a 6-digit code…" underneath it — to someone whose account may well have two-factor ON.
+  // Telling a protected account it is unprotected is the one wrong answer this card can give: it
+  // invites an enrolment that will fail, and it undermines trust in every other status in the app.
+  // Unknown is shown as unknown. The set-up button is already `disabled={busy || !status}`, so no
+  // action is offered on a state we cannot see — this only stops the CLAIM being made.
+  const unknown = !status && !!error;
 
   return (
     <>
@@ -85,9 +93,11 @@ export default function TwoFactorSection() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <ShieldCheck size={22} color={enabled ? 'var(--live)' : 'var(--text-secondary)'} aria-hidden="true" />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 600 }}>{enabled ? 'On' : 'Off'}</div>
+            <div style={{ fontWeight: 600 }}>{unknown ? 'Unknown' : enabled ? 'On' : 'Off'}</div>
             <div className="camera-tile__sub">
-              {enabled
+              {unknown
+                ? "Couldn't check whether two-factor is on for this account."
+                : enabled
                 ? `${status.backup_codes_remaining} backup code${status.backup_codes_remaining === 1 ? '' : 's'} left`
                 : 'Require a 6-digit code from an authenticator app at login.'}
             </div>
