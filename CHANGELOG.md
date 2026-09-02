@@ -55,6 +55,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **The MQTT settings page could go blank instead of loading.** If the server answered with an empty
+  or unreadable body — a proxy that strips it, a truncated response — the page crashed to the
+  "Something went wrong" screen rather than simply showing empty fields. It now opens normally and
+  you can fill it in.
 - **A white-noise machine could make a whole night read as "awake".** Each room's ambient sound level
   is learned continuously, but a noise that started up mid-night and settled between *half* and *all*
   of the alert margin above that level was neither absorbed into it nor tracked by it — so the ambient

@@ -106,6 +106,27 @@ export default defineConfig({
       // Phase 5 target: >= 80% of the front end that CAN be tested. Raise as suites land; never lower
       // to go green, and never widen the exclude list to go green either — that is the same thing
       // wearing a different hat, and it is why each entry above has to justify itself.
+      //
+      // ✅ MET 2026-09-02: 87.45 statements / 82.93 branches / 80.84 functions / 90.16 lines, and CI's
+      // front-end job was promoted from `npm test` to `npm run test:coverage` in the same commit, so
+      // this is now a BLOCKING gate rather than a number nobody reads.
+      //
+      // ⚠️⚠️ THE FUNCTION PERCENTAGE IS NOT DETERMINISTIC RUN TO RUN. Measured three times on the
+      // SAME tree and the same machine: 80.71, 80.59, 80.59 — a swing of about 0.12 of a point, which
+      // is one or two functions out of ~810. So this gate is not "clear 80", it is "clear 80 by more
+      // than the noise". The first attempt cleared it by 0.09 and went red on CI.
+      //
+      // ⚠️ I FIRST WROTE THAT UP AS "the runner measures lower than a dev machine". That was wrong,
+      // and an adversarial review disproved it: a clean checkout of that same commit measured 79.97%
+      // LOCALLY — identical to the runner. The 80.09% I had quoted came from a dirty working tree.
+      // ★ Two lessons, both cheap: measure coverage from a CLEAN tree before quoting a number, and do
+      // not attach a causal story to two data points.
+      //
+      // ★ The nondeterminism itself is a smell worth chasing one day: coverage varying between runs
+      // means some code path executes only sometimes, which usually means async work escaping past a
+      // test boundary. Recorded as a known issue, not diagnosed.
+      // If this goes red, the answer is more coverage — never a smaller number on this line, and
+      // never a wider exclude list.
       thresholds: { lines: 80, functions: 80, branches: 75, statements: 80 },
     },
   },

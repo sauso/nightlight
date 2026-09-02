@@ -12,14 +12,20 @@ export default function SettingsMqtt() {
 
   useEffect(() => {
     api.get('/settings/mqtt').then((mqtt) => {
-      setForm((f) => ({
-        ...f,
-        mqtt_enabled: mqtt.mqtt_enabled,
-        mqtt_host: mqtt.mqtt_host,
-        mqtt_port: mqtt.mqtt_port,
-        mqtt_username: mqtt.mqtt_username,
-      }));
-      setPasswordSet(mqtt.mqtt_password_set);
+      // ⚠️ READ THE FIELDS HERE, NOT INSIDE THE UPDATER. `api.get` returns null for an empty or
+      // unparseable body on an otherwise-200 response, and dereferencing it inside `setForm(f => …)`
+      // throws when REACT runs the updater, on a later tick — by which time the `.catch` below has
+      // long since gone. The result was an uncaught TypeError that took the whole page to the crash
+      // screen, with a `.catch(() => {})` sitting right there looking like it handled it.
+      const cfg = mqtt || {};
+      const next = {
+        mqtt_enabled: cfg.mqtt_enabled,
+        mqtt_host: cfg.mqtt_host,
+        mqtt_port: cfg.mqtt_port,
+        mqtt_username: cfg.mqtt_username,
+      };
+      setForm((f) => ({ ...f, ...next }));
+      setPasswordSet(cfg.mqtt_password_set);
     }).catch(() => {});
   }, []);
 
