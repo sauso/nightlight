@@ -16,6 +16,17 @@
 //
 // No database, no ffmpeg, no timers: the analyser takes `now` as an argument, so a 12-minute night
 // replays in milliseconds.
+//
+// ★ MUTATION RESULTS, 2026-09-02: 41 mutants run across two sweeps, 39 killed, no-op control survived.
+// The two that survive are judged EQUIVALENT, written down so the next person does not re-derive them:
+//   * the dead-band ESCAPE using the trailing mean rather than the instantaneous reading. The branch is
+//     only reachable after five minutes of sustained elevation, where the two expressions are equal to
+//     within the signal's own variance and converge to the same floor. The same mutation in the
+//     below-band branch, where it does matter, IS killed.
+//   * the staleness reset not clearing `loudSince`. It also clears `recent`, so the first reading back
+//     cannot be `confirmed` and necessarily takes the `else` branch, which zeroes `loudSince` anyway.
+//     The line is kept as defence in depth: it stops being redundant the moment anyone touches the
+//     window reset beside it.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -59,10 +70,21 @@ function drive(a, levels, startT = T0) {
   return out;
 }
 
-/** A settled analyser sitting on a QUIET room, plus the index the caller's own sequence starts at. */
+// Where every "settled analyser" fixture hands over to the sequence under test.
+const START = T0 + 60000;
+
+/**
+ * An analyser that has seeded and settled on a QUIET room, handing over CONTIGUOUSLY at `START`.
+ *
+ * ⚠️ The contiguity is load-bearing, not tidiness. This helper used to stop at T0+34.8 s while every
+ * caller began at T0+60 s, leaving a 25 s hole between them — harmless until the analyser learned to
+ * recognise a hole in the stream, at which point four fixtures silently began each test by throwing
+ * away the trailing window they were about to measure. Real audio has no such hole, so a fixture with
+ * one is not testing the code that runs.
+ */
 function settled() {
   const a = analyser();
-  drive(a, rep(SEED_WINDOWS + secs(30), QUIET));
+  drive(a, rep((START - T0) / READING_MS, QUIET));
   return a;
 }
 
@@ -88,11 +110,14 @@ function firstHold(rows, from) {
 
 test('reports nothing until it has SEED_WINDOWS readings, then seeds from their MEDIAN', () => {
   const a = analyser();
-  // 25 windows, five of them very loud and scattered. The median is the quiet floor; the MEAN would
-  // be ~-53. This is the discriminating case: the baseline used to be seeded from a SINGLE window, so
-  // a relaunch landing during a cry seeded ambient AT CRY LEVEL — and it relaunches 5 s after any exit.
-  const levels = rep(SEED_WINDOWS, QUIET);
-  for (const i of [0, 3, 11, 19, 24]) levels[i] = -20;
+  // ⚠️ THREE distinct levels, not two. My first fixture put 5 of 25 windows at cry level and the rest
+  // at the floor — which the median passes, but so does p25, p75, the min, and every other order
+  // statistic from index 0 to 19, because they all land on the same value. It discriminated
+  // median-from-mean and nothing else. Here 8 low / 9 middle / 8 high means the median (index 12) is
+  // the ONLY statistic that returns QUIET: p25 lands on -70, p75 on -20, min on -70.
+  assert.equal(SEED_WINDOWS, 25, 'the fixture below is hand-sized to this and does not track it');
+  const levels = [...rep(8, -70), ...rep(9, QUIET), ...rep(8, -20)];
+  assert.equal(levels.length, 25);
 
   const rows = drive(a, levels);
   for (let i = 0; i < SEED_WINDOWS - 1; i++) {
@@ -107,6 +132,18 @@ test('reports nothing until it has SEED_WINDOWS readings, then seeds from their 
   // ONLY evidence the 7.9-hour freeze ever existed — it is production diagnostics, not a test hook.
   assert.equal(a.baseline, QUIET);
   assert.equal(analyser().baseline, null, 'and it reads null before the analyser has seeded');
+});
+
+test('KNOWN LIMIT: a stream that is loud for MOST of the seed still seeds high', () => {
+  // The median protects against a few loud windows, not against a continuously loud stream. If the
+  // detector comes up in the middle of a long cry, more than half the seed is the cry and the floor
+  // is set at cry level — the exact failure the seeding change is aimed at, merely made much less
+  // likely. Written down here because the commit message for that change overstated it, and because
+  // silence about a limit is the thing this repo's rules forbid. Bounded: the EMA drags the floor
+  // back down within ~20 s once the room quietens, which is why it is a limit and not a defect.
+  const a = analyser();
+  const rows = drive(a, [...rep(15, -20), ...rep(10, QUIET)]);
+  assert.equal(rows[SEED_WINDOWS - 1].baseline, -20);
 });
 
 test('true digital silence (-Infinity) neither seeds nor moves the baseline', () => {
@@ -132,7 +169,7 @@ test('a +9 dB step INSIDE the dead band is eventually learned, not frozen foreve
   // consecutive level lines = 7.9 unbroken hours pinned to one value, which is what a white-noise
   // machine switched on at bedtime did every single night.
   const a = settled();
-  const rows = drive(a, rep(secs(12 * 60), QUIET + 9), T0 + 60000);
+  const rows = drive(a, rep(secs(12 * 60), QUIET + 9), START);
 
   const last = rows[rows.length - 1];
   assert.ok(
@@ -162,7 +199,7 @@ test('a reading BELOW the ambient floor records 0, never a negative excursion', 
   // silently discard the window instead of recording a quiet minute — the timeline would then have
   // fewer sound windows than minutes and read as "no data" rather than "quiet".
   const a = settled();
-  const r = a.push(QUIET - 12, T0 + 60000);
+  const r = a.push(QUIET - 12, START);
   assert.equal(r.recordDb, 0);
 });
 
@@ -172,7 +209,7 @@ test('the freeze lasts EXACTLY DEAD_BAND_MAX_MS — not one reading more or less
   // ramp length: the first reading that holds the baseline is when the freeze clock starts, and the
   // next reading that moves it must be exactly DEAD_BAND_MAX_MS later.
   const a = settled();
-  const rows = drive(a, rep(secs(12 * 60), QUIET + 9), T0 + 60000);
+  const rows = drive(a, rep(secs(12 * 60), QUIET + 9), START);
 
   const holdIdx = firstHold(rows, 1);
   assert.ok(holdIdx > 0, 'the baseline must actually freeze — the dead band is not being entered');
@@ -196,11 +233,22 @@ test('the dead band still protects a 4-minute moderate cry from raising its own 
   // A mutant shortening the escape to REBASELINE_MS (45 s) — the obvious "just reuse the constant"
   // simplification — dies here.
   const a = settled();
-  const rows = drive(a, rep(secs(4 * 60), QUIET + 9), T0 + 60000);
+  const rows = drive(a, rep(secs(4 * 60), QUIET + 9), START);
 
   const holdIdx = firstHold(rows, 1);
   assert.ok(holdIdx > 0);
   const frozenAt = rows[holdIdx].baseline;
+  // The leak, pinned. The step's leading edge sits below margin/2 for its first 14 readings while the
+  // 20-reading trailing average fills, and the EMA tracks those — lifting the floor ~1.18 dB before
+  // the freeze locks in. Asserted rather than merely described, because the SIZE of the leak is what
+  // makes the excursion below read 7.8 rather than 9, and because an EMA that tracked the trailing
+  // AVERAGE instead of the instantaneous reading would leak only ~0.2 dB and pass every other
+  // assertion in this file.
+  assert.ok(
+    Math.abs(frozenAt - (QUIET + 1.18)) < 0.15,
+    `expected the pre-freeze leak to be ~1.18 dB, got ${(frozenAt - QUIET).toFixed(2)}`
+  );
+
   const last = rows[rows.length - 1];
   assert.equal(last.baseline, frozenAt, 'a 4-minute moderate cry must not move the ambient floor');
   // Still comfortably above sleepAnalysis's SOUND_ACTIVE (6 dB), which is the threshold that decides
@@ -218,7 +266,7 @@ test('an OSCILLATING source that crosses the margin still escapes the freeze', (
   // band either. It is continuously elevated the whole time, so it must be treated as ambient.
   const block = [...rep(secs(30), QUIET + 13), ...rep(secs(30), QUIET + 7)];
   const a = settled();
-  const rows = drive(a, Array.from({ length: 12 }, () => block).flat(), T0 + 60000);
+  const rows = drive(a, Array.from({ length: 12 }, () => block).flat(), START);
 
   const last = rows[rows.length - 1];
   assert.ok(
@@ -232,8 +280,145 @@ test('a quiet room ratchets the baseline DOWN normally (the guard is not one-sid
   // `over < margin/2`) while blocking every rise — which is exactly what made the band absorbing.
   // Falling must still work.
   const a = settled();
-  const rows = drive(a, rep(secs(3 * 60), QUIET - 6), T0 + 60000);
+  const rows = drive(a, rep(secs(3 * 60), QUIET - 6), START);
   assert.ok(Math.abs(rows[rows.length - 1].baseline - (QUIET - 6)) < 0.05, 'tracks a quieter room');
+});
+
+test('the freeze clock is re-armed once the floor tracks again, so EVERY later cry is protected', () => {
+  // ⚠️ FOUND BY AN ADVERSARIAL REVIEW, 2026-09-02, as a SURVIVING MUTANT: deleting the
+  // `frozenSince = 0` in the below-band branch left every test in this file green while destroying
+  // the dead band for the whole rest of the night. It is the only reset outside the absorb, so
+  // without it the clock keeps running from the FIRST freeze of the evening and every subsequent
+  // moderate cry is absorbed on its first reading.
+  //
+  // The shape is an ordinary night: white-noise machine on (freeze, then escape after 5 min), the
+  // machine off again, then the child cries. That cry must get the same 5 minutes of protection as
+  // the one in the test above — a single-episode fixture cannot see this at all.
+  const a = settled();
+  let t = START;
+  const machineOn = drive(a, rep(secs(12 * 60), QUIET + 9), t);
+  t = machineOn[machineOn.length - 1].t + READING_MS;
+  const machineOff = drive(a, rep(secs(3 * 60), QUIET + 9 - 9), t);
+  t = machineOff[machineOff.length - 1].t + READING_MS;
+
+  const cry = drive(a, rep(secs(4 * 60), QUIET + 9), t);
+  const holdIdx = firstHold(cry, 1);
+  assert.ok(holdIdx > 0, 'the second episode must freeze the floor too');
+  const last = cry[cry.length - 1];
+  assert.equal(last.baseline, cry[holdIdx].baseline, 'the second 4-minute cry must be protected too');
+  assert.ok(last.recordDb > 6, `and must still read as loud, got ${last.recordDb}`);
+});
+
+test('the dead band starts at HALF the margin — a +6 dB source is learned, not frozen', () => {
+  // ⚠️ ALSO A SURVIVING MUTANT: every other fixture here steps to +9 or +15 dB, where `margin * 0.5`
+  // and `margin * 0.4` (or 0.6, or `<` vs `<=`) behave identically, so the edge itself was untested
+  // in both directions. +6 dB is the shape that separates them: under the shipped half-margin the
+  // trailing average never clears the edge before the EMA has followed it, so the source is simply
+  // learned; move the edge down and it freezes with the floor ~5 dB low — which is exactly the
+  // "reads as awake all night" failure. The 0.5 is also a user-facing promise in
+  // docs/notifications.md ("between half and all of the margin"), and nothing else pins it.
+  const a = settled();
+  const rows = drive(a, rep(secs(4 * 60), QUIET + 6), START);
+  const last = rows[rows.length - 1];
+  assert.ok(
+    Math.abs(last.baseline - (QUIET + 6)) < 0.1,
+    `a +6 dB source is below the dead band and must be tracked, got ${last.baseline}`
+  );
+  assert.ok(last.recordDb < 0.1, `so its excursion decays, got ${last.recordDb}`);
+});
+
+test('a level sitting EXACTLY on half the margin is INSIDE the dead band — the comparison is <', () => {
+  // The mirror of the exact-margin test further down, and the other end of the promise in
+  // docs/notifications.md. `<` vs `<=` differ only when `over` lands precisely on `margin/2`, which
+  // needs values that are exact in binary: sensitivity 1 gives margin === 18, half is 9, and a window
+  // of identical -51s against a floor of exactly -60 gives over === 9 with no rounding at all.
+  const a = createSoundAnalyser({ margin: marginDb(1), trailN: TRAIL_N, cooldownMs: COOLDOWN_MS });
+  const rows = drive(a, [...rep(SEED_WINDOWS, -60), ...rep(10, -51)]);
+  const post = rows.slice(SEED_WINDOWS);
+  assert.equal(post[0].over, 9, 'the fixture must land exactly on half the margin');
+  for (const r of post) assert.equal(r.baseline, -60, 'exactly half the margin must freeze, not track');
+});
+
+// ---------------------------------------------------------------------------------------------
+// A hole in the stream — the analyser outlives an ffmpeg restart, so it has to notice one
+// ---------------------------------------------------------------------------------------------
+
+  // The ordinary restart is 5 s of back-off plus up to 45 s waiting for the MediaMTX path, so a
+  // 30–50 s hole is routine, not pathological. Everything the analyser holds except the baseline is
+  // wall-clock or positional, so before the staleness reset the OUTAGE ITSELF counted as observed
+  // audio. All three cases below were demonstrated failing on 2026-09-02.
+
+  test('a gap does NOT let an in-progress cry absorb itself from a reading of SILENCE', () => {
+    const a = settled();
+    // 20 s above the margin: `loudSince` is set, but 45 s has not elapsed so nothing is absorbed.
+    const cry = drive(a, rep(secs(20), QUIET + 15), START);
+    const before = cry[cry.length - 1].baseline;
+
+    // The stream drops for 30 s and the child stops crying during it. The first reading back is a
+    // SILENT room — and it used to move the floor from -58.8 to -45.8, because the stale trailing
+    // window still held the cry and `now - loudSince` had cleared 45 s by sitting in the gap.
+    const back = a.push(QUIET, cry[cry.length - 1].t + 30000);
+    assert.ok(
+      Math.abs(back.baseline - before) < 0.1,
+      `a silent reading after an outage must not absorb, floor went ${before} -> ${back.baseline}`
+    );
+    assert.equal(back.confirmed, false, 'and the stale trailing window must be discarded, not reused');
+  });
+
+  test('a gap does not let elapsed OUTAGE count toward the 45-second absorb', () => {
+    const a = settled();
+    const cry = drive(a, rep(secs(20), QUIET + 15), START);
+    const t = cry[cry.length - 1].t;
+    // Same cry, still going after a 30 s hole. It must serve its 45 s of OBSERVED elevation from
+    // scratch, so the reading immediately back cannot be the absorbing one.
+    const back = a.push(QUIET + 15, t + 30000);
+    assert.ok(Math.abs(back.baseline - cry[cry.length - 1].baseline) < 0.1, 'no absorb on the first reading back');
+    const after = drive(a, rep(secs(20), QUIET + 15), t + 30000 + READING_MS);
+    assert.ok(after.every((r, i) => i === 0 || r.baseline - after[i - 1].baseline < 1),
+      'and none in the following 20 s either — the 45 s clock restarted');
+  });
+
+  test('a gap does not let elapsed OUTAGE count toward the dead-band escape', () => {
+    const a = settled();
+    const held = drive(a, rep(secs(60), QUIET + 9), START);
+    const frozenAt = held[held.length - 1].baseline;
+    // 299 s of outage plus the 60 s already served used to clear DEAD_BAND_MAX_MS on the first
+    // reading back, having observed one minute of elevation.
+    const back = a.push(QUIET + 9, held[held.length - 1].t + 299000);
+    assert.equal(back.baseline, frozenAt, 'the escape must be earned by observed elevation only');
+  });
+
+  test('a NORMAL, JITTERY cadence is never mistaken for a gap', () => {
+    // ⚠️⚠️ THE JITTER IS THE POINT, AND EVERY OTHER FIXTURE IN THIS FILE LACKS IT. `drive` advances
+    // exactly 200 ms per reading, but in production `now` is `Date.now()` at the moment a 1600-sample
+    // PCM window finishes arriving off a network RTSP stream — it is never grid-aligned. A staleness
+    // window of one reading interval passes the grid-aligned fixture perfectly (200 > 200 is false)
+    // and, on a real stream, would clear the trailing window on almost every reading, so nothing
+    // would ever be confirmed and the camera would never alert again. That mutant survived the whole
+    // suite until this test existed.
+    const a = settled();
+    let t = START;
+    let confirmed = 0;
+    let alerted = 0;
+    for (let i = 0; i < secs(30); i++) {
+      const r = a.push(QUIET + 15, t);
+      if (r.confirmed) confirmed++;
+      if (r.wouldAlert) alerted++;
+      t += 190 + ((i * 7) % 26); // 190–215 ms, deterministic, never a multiple of 200
+    }
+    assert.ok(confirmed > 100, `a jittery stream must still fill the window, confirmed ${confirmed}`);
+    assert.ok(alerted > 0, 'and must still alert');
+  });
+
+  test('the learned floor SURVIVES the gap — that is the whole point of the analyser outliving a restart', () => {
+    const a = settled();
+    const learned = drive(a, rep(secs(12 * 60), QUIET + 9), START);
+    const floor = learned[learned.length - 1].baseline;
+    const back = a.push(QUIET + 9, learned[learned.length - 1].t + 60000);
+    // ⚠️ The staleness reset must NOT throw away `baseline`. Re-seeding on every restart is the
+    // defect this file's hoisting fixed; the reset exists only to drop evidence we did not observe.
+    assert.ok(Math.abs(back.baseline - floor) < 0.1, `floor kept across the gap, got ${back.baseline}`);
+    assert.ok(back.recordDb < 0.1, 'so the room still reads as quiet immediately, with no relearning hole');
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -242,7 +427,7 @@ test('a quiet room ratchets the baseline DOWN normally (the guard is not one-sid
 
 test('a sustained ABOVE-margin source is absorbed exactly REBASELINE_MS after it crosses', () => {
   const a = settled();
-  const rows = drive(a, rep(secs(3 * 60), QUIET + 15), T0 + 60000);
+  const rows = drive(a, rep(secs(3 * 60), QUIET + 15), START);
 
   const crossIdx = rows.findIndex((r) => r.confirmed && r.over >= MARGIN);
   assert.ok(crossIdx > 0, 'a +15 dB source must clear the 11.07 dB margin');
@@ -259,6 +444,41 @@ test('a sustained ABOVE-margin source is absorbed exactly REBASELINE_MS after it
     `absorb sets the floor to the new level, got ${rows[absorbIdx].baseline}`
   );
   assert.equal(rows[absorbIdx].wouldAlert, false, 'the absorbing reading never also alerts');
+
+  // ⚠️ THE ABSORBING READING STILL SCORES ITSELF AGAINST THE OLD FLOOR. `recordDb` is computed before
+  // the baseline moves, so this minute is recorded as the ~15 dB it actually was. Computing it after
+  // would record 0.0 — and since `sound_peak` is a per-MINUTE MAXIMUM, that single reading is enough
+  // to flip a genuinely loud minute to "quiet" in `activity_samples`. Found as a surviving mutant.
+  assert.ok(
+    rows[absorbIdx].recordDb > 13,
+    `the absorbing reading records the excursion it observed, got ${rows[absorbIdx].recordDb}`
+  );
+
+  // ⚠️ AND THE TRAILING WINDOW IS EMPTIED. Without that, the very next reading is `confirmed` against
+  // an average still made of pre-absorb (loud) readings measured against the NEW floor, so it can
+  // alert immediately on a source that was just declared ambient. Also a surviving mutant.
+  assert.equal(rows[absorbIdx + 1].confirmed, false, 'the window is rebuilt from scratch after an absorb');
+  for (let i = 1; i < TRAIL_N; i++) {
+    assert.equal(rows[absorbIdx + i].confirmed, false, `still refilling ${i} readings after the absorb`);
+  }
+  assert.equal(rows[absorbIdx + TRAIL_N].confirmed, true, 'confirmed again exactly trailN readings later');
+});
+
+test('the dead-band escape resumes the EMA gradually — it does NOT absorb in one step', () => {
+  // ⚠️ Surviving mutant: replacing the escape's `baseline += ALPHA * (rms - baseline)` with the
+  // absorb branch's `baseline += over` reaches the same floor and passes every other assertion here.
+  // The gradual form is deliberate and the reason is in the source: it climbs continuously to the new
+  // floor rather than stepping once every 5 minutes. A step would also drop the recorded excursion
+  // from ~9 dB to 0 in a single minute, which reads downstream as the room falling silent instantly.
+  const a = settled();
+  const rows = drive(a, rep(secs(12 * 60), QUIET + 9), START);
+  const holdIdx = firstHold(rows, 1);
+  const resumeIdx = firstMove(rows, holdIdx + 1);
+
+  const jump = rows[resumeIdx].baseline - rows[resumeIdx - 1].baseline;
+  // One EMA step over a ~7.8 dB gap is 0.01 x 7.8 = 0.078 dB. An absorb would be the whole 7.8.
+  assert.ok(jump > 0 && jump < 0.5, `the escape must be a crawl, not a step — moved ${jump.toFixed(3)} dB`);
+  assert.ok(rows[resumeIdx].recordDb > 6, 'and the room still reads as loud on that reading');
 });
 
 test('a 3-second burst is not absorbed, and the floor returns to the quiet value afterwards', () => {
@@ -266,7 +486,7 @@ test('a 3-second burst is not absorbed, and the floor returns to the quiet value
   // ambient floor. An absorb is a STEP (the whole excursion folded in at once), so it is distinguished
   // from the EMA's ordinary crawl by the size of a single reading's move.
   const a = settled();
-  const burst = drive(a, rep(secs(3), QUIET + 15), T0 + 60000);
+  const burst = drive(a, rep(secs(3), QUIET + 15), START);
   for (let i = 1; i < burst.length; i++) {
     assert.ok(
       Math.abs(burst[i].baseline - burst[i - 1].baseline) < 1,
@@ -302,7 +522,7 @@ test('a freshly seeded analyser cannot alert until the trailing window holds tra
 
 test('an alert needs the trailing AVERAGE above the margin, and the cooldown starts only when one fires', () => {
   const a = settled();
-  const rows = drive(a, rep(secs(30), QUIET + 15), T0 + 60000);
+  const rows = drive(a, rep(secs(30), QUIET + 15), START);
 
   const firstAlert = rows.findIndex((r) => r.wouldAlert);
   assert.ok(firstAlert > 0, 'a +15 dB source must eventually alert');
@@ -320,7 +540,7 @@ test('an alert needs the trailing AVERAGE above the margin, and the cooldown sta
 
 test('the cooldown suppresses a second alert for exactly sound_cooldown_s, then releases', () => {
   const a = settled();
-  const first = drive(a, rep(secs(20), QUIET + 15), T0 + 60000);
+  const first = drive(a, rep(secs(20), QUIET + 15), START);
   const tA = first[first.findIndex((r) => r.wouldAlert)].t;
   a.markAlerted(tA);
 

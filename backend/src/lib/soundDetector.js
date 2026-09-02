@@ -84,7 +84,9 @@ export async function startSoundDetector(camera) {
   // exits) re-creates the analyser. Left alone deliberately: closing it means moving the detector
   // registry's lifetime out of this function, and the 5 s seed window now costs 5 s of readings
   // rather than an arbitrary single sample.
-  const analyser = createSoundAnalyser({ margin, trailN, cooldownMs });
+  // `readingMs` is how the analyser recognises a hole in the stream: because it now survives an
+  // ffmpeg restart, it has to be able to tell "45 s of sustained noise" from "45 s of outage".
+  const analyser = createSoundAnalyser({ margin, trailN, cooldownMs, readingMs: READING_MS });
 
   async function launch() {
     const entry = { proc: null, stopped: false };

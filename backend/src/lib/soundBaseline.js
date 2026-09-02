@@ -64,6 +64,8 @@ export function marginDb(sensitivity) {
  * @param {number} opts.margin    dB above ambient the trailing average must reach to alert.
  * @param {number} opts.trailN    readings in the trailing average (= the confirm window).
  * @param {number} opts.cooldownMs minimum gap between alerts.
+ * @param {number} opts.readingMs how far apart readings arrive (200 ms for a 1600-sample window at
+ *   8 kHz). Used ONLY to recognise a gap in the stream — see the staleness reset in `push`.
  *
  * `push(rms, now)` returns, for one loudness window:
  *   { baseline, over, confirmed, recordDb, wouldAlert }
@@ -73,21 +75,56 @@ export function marginDb(sensitivity) {
  * schedule) and calls `markAlerted(now)` if it did — the cooldown must only start when a notification
  * really went out, not when one was merely eligible.
  */
-export function createSoundAnalyser({ margin, trailN, cooldownMs }) {
+export function createSoundAnalyser({ margin, trailN, cooldownMs, readingMs = 200 }) {
+  // ★★★ THE STALENESS WINDOW — the analyser now OUTLIVES an ffmpeg restart (that is the point: the
+  // learned floor used to be thrown away every time), and everything else it holds is either
+  // wall-clock or positional, so without this the outage itself counts as observed audio.
+  //
+  // The ordinary restart is not short: RESTART_DELAY_MS is 5 s and `waitForPath` adds up to
+  // PATH_GRACE_MS = 45 s, so a 30–50 s hole is routine. Demonstrated 2026-09-02, before this guard:
+  // settle quiet, 20 s of a cry above the margin (so `loudSince` is set but the 45 s absorb has not
+  // fired), then a 30 s gap, then ONE reading of SILENCE because the child stopped crying during the
+  // outage — and the floor jumped from -58.8 to -45.8. The stale 20-reading window still held the
+  // pre-outage cry, so `confirmed` was true and `over` was 13 dB on a reading of a silent room, and
+  // `now - loudSince` had cleared 45 s purely by sitting in the gap. The floor then sat ~14 dB too
+  // high for about a minute: the same corruption this file exists to fix, arriving through the
+  // shared-state door instead of the seeding door.
+  //
+  // So: a gap longer than the trailing window means every reading in that window is older than the
+  // window is meant to reach back, and both elapsed-time rules would be measuring silence we never
+  // heard. Drop all of it — but KEEP `baseline`, which is the only thing worth carrying across a
+  // restart and the reason the analyser is hoisted in the first place.
+  const staleMs = Math.max(trailN, 1) * readingMs;
+
   let baseline = null;
   const seed = [];
   const recent = [];
+  let lastPush = 0;
   let loudSince = 0; // start of the current above-margin run (0 = not currently above margin)
-  // Start of the current run in which the baseline is NOT tracking. Deliberately NOT cleared by the
-  // above-margin branch: a source oscillating across the margin is still continuously elevated, and
-  // clearing it there would hand that source the same permanent freeze this constant exists to end
-  // (`loudSince` already resets on every dip, which is why an oscillating source is never absorbed
-  // by REBASELINE_MS either). It is cleared only when the baseline actually moves again.
+  // Start of the current run in which the baseline is NOT tracking. Deliberately NOT cleared merely
+  // by being above the margin: a source oscillating across the margin is still continuously elevated,
+  // and clearing it there would hand that source the same permanent freeze this constant exists to
+  // end (`loudSince` already resets on every dip, which is why an oscillating source is never
+  // absorbed by REBASELINE_MS either).
+  // It is cleared in exactly three places, and all three are moments when the floor genuinely moved
+  // or the evidence expired: the absorb below, the below-band EMA update, and the staleness reset.
   let frozenSince = 0;
   let lastAlert = 0;
 
   function push(rms, now) {
+    // Defence in depth: `soundDetector.handleReading` already drops non-finite readings (true digital
+    // silence gives -Infinity) before calling in here, so in production this is unreachable. Kept
+    // because the analyser is a public module now and a NaN would poison the baseline permanently.
     if (!Number.isFinite(rms)) return { baseline, over: null, confirmed: false, recordDb: null, wouldAlert: false };
+
+    // A hole in the stream — see `staleMs`. Everything time- or position-dependent goes; the floor stays.
+    if (lastPush && now - lastPush > staleMs) {
+      recent.length = 0;
+      seed.length = 0;
+      loudSince = 0;
+      frozenSince = 0;
+    }
+    lastPush = now;
 
     if (baseline === null) {
       seed.push(rms);
