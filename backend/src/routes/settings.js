@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import db from '../db.js';
-import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { requireAuth, requireAdmin, optionalAuth } from '../middleware/auth.js';
 import { refreshMqttConnection, mqttStatus } from '../lib/mqttClient.js';
 import { restartClipCapture } from '../lib/clipCapture.js';
 import { clipStorageStats, sweepClips } from '../lib/clipStorage.js';
@@ -16,18 +16,61 @@ function getSettings() {
   return db.prepare('SELECT * FROM settings WHERE id = ?').get('app');
 }
 
-// Deliberately excludes mqtt_host/port/username/password - this is fetched by
-// unauthenticated visitors too (the login screen needs the app name/theme), and MQTT
-// broker credentials have no reason to ever reach a client that isn't the admin
-// settings page specifically.
-function toPublicSettings(s) {
-  const { mqtt_host, mqtt_port, mqtt_username, mqtt_password, mqtt_enabled, ...pub } = s;
-  return pub;
+// GET /settings answers WITHOUT a token, because the login screen needs the app name, colours and
+// font before anyone can sign in. That makes the response an ALLOW-LIST, and the distinction is not
+// stylistic: the settings table gains columns with nearly every feature, and several of those columns
+// are credentials. A deny-list is correct only until the next migration, and then it silently leaks
+// whatever was added.
+//
+// It already failed exactly that way. This function used to exclude the five mqtt_* columns and spread
+// the rest, which was right when it was written and wrong the moment ntfy, Gotify and Pushover added
+// their own token columns to the same table — those were served to any unauthenticated caller. See
+// GHSA-qffc-965c-x74m. Adding a field here must be a deliberate act; forgetting to add one is a
+// missing setting on a page, which is visible, rather than a leaked secret, which is not.
+const PUBLIC_FIELDS = [
+  'app_name',
+  'accent_color',
+  'live_color',
+  'offline_color',
+  'font_choice',
+  'temp_unit',
+  'timezone',
+];
+
+// Additionally returned to an ADMIN. These are the non-secret config values the admin settings forms
+// bind (SettingsGeneral / SettingsCamera / SettingsRecording seed their form state straight from this
+// response), so removing one breaks a form field. Nothing here is a credential — provider tokens and
+// broker passwords are served only by their own admin-only /config routes, which mask them.
+// Caregivers deliberately get PUBLIC_FIELDS only: every settings page that uses these is admin-gated
+// in the UI, and PUT /settings is requireAdmin.
+const ADMIN_FIELDS = [
+  ...PUBLIC_FIELDS,
+  'camera_offline_alert_enabled',
+  'camera_offline_alert_minutes',
+  'clip_pre_roll_s',
+  'clip_post_roll_s',
+  'clip_retention_days',
+  'clip_retention_max_gb',
+  'ondemand_enabled',
+  'ondemand_pre_roll_s',
+  'ondemand_max_duration_s',
+  'ptz_step',
+  'wake_clips_enabled',
+  'wake_clip_seconds',
+  'wake_clip_retention_days',
+];
+
+function pick(row, fields) {
+  const out = {};
+  for (const f of fields) if (f in row) out[f] = row[f];
+  return out;
 }
 
-// Public: the login screen (pre-authentication) also needs the app name/colors.
-router.get('/', (req, res) => {
-  res.json(toPublicSettings(getSettings()));
+// Public: the login screen (pre-authentication) also needs the app name/colors. optionalAuth attaches
+// req.user when a valid token is present without rejecting when it isn't, so one route can serve both.
+router.get('/', optionalAuth, (req, res) => {
+  const fields = req.user?.role === 'admin' ? ADMIN_FIELDS : PUBLIC_FIELDS;
+  res.json(pick(getSettings(), fields));
 });
 
 // Admin-only: MQTT broker config for the Settings page form. The password itself is
@@ -257,7 +300,8 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
   if (retentionChanged) {
     try { sweepClips(); } catch { /* logged inside */ }
   }
-  res.json(toPublicSettings(getSettings()));
+  // PUT is requireAdmin, so it answers with the admin view — the forms re-seed from this response.
+  res.json(pick(getSettings(), ADMIN_FIELDS));
 });
 
 export default router;

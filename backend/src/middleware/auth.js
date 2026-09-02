@@ -109,6 +109,19 @@ export function requireAuthQueryOrHeader(req, res, next) {
   }
 }
 
+// Populates req.user when a valid session token is present, and does NOT reject when one is absent or
+// invalid. For a route that must answer unauthenticated callers but reveal more to a signed-in one —
+// currently only GET /settings, whose public half feeds the login screen before anyone can sign in.
+// Reuses verifyToken, so a media-scoped token is rejected here exactly as it is in requireAuth: a
+// leaked media URL must never widen a response.
+export function optionalAuth(req, res, next) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  const payload = verifyToken(token);
+  if (payload) req.user = payload;
+  next();
+}
+
 export function requireAdmin(req, res, next) {
   if (req.user?.role !== 'admin') {
     return res.status(403).json({ error: 'Admin access required' });
