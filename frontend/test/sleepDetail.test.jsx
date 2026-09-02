@@ -156,8 +156,14 @@ describe('moving between nights', () => {
     expect(min).toBe(addDays(picker.getAttribute('max'), -29));
 
     // Walk to the floor and confirm the arrow gives out there rather than one step later.
+    // ⚠️ fireEvent, not user.click, ONLY for this loop. `userEvent` simulates a full pointer sequence
+    // with a delay between events, and doing that up to 40 times — each one re-rendering the screen —
+    // pushed this test past the 5 s timeout on a loaded machine. It failed in roughly 1 run in 10,
+    // and promoting the front-end job to a blocking gate turned that into an intermittent merge
+    // blocker. Nothing here is about pointer semantics; the click that IS about that is the one in
+    // the test above, which stays a `user.click`.
     for (let i = 0; i < 40 && !screen.getByLabelText('Previous night').disabled; i += 1) {
-      await user.click(screen.getByLabelText('Previous night'));
+      fireEvent.click(screen.getByLabelText('Previous night'));
     }
     expect(screen.getByLabelText('Pick a night').value).toBe(min);
   });
