@@ -83,6 +83,13 @@ export default defineConfig({
         // A dnd-kit wrapper that renders CameraTile — mounting it mounts the whole player stack, so it
         // inherits the exclusion above rather than being untestable in itself.
         'src/components/SortableCameraTile.jsx',
+        // The live grid. Renders one SortableCameraTile per camera, so mounting it mounts the whole
+        // player stack too, and its own effects are Capacitor (picture-in-picture, background pause)
+        // and pointer-gesture pull-to-refresh — none of which exist in jsdom.
+        // ⚠️ Same condition as CameraTile: its one piece of real logic, the drag-reorder, is exported
+        // as `reorderCameras` and IS tested (liveMonitorHelpers.test.jsx). Anything else worth pinning
+        // gets extracted the same way rather than left in here to hide behind this line.
+        'src/components/LiveMonitor.jsx',
         'src/components/InstallPrompt.jsx', // the `beforeinstallprompt` PWA event
         // --- native shell: Capacitor plugins are simply absent outside the APK ---
         'src/lib/nativeBridge.js',
