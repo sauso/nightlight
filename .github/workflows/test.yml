@@ -71,13 +71,19 @@ jobs:
       - name: Install front-end dependencies
         working-directory: frontend
         run: npm ci
-      - name: Run component tests
+      # NOW A BLOCKING GATE. The >= 80% threshold lives in vite.config.js and this runs it, on the
+      # same principle the backend core-logic gate was switched on: only once the suite actually
+      # passes it, so it never trains anyone to click past a red check. Met 2026-09-02 at
+      # 87.0 statements / 82.8 branches / 80.1 functions / 89.8 lines, measured on the front end
+      # that CAN be tested (see the exclude list in vite.config.js, where every entry has to
+      # justify itself).
+      #
+      # /!\ FUNCTIONS SITS AT 80.1% AGAINST AN 80% BAR. The next screen added without tests will
+      # turn this red. That is the ratchet working as intended - raise the coverage, never lower
+      # the threshold or widen the exclude list, which is the same thing wearing a different hat.
+      - name: Run component tests + coverage gate
         working-directory: frontend
-        run: npm test
-      # NOTE: the >= 80% front-end coverage threshold is configured in vite.config.js but is NOT a
-      # blocking gate yet - the suite is at the very start of Phase 5 and would fail every run, which
-      # would train everyone to ignore it. Promote this to `npm run test:coverage` once the target is
-      # actually met, the same way the backend core-logic gate was only switched on once it passed.
+        run: npm run test:coverage
 
   changelog:
     name: CHANGELOG structure

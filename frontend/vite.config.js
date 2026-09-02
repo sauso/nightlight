@@ -106,6 +106,12 @@ export default defineConfig({
       // Phase 5 target: >= 80% of the front end that CAN be tested. Raise as suites land; never lower
       // to go green, and never widen the exclude list to go green either — that is the same thing
       // wearing a different hat, and it is why each entry above has to justify itself.
+      //
+      // ✅ MET 2026-09-02: 87.02 statements / 82.76 branches / 80.09 functions / 89.81 lines, and CI's
+      // front-end job was promoted from `npm test` to `npm run test:coverage` in the same commit, so
+      // this is now a BLOCKING gate rather than a number nobody reads.
+      // ⚠️ FUNCTIONS CLEARS THE BAR BY 0.09 OF A POINT. The next screen added without tests turns CI
+      // red. That is the ratchet doing its job — the fix is coverage, never a smaller number here.
       thresholds: { lines: 80, functions: 80, branches: 75, statements: 80 },
     },
   },
