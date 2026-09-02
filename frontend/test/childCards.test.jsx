@@ -30,14 +30,16 @@ describe('SleepSummaryCard', () => {
   const live = (payload) => vi.spyOn(api, 'get').mockResolvedValue(payload);
   const show = (opts) => renderAsAdmin(<SleepSummaryCard childId="kid-1" />, { settings: { timezone: TZ }, ...opts });
 
-  // ⚠️ THESE TESTS MUST NOT ASSERT THIS MACHINE'S LOCALE. The card formats with
-  // `Intl.DateTimeFormat([])` — an empty locale list, i.e. whatever the runtime default is. vite.config
-  // pins the suite's TIMEZONE (deliberately, and for good reasons written up there) but nothing pins
-  // the locale, which comes from the OS via ICU and is not settable from vitest on Windows. So
-  // "7:10 pm" here is "19:10" on an en-GB machine and "Tue, 1 Sept" is "Tue, Sep 1" on en-US, and
-  // asserting either verbatim writes a test that fails on a colleague's laptop for no real reason.
-  // `hhmm` matches the same instant in 12- and 24-hour form and nothing else: the \b stops "9:10"
-  // matching inside "19:10", which is what would make this sloppy instead of tolerant.
+  // The card formats with `Intl.DateTimeFormat([])` — an empty locale list, i.e. whatever the runtime
+  // default is, which comes from the OS through ICU. **test/setup.js pins that**, for the same reason
+  // vite.config.js pins the timezone, and after ten tests here passed locally and failed in CI on
+  // nothing but en-AU vs en-US. So exact strings are safe now.
+  //
+  // `hhmm` stays value-based anyway, and deliberately: what these tests are actually claiming is that
+  // the card renders a particular INSTANT in the configured timezone. Asserting the instant says that;
+  // asserting "7:10 pm" says it only as long as nobody touches the pin. The \b is what keeps it from
+  // being sloppy rather than tolerant — it stops "9:10" matching inside "19:10", which is precisely
+  // the pair the timezone test below turns on.
   const hhmm = (h24, min) => {
     const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
     const mm = String(min).padStart(2, '0'); // minutes are always two digits in both forms
@@ -66,7 +68,7 @@ describe('SleepSummaryCard', () => {
     live({ scope: 'last_night', night: OK_NIGHT });
     show();
     expect(await screen.findByText('10h 37m asleep')).toBeInTheDocument();
-    expect(head()).toMatch(/^Last night · Tue,/);
+    expect(head()).toBe('Last night · Tue, 1 Sept');
     // ⚠️ 09:10Z is 19:10 in Melbourne and 09:10 in UTC. The card must format in `settings.timezone`,
     // not the browser's — a review window anchored on a literal UTC hour has shipped here before.
     expect(soon()).toMatch(hhmm(19, 10));
@@ -139,7 +141,7 @@ describe('SleepSummaryCard', () => {
     live({ scope: 'last_night', night: { status: 'empty', night_date: '2026-09-01' } });
     const { unmount } = show();
     expect(await screen.findByText('No one in the bed — nothing to report for this night.')).toBeInTheDocument();
-    expect(head()).toMatch(/^Last night · Tue,/);
+    expect(head()).toBe('Last night · Tue, 1 Sept');
     unmount();
 
     live({ scope: 'last_night', night: { status: 'no_data' } });
@@ -260,12 +262,13 @@ describe('TimelapseCard', () => {
   ];
   const list = (rows) => vi.spyOn(api, 'get').mockResolvedValue(rows);
 
-  // Locale-tolerant, for the reason spelled out in the SleepSummaryCard block above: this card
-  // labels its nights with `toLocaleDateString([], ...)`, which renders "Tue, 1 Sept" here and
-  // "Tue, Sep 1" on an en-US machine. Matching the day number and the month separately pins the
-  // right night without pinning this developer's OS.
-  const SEP1 = /^Play .*1.*Sep.* timelapse$/;
-  const AUG31 = /^Play .*31.*Aug.* timelapse$/;
+  // Exact strings, which are safe ONLY because test/setup.js pins the suite's locale.
+  // ⚠️ These were regexes first, written to be "locale-tolerant" — and they still failed in CI,
+  // because `/Play .*1.*Sep.*/` quietly assumes day-BEFORE-month and en-US renders "Tue, Sep 1".
+  // That is why the locale is pinned rather than worked around: a half-tolerant matcher reads as
+  // careful while being exactly as machine-specific as the exact string it replaced.
+  const SEP1 = 'Play Tue, 1 Sept timelapse';
+  const AUG31 = 'Play Mon, 31 Aug timelapse';
 
   beforeEach(() => {
     vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}`);
@@ -291,8 +294,7 @@ describe('TimelapseCard', () => {
     list(ROWS);
     renderAsAdmin(<TimelapseCard childId="kid-1" />);
     const hero = await screen.findByRole('button', { name: SEP1 });
-    expect(hero.textContent).toMatch(/1.*Sep/);
-    expect(hero.textContent).toMatch(/· 42s$/);
+    expect(hero.textContent).toBe('Tue, 1 Sept · 42s');
   });
 
   test('a single timelapse shows no picker strip', async () => {
@@ -325,7 +327,7 @@ describe('TimelapseCard', () => {
     list(ROWS);
     const { user } = renderAsAdmin(<TimelapseCard childId="kid-1" />);
     await user.click(await screen.findByRole('button', { name: SEP1 }));
-    expect((await screen.findByRole('dialog')).getAttribute('aria-label') ?? document.querySelector('.modal-card__head h2').textContent).toMatch(/^Timelapse · .*1.*Sep/);
+    expect(await screen.findByRole('dialog')).toHaveAccessibleName('Timelapse · Tue, 1 Sept');
   });
 
   test('ONLY an admin can delete a timelapse', async () => {
