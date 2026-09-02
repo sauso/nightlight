@@ -113,9 +113,10 @@ export default defineConfig({
       //
       // ⚠️⚠️ THE RUNNER DOES NOT MEASURE EXACTLY WHAT THIS MACHINE MEASURES. First attempt: 80.09%
       // functions here, **79.97% on the runner** — the gate failed by 0.03 of a point on a suite that
-      // was green locally, with all 815 tests passing on both. The delta is small (~0.12 on functions)
-      // but it is real and it goes the unhelpful way, so a threshold cleared by a rounding error is
-      // not cleared. Coverage was raised until there is ~0.9 of a point of headroom instead.
+      // was green locally, with every test passing on both. Measured twice now, the runner comes in
+      // 0.1–0.3 of a point LOWER on functions and always the unhelpful way (80.09→79.97, then
+      // 80.84→80.59). It is NOT a fixed offset, so do not budget for a specific number — budget for
+      // "comfortably over", which is why coverage was raised rather than this line lowered.
       // ★ If this ever goes red on CI while green here, that gap is the first thing to suspect — and
       // the answer is more coverage, never a smaller number on this line or a wider exclude list.
       thresholds: { lines: 80, functions: 80, branches: 75, statements: 80 },

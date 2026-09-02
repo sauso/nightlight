@@ -80,9 +80,10 @@ jobs:
       #
       # /!\ THIS RUNNER MEASURES SLIGHTLY LOWER THAN A DEV MACHINE. First attempt at the gate:
       # 80.09% functions locally, 79.97% here - red by 0.03 of a point with every test passing on
-      # both. So the target is not "clear 80", it is "clear 80 with headroom"; there is currently
-      # about 0.9 of a point. Raise the coverage, never lower the threshold or widen the exclude
-      # list, which is the same thing wearing a different hat.
+      # both. Measured twice, the gap is 0.1-0.3 of a point on functions, always the unhelpful way,
+      # and it is NOT a fixed offset. So the target is not "clear 80", it is "clear 80 with room to
+      # spare". Raise the coverage, never lower the threshold or widen the exclude list, which is
+      # the same thing wearing a different hat.
       - name: Run component tests + coverage gate
         working-directory: frontend
         run: npm run test:coverage
