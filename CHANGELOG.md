@@ -55,6 +55,26 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **A white-noise machine could make a whole night read as "awake".** Each room's ambient sound level
+  is learned continuously, but a noise that started up mid-night and settled between *half* and *all*
+  of the alert margin above that level was neither absorbed into it nor tracked by it — so the ambient
+  level froze for as long as the source ran, and every minute afterwards was measured against a floor
+  from before the noise existed. On one install it held at exactly the same value for **7.9 unbroken
+  hours**, marked 66% of the night's minutes as active with no motion at all, and reported a
+  seven-hour awake span that never happened — every night, because a machine switched on at bedtime is
+  exactly the kind of sudden change that triggered it. A steady noise in that range is now learned
+  after five minutes. Sleep and wake *times* were not affected by this; only awake/asleep totals were.
+  See **docs/notifications.md → Sound sensitivity also changes sleep tracking** for what this trades
+  away and how to read the level line. The old workaround — raising that camera's sound sensitivity to
+  90 or above — is no longer needed.
+- **A camera's learned ambient level is no longer thrown away when its audio reader restarts.** It was
+  re-learned from a single 0.2-second sample, so a restart that happened during a cry set the room's
+  "normal" to the cry, and the reader restarts a few seconds after any stream hiccup. It now keeps
+  what it has learned across restarts, and a first-time reading is taken from five seconds of audio.
+  Time spent off the stream no longer counts as time spent listening either: a restart takes a few
+  seconds and can wait up to 45 more for the camera's stream to come back, and that silence used to
+  be treated as though the room had been making the same noise throughout — enough, on its own, to
+  push a cry that stopped during the outage into the room's "normal" level for about a minute.
 - **Two-factor could tell you it was off when it simply couldn't check.** If the account screen failed
   to reach the server, the two-factor card read a confident **Off** — to an account that may well have
   had it on. It now says **Unknown** and explains why, rather than claiming an account is unprotected

@@ -86,7 +86,15 @@ upstream cause of the false arrivals, not the classifier's thresholds. Separatel
 a slow link window (see the entry under `[Unreleased]`), which fixes the missed unaided climb-out.
 What remains is the occupancy state and telling a parent leaving from a child getting out.
 
-**What's wrong**, measured on 2026-08-26 against owner ground truth (nobody entered Renz's room all
+⚠️⚠️ **EVERY FIGURE IN THIS SECTION IS PRE-REPAINT, AND IS THEREFORE HISTORICAL.** Both bed zones were
+redrawn over real frames on 2026-08-30 (details at the end of the section), which changed the input to
+every measurement below. The 62% impossible-pair rate, the 38.5% / 23.4% zone areas and the minute
+counts all describe the **old** zones and must not be quoted as the current state. They are kept
+because they are what motivated the work, and because they are the arithmetic the re-measurement will
+repeat — not because they are still true. The holdout runs to ~2026-09-09; nothing here is re-measured
+before then. (This warning used to sit *below* the numbers, which is not where a reader meets them.)
+
+**What was wrong**, measured on 2026-08-26 against owner ground truth (nobody entered Renz's room all
 night; Raffa put down 19:10, his mother out at 19:19):
 
 - **No occupancy state.** `motionDetector.js` runs the out-of-bed and into-bed detectors as independent
@@ -103,11 +111,11 @@ night; Raffa put down 19:10, his mother out at 19:19):
   opened a child-out interval that ran until the first false arrival at 23:12.
 
 ★★ **MEASURED 2026-08-29, and item 1 now has a hard target.** Across the 238 transitions then stored
-on prod, **147 (62%) are the same type twice in a row** with nothing between — Raffa Room 61 of 109
-(56%), Renz Room 86 of 129 (67%). You cannot get into a bed you are already in, so at least one of every
-pair is wrong. `getImpossibleTransitions()` in `lib/bedTransitions.js` returns them, each naming the
-event it contradicts, per camera. **Item 1 should collapse most of those 147, and that is now a number
-this work can be scored against rather than an argument.**
+on prod **at that time**, **147 (62%) were the same type twice in a row** with nothing between — Raffa
+Room 61 of 109 (56%), Renz Room 86 of 129 (67%). You cannot get into a bed you are already in, so at
+least one of every pair is wrong. `getImpossibleTransitions()` in `lib/bedTransitions.js` returns them,
+each naming the event it contradicts, per camera. **The durable thing here is the QUERY, not the 147:
+it is re-runnable, and item 1 is scored against whatever it returns after the holdout.**
 
 ★★ **0.29.0 ships the missing evidence: a saved frame at every transition** (`bed_transitions.snapshot`
 + `transition-snapshots/`, 45-day retention in lockstep). Until now the detector recorded *when* it
@@ -135,7 +143,7 @@ and the curtain manufactures transitions that never happened.
 seven minutes later, far outside even the slow window, so no candidate ever opened. Next recorded exit
 **07:36** against an observed ~06:00.
 
-⚠️⚠️ **His zone is 38.5% of frame — LARGER than Raffa's 23.4%. Every number said it was fine.** Area and
+⚠️⚠️ **His zone WAS 38.5% of frame — LARGER than Raffa's 23.4%. Every number said it was fine.** Area and
 rect count prove nothing about whether a zone is in the right *place*. This was only visible by drawing
 it over a frame, which the transition snapshots now make possible.
 
@@ -159,7 +167,8 @@ counts as **historical**, not as the current state.
 **Work:**
 1. Track believed occupancy; ignore an `into_bed` while already in bed and an `out_of_bed` while already
    out. (Alone this collapses the four arrivals to one.) — **still open**, and still the cheapest win.
-   ★ Target: the 147 impossible pairs above.
+   ★ Target: whatever `getImpossibleTransitions()` returns when it is re-run after the holdout. It
+   returned 147 pairs against the OLD zones — historical, see the warning at the top of this section.
    ★ This is *inferred* occupancy and needs no model — do it regardless of §2.5, which would supply the
    same fact as independent evidence from the camera. They are complementary; neither waits on the other.
 2. Record the outside channel's **peak and duration** alongside each transition — new columns on

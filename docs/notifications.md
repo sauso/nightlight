@@ -202,30 +202,49 @@ affects alerts. Sound sensitivity affects **both**. The same margin that decides
 also decides when a *steady* background noise gets absorbed into the room's ambient level, and sleep
 tracking counts a minute as "awake" partly from sound.
 
-**Known limit.** A constant broadband source — a white-noise machine, fan, air purifier or heater —
-whose level settles **between half the margin and the full margin** above the learned ambient is
-neither absorbed into the ambient nor tracked by it, so it reads as continuous noise for as long as it
-runs. Sleep tracking then reports the child as awake while they are asleep and perfectly still.
+**How long a steady noise takes to be learned.** A source that starts up mid-night — a white-noise
+machine switched on at bedtime, a fan, an air purifier, a heater — is folded into the room's ambient
+level, after which it stops both alerting and counting toward "awake". How long that takes depends on
+how loud it is relative to the margin:
 
-Measured on a real install (2026-08-31): a white-noise machine roughly 9 dB over ambient, at sound
-sensitivity 49, marked **66% of one night's minutes as active with no motion at all** and produced a
-seven-hour "awake" span that never happened. Sleep and wake *times* were unaffected — only the
-awake/asleep totals.
+| The source sits… | Absorbed after | Why |
+| --- | --- | --- |
+| **above** the full margin | 45 seconds | It is alerting, so it is dealt with quickly. |
+| **between half and all** of the margin | 5 minutes | Deliberately slower: this band is also where a moderate cry sits, and a cry must not be able to quietly raise its own baseline and silence itself. |
+| **below** half the margin | continuously | Ordinary tracking, roughly a 20-second time constant. |
 
-**How to tell.** The container log prints a level line every 15 seconds per camera:
+**The trade this makes.** A moderate cry — loud enough to sit in that middle band, not loud enough to
+alert — that runs for more than five minutes is treated as ambient too, so its recorded loudness fades
+toward zero. That is a real loss of signal and it is a deliberate choice: the alternative, which
+shipped until the fix noted below, was a room whose ambient level could get stuck permanently.
+
+> **The middle row of that table used to be a one-way trap** (fixed 2026-09-02 — see the CHANGELOG
+> entry *"A white-noise machine could make a whole night read as awake"*). A noise landing in that band
+> was neither absorbed nor tracked, and the ambient level froze *for as long as the source ran*.
+> Measured on a real install (2026-08-31), a white-noise machine roughly 9 dB over ambient at sound
+> sensitivity 49 held one camera's ambient at exactly `-63.5 dB` for **7.9 unbroken hours**, marked
+> **66% of the night's minutes as active with no motion at all**, and produced a seven-hour "awake"
+> span that never happened. It re-armed every night. Sleep and wake *times* were unaffected — only the
+> awake/asleep totals. The old workaround (raising sound sensitivity to 90+) is no longer needed; if
+> you applied it, you can put that camera back to whatever suits its alerting.
+
+**How to tell what your ambient level is doing.** The container log prints a level line every 15
+seconds per camera:
 
 ```
 [sound] "Nursery" ambient=-63.5dB peak=-55.2dB maxAvgOver=+7.8 (fires at +11)
 ```
 
-If `ambient=` sits at exactly the same value for hours while `maxAvgOver` stays between half and all
-of the "fires at" figure, the ambient level is stuck and this is what you are seeing. A working camera's
-`ambient=` drifts by a few tenths of a dB continuously.
+A healthy `ambient=` drifts by a few tenths of a dB continuously, and settles onto a steady source
+within the times in the table above. If it sits at *exactly* the same value for hours while
+`maxAvgOver` stays between half and all of the "fires at" figure, you are running a version from
+before that fix.
 
-**What to do about it.** Raising that camera's sound sensitivity to **90 or above** lets the noise be
-absorbed normally. The trade is a smaller alert margin, so expect more sound notifications from that
-camera. Moving the camera further from the noise source works too. This is a known limitation rather
-than a setting to get right — a proper fix is planned.
+**Still true regardless of version:** sleep tracking scores each minute on that minute's *loudest*
+window, so a room with a lot of variation — a white-noise machine close to the microphone is the usual
+cause — reads as noisier than its average suggests, and can still overstate awake time even with a
+perfectly tracking ambient level. Moving the camera further from the noise source is the reliable
+remedy.
 
 ## Troubleshooting
 
