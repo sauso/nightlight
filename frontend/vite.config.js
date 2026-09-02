@@ -107,11 +107,17 @@ export default defineConfig({
       // to go green, and never widen the exclude list to go green either — that is the same thing
       // wearing a different hat, and it is why each entry above has to justify itself.
       //
-      // ✅ MET 2026-09-02: 87.02 statements / 82.76 branches / 80.09 functions / 89.81 lines, and CI's
+      // ✅ MET 2026-09-02: 87.45 statements / 82.93 branches / 80.84 functions / 90.16 lines, and CI's
       // front-end job was promoted from `npm test` to `npm run test:coverage` in the same commit, so
       // this is now a BLOCKING gate rather than a number nobody reads.
-      // ⚠️ FUNCTIONS CLEARS THE BAR BY 0.09 OF A POINT. The next screen added without tests turns CI
-      // red. That is the ratchet doing its job — the fix is coverage, never a smaller number here.
+      //
+      // ⚠️⚠️ THE RUNNER DOES NOT MEASURE EXACTLY WHAT THIS MACHINE MEASURES. First attempt: 80.09%
+      // functions here, **79.97% on the runner** — the gate failed by 0.03 of a point on a suite that
+      // was green locally, with all 815 tests passing on both. The delta is small (~0.12 on functions)
+      // but it is real and it goes the unhelpful way, so a threshold cleared by a rounding error is
+      // not cleared. Coverage was raised until there is ~0.9 of a point of headroom instead.
+      // ★ If this ever goes red on CI while green here, that gap is the first thing to suspect — and
+      // the answer is more coverage, never a smaller number on this line or a wider exclude list.
       thresholds: { lines: 80, functions: 80, branches: 75, statements: 80 },
     },
   },
