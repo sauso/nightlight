@@ -5,15 +5,21 @@ import { inActiveWindow } from './detectSchedule.js';
 import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
 import { recordSound } from './activityTracker.js';
+import { createSoundAnalyser, marginDb } from './soundBaseline.js';
 
 // Server-side SOUND detection, parallel to motionDetector.js. Per camera with sound detection
 // enabled, a cheap audio-only FFmpeg leg reads the already-published MediaMTX stream and reports a
 // windowed loudness (RMS dBFS) a few times a second. We track a ROLLING ambient baseline so a
-// white-noise machine / fan is learned continuously (not a one-time boot calibration): turn the
-// machine on an hour after boot and the baseline rises to the new floor within its time constant.
+// white-noise machine / fan is learned continuously (not a one-time boot calibration).
 // An alert fires when loudness stays a sensitivity-controlled margin ABOVE that ambient for
 // sound_confirm_s, rate-limited by sound_cooldown_s and gated by the same quiet-hours schedule as
 // motion. Never touches the WebRTC/HLS pipeline — a separate, tiny reader off 127.0.0.1:8554.
+//
+// This file is now only the PLUMBING — ffmpeg lifecycle, restart/back-off, logging. Everything that
+// decides what the ambient floor is and when to alert lives in soundBaseline.js, which is pure and
+// tested. ⚠️ The old header claimed the baseline "rises to the new floor within its time constant";
+// that was FACTUALLY FALSE for any step landing inside the dead band, and the comment stated it
+// confidently for months while the opposite shipped. See soundBaseline.js's DEAD_BAND_MAX_MS.
 
 // camera_id -> { proc, stopped }
 const detectors = new Map();
@@ -31,27 +37,9 @@ const WIN_RATE = 8000;
 const WIN_SAMPLES = 1600;
 const WIN_BYTES = WIN_SAMPLES * 2; // s16le = 2 bytes/sample, mono
 
-// Ambient baseline EMA. At ~5 readings/s, alpha 0.01 gives a ~20 s time constant — slow enough that
-// a cry doesn't get absorbed before it alerts, fast enough to track a fan/AC/white-noise change.
-const BASELINE_ALPHA = 0.01;
-// A level that stays elevated far longer than any cry burst is treated as a NEW ambient floor (the
-// white-noise machine was switched on, a fan, a running tap, the TV) and folded into the baseline so
-// it stops alerting. A cry alerts well before this.
-const REBASELINE_MS = 45000;
-
 // If a launch yields no loudness readings at all and exits quickly this many times in a row, the
 // camera almost certainly has no audio track — stop trying (and say so) instead of restart-looping.
 const NO_AUDIO_MAX_STRIKES = 3;
-
-// Map 1..100 sensitivity to how many dB the trailing-average loudness must exceed the ambient
-// baseline by. Higher sensitivity => smaller margin => easier to trigger. ~18 dB (needs a clearly
-// loud sound) at 1, ~4 dB (quite sensitive) at 100, ~11 dB at the 50 default. This is compared
-// against the AVERAGE over the confirm window, so a pulsing cry (loud on average) clears it even
-// though its quiet moments dip below.
-function marginDb(sensitivity) {
-  const s = Math.min(100, Math.max(1, sensitivity || 50));
-  return 4 + (18 - 4) * ((100 - s) / 99);
-}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -83,6 +71,21 @@ export async function startSoundDetector(camera) {
   const trailN = Math.max(3, Math.round(confirmMs / READING_MS));
   let noAudioStrikes = 0;
 
+  // ⚠️ DELIBERATELY OUTSIDE `launch()`: the analyser (and with it the learned ambient floor) must
+  // OUTLIVE an ffmpeg relaunch. It used to be re-created per launch, so every restart — and the
+  // detector restarts 5 s after any exit — threw away hours of learning and re-seeded the floor from
+  // a single 200 ms window. A relaunch during a cry therefore seeded ambient AT CRY LEVEL. It is also
+  // why two containers could never be assumed comparable for a sound A/B: they had independent,
+  // arbitrarily-seeded floors.
+  //
+  // ⚠️ RESIDUAL, not fixed here: the floor is still lost if `startSoundDetector` itself is called
+  // again, which the 5-minute reconcile tick does when `isSoundDetecting` is false. `detectors` is
+  // cleared on ffmpeg's exit and repopulated 5 s later, so a tick landing in that gap (~1.7% of
+  // exits) re-creates the analyser. Left alone deliberately: closing it means moving the detector
+  // registry's lifetime out of this function, and the 5 s seed window now costs 5 s of readings
+  // rather than an arbitrary single sample.
+  const analyser = createSoundAnalyser({ margin, trailN, cooldownMs });
+
   async function launch() {
     const entry = { proc: null, stopped: false };
     detectors.set(camera.id, entry);
@@ -106,10 +109,6 @@ export async function startSoundDetector(camera) {
     const startedAt = Date.now();
     logger.info(`[sound] watching "${camera.name}" — fires at +${Math.round(margin)} dB over ambient, sustained ${Math.round(confirmMs / 1000)}s`);
 
-    let baseline = null; // rolling ambient level (dBFS)
-    let loudSince = 0; // start of the current elevated run (0 = not currently elevated)
-    let lastAlert = 0;
-    const recent = []; // last trailN readings, for the trailing average
     let sawReading = false;
     let pcm = Buffer.alloc(0);
     // Periodic level line (throttled) so the ambient baseline + recent peak are visible for tuning
@@ -125,8 +124,9 @@ export async function startSoundDetector(camera) {
       const now = Date.now();
       if (rms > windowPeak) windowPeak = rms;
       if (now - lastLevelLog >= LEVEL_LOG_MS) {
+        const b = analyser.baseline;
         logger.info(
-          `[sound] "${camera.name}" ambient=${baseline === null ? '?' : baseline.toFixed(1)}dB ` +
+          `[sound] "${camera.name}" ambient=${b === null ? '?' : b.toFixed(1)}dB ` +
             `peak=${windowPeak === -Infinity ? '?' : windowPeak.toFixed(1)}dB ` +
             `maxAvgOver=${windowMaxOver === -Infinity ? '?' : `+${windowMaxOver.toFixed(1)}`} (fires at +${Math.round(margin)})`
         );
@@ -134,41 +134,16 @@ export async function startSoundDetector(camera) {
         windowMaxOver = -Infinity;
         lastLevelLog = now;
       }
-      if (baseline === null) {
-        baseline = rms;
-        return;
-      }
 
-      // Feed loudness-above-ambient into the per-minute activity timeline (independent of the alert
-      // margin/cooldown), so sleep tracking sees continuous noise level, not just cry alerts.
-      recordSound(camera.id, Math.max(0, rms - baseline));
-
-      // Trailing average over the confirm window. A cry is loud ON AVERAGE across those seconds even
-      // as it pulses, so averaging is far more robust than requiring every instant to clear the bar.
-      recent.push(rms);
-      if (recent.length > trailN) recent.shift();
-      const over = recent.reduce((a, b) => a + b, 0) / recent.length - baseline;
-      if (recent.length >= trailN && over > windowMaxOver) windowMaxOver = over;
-
-      if (recent.length >= trailN && over >= margin) {
-        if (!loudSince) loudSince = now;
-        // A steady elevated source held far longer than a cry burst becomes the new ambient (the
-        // white-noise machine was switched on, a fan, the TV) so it stops alerting.
-        if (now - loudSince >= REBASELINE_MS) {
-          baseline += over; // absorb the elevation into the ambient
-          loudSince = 0;
-          recent.length = 0;
-          return;
-        }
-        if (now - lastAlert >= cooldownMs && inActiveWindow(camera)) {
-          lastAlert = now;
-          fireDetectionAlert(camera, ALERT.SOUND, `+${Math.round(over)} dB over ambient`, { snapshotPath: path }).catch(() => {});
-        }
-      } else {
-        loudSince = 0;
-        // Track the ambient floor, but freeze while the average is already creeping up toward a
-        // trigger, so a cry's ramp-up can't quietly raise its own baseline and desensitise itself.
-        if (over < margin * 0.5) baseline += BASELINE_ALPHA * (rms - baseline);
+      const r = analyser.push(rms, now);
+      if (r.recordDb !== null) recordSound(camera.id, r.recordDb);
+      if (r.confirmed && r.over > windowMaxOver) windowMaxOver = r.over;
+      // The analyser reports that the ALERT RULES are satisfied; the quiet-hours schedule is this
+      // layer's business. `markAlerted` only runs when a notification actually went out, so the
+      // cooldown is never consumed by an alert that was suppressed by the schedule.
+      if (r.wouldAlert && inActiveWindow(camera)) {
+        analyser.markAlerted(now);
+        fireDetectionAlert(camera, ALERT.SOUND, `+${Math.round(r.over)} dB over ambient`, { snapshotPath: path }).catch(() => {});
       }
     }
 
