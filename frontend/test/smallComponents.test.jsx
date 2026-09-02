@@ -266,16 +266,22 @@ describe('AlertList', () => {
         alerts={[
           base({ id: 'a', created_at: ago(20) }),
           base({ id: 'b', created_at: ago(59) }),
-          base({ id: 'c', created_at: ago(90) }),
-          base({ id: 'd', created_at: ago(3 * 3600) }),
-          base({ id: 'e', created_at: ago(50 * 3600) }),
+          base({ id: 'c', created_at: ago(75) }),
+          base({ id: 'd', created_at: ago(90) }),
+          base({ id: 'e', created_at: ago(3 * 3600) }),
+          base({ id: 'f', created_at: ago(50 * 3600) }),
         ]}
       />
     );
-    // ⚠️ 59 s is ALSO "just now" (the check is `s < 60`), but 90 s ROUNDS to 2m, not 1m —
-    // `Math.round`, not `Math.floor`. Both boundaries are asserted because each one alone is passed
-    // by the wrong function.
+    // ⚠️ BOTH SIDES of the "just now" cut, and both sides of the minute rounding.
+    // 20 s and 59 s are "just now" (`s < 60`); 75 s must NOT be — it is the only case that pins the
+    // cut from ABOVE, and without it widening the bound to `s < 90` survives the whole suite (found
+    // by an adversarial review, 2026-09-02, against an earlier version of this comment that claimed
+    // both boundaries were covered when only one was).
+    // 75 s rounds to 1m and 90 s rounds to 2m — that pair is what separates `Math.round` from
+    // `Math.floor` on the minutes, since floor would call both of them 1m.
     expect(screen.getAllByText('just now')).toHaveLength(2);
+    expect(screen.getByText('1m ago')).toBeInTheDocument();
     expect(screen.getByText('2m ago')).toBeInTheDocument();
     expect(screen.getByText('3h ago')).toBeInTheDocument();
     expect(screen.getByText('2d ago')).toBeInTheDocument();
@@ -283,6 +289,25 @@ describe('AlertList', () => {
       // ⚠️ try/finally, not a trailing call: a failed assertion above would otherwise leave fake
       // timers installed for the REST OF THE FILE, and every later test that awaits a userEvent
       // click then hangs to its 5 s timeout. One bad assertion turned into five red tests.
+      vi.useRealTimers();
+    }
+  });
+
+  test('the seconds are ROUNDED, not floored — a fraction over the minute is not "just now"', () => {
+    // ⚠️ The clock is deliberately offset by 600 ms. `created_at` is stored to whole seconds, so
+    // freezing the clock on an exact second (as the test above must, to pin the 59/60 cut) makes the
+    // elapsed time an exact multiple of 1000 — and `Math.round` and `Math.floor` can then never
+    // disagree. That is a fixture that cannot discriminate: the fix for one flake removed the
+    // ability to test this line at all, and the mutant survived until a review found it.
+    // Here elapsed is 59.6 s: rounded it is 60 (so "1m ago"), floored it is 59 (so "just now").
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-02T10:00:00.600Z'));
+    try {
+      const created = new Date(Date.now() - 59 * 1000).toISOString().slice(0, 19).replace('T', ' ');
+      render(<AlertList alerts={[base({ id: 'x', created_at: created })]} />);
+      expect(screen.getByText('1m ago')).toBeInTheDocument();
+      expect(screen.queryByText('just now')).not.toBeInTheDocument();
+    } finally {
       vi.useRealTimers();
     }
   });

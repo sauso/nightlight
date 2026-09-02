@@ -254,6 +254,21 @@ describe('reloading after a spell in the background', () => {
     expect(reload).not.toHaveBeenCalled();
   });
 
+  test('the hidden timestamp is CLEARED on return, so a second visible event does not re-reload', async () => {
+    // ⚠️ `hiddenAt = null` inside the visible branch. Without it a duplicate visibilitychange —
+    // which mobile Safari and the Android app-switcher do emit — sees the stale timestamp, computes
+    // the same long absence again, and reloads a page the user is already looking at. Deleting that
+    // one line survived the whole suite until an adversarial review found it (2026-09-02).
+    await bootShell();
+    hide();
+    await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
+    showAgain();
+    expect(reload).toHaveBeenCalledTimes(1);
+
+    showAgain(); // a duplicate event, with no intervening hide
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
   test('becoming visible without having been hidden does nothing', async () => {
     await bootShell();
     showAgain();

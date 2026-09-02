@@ -78,12 +78,15 @@ jobs:
       # that CAN be tested (see the exclude list in vite.config.js, where every entry has to
       # justify itself).
       #
-      # /!\ THIS RUNNER MEASURES SLIGHTLY LOWER THAN A DEV MACHINE. First attempt at the gate:
-      # 80.09% functions locally, 79.97% here - red by 0.03 of a point with every test passing on
-      # both. Measured twice, the gap is 0.1-0.3 of a point on functions, always the unhelpful way,
-      # and it is NOT a fixed offset. So the target is not "clear 80", it is "clear 80 with room to
-      # spare". Raise the coverage, never lower the threshold or widen the exclude list, which is
-      # the same thing wearing a different hat.
+      # /!\ THE FUNCTION PERCENTAGE IS NOT DETERMINISTIC. Three runs of the same tree on the same
+      # machine gave 80.71 / 80.59 / 80.59 - about 0.12 of a point, one or two functions out of ~810.
+      # So the target is not "clear 80", it is "clear 80 by more than the noise": the first attempt
+      # cleared it by 0.09 locally and went red here. If this job is red while a dev machine is
+      # green, re-measure on a CLEAN checkout before concluding anything about the runner - an
+      # earlier note here blamed the runner, and a clean local checkout of that same commit
+      # reproduced the failing number exactly.
+      # Raise the coverage, never lower the threshold or widen the exclude list, which is the same
+      # thing wearing a different hat.
       - name: Run component tests + coverage gate
         working-directory: frontend
         run: npm run test:coverage

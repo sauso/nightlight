@@ -49,8 +49,19 @@ describe('zone storage round-trip', () => {
   });
 
   test('every single-cell position round-trips, including all four corners', () => {
-    // One cell at a time across the whole grid — the exhaustive version, because an off-by-one in the
-    // edge rounding would only show at a boundary.
+    // ⚠️ THE CONSTANTS ARE PINNED HERE, and it is not ceremony. The loop below is parameterised by
+    // COLS/ROWS, so "exhaustive over all 576 cells" is only true if the grid IS 32x18 — shrink ROWS
+    // to 16 and this test quietly becomes exhaustive over 512 and still passes. Found by an
+    // adversarial review. The grid is also not free to change: the detector analyses a 320x180 frame,
+    // so one cell is exactly 10x10 analysis pixels and a different grid would pretend to a precision
+    // the thing consuming it does not have.
+    expect(COLS).toBe(32);
+    expect(ROWS).toBe(18);
+    expect(COLS * ROWS).toBe(576);
+
+    // One cell at a time across the whole grid, because an off-by-one in the edge rounding would only
+    // show at a boundary.
+    let checked = 0;
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
         const cells = new Uint8Array(COLS * ROWS);
@@ -58,8 +69,10 @@ describe('zone storage round-trip', () => {
         const back = rectsToCells(cellsToRects(cells));
         expect(cellCount(back)).toBe(1);
         expect(on(back, c, r)).toBe(true);
+        checked++;
       }
     }
+    expect(checked).toBe(576);
   });
 
   test('a full-frame paint round-trips as one rect covering everything', () => {
@@ -133,6 +146,22 @@ describe('rectsToCells rasterising', () => {
       { x: 0, y: 0, w: 0.25, h: 0.5 }, // the good one
     ]);
     expect(cellCount(cells)).toBe((COLS / 4) * (ROWS / 2));
+  });
+
+  test('a centre sitting EXACTLY on a rect edge is INSIDE it', () => {
+    // ⚠️ Three comparisons in rectsToCells are inclusive (`cx >= r.x`, `cx <= r.x+r.w`, and the
+    // `cy < r.y` skip), and every other fixture in this file uses zones this picker WROTE — where a
+    // cell centre never lands on an edge, so all three flip freely and survive. Legacy hand-drawn
+    // boxes are exactly the case where a centre CAN land on an edge, and the source comment calls
+    // them out as the thing this function approximates.
+    // Centres sit at (k+0.5)/N, so this rect's left edge is cell 0's centre and its right edge is
+    // cell 2's centre; its top edge is row 0's centre. h is 0.45 on purpose — nowhere near a centre —
+    // so the bottom edge is not also a boundary and each assertion below has one reason to fail.
+    const cells = rectsToCells([{ x: 0.5 / COLS, y: 0.5 / ROWS, w: 2 / COLS, h: 0.45 }]);
+    expect(on(cells, 0, 0)).toBe(true); // left edge == centre → in
+    expect(on(cells, 2, 0)).toBe(true); // right edge == centre → in
+    expect(on(cells, 3, 0)).toBe(false); // and it stops there
+    expect(cellCount(cells)).toBe(3 * 9); // cols 0-2, rows 0-8
   });
 
   test('a cell is on when its CENTRE is inside the rect', () => {
@@ -329,6 +358,30 @@ describe('CribZonePicker', () => {
       const cells = rectsToCells(onChange.mock.calls[0][0]);
       expect(on(cells, 0, 0)).toBe(true);
       expect(on(cells, COLS - 1, ROWS - 1)).toBe(true);
+    });
+
+    test('a drag past the LEFT edge clamps, rather than wrapping onto the row above', () => {
+      // ⚠️ The sharp case for clamp01, and the one the existing "clamped inside it" test misses:
+      // dragging far outside gives a hugely negative index that a Uint8Array simply ignores, so
+      // removing the clamp changes nothing there. Slipping just a few pixels past the edge is
+      // different — the column becomes -1 and `row * COLS + (-1)` lands on the LAST CELL OF THE ROW
+      // ABOVE. Verified: without clamp01 this paints (31, 4). Found by an adversarial review.
+      vi.spyOn(api, 'url').mockReturnValue('http://host/snap');
+      const onChange = vi.fn();
+      const { container } = show({ onChange });
+      fireEvent.load(img());
+      const stage = stageAt(container);
+
+      fireEvent.pointerDown(stage, { pointerId: 1, ...at(3, 5) });
+      fireEvent.pointerMove(stage, { clientX: -5, clientY: at(0, 5).clientY });
+      fireEvent.pointerUp(stage);
+
+      const cells = rectsToCells(onChange.mock.calls[0][0]);
+      expect(on(cells, 0, 5)).toBe(true);
+      expect(on(cells, 31, 4)).toBe(false);
+      // The stroke stays entirely on the row it started on.
+      for (let c = 0; c <= 3; c++) expect(on(cells, c, 5)).toBe(true);
+      expect(cellCount(cells)).toBe(4);
     });
 
     test('painting is inert until the frame has loaded', () => {
