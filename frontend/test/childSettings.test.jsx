@@ -282,6 +282,18 @@ describe('what each role is told about clip settings', () => {
 });
 
 describe('removing a child', () => {
+  test('★ the dialog is a real dialog, named by its own heading', async () => {
+    // `role="dialog"` is covered incidentally by every `findByRole('dialog')` in the suite, but
+    // `aria-modal` and `aria-labelledby` were not asserted anywhere — removing BOTH left all 500
+    // tests green. They are the parts that make the page behind inert and give the dialog a name, and
+    // this dialog is a destructive confirmation, which is exactly where that matters.
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Remove child' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(dialog).toHaveAccessibleName('Remove child');
+  });
+
   test('★ asks first, and says what happens to the cameras', async () => {
     // The consequence people do not expect: the cameras survive, unassigned. Saying so is what stops
     // someone believing they are about to delete the cameras too.

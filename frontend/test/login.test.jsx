@@ -141,6 +141,15 @@ describe('signing in', () => {
     expect(screen.getByRole('button', { name: 'Sign in' }).disabled).toBe(false);
   });
 
+  test('★ the sign-in password has NO minimum length', async () => {
+    // The other half of the setup-screen assertion, and the half that carries the consequence: a
+    // floor here would lock out anyone whose existing password predates the rule, which is not a
+    // security improvement. Asserting only the setup side left `minLength={needsSetup ? 8 : undefined}`
+    // free to become an unconditional `minLength={8}` with the whole suite green.
+    mount();
+    expect((await screen.findByLabelText('Password')).getAttribute('minlength')).toBe(null);
+  });
+
   test('password managers are given the right hints', async () => {
     // Wrong autocomplete tokens are why a manager offers to save a "new password" on every sign-in,
     // or silently fills the wrong field on the setup screen.

@@ -55,6 +55,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **Two-factor could tell you it was off when it simply couldn't check.** If the account screen failed
+  to reach the server, the two-factor card read a confident **Off** — to an account that may well have
+  had it on. It now says **Unknown** and explains why, rather than claiming an account is unprotected
+  on no evidence.
+
 - **The detection sensitivity sliders had no name a screen reader could read.** The label beside them
   was not attached to the control, so both announced only "slider, 50" with nothing to say what they
   adjusted.

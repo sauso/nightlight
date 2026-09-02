@@ -389,11 +389,21 @@ describe('two-factor authentication', () => {
     expect(screen.getByText('On'), 'still enabled').toBeTruthy();
   });
 
-  test('a failed status lookup is reported rather than reading as "off"', async () => {
-    // The dangerous default: with no status, `enabled` is false and the card would say "Off" — that
-    // is, it would tell someone with two-factor ON that their account is unprotected.
+  test('★★ a failed status lookup reads as UNKNOWN, never as "Off"', async () => {
+    // The dangerous default, and one this test used to NAME without asserting: `enabled` is
+    // `!!status?.enabled`, so a failed lookup is false — and the card said a confident "Off", with
+    // "Require a 6-digit code…" under it, to someone whose account may well have two-factor ON.
+    // Telling a protected account it is unprotected is the one wrong answer this card can give.
+    //
+    // Asserting the error appears is NOT enough — it appeared alongside the false "Off" all along.
+    // The claim that discriminates is the ABSENCE of the wrong status.
     vi.spyOn(api, 'get').mockRejectedValue(new Error('Could not load two-factor status'));
     renderAs(USER, <TwoFactorSection />, { route: '/account' });
+
     expect(await screen.findByText('Could not load two-factor status')).toBeTruthy();
+    expect(screen.getByText('Unknown')).toBeTruthy();
+    expect(screen.queryByText('Off'), 'never claim an account is unprotected on no evidence').toBeNull();
+    expect(screen.queryByText(/Require a 6-digit code/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Set up two-factor' }).disabled).toBe(true);
   });
 });

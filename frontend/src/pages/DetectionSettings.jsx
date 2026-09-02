@@ -17,9 +17,12 @@ const TITLES = { motion: 'Motion detection', sound: 'Sound detection', schedule:
 // Build the full detection state (all three slices) from a camera row.
 //
 // Each screen sends the WHOLE payload with only its own slice changed. ⚠️ Not because the route
-// demands it: `PUT /:id/detection` keeps any field it is not sent (verified in
-// backend/test/detection-route.test.js, which is also why the camera tile's quick toggles can get
-// away with omitting `zone` and `record_clips`). It is because this component holds all three slices
+// demands it: `PUT /:id/detection` keeps any field it is not sent — **with one exception,
+// `motion_enabled`, which is read as `motion_enabled ? 1 : 0` with no undefined check, so omitting it
+// switches motion OFF.** Both halves are verified in backend/test/detection-route.test.js. The
+// keep-on-absent rule is why the camera tile's quick toggles can get away with omitting `zone` and
+// `record_clips`; the exception is why no caller may omit `motion_enabled`. It is because this
+// component holds all three slices
 // in one state object and has no way to know which fields the user actually touched. That makes the
 // round-trip load-bearing: whatever `fromCam` reads, `toPayload` writes back — so a field misread
 // here is not dropped, it is sent back WRONG, and an edit on the sound screen rewrites the motion

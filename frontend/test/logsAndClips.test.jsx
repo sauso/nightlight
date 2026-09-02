@@ -336,4 +336,15 @@ describe('clip management', () => {
     const headings = document.querySelectorAll('.card.tight .card-title');
     expect(headings.length, 'both clips fall on one local day under this suite\'s clock').toBe(1);
   });
+
+  test('★★ …and clips on DIFFERENT local days get separate headings', async () => {
+    // ⚠️ THE OTHER HALF, and without it the test above is nearly worthless: "these two group into
+    // one" is satisfied by an implementation that puts EVERYTHING in one group. Replacing the day key
+    // with a constant survived the one-group assertion alone — so this pins that grouping actually
+    // discriminates, which is also what the whole day-filter feature is keyed on.
+    mockClips(CLIPS); // c1/c2 hours apart, c3 fifty hours back
+    mountClips();
+    await screen.findByText(/3 clips/);
+    expect(document.querySelectorAll('.card.tight .card-title').length).toBe(2);
+  });
 });

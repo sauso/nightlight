@@ -8,10 +8,18 @@
 // screen would look right, the photo would appear, and the damage would only show up as sleep data
 // quietly going missing.
 //
-// The other half is `reconcileChildLegs`: turning tracking on or moving the window changes whether the
-// activity leg should be running RIGHT NOW, so the route re-evaluates rather than waiting for a
-// restart. The tests below pin when that is triggered, because "nothing happened until I restarted
-// the container" is the symptom of getting it wrong.
+// ⚠️ WHAT THIS FILE DOES **NOT** COVER, stated plainly because an earlier version of this very header
+// claimed otherwise: `reconcileChildLegs`. Turning tracking on, or moving the window, changes whether
+// the activity leg should be running right now, so the route re-evaluates immediately rather than
+// waiting up to five minutes for the periodic reconcile — and "nothing happened until I restarted the
+// container" is the symptom of getting that wrong. **No test here pins it.** Its only observable
+// effect is a call to `startMotionDetector`, which spawns an FFmpeg leg; this harness exists precisely
+// to keep the process tree out, and node:test cannot intercept the import without an experimental
+// flag. So a mutation deleting the reconcile call survives this suite. Verified, not assumed —
+// removing line 94 of children.js leaves all of these green.
+// ★ The header said "the tests below pin when that is triggered" and nothing did. That is the same
+// shape as PR #229's test whose NAME carried the invariant its body never asserted, and it is worth
+// leaving the correction visible: a file header is an assertion too, and nothing checks it.
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -84,6 +92,20 @@ test('an empty name is ignored rather than blanking the child', async () => {
   const res = await put({ name: '   ' });
   assert.equal(res.status, 200);
   assert.equal(row().name, 'Raffa');
+});
+
+test('★ a birthday can be CLEARED, which is different from omitting it', async () => {
+  // `birthday !== undefined ? birthday : existing.birthday` — the `!== undefined` is what makes an
+  // explicit empty string mean "remove it" while an absent key means "keep it". Written as
+  // `birthday || existing.birthday` the two collapse, and a birthday entered by mistake could never
+  // be taken off again. Both directions asserted, because only the pair distinguishes them.
+  const cleared = await put({ birthday: '' });
+  assert.equal(cleared.status, 200);
+  assert.equal(row().birthday, '', 'an explicit blank clears it');
+
+  db.prepare('UPDATE children SET birthday = ? WHERE id = ?').run('2023-04-01', KID);
+  await put({ name: 'Raffa' });
+  assert.equal(row().birthday, '2023-04-01', 'while omitting the key keeps it');
 });
 
 test('sleep tracking can be turned off, and back on', async () => {

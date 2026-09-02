@@ -211,6 +211,16 @@ describe('reading a camera into the form', () => {
     expect((await screen.findByLabelText('Confirm (seconds)')).value).toBe('0');
   });
 
+  test('★★ and so does a stored ZERO on the MOTION screen', async () => {
+    // The same `??`-vs-`||` trap, on the other detector. `detect_confirm_s` has the same floor of 0
+    // server-side (`Math.max(0, …)`), so 0 is a value a camera can really be running — and because
+    // this screen rewrites the whole payload on any change, showing 3 instead would then SAVE 3 over
+    // it on the next unrelated edit. Covering only the sound field left this one open: mutating
+    // `detect_confirm_s ?? 3` to `|| 3` survived the whole suite.
+    mount('motion', { ...CAM, detect_confirm_s: 0 });
+    expect((await screen.findByLabelText('Confirm (seconds)')).value).toBe('0');
+  });
+
   test('missing values fall back to the documented defaults', async () => {
     mount('sound', { id: 'cam-1', name: 'Bare', detect_sound_enabled: 1 });
     expect((await screen.findByLabelText('Confirm (seconds)')).value).toBe('4');

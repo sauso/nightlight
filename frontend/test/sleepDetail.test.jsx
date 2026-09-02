@@ -23,7 +23,7 @@ import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within, fireEvent } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
 import { renderAsAdmin } from './helpers/render.jsx';
-import SleepDetail from '../src/pages/SleepDetail.jsx';
+import SleepDetail, { addDays } from '../src/pages/SleepDetail.jsx';
 import { api } from '../src/lib/api.js';
 
 const KID = { id: 'kid-1', name: 'Raffa' };
@@ -147,7 +147,13 @@ describe('moving between nights', () => {
     const picker = await screen.findByLabelText('Pick a night');
     const min = picker.getAttribute('min');
     expect(min, 'the picker publishes the same floor the arrow enforces').toBeTruthy();
-    expect(min < '2026-08-30').toBe(true);
+
+    // ⚠️ THE EXACT FLOOR, not merely "earlier than today". `HISTORY_DAYS` is 30 and the window is
+    // INCLUSIVE of both ends, so the floor is max − 29. Asserting only `min < max` let two mutants
+    // through the whole suite: changing the constant, and dropping the `- 1` — and that second one is
+    // precisely the PR #229 class, an inclusive/exclusive slip that would offer a 31st night the
+    // underlying activity_samples retention does not cover, which reads as data silently missing.
+    expect(min).toBe(addDays(picker.getAttribute('max'), -29));
 
     // Walk to the floor and confirm the arrow gives out there rather than one step later.
     for (let i = 0; i < 40 && !screen.getByLabelText('Previous night').disabled; i += 1) {

@@ -135,12 +135,13 @@ test('★ an omitted field is kept, one field at a time', async () => {
 
 test('⚠️ but motion_enabled is NOT optional — an absent one turns motion OFF', async () => {
   // The one field that does not follow the rule: `motion_enabled ? 1 : 0`, with no undefined check.
-  // Pinned because it is a genuine inconsistency and a trap for the next caller that tries to send a
-  // partial payload — every other field can be omitted safely, this one cannot. Not "fixed" here:
-  // every existing caller sends it, and making it keep-on-absent would change what a client that
-  // deliberately sends `{motion_enabled: false}`... would not, in fact, change — but it WOULD silently
-  // alter the meaning of a payload for any future caller, which is a decision to take deliberately
-  // rather than as a side effect of a test.
+  // Pinned because it is a genuine inconsistency and a trap for the next caller that writes a partial
+  // payload — every other field can be omitted safely, this one cannot.
+  //
+  // Deliberately NOT "fixed" here. Making it keep-on-absent is a real behaviour change, not a tidy-up:
+  // it would silently redefine what an omitted `motion_enabled` means for every future caller, and
+  // that is a decision to take on purpose rather than as a side effect of writing a test. Every
+  // caller today sends the field, so nothing is broken; what was missing was anyone knowing.
   await put({ sound_sensitivity: 40 });
   assert.equal(row().detect_motion_enabled, 0, 'motion is switched off by a payload that omits it');
 });
@@ -215,6 +216,18 @@ test('★ numbers are clamped to their documented ranges', async () => {
   assert.equal(r.sound_sensitivity, 50, 'sound sensitivity is 1..100, so 0 falls back to the default');
   assert.equal(r.sound_confirm_s, 999, 'confirm has no upper clamp — the form is what bounds it');
   assert.equal(r.sound_cooldown_s, 99999);
+});
+
+test('★ …and at the BOTTOM of the range too, not just the top', async () => {
+  // ⚠️ The clamp test above sends 500 (upper) and a sound sensitivity of 0 — but 0 never reaches the
+  // clamp, `|| 50` absorbs it first. So the LOWER bound of both sensitivities was untested, and
+  // widening `Math.max(1, …)` to `Math.max(-999, …)` survived the whole suite. A negative sensitivity
+  // is not academic: it would store a threshold no frame can ever meet, and motion detection would be
+  // silently dead with the screen showing it as on.
+  const res = await put({ motion_enabled: true, sensitivity: -5, sound_sensitivity: -20 });
+  assert.equal(res.status, 200);
+  assert.equal(row().detect_sensitivity, 1, 'sensitivity has a floor of 1');
+  assert.equal(row().sound_sensitivity, 1);
 });
 
 test('garbage in a numeric field falls back to the default instead of writing NaN', async () => {
