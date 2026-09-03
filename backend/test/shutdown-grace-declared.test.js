@@ -86,7 +86,12 @@ function composeServices(text) {
   for (const line of text.split('\n')) {
     if (/^services:\s*$/.test(line)) { inServices = true; continue; }
     if (!inServices) continue;
-    if (line.trim() !== '' && /^\S/.test(line)) { break; } // a new top-level key ends the section
+    // ⚠️ Blank lines and column-0 COMMENTS are not the end of the section. Treating them as one
+    // truncated the service list silently: adversarial review of #279 added a second, undeclared
+    // service after a `#` comment and the scan simply stopped before it, with the suite green and
+    // `docker compose config` calling the file valid.
+    if (line.trim() === '' || /^\s*#/.test(line)) continue;
+    if (/^\S/.test(line)) break; // a genuine new top-level key ends the section
     const m = /^ {2}([A-Za-z0-9_.-]+):\s*$/.exec(line);
     if (m) { cur = { name: m[1], body: [] }; out.push(cur); continue; }
     if (cur) cur.body.push(line);
@@ -95,27 +100,53 @@ function composeServices(text) {
 }
 
 // Services running a Nightlight image, from every compose file in the repo.
+// ⚠️ `compose.yaml` and `compose.yml` count too, and are in fact the Compose Specification's PREFERRED
+// names — `docker compose` looks for them BEFORE `docker-compose.yml`. Matching only the legacy prefix
+// let review of #279 drop a `compose.yaml` with an undeclared Nightlight service into the repo root
+// with the suite still green: the file Docker would have picked first was the one not checked.
+const COMPOSE_FILE = /(^|\/)(docker-compose|compose)[^/]*\.ya?ml$/;
 const NIGHTLIGHT_SERVICES = ALL_FILES
-  .filter((f) => /(^|\/)docker-compose[^/]*\.ya?ml$/.test(f))
+  .filter((f) => COMPOSE_FILE.test(f))
   .flatMap((f) =>
     composeServices(read(f))
       .filter((s) => /^\s*image:.*nightlight/m.test(s.body))
       .map((s) => ({ file: f, ...s }))
   );
 
-// Documented `docker run` invocations that start Nightlight, from every markdown file in the repo.
-// Backslash continuations are folded first so a multi-line example is one logical command; prose that
-// merely mentions `docker run` is excluded because the command must START the line.
-const DOCKER_RUN_EXAMPLES = ALL_FILES
-  .filter((f) => f.endsWith('.md'))
-  .flatMap((f) => {
-    const folded = read(f).replace(/\\\n\s*/g, ' ');
-    return folded
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l.startsWith('docker run') && /nightlight/.test(l))
-      .map((cmd) => ({ file: f, cmd }));
-  });
+// Documented `docker run` invocations from every markdown file in the repo. Backslash continuations
+// are folded so a multi-line example is one logical command; prose that merely mentions `docker run`
+// is excluded because the command must START the line.
+//
+// ⚠️ `[ \t]*` BEFORE the newline is load-bearing, and its absence was a real hole. With a plain
+// `\\\n`, adding ONE TRAILING SPACE after the backslash in the README's quick-start command stopped
+// the fold, so the command's first line no longer reached its own image name and the whole example
+// dropped out of the scan — while the count guard still passed on the remaining examples. Review of
+// #279 removed `--stop-timeout` from that same command and the suite stayed green. A trailing space
+// after a `\` is invisible in a diff and breaks the command for anyone who copies it, too.
+function dockerRunLines(text) {
+  return text
+    .replace(/\\[ \t]*\n\s*/g, ' ')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith('docker run'));
+}
+
+const MARKDOWN = ALL_FILES.filter((f) => f.endsWith('.md'));
+const DOCKER_RUN_EXAMPLES = MARKDOWN.flatMap((f) =>
+  dockerRunLines(read(f))
+    .filter((cmd) => /nightlight/.test(cmd))
+    .map((cmd) => ({ file: f, cmd }))
+);
+
+// ★ FOLDING IS LOSSLESS — asserted from the RAW text, so a parser that quietly drops a command cannot
+// pass. Counts every line that STARTS a `docker run`, before any folding or filtering, and requires
+// the folded parse to produce exactly as many. This is deliberately independent of whether a command
+// mentions Nightlight: it tests the parser, not the subject.
+const DOCKER_RUN_RAW_STARTS = MARKDOWN.map((f) => ({
+  file: f,
+  raw: read(f).split('\n').filter((l) => l.trim().startsWith('docker run')).length,
+  parsed: dockerRunLines(read(f)).length,
+})).filter((x) => x.raw > 0 || x.parsed > 0);
 
 const parseSeconds = (v) => (/^(\d+)m$/.test(v) ? Number(RegExp.$1) * 60 : Number(String(v).replace(/s$/, '')));
 
@@ -170,6 +201,17 @@ describe('the shutdown grace this deployment needs', () => {
       `the markdown scan found only ${DOCKER_RUN_EXAMPLES.length}: ` +
         `[${DOCKER_RUN_EXAMPLES.map((e) => e.file).join(', ')}] — it has stopped working`
     );
+    // Nothing was lost on the way in. See DOCKER_RUN_RAW_STARTS: one trailing space used to be enough
+    // to drop a whole command from the scan, and a count-based guard with slack never noticed.
+    for (const f of DOCKER_RUN_RAW_STARTS) {
+      assert.equal(
+        f.parsed,
+        f.raw,
+        `${f.file}: ${f.raw} \`docker run\` command(s) in the file but ${f.parsed} parsed — a line ` +
+          'continuation is not being folded (a trailing space after a `\\` does exactly this), so a ' +
+          'documented command is escaping this check entirely'
+      );
+    }
     assert.ok(
       DOCKER_RUN_EXAMPLES.some((e) => e.file === 'README.md'),
       'the README quick-start example was not scanned'
@@ -197,8 +239,9 @@ describe('the shutdown grace this deployment needs', () => {
   });
 
   test('all of them declare the SAME value, so one place cannot drift', () => {
-    // Not pedantry: these are five copies of one decision, and a reader who finds two different
-    // numbers has no way to tell which is current. Raising the requirement must move all of them.
+    // Not pedantry: these are eight copies of one decision across six files, and a reader who finds
+    // two different numbers has no way to tell which is current. Raising the requirement must move
+    // all of them.
     const declared = new Set([
       ...NIGHTLIGHT_SERVICES.map((s) => parseSeconds(/stop_grace_period:\s*(\S+)/.exec(s.body)[1])),
       ...DOCKER_RUN_EXAMPLES.map((e) => Number(/--stop-timeout[ =](\d+)/.exec(e.cmd)[1])),

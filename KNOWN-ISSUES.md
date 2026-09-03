@@ -156,8 +156,9 @@ restarted (a deploy, a reboot, a power cut).
 
 **Why:** a clip is assembled from the buffer *after* you press stop, and a restart during that step
 loses it. Nightlight now marks such a recording as failed when it next starts, rather than leaving it
-stuck half-finished forever. It tries to finish the clip first, but only within the time your container
-is given to shut down, so a long recording may still be lost.
+stuck half-finished forever. It tries to finish the clip first, but only for up to 6 seconds — a fixed
+limit that allowing your container longer to stop does **not** extend — so a long recording may still
+be lost.
 
 **What to do:** re-record if you still need it. ⚠️ Failed recordings are **not** shown in the
 recordings list — that list shows finished ones only — so a recording that vanished after a restart

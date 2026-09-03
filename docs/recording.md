@@ -150,9 +150,12 @@ it on the way down — but only if your container is given time to shut down, wh
 `--stop-timeout 30` (or Compose's `stop_grace_period: 30s`, or the Unraid template's *Extra
 Parameters*) is for. Stopping takes a few seconds and the container exits as soon as it's done. Without
 that setting Docker may kill it part-way, and the recording is marked **failed** instead — see
-[Quick start](../README.md#quick-start) and
-[KNOWN-ISSUES.md](../KNOWN-ISSUES.md). A recording long enough to outlast the whole grace can still be
-lost; that is a bounded wait, not a promise.
+[Quick start](../README.md#quick-start) and [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
+
+Nightlight waits **up to 6 seconds** for that final step, which is enough for the recordings this is
+for. It's a fixed limit: **raising the stop timeout past 30 seconds won't buy a long recording more
+time**, because the wait isn't derived from it. A recording still being assembled after 6 seconds is
+given up on and marked failed — a bounded wait, not a promise.
 
 **Record on a camera that's offline** will start and then save nothing — the buffer exists but has no
 frames in it, so the recording ends up marked failed rather than appearing on the child's page. The

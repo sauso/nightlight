@@ -207,6 +207,23 @@ describe('stopAllRecordings', () => {
     assert.ok(started !== -1, 'the recording stop is no longer started before the detector stops');
     assert.ok(awaited > started, 'the recording stop is never awaited — #256 is reintroduced');
     assert.ok(awaited < clipCapture, 'the ring is torn down before the recording finishes cutting from it');
+
+    // ★ AND THE DETECTOR STOPS MUST SIT BETWEEN THOSE TWO — which is the whole of the overlap, and
+    // was NOT asserted until adversarial review of #279 demonstrated the gap. Moving `await
+    // recordingsFinished` up to immediately after the start makes shutdown fully serial again
+    // (6+3+3+3 = 15s, the exact #277 regression) while satisfying every check above: the arithmetic
+    // is over constants a reordering does not touch, and `awaited` is still after `started` and
+    // before `clipCapture`. That mutant passed the whole 482-case suite. Without these three lines
+    // the comment in index.js claiming this is "asserted in recordings-shutdown.test.js" is false.
+    for (const stop of ['stopAllMotionDetectors', 'stopAllOnvifMotion', 'stopAllSoundDetectors']) {
+      const at = indexSrc.indexOf(`await ${stop}()`);
+      assert.ok(at !== -1, `${stop} is no longer awaited during shutdown`);
+      assert.ok(
+        at > started && at < awaited,
+        `${stop} no longer runs while the recording is still being saved — shutdown is serial again, ` +
+          'which is the 15s worst case PR #277 removed'
+      );
+    }
   });
 });
 
