@@ -65,7 +65,7 @@ beforeEach(() => {
     `rtsp://admin:${PLANTED}@192.0.2.10:554/ch1`,
     'onvifuser', PLANTED,
     'talkuser', PLANTED,
-    'http://192.0.2.10/snap.jpg'
+    `http://admin:${PLANTED}@192.0.2.10/snap.jpg`
   );
 });
 
@@ -103,11 +103,68 @@ describe('PUT /cameras/:id/assign as a caregiver', () => {
     );
   });
 
+  test('does not get the admin edit-form view', async () => {
+    // Hard-coding publicCamera(updated, true) leaks no planted marker to a caregiver — it hands them
+    // the admin SHAPE. The marker sweep cannot see that, so assert on the admin-only keys directly, or
+    // that mutant survives.
+    const r = await unassign(caregiverToken);
+    for (const field of ['rtsp_host', 'rtsp_port', 'rtsp_path', 'rtsp_username', 'rtsp_display',
+                         'rtsp_has_password', 'talk_has_password', 'sub_rtsp_path']) {
+      assert.equal(r.body[field], undefined, `${field} is admin-only but reached a caregiver`);
+    }
+  });
+
   test('still returns the fields the tile needs', async () => {
     const r = await unassign(caregiverToken);
     for (const field of ['id', 'name', 'child_id']) {
       assert.ok(field in r.body, `${field} missing — the camera tile needs it`);
     }
+  });
+});
+
+describe('the credential list itself stays honest', () => {
+  // The header above claims these tests catch a credential column added to `cameras` later. That was
+  // not true as written: the fixture is a hand-written UPDATE naming seven columns and
+  // CREDENTIAL_FIELDS is a seven-element literal, so a new column would simply be invisible to both.
+  //
+  // This is the tripwire that makes the claim real. It reads the live schema and fails when a column
+  // appears whose NAME suggests it carries a credential and which nobody has classified yet. The fix
+  // when it fires is to decide: strip it in publicCamera and add it to CREDENTIAL_FIELDS, or add it to
+  // REVIEWED_SAFE with a reason.
+  const REVIEWED_SAFE = new Set([
+    'mediamtx_path',      // server-generated local path, no credential
+    'onvif_device_url',   // bare service endpoint; ONVIF creds live in their own columns
+    'motion_mqtt_topic',  // topic name; broker credentials are in `settings`, not here
+    'motion_mqtt_value',  // the payload value that means "motion"
+    'talk_backend',       // which backchannel implementation, e.g. 'onvif'
+    'discovery_source',   // 'manual' | 'onvif'
+    // Named "token" but it is not authentication material: an ONVIF MEDIA PROFILE identifier
+    // (e.g. 'Profile_1'), stored so PTZ commands don't have to re-probe. It selects which profile
+    // to act on; the credentials that authorise the call are onvif_username/onvif_password.
+    // Caught by this tripwire on its first run, which is the point of it.
+    'onvif_profile_token',
+  ]);
+
+  test('no unclassified column on `cameras` looks like a credential', () => {
+    const cols = db.prepare('PRAGMA table_info(cameras)').all().map((c) => c.name);
+    const suspicious = cols.filter((c) => /pass|secret|token|cred|auth|url|user/i.test(c));
+    const unclassified = suspicious.filter(
+      (c) => !CREDENTIAL_FIELDS.includes(c) && !REVIEWED_SAFE.has(c)
+    );
+    assert.deepEqual(
+      unclassified, [],
+      `new column(s) on \`cameras\` that may carry a credential and are classified nowhere: ` +
+      `${unclassified.join(', ')}. Either strip them in publicCamera() and add them to ` +
+      `CREDENTIAL_FIELDS, or add them to REVIEWED_SAFE with a reason.`
+    );
+  });
+
+  test('every field CREDENTIAL_FIELDS names is really a column', () => {
+    // Guards the other direction: a renamed column would silently make an assertion vacuous, because
+    // `undefined === undefined` passes for a field that no longer exists.
+    const cols = new Set(db.prepare('PRAGMA table_info(cameras)').all().map((c) => c.name));
+    const missing = CREDENTIAL_FIELDS.filter((f) => !cols.has(f));
+    assert.deepEqual(missing, [], `CREDENTIAL_FIELDS names column(s) that no longer exist: ${missing.join(', ')}`);
   });
 });
 
@@ -125,9 +182,18 @@ describe('PUT /cameras/:id/assign as an admin', () => {
     for (const field of ['rtsp_url', 'sub_rtsp_url', 'onvif_username', 'onvif_password', 'talk_password']) {
       assert.equal(r.body[field], undefined, `${field} was returned to an admin as a raw value`);
     }
+    // KNOWN AND DELIBERATE, not an oversight: snapshot_url comes back to an admin VERBATIM, embedded
+    // Basic-auth credentials included, because the edit box has to show what the operator typed. It is
+    // the one credential-bearing column publicCamera returns raw, and it is inconsistent with how the
+    // same function treats the RTSP and talk passwords (components + a has_password flag) and with
+    // diagnostics.js, which reduces this column to a boolean. Tracked separately; asserted here so the
+    // contract is explicit and a change to it is a deliberate act. Caregivers never receive it — that
+    // is asserted above.
+    assert.equal(r.body.snapshot_url, `http://admin:${PLANTED}@192.0.2.10/snap.jpg`);
+    const { snapshot_url, ...rest } = r.body;
     assert.ok(
-      !JSON.stringify(r.body).includes(PLANTED),
-      `a raw credential reached the admin response: ${JSON.stringify(r.body)}`
+      !JSON.stringify(rest).includes(PLANTED),
+      `a raw credential reached the admin response: ${JSON.stringify(rest)}`
     );
   });
 });
