@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import db from '../db.js';
-import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { requireAuth, requireAdmin, optionalAuth } from '../middleware/auth.js';
 import { refreshMqttConnection, mqttStatus } from '../lib/mqttClient.js';
 import { restartClipCapture } from '../lib/clipCapture.js';
 import { clipStorageStats, sweepClips } from '../lib/clipStorage.js';
@@ -16,18 +16,77 @@ function getSettings() {
   return db.prepare('SELECT * FROM settings WHERE id = ?').get('app');
 }
 
-// Deliberately excludes mqtt_host/port/username/password - this is fetched by
-// unauthenticated visitors too (the login screen needs the app name/theme), and MQTT
-// broker credentials have no reason to ever reach a client that isn't the admin
-// settings page specifically.
-function toPublicSettings(s) {
-  const { mqtt_host, mqtt_port, mqtt_username, mqtt_password, mqtt_enabled, ...pub } = s;
-  return pub;
+// GET /settings answers WITHOUT a token, because the login screen needs the app name, colours and
+// font before anyone can sign in. That makes the response an ALLOW-LIST, and the distinction is not
+// stylistic: the settings table gains columns with nearly every feature, and several of those columns
+// are credentials. A deny-list is correct only until the next migration, and then it silently leaks
+// whatever was added.
+//
+// It already failed exactly that way. This function used to exclude the five mqtt_* columns and spread
+// the rest, which was right when it was written and wrong the moment ntfy, Gotify and Pushover added
+// their own token columns to the same table — those were served to any unauthenticated caller. See
+// GHSA-qffc-965c-x74m. Adding a field here must be a deliberate act; forgetting to add one is a
+// missing setting on a page, which is visible, rather than a leaked secret, which is not.
+const PUBLIC_FIELDS = [
+  'app_name',
+  'accent_color',
+  'live_color',
+  'offline_color',
+  'font_choice',
+  'temp_unit',
+  'timezone',
+];
+
+// Additionally returned to an ADMIN. These are the non-secret config values the admin settings forms
+// bind. SettingsGeneral / SettingsCamera / SettingsRecording seed their form state from the SETTINGS
+// CONTEXT — i.e. from THIS route's GET, which they re-read via refresh() after every save — so
+// removing a name here blanks a form field. (They discard the PUT response body entirely; if you are
+// looking for what constrains this list, it is the GET, not the PUT.) Nothing here is a credential —
+// provider tokens and broker passwords are served only by their own admin-only /config routes, which
+// mask them.
+// Caregivers deliberately get PUBLIC_FIELDS only: every settings page that uses these is admin-gated
+// in the UI, and PUT /settings is requireAdmin.
+const ADMIN_FIELDS = [
+  ...PUBLIC_FIELDS,
+  'camera_offline_alert_enabled',
+  'camera_offline_alert_minutes',
+  'clip_pre_roll_s',
+  'clip_post_roll_s',
+  'clip_retention_days',
+  'clip_retention_max_gb',
+  'ondemand_enabled',
+  'ondemand_pre_roll_s',
+  'ondemand_max_duration_s',
+  'ptz_step',
+  'wake_clips_enabled',
+  'wake_clip_seconds',
+  'wake_clip_retention_days',
+];
+
+function pick(row, fields) {
+  const out = {};
+  for (const f of fields) if (f in row) out[f] = row[f];
+  return out;
 }
 
-// Public: the login screen (pre-authentication) also needs the app name/colors.
-router.get('/', (req, res) => {
-  res.json(toPublicSettings(getSettings()));
+// Public: the login screen (pre-authentication) also needs the app name/colors. optionalAuth attaches
+// req.user when a valid token is present without rejecting when it isn't, so one route can serve both.
+router.get('/', optionalAuth, (req, res) => {
+  // This response now varies by credential — the same URL answers an anonymous visitor and an admin
+  // differently. Any shared cache in front of the app must be told that, or it can serve one user's
+  // body to another. The shipped SWAG config caches nothing here, so this changes nothing today; it
+  // is for the operator who puts Cloudflare "Cache Everything" in front of their instance, which the
+  // README's remote-access section makes a realistic deployment.
+  res.set('Vary', 'Authorization');
+  res.set('Cache-Control', 'private, no-store');
+  // Own-property check, not a plain `req.user?.role === 'admin'`: jwt.verify returns a JSON.parse'd
+  // object, so a plain read would resolve through the prototype chain, and a token carrying no role
+  // claim at all would answer as admin if Object.prototype.role were ever set. No vector for that was
+  // found — six qs shapes, four headers and a JWT with a literal "__proto__" key all failed to set it
+  // — but this closes the class for one line, and the widening direction is the dangerous one.
+  const isAdmin = req.user != null && Object.hasOwn(req.user, 'role') && req.user.role === 'admin';
+  const fields = isAdmin ? ADMIN_FIELDS : PUBLIC_FIELDS;
+  res.json(pick(getSettings(), fields));
 });
 
 // Admin-only: MQTT broker config for the Settings page form. The password itself is
@@ -257,7 +316,13 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
   if (retentionChanged) {
     try { sweepClips(); } catch { /* logged inside */ }
   }
-  res.json(toPublicSettings(getSettings()));
+  // PUT is requireAdmin, so it answers with the admin view. No client reads this body — all five
+  // callers discard it and re-read via GET — but it is filtered anyway: before the allow-list, this
+  // line returned the whole row minus the five mqtt_* columns, which handed the ntfy/Gotify/Pushover
+  // tokens to the admin's browser on every save. Same class as GHSA-qffc-965c-x74m, much less severe
+  // because it needs an admin session, and closed here rather than left as the one path still spraying
+  // credentials into a page.
+  res.json(pick(getSettings(), ADMIN_FIELDS));
 });
 
 export default router;
