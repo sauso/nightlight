@@ -56,16 +56,20 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ### Fixed
 
 - **A background check that failed could shut Nightlight down.** The 15-second camera watchdog, the
-  30-second audio check, the 5-minute reconcile and the timelapse sampler each ran unprotected: if one
-  of them hit an error — most likely the streaming server being briefly unavailable — the whole app
-  exited. That is an outage on an unattended monitor, and it was self-inflicted at the worst moment,
-  because a briefly-unavailable streaming server is also exactly what makes a camera look unready and
-  sends the watchdog in to fix it.
+  30-second audio check, the 5-minute reconcile and the timelapse sampler each ran unprotected, so an
+  error inside one of them exited the whole app — an outage on a monitor that is normally left
+  unattended overnight. The two ways it could happen: the low-resolution stream failing to register
+  with the streaming server while that server is restarting, and the database being momentarily locked
+  when a check reads its camera list.
   - A failure in one of those jobs is now written to the log as `[guard:…] background task failed
     (continuing)` and skipped; the job runs again on its next tick.
   - A failure while checking one camera no longer skips the cameras after it in the same pass.
-  - Nightlight now also survives unexpected errors elsewhere rather than exiting — see
-    [KNOWN-ISSUES.md](KNOWN-ISSUES.md) for what these log lines mean and when to worry about them.
+  - A repeating failure is now reported once a minute rather than every tick, so it cannot scroll the
+    rest of the log out of view.
+  - Once running, Nightlight survives unexpected errors elsewhere rather than exiting — but a failure
+    while it is still *starting* now exits properly, so your container restarts instead of sitting
+    there looking healthy with nothing serving. See [KNOWN-ISSUES.md](KNOWN-ISSUES.md) for what these
+    log lines mean and when to worry about them.
 
 - **A missing video component could crash Nightlight instead of disabling one camera.** Nightlight runs
   a helper program (FFmpeg) per camera, and the streaming server (MediaMTX) alongside it. If one of

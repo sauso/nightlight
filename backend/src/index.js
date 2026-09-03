@@ -41,7 +41,7 @@ import { startSleepJob } from './lib/sleepAnalysis.js';
 import { startWakeWatcher } from './lib/wakeWatcher.js';
 import { startTimelapseSampler } from './lib/timelapse.js';
 import { logger } from './lib/logger.js';
-import { safeInterval, installCrashGuards, reportGuardFailure } from './lib/processGuards.js';
+import { safeInterval, installCrashGuards, markBootComplete, reportGuardFailure } from './lib/processGuards.js';
 import { recordCameraEvent, EVENT } from './lib/cameraEvents.js';
 import { probeAudioFlowing, tracksHaveAudio } from './lib/audioLiveness.js';
 import { notifyCameraOffline, notifyCameraRecovered } from './lib/cameraStatusAlert.js';
@@ -241,6 +241,10 @@ app.get('*', (req, res) => {
 const PORT = process.env.PORT || 4000;
 const server = app.listen(PORT, () => {
   logger.info(`Baby monitor backend listening on port ${PORT}`);
+  // From here on a background fault should be survived, not fatal. BEFORE this point it is a failed
+  // start, and the guards exit non-zero instead of leaving a healthy-looking container with no server
+  // bound — see the boot/steady-state note in lib/processGuards.js.
+  markBootComplete();
   // Run the clip-storage guard + retention sweeper BEFORE reconcile, so reconcile only starts
   // segmenters once storage is known usable (startClipCapture gates on it).
   startClipStorage();
@@ -326,7 +330,7 @@ function purgeExpiredSessions() {
   if (changes > 0) logger.info(`Purged ${changes} expired session(s).`);
 }
 purgeExpiredSessions();
-setInterval(purgeExpiredSessions, 24 * 60 * 60 * 1000);
+safeInterval('purge-sessions', 24 * 60 * 60 * 1000, purgeExpiredSessions);
 
 // Second, independent layer of defense: even with FFmpeg's own read timeout (see
 // transcoder.js), a stalled connection could conceivably hang in a way that never
@@ -412,29 +416,39 @@ safeInterval('camera-watchdog', WATCHDOG_INTERVAL_MS, async () => {
         }
       }
 
-      // Sub-stream (Low quality) wedge check — independent of the main path above, and BEFORE its early
-      // `continue`, so it runs even when the main stream is healthy. Mirrors the main logic: if the sub path
-      // stays not-ready past the threshold, force-restart just the sub leg (startSubStream → stopTranscoder
-      // SIGTERM→SIGKILL → relaunch), which clears a wedged FFmpeg that the reconcile can't (it's still alive).
-      if (subConfigured(cam)) {
-        const subReady = (await getPathStatus(subPathName(cam.mediamtx_path))).ready;
-        if (subReady) {
-          subNotReadySince.delete(cam.id);
-        } else {
-          const subSince = subNotReadySince.get(cam.id);
-          if (!subSince) {
-            subNotReadySince.set(cam.id, Date.now());
-          } else if (Date.now() - subSince > STUCK_THRESHOLD_MS) {
-            logger.error(`Sub-stream (Low) for "${cam.name}" unready over ${STUCK_THRESHOLD_MS / 1000}s - force-restarting it.`);
-            recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'sub-stream force-restarted by watchdog (unready 30s+)');
-            await startSubStream(cam);
+      // ⚠️ The sub leg gets its OWN try, INSIDE the per-camera one. Adversarial review of PR #275
+      // found that sharing a single per-camera try was not enough: the sub leg runs FIRST, and
+      // `startSubStream` is the one genuinely bare `upsertPath` in the codebase. A sub path MediaMTX
+      // keeps rejecting therefore threw every tick before the main-leg code below could run, so
+      // `notReadySince` was never seeded and the MAIN transcoder could never be force-restarted for
+      // that camera — with MediaMTX itself perfectly up. Isolating per camera was right; isolating
+      // only per camera was still one outage short.
+      try {
+        // Sub-stream (Low quality) wedge check — independent of the main path above, and BEFORE its early
+        // `continue`, so it runs even when the main stream is healthy. Mirrors the main logic: if the sub path
+        // stays not-ready past the threshold, force-restart just the sub leg (startSubStream → stopTranscoder
+        // SIGTERM→SIGKILL → relaunch), which clears a wedged FFmpeg that the reconcile can't (it's still alive).
+        if (subConfigured(cam)) {
+          const subReady = (await getPathStatus(subPathName(cam.mediamtx_path))).ready;
+          if (subReady) {
             subNotReadySince.delete(cam.id);
+          } else {
+            const subSince = subNotReadySince.get(cam.id);
+            if (!subSince) {
+              subNotReadySince.set(cam.id, Date.now());
+            } else if (Date.now() - subSince > STUCK_THRESHOLD_MS) {
+              logger.error(`Sub-stream (Low) for "${cam.name}" unready over ${STUCK_THRESHOLD_MS / 1000}s - force-restarting it.`);
+              recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'sub-stream force-restarted by watchdog (unready 30s+)');
+              await startSubStream(cam);
+              subNotReadySince.delete(cam.id);
+            }
           }
+        } else {
+          subNotReadySince.delete(cam.id);
         }
-      } else {
-        subNotReadySince.delete(cam.id);
+      } catch (err) {
+        reportGuardFailure(`camera-watchdog:sub:${cam.name}`, err);
       }
-
       if (status.ready) {
         notReadySince.delete(cam.id);
         continue;
