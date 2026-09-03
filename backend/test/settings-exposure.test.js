@@ -141,6 +141,37 @@ describe('GET /settings role check reads own properties only', () => {
   });
 });
 
+describe('GET /settings only widens for the admin role specifically', () => {
+  // Mutation testing found that `role === 'admin'` could be rewritten as `role !== 'caregiver'` and
+  // every one of the other tests still passed, because the fixtures only ever use 'admin', 'caregiver'
+  // or no role claim at all. Nothing pinned the case in between. A role this build does not recognise
+  // — an older or newer token, a value someone adds later — must fail CLOSED.
+  test('an unrecognised role is not treated as admin', async () => {
+    const viewer = makeUser(db, { id: 'u-v', username: 'viewer', role: 'caregiver' });
+    const token = signToken({ id: viewer.id, username: viewer.username, role: 'viewer', sid: makeSession(db, viewer.id) });
+    const r = await get(token);
+    assert.equal(r.status, 200);
+    assert.equal(r.body.ptz_step, undefined, "role 'viewer' was treated as admin");
+    const extra = Object.keys(r.body).filter((k) => !PUBLIC.includes(k));
+    assert.deepEqual(extra, [], `an unrecognised role widened the response: ${extra.join(', ')}`);
+  });
+});
+
+describe('GET /settings ignores a token in the query string', () => {
+  // A full session token must never be accepted from a query string — query strings reach reverse-proxy
+  // access logs, browser history and Referer headers, which is why requireAuthQueryOrHeader accepts
+  // only media-scoped tokens there. verifyToken pins the media half (mutating optionalAuth to demand
+  // purpose:'media' is killed), but nothing pinned this: teaching optionalAuth to read req.query.token
+  // survived all 398 tests while returning the full admin set for a token sitting in a URL.
+  test('an admin session token in ?token= does not widen the response', async () => {
+    const r = await call(`${server.url}/api/settings?token=${encodeURIComponent(adminToken)}`);
+    assert.equal(r.status, 200);
+    assert.equal(r.body.ptz_step, undefined, 'a session token in the query string was honoured');
+    const extra = Object.keys(r.body).filter((k) => !PUBLIC.includes(k));
+    assert.deepEqual(extra, [], `a query-string token widened the response: ${extra.join(', ')}`);
+  });
+});
+
 describe('GET /settings as a caregiver', () => {
   test('gets the public fields and no admin config', async () => {
     const r = await get(caregiverToken);
