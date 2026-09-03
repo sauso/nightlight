@@ -115,6 +115,32 @@ describe('GET /settings unauthenticated', () => {
   });
 });
 
+describe('GET /settings role check reads own properties only', () => {
+  // jwt.verify hands back a JSON.parse'd object, so `req.user.role` would otherwise resolve through
+  // the prototype chain. No way to set Object.prototype.role from a request was found (six query-string
+  // shapes, four header shapes, and a JWT with a literal "__proto__" key all failed), so this is
+  // defence in depth rather than a demonstrated exploit — but the failure direction is widening the
+  // response, which is the one that must not happen. Media tokens are rejected before this point;
+  // a *session* token simply minted without a role claim is the shape that reaches it.
+  test('a token with no role claim is not admin, even if Object.prototype.role says otherwise', async () => {
+    const sid = makeSession(db, 'u-c');
+    const noRoleToken = signToken({ id: 'u-c', username: 'nanny', sid });
+    Object.prototype.role = 'admin'; // eslint-disable-line no-extend-native
+    try {
+      const r = await get(noRoleToken);
+      assert.equal(r.status, 200);
+      assert.equal(
+        r.body.ptz_step, undefined,
+        'a token carrying no role claim was treated as admin via the prototype chain'
+      );
+      const extra = Object.keys(r.body).filter((k) => !PUBLIC.includes(k));
+      assert.deepEqual(extra, [], `prototype-chain read widened the response: ${extra.join(', ')}`);
+    } finally {
+      delete Object.prototype.role;
+    }
+  });
+});
+
 describe('GET /settings as a caregiver', () => {
   test('gets the public fields and no admin config', async () => {
     const r = await get(caregiverToken);

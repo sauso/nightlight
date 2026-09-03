@@ -69,7 +69,13 @@ function pick(row, fields) {
 // Public: the login screen (pre-authentication) also needs the app name/colors. optionalAuth attaches
 // req.user when a valid token is present without rejecting when it isn't, so one route can serve both.
 router.get('/', optionalAuth, (req, res) => {
-  const fields = req.user?.role === 'admin' ? ADMIN_FIELDS : PUBLIC_FIELDS;
+  // Own-property check, not a plain `req.user?.role === 'admin'`: jwt.verify returns a JSON.parse'd
+  // object, so a plain read would resolve through the prototype chain, and a token carrying no role
+  // claim at all would answer as admin if Object.prototype.role were ever set. No vector for that was
+  // found — six qs shapes, four headers and a JWT with a literal "__proto__" key all failed to set it
+  // — but this closes the class for one line, and the widening direction is the dangerous one.
+  const isAdmin = req.user != null && Object.hasOwn(req.user, 'role') && req.user.role === 'admin';
+  const fields = isAdmin ? ADMIN_FIELDS : PUBLIC_FIELDS;
   res.json(pick(getSettings(), fields));
 });
 
