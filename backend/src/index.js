@@ -604,10 +604,17 @@ async function shutdown() {
   //
   // ⚠️ THE REASON IT IS NOT SIMPLY AWAITED IN PLACE IS ARITHMETIC, and awaiting in place was a real
   // regression caught by adversarial review of PR #277. Each detector stop is bounded by its own 3s
-  // force-kill, and so is the transcoder stop: 3 + 3 + 6 + 3 = 15s worst case, against Docker's
-  // DEFAULT 10s stop grace (docker-compose.yml sets no stop_grace_period, and a hand-rolled
-  // `docker run` has none either). Before this PR the worst case was 3 + 3 + 3 = 9s — just inside.
-  // Overlapping the recording wait with the detector stops restores that: max(6, 3+3) + 3 = 9s.
+  // force-kill, and so is the transcoder stop: awaiting in sequence gave 3 + 3 + 6 + 3 = 15s worst
+  // case, where before that PR it was 3 + 3 + 3 = 9s. Overlapping the recording wait with the
+  // detector stops restores that: max(6, 3+3) + 3 = 9s. Asserted in recordings-shutdown.test.js,
+  // because it is not observable any other way.
+  //
+  // ⚠️ 9s is the number the DEPLOYMENT grace is sized from — see issue #279 and the
+  // `stop_grace_period` / `--stop-timeout 30` declarations in docker-compose.yml, unraid-template.xml
+  // and the README. An earlier version of this comment said 15s exceeded "Docker's DEFAULT 10s stop
+  // grace"; soak-testing this on Docker Engine 29.7.2 showed there is no such guarantee — `docker
+  // stop` with no `-t` SIGKILLed the container after ~4s, losing exactly the recording this code
+  // exists to save. Keep the bound under 9s AND keep the grace declared; neither alone is enough.
   const recordingsFinished = stopAllRecordingsForShutdown();
   await stopAllMotionDetectors();
   await stopAllOnvifMotion();

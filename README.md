@@ -56,6 +56,7 @@ docker run -d \
   --restart unless-stopped \
   --log-opt max-size=10m \
   --log-opt max-file=3 \
+  --stop-timeout 30 \
   -e PUID=99 \
   -e PGID=100 \
   -e TZ=UTC \
@@ -80,6 +81,17 @@ The `--log-opt` flags cap Docker's own log storage at 10MB × 3 files - without 
 logs default to growing unbounded, which can be a real problem on Unraid specifically
 since Docker's storage there is a fixed-size image that can break the whole Docker
 service if it fills up.
+
+`--stop-timeout 30` gives Nightlight enough time to stop cleanly. It needs a few seconds
+on the way down — an on-demand recording is assembled from the buffer at that point, and
+being killed part-way through loses it. Stopping normally takes **1-5 seconds**, so 30 is
+deliberately generous — and costs nothing, because the container exits as soon as it's
+finished rather than waiting out the timeout. Don't rely on Docker's own default here:
+recent versions don't document one, and it has been measured killing the container after
+about 4 seconds, which was enough to lose the recording. **If you deployed before this
+was added**, add `--stop-timeout 30` yourself (or `stop_grace_period: 30s` under the
+service in Compose, or the Unraid template's "Extra Parameters" field). Nothing else breaks
+without it — a recording lost this way is marked failed rather than disappearing silently.
 
 Or with Docker Compose:
 
@@ -124,6 +136,13 @@ Apps tab), install it locally by placing the file where Unraid looks for user te
 
 This is a single container — no extra plugins needed, Unraid's normal Docker UI handles it
 directly.
+
+**Already installed from an older copy of the template?** Check that **Extra Parameters**
+(Advanced view, on the container's edit page) contains `--stop-timeout 30`, and add it if
+not. Unraid builds the container from the saved template, so a template downloaded before
+this was added keeps the old value until you edit it — and without it a recording that was
+in progress when the container restarts can be cut short. See the note under
+[Quick start](#quick-start) for what it does.
 
 ## Networking modes
 
@@ -532,7 +551,8 @@ recovery window) with what each one means and whether it needs any action, see
 git clone https://github.com/sauso/nightlight.git
 cd nightlight
 docker build -t nightlight .
-docker run -d --name nightlight --network host -e PUID=99 -e PGID=100 -v ./data:/app/data nightlight
+docker run -d --name nightlight --network host --stop-timeout 30 \
+  -e PUID=99 -e PGID=100 -v ./data:/app/data nightlight
 ```
 
 ## Project layout

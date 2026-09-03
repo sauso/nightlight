@@ -181,13 +181,19 @@ describe('stopAllRecordings', () => {
     assert.ok(SHUTDOWN_SETTLE_MS < SEGMENT_SETTLE_MS, 'the shutdown settle is no longer the shorter one');
   });
 
-  test('shutdown stays inside Docker’s default 10s stop grace', () => {
+  test('shutdown stays inside the 9s bound the deployment grace is sized from', () => {
     // Arithmetic, because this is not otherwise observable and getting it wrong is a REGRESSION that a
     // green suite would never show. Each detector stop and the transcoder stop are each bounded by a 3s
-    // force-kill. Awaiting the recording stop in sequence gave 3+3+6+3 = 15s against a default grace of
-    // 10s (docker-compose.yml sets no stop_grace_period, and a hand-rolled `docker run` has none) —
-    // where the pre-PR worst case was 9s. Overlapping the recording wait with the detector stops
-    // restores that: max(6, 3+3) + 3 = 9s. Found by adversarial review of #277.
+    // force-kill. Awaiting the recording stop in sequence gave 3+3+6+3 = 15s, where the pre-PR worst
+    // case was 9s. Overlapping the recording wait with the detector stops restores that:
+    // max(6, 3+3) + 3 = 9s. Found by adversarial review of #277.
+    //
+    // ⚠️ THE ORIGINAL VERSION OF THIS CASE CALLED 9s "inside Docker's default 10s stop grace". That
+    // was false, and it is the reason issue #279 exists: Docker Engine 29 documents no default, the
+    // container config carries `StopTimeout=<nil>`, and a bare `docker stop` on the soak box SIGKILLed
+    // at ~4s — losing the very recording this code saves. The grace is now DECLARED (30s) wherever a
+    // container is created, and shutdown-grace-declared.test.js checks those declarations cover this
+    // bound. This case owns the other half: that the bound itself does not creep upward.
     const FORCE_KILL_MS = 3000; // motionDetector.js / soundDetector.js / transcoder.js
     const detectors = FORCE_KILL_MS * 2; // motion + sound (ONVIF is not process-bound)
     const worstCase = Math.max(SHUTDOWN_BUDGET_MS, detectors) + FORCE_KILL_MS;
