@@ -45,7 +45,7 @@ await new Promise((r) => mediamtx.listen(0, '127.0.0.1', r));
 process.env.MEDIAMTX_API = `http://127.0.0.1:${mediamtx.address().port}`;
 
 const { logger } = await import('../src/lib/logger.js');
-const { startTranscoder, stopTranscoder, isRunning } = await import('../src/lib/transcoder.js');
+const { startTranscoder, stopTranscoder, stopAllTranscoders, isRunning } = await import('../src/lib/transcoder.js');
 const { startMotionDetector, stopMotionDetector } = await import('../src/lib/motionDetector.js');
 const { startSoundDetector, stopSoundDetector } = await import('../src/lib/soundDetector.js');
 
@@ -182,5 +182,54 @@ describe('the same window in the two detectors', { concurrency: true }, () => {
       restartsFor(cam.mediamtx_path), before,
       `sound detector relaunched ${restartsFor(cam.mediamtx_path) - before} time(s) after stop`
     );
+  });
+});
+
+// Shutdown and restart-into-the-gap. Both were claims in the PR that no test covered: stopAll* iterates
+// the union of the process map and pendingRestarts, and startTranscoder awaits stopTranscoder first,
+// so a re-start inside the gap should adopt the pending relaunch rather than race it. Asserting that
+// without driving it is the habit these tests exist to break.
+describe('shutdown and restart while a relaunch is pending', { concurrency: true }, () => {
+  test('stopAllTranscoders disarms a camera sitting in the restart gap', async () => {
+    const CAM = 'cam-stopall-1';
+    const PATH = 'path_stopall_1';
+    await startTranscoder(CAM, 'rtsp://192.0.2.10:554/ch0', PATH, 'StopAll Cam');
+
+    await sleep(GAP_WAIT_MS);
+    // In the gap: no live process, so this camera is in pendingRestarts ONLY. Iterating `processes`
+    // alone at shutdown would miss it entirely — which is the case this test exists for.
+    assert.ok(restartsFor(PATH) >= 1, 'ffmpeg never exited — the test would prove nothing');
+    assert.equal(isRunning(CAM), false, 'expected to be mid-restart, absent from `processes`');
+
+    await stopAllTranscoders();
+    const before = restartsFor(PATH);
+    await sleep(PROVE_MS);
+    assert.equal(
+      restartsFor(PATH), before,
+      `stopAllTranscoders left ${restartsFor(PATH) - before} relaunch(es) armed`
+    );
+  });
+
+  test('re-starting inside the gap does not leave a second lineage running', async () => {
+    // The original comment warns that two lineages publishing to one MediaMTX path kick each other off
+    // forever — a real incident, 901 restarts in 2.5 hours. startTranscoder awaits stopTranscoder, which
+    // now cancels the pending timer, so the old relaunch must not survive the new start.
+    const CAM = 'cam-relaunch-1';
+    const PATH = 'path_relaunch_1';
+    await startTranscoder(CAM, 'rtsp://192.0.2.10:554/ch0', PATH, 'Relaunch Cam');
+    await sleep(GAP_WAIT_MS);
+    assert.ok(restartsFor(PATH) >= 1, 'ffmpeg never exited — the test would prove nothing');
+
+    // Start again while the first lineage's relaunch is still armed, then stop for good.
+    await startTranscoder(CAM, 'rtsp://192.0.2.10:554/ch0', PATH, 'Relaunch Cam');
+    await stopTranscoder(CAM);
+
+    const before = restartsFor(PATH);
+    await sleep(PROVE_MS);
+    assert.equal(
+      restartsFor(PATH), before,
+      `a relaunch survived the re-start + stop: ${restartsFor(PATH) - before} extra`
+    );
+    assert.equal(isRunning(CAM), false);
   });
 });
