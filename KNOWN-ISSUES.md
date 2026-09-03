@@ -135,6 +135,34 @@ doing, and restart the container if cameras are not recovering.
 > has quit. The trade-off is that these lines are worth reading rather than assuming the app is fine
 > just because it is still up.
 
+## Video comes back before Record does, after a restart
+
+**What you see:** a camera's picture returns a minute or so after a restart or a glitch, but pressing
+**Record** still says *"This camera isn't buffering yet — it may be offline."* for a few minutes more.
+
+**Why:** two different mechanisms heal them. The live stream is watched every 15 seconds and restarted
+quickly; the recording buffer is restored by a housekeeping pass that runs every 5 minutes. So there is
+a window where the picture is healthy and there is nothing yet to cut a clip from. Measured on a test
+container: picture back after ~60 seconds, recording available on the next 5-minute pass.
+
+**What to do:** wait for the next few minutes and try again. Nothing is wrong, and no action is needed.
+
+---
+
+## An interrupted recording shows as failed rather than disappearing
+
+**What you see:** nothing in the recordings list for a recording that was in progress when Nightlight
+restarted (a deploy, a reboot, a power cut).
+
+**Why:** a clip is assembled from the buffer *after* you press stop, and a restart during that step
+loses it. Nightlight now marks such a recording as failed when it next starts, rather than leaving it
+stuck half-finished forever. It tries to finish the clip first, but only within the few seconds a
+container is given to shut down, so a long recording may still be lost.
+
+**What to do:** re-record if you still need it. ⚠️ Failed recordings are **not** shown in the
+recordings list — that list shows finished ones only — so a recording that vanished after a restart
+was almost certainly this.
+
 ---
 
 ## Confirmed bugs (fix pending)

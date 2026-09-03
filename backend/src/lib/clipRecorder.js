@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { logger, isNoisyMediaLine } from './logger.js';
+import { addHold, removeHold, effectiveHold, clearHolds } from './ringHolds.js';
 
 // Event-recording capture core (Stage 1, "Option A"; shipped in 0.17.0).
 //
@@ -47,7 +48,8 @@ const RING_ROOT = path.join(CLIPS_DIR, '.ring');
 const SEGMENT_SEC = 2;
 const RESTART_DELAY_MS = 5000;
 
-// cameraId -> { proc, stopped, ringDir, ringDepthMs, janitor, holdFromMs }
+// cameraId -> { proc, stopped, ringDir, ringDepthMs, janitor }. Holds live in ringHolds.js, keyed by
+// owner, because two features share this ring — see #255.
 const segmenters = new Map();
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -128,21 +130,25 @@ export function isSegmenterRunning(cameraId) {
   return segmenters.has(cameraId);
 }
 
-// Protect ring segments back to `fromMs` from pruning, for the duration of an on-demand recording (see
-// pruneRing). Returns false if no segmenter is running for the camera, so the caller can refuse to
-// start a recording that would have nothing to cut.
-export function holdRing(cameraId, fromMs) {
+// Protect ring segments back to `fromMs` from pruning (see pruneRing), on behalf of ONE named owner.
+// Returns false if no segmenter is running for the camera, so the caller can refuse to start a
+// recording that would have nothing to cut.
+//
+// `owner` is required and comes from RING_OWNER. Two features hold this ring — on-demand Record and
+// automatic wake clips — and before #255 they shared a single slot, so whichever acted last silently
+// replaced the other's protection and whichever finished first destroyed it. See ringHolds.js.
+export function holdRing(cameraId, owner, fromMs) {
   const entry = segmenters.get(cameraId);
   if (!entry) return false;
-  entry.holdFromMs = fromMs;
+  addHold(cameraId, owner, fromMs);
   return true;
 }
 
-// Resume normal depth-based pruning. Always call this when a recording ends (including on failure),
-// or the ring for that camera grows until the segmenter next restarts.
-export function releaseRing(cameraId) {
-  const entry = segmenters.get(cameraId);
-  if (entry) entry.holdFromMs = null;
+// Resume normal pruning for ONE owner. Always call this when that owner's work ends (including on
+// failure), or its hold keeps the ring growing until the segmenter next restarts. Other owners'
+// holds are untouched — that is the whole point of #255.
+export function releaseRing(cameraId, owner) {
+  removeHold(cameraId, owner);
 }
 
 // Start (or restart) the continuous segmenter for a camera. `pathName` is the camera's local MediaMTX
@@ -166,7 +172,7 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
   // and exits within a second, every 5s). We used to log an ERROR on every one of those, which
   // spammed ~30 identical lines per camera blip. Now we log the first, then go quiet, and log a
   // recovery when it comes back — see the exit handler.
-  const entry = { proc: null, stopped: false, ringDir, ringDepthMs, janitor: null, fastFails: 0, holdFromMs: null };
+  const entry = { proc: null, stopped: false, ringDir, ringDepthMs, janitor: null, fastFails: 0 };
   segmenters.set(cameraId, entry);
 
   function launch() {
@@ -239,7 +245,7 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
   }
 
   launch();
-  entry.janitor = setInterval(() => pruneRing(ringDir, entry.ringDepthMs, entry.holdFromMs), SEGMENT_SEC * 1000);
+  entry.janitor = setInterval(() => pruneRing(ringDir, entry.ringDepthMs, effectiveHold(cameraId)), SEGMENT_SEC * 1000);
   logger.info(
     `[clipseg:${pathName}] segmenter started (ring ${ringDir}, depth ${Math.round(ringDepthMs / 1000)}s)`
   );
@@ -247,6 +253,7 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
 }
 
 export function stopSegmenter(cameraId) {
+  clearHolds(cameraId); // the ring is about to go; a surviving hold would apply to the next one
   const entry = segmenters.get(cameraId);
   if (!entry) return;
   entry.stopped = true;
