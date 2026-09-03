@@ -208,6 +208,19 @@ describe('PUT /settings answers with the same allow-list', () => {
   });
 });
 
+describe('GET /settings is not cacheable across callers', () => {
+  // The same URL now answers an anonymous visitor and an admin with different bodies, which it never
+  // did before. Any shared cache in front of the app has to be told, or it can hand one caller's body
+  // to another. The shipped reverse-proxy config caches nothing here, so this is for the operator who
+  // puts a CDN with "cache everything" in front of their instance.
+  test('sends Vary: Authorization and a private Cache-Control', async () => {
+    const res = await fetch(`${server.url}/api/settings`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('vary') || '', /Authorization/i, 'missing Vary: Authorization');
+    assert.match(res.headers.get('cache-control') || '', /private|no-store/i, 'response is shared-cacheable');
+  });
+});
+
 describe('GET /settings as a caregiver', () => {
   test('gets the public fields and no admin config', async () => {
     const r = await get(caregiverToken);

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { api } from './api.js';
 import { useAuth } from './AuthContext.jsx';
 import { FONT_PRESETS, DEFAULT_FONT_CHOICE } from './fonts.js';
@@ -15,10 +15,6 @@ const DEFAULTS = {
   timezone: 'UTC',
   font_choice: DEFAULT_FONT_CHOICE,
   temp_unit: 'C',
-  mqtt_host: '',
-  mqtt_port: '',
-  mqtt_username: '',
-  mqtt_password: '',
 };
 
 function applyTheme(settings) {
@@ -38,17 +34,33 @@ export function SettingsProvider({ children }) {
   // Optional: tests render this provider outside an AuthProvider, and it must still work there —
   // it then simply never re-fetches, which is the pre-existing mount-only behaviour.
   const { user } = useAuth() || {};
+  // Which refresh is current, so a slow earlier response can't overwrite a newer one (see refresh).
+  const reqSeq = useRef(0);
+  // Whether real settings have ever arrived, so a later failure doesn't reset a working theme.
+  const loadedOnce = useRef(false);
 
   async function refresh() {
+    // Ignore a response that a newer refresh has already superseded. Signing in fires a second fetch
+    // while the anonymous one may still be in flight, and the anonymous reply landing last would
+    // overwrite the admin settings with the 7 public fields — SettingsRecording does setForm(settings),
+    // a replace rather than a merge, so its form would silently blank.
+    const seq = ++reqSeq.current;
     try {
       const data = await api.get('/settings');
+      if (seq !== reqSeq.current) return;
+      loadedOnce.current = true;
       setSettings(data);
       applyTheme(data);
     } catch {
-      // Fall back to defaults silently — this shouldn't block the app from loading.
-      applyTheme(DEFAULTS);
+      // Only fall back to defaults if we have never had real settings. This catch exists so a FIRST
+      // failure doesn't block the app from loading — not to undo a good load. Re-applying DEFAULTS
+      // after a success would reset the palette and the tab title while `settings` state kept the real
+      // values, leaving a branded install half-themed after one transient failure, with no error and
+      // no retry. Harmless before this file re-fetched on sign-in, because it only ever ran at mount
+      // when the state genuinely was DEFAULTS.
+      if (seq === reqSeq.current && !loadedOnce.current) applyTheme(DEFAULTS);
     } finally {
-      setLoading(false);
+      if (seq === reqSeq.current) setLoading(false);
     }
   }
 

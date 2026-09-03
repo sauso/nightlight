@@ -72,6 +72,13 @@ function pick(row, fields) {
 // Public: the login screen (pre-authentication) also needs the app name/colors. optionalAuth attaches
 // req.user when a valid token is present without rejecting when it isn't, so one route can serve both.
 router.get('/', optionalAuth, (req, res) => {
+  // This response now varies by credential — the same URL answers an anonymous visitor and an admin
+  // differently. Any shared cache in front of the app must be told that, or it can serve one user's
+  // body to another. The shipped SWAG config caches nothing here, so this changes nothing today; it
+  // is for the operator who puts Cloudflare "Cache Everything" in front of their instance, which the
+  // README's remote-access section makes a realistic deployment.
+  res.set('Vary', 'Authorization');
+  res.set('Cache-Control', 'private, no-store');
   // Own-property check, not a plain `req.user?.role === 'admin'`: jwt.verify returns a JSON.parse'd
   // object, so a plain read would resolve through the prototype chain, and a token carrying no role
   // claim at all would answer as admin if Object.prototype.role were ever set. No vector for that was
