@@ -155,7 +155,7 @@ that setting Docker may kill it part-way, and the recording is marked **failed**
 Nightlight waits **up to 6 seconds** for that final step, which is enough for the recordings this is
 for. It's a fixed limit: **raising the stop timeout past 30 seconds won't buy a long recording more
 time**, because the wait isn't derived from it. A recording still being assembled after 6 seconds is
-given up on and marked failed — a bounded wait, not a promise.
+given up on, and marked **failed** the next time Nightlight starts — a bounded wait, not a promise.
 
 **Record on a camera that's offline** will start and then save nothing — the buffer exists but has no
 frames in it, so the recording ends up marked failed rather than appearing on the child's page. The

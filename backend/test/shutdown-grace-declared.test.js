@@ -83,8 +83,9 @@ function composeServices(text) {
   const out = [];
   let inServices = false;
   let cur = null;
+  let serviceIndent = null; // ⚠️ discovered from the file, NOT assumed to be two spaces (see below)
   for (const line of text.split('\n')) {
-    if (/^services:\s*$/.test(line)) { inServices = true; continue; }
+    if (/^services\s*:\s*$/.test(line)) { inServices = true; continue; }
     if (!inServices) continue;
     // ⚠️ Blank lines and column-0 COMMENTS are not the end of the section. Treating them as one
     // truncated the service list silently: adversarial review of #279 added a second, undeclared
@@ -92,11 +93,28 @@ function composeServices(text) {
     // `docker compose config` calling the file valid.
     if (line.trim() === '' || /^\s*#/.test(line)) continue;
     if (/^\S/.test(line)) break; // a genuine new top-level key ends the section
-    const m = /^ {2}([A-Za-z0-9_.-]+):\s*$/.exec(line);
-    if (m) { cur = { name: m[1], body: [] }; out.push(cur); continue; }
+    const indent = /^[ \t]*/.exec(line)[0].length;
+    // ⚠️ The service-key indent used to be hard-coded as exactly two spaces, so a compose file written
+    // with FOUR-space indentation — perfectly valid YAML, and what many people's editors produce —
+    // had every one of its services silently invisible to this scan. Take the shallowest indent seen
+    // inside `services:` as the service level instead. Found by the second review of #279.
+    if (serviceIndent === null || indent < serviceIndent) serviceIndent = indent;
+    const m = indent === serviceIndent ? /^[ \t]*([A-Za-z0-9_.-]+)\s*:\s*(.*)$/.exec(line) : null;
+    if (m) { cur = { name: m[1], body: [m[2]] }; out.push(cur); continue; }
     if (cur) cur.body.push(line);
   }
   return out.map((s) => ({ name: s.name, body: s.body.join('\n') }));
+}
+
+// ★ CATCH-ALL, because the parser above is not a YAML engine and never will be. Counts Nightlight
+// image references in the RAW file and requires the parse to have attributed every one of them to a
+// service. Two shapes slipped through the parser undetected in review of #279 — an inline flow mapping
+// (`nightlight: {image: "sauso/nightlight:latest"}`) and an image inherited through a YAML anchor
+// merge (`<<: *base`) — and in both cases the service count simply stayed at 2, so no guard fired.
+// This does not teach the parser those shapes; it makes them impossible to miss QUIETLY, which is the
+// property that actually matters.
+function rawNightlightImageRefs(text) {
+  return text.split('\n').filter((l) => !/^\s*#/.test(l) && /image\s*:\s*["']?\S*nightlight/.test(l)).length;
 }
 
 // Services running a Nightlight image, from every compose file in the repo.
@@ -105,13 +123,20 @@ function composeServices(text) {
 // let review of #279 drop a `compose.yaml` with an undeclared Nightlight service into the repo root
 // with the suite still green: the file Docker would have picked first was the one not checked.
 const COMPOSE_FILE = /(^|\/)(docker-compose|compose)[^/]*\.ya?ml$/;
-const NIGHTLIGHT_SERVICES = ALL_FILES
-  .filter((f) => COMPOSE_FILE.test(f))
-  .flatMap((f) =>
-    composeServices(read(f))
-      .filter((s) => /^\s*image:.*nightlight/m.test(s.body))
-      .map((s) => ({ file: f, ...s }))
-  );
+const COMPOSE_FILES = ALL_FILES.filter((f) => COMPOSE_FILE.test(f));
+const NIGHTLIGHT_SERVICES = COMPOSE_FILES.flatMap((f) =>
+  composeServices(read(f))
+    .filter((s) => /image\s*:\s*["']?\S*nightlight/.test(s.body))
+    .map((s) => ({ file: f, ...s }))
+);
+
+// Per compose file: how many Nightlight images the raw text mentions vs how many the parser
+// attributed to a service. See rawNightlightImageRefs — a mismatch means a service is invisible.
+const COMPOSE_ATTRIBUTION = COMPOSE_FILES.map((f) => ({
+  file: f,
+  raw: rawNightlightImageRefs(read(f)),
+  attributed: NIGHTLIGHT_SERVICES.filter((s) => s.file === f).length,
+}));
 
 // Documented `docker run` invocations from every markdown file in the repo. Backslash continuations
 // are folded so a multi-line example is one logical command; prose that merely mentions `docker run`
@@ -123,12 +148,24 @@ const NIGHTLIGHT_SERVICES = ALL_FILES
 // dropped out of the scan — while the count guard still passed on the remaining examples. Review of
 // #279 removed `--stop-timeout` from that same command and the suite stayed green. A trailing space
 // after a `\` is invisible in a diff and breaks the command for anyone who copies it, too.
+// ⚠️ `[ \t]*` AFTER the newline, not `\s*`. With `\s*` the fold crossed BLANK LINES, so an ordinary
+// markdown hard-break (a prose line ending in `\`) swallowed the command in the next block entirely —
+// and the lossless check below then failed with a message blaming a trailing space, on a file that was
+// perfectly correct. A check that cries wolf is worse than no check; found by review of #279.
+const FOLD_CONTINUATION = /\\[ \t]*\n[ \t]*/g;
+
+// ⚠️ A shell prompt or `sudo` in front is still a documented command someone will copy. Matching only
+// a bare `docker run` at the start of the line let `sudo docker run …` and `$ docker run …` past with
+// no `--stop-timeout` AND no alarm — both demonstrated surviving. `docker container run` is the same
+// command spelled out in full.
+const DOCKER_RUN = /^(?:[$#>]\s+)?(?:sudo\s+)?docker\s+(?:container\s+)?run\b/;
+
 function dockerRunLines(text) {
   return text
-    .replace(/\\[ \t]*\n\s*/g, ' ')
+    .replace(FOLD_CONTINUATION, ' ')
     .split('\n')
     .map((l) => l.trim())
-    .filter((l) => l.startsWith('docker run'));
+    .filter((l) => DOCKER_RUN.test(l));
 }
 
 const MARKDOWN = ALL_FILES.filter((f) => f.endsWith('.md'));
@@ -144,7 +181,7 @@ const DOCKER_RUN_EXAMPLES = MARKDOWN.flatMap((f) =>
 // mentions Nightlight: it tests the parser, not the subject.
 const DOCKER_RUN_RAW_STARTS = MARKDOWN.map((f) => ({
   file: f,
-  raw: read(f).split('\n').filter((l) => l.trim().startsWith('docker run')).length,
+  raw: read(f).split('\n').filter((l) => DOCKER_RUN.test(l.trim())).length,
   parsed: dockerRunLines(read(f)).length,
 })).filter((x) => x.raw > 0 || x.parsed > 0);
 
@@ -181,6 +218,17 @@ describe('the shutdown grace this deployment needs', () => {
       NIGHTLIGHT_SERVICES.some((s) => s.file === 'docker-compose.yml'),
       'the production compose file was not scanned'
     );
+    // Nothing hid from the parser. See COMPOSE_ATTRIBUTION.
+    for (const f of COMPOSE_ATTRIBUTION) {
+      assert.equal(
+        f.attributed,
+        f.raw,
+        `${f.file}: the file references ${f.raw} Nightlight image(s) but only ${f.attributed} were ` +
+          'attributed to a service — a service is written in a shape this scan cannot read (an inline ' +
+          'flow mapping, or an image inherited through a YAML anchor), so it is escaping the check ' +
+          'entirely. Rewrite it as a plain block mapping, or teach composeServices that shape.'
+      );
+    }
 
     for (const svc of NIGHTLIGHT_SERVICES) {
       const m = /^\s*stop_grace_period:\s*(\S+)\s*$/m.exec(svc.body);
@@ -248,6 +296,25 @@ describe('the shutdown grace this deployment needs', () => {
       Number(/--stop-timeout[ =](\d+)/.exec(/<ExtraParams>([^<]*)<\/ExtraParams>/.exec(read('unraid-template.xml'))[1])[1]),
     ]);
     assert.equal(declared.size, 1, `the declared grace differs between files: ${[...declared].sort().join('s, ')}s`);
+  });
+
+  test('the documented recording wait matches the constant it describes', () => {
+    // PR #279 replaced a vague "within the time a container is given" with a hard number in three
+    // user-facing places, because the vague version implied the wait scales with the stop timeout and
+    // it does not. A typed number in prose drifts silently: review demonstrated SHUTDOWN_BUDGET_MS
+    // dropping 6000 -> 4500 with the whole suite green, leaving three documents stating a false 6s.
+    // This is the tripwire. It is deliberately about the NUMBER only — whether the surrounding
+    // sentence is a good explanation is not something an assertion can judge.
+    const seconds = SHUTDOWN_BUDGET_MS / 1000;
+    assert.ok(Number.isInteger(seconds), `SHUTDOWN_BUDGET_MS is ${SHUTDOWN_BUDGET_MS}ms — the docs say whole seconds`);
+    for (const f of ['CHANGELOG.md', 'KNOWN-ISSUES.md', 'docs/recording.md']) {
+      assert.match(
+        read(f),
+        new RegExp(`${seconds} seconds?\\b`),
+        `${f} documents the recording shutdown wait, but no longer says "${seconds} seconds" — ` +
+          `SHUTDOWN_BUDGET_MS is ${SHUTDOWN_BUDGET_MS}ms and the docs must agree with it`
+      );
+    }
   });
 
   test('the README mentions the flag in PROSE, not only inside a copyable command', () => {
