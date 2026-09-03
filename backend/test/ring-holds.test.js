@@ -15,6 +15,10 @@
 // without racing a ~5ms window.
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { useTempDataDir, cleanupTempDataDirs } from './helpers/harness.js';
+
+useTempDataDir();
+
 import {
   addHold,
   removeHold,
@@ -23,6 +27,9 @@ import {
   holdOwners,
   RING_OWNER,
 } from '../src/lib/ringHolds.js';
+const { holdRing, releaseRing, startSegmenter, stopSegmenter } = await import('../src/lib/clipRecorder.js');
+const fsMod = await import('node:fs');
+const indexSrcRing = fsMod.readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
 
 const CAM = 'cam-1';
 const OTHER = 'cam-2';
@@ -113,10 +120,110 @@ describe('ring holds', () => {
   });
 
   test('the two real owners are distinct constants', () => {
+    // (see below for the wiring cases — the registry being right is only half of it)
     // A typo'd owner string in a RELEASE would silently leak a hold — the ring then grows until the
     // segmenter restarts, with nothing logged and nothing failing. Constants are the guard.
     assert.notEqual(RING_OWNER.WAKE, RING_OWNER.ONDEMAND);
     assert.equal(typeof RING_OWNER.WAKE, 'string');
     assert.equal(typeof RING_OWNER.ONDEMAND, 'string');
+  });
+});
+
+describe('the wiring in clipRecorder', () => {
+  // ★ THE CASES ABOVE ARE NOT ENOUGH, and adversarial review of PR #277 proved it: with only those,
+  // `releaseRing` could be changed back to `clearHolds(cameraId)` — reintroducing #255 VERBATIM — and
+  // the whole suite stayed green, because nothing referenced the functions the rest of the app calls.
+  // A registry that is perfect but wired up wrong is the exact failure mode here.
+
+  test('releaseRing releases ONLY its own owner — the #255 defect, through the real API', () => {
+    // The scenario again, but driven through the function recordings.js actually calls.
+    addHold(CAM, RING_OWNER.WAKE, DEEP);
+    addHold(CAM, RING_OWNER.ONDEMAND, SHALLOW);
+
+    releaseRing(CAM, RING_OWNER.ONDEMAND);
+
+    assert.equal(effectiveHold(CAM), DEEP, 'releaseRing cleared a hold belonging to another owner');
+    assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE]);
+  });
+
+  test('releaseRing on a camera with no segmenter does not throw', () => {
+    // It deliberately does NOT require a live segmenter: a recording that fails must be able to let go
+    // of its hold even after the segmenter died underneath it.
+    releaseRing('no-such-camera', RING_OWNER.ONDEMAND);
+  });
+
+  test('holdRing records the hold under its owner, and refuses when nothing is buffering', () => {
+    // ⚠️ Two halves, and the ordering is what makes this testable at all. There is no ffmpeg in a test
+    // environment, and since #274 a segmenter that cannot spawn DELETES its own map entry — but it does
+    // so on a LATER TICK, because 'error' is emitted asynchronously. Everything here is synchronous, so
+    // it runs inside the window where the entry legitimately exists. No sleep, no race.
+    assert.equal(holdRing('never-started', RING_OWNER.WAKE, DEEP), false, 'holdRing claimed to hold a ring that does not exist');
+    assert.deepEqual(holdOwners('never-started'), [], 'it recorded a hold anyway');
+
+    const CAM_LIVE = 'cam-live-hold';
+    startSegmenter(CAM_LIVE, 'path_live_hold', { preRollSec: 2, postRollSec: 2 });
+    try {
+      assert.equal(holdRing(CAM_LIVE, RING_OWNER.WAKE, DEEP), true, 'holdRing refused a running segmenter');
+      assert.deepEqual(holdOwners(CAM_LIVE), [RING_OWNER.WAKE], 'holdRing did not record the hold');
+      assert.equal(effectiveHold(CAM_LIVE), DEEP);
+    } finally {
+      stopSegmenter(CAM_LIVE);
+    }
+  });
+
+  test('stopSegmenter drops that camera’s holds — the ring goes with it', () => {
+    const CAM_LIVE = 'cam-live-stop';
+    startSegmenter(CAM_LIVE, 'path_live_stop', { preRollSec: 2, postRollSec: 2 });
+    holdRing(CAM_LIVE, RING_OWNER.ONDEMAND, SHALLOW);
+    addHold(OTHER, RING_OWNER.WAKE, DEEP); // a bystander, to prove the teardown is not a clear-all
+
+    stopSegmenter(CAM_LIVE);
+
+    assert.deepEqual(holdOwners(CAM_LIVE), [], 'a hold outlived the segmenter it was protecting');
+    assert.equal(effectiveHold(OTHER), DEEP, 'tearing down one camera dropped another camera’s hold');
+  });
+
+  test('the janitor is given the effective hold, not a constant', () => {
+    // The one line that connects the registry to actual pruning. It cannot be driven without a live
+    // ffmpeg (the janitor dies with the segmenter entry when the spawn fails), so this reads the source
+    // — a mutant passing `null` there disables the entire feature while every other case stays green.
+    const src = fsMod.readFileSync(new URL('../src/lib/clipRecorder.js', import.meta.url), 'utf8');
+    assert.match(
+      src,
+      /pruneRing\(ringDir, entry\.ringDepthMs, effectiveHold\(cameraId\)\)/,
+      'the ring janitor no longer consults the hold registry'
+    );
+    assert.ok(!/entry\.holdFromMs/.test(src), 'a reference to the removed single-slot field is back');
+  });
+});
+
+describe('the wiring in the callers', () => {
+  // Owner identity is the whole mechanism: releasing as the WRONG owner reintroduces #255 exactly, and
+  // review of #277 showed those mutants surviving at all three call sites.
+  const read = (rel) => fsMod.readFileSync(new URL(rel, import.meta.url), 'utf8');
+
+  test('on-demand Record holds and releases as ONDEMAND', () => {
+    const src = read('../src/lib/recordings.js');
+    assert.match(src, /holdRing\(camera\.id, RING_OWNER\.ONDEMAND,/, 'Record no longer holds as ONDEMAND');
+    assert.match(src, /releaseRing\(cameraId, RING_OWNER\.ONDEMAND\)/, 'Record no longer releases as ONDEMAND');
+    assert.ok(!/RING_OWNER\.WAKE/.test(src), 'recordings.js touches the wake watcher’s hold');
+  });
+
+  test('the wake watcher holds and releases as WAKE', () => {
+    const src = read('../src/lib/wakeWatcher.js');
+    assert.match(src, /holdRing\(cameraId, RING_OWNER\.WAKE,/, 'the wake watcher no longer holds as WAKE');
+    assert.equal(
+      (src.match(/releaseRing\(cameraId, RING_OWNER\.WAKE\)/g) || []).length,
+      2,
+      'both wake-watcher release sites must release as WAKE'
+    );
+    assert.ok(!/RING_OWNER\.ONDEMAND/.test(src), 'wakeWatcher.js touches Record’s hold');
+  });
+
+  test('no caller still uses the old single-argument form', () => {
+    for (const f of ['../src/lib/recordings.js', '../src/lib/wakeWatcher.js']) {
+      const src = read(f);
+      assert.ok(!/releaseRing\([A-Za-z.]+\)\s*;/.test(src), `${f} still calls releaseRing without an owner`);
+    }
   });
 });

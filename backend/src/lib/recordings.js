@@ -31,7 +31,7 @@ import { hasMinFreeSpace } from './clipStorage.js';
 const TAIL_SEC = 2;
 // After Stop we only need the final segment to close — the recorded span is already in the past — so
 // extractClip gets this short settle instead of waiting out a post-roll it has no reason to wait for.
-const SEGMENT_SETTLE_MS = 5000;
+export const SEGMENT_SETTLE_MS = 5000;
 const MAX_ACTIVE_MS = 15 * 60 * 1000; // absolute backstop if a stop timer were ever lost
 
 // cameraId -> { id, startMs, timer, userId }
@@ -162,10 +162,12 @@ export async function stopRecording(cameraId, { settleMs = SEGMENT_SETTLE_MS } =
 // Shutdown only. extractClip opens with SEGMENT_SETTLE_MS (5s) so the in-progress segment closes; on
 // the way down that is longer than the budget allows, and one 2s segment plus margin is enough to
 // leave a usable clip. The tail may lose up to ~1s — far better than losing the recording.
-const SHUTDOWN_SETTLE_MS = 2500;
+export const SHUTDOWN_SETTLE_MS = 2500;
 // Docker's default stop grace is 10s. stopAllTranscoders is bounded at 3s after us, so this is what
 // is left. Over budget we give up and let reconcileStaleRecordings mark the row on next boot.
-const SHUTDOWN_BUDGET_MS = 6000;
+export const SHUTDOWN_BUDGET_MS = 6000;
+// Exported so a test can assert the relationship between them: a settle longer than the budget makes
+// the whole save path permanently inert, and that mutant survived the first review of #277.
 
 // Stop every in-flight recording (shutdown). Best-effort: we still try to save what was captured.
 //
@@ -192,16 +194,30 @@ export async function stopAllRecordingsForShutdown() {
   await stopAllRecordings({ settleMs: SHUTDOWN_SETTLE_MS, budgetMs: SHUTDOWN_BUDGET_MS });
 }
 
-// At boot, NOTHING can legitimately be 'pending': that status only exists between stopRecording
-// updating the row and extractClip finishing, and the in-process `active` map is gone. So any pending
-// row is the debris of a shutdown or a crash that never got to finish, and leaving it is the visible
-// half of #256 — listChildRecordings filters on status='ready', so the row is invisible forever and
-// the user simply never sees the recording they asked for, with nothing explaining why.
+// At boot, NEITHER live status can legitimately still be set. A row is 'recording' from startRecording
+// until the user stops it, and 'pending' from then until extractClip finishes — both describe work held
+// in the in-process `active` map, which is gone. So a row in either state is debris from a shutdown or
+// a crash that never got to finish, and leaving it is the visible half of #256: listChildRecordings
+// filters on status='ready', so the row is invisible forever and the user simply never sees the
+// recording they asked for, with nothing explaining why.
+//
+// ⚠️ SWEEPING ONLY 'pending' WAS NOT ENOUGH, and the first version of this did exactly that while its
+// comment claimed to cover "a SIGKILL or a power cut". Found by adversarial review of PR #277, which
+// demonstrated it: a container killed mid-recording leaves 'recording', which that sweep skipped on
+// every subsequent boot — the same bug this function exists to fix, one status along.
 //
 // This is the layer that covers what the shutdown budget cannot: a SIGKILL or a power cut, where no
 // shutdown handler runs at all. Returns how many rows it cleaned up.
+//
+// The two terminal statuses ('ready', 'failed') are deliberately NOT listed: this is an allow-list of
+// live states, so a status added later is skipped rather than silently clobbered.
+const LIVE_RECORDING_STATUSES = ['recording', 'pending'];
+
 export function reconcileStaleRecordings() {
-  const res = db.prepare("UPDATE recordings SET status='failed' WHERE status='pending'").run();
+  const placeholders = LIVE_RECORDING_STATUSES.map(() => '?').join(', ');
+  const res = db
+    .prepare(`UPDATE recordings SET status='failed' WHERE status IN (${placeholders})`)
+    .run(...LIVE_RECORDING_STATUSES);
   if (res.changes > 0) {
     logger.error(`[rec] marked ${res.changes} unfinished recording(s) as failed - they were interrupted by a restart.`);
   }

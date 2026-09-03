@@ -70,8 +70,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   - Shutdown now waits for an in-flight recording to finish, within the few seconds a container is
     given to stop. A long recording can still be cut short — that is a bounded wait, not a promise.
   - Any recording left unfinished by a restart, a crash or a power cut is now marked failed on the
-    next start rather than sitting in limbo. ⚠️ Failed recordings are not shown in the recordings
-    list; see [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
+    next start rather than sitting in limbo — whether it was still capturing or already being
+    assembled. ⚠️ Failed recordings are not shown in the recordings list; see
+    [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
 
 - **A background check that failed could shut Nightlight down.** The 15-second camera watchdog, the
   30-second audio check, the 5-minute reconcile and the timelapse sampler each ran unprotected, so an

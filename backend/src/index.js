@@ -598,11 +598,22 @@ async function reconcileCameraPaths(attempt = 1) {
 // rather than letting `docker stop` just kill the whole process tree indiscriminately.
 async function shutdown() {
   logger.info('Shutting down - stopping transcoders and MediaMTX.');
+  // Started HERE, awaited below. The only ordering that actually matters is that an in-flight
+  // recording finishes cutting BEFORE stopAllClipCapture takes the ring away; the detector stops are
+  // unrelated to it and can overlap.
+  //
+  // ⚠️ THE REASON IT IS NOT SIMPLY AWAITED IN PLACE IS ARITHMETIC, and awaiting in place was a real
+  // regression caught by adversarial review of PR #277. Each detector stop is bounded by its own 3s
+  // force-kill, and so is the transcoder stop: 3 + 3 + 6 + 3 = 15s worst case, against Docker's
+  // DEFAULT 10s stop grace (docker-compose.yml sets no stop_grace_period, and a hand-rolled
+  // `docker run` has none either). Before this PR the worst case was 3 + 3 + 3 = 9s — just inside.
+  // Overlapping the recording wait with the detector stops restores that: max(6, 3+3) + 3 = 9s.
+  const recordingsFinished = stopAllRecordingsForShutdown();
   await stopAllMotionDetectors();
   await stopAllOnvifMotion();
   await stopAllSoundDetectors();
-  // Finish any in-flight recording first — it cuts from the ring the segmenters own.
-  await stopAllRecordingsForShutdown();
+  // Finish any in-flight recording before the ring goes — it cuts from the segments the ring owns.
+  await recordingsFinished;
   stopAllClipCapture();
   await stopAllTranscoders();
   stopMediaMTX();
