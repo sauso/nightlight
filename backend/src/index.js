@@ -41,6 +41,7 @@ import { startSleepJob } from './lib/sleepAnalysis.js';
 import { startWakeWatcher } from './lib/wakeWatcher.js';
 import { startTimelapseSampler } from './lib/timelapse.js';
 import { logger } from './lib/logger.js';
+import { safeInterval, installCrashGuards, reportGuardFailure } from './lib/processGuards.js';
 import { recordCameraEvent, EVENT } from './lib/cameraEvents.js';
 import { probeAudioFlowing, tracksHaveAudio } from './lib/audioLiveness.js';
 import { notifyCameraOffline, notifyCameraRecovered } from './lib/cameraStatusAlert.js';
@@ -62,6 +63,12 @@ startSensorSampler(); // persist MQTT temp/humidity over time (Stage-2 sleep-tra
 startActivityTracker(); // bucket motion/sound activity per minute (Stage-2 sleep-tracking timeline)
 startSleepJob(); // compute the nightly per-child sleep summary from that timeline
 startWakeWatcher(); // record a short clip when a wake starts — deliberately WITHOUT alerting
+
+// Before anything can fail: a background task that throws must not take the monitor down at 3am.
+// The individual call sites are guarded too (see safeInterval and the per-camera try/catch in the
+// watchdogs); this is the backstop for the ones nobody has thought of. See lib/processGuards.js for
+// why an unattended monitor deliberately does NOT follow Node's exit-on-uncaught guidance.
+installCrashGuards();
 
 const app = express();
 
@@ -308,7 +315,7 @@ async function handleTalkConnection(ws, camera, user) {
 // Also re-check periodically (not just at startup) — if MediaMTX is ever restarted
 // on its own (e.g. after a config change, or a crash) without the app restarting too,
 // this makes it self-heal within a few minutes instead of needing a manual restart.
-setInterval(reconcileCameraPaths, 5 * 60 * 1000);
+safeInterval('reconcile', 5 * 60 * 1000, reconcileCameraPaths);
 
 // Housekeeping: every login inserts a sessions row, and only an explicit logout
 // deletes it, so abandoned rows accumulate forever. Anything idle past the JWT's own
@@ -347,99 +354,107 @@ const offlineAlerted = new Set(); // camera_ids already notified for the current
 const WATCHDOG_INTERVAL_MS = 15 * 1000;
 const STUCK_THRESHOLD_MS = 30 * 1000;
 
-setInterval(async () => {
+safeInterval('camera-watchdog', WATCHDOG_INTERVAL_MS, async () => {
   const cameras = db.prepare('SELECT * FROM cameras').all();
   // Read the offline-alert config once per tick (not per camera).
   const offlineCfg = db.prepare(
     "SELECT camera_offline_alert_enabled AS enabled, camera_offline_alert_minutes AS minutes FROM settings WHERE id = 'app'"
   ).get();
   for (const cam of cameras) {
-    // A disabled camera intentionally has no path/transcoder - skip it entirely so the
-    // watchdog doesn't read it as "unready", log phantom offline events, or try to restart
-    // it. Clear any tracked state so re-enabling starts clean (seeds silently, no event).
-    if (cam.disabled) {
-      notReadySince.delete(cam.id);
-      subNotReadySince.delete(cam.id);
-      onlineState.delete(cam.id);
-      offlineSince.delete(cam.id);
-      offlineAlerted.delete(cam.id);
-      continue;
-    }
-    const status = await getPathStatus(cam.mediamtx_path);
-
-    // Record sustained up/down transitions (see onlineState above). A brief blip that
-    // self-heals between two polls never flips this and so never logs an event here -
-    // those fine-grained restarts are recorded by the transcoder itself instead.
-    const wasOnline = onlineState.get(cam.id);
-    if (wasOnline === undefined) {
-      onlineState.set(cam.id, status.ready); // seed silently, no event
-    } else if (status.ready && !wasOnline) {
-      onlineState.set(cam.id, true);
-      recordCameraEvent(cam.id, cam.name, EVENT.ONLINE, 'stream recovered');
-    } else if (!status.ready && wasOnline) {
-      onlineState.set(cam.id, false);
-      recordCameraEvent(cam.id, cam.name, EVENT.OFFLINE, 'stream stopped delivering frames');
-    }
-
-    // Offline-duration notification (see offlineSince/offlineAlerted above). Independent of the 30s
-    // restart timer below. Fires one push once the outage passes the admin's threshold, and a "back
-    // online" push on recovery. Only notifies when enabled; recovery only fires if we actually alerted.
-    if (status.ready) {
-      if (offlineAlerted.has(cam.id)) notifyCameraRecovered(cam, offlineSince.get(cam.id));
-      offlineSince.delete(cam.id);
-      offlineAlerted.delete(cam.id);
-    } else {
-      if (!offlineSince.has(cam.id)) offlineSince.set(cam.id, Date.now());
-      if (
-        offlineCfg?.enabled &&
-        !offlineAlerted.has(cam.id) &&
-        Date.now() - offlineSince.get(cam.id) >= offlineCfg.minutes * 60 * 1000
-      ) {
-        offlineAlerted.add(cam.id);
-        notifyCameraOffline(cam, offlineCfg.minutes);
-      }
-    }
-
-    // Sub-stream (Low quality) wedge check — independent of the main path above, and BEFORE its early
-    // `continue`, so it runs even when the main stream is healthy. Mirrors the main logic: if the sub path
-    // stays not-ready past the threshold, force-restart just the sub leg (startSubStream → stopTranscoder
-    // SIGTERM→SIGKILL → relaunch), which clears a wedged FFmpeg that the reconcile can't (it's still alive).
-    if (subConfigured(cam)) {
-      const subReady = (await getPathStatus(subPathName(cam.mediamtx_path))).ready;
-      if (subReady) {
+    // One camera must not take the others down with it. Without this the FIRST camera to throw
+    // skips every camera after it for this tick — and since the fault repeats every tick, one bad
+    // camera would permanently block its siblings' watchdog. `continue` inside a try still
+    // continues the loop, so the body below is unchanged apart from its indentation.
+    try {
+      // A disabled camera intentionally has no path/transcoder - skip it entirely so the
+      // watchdog doesn't read it as "unready", log phantom offline events, or try to restart
+      // it. Clear any tracked state so re-enabling starts clean (seeds silently, no event).
+      if (cam.disabled) {
+        notReadySince.delete(cam.id);
         subNotReadySince.delete(cam.id);
+        onlineState.delete(cam.id);
+        offlineSince.delete(cam.id);
+        offlineAlerted.delete(cam.id);
+        continue;
+      }
+      const status = await getPathStatus(cam.mediamtx_path);
+
+      // Record sustained up/down transitions (see onlineState above). A brief blip that
+      // self-heals between two polls never flips this and so never logs an event here -
+      // those fine-grained restarts are recorded by the transcoder itself instead.
+      const wasOnline = onlineState.get(cam.id);
+      if (wasOnline === undefined) {
+        onlineState.set(cam.id, status.ready); // seed silently, no event
+      } else if (status.ready && !wasOnline) {
+        onlineState.set(cam.id, true);
+        recordCameraEvent(cam.id, cam.name, EVENT.ONLINE, 'stream recovered');
+      } else if (!status.ready && wasOnline) {
+        onlineState.set(cam.id, false);
+        recordCameraEvent(cam.id, cam.name, EVENT.OFFLINE, 'stream stopped delivering frames');
+      }
+
+      // Offline-duration notification (see offlineSince/offlineAlerted above). Independent of the 30s
+      // restart timer below. Fires one push once the outage passes the admin's threshold, and a "back
+      // online" push on recovery. Only notifies when enabled; recovery only fires if we actually alerted.
+      if (status.ready) {
+        if (offlineAlerted.has(cam.id)) notifyCameraRecovered(cam, offlineSince.get(cam.id));
+        offlineSince.delete(cam.id);
+        offlineAlerted.delete(cam.id);
       } else {
-        const subSince = subNotReadySince.get(cam.id);
-        if (!subSince) {
-          subNotReadySince.set(cam.id, Date.now());
-        } else if (Date.now() - subSince > STUCK_THRESHOLD_MS) {
-          logger.error(`Sub-stream (Low) for "${cam.name}" unready over ${STUCK_THRESHOLD_MS / 1000}s - force-restarting it.`);
-          recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'sub-stream force-restarted by watchdog (unready 30s+)');
-          await startSubStream(cam);
-          subNotReadySince.delete(cam.id);
+        if (!offlineSince.has(cam.id)) offlineSince.set(cam.id, Date.now());
+        if (
+          offlineCfg?.enabled &&
+          !offlineAlerted.has(cam.id) &&
+          Date.now() - offlineSince.get(cam.id) >= offlineCfg.minutes * 60 * 1000
+        ) {
+          offlineAlerted.add(cam.id);
+          notifyCameraOffline(cam, offlineCfg.minutes);
         }
       }
-    } else {
-      subNotReadySince.delete(cam.id);
-    }
 
-    if (status.ready) {
-      notReadySince.delete(cam.id);
-      continue;
-    }
-    const since = notReadySince.get(cam.id);
-    if (!since) {
-      notReadySince.set(cam.id, Date.now());
-    } else if (Date.now() - since > STUCK_THRESHOLD_MS) {
-      logger.error(
-        `Camera "${cam.name}" has been unready for over ${STUCK_THRESHOLD_MS / 1000}s - force-restarting its transcoder.`
-      );
-      recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'force-restarted by watchdog (unready 30s+)');
-      await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
-      notReadySince.delete(cam.id);
+      // Sub-stream (Low quality) wedge check — independent of the main path above, and BEFORE its early
+      // `continue`, so it runs even when the main stream is healthy. Mirrors the main logic: if the sub path
+      // stays not-ready past the threshold, force-restart just the sub leg (startSubStream → stopTranscoder
+      // SIGTERM→SIGKILL → relaunch), which clears a wedged FFmpeg that the reconcile can't (it's still alive).
+      if (subConfigured(cam)) {
+        const subReady = (await getPathStatus(subPathName(cam.mediamtx_path))).ready;
+        if (subReady) {
+          subNotReadySince.delete(cam.id);
+        } else {
+          const subSince = subNotReadySince.get(cam.id);
+          if (!subSince) {
+            subNotReadySince.set(cam.id, Date.now());
+          } else if (Date.now() - subSince > STUCK_THRESHOLD_MS) {
+            logger.error(`Sub-stream (Low) for "${cam.name}" unready over ${STUCK_THRESHOLD_MS / 1000}s - force-restarting it.`);
+            recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'sub-stream force-restarted by watchdog (unready 30s+)');
+            await startSubStream(cam);
+            subNotReadySince.delete(cam.id);
+          }
+        }
+      } else {
+        subNotReadySince.delete(cam.id);
+      }
+
+      if (status.ready) {
+        notReadySince.delete(cam.id);
+        continue;
+      }
+      const since = notReadySince.get(cam.id);
+      if (!since) {
+        notReadySince.set(cam.id, Date.now());
+      } else if (Date.now() - since > STUCK_THRESHOLD_MS) {
+        logger.error(
+          `Camera "${cam.name}" has been unready for over ${STUCK_THRESHOLD_MS / 1000}s - force-restarting its transcoder.`
+        );
+        recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'force-restarted by watchdog (unready 30s+)');
+        await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
+        notReadySince.delete(cam.id);
+      }
+    } catch (err) {
+      reportGuardFailure(`camera-watchdog:${cam.name}`, err);
     }
   }
-}, WATCHDOG_INTERVAL_MS);
+});
 
 // Third watchdog: audio liveness. The frame watchdog above can't see a camera whose AUDIO track
 // stalls while video keeps flowing - the path still reads "ready" and frames keep arriving, so it
@@ -457,36 +472,41 @@ const audioStallCounts = new Map(); // camera_id -> consecutive stalled checks
 const AUDIO_CHECK_INTERVAL_MS = 30 * 1000;
 const AUDIO_STALL_RESTART_THRESHOLD = 2;
 
-setInterval(async () => {
+safeInterval('audio-watchdog', AUDIO_CHECK_INTERVAL_MS, async () => {
   const cameras = db.prepare('SELECT * FROM cameras').all();
   for (const cam of cameras) {
-    if (cam.disabled) {
-      audioStallCounts.delete(cam.id);
-      continue;
-    }
-    const status = await getPathStatus(cam.mediamtx_path);
-    // Only meaningful once the stream is up AND actually carries audio - never restart a camera
-    // that legitimately has no audio track (its "no audio flowing" is correct, not a stall).
-    if (!status.ready || !tracksHaveAudio(status.tracks)) {
-      audioStallCounts.delete(cam.id);
-      continue;
-    }
-    const flowing = await probeAudioFlowing(cam.mediamtx_path);
-    if (flowing !== false) {
-      // true (flowing) or null (couldn't tell) - clear the counter, don't act on an unknown.
-      audioStallCounts.delete(cam.id);
-      continue;
-    }
-    const stalls = (audioStallCounts.get(cam.id) || 0) + 1;
-    audioStallCounts.set(cam.id, stalls);
-    if (stalls >= AUDIO_STALL_RESTART_THRESHOLD) {
-      logger.error(`Camera "${cam.name}" audio has stalled (declared but not flowing) - restarting its transcoder.`);
-      recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'audio stalled - restarted by watchdog');
-      await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
-      audioStallCounts.delete(cam.id);
+    // Same per-camera isolation as the frame watchdog above.
+    try {
+      if (cam.disabled) {
+        audioStallCounts.delete(cam.id);
+        continue;
+      }
+      const status = await getPathStatus(cam.mediamtx_path);
+      // Only meaningful once the stream is up AND actually carries audio - never restart a camera
+      // that legitimately has no audio track (its "no audio flowing" is correct, not a stall).
+      if (!status.ready || !tracksHaveAudio(status.tracks)) {
+        audioStallCounts.delete(cam.id);
+        continue;
+      }
+      const flowing = await probeAudioFlowing(cam.mediamtx_path);
+      if (flowing !== false) {
+        // true (flowing) or null (couldn't tell) - clear the counter, don't act on an unknown.
+        audioStallCounts.delete(cam.id);
+        continue;
+      }
+      const stalls = (audioStallCounts.get(cam.id) || 0) + 1;
+      audioStallCounts.set(cam.id, stalls);
+      if (stalls >= AUDIO_STALL_RESTART_THRESHOLD) {
+        logger.error(`Camera "${cam.name}" audio has stalled (declared but not flowing) - restarting its transcoder.`);
+        recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'audio stalled - restarted by watchdog');
+        await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
+        audioStallCounts.delete(cam.id);
+      }
+    } catch (err) {
+      reportGuardFailure(`audio-watchdog:${cam.name}`, err);
     }
   }
-}, AUDIO_CHECK_INTERVAL_MS);
+});
 
 // MediaMTX only learns about a camera when it's added/edited through our API, or from
 // this reconciliation. Important: every actual config write to MediaMTX forces it to
