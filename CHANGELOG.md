@@ -130,6 +130,21 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   were dropped wholesale instead of the oldest events being dropped. It is now newest-first
   across all cameras. Detection itself is unchanged — this affected only the diagnostic report.
 
+### Security
+- **Notification credentials were readable without signing in.** The settings endpoint is deliberately
+  reachable before you log in, because the login screen needs the app name, colours and font. It
+  filtered its response by *excluding* the MQTT broker fields — correct when it was written, but the
+  ntfy, Gotify and Pushover integrations later added their own token columns alongside them, and those
+  were served to anyone who could reach the app. Affected: the Pushover application token and user key,
+  the ntfy access token and password, and the Gotify application token.
+  - It now returns an explicit **list of what is allowed out**, rather than a list of what is held
+    back, so a credential added in future is private by default instead of public by default.
+  - Signing in as an admin returns the extra settings the admin pages need, exactly as before —
+    **no setting has moved or disappeared from any screen.** Provider tokens are still shown only on
+    their own settings pages, still masked.
+  - **If your Nightlight has ever been reachable from outside your home network, rotate those tokens.**
+    Instances only reachable on your own LAN were exposed only to devices already on that network.
+
 ## [0.29.0] - 2026-08-30
 
 ### Added

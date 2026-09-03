@@ -181,11 +181,17 @@ function Shell() {
 export default function App() {
   return (
     <ErrorBoundary>
-      <SettingsProvider>
-        <AuthProvider>
+      {/* AuthProvider is OUTSIDE SettingsProvider so the settings can be re-fetched when the signed-in
+          user changes: GET /settings answers an admin with more than it answers an anonymous visitor,
+          and signing in happens in-page (Login navigates, it does not reload), so a provider that
+          fetched once at mount would keep the anonymous response for the whole session and leave the
+          admin settings forms seeding from fields that were never sent. AuthProvider does not read
+          settings, so this nesting has no cycle. */}
+      <AuthProvider>
+        <SettingsProvider>
           <Shell />
-        </AuthProvider>
-      </SettingsProvider>
+        </SettingsProvider>
+      </AuthProvider>
     </ErrorBoundary>
   );
 }
