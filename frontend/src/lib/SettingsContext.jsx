@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { api } from './api.js';
+import { useAuth } from './AuthContext.jsx';
 import { FONT_PRESETS, DEFAULT_FONT_CHOICE } from './fonts.js';
 
 // Exported so tests can inject a value directly — chiefly to render a screen as an admin and
@@ -34,6 +35,9 @@ function applyTheme(settings) {
 export function SettingsProvider({ children }) {
   const [settings, setSettings] = useState(DEFAULTS);
   const [loading, setLoading] = useState(true);
+  // Optional: tests render this provider outside an AuthProvider, and it must still work there —
+  // it then simply never re-fetches, which is the pre-existing mount-only behaviour.
+  const { user } = useAuth() || {};
 
   async function refresh() {
     try {
@@ -48,9 +52,16 @@ export function SettingsProvider({ children }) {
     }
   }
 
+  // Re-fetch whenever the signed-in identity changes, not only at mount. GET /settings is an
+  // allow-list keyed on role — an anonymous caller gets the presentation fields the login screen
+  // needs, an admin also gets the config the settings forms bind. Signing in does not reload the page
+  // (Login navigates), so fetching only at mount would leave every session that began at the login
+  // screen holding the anonymous response, and the admin settings forms would seed from fields that
+  // were never sent. Runs on mount too (user is undefined then), so the theme still applies
+  // immediately rather than waiting for auth to resolve.
   useEffect(() => {
     refresh();
-  }, []);
+  }, [user?.id, user?.role]);
 
   return (
     <SettingsContext.Provider value={{ settings, loading, refresh }}>
