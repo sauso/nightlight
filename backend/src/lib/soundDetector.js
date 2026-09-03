@@ -125,6 +125,22 @@ export async function startSoundDetector(camera) {
     ];
     const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     entry.proc = proc;
+
+    proc.on('error', (err) => {
+      // A spawn that never started. Node emits 'error' INSTEAD OF 'exit' here, so nothing downstream
+      // runs — and with no listener on it an EventEmitter 'error' THROWS, taking the whole backend down.
+      // On a baby monitor that is an outage. ENOENT (no ffmpeg on PATH — a broken image layer, a bad
+      // volume mount) is the obvious trigger; EACCES, and EMFILE/EAGAIN under file-descriptor or fork
+      // pressure, arrive the same way. See issue #257.
+      //
+      // Deliberately NOT scheduling the 5s relaunch the exit path uses: a binary that cannot be executed
+      // fails identically every time, so that would be a hot loop writing a log line every five seconds
+      // forever. Clearing the map entry instead lets the reconcile pass (every 5 minutes) retry at a
+      // sane cadence, and isSoundDetecting() reports the truth in the meantime — without this the leg would be
+      // left claimed by a process that never existed, and reconcile would skip it as healthy.
+      logger.error(`[sound:${path}] could not start ffmpeg: ${err.code || err.message}`);
+      if (detectors.get(camera.id) === entry) detectors.delete(camera.id);
+    });
     const startedAt = Date.now();
     logger.info(`[sound] watching "${camera.name}" — fires at +${Math.round(margin)} dB over ambient, sustained ${Math.round(confirmMs / 1000)}s`);
 
@@ -230,11 +246,22 @@ export function stopSoundDetector(cameraId) {
         resolve();
       }
     };
+    // See stopTranscoder for the full reasoning: a process that never spawned throws on kill()
+    // (EINVAL, verified on win32 — an uncaught throw, the same crash class as #257) and emits
+    // 'error'/'close' but never 'exit', so waiting on 'exit' alone stalls for the whole timeout.
+    const kill = (sig) => {
+      try {
+        entry.proc.kill(sig);
+      } catch {
+        /* never spawned, or already reaped */
+      }
+    };
     entry.proc.once('exit', done);
-    entry.proc.kill('SIGTERM');
+    entry.proc.once('error', done);
+    kill('SIGTERM');
     setTimeout(() => {
       if (!resolved) {
-        entry.proc.kill('SIGKILL');
+        kill('SIGKILL');
         done();
       }
     }, FORCE_KILL_TIMEOUT_MS);

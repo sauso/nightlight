@@ -140,6 +140,22 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraNam
     const entry = { proc, stopped: false };
     processes.set(cameraId, entry);
 
+    proc.on('error', (err) => {
+      // A spawn that never started. Node emits 'error' INSTEAD OF 'exit' here, so nothing downstream
+      // runs — and with no listener on it an EventEmitter 'error' THROWS, taking the whole backend down.
+      // On a baby monitor that is an outage. ENOENT (no ffmpeg on PATH — a broken image layer, a bad
+      // volume mount) is the obvious trigger; EACCES, and EMFILE/EAGAIN under file-descriptor or fork
+      // pressure, arrive the same way. See issue #257.
+      //
+      // Deliberately NOT scheduling the 5s relaunch the exit path uses: a binary that cannot be executed
+      // fails identically every time, so that would be a hot loop writing a log line every five seconds
+      // forever. Clearing the map entry instead lets the reconcile pass (every 5 minutes) retry at a
+      // sane cadence, and isRunning() reports the truth in the meantime — without this the leg would be
+      // left claimed by a process that never existed, and reconcile would skip it as healthy.
+      logger.error(`[ffmpeg:${mediamtxPath}] could not start ffmpeg: ${err.code || err.message}`);
+      if (processes.get(cameraId) === entry) processes.delete(cameraId);
+    });
+
     let lastLine = '';
     // This camera occasionally sends one corrupted RTP timestamp (jumping to
     // billions, near the 32-bit rollover point) which poisons every downstream
@@ -223,12 +239,28 @@ export function stopTranscoder(cameraId) {
       resolved = true;
       resolve();
     }
+    // A process that never spawned has no OS process behind it, and stop() can land in that window
+    // (it is ~5ms wide: spawn() returns synchronously, 'error' arrives on a later tick). Two
+    // consequences, both found by adversarial review of PR #274:
+    //   1. kill() THROWS on it — EINVAL, verified on win32 — and that throw is uncaught, which is the
+    //      very crash class #257 is about, one layer down. clipRecorder's stopSegmenter already
+    //      guarded its kill; this leg did not.
+    //   2. It emits 'error' then 'close' but NEVER 'exit', so waiting on 'exit' alone would stall
+    //      every such stop for the full force-kill timeout before resolving.
+    const kill = (sig) => {
+      try {
+        entry.proc.kill(sig);
+      } catch {
+        /* never spawned, or already reaped */
+      }
+    };
     entry.proc.once('exit', done);
-    entry.proc.kill('SIGTERM');
+    entry.proc.once('error', done);
+    kill('SIGTERM');
     // Belt-and-suspenders: don't let a stuck process block a restart indefinitely.
     setTimeout(() => {
       if (resolved) return;
-      entry.proc.kill('SIGKILL');
+      kill('SIGKILL');
       done();
     }, FORCE_KILL_TIMEOUT_MS);
   });
