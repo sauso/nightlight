@@ -23,6 +23,24 @@ import { childSamplingActiveNow } from './sleepAnalysis.js';
 // camera_id -> { proc, stopped }
 const detectors = new Map();
 
+// Cameras with a relaunch SCHEDULED but no process yet — the 5s gap between an ffmpeg exit and the
+// restart. The exit handler removes the camera from `detectors` before arming that timer, so during
+// the gap the entry is unreachable and `entry.stopped`, the only brake on the relaunch, cannot be set.
+// stop() was therefore a no-op inside the window, and a camera deleted or disabled mid-restart kept
+// respawning ffmpeg every 5s for the life of the container — invisible to isDetecting(), so no
+// watchdog or reconcile pass could see or heal it, while it went on writing activity_samples outside
+// the sleep window. Keeping the timer handle here is what makes the relaunch cancellable. See #253.
+const pendingRestarts = new Map(); // cameraId -> timeout handle
+
+// Cancel a scheduled relaunch, if any. Safe to call for a camera that has none.
+function cancelPendingRestart(cameraId) {
+  const t = pendingRestarts.get(cameraId);
+  if (t) {
+    clearTimeout(t);
+    pendingRestarts.delete(cameraId);
+  }
+}
+
 const RESTART_DELAY_MS = 5000;
 const FORCE_KILL_TIMEOUT_MS = 3000;
 
@@ -395,9 +413,10 @@ export async function startMotionDetector(camera) {
         // reconnect quietly, re-picking sub vs main. Only a real failure is logged loudly.
         if (code === 0) logger.raw(`detect:${path}`, 'stream ended, reconnecting');
         else logger.error(`[detect:${path}] exited (code ${code}), restarting in 5s`);
-        setTimeout(() => {
+        pendingRestarts.set(camera.id, setTimeout(() => {
+          pendingRestarts.delete(camera.id);
           if (!entry.stopped && !detectors.has(camera.id)) launch().catch(() => {});
-        }, RESTART_DELAY_MS);
+        }, RESTART_DELAY_MS));
       }
     });
   }
@@ -406,6 +425,10 @@ export async function startMotionDetector(camera) {
 }
 
 export function stopMotionDetector(cameraId) {
+  // FIRST, before the early return: a camera in the 5s restart gap has no entry but does have a
+  // relaunch armed, and stop() used to return without cancelling it (#253).
+  cancelPendingRestart(cameraId);
+
   const entry = detectors.get(cameraId);
   if (!entry) return Promise.resolve();
   entry.stopped = true;
@@ -433,5 +456,8 @@ export function stopMotionDetector(cameraId) {
 }
 
 export async function stopAllMotionDetectors() {
-  await Promise.all([...detectors.keys()].map(stopMotionDetector));
+  // Union of both maps: a camera in its restart gap is in pendingRestarts only, and iterating
+  // detectors alone would leave its relaunch armed through shutdown.
+  const ids = new Set([...detectors.keys(), ...pendingRestarts.keys()]);
+  await Promise.all([...ids].map(stopMotionDetector));
 }

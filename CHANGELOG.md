@@ -55,6 +55,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **Deleting or turning off a camera could leave it running in the background.** If you removed a
+  camera, or switched it off, during the few seconds after its video connection had dropped and before
+  Nightlight retried it, the retry went ahead anyway — and then kept retrying every five seconds for as
+  long as the container ran. The camera showed as stopped the whole time, so nothing reported it and
+  nothing cleaned it up; it simply used CPU in the background, and for a camera assigned to a child it
+  also kept writing movement data outside the sleep window.
+  - Most likely to bite on a camera that was **already dropping in and out**, which is exactly the one
+    you would be turning off. Restarting the container cleared it.
+  - Stopping a camera now cancels a pending retry as well as the running connection, in all three
+    places that retry: the video stream, motion detection and sound detection.
+
 - **The MQTT settings page could go blank instead of loading.** If the server answered with an empty
   or unreadable body — a proxy that strips it, a truncated response — the page crashed to the
   "Something went wrong" screen rather than simply showing empty fields. It now opens normally and
