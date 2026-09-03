@@ -4,6 +4,10 @@ import { logger } from './logger.js';
 
 let proc = null;
 let stopped = false;
+// Consecutive launches that could not spawn at all, and the last WebRTC host list we logged. Both
+// exist only to keep a permanent spawn failure from flooding the log — see the 'error' handler.
+let spawnFailures = 0;
+let lastAdvertised = null;
 
 const RESTART_DELAY_MS = 3000;
 // At container start the host network may not have surfaced a routable address yet; wait briefly
@@ -60,12 +64,17 @@ export async function startMediaMTX(configPath) {
     }
     hosts.push(...detectHostIPv4s());
     const advertised = [...new Set(hosts)];
+    // Log the host list only when it CHANGES. It is recomputed every launch, and the spawn-failure
+    // retry below relaunches every 3s forever, so logging it unconditionally added a second line to
+    // the flood described there — and this one is info, i.e. pure noise once it has been said once.
+    const advertisedKey = advertised.join(',');
     if (advertised.length) {
-      env.MTX_WEBRTCADDITIONALHOSTS = advertised.join(',');
-      logger.info(`[mediamtx] advertising WebRTC hosts: ${advertised.join(', ')}`);
-    } else {
+      env.MTX_WEBRTCADDITIONALHOSTS = advertisedKey;
+      if (advertisedKey !== lastAdvertised) logger.info(`[mediamtx] advertising WebRTC hosts: ${advertised.join(', ')}`);
+    } else if (lastAdvertised !== '') {
       logger.error('[mediamtx] no routable host IP found - WebRTC may only advertise loopback');
     }
+    lastAdvertised = advertisedKey;
 
     // Both streams piped (not 'ignore'/'inherit') so every line can be forwarded
     // through our own logger - this is what makes MediaMTX's output show up in both
@@ -81,7 +90,17 @@ export async function startMediaMTX(configPath) {
     // so nothing else would ever bring it back, and the same backoff the exit path uses is the only
     // route to recovery if the binary appears (a fixed mount, a corrected image).
     proc.on('error', (err) => {
-      logger.error(`[mediamtx] could not start: ${err.code || err.message}`);
+      // Loud, then quiet — the same pattern as clipRecorder's fast-fail exit path, and for a sharper
+      // reason here. A missing binary retries every 3s forever, which is ~1200 lines/hour into
+      // logger.js's 1000-line ring: within the hour it would have evicted EVERY other line, including
+      // the per-camera "could not start ffmpeg" lines that diagnose the same broken image. A log that
+      // scrolls away the evidence of the fault it is reporting is worse than no log. So: log the
+      // first failure, then roughly once a minute (20 x 3s). Measured/found by review of PR #274.
+      spawnFailures += 1;
+      if (spawnFailures === 1 || spawnFailures % 20 === 0) {
+        const note = spawnFailures > 1 ? ` (${spawnFailures}x, still retrying every ${RESTART_DELAY_MS / 1000}s)` : '';
+        logger.error(`[mediamtx] could not start: ${err.code || err.message}${note}`);
+      }
       if (!stopped) {
         setTimeout(() => {
           if (!stopped) launch();
@@ -104,6 +123,9 @@ export async function startMediaMTX(configPath) {
     });
 
     proc.on('exit', (code) => {
+      // Reaching 'exit' at all means this launch really spawned, so a later spawn failure starts its
+      // own fresh loud-then-quiet cycle rather than inheriting an old run's count.
+      spawnFailures = 0;
       if (!stopped) {
         logger.error(
           `[mediamtx] exited (code ${code}), restarting in ${RESTART_DELAY_MS / 1000}s. Last output: ${lastLine}`
@@ -120,5 +142,16 @@ export async function startMediaMTX(configPath) {
 
 export function stopMediaMTX() {
   stopped = true;
-  if (proc) proc.kill('SIGTERM');
+  // `proc` is non-null even for a launch that never spawned (it is assigned from spawn()'s return
+  // value). Killing one of those throws `Error: kill EINVAL` — but ONLY in the window between spawn()
+  // and the 'error' event, while the child still holds a libuv handle with no OS process behind it;
+  // after 'error' the handle is nulled and kill() just returns false. Uncaught during shutdown that is
+  // the same crash class this file is fixing. Verified on win32 by
+  // spawn-failure.test.js's "stopping inside the pre-error window" case, which is the ONLY thing that
+  // kills this mutant — a case that waits for the error first cannot see it. See also stopTranscoder.
+  try {
+    proc?.kill('SIGTERM');
+  } catch {
+    /* never spawned, or already reaped */
+  }
 }

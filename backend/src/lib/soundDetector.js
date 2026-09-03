@@ -246,11 +246,22 @@ export function stopSoundDetector(cameraId) {
         resolve();
       }
     };
+    // See stopTranscoder for the full reasoning: a process that never spawned throws on kill()
+    // (EINVAL, verified on win32 — an uncaught throw, the same crash class as #257) and emits
+    // 'error'/'close' but never 'exit', so waiting on 'exit' alone stalls for the whole timeout.
+    const kill = (sig) => {
+      try {
+        entry.proc.kill(sig);
+      } catch {
+        /* never spawned, or already reaped */
+      }
+    };
     entry.proc.once('exit', done);
-    entry.proc.kill('SIGTERM');
+    entry.proc.once('error', done);
+    kill('SIGTERM');
     setTimeout(() => {
       if (!resolved) {
-        entry.proc.kill('SIGKILL');
+        kill('SIGKILL');
         done();
       }
     }, FORCE_KILL_TIMEOUT_MS);

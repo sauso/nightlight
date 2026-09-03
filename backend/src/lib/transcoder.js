@@ -239,12 +239,28 @@ export function stopTranscoder(cameraId) {
       resolved = true;
       resolve();
     }
+    // A process that never spawned has no OS process behind it, and stop() can land in that window
+    // (it is ~5ms wide: spawn() returns synchronously, 'error' arrives on a later tick). Two
+    // consequences, both found by adversarial review of PR #274:
+    //   1. kill() THROWS on it — EINVAL, verified on win32 — and that throw is uncaught, which is the
+    //      very crash class #257 is about, one layer down. clipRecorder's stopSegmenter already
+    //      guarded its kill; this leg did not.
+    //   2. It emits 'error' then 'close' but NEVER 'exit', so waiting on 'exit' alone would stall
+    //      every such stop for the full force-kill timeout before resolving.
+    const kill = (sig) => {
+      try {
+        entry.proc.kill(sig);
+      } catch {
+        /* never spawned, or already reaped */
+      }
+    };
     entry.proc.once('exit', done);
-    entry.proc.kill('SIGTERM');
+    entry.proc.once('error', done);
+    kill('SIGTERM');
     // Belt-and-suspenders: don't let a stuck process block a restart indefinitely.
     setTimeout(() => {
       if (resolved) return;
-      entry.proc.kill('SIGKILL');
+      kill('SIGKILL');
       done();
     }, FORCE_KILL_TIMEOUT_MS);
   });
