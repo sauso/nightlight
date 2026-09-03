@@ -57,6 +57,13 @@ beforeEach(() => {
   // Put a recognisable value in every secret column, so a leak is unambiguous rather than a null that
   // happens to look harmless on a fresh database. The original bug was invisible precisely because an
   // unconfigured install leaks empty strings.
+  // mqtt_enabled is forced OFF, and that is load-bearing, not tidiness. The column's migration is
+  // `DEFAULT 1` (deliberately — it was added after MQTT already shipped, so defaulting to 0 would have
+  // silently disabled it for everyone already using it), and a SUCCESSFUL PUT /settings calls
+  // refreshMqttConnection(). With enabled=1 and the broker host planted below, the PUT tests dial
+  // `broker.example` for real and the suite hangs on DNS retries until the runner times out.
+  db.prepare("UPDATE settings SET mqtt_enabled = 0 WHERE id = 'app'").run();
+
   db.prepare(
     `UPDATE settings SET mqtt_host = ?, mqtt_username = ?, mqtt_password = ?,
        pushover_app_token = ?, pushover_user_key = ?,
@@ -169,6 +176,35 @@ describe('GET /settings ignores a token in the query string', () => {
     assert.equal(r.body.ptz_step, undefined, 'a session token in the query string was honoured');
     const extra = Object.keys(r.body).filter((k) => !PUBLIC.includes(k));
     assert.deepEqual(extra, [], `a query-string token widened the response: ${extra.join(', ')}`);
+  });
+});
+
+describe('PUT /settings answers with the same allow-list', () => {
+  // No client reads this body — all five callers discard it and re-read via GET — but it is still a
+  // response, and before the allow-list it returned the whole row minus the five mqtt_* columns, which
+  // put the ntfy/Gotify/Pushover tokens into the admin's browser on every save. Mutation testing found
+  // both directions of this line unprotected: returning PUBLIC_FIELDS, and returning the entire row,
+  // each survived all 400 tests. These two pin it.
+  const putBody = { app_name: 'Nightlight' };
+  const put = (token) => call(`${server.url}/api/settings`, { method: 'PUT', token, body: putBody });
+
+  test('returns the admin fields, not the public subset', async () => {
+    const r = await put(adminToken);
+    assert.equal(r.status, 200);
+    for (const field of ['ptz_step', 'clip_pre_roll_s', 'wake_clip_seconds']) {
+      assert.ok(field in r.body, `${field} missing from the PUT response`);
+    }
+  });
+
+  test('leaks no provider credential back to the admin who saved', async () => {
+    const r = await put(adminToken);
+    for (const field of SECRETS) {
+      assert.equal(r.body[field], undefined, `${field} was returned by PUT /settings`);
+    }
+    assert.ok(
+      !JSON.stringify(r.body).includes('LEAK-'),
+      `a planted secret came back from a save: ${JSON.stringify(r.body)}`
+    );
   });
 });
 

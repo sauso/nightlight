@@ -38,9 +38,12 @@ const PUBLIC_FIELDS = [
 ];
 
 // Additionally returned to an ADMIN. These are the non-secret config values the admin settings forms
-// bind (SettingsGeneral / SettingsCamera / SettingsRecording seed their form state straight from this
-// response), so removing one breaks a form field. Nothing here is a credential — provider tokens and
-// broker passwords are served only by their own admin-only /config routes, which mask them.
+// bind. SettingsGeneral / SettingsCamera / SettingsRecording seed their form state from the SETTINGS
+// CONTEXT — i.e. from THIS route's GET, which they re-read via refresh() after every save — so
+// removing a name here blanks a form field. (They discard the PUT response body entirely; if you are
+// looking for what constrains this list, it is the GET, not the PUT.) Nothing here is a credential —
+// provider tokens and broker passwords are served only by their own admin-only /config routes, which
+// mask them.
 // Caregivers deliberately get PUBLIC_FIELDS only: every settings page that uses these is admin-gated
 // in the UI, and PUT /settings is requireAdmin.
 const ADMIN_FIELDS = [
@@ -306,7 +309,12 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
   if (retentionChanged) {
     try { sweepClips(); } catch { /* logged inside */ }
   }
-  // PUT is requireAdmin, so it answers with the admin view — the forms re-seed from this response.
+  // PUT is requireAdmin, so it answers with the admin view. No client reads this body — all five
+  // callers discard it and re-read via GET — but it is filtered anyway: before the allow-list, this
+  // line returned the whole row minus the five mqtt_* columns, which handed the ntfy/Gotify/Pushover
+  // tokens to the admin's browser on every save. Same class as GHSA-qffc-965c-x74m, much less severe
+  // because it needs an admin session, and closed here rather than left as the one path still spraying
+  // credentials into a page.
   res.json(pick(getSettings(), ADMIN_FIELDS));
 });
 
