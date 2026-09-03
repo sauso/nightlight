@@ -55,6 +55,19 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **An interrupted update could leave Nightlight unable to start again.** When a new version adds
+  fields to the database it applies them in groups, and each change used to be saved on its own. If the
+  container was stopped, ran out of memory, or lost power *during* that step — a window of
+  milliseconds, on the first start after an update — a group could be left half applied. There was no
+  way back from it: depending on which group, Nightlight would either fail to start on every attempt
+  afterwards, or start normally and then report a missing field the first time you used that feature.
+  Recovering meant editing the database by hand.
+  - The whole step is now applied as one unit. A start either brings the database fully up to date or
+    leaves it exactly as it was and tries again next time, so an interruption costs you a restart
+    rather than the install.
+  - **No action needed, and nothing changes on a normal update.** This only affects what happens if a
+    start is interrupted at that exact moment.
+
 - **Deleting or turning off a camera could leave it running in the background.** If you removed a
   camera, or switched it off, during the few seconds after its video connection had dropped and before
   Nightlight retried it, the retry went ahead anyway — and then kept retrying every five seconds for as
