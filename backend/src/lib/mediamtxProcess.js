@@ -72,6 +72,23 @@ export async function startMediaMTX(configPath) {
     // `docker logs` and the in-app log viewer, rather than being silently discarded.
     proc = spawn('mediamtx', [configPath], { stdio: ['ignore', 'pipe', 'pipe'], env });
 
+    // A spawn that never started. Node emits 'error' INSTEAD OF 'exit', so the restart below never
+    // runs — and an EventEmitter 'error' with no listener THROWS, taking the whole backend down before
+    // it can serve anything. ENOENT here means the mediamtx binary is missing from the image, which is
+    // fatal to video but should still leave the app up to say so. See issue #257.
+    //
+    // Unlike the camera legs this DOES keep retrying: there is no reconcile pass for MediaMTX itself,
+    // so nothing else would ever bring it back, and the same backoff the exit path uses is the only
+    // route to recovery if the binary appears (a fixed mount, a corrected image).
+    proc.on('error', (err) => {
+      logger.error(`[mediamtx] could not start: ${err.code || err.message}`);
+      if (!stopped) {
+        setTimeout(() => {
+          if (!stopped) launch();
+        }, RESTART_DELAY_MS);
+      }
+    });
+
     let lastLine = '';
     proc.stdout.on('data', (chunk) => {
       forwardLines(chunk, (line) => {

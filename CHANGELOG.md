@@ -55,6 +55,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **A missing video component could crash Nightlight instead of disabling one camera.** Nightlight runs
+  a helper program (FFmpeg) per camera, and the streaming server (MediaMTX) alongside it. If one of
+  those could not be started at all — missing from the image after a bad update, wrong permissions, or
+  the system briefly out of file handles — the failure was unhandled and took the whole app down rather
+  than affecting one camera. It then happened again on every restart, so the app looked broken with
+  nothing explaining why.
+  - Each of those launches now reports the real reason in the log ("could not start ffmpeg: ENOENT")
+    and carries on. A camera whose helper could not start is shown as not running and is retried by the
+    regular five-minute check; the rest of the app, including your other cameras, keeps working.
+
 - **An interrupted update could leave Nightlight unable to start again.** When a new version adds
   fields to the database it applies them in groups, and each change used to be saved on its own. If the
   container was stopped, ran out of memory, or lost power *during* that step — a window of

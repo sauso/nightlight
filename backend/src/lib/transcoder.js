@@ -140,6 +140,22 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraNam
     const entry = { proc, stopped: false };
     processes.set(cameraId, entry);
 
+    proc.on('error', (err) => {
+      // A spawn that never started. Node emits 'error' INSTEAD OF 'exit' here, so nothing downstream
+      // runs — and with no listener on it an EventEmitter 'error' THROWS, taking the whole backend down.
+      // On a baby monitor that is an outage. ENOENT (no ffmpeg on PATH — a broken image layer, a bad
+      // volume mount) is the obvious trigger; EACCES, and EMFILE/EAGAIN under file-descriptor or fork
+      // pressure, arrive the same way. See issue #257.
+      //
+      // Deliberately NOT scheduling the 5s relaunch the exit path uses: a binary that cannot be executed
+      // fails identically every time, so that would be a hot loop writing a log line every five seconds
+      // forever. Clearing the map entry instead lets the reconcile pass (every 5 minutes) retry at a
+      // sane cadence, and isRunning() reports the truth in the meantime — without this the leg would be
+      // left claimed by a process that never existed, and reconcile would skip it as healthy.
+      logger.error(`[ffmpeg:${mediamtxPath}] could not start ffmpeg: ${err.code || err.message}`);
+      if (processes.get(cameraId) === entry) processes.delete(cameraId);
+    });
+
     let lastLine = '';
     // This camera occasionally sends one corrupted RTP timestamp (jumping to
     // billions, near the 32-bit rollover point) which poisons every downstream

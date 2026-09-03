@@ -176,6 +176,19 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
     });
     entry.proc = proc;
 
+    proc.on('error', (err) => {
+      // A spawn that never started. Node emits 'error' INSTEAD OF 'exit', so the exit handler below
+      // never runs — and an EventEmitter 'error' with no listener THROWS, taking the backend down. The
+      // sibling extractClip spawn already handles this; the segmenter did not. See issue #257.
+      //
+      // No relaunch: an unrunnable binary fails identically every time. Clearing entry.proc leaves the
+      // segmenter registered but idle, so isSegmenterRunning() reports false and a later
+      // startClipCapture/reconcile can bring it back — the ring simply has nothing to cut until then,
+      // which is what an on-demand Record already checks for.
+      logger.error(`[clipseg:${pathName}] could not start ffmpeg: ${err.code || err.message}`);
+      if (entry.proc === proc) entry.proc = null;
+    });
+
     let lastLine = '';
     proc.stderr.on('data', (chunk) => {
       chunk

@@ -243,6 +243,22 @@ export async function startMotionDetector(camera) {
     const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     entry.proc = proc;
 
+    proc.on('error', (err) => {
+      // A spawn that never started. Node emits 'error' INSTEAD OF 'exit' here, so nothing downstream
+      // runs — and with no listener on it an EventEmitter 'error' THROWS, taking the whole backend down.
+      // On a baby monitor that is an outage. ENOENT (no ffmpeg on PATH — a broken image layer, a bad
+      // volume mount) is the obvious trigger; EACCES, and EMFILE/EAGAIN under file-descriptor or fork
+      // pressure, arrive the same way. See issue #257.
+      //
+      // Deliberately NOT scheduling the 5s relaunch the exit path uses: a binary that cannot be executed
+      // fails identically every time, so that would be a hot loop writing a log line every five seconds
+      // forever. Clearing the map entry instead lets the reconcile pass (every 5 minutes) retry at a
+      // sane cadence, and isDetecting() reports the truth in the meantime — without this the leg would be
+      // left claimed by a process that never existed, and reconcile would skip it as healthy.
+      logger.error(`[detect:${path}] could not start ffmpeg: ${err.code || err.message}`);
+      if (detectors.get(camera.id) === entry) detectors.delete(camera.id);
+    });
+
     let prev = null;
     let buf = Buffer.alloc(0);
     let activeSince = 0; // start of the current sustained-motion run (0 = not currently active)
