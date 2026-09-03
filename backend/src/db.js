@@ -9,6 +9,46 @@ const db = new Database(path.join(DATA_DIR, 'babymonitor.db'));
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
+// ── Everything below, to the COMMIT at the bottom, runs as ONE transaction. ────────────────────────
+//
+// SQLite has transactional DDL, and the migrations at the bottom of this file badly need it. They are
+// groups of ALTER TABLE statements behind a single sentinel-column check, and each db.exec used to
+// autocommit on its own — so an interruption (power loss, OOM kill, a `docker stop` landing mid-
+// upgrade) could leave a group half applied, permanently, with no way back. Both orderings failed, and
+// both were reproduced:
+//
+//   • Sentinel added LAST — the activity_samples group adds `motion_out_level` and then
+//     `motion_out_peak`, and the guard tests the second. Crash between them and the guard is still
+//     false, so the next boot re-runs the first ALTER and throws `duplicate column name` — AT MODULE
+//     LOAD, before the server starts. Every subsequent restart repeats it identically. The install is
+//     bricked and needs manual sqlite3 surgery.
+//   • Sentinel added FIRST — the ntfy group and about a dozen others. Crash after the sentinel and the
+//     guard is true forever, the remaining columns never arrive, db.js loads "fine", and the failure
+//     surfaces later as `no such column: ntfy_server_url` the first time that feature is used.
+//
+// Wrapping the whole schema section rather than each group individually is deliberate: it is a
+// two-line change instead of twenty scattered ones, it cannot be half-applied by someone adding a new
+// group and forgetting the wrapper, and there is no partial state worth preserving — a boot either
+// brings the schema fully up to date or leaves it exactly as it was, and retries next time.
+//
+// Rollback needs no explicit handler. If anything in here throws, module load fails and the process
+// dies with the transaction still open, and SQLite discards an uncommitted transaction when the
+// connection goes — including on a hard kill, where the next open rolls the journal back. Measured,
+// not assumed: stalling a migration group mid-way and SIGKILLing the process leaves 0 of that group's
+// 6 columns applied and the next boot completes all 6, while the same experiment without this
+// transaction leaves 2 of 6 committed and permanently torn.
+//
+// An earlier version of this block registered a process.once('exit') ROLLBACK as belt and braces. It
+// was removed: it is unreachable as a fix — 'exit' fires only when the process is already ending, at
+// which point the connection close does the same job — and every mutation of it (inverting its guard,
+// making it unconditional, deleting it outright) left the suite green, i.e. nothing could hold it
+// honest. Its comment also claimed it covered a caller that CATCHES the import error and keeps
+// running, which is exactly the case it cannot help: nothing has exited, so the handler never fires
+// and the transaction stays open holding the write lock. Nothing does that today (index.js imports
+// this module statically), but if anything ever needs to, the fix is a try/catch with an explicit
+// ROLLBACK around the section — not an exit hook. See issue #258.
+db.exec('BEGIN');
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
@@ -725,5 +765,11 @@ db.prepare(
 // the refreshed UI uses. Migrate installs still on the exact old default to the new one; a value
 // that isn't the old default means the user picked their own colour, so leave it untouched.
 db.prepare("UPDATE settings SET accent_color = '#f4c56a' WHERE accent_color = '#F5D9A8'").run();
+
+// ── End of the schema transaction opened after the pragmas at the top. ────────────────────────────
+// Reaching here means every CREATE, every migration group and the settings-row seed applied. Anything
+// that threw on the way left the transaction open and unrolled, so the database still holds the schema
+// it had before this boot and the next start retries from there — rather than being stuck half-way.
+db.exec('COMMIT');
 
 export default db;
