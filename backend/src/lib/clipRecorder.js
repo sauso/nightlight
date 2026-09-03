@@ -176,6 +176,30 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
     });
     entry.proc = proc;
 
+    proc.on('error', (err) => {
+      // A spawn that never started. Node emits 'error' INSTEAD OF 'exit', so the exit handler below
+      // never runs — and an EventEmitter 'error' with no listener THROWS, taking the backend down. The
+      // sibling extractClip spawn already handles this; the segmenter did not. See issue #257.
+      //
+      // No relaunch: an unrunnable binary fails identically every time. Instead DELETE the map entry,
+      // exactly as the transcoder/detector legs do — because every "is this camera covered?" predicate
+      // here is `segmenters.has(cameraId)` (see isSegmenterRunning), which does not look at entry.proc
+      // at all. Nulling the field alone left the camera reading as running: startClipCapture's guard
+      // (clipCapture.js) would skip it forever, holdRing() would still return true, and an on-demand
+      // Record would pass its gate, write a recordings row and only fail ~20s later inside extractClip.
+      // That is precisely the "permanently dead and invisible to the healing pass" failure this whole
+      // change exists to prevent. Found by adversarial review of PR #274 — the first version of this
+      // handler shipped a comment claiming isSegmenterRunning() reported false; it did not.
+      //
+      // The janitor interval is assigned after launch() returns, but 'error' is emitted asynchronously,
+      // so it is always set by the time we get here — clear it or the pruner outlives the segmenter.
+      logger.error(`[clipseg:${pathName}] could not start ffmpeg: ${err.code || err.message}`);
+      if (segmenters.get(cameraId) === entry) {
+        if (entry.janitor) clearInterval(entry.janitor);
+        segmenters.delete(cameraId);
+      }
+    });
+
     let lastLine = '';
     proc.stderr.on('data', (chunk) => {
       chunk
