@@ -145,6 +145,22 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   - **If your Nightlight has ever been reachable from outside your home network, rotate those tokens.**
     Instances only reachable on your own LAN were exposed only to devices already on that network.
 
+- **Camera passwords could reach a caregiver account.** Assigning a camera to a child is meant to be
+  everyday caregiving, so that action is open to caregivers as well as admins — but it was the one
+  camera action that replied with the camera's full database record instead of the filtered version
+  every other camera screen uses. That record includes the stream address with the password embedded
+  in it, and the ONVIF and two-way-audio logins. On most cameras the ONVIF login is the camera's own
+  administrator account, so this reached past Nightlight to the camera itself.
+  - It now replies through the same filter as everywhere else. Admins still get what the camera edit
+    form needs — the address in separate fields, and whether a stream password is set rather than the
+    password itself. **Nothing changes on screen for anyone.** (One exception, unchanged by this and
+    the same on every other camera screen: if you put a username and password into the **Snapshot
+    URL** field, admins do get that field back verbatim, because the edit box has to show what you
+    typed. Caregivers never see it.)
+  - **Only relevant if you have caregiver accounts.** If you do, and you would rather not rely on
+    those people having ignored it, change the camera's password in the camera's own settings and
+    then update it in Nightlight.
+
 ## [0.29.0] - 2026-08-30
 
 ### Added

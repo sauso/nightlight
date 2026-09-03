@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import db from '../db.js';
-import { requireAuth, requireAdmin, optionalAuth } from '../middleware/auth.js';
+import { requireAuth, requireAdmin, optionalAuth, isAdminRequest } from '../middleware/auth.js';
 import { refreshMqttConnection, mqttStatus } from '../lib/mqttClient.js';
 import { restartClipCapture } from '../lib/clipCapture.js';
 import { clipStorageStats, sweepClips } from '../lib/clipStorage.js';
@@ -79,13 +79,10 @@ router.get('/', optionalAuth, (req, res) => {
   // README's remote-access section makes a realistic deployment.
   res.set('Vary', 'Authorization');
   res.set('Cache-Control', 'private, no-store');
-  // Own-property check, not a plain `req.user?.role === 'admin'`: jwt.verify returns a JSON.parse'd
-  // object, so a plain read would resolve through the prototype chain, and a token carrying no role
-  // claim at all would answer as admin if Object.prototype.role were ever set. No vector for that was
-  // found — six qs shapes, four headers and a JWT with a literal "__proto__" key all failed to set it
-  // — but this closes the class for one line, and the widening direction is the dangerous one.
-  const isAdmin = req.user != null && Object.hasOwn(req.user, 'role') && req.user.role === 'admin';
-  const fields = isAdmin ? ADMIN_FIELDS : PUBLIC_FIELDS;
+  // isAdminRequest, not a plain `req.user?.role === 'admin'` — see middleware/auth.js for why the
+  // read must be own-property-only. Every route that varies a response SHAPE by role goes through
+  // that one function so the copies cannot drift.
+  const fields = isAdminRequest(req) ? ADMIN_FIELDS : PUBLIC_FIELDS;
   res.json(pick(getSettings(), fields));
 });
 

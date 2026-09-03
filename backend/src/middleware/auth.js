@@ -122,6 +122,19 @@ export function optionalAuth(req, res, next) {
   next();
 }
 
+// Is this request an admin's? For routes that serve BOTH roles and vary the response SHAPE — not a
+// gate (that is requireAdmin), which is why it returns a boolean instead of ending the request.
+//
+// Own-property read, not a plain `req.user?.role === 'admin'`: jwt.verify hands back a JSON.parse'd
+// object, so a plain read resolves through the prototype chain and a token carrying no role claim
+// would answer as admin if Object.prototype.role were ever set. No vector was found for setting it,
+// but the direction it fails in is WIDENING a response, so every such decision goes through this one
+// function rather than repeating the idiom and having the copies drift.
+export function isAdminRequest(req) {
+  const user = req?.user;
+  return user != null && Object.hasOwn(user, 'role') && user.role === 'admin';
+}
+
 export function requireAdmin(req, res, next) {
   if (req.user?.role !== 'admin') {
     return res.status(403).json({ error: 'Admin access required' });
