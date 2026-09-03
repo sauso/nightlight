@@ -55,6 +55,25 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **Pressing Record during a wake could destroy the wake clip.** Automatic wake clips and manual
+  recordings both protect the recent buffer from being cleaned up, but they shared a single slot with
+  no notion of who had claimed it. So a parent watching a wake on their phone and pressing Record
+  replaced the wake clip's protection, and when that manual recording finished it released protection
+  the wake clip still needed — losing its opening, or the clip entirely. Exactly the moment the
+  feature exists to capture. Each now holds its own claim, and the buffer is kept back as far as the
+  earliest of them needs.
+
+- **A recording in progress when Nightlight restarted was lost, and never appeared or explained
+  itself.** A clip is assembled from the buffer after you press stop, and shutdown did not wait for
+  that step — so a restart during it lost the recording, and left it stuck half-finished forever.
+  Because the list shows finished recordings only, it simply never appeared.
+  - Shutdown now waits for an in-flight recording to finish, within the few seconds a container is
+    given to stop. A long recording can still be cut short — that is a bounded wait, not a promise.
+  - Any recording left unfinished by a restart, a crash or a power cut is now marked failed on the
+    next start rather than sitting in limbo — whether it was still capturing or already being
+    assembled. ⚠️ Failed recordings are not shown in the recordings list; see
+    [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
+
 - **A background check that failed could shut Nightlight down.** The 15-second camera watchdog, the
   30-second audio check, the 5-minute reconcile and the timelapse sampler each ran unprotected, so an
   error inside one of them exited the whole app — an outage on a monitor that is normally left
