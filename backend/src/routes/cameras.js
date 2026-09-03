@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { readFileSync } from 'fs';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
-import { requireAuth, requireAdmin, requireAuthQueryOrHeader } from '../middleware/auth.js';
+import { requireAuth, requireAdmin, requireAuthQueryOrHeader, isAdminRequest } from '../middleware/auth.js';
 import { upsertPath, removePath, getPathStatus, toPathName, hlsPathName } from '../lib/mediamtx.js';
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
 import { recordCameraEvent, EVENT } from '../lib/cameraEvents.js';
@@ -483,7 +483,7 @@ router.post('/:id/snooze', requireAuth, (req, res) => {
 
 router.get('/', async (req, res) => {
   const cameras = db.prepare('SELECT * FROM cameras ORDER BY sort_order, created_at').all();
-  const isAdmin = req.user?.role === 'admin';
+  const isAdmin = isAdminRequest(req);
   const withStatus = await Promise.all(
     cameras.map(async (cam) => ({
       ...publicCamera(cam, isAdmin),
@@ -1044,7 +1044,11 @@ router.put('/:id/assign', async (req, res) => {
     if (motionLegWanted(updated)) await startMotionDetector(updated).catch(() => {});
     else await stopMotionDetector(updated.id).catch(() => {});
   }
-  res.json(updated);
+  // Through publicCamera like every other camera response. This route is deliberately open to
+  // caregivers (assignment is day-to-day caregiving, not administration), and it was the ONLY site in
+  // this file returning the raw row — which handed rtsp_url, with the stream password embedded in it,
+  // plus the ONVIF and talk credentials, to any signed-in caregiver. See GHSA-43c3-wrx8-fq39.
+  res.json(publicCamera(updated, isAdminRequest(req)));
 });
 
 router.delete('/:id', requireAdmin, async (req, res) => {
