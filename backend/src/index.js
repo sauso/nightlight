@@ -30,7 +30,7 @@ import { startMotionDetector, stopMotionDetector, isDetecting, stopAllMotionDete
 import { startOnvifMotion, stopOnvifMotion, isOnvifMotion, onvifMotionWanted, stopAllOnvifMotion } from './lib/onvifMotion.js';
 import { startSoundDetector, isSoundDetecting, stopAllSoundDetectors } from './lib/soundDetector.js';
 import { startClipCapture, clipRingWanted, isClipCapturing, stopAllClipCapture } from './lib/clipCapture.js';
-import { stopAllRecordings } from './lib/recordings.js';
+import { stopAllRecordingsForShutdown, reconcileStaleRecordings } from './lib/recordings.js';
 import { startClipStorage } from './lib/clipStorage.js';
 import { initPush } from './lib/push.js';
 import { startMediaMTX, stopMediaMTX } from './lib/mediamtxProcess.js';
@@ -248,6 +248,10 @@ const server = app.listen(PORT, () => {
   // Run the clip-storage guard + retention sweeper BEFORE reconcile, so reconcile only starts
   // segmenters once storage is known usable (startClipCapture gates on it).
   startClipStorage();
+  // Any recording still marked 'pending' is debris from a restart that interrupted the extraction —
+  // there is no in-process state left for it, and the row would otherwise stay invisible forever
+  // (listChildRecordings filters on 'ready'). See #256.
+  reconcileStaleRecordings();
   startTimelapseSampler(); // sample sleep-window frames for the nightly memories timelapse (gated on clip storage)
   reconcileCameraPaths();
   initPush();
@@ -598,7 +602,7 @@ async function shutdown() {
   await stopAllOnvifMotion();
   await stopAllSoundDetectors();
   // Finish any in-flight recording first — it cuts from the ring the segmenters own.
-  stopAllRecordings().catch(() => {});
+  await stopAllRecordingsForShutdown();
   stopAllClipCapture();
   await stopAllTranscoders();
   stopMediaMTX();
