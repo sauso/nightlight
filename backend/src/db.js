@@ -31,19 +31,23 @@ db.pragma('foreign_keys = ON');
 // group and forgetting the wrapper, and there is no partial state worth preserving — a boot either
 // brings the schema fully up to date or leaves it exactly as it was, and retries next time.
 //
-// If anything in here throws, module load fails and the process dies with the transaction open, which
-// SQLite rolls back; the exit handler below makes that explicit rather than incidental, and also
-// covers a caller that catches the import error instead of exiting. See issue #258.
+// Rollback needs no explicit handler. If anything in here throws, module load fails and the process
+// dies with the transaction still open, and SQLite discards an uncommitted transaction when the
+// connection goes — including on a hard kill, where the next open rolls the journal back. Measured,
+// not assumed: stalling a migration group mid-way and SIGKILLing the process leaves 0 of that group's
+// 6 columns applied and the next boot completes all 6, while the same experiment without this
+// transaction leaves 2 of 6 committed and permanently torn.
+//
+// An earlier version of this block registered a process.once('exit') ROLLBACK as belt and braces. It
+// was removed: it is unreachable as a fix — 'exit' fires only when the process is already ending, at
+// which point the connection close does the same job — and every mutation of it (inverting its guard,
+// making it unconditional, deleting it outright) left the suite green, i.e. nothing could hold it
+// honest. Its comment also claimed it covered a caller that CATCHES the import error and keeps
+// running, which is exactly the case it cannot help: nothing has exited, so the handler never fires
+// and the transaction stays open holding the write lock. Nothing does that today (index.js imports
+// this module statically), but if anything ever needs to, the fix is a try/catch with an explicit
+// ROLLBACK around the section — not an exit hook. See issue #258.
 db.exec('BEGIN');
-let schemaCommitted = false;
-process.once('exit', () => {
-  // Guarded on our own flag, not on db.inTransaction alone: by exit time some unrelated caller could
-  // be inside its own db.transaction(), and rolling that back is not this handler's business. This
-  // fires only when the schema transaction below never reached its COMMIT — i.e. a migration threw.
-  if (!schemaCommitted && db.inTransaction) {
-    try { db.exec('ROLLBACK'); } catch { /* the connection is going away regardless */ }
-  }
-});
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -767,6 +771,5 @@ db.prepare("UPDATE settings SET accent_color = '#f4c56a' WHERE accent_color = '#
 // that threw on the way left the transaction open and unrolled, so the database still holds the schema
 // it had before this boot and the next start retries from there — rather than being stuck half-way.
 db.exec('COMMIT');
-schemaCommitted = true;
 
 export default db;
