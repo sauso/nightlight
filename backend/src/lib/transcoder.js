@@ -7,6 +7,25 @@ import { hlsPathName, upsertPath, isPathConfiguredCorrectly } from './mediamtx.j
 // camera_id -> { proc, stopped }
 const processes = new Map();
 
+// Cameras with a relaunch SCHEDULED but no process yet — the 5s gap between an ffmpeg exit and the
+// restart. The exit handler removes the camera from `processes` before arming that timer, so during
+// the gap the entry is unreachable and `entry.stopped`, the only brake on the relaunch, cannot be set
+// by anything. stopTranscoder() was therefore a no-op inside the window: deleting or disabling a
+// camera mid-restart left ffmpeg respawning every 5s for the life of the container, invisible to
+// isRunning() and so unreachable by the watchdog or reconcile. A flapping camera restarts every 5s,
+// so the window is effectively always open for exactly the camera you would want to stop.
+// Keeping the timer handle here is what makes the relaunch cancellable. See issue #253.
+const pendingRestarts = new Map(); // cameraId -> timeout handle
+
+// Cancel a scheduled relaunch, if any. Safe to call for a camera that has none.
+function cancelPendingRestart(cameraId) {
+  const t = pendingRestarts.get(cameraId);
+  if (t) {
+    clearTimeout(t);
+    pendingRestarts.delete(cameraId);
+  }
+}
+
 // rtsp_url -> source audio codec (probed once, reused across restarts — the codec doesn't change while
 // a camera stays put). Lets buildArgs pick the right WebRTC audio track without an ffprobe per restart.
 const audioCodecCache = new Map();
@@ -171,12 +190,13 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraNam
         if (!restarting) {
           recordCameraEvent(cameraId, cameraName, EVENT.RESTART, `stream ended (exit code ${code})`);
         }
-        setTimeout(() => {
+        pendingRestarts.set(cameraId, setTimeout(() => {
+          pendingRestarts.delete(cameraId);
           // Re-checked at fire time too: startTranscoder (watchdog, camera edit)
           // may have started a new owner during the 5s delay - launching anyway
           // would create exactly the two-lineage fight described above.
           if (!entry.stopped && !processes.has(cameraId)) launch();
-        }, RESTART_DELAY_MS);
+        }, RESTART_DELAY_MS));
       }
     });
   }
@@ -185,6 +205,11 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraNam
 }
 
 export function stopTranscoder(cameraId) {
+  // FIRST, and before the early return below: a camera in the 5s restart gap has no entry in
+  // `processes` but does have a relaunch armed. Without this, stop() returned Promise.resolve() and
+  // the relaunch fired anyway (#253).
+  cancelPendingRestart(cameraId);
+
   const entry = processes.get(cameraId);
   if (!entry) return Promise.resolve();
 
@@ -210,5 +235,8 @@ export function stopTranscoder(cameraId) {
 }
 
 export async function stopAllTranscoders() {
-  await Promise.all([...processes.keys()].map(stopTranscoder));
+  // The union of both maps: a camera sitting in its restart gap is in `pendingRestarts` only, and
+  // iterating `processes` alone would leave its relaunch armed through shutdown.
+  const ids = new Set([...processes.keys(), ...pendingRestarts.keys()]);
+  await Promise.all([...ids].map(stopTranscoder));
 }
