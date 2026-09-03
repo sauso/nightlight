@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import db from '../db.js';
 import { logger } from './logger.js';
+import { safeInterval } from './processGuards.js';
 import { CLIPS_DIR } from './clipRecorder.js';
 import { clipStorageReady, hasMinFreeSpace } from './clipStorage.js';
 import { captureSnapshot, fetchHttpSnapshot } from './snapshot.js';
@@ -140,7 +141,10 @@ async function sampleTick() {
 
 export function startTimelapseSampler() {
   if (sampleTimer) return;
-  sampleTimer = setInterval(() => { sampleTick(); }, SAMPLE_INTERVAL_MS);
+  // sampleTick guards its own body, but its first two checks (clipStorageReady/hasMinFreeSpace) sit
+  // OUTSIDE that try — a throw there rejects the floating promise, which used to mean an unhandled
+  // rejection and a dead process. safeInterval catches it and keeps the timer alive. See #254.
+  sampleTimer = safeInterval('timelapse-sampler', SAMPLE_INTERVAL_MS, sampleTick);
   sampleTimer.unref?.();
   logger.info(`[timelapse] frame sampler started (every ${SAMPLE_INTERVAL_MS / 1000}s during open sleep windows)`);
 }

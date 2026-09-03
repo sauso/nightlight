@@ -113,6 +113,28 @@ track — but it can't fix (1), a camera that simply won't stream AAC.
 Nightlight's native path: it streams reliably and gives sound in both Low latency and Compatibility.
 This is how the Sonoff/Thingino cameras are happiest — flip AAC → G711A in the camera's web UI.
 
+## A `[guard:…]` error in the log, and Nightlight keeps running
+
+**What you see:** a line like
+`[guard:camera-watchdog:Nursery] background task failed (continuing): TypeError: fetch failed …`,
+followed by the app carrying on normally.
+
+**Why:** background jobs — the 15-second camera watchdog, the 30-second audio check, the 5-minute
+reconcile, the timelapse sampler — are wrapped so that a failure in one of them is reported and
+skipped instead of taking the whole app down. The commonest cause is the streaming server (MediaMTX)
+being briefly unavailable, which is also exactly what makes a camera look unready in the first place,
+so the two tend to appear together.
+
+**What to do:** if it appears once or twice around a camera restart, ignore it — the next tick
+(15-30 seconds later) retries on its own. If the *same* guard line repeats steadily for many minutes,
+something is genuinely stuck: check the log above it for what that camera or the streaming server was
+doing, and restart the container if cameras are not recovering.
+
+> Nightlight deliberately keeps running after an unexpected error rather than exiting, because it is
+> normally left unattended overnight — a monitor that is degraded is more useful at 3am than one that
+> has quit. The trade-off is that these lines are worth reading rather than assuming the app is fine
+> just because it is still up.
+
 ---
 
 ## Confirmed bugs (fix pending)
