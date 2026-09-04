@@ -163,6 +163,10 @@ in the **Recordings** card as a greyed entry reading *Couldn't be saved*, rather
 Tapping it explains what happened and offers to remove it. There's nothing to play, so it has no
 thumbnail and no play button.
 
+**Removing a failed one doesn't ask twice.** Deleting a recording that *worked* takes two taps — a
+confirmation, because the video is gone for good and there's no retention sweep that would have removed
+it anyway. A failed entry has no video to lose, so **Remove** clears it immediately.
+
 This is deliberately different from the other two kinds of video: alert clips and wake clips are
 tidied up automatically, so a failed one just disappears. Recordings have **no automatic retention**
 (see above), so a failed one stays until you remove it — which is why it's shown at all. A recording

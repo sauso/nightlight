@@ -66,7 +66,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - **A recording in progress when Nightlight restarted was lost, and never appeared or explained
   itself.** A clip is assembled from the buffer after you press stop, and shutdown did not wait for
   that step — so a restart during it lost the recording, and left it stuck half-finished forever.
-  Because the list shows finished recordings only, it simply never appeared.
+  Because the list showed finished recordings only, it simply never appeared.
   - Shutdown now waits up to **6 seconds** for an in-flight recording to finish. A long recording can
     still be cut short — that is a fixed, bounded wait, not a promise, and **allowing your container
     longer to stop does not extend it**.

@@ -161,7 +161,7 @@ limit that allowing your container longer to stop does **not** extend — so a l
 be lost.
 
 **What to do:** re-record if you still need it, then tap the entry and choose **Remove** to clear it —
-recordings have no automatic retention, so it stays until you do. *(Before 0.30.0 these were hidden
+recordings have no automatic retention, so it stays until you do. *(Older versions hid these
 entirely: the recording simply never appeared, with nothing explaining why. If you are on an older
 version, a recording that vanished after a restart was almost certainly this.)*
 

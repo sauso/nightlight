@@ -213,9 +213,13 @@ export async function stopAllRecordingsForShutdown() {
 // At boot, NEITHER live status can legitimately still be set. A row is 'recording' from startRecording
 // until the user stops it, and 'pending' from then until extractClip finishes — both describe work held
 // in the in-process `active` map, which is gone. So a row in either state is debris from a shutdown or
-// a crash that never got to finish, and leaving it is the visible half of #256: listChildRecordings
-// filters on status='ready', so the row is invisible forever and the user simply never sees the
-// recording they asked for, with nothing explaining why.
+// a crash that never got to finish, and leaving it is the visible half of #256.
+//
+// ⚠️ WHAT THIS SWEEP MEANS CHANGED WITH #276, and this comment used to say the opposite. It once read
+// "listChildRecordings filters on status='ready', so the row is invisible forever" — true then, false
+// now: the list returns 'ready' AND 'failed'. So sweeping a row to 'failed' is no longer what HIDES it,
+// it is precisely what puts it on the child's page with an explanation. Leaving it 'pending' is what
+// would hide it, because the two live statuses are the ones the list still excludes.
 //
 // ⚠️ SWEEPING ONLY 'pending' WAS NOT ENOUGH, and the first version of this did exactly that while its
 // comment claimed to cover "a SIGKILL or a power cut". Found by adversarial review of PR #277, which
