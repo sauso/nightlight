@@ -2558,6 +2558,17 @@ input[type='range'] {
 .rec-strip__item:hover { border-color: var(--peri); color: var(--text-primary); }
 .rec-strip__item img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
 .rec-strip__item span:last-child { display: block; padding: 5px 6px; font-size: 11px; line-height: 1.25; }
+/* A recording that couldn't be saved (issue #276). It has no thumbnail to show, so the tile keeps the
+   same footprint as its neighbours — a shorter tile would make the strip ragged — and fills the image
+   area with a warning glyph instead. Muted rather than alarming: it is an explanation, not an alert. */
+.rec-strip__item--failed { border-style: dashed; border-color: var(--border); }
+.rec-strip__item--failed:hover { border-color: var(--offline); }
+.rec-strip__failed {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; aspect-ratio: 16 / 9;
+  background: var(--bg-elevated); color: var(--offline);
+}
+
 .rec-strip__play {
   position: absolute; top: 34%; left: 50%; transform: translate(-50%, -50%);
   width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;

@@ -157,9 +157,24 @@ for. It's a fixed limit: **raising the stop timeout past 30 seconds won't buy a 
 time**, because the wait isn't derived from it. A recording still being assembled after 6 seconds is
 given up on, and marked **failed** the next time Nightlight starts — a bounded wait, not a promise.
 
+**When a recording can't be saved, it says so.** A recording that fails — the camera was offline and
+the buffer had no frames in it, the clip couldn't be assembled, or a restart interrupted it — appears
+in the **Recordings** card as a greyed entry reading *Couldn't be saved*, rather than never appearing.
+Tapping it explains what happened and offers to remove it. There's nothing to play, so it has no
+thumbnail and no play button.
+
+**Removing a failed one doesn't ask twice.** Deleting a recording that *worked* takes two taps — a
+confirmation, because the video is gone for good and there's no retention sweep that would have removed
+it anyway. A failed entry has no video to lose, so **Remove** clears it immediately.
+
+This is deliberately different from the other two kinds of video: alert clips and wake clips are
+tidied up automatically, so a failed one just disappears. Recordings have **no automatic retention**
+(see above), so a failed one stays until you remove it — which is why it's shown at all. A recording
+that silently never appeared was indistinguishable from the app having ignored the button.
+
 **Record on a camera that's offline** will start and then save nothing — the buffer exists but has no
-frames in it, so the recording ends up marked failed rather than appearing on the child's page. The
-button doesn't currently distinguish "buffering" from "buffering something".
+frames in it. The button doesn't currently distinguish "buffering" from "buffering something", so this
+is the case you're most likely to meet the *Couldn't be saved* entry in.
 
 ---
 

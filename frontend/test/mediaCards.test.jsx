@@ -372,6 +372,76 @@ describe('RecordingsCard', () => {
     expect(container.querySelector('.rec-strip__item img')).toHaveAttribute('src', 'http://host/recordings/r-1/thumb');
   });
 
+  // --- failed recordings (issue #276) ---
+  // The API now returns 'failed' rows as well as 'ready' ones. Before this, a recording that could not
+  // be saved was filtered out server-side and the user saw NOTHING — no error, no entry, no way to tell
+  // it apart from the app having ignored the Record press. These cases pin the two halves: it is shown,
+  // and it is shown as un-playable.
+  const FAILED_ROWS = [
+    { id: 'r-ok', status: 'ready', camera_name: 'Raffa Room', started_at: '2026-09-02 10:00:00', duration_s: 30 },
+    { id: 'r-bad', status: 'failed', camera_name: 'Renz Room', started_at: '2026-09-02 09:00:00', duration_s: 12 },
+  ];
+
+  test('a FAILED recording appears in the strip instead of vanishing', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(FAILED_ROWS);
+    const { container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
+    await screen.findByText('Recordings');
+    await waitFor(() => expect(container.querySelectorAll('.rec-strip__item')).toHaveLength(2));
+    expect(container.querySelectorAll('.rec-strip__item--failed')).toHaveLength(1);
+    expect(screen.getByText('Couldn’t be saved')).toBeInTheDocument();
+  });
+
+  test('it never requests media it cannot have — no thumbnail, no play affordance', async () => {
+    // Not cosmetic. The server refuses to serve a non-ready row, so an <img> pointed at its thumb
+    // renders a broken-image glyph, and a play badge invites a click that can only fail.
+    vi.spyOn(api, 'get').mockResolvedValue(FAILED_ROWS);
+    const { container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
+    await screen.findByText('Recordings');
+    const failedTile = await waitFor(() => {
+      const el = container.querySelector('.rec-strip__item--failed');
+      expect(el).not.toBeNull();
+      return el;
+    });
+    expect(failedTile.querySelector('img')).toBeNull();
+    expect(failedTile.querySelector('.rec-strip__play')).toBeNull();
+    // ...while the ready one still has both, so this is not passing because the strip is empty.
+    const okTile = container.querySelector('.rec-strip__item:not(.rec-strip__item--failed)');
+    expect(okTile.querySelector('img')).not.toBeNull();
+    expect(okTile.querySelector('.rec-strip__play')).not.toBeNull();
+  });
+
+  test('opening it explains what happened rather than launching a player', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(FAILED_ROWS);
+    const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
+    await screen.findByText('Recordings');
+    await user.click(await waitFor(() => {
+      const el = container.querySelector('.rec-strip__item--failed');
+      expect(el).not.toBeNull();
+      return el;
+    }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveAccessibleName('Recording couldn’t be saved');
+    // The distinguishing assertion: MediaPlayerModal renders a <video>. This must not.
+    expect(dialog.querySelector('video')).toBeNull();
+    expect(dialog.textContent).toContain('Renz Room');
+  });
+
+  test('a failed recording can still be removed, so failures do not pile up forever', async () => {
+    // Recordings have NO automatic retention, so anything that can appear on this card has to be
+    // removable from it or it stays there for the life of the install.
+    vi.spyOn(api, 'get').mockResolvedValue(FAILED_ROWS);
+    const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
+    await screen.findByText('Recordings');
+    await user.click(await waitFor(() => {
+      const el = container.querySelector('.rec-strip__item--failed');
+      expect(el).not.toBeNull();
+      return el;
+    }));
+    await user.click(await screen.findByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(api.del).toHaveBeenCalledWith('/recordings/r-bad'));
+  });
+
   test('reloads when the parent bumps the refresh nonce', async () => {
     vi.spyOn(api, 'get').mockResolvedValue(ROWS);
     const { rerenderWith } = renderAsAdmin(<RecordingsCard childId="kid-1" refreshNonce={0} />);
