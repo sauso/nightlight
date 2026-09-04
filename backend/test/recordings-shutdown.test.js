@@ -29,6 +29,20 @@ const {
 } = await import('../src/lib/recordings.js');
 const indexSrc = fs.readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
 
+// ⚠️ ORDERING IS CHECKED BY WHOLE LINE, not by substring, and that is load-bearing rather than style.
+// A substring search over source text is satisfied by a COMMENT containing the literal, which executes
+// nothing. A second adversarial review of #279 did exactly that: it awaited the recording in place as
+// `await Promise.resolve(recordingsFinished);` — a genuine in-place await, since for a native promise
+// `Promise.resolve(p)` returns p — and left `// decoy: await recordingsFinished;` further down for the
+// check to find. Shutdown was serial again at 15s and the full 482-case suite passed.
+//
+// A trimmed whole-line match closes it: neither `// decoy: await recordingsFinished;` nor
+// `stopAllClipCapture(); // await recordingsFinished;` equals the statement being looked for.
+// ⚠️ Stripping comments instead was tried first and is WRONG here — `/\*[\s\S]*?\*\//` matched inside a
+// string literal in index.js and silently removed 4kB of real code, breaking unrelated cases.
+const indexLines = indexSrc.replace(/\r\n/g, '\n').split('\n').map((l) => l.trim());
+const lineOf = (statement) => indexLines.indexOf(statement);
+
 // ⚠️ HOSTILE BY CONSTRUCTION, AND DERIVED FROM THE SCHEMA rather than a list I typed. The first
 // version of this fixture set only id/status/kind/path, so a sweep that ALSO nulled thumb_path, bytes,
 // duration_s, ended_at, child_id or triggered_by was invisible to it — adversarial review of PR #277
@@ -181,26 +195,65 @@ describe('stopAllRecordings', () => {
     assert.ok(SHUTDOWN_SETTLE_MS < SEGMENT_SETTLE_MS, 'the shutdown settle is no longer the shorter one');
   });
 
-  test('shutdown stays inside Docker’s default 10s stop grace', () => {
+  test('shutdown stays inside the 9s bound the deployment grace is sized from', () => {
     // Arithmetic, because this is not otherwise observable and getting it wrong is a REGRESSION that a
     // green suite would never show. Each detector stop and the transcoder stop are each bounded by a 3s
-    // force-kill. Awaiting the recording stop in sequence gave 3+3+6+3 = 15s against a default grace of
-    // 10s (docker-compose.yml sets no stop_grace_period, and a hand-rolled `docker run` has none) —
-    // where the pre-PR worst case was 9s. Overlapping the recording wait with the detector stops
-    // restores that: max(6, 3+3) + 3 = 9s. Found by adversarial review of #277.
-    const FORCE_KILL_MS = 3000; // motionDetector.js / soundDetector.js / transcoder.js
-    const detectors = FORCE_KILL_MS * 2; // motion + sound (ONVIF is not process-bound)
-    const worstCase = Math.max(SHUTDOWN_BUDGET_MS, detectors) + FORCE_KILL_MS;
+    // force-kill. Awaiting the recording stop in sequence gave 3+3+6+3 = 15s, where the pre-PR worst
+    // case was 9s. Overlapping the recording wait with the detector stops restores that:
+    // max(6, 3+3) + 3 = 9s. Found by adversarial review of #277.
+    //
+    // ⚠️ THE ORIGINAL VERSION OF THIS CASE CALLED 9s "inside Docker's default 10s stop grace". That
+    // was false, and it is the reason issue #279 exists: Docker Engine 29 documents no default, the
+    // container config carries `StopTimeout=<nil>`, and a bare `docker stop` on the soak box SIGKILLed
+    // at ~4s — losing the very recording this code saves. The grace is now DECLARED (30s) wherever a
+    // container is created, and shutdown-grace-declared.test.js checks those declarations cover this
+    // bound. This case owns the other half: that the bound itself does not creep upward.
+    // ⚠️ READ FROM THE MODULES, not typed. This line used to be `const FORCE_KILL_MS = 3000;` with the
+    // three module names in a trailing comment — so raising motionDetector.js's own
+    // FORCE_KILL_TIMEOUT_MS to 10000 left the real worst case at 16s while this case still computed 9s
+    // and passed. A second adversarial review of #279 demonstrated that mutant surviving the full
+    // suite, which means PR #279's claim "the app-side bound has not crept upward" was not actually
+    // enforced here. Its sibling shutdown-grace-declared.test.js already derived these; this one did
+    // not, and the inconsistency was the bug.
+    const forceKill = (mod) => {
+      const src = fs
+        .readFileSync(new URL(`../src/lib/${mod}`, import.meta.url), 'utf8')
+        .replace(/\r\n/g, '\n');
+      const m = /^const FORCE_KILL_TIMEOUT_MS = (\d+);/m.exec(src);
+      assert.ok(m, `${mod} no longer declares FORCE_KILL_TIMEOUT_MS — this bound is being under-computed`);
+      return Number(m[1]);
+    };
+    // Mirrors shutdown() exactly: motion and sound run while the recording is still saving (ONVIF is
+    // not process-bound and adds nothing), then the transcoder stop runs after.
+    const detectors = forceKill('motionDetector.js') + forceKill('soundDetector.js');
+    const worstCase = Math.max(SHUTDOWN_BUDGET_MS, detectors) + forceKill('transcoder.js');
     assert.ok(worstCase <= 9000, `worst-case shutdown is now ${worstCase}ms — it must not exceed the pre-PR 9000ms`);
 
     // ...and the code must actually overlap them, not await in place. A source check, because
     // index.js boots the whole app and cannot be unit-tested.
-    const started = indexSrc.indexOf('const recordingsFinished = stopAllRecordingsForShutdown();');
-    const awaited = indexSrc.indexOf('await recordingsFinished;');
-    const clipCapture = indexSrc.indexOf('stopAllClipCapture();');
+    const started = lineOf('const recordingsFinished = stopAllRecordingsForShutdown();');
+    const awaited = lineOf('await recordingsFinished;');
+    const clipCapture = lineOf('stopAllClipCapture();');
     assert.ok(started !== -1, 'the recording stop is no longer started before the detector stops');
     assert.ok(awaited > started, 'the recording stop is never awaited — #256 is reintroduced');
     assert.ok(awaited < clipCapture, 'the ring is torn down before the recording finishes cutting from it');
+
+    // ★ AND THE DETECTOR STOPS MUST SIT BETWEEN THOSE TWO — which is the whole of the overlap, and
+    // was NOT asserted until adversarial review of #279 demonstrated the gap. Moving `await
+    // recordingsFinished` up to immediately after the start makes shutdown fully serial again
+    // (6+3+3+3 = 15s, the exact #277 regression) while satisfying every check above: the arithmetic
+    // is over constants a reordering does not touch, and `awaited` is still after `started` and
+    // before `clipCapture`. That mutant passed the whole 482-case suite. Without these three lines
+    // the comment in index.js claiming this is "asserted in recordings-shutdown.test.js" is false.
+    for (const stop of ['stopAllMotionDetectors', 'stopAllOnvifMotion', 'stopAllSoundDetectors']) {
+      const at = lineOf(`await ${stop}();`);
+      assert.ok(at !== -1, `${stop} is no longer awaited during shutdown`);
+      assert.ok(
+        at > started && at < awaited,
+        `${stop} no longer runs while the recording is still being saved — shutdown is serial again, ` +
+          'which is the 15s worst case PR #277 removed'
+      );
+    }
   });
 });
 
@@ -215,7 +268,7 @@ describe('index.js wiring', () => {
   test('the boot sweep runs before cameras are reconciled', () => {
     // Order matters: clean the debris before anything new can start writing rows.
     assert.ok(
-      indexSrc.indexOf('reconcileStaleRecordings();') < indexSrc.indexOf('reconcileCameraPaths();'),
+      lineOf('reconcileStaleRecordings();') < lineOf('reconcileCameraPaths();'),
       'the sweep runs after camera reconcile'
     );
   });

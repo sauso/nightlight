@@ -116,10 +116,12 @@ cd frontend && npm install
 npm run dev
 npm run build                # outputs to frontend/dist, copied into the image as ./public
 
-# Full stack, matching production
+# Full stack, matching production.
+# --stop-timeout: shutdown finishes an in-flight recording, which needs a few seconds. Docker's own
+# default is unspecified and was measured at ~4s — short enough to SIGKILL mid-save (issue #279).
 docker build -t nightlight .
-docker run -d --name nightlight --network host -e PUID=99 -e PGID=100 \
-  -v ./data:/app/data nightlight
+docker run -d --name nightlight --network host --stop-timeout 30 \
+  -e PUID=99 -e PGID=100 -v ./data:/app/data nightlight
 docker logs -f nightlight
 ```
 
