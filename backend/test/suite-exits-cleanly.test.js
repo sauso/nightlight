@@ -145,6 +145,42 @@ describe('starting the activity tracker does not pin the process open', () => {
   });
 });
 
+describe('shutdown() actually stops the tracker', () => {
+  // ★ ADDED AFTER ADVERSARIAL REVIEW OF THIS PR. Deleting the `stopActivityTracker()` call from
+  // shutdown() left the entire 513-test suite green — the production wiring was untested, and both
+  // reviewers found it independently. It is invisible to a behavioural test because the `process.exit(0)`
+  // on the very next line tears the timers down anyway, so nothing observable changes today. That is
+  // exactly why it needs a source-level assertion: the moment shutdown stops hard-exiting, this call is
+  // the only thing standing between a SIGTERM and a process that never dies.
+  //
+  // Matched as a trimmed WHOLE LINE, never with `indexOf` on a fragment: a substring search is
+  // satisfied by the call appearing inside a comment, which is how a source assertion quietly stops
+  // discriminating. Same technique as recordings-shutdown.test.js.
+  const indexLines = readFileSync(path.join(BACKEND, 'src/index.js'), 'utf8')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((l) => l.trim());
+
+  test('shutdown() calls stopActivityTracker()', () => {
+    assert.ok(
+      indexLines.includes('stopActivityTracker();'),
+      'src/index.js no longer calls stopActivityTracker() — a SIGTERM would leave both intervals running, ' +
+        'and only the hard process.exit(0) would still be ending the process (issue #278)'
+    );
+  });
+
+  test('and imports it, rather than the call being dead text', () => {
+    // Anti-vacuous companion: a call to a name that was never imported would throw at shutdown, which
+    // is strictly worse than not calling it. The line above cannot tell the difference.
+    const src = readFileSync(path.join(BACKEND, 'src/index.js'), 'utf8');
+    assert.match(
+      src,
+      /import\s*\{[^}]*\bstopActivityTracker\b[^}]*\}\s*from\s*'\.\/lib\/activityTracker\.js'/,
+      'stopActivityTracker is called in index.js but not imported from lib/activityTracker.js'
+    );
+  });
+});
+
 describe('the npm scripts do not paper over a leaked handle', () => {
   // The guard that keeps this fixed. `--test-force-exit` is an easy thing to re-add the next time one
   // test leaks a handle, and it fails in the least visible way available: files vanish from the run

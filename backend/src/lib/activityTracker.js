@@ -166,8 +166,13 @@ export function startActivityTracker() {
 export function stopActivityTracker() {
   clearInterval(flushTimer);
   clearInterval(pruneTimer);
-  // Nulled, not just cleared: `startActivityTracker` guards on `if (flushTimer) return`, so leaving a
-  // stale handle here would make every later restart a silent no-op.
+  // ⚠️ ONLY `flushTimer = null` IS LOAD-BEARING, and saying "nulls the handles" plural was an
+  // overstatement caught by adversarial review of this PR: `startActivityTracker` guards on
+  // `if (flushTimer) return` and nothing anywhere reads `pruneTimer`'s truthiness, so dropping the
+  // second line survives every test in the suite — verified by mutation. Without the first line a
+  // restart after a stop is a silent no-op.
+  // `pruneTimer` is still nulled, deliberately: releasing the handle for GC and keeping the two in
+  // the same state costs nothing, and a future guard that reads either one then cannot be wrong.
   flushTimer = null;
   pruneTimer = null;
 }
