@@ -67,8 +67,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   itself.** A clip is assembled from the buffer after you press stop, and shutdown did not wait for
   that step — so a restart during it lost the recording, and left it stuck half-finished forever.
   Because the list shows finished recordings only, it simply never appeared.
-  - Shutdown now waits for an in-flight recording to finish, within the few seconds a container is
-    given to stop. A long recording can still be cut short — that is a bounded wait, not a promise.
+  - Shutdown now waits up to **6 seconds** for an in-flight recording to finish. A long recording can
+    still be cut short — that is a fixed, bounded wait, not a promise, and **allowing your container
+    longer to stop does not extend it**.
+  - **Nightlight now tells Docker it needs those seconds**, in every supplied way of creating the
+    container: the Compose file, the Unraid template, and the `docker run` examples. Without that,
+    Docker decides how long to wait and recent versions no longer promise the familiar 10 seconds —
+    measured as low as 4, which is short enough to lose the recording anyway. ⚠️ **An existing
+    install does not pick this up on its own**: add `--stop-timeout 30` to your `docker run`,
+    `stop_grace_period: 30s` under the service in Compose, or `--stop-timeout 30` to the Unraid
+    template's **Extra Parameters** field. Nothing else misbehaves without it. See
+    [README → Quick start](README.md#quick-start).
   - Any recording left unfinished by a restart, a crash or a power cut is now marked failed on the
     next start rather than sitting in limbo — whether it was still capturing or already being
     assembled. ⚠️ Failed recordings are not shown in the recordings list; see

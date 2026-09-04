@@ -163,8 +163,24 @@ export async function stopRecording(cameraId, { settleMs = SEGMENT_SETTLE_MS } =
 // the way down that is longer than the budget allows, and one 2s segment plus margin is enough to
 // leave a usable clip. The tail may lose up to ~1s — far better than losing the recording.
 export const SHUTDOWN_SETTLE_MS = 2500;
-// Docker's default stop grace is 10s. stopAllTranscoders is bounded at 3s after us, so this is what
-// is left. Over budget we give up and let reconcileStaleRecordings mark the row on next boot.
+// ⚠️ THIS COMMENT USED TO READ "Docker's default stop grace is 10s", and that is false — there is no
+// such default (Engine 29 documents none; a bare `docker stop` was measured SIGKILLing at ~4s). The
+// budget is NOT derived from Docker's behaviour. It is a deliberate cap on how long shutdown will wait
+// for a clip, chosen so the whole of shutdown stays inside the 9s bound index.js documents, which is
+// in turn what the DECLARED 30s grace is sized from (issue #279: `stop_grace_period` in
+// docker-compose.yml, `--stop-timeout 30` in the Unraid template and the README).
+// ⚠️ Raising this does NOT let a longer recording finish "if the grace allows" — the cap is absolute
+// and independent of the grace (`stopAllRecordings` races the work against it).
+// Which test stops you changing it, precisely — because an earlier version of THIS comment named the
+// wrong one, and a second adversarial review of #279 proved it by raising the value and watching that
+// test pass. Three guards, three different thresholds:
+//   * recordings-shutdown.test.js catches any RAISE: its bound is max(budget, 6000) + 3000 <= 9000.
+//   * shutdown-grace-declared.test.js catches any change UP OR DOWN, via the docs tripwire — three
+//     user-facing files state this value in seconds and must agree with it. (A LOWERING is otherwise
+//     invisible: 4500 cleared every arithmetic check while leaving three documents saying "6 seconds".)
+//   * that same file's grace arithmetic — ceil((budget + 9000)/1000) vs the DECLARED 30s — only bites
+//     above 21000. It is the weakest of the three, and naming it alone was the false claim.
+// Over budget we give up and let reconcileStaleRecordings mark the row on next boot.
 export const SHUTDOWN_BUDGET_MS = 6000;
 // Exported so a test can assert the relationship between them: a settle longer than the budget makes
 // the whole save path permanently inert, and that mutant survived the first review of #277.

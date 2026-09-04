@@ -7,6 +7,14 @@ services:
     #   dockerfile: Dockerfile
     container_name: nightlight
     restart: unless-stopped
+    # How long Docker waits after SIGTERM before SIGKILL. Nightlight needs a few seconds to stop
+    # cleanly: an in-flight recording is cut from the buffer during shutdown, and a SIGKILL loses it
+    # (issue #256, then #279). The app's own worst case is bounded at 9s by design and a real stop
+    # with a recording in flight measured ~4.6s, so 30s is generous on purpose — the container exits
+    # as soon as it is done, so over-declaring costs nothing while under-declaring costs a recording.
+    # ⚠️ Do NOT rely on Docker's default: Engine 29 no longer documents one, and a bare `docker stop`
+    # measured ~4s on the machine this was found on — enough to kill the save half-finished.
+    stop_grace_period: 30s
     network_mode: host
     environment:
       # Which host user/group owns files this container creates in the data volume

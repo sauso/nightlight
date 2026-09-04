@@ -156,12 +156,21 @@ restarted (a deploy, a reboot, a power cut).
 
 **Why:** a clip is assembled from the buffer *after* you press stop, and a restart during that step
 loses it. Nightlight now marks such a recording as failed when it next starts, rather than leaving it
-stuck half-finished forever. It tries to finish the clip first, but only within the few seconds a
-container is given to shut down, so a long recording may still be lost.
+stuck half-finished forever. It tries to finish the clip first, but only for up to 6 seconds — a fixed
+limit that allowing your container longer to stop does **not** extend — so a long recording may still
+be lost.
 
 **What to do:** re-record if you still need it. ⚠️ Failed recordings are **not** shown in the
 recordings list — that list shows finished ones only — so a recording that vanished after a restart
 was almost certainly this.
+
+⚠️ **Check your container actually grants that time**, especially on an install created before this
+was added. Nightlight needs a few seconds to stop cleanly and it declares that as `--stop-timeout 30` /
+`stop_grace_period: 30s`; **Docker's own default is not a reliable substitute** — recent versions
+document none, and it has been measured killing the container after about 4 seconds — enough to lose
+the recording it was in the middle of saving. Verify with `docker inspect -f '{{.Config.StopTimeout}}' nightlight`:
+`30` is right; `<nil>` means nothing is set and Docker will decide for you. See
+[Quick start](README.md#quick-start) for where to add it.
 
 ---
 

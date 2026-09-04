@@ -13,6 +13,7 @@ One container includes the app, [MediaMTX](https://github.com/bluenviron/mediamt
 docker run -d \
     --name=nightlight \
     --network=host \
+    --stop-timeout 30 \
     -e PUID=<uid for user> \
     -e PGID=<gid for user> \
     -v <path for config/data>:/app/data \
@@ -28,6 +29,7 @@ work correctly on your LAN.
 docker run -d \
     --name=nightlight \
     --network=host \
+    --stop-timeout 30 \
     -e PUID=99 \
     -e PGID=100 \
     -v /mnt/user/appdata/nightlight:/app/data \
@@ -45,6 +47,10 @@ a trusted device.
 
 - PUID/PGID default to 99/100 (Unraid's own "nobody"/"users" convention) if left
   unset. Find your own with `id <username>` on other systems.
+- `--stop-timeout 30` lets Nightlight shut down cleanly - a recording in progress is
+  assembled from its buffer as the app stops, and being killed part-way loses it.
+  Stopping normally takes a few seconds; the container exits as soon as it's done, so
+  the generous timeout costs nothing.
 - An Unraid template is available - see the GitHub repo below for setup.
 - A random session secret is generated and stored in your data directory
   automatically on first run - nothing to configure.
