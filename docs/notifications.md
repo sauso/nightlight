@@ -248,6 +248,14 @@ remedy.
 
 ## Troubleshooting
 
+- **"Send test" says it timed out after 10s.** Nightlight gives any notification provider **10
+  seconds** to accept a message before giving up, and reports it rather than waiting. The usual cause
+  is a self-hosted **ntfy** or **Gotify** server that is half up — accepting the connection but never
+  answering — so check the server is actually serving, and that the Server URL includes the right
+  scheme and port. This applies to real alerts too: an alert that can't be delivered in ten seconds is
+  dropped with a line in the log, not queued. Nightlight is a doorbell, not a mail server — a motion
+  alert that arrives minutes late is worse than none. *(Before this limit existed, a half-up server
+  left the Test button spinning for five minutes with no feedback.)*
 - **Server log says Firebase initialized, but no notification arrives.** Make sure the phone opted in
   (Account → Notifications) and granted the OS notification permission, that the camera has motion
   detection on, and that the app has been opened at least once since enabling (so it registered its

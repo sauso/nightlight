@@ -55,6 +55,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **A notification server that stopped answering could hang the Test button for five minutes.**
+  Nightlight now gives any provider — Pushover, ntfy or Gotify — **10 seconds** to accept a message,
+  then gives up and says so. The case that bites is a self-hosted ntfy or Gotify that accepts the
+  connection and never replies, which is exactly how a half-up server fails; previously there was no
+  limit at all beyond a five-minute network default, so **Send test** simply spun with no feedback.
+  Real alerts were never blocked by this — they're sent in the background — but each stuck one held
+  its snapshot image in memory for those five minutes, so a camera flapping during a network problem
+  could pile them up. An alert that can't be delivered in ten seconds is now dropped with a line in
+  the log: this is a doorbell, not a mail server, and a motion alert that arrives minutes late is
+  worse than none. See [docs/notifications.md](docs/notifications.md).
+
 - **Pressing Record during a wake could destroy the wake clip.** Automatic wake clips and manual
   recordings both protect the recent buffer from being cleaned up, but they shared a single slot with
   no notion of who had claimed it. So a parent watching a wake on their phone and pressing Record
