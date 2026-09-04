@@ -5,8 +5,10 @@
 // while stopAllTranscoders bounds the rest of shutdown at 3s, so `process.exit(0)` always won. The
 // comment directly above the call promised "Finish any in-flight recording first", which the code did
 // not do. The row was then left `{status:'pending', path:null}` forever, and `listChildRecordings`
-// filters on `status='ready'` — so the user saw a recording that simply never appeared, with nothing
+// filtered on `status='ready'` — so the user saw a recording that simply never appeared, with nothing
 // explaining why. A container restart is routine; every deploy does one.
+// (Since #276 the list also shows 'failed' rows, so the sweep below is what makes them VISIBLE rather
+// than merely tidy — see recordings-visibility.test.js. 'pending' and 'recording' are still hidden.)
 //
 // Two layers are needed and this file tests both:
 //   1. actually try to save it (bounded, best-effort)
@@ -107,7 +109,8 @@ describe('reconcileStaleRecordings', () => {
     // status='recording'; a row only becomes 'pending' inside stopRecording. So the SIGKILL and
     // power-cut scenarios this function's comment claims to cover leave 'recording', not 'pending' —
     // and a sweep that named only 'pending' skipped them on every subsequent boot. Same bug as #256,
-    // one status along, and invisible forever because listChildRecordings shows 'ready' only.
+    // one status along. It was invisible forever back then; since #276 sweeping it to 'failed' is
+    // exactly what puts it on screen with an explanation.
     insertRecording({ id: 110, status: 'recording' });
     assert.equal(reconcileStaleRecordings(), 1, 'a recording killed mid-capture was left in limbo');
     assert.equal(statusOf(110).status, 'failed');

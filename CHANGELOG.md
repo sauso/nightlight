@@ -80,8 +80,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
     [README → Quick start](README.md#quick-start).
   - Any recording left unfinished by a restart, a crash or a power cut is now marked failed on the
     next start rather than sitting in limbo — whether it was still capturing or already being
-    assembled. ⚠️ Failed recordings are not shown in the recordings list; see
-    [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
+    assembled.
+  - **And a recording that couldn't be saved now says so, instead of never appearing.** However a
+    recording fails — an offline camera with nothing in its buffer, a clip that couldn't be assembled,
+    or a restart part-way — it shows in the **Recordings** card as *Couldn't be saved*. Tap it for what
+    happened and to remove it. Previously the list showed finished recordings only, so a failure was
+    silent and indistinguishable from the Record button having been ignored. There is nothing to play,
+    so these have no thumbnail and no play button, and unlike alert or wake clips they are not tidied
+    up for you — recordings have no automatic retention, so a failed one stays until you remove it.
+    See [docs/recording.md](docs/recording.md).
 
 - **A background check that failed could shut Nightlight down.** The 15-second camera watchdog, the
   30-second audio check, the 5-minute reconcile and the timelapse sampler each ran unprotected, so an

@@ -151,8 +151,8 @@ container: picture back after ~60 seconds, recording available on the next 5-min
 
 ## An interrupted recording shows as failed rather than disappearing
 
-**What you see:** nothing in the recordings list for a recording that was in progress when Nightlight
-restarted (a deploy, a reboot, a power cut).
+**What you see:** an entry reading *Couldn't be saved* in the Recordings card, for a recording that was
+in progress when Nightlight restarted (a deploy, a reboot, a power cut).
 
 **Why:** a clip is assembled from the buffer *after* you press stop, and a restart during that step
 loses it. Nightlight now marks such a recording as failed when it next starts, rather than leaving it
@@ -160,9 +160,10 @@ stuck half-finished forever. It tries to finish the clip first, but only for up 
 limit that allowing your container longer to stop does **not** extend — so a long recording may still
 be lost.
 
-**What to do:** re-record if you still need it. ⚠️ Failed recordings are **not** shown in the
-recordings list — that list shows finished ones only — so a recording that vanished after a restart
-was almost certainly this.
+**What to do:** re-record if you still need it, then tap the entry and choose **Remove** to clear it —
+recordings have no automatic retention, so it stays until you do. *(Before 0.30.0 these were hidden
+entirely: the recording simply never appeared, with nothing explaining why. If you are on an older
+version, a recording that vanished after a restart was almost certainly this.)*
 
 ⚠️ **Check your container actually grants that time**, especially on an install created before this
 was added. Nightlight needs a few seconds to stop cleanly and it declares that as `--stop-timeout 30` /

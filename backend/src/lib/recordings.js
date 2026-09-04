@@ -373,13 +373,28 @@ export function wakeClipStats() {
     .get();
 }
 
+// The Recordings card on a child's page.
+//
+// ⚠️ 'failed' IS INCLUDED DELIBERATELY (issue #276), and it is the visible half of #256. A recording
+// can fail two ways: the extraction itself throws (stopRecording's catch), or a restart interrupts it
+// and reconcileStaleRecordings marks it on the next boot. Either way the user pressed Record, the
+// button behaved, and then nothing ever appeared — no error, no entry, indistinguishable from the app
+// having ignored the press. Showing the row as a failure is the whole point: an explanation beats a
+// silence. The row already carries started_at, duration_s and camera_id, so there is something to show.
+//
+// ⚠️ This does NOT make a failed recording servable. getRecordingVideoFile/getRecordingThumbFile still
+// require status === 'ready', and must keep doing so — the file is missing or truncated, which is what
+// 'failed' means. The card renders these as non-playable; it does not ask for their media.
+//
+// The other statuses stay hidden on purpose: 'recording' and 'pending' are live, in-flight states that
+// resolve within seconds, and showing them would put a row on screen that is about to change.
 export function listChildRecordings(childId, limit = 50) {
   return db
     .prepare(
       `SELECT r.id, r.camera_id, r.child_id, r.status, r.started_at, r.ended_at, r.duration_s, r.bytes,
               r.created_at, c.name AS camera_name
          FROM recordings r LEFT JOIN cameras c ON c.id = r.camera_id
-        WHERE r.child_id = ? AND r.status = 'ready' AND r.kind = 'manual'
+        WHERE r.child_id = ? AND r.status IN ('ready', 'failed') AND r.kind = 'manual'
         ORDER BY r.created_at DESC LIMIT ?`
     )
     .all(childId, Math.min(200, Math.max(1, limit)));
