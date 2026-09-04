@@ -27,6 +27,8 @@ let server;
 let token;
 const del = (id) => call(`${server.url}/api/children/${id}`, { method: 'DELETE', token });
 
+const framesDir = (childId) => path.join(CLIPS_DIR, '.timelapse-frames', childId);
+
 const KEEP = 'kid-keep';
 const GONE = 'kid-gone';
 
@@ -56,7 +58,20 @@ function seedChild(childId, tag) {
      VALUES (?, '2026-09-03', ?, ?, datetime('now'))`
   ).run(childId, rel(tl), rel(tlThumb));
 
-  files[tag] = { rec, recThumb, tl, tlThumb };
+  // A wake clip: same table, same child_id, no `kind` filter in the route's loop.
+  const wake = path.join(dir, `${tag}-wake.mp4`);
+  fs.writeFileSync(wake, 'x');
+  db.prepare(
+    `INSERT INTO recordings (camera_id, child_id, kind, status, started_at, path)
+     VALUES ('cam-1', ?, 'wake', 'ready', '2026-09-04 02:00:00', ?)`
+  ).run(childId, rel(wake));
+
+  // Frames for a night still in progress — no `timelapses` row exists for these yet.
+  const fdir = path.join(framesDir(childId), '2026-09-04');
+  fs.mkdirSync(fdir, { recursive: true });
+  fs.writeFileSync(path.join(fdir, 'f-1.jpg'), 'x');
+
+  files[tag] = { rec, recThumb, tl, tlThumb, wake };
   return recId;
 }
 
@@ -85,7 +100,7 @@ describe('DELETE /api/children/:id', () => {
         assert.ok(fs.existsSync(f), `fixture file missing before the test even runs: ${f}`);
       }
     }
-    assert.equal(countFor('recordings', GONE), 1);
+    assert.equal(countFor('recordings', GONE), 2, 'expected a manual recording AND a wake clip');
     assert.equal(countFor('timelapses', GONE), 1);
   });
 
@@ -109,11 +124,38 @@ describe('DELETE /api/children/:id', () => {
 
   test('another child keeps everything — this deletes one child, not all media', () => {
     // The control. Without it, a fix that wiped the whole recordings table would pass every case above.
-    assert.equal(countFor('recordings', KEEP), 1, 'an unrelated child lost its recordings');
+    assert.equal(countFor('recordings', KEEP), 2, 'an unrelated child lost its recordings');
     assert.equal(countFor('timelapses', KEEP), 1, 'an unrelated child lost its timelapses');
     for (const [name, f] of Object.entries(files.keep)) {
       assert.ok(fs.existsSync(f), `an unrelated child's ${name} was deleted from disk: ${f}`);
     }
+  });
+
+  test('WAKE clips go too — they share the recordings table, and the docs now say so', () => {
+    // ⚠️ THIS PINS A CLAIM THAT WAS FALSE IN A SHIPPED CHANGELOG. The first version of this PR said
+    // "alert clips and wake clips are unaffected; they were already swept by normal retention". True
+    // of alert clips — detection_events has no child_id at all, they hang off the camera — but FALSE
+    // of wake clips: they live in `recordings` with a child_id, and the route's loop has no `kind`
+    // filter, so they are deleted identically. Found by adversarial review of #284.
+    // The behaviour is right (they are that child's video, and nothing else would ever reclaim them);
+    // it was the description that was wrong. Asserted here so the docs and the code cannot drift apart.
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS n FROM recordings WHERE child_id = ? AND kind = 'wake'").get(GONE).n,
+      0,
+      'a wake clip survived its child'
+    );
+    assert.ok(!fs.existsSync(files.gone.wake), `the wake clip file was left on disk: ${files.gone.wake}`);
+    assert.ok(fs.existsSync(files.keep.wake), 'another child lost its wake clip');
+  });
+
+  test('frames for a night still in progress are cleaned up too', () => {
+    // ★ A SIBLING THE FIX ORIGINALLY MISSED. Frames are sampled every 2 minutes into
+    // .timelapse-frames/<childId>/<nightDate>/ and a `timelapses` row only exists once the night is
+    // ASSEMBLED — so deleting a child mid-night left a directory the timelapse loop could not see, and
+    // which nothing else ever revisits for a child that no longer exists. Same leak as #259, one
+    // directory along. Found by adversarial review of #284.
+    assert.ok(!fs.existsSync(framesDir(GONE)), 'in-progress timelapse frames were left on disk');
+    assert.ok(fs.existsSync(framesDir(KEEP)), 'another child lost its in-progress frames');
   });
 
   test('deleting a child with no media at all is still a clean 204', async () => {

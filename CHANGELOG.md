@@ -60,10 +60,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   up to 30 timelapse videos per child, plus every manual recording. Manual recordings are the worse
   half: they have **no automatic retention by design**, so deleting the child removed the only way left
   to reclaim that space. ⚠️ **Deleting a child now deletes its recordings and timelapses too**, files
-  included. That is a deliberate choice — the alternative was keeping them in a "no child" bucket — so
-  if you want to keep a child's videos, save them before removing the child. Alert clips and wake clips
-  are unaffected; they were already swept by the normal retention rules. See
-  [docs/recording.md](docs/recording.md).
+  included — **and their wake clips too**, which live alongside recordings. That is a deliberate choice
+  — the alternative was keeping them in a "no child" bucket — so if you want to keep a child's videos,
+  save them before removing the child. Frames already collected for tonight's not-yet-finished
+  timelapse go as well. Alert clips are unaffected: those hang off the camera, not the child, and are
+  swept by the normal retention rules. See [docs/recording.md](docs/recording.md).
+  ⚠️ **Deleting a child is now admin-only**, like deleting a camera or a user. It was previously
+  available to any signed-in account, which mattered much less when it only unassigned a camera.
 
 - **A notification server that stopped answering could hang the Test button for five minutes.**
   Nightlight now gives any provider — Pushover, ntfy or Gotify — **10 seconds** to accept a message,

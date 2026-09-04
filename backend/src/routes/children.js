@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { normalizePhoto } from '../lib/photo.js';
 import { getStoredNights, computeNight, computeAndStoreNight, currentNightDate, childTracksSleep, sleepInsights } from '../lib/sleepAnalysis.js';
 import { startMotionDetector } from '../lib/motionDetector.js';
 import { deleteRecording } from '../lib/recordings.js';
-import { deleteTimelapse } from '../lib/timelapse.js';
+import { deleteTimelapse, discardAllTimelapseFrames } from '../lib/timelapse.js';
 import { getNightReview, saveNightReview, reviewCardState, localHmToUtcSql, applyVerdicts,
   applyCorrection, applyCorrections, transitionInstant } from '../lib/sleepReviews.js';
 
@@ -270,13 +270,19 @@ router.put('/:id/review/:date', (req, res) => {
 // explicit, confirmed act about that child, and a "no child" bucket would be a new surface to build,
 // explain and prune. What is NOT acceptable is the third option we had: keeping them forever while
 // hiding them. Said plainly in the changelog and docs so nobody meets it as a surprise.
-router.delete('/:id', (req, res) => {
+// ⚠️ ADMIN-ONLY, added with the media deletion above (adversarial review of PR #284). This router only
+// applied `requireAuth`, so a CAREGIVER could delete a child — verified, it returned 204 — while every
+// other destructive route in the app (deleting a camera, a user, an alert) requires an admin. That was
+// already wrong; making this call also erase video off the disk is what made it untenable to leave.
+router.delete('/:id', requireAdmin, (req, res) => {
   const id = req.params.id;
   db.prepare('UPDATE cameras SET child_id = NULL WHERE child_id = ?').run(id);
   // Before the child row goes, so a failure part-way leaves the child (and its media) still reachable
   // rather than stranding exactly the rows this exists to clean up.
   for (const r of db.prepare('SELECT id FROM recordings WHERE child_id = ?').all(id)) deleteRecording(r.id);
   for (const t of db.prepare('SELECT id FROM timelapses WHERE child_id = ?').all(id)) deleteTimelapse(t.id);
+  // Frames for a night still in progress have no timelapses row yet, so the loop above cannot see them.
+  discardAllTimelapseFrames(id);
   db.prepare('DELETE FROM children WHERE id = ?').run(id);
   db.prepare('DELETE FROM sleep_nights WHERE child_id = ?').run(id);
   res.status(204).end();
