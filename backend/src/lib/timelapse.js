@@ -194,6 +194,22 @@ export function discardTimelapseFrames(childId, nightDate) {
   return frames.length;
 }
 
+// Every frame this child has on disk, assembled or not — for deleting the child itself (issue #259).
+//
+// ⚠️ NOT THE SAME AS deleting their `timelapses` rows, and that gap was found by adversarial review of
+// PR #284. Frames are sampled every 2 minutes into FRAMES_ROOT/<childId>/<nightDate>/ while a sleep
+// window is open, and a `timelapses` row only exists once the night is ASSEMBLED at the end of it. So
+// deleting a child mid-night leaves a scratch directory that nothing ever touches again: the only
+// things that clean it are assembleTimelapse's success path and discardTimelapseFrames, both driven by
+// the nightly job for a child that no longer exists. Same leak as #259, one directory along.
+export function discardAllTimelapseFrames(childId) {
+  const dir = path.join(FRAMES_ROOT, safeSeg(childId));
+  const nights = safeReaddir(dir).length;
+  rmrf(dir);
+  if (nights) logger.info(`[timelapse] child ${childId}: discarded frames for ${nights} night(s)`);
+  return nights;
+}
+
 // Delete one timelapse: the row, the MP4 and its thumbnail. Admin-only at the route. The files are
 // resolved through the same CLIPS_DIR jail as playback, so a tampered stored path can't escape it.
 export function deleteTimelapse(id) {
