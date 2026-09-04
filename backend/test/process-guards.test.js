@@ -28,6 +28,33 @@ const { logger } = await import('../src/lib/logger.js');
 const { safeInterval, reportGuardFailure, resetGuardRateLimit } = await import('../src/lib/processGuards.js');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ⚠️ WAIT FOR THE CONDITION, NEVER FOR A DURATION (issue #278). These cases used to start a 20ms
+// interval, `await sleep(120)`, then assert at least 2 ticks had happened — which is an assumption
+// about how fast the machine is. `node --test` runs each FILE in its own process, concurrently up to
+// the CPU count, and a GitHub runner has 2 cores against this dev box's 6: under that contention the
+// 120ms elapsed while the interval had fired once, and the suite went red on a commit that had changed
+// nothing. Reproduced locally at `--test-concurrency=32`, 5 runs out of 5.
+//
+// ★ Polling is not a weaker assertion, it is a STRONGER one. The old code merely hoped the ticks had
+// happened; this waits until they demonstrably have. A guard that stops its timer after the first
+// failure — the exact defect these cases exist to catch — never reaches the count and still fails,
+// just at the deadline rather than immediately. The deadline is generous ON PURPOSE: it is a
+// backstop for a broken implementation, not a timing assertion, so making it large costs nothing on a
+// passing run and cannot mask a regression.
+const WAIT_TIMEOUT_MS = 5000;
+async function waitFor(predicate, message, timeoutMs = WAIT_TIMEOUT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await sleep(5);
+  }
+  assert.fail(`${message} (waited ${timeoutMs}ms)`);
+}
+
+// Enough ticks to prove the timer KEPT going, and — for the rate-limited cases — that repeated
+// failures really were suppressed rather than never having occurred.
+const TICKS_PROVING_REPEAT = 3;
 const recent = () => logger.getRecent();
 const logged = (needle) => recent().filter((l) => l.includes(needle)).length;
 
@@ -55,10 +82,12 @@ describe('safeInterval', () => {
           throw new Error('ECONNREFUSED to mediamtx');
         })
       );
-      await sleep(120);
+      await waitFor(
+        () => ticks >= TICKS_PROVING_REPEAT,
+        `the timer stopped after the first failure (${ticks} tick(s))`
+      );
 
       assert.deepEqual(seen, [], 'the rejection escaped to Node — the process would have exited here');
-      assert.ok(ticks >= 2, `the timer stopped after the first failure (${ticks} tick(s))`);
       assert.equal(logged('[guard:probe]'), 1, 'expected exactly one line — the rest are rate-limited');
       assert.ok(logged('ECONNREFUSED to mediamtx') >= 1, 'the log line does not carry the real reason');
     } finally {
@@ -77,9 +106,8 @@ describe('safeInterval', () => {
         throw new Error('SQLITE_BUSY: database is locked');
       })
     );
-    await sleep(120);
+    await waitFor(() => ticks >= TICKS_PROVING_REPEAT, 'the timer stopped after a synchronous throw');
 
-    assert.ok(ticks >= 2, 'the timer stopped after a synchronous throw');
     assert.equal(logged('[guard:sync-probe]'), 1);
     assert.ok(logged('SQLITE_BUSY') >= 1);
   });
@@ -87,9 +115,8 @@ describe('safeInterval', () => {
   test('a healthy tick is left completely alone', async () => {
     let ticks = 0;
     timers.push(safeInterval('quiet', 20, async () => { ticks += 1; }));
-    await sleep(120);
+    await waitFor(() => ticks >= TICKS_PROVING_REPEAT, 'the guarded timer did not run');
 
-    assert.ok(ticks >= 2, 'the guarded timer did not run');
     assert.equal(logged('[guard:quiet]'), 0, 'a successful tick logged a failure');
   });
 
@@ -99,7 +126,17 @@ describe('safeInterval', () => {
     assert.equal(typeof t.unref, 'function', 'not a Timeout — unref?.() would silently no-op');
     clearInterval(t);
     const after = ticks;
-    await sleep(80);
+
+    // ⚠️ A NEGATIVE assertion cannot poll for its condition, so it needs a CONTROL instead of a sleep.
+    // `await sleep(80)` here was not a flake risk — a starved machine ticks less, so it passed more
+    // easily — it was a DISCRIMINATION risk: if clearInterval silently did nothing, a loaded machine
+    // might still not have ticked within 80ms, and the mutant would survive. Waiting until an
+    // uncleared control timer has ticked several times proves the event loop really ran that many
+    // intervals' worth, whatever the machine was doing, before asserting the cleared one stood still.
+    let control = 0;
+    timers.push(safeInterval('control', 20, async () => { control += 1; }));
+    await waitFor(() => control >= TICKS_PROVING_REPEAT, 'the control timer never ran — the wait proves nothing');
+
     assert.equal(ticks, after, 'clearInterval did not stop the guarded timer');
   });
 });
