@@ -77,7 +77,10 @@ describe('the shared bounded POST', () => {
       () => postWithTimeout(baseUrl, { method: 'POST' }, { timeoutMs: 300, label: 'probe' }),
       (e) => {
         assert.match(e.message, /timed out/, `unhelpful error surfaced to the user: ${e.message}`);
-        assert.match(e.message, /never replied/);
+        // "stopped responding" rather than "never replied": review of #262 pointed out that the
+        // second case this covers is a server which DID reply with headers and then went quiet
+        // mid-body, so "never" was imprecise for half the failures it describes.
+        assert.match(e.message, /stopped responding/);
         assert.ok(!/aborted/i.test(e.message), 'the raw AbortError message is leaking to the user');
         return true;
       }
@@ -134,27 +137,101 @@ describe('the shared bounded POST', () => {
   });
 });
 
-describe('every provider is bounded, not just the one that was fixed first', () => {
-  // ★ DERIVED FROM THE SOURCE, not a list typed here: the point of #262 is that FOUR call sites shared
-  // one defect, and a fix applied to three of them looks identical to a fix applied to all four. If a
-  // fifth provider is added next year with a bare fetch, this fails.
-  test('no provider module still calls fetch() directly', async () => {
+describe('nothing in the backend performs an UNBOUNDED fetch', () => {
+  // ★ FAIL CLOSED. The first version of this did the opposite: it scanned a hard-coded filename
+  // whitelist, /^(ntfy|gotify|pushover|push)\.js$/, while its own comment claimed "a fifth provider
+  // added later cannot quietly reintroduce this". Adversarial review of #262 falsified that in the
+  // most direct way available — it dropped a `discord.js` into src/lib with a genuinely unbounded
+  // fetch and the suite stayed green, because the file was never looked at. A whitelist fails OPEN,
+  // which is the one shape a regression guard must never have.
+  //
+  // Now every .js under src is scanned and each fetch() must pass a `signal:`. A new provider added
+  // anywhere fails by default; the only ways to pass are to bound the call or to add the file to
+  // ALLOWED, which is a visible decision carrying a reason rather than a silence.
+  const readAllSources = async () => {
     const fs = await import('node:fs');
     const path = await import('node:path');
-    const libDir = path.join(process.cwd(), 'src', 'lib');
-    const providers = fs
-      .readdirSync(libDir)
-      .filter((f) => /^(ntfy|gotify|pushover|push)\.js$/.test(f));
-    assert.ok(providers.length >= 3, `only found ${providers.length} provider modules — the scan has stopped working`);
+    const root = path.join(process.cwd(), 'src');
+    const out = [];
+    const walk = (dir) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) walk(full);
+        else if (e.name.endsWith('.js')) {
+          out.push({
+            rel: path.relative(root, full).split(path.sep).join('/'),
+            src: fs.readFileSync(full, 'utf8'),
+          });
+        }
+      }
+    };
+    walk(root);
+    return out;
+  };
 
-    for (const f of providers) {
-      const src = fs.readFileSync(path.join(libDir, f), 'utf8');
-      const bare = src.match(/await fetch\(/g) || [];
-      assert.equal(
-        bare.length,
-        0,
-        `${f} still has ${bare.length} unbounded fetch call(s) — undici's default is 300s (issue #262)`
+  // Every entry needs a reason. These are the only unbounded fetches left in the backend.
+  const ALLOWED = {
+    // The bounded helper itself — its fetch is the one carrying the signal.
+    'lib/httpNotify.js': 'defines postWithTimeout',
+    // ⚠️ KNOWN LIMIT, DOCUMENTED RATHER THAN HIDDEN. mediamtx.js talks to MediaMTX's HTTP API on
+    // 127.0.0.1 inside the same container, so it cannot hang on a network partition the way a remote
+    // provider can, and its callers now run under safeInterval's crash guard. Still technically
+    // unbounded, and out of scope for #262, which is about notification providers.
+    'lib/mediamtx.js': 'loopback API in the same container; out of scope for #262',
+  };
+
+  // A text scan is fooled by comments and string literals in BOTH directions — review of #262 hid a
+  // real unbounded call from the old scan, and separately made it fail on the literal "await fetch("
+  // sitting inside an explanatory comment. Strip both before matching.
+  const stripCommentsAndStrings = (src) =>
+    src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/.*/g, '$1')
+      .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
+      .replace(/"(?:[^"\\\n]|\\.)*"/g, '""')
+      .replace(/`(?:[^`\\]|\\.)*`/g, '``');
+
+  test('every fetch() passes a signal, or is an allowed exception with a stated reason', async () => {
+    const files = await readAllSources();
+    assert.ok(files.length > 20, `the source walk found only ${files.length} files — it has stopped working`);
+    // Anti-vacuous: the scan must actually be finding fetch calls, or it proves nothing at all.
+    const withFetch = files.filter((f) => /\bfetch\s*\(/.test(f.src));
+    assert.ok(withFetch.length >= 2, `found fetch() in only ${withFetch.length} file(s) — the scan stopped matching`);
+
+    for (const f of files) {
+      if (ALLOWED[f.rel]) continue;
+      const code = stripCommentsAndStrings(f.src);
+
+      for (const m of code.matchAll(/\bfetch\s*\(/g)) {
+        const tail = code.slice(m.index, m.index + 400);
+        assert.match(
+          tail,
+          /signal\s*:/,
+          `${f.rel} calls fetch() with no signal — undici's default bound is 300s (issue #262). ` +
+            'Route it through postWithTimeout, or add it to ALLOWED with a reason.'
+        );
+      }
+
+      // ⚠️ AND THE ALIAS FORM, which a plain `fetch(` scan cannot see. Review of #262 slipped an
+      // unbounded call past the old scan as `const rawFetch = fetch; await rawFetch(url, ...)`.
+      // A regex cannot catch every indirection — that needs an AST — but it catches the shapes people
+      // actually write, and aliasing fetch is not something anyone does by accident.
+      assert.doesNotMatch(
+        code,
+        /=\s*(globalThis\.)?fetch\s*[;,\r\n]/,
+        `${f.rel} aliases fetch to another name, which would slip past the check above`
       );
+    }
+  });
+
+  test('the notification providers in particular go through the bounded helper', async () => {
+    // The positive half. The scan above proves nothing unbounded EXISTS; this proves the call sites
+    // #262 was filed about are actually wired to the helper, rather than deleted or routed elsewhere.
+    const files = await readAllSources();
+    for (const rel of ['lib/ntfy.js', 'lib/gotify.js', 'lib/pushover.js']) {
+      const f = files.find((x) => x.rel === rel);
+      assert.ok(f, `${rel} has gone missing`);
+      assert.match(f.src, /postWithTimeout\(/, `${rel} no longer sends through the bounded helper`);
     }
   });
 });

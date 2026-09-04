@@ -58,8 +58,8 @@ export async function postWithTimeout(url, options = {}, { timeoutMs = NOTIFY_TI
     // aborted body read, the reason we stopped is the same one.
     if (ctrl.signal.aborted || e?.name === 'AbortError') {
       const secs = Math.round(timeoutMs / 1000);
-      logger.error(`[${label}] request timed out after ${secs}s — the server accepted the connection but never replied`);
-      throw new Error(`timed out after ${secs}s — the server accepted the connection but never replied`);
+      logger.error(`[${label}] request timed out after ${secs}s — the server accepted the connection but stopped responding`);
+      throw new Error(`timed out after ${secs}s — the server accepted the connection but stopped responding`);
     }
     throw e;
   } finally {
