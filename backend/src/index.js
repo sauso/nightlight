@@ -248,9 +248,12 @@ const server = app.listen(PORT, () => {
   // Run the clip-storage guard + retention sweeper BEFORE reconcile, so reconcile only starts
   // segmenters once storage is known usable (startClipCapture gates on it).
   startClipStorage();
-  // Any recording still marked 'pending' is debris from a restart that interrupted the extraction —
-  // there is no in-process state left for it, and the row would otherwise stay invisible forever
-  // (listChildRecordings filters on 'ready'). See #256.
+  // Any recording still marked 'recording' or 'pending' is debris from a restart that interrupted it —
+  // there is no in-process state left for either. Sweeping it to 'failed' is what makes it VISIBLE:
+  // since #276 the child's page lists 'ready' and 'failed', and excludes the two live statuses, so a
+  // row left 'pending' is the one that stays hidden forever. See #256 and #276.
+  // (This comment previously said listChildRecordings "filters on 'ready'" — true before #276, and a
+  // false reason attached to a still-true conclusion, which is the hardest kind to notice.)
   reconcileStaleRecordings();
   startTimelapseSampler(); // sample sleep-window frames for the nightly memories timelapse (gated on clip storage)
   reconcileCameraPaths();

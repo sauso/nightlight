@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Play, Video, Trash2 } from 'lucide-react';
+import { Play, Video, Trash2, AlertTriangle } from 'lucide-react';
 import { api } from '../lib/api.js';
 import MediaPlayerModal from './MediaPlayerModal.jsx';
+import Modal from './Modal.jsx';
 
 // "Recordings" card on a child's detail page: the clips someone captured with the tile's Record button
 // (see lib/recordings.js). Deliberately its own card rather than entries in the alert feed — these are
@@ -62,22 +63,62 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
       </div>
 
       <div className="rec-strip">
-        {list.map((r) => (
-          <button
-            key={r.id}
-            type="button"
-            className="rec-strip__item"
-            onClick={() => setOpenId(r.id)}
-            title={`${r.camera_name || 'Camera'} · ${when(r.started_at)}`}
-          >
-            <img src={api.url(`/recordings/${r.id}/thumb`)} alt="" loading="lazy" />
-            <span className="rec-strip__play"><Play size={16} aria-hidden="true" /></span>
-            <span>{when(r.started_at)}</span>
-          </button>
-        ))}
+        {list.map((r) => {
+          // A failed recording is shown, not hidden (issue #276) — the user pressed Record and is owed
+          // an explanation rather than an empty card. It has no video and no thumbnail, so it must not
+          // request either: the server refuses to serve a non-ready row, and an <img> pointed at it
+          // would just render a broken-image glyph.
+          const failed = r.status === 'failed';
+          return (
+            <button
+              key={r.id}
+              type="button"
+              className={`rec-strip__item${failed ? ' rec-strip__item--failed' : ''}`}
+              onClick={() => setOpenId(r.id)}
+              title={
+                failed
+                  ? `${r.camera_name || 'Camera'} · ${when(r.started_at)} · couldn’t be saved`
+                  : `${r.camera_name || 'Camera'} · ${when(r.started_at)}`
+              }
+            >
+              {failed ? (
+                <span className="rec-strip__failed" aria-hidden="true"><AlertTriangle size={18} /></span>
+              ) : (
+                <>
+                  <img src={api.url(`/recordings/${r.id}/thumb`)} alt="" loading="lazy" />
+                  <span className="rec-strip__play"><Play size={16} aria-hidden="true" /></span>
+                </>
+              )}
+              <span>{failed ? 'Couldn’t be saved' : when(r.started_at)}</span>
+            </button>
+          );
+        })}
       </div>
 
-      {open && (
+      {/* A failed recording gets an explanation and a way to clear it — NOT the player, which would
+          load a video that does not exist. Keeping it deletable is what stops failures accumulating
+          on the card forever, since recordings have no automatic retention. */}
+      {open && open.status === 'failed' && (
+        <Modal title="Recording couldn’t be saved" onClose={close}>
+          <p className="muted" style={{ marginTop: 0 }}>
+            {open.camera_name || 'This camera'} · {when(open.started_at)}
+          </p>
+          <p>
+            Nightlight started this recording but couldn’t finish saving it. That usually means the
+            container restarted while the clip was still being assembled, or the camera stopped sending
+            video partway through. There’s nothing to play.
+          </p>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button type="button" className="btn" onClick={close} disabled={del === 'deleting'}>Close</button>
+            <button type="button" className="btn btn-danger" onClick={deleteNow} disabled={del === 'deleting'}>
+              {del === 'deleting' ? 'Removing…' : 'Remove'}
+            </button>
+          </div>
+          {del === 'error' && <p className="muted">Couldn’t remove it — try again.</p>}
+        </Modal>
+      )}
+
+      {open && open.status !== 'failed' && (
         <MediaPlayerModal
           title={`${open.camera_name || 'Recording'} · ${when(open.started_at)}`}
           videoPath={`/recordings/${open.id}/video`}
