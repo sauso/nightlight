@@ -5,6 +5,8 @@ import { requireAuth } from '../middleware/auth.js';
 import { normalizePhoto } from '../lib/photo.js';
 import { getStoredNights, computeNight, computeAndStoreNight, currentNightDate, childTracksSleep, sleepInsights } from '../lib/sleepAnalysis.js';
 import { startMotionDetector } from '../lib/motionDetector.js';
+import { deleteRecording } from '../lib/recordings.js';
+import { deleteTimelapse } from '../lib/timelapse.js';
 import { getNightReview, saveNightReview, reviewCardState, localHmToUtcSql, applyVerdicts,
   applyCorrection, applyCorrections, transitionInstant } from '../lib/sleepReviews.js';
 
@@ -253,10 +255,30 @@ router.put('/:id/review/:date', (req, res) => {
   res.json({ review, verdicts_applied: check.applied });
 });
 
+// ⚠️ DELETING A CHILD MUST TAKE ITS VIDEO WITH IT (issue #259). `timelapses` and `recordings` both
+// carry a `child_id`, and neither was touched here — so the rows survived pointing at a child that no
+// longer existed, every listing query that filters on the child returned nothing, and the FILES stayed
+// on disk forever with no way left to reach them. The schema does not save us either: it has only two
+// REFERENCES clauses and neither is on these tables, so there is no ON DELETE to fall back on.
+//
+// Worst for manual recordings, which have NO retention sweep BY DESIGN — they are keepsakes kept until
+// a person deletes them, so deleting the child removed the only route to ever reclaiming that space.
+// Storage is the resource this app is most sensitive to; the whole clip-retention system exists
+// because the disk fills.
+//
+// ⚠️ DESTROY, NOT ORPHAN — a deliberate choice between the two the issue offers. Deleting a child is an
+// explicit, confirmed act about that child, and a "no child" bucket would be a new surface to build,
+// explain and prune. What is NOT acceptable is the third option we had: keeping them forever while
+// hiding them. Said plainly in the changelog and docs so nobody meets it as a surprise.
 router.delete('/:id', (req, res) => {
-  db.prepare('UPDATE cameras SET child_id = NULL WHERE child_id = ?').run(req.params.id);
-  db.prepare('DELETE FROM children WHERE id = ?').run(req.params.id);
-  db.prepare('DELETE FROM sleep_nights WHERE child_id = ?').run(req.params.id);
+  const id = req.params.id;
+  db.prepare('UPDATE cameras SET child_id = NULL WHERE child_id = ?').run(id);
+  // Before the child row goes, so a failure part-way leaves the child (and its media) still reachable
+  // rather than stranding exactly the rows this exists to clean up.
+  for (const r of db.prepare('SELECT id FROM recordings WHERE child_id = ?').all(id)) deleteRecording(r.id);
+  for (const t of db.prepare('SELECT id FROM timelapses WHERE child_id = ?').all(id)) deleteTimelapse(t.id);
+  db.prepare('DELETE FROM children WHERE id = ?').run(id);
+  db.prepare('DELETE FROM sleep_nights WHERE child_id = ?').run(id);
   res.status(204).end();
 });
 

@@ -163,6 +163,12 @@ in the **Recordings** card as a greyed entry reading *Couldn't be saved*, rather
 Tapping it explains what happened and offers to remove it. There's nothing to play, so it has no
 thumbnail and no play button.
 
+⚠️ **Deleting a child deletes its recordings.** Recordings have no automatic retention, so they would
+otherwise sit on disk forever with nothing left able to list or remove them — the child page is the only
+place they appear. The same applies to that child's nightly timelapses. **Save anything you want to keep
+before removing a child.** Alert clips and wake clips are unaffected: those are swept by the normal
+retention rules regardless.
+
 **Removing a failed one doesn't ask twice.** Deleting a recording that *worked* takes two taps — a
 confirmation, because the video is gone for good and there's no retention sweep that would have removed
 it anyway. A failed entry has no video to lose, so **Remove** clears it immediately.
