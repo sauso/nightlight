@@ -24,6 +24,23 @@ const { classify, SHUTDOWN_MARKER, summarise } = await import(
 // A hand-written fixture would not have had those prefixes and the bug would have shipped.
 const REAL_KILLED = readFileSync(path.join(HERE, 'fixtures', 'killed-runner.log'), 'utf8');
 
+// ⚠️ THE FIXTURE MUST COME FROM THE PER-JOB LOGS API, not from `gh run view`. Those sources disagree:
+// `gh run view --log` DROPS the job-level `##[error]The runner has received a shutdown signal` line
+// entirely, and `--log-failed` can come back empty. The workflow read `gh run view` on its first live
+// firing and therefore classified a genuine killed runner as a real failure, while these tests stayed
+// green — the module was right and the plumbing was reading the wrong pipe. This guard fails loudly if
+// the fixture is ever regenerated from a source that omits the marker, which is the only way these
+// tests could go quietly meaningless again.
+//
+// Regenerate with:
+//   gh api repos/sauso/nightlight/actions/jobs/<job-id>/logs
+if (!REAL_KILLED.includes(SHUTDOWN_MARKER)) {
+  throw new Error(
+    'fixtures/killed-runner.log has no runner-shutdown marker — it was captured from `gh run view`, ' +
+      'which strips job-level ##[error] lines. Recapture it from the per-job logs API.'
+  );
+}
+
 describe('a killed runner', () => {
   test('the real captured log is recognised, and asks for a retry', () => {
     const v = classify(REAL_KILLED, 1);
