@@ -29,19 +29,43 @@ const { safeInterval, reportGuardFailure, resetGuardRateLimit } = await import('
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ⚠️ WAIT FOR THE CONDITION, NEVER FOR A DURATION (issue #278). These cases used to start a 20ms
-// interval, `await sleep(120)`, then assert at least 2 ticks had happened — which is an assumption
-// about how fast the machine is. `node --test` runs each FILE in its own process, concurrently up to
-// the CPU count, and a GitHub runner has 2 cores against this dev box's 6: under that contention the
-// 120ms elapsed while the interval had fired once, and the suite went red on a commit that had changed
-// nothing. Reproduced locally at `--test-concurrency=32`, 5 runs out of 5.
+// ⚠️ WAIT FOR THE CONDITION, NEVER FOR A DURATION. These cases used to start a 20ms interval,
+// `await sleep(120)`, then assert at least 2 ticks had happened — an assumption about how fast the
+// machine is. `node --test` runs each FILE in its own process, concurrently up to the CPU count, and
+// under that contention the 120ms could elapse while the interval had fired only once. Reproduced at
+// `--test-concurrency=34` on a 6-core box: 6 runs out of 6 red without this change, 6 of 6 green with
+// it.
 //
-// ★ Polling is not a weaker assertion, it is a STRONGER one. The old code merely hoped the ticks had
-// happened; this waits until they demonstrably have. A guard that stops its timer after the first
-// failure — the exact defect these cases exist to catch — never reaches the count and still fails,
-// just at the deadline rather than immediately. The deadline is generous ON PURPOSE: it is a
-// backstop for a broken implementation, not a timing assertion, so making it large costs nothing on a
-// passing run and cannot mask a regression.
+// ⚠️ THIS IS NOT ISSUE #278, though an earlier version of this comment said it was. #278 is CI runs
+// reporting `fail 0` with N files `cancelled`, and it was measured to be the GitHub runner receiving
+// a shutdown signal mid-job — nothing to do with these assertions. An earlier claim here that "a
+// GitHub runner has 2 cores" was never measured and is simply wrong: it is 4 cores and 16GB. The
+// flake fixed below is real and reproducible; it is just a different, local one.
+//
+// ★ Polling is not a weaker assertion, it is a STRONGER one — FOR THE POSITIVE CONDITION. The old
+// code merely hoped the ticks had happened; this waits until they demonstrably have. A guard that
+// stops its timer after the first failure — the exact defect these cases exist to catch — never
+// reaches the count and still fails, just at the deadline rather than immediately. The deadline is
+// generous ON PURPOSE: it is a backstop for a broken implementation, not a timing assertion, so
+// making it large costs nothing on a passing run and cannot mask a regression.
+//
+// ⚠️⚠️ BUT THAT IS ONLY TRUE OF POSITIVES, AND ASSUMING IT OF EVERY ASSERTION IN THIS FILE WAS A REAL
+// REGRESSION — found by adversarial review of this PR and reproduced. `logged(...) === 1` is NOT a
+// positive: it asserts that repeated failures were SUPPRESSED, and suppression is defined by
+// RELOG_INTERVAL_MS, an ELAPSED-TIME window. The old `await sleep(120)` incidentally gave that
+// negative 120ms of real time to be wrong in. Polling for `ticks >= 3` at a 20ms interval returns
+// after ~60-70ms, so it handed the same assertion roughly half the window — and a broken rate limiter
+// went undetected. Measured, 5 runs each, mutating RELOG_INTERVAL_MS:
+//
+//     window   old tests        polling-only
+//       30ms   killed 5/5       killed 5/5
+//       45ms   killed 5/5       SURVIVED 5/5
+//       60ms   killed 5/5       SURVIVED 5/5
+//
+// ★ THE RULE: a poll may only ever REPLACE a wait, never SHORTEN one that a negative assertion is
+// standing on. So the wait below satisfies BOTH conditions — enough ticks (so a slow machine cannot
+// fail it early, which is the #278 flake) AND enough elapsed time (so the suppression assertion keeps
+// the discrimination the fixed sleep had). Strictly stronger than either version alone.
 const WAIT_TIMEOUT_MS = 5000;
 async function waitFor(predicate, message, timeoutMs = WAIT_TIMEOUT_MS) {
   const deadline = Date.now() + timeoutMs;
@@ -49,12 +73,27 @@ async function waitFor(predicate, message, timeoutMs = WAIT_TIMEOUT_MS) {
     if (predicate()) return;
     await sleep(5);
   }
-  assert.fail(`${message} (waited ${timeoutMs}ms)`);
+  // ⚠️ `message` is a THUNK, not a string. Passing a pre-built string captured the counter's value at
+  // CALL time, so a real failure reported "(0 tick(s))" when the count was actually 1 by the deadline
+  // — a stale diagnostic pointing at the wrong defect. Also caught by the review of this PR.
+  assert.fail(`${typeof message === 'function' ? message() : message} (waited ${timeoutMs}ms)`);
 }
 
 // Enough ticks to prove the timer KEPT going, and — for the rate-limited cases — that repeated
 // failures really were suppressed rather than never having occurred.
 const TICKS_PROVING_REPEAT = 3;
+
+// The floor the suppression assertions stand on. Matches the 120ms the pre-#278 fixed sleep happened
+// to provide, so this restores exactly the discrimination that was lost rather than guessing a new
+// number: a rate-limit window anywhere below this is now caught, as the table above shows it was.
+// Costs 120ms on a passing run, which is the price of the negative being real.
+const RATE_LIMIT_WINDOW_PROBE_MS = 120;
+
+// Waits for the tick count AND for enough wall-clock that a too-small RELOG_INTERVAL_MS would have
+// re-logged. Use this — not the bare tick wait — before any `logged(...) === 1` assertion.
+function provedSuppression(startedAt, ticksSoFar) {
+  return () => ticksSoFar() >= TICKS_PROVING_REPEAT && Date.now() - startedAt >= RATE_LIMIT_WINDOW_PROBE_MS;
+}
 const recent = () => logger.getRecent();
 const logged = (needle) => recent().filter((l) => l.includes(needle)).length;
 
@@ -76,15 +115,18 @@ describe('safeInterval', () => {
     process.on('unhandledRejection', onUnhandled);
     try {
       let ticks = 0;
+      const startedAt = Date.now();
       timers.push(
         safeInterval('probe', 20, async () => {
           ticks += 1;
           throw new Error('ECONNREFUSED to mediamtx');
         })
       );
+      // provedSuppression, not a bare tick wait: the `logged(...) === 1` below is a NEGATIVE standing
+      // on elapsed time. See the rule at the top of this file.
       await waitFor(
-        () => ticks >= TICKS_PROVING_REPEAT,
-        `the timer stopped after the first failure (${ticks} tick(s))`
+        provedSuppression(startedAt, () => ticks),
+        () => `the timer stopped after the first failure (${ticks} tick(s))`
       );
 
       assert.deepEqual(seen, [], 'the rejection escaped to Node — the process would have exited here');
@@ -100,13 +142,14 @@ describe('safeInterval', () => {
     // REAL trigger in production — `db.prepare('SELECT * FROM cameras').all()` at the top of each tick,
     // which better-sqlite3 throws synchronously on SQLITE_BUSY or a locked file.
     let ticks = 0;
+    const startedAt = Date.now();
     timers.push(
       safeInterval('sync-probe', 20, () => {
         ticks += 1;
         throw new Error('SQLITE_BUSY: database is locked');
       })
     );
-    await waitFor(() => ticks >= TICKS_PROVING_REPEAT, 'the timer stopped after a synchronous throw');
+    await waitFor(provedSuppression(startedAt, () => ticks), () => `the timer stopped after a synchronous throw (${ticks} tick(s))`);
 
     assert.equal(logged('[guard:sync-probe]'), 1);
     assert.ok(logged('SQLITE_BUSY') >= 1);
