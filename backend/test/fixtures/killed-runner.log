@@ -1,0 +1,12 @@
+unit	UNKNOWN STEP	2026-09-05T00:21:47.7562002Z ##[error]The runner has received a shutdown signal. This can happen when the runner service is stopped, or a manually started runner is canceled.
+unit	UNKNOWN STEP	2026-09-05T00:21:47.7697427Z ✖ test/restart-cancellation.test.js (13994.952965ms)
+unit	UNKNOWN STEP	2026-09-05T00:21:47.7885847Z ✖ test/spawn-failure.test.js (10830.36046ms)
+unit	UNKNOWN STEP	2026-09-05T00:21:47.7958004Z ℹ tests 511
+unit	UNKNOWN STEP	2026-09-05T00:21:47.7958206Z ℹ suites 46
+unit	UNKNOWN STEP	2026-09-05T00:21:47.7958414Z ℹ pass 509
+unit	UNKNOWN STEP	2026-09-05T00:21:47.7958617Z ℹ fail 0
+unit	UNKNOWN STEP	2026-09-05T00:21:47.7958822Z ℹ cancelled 2
+unit	UNKNOWN STEP	2026-09-05T00:21:47.7959727Z ℹ duration_ms 19539.706978
+unit	UNKNOWN STEP	2026-09-05T00:21:47.7960796Z ✖ test/restart-cancellation.test.js (13994.952965ms)
+unit	UNKNOWN STEP	2026-09-05T00:21:47.7962238Z ✖ test/spawn-failure.test.js (10830.36046ms)
+unit	UNKNOWN STEP	2026-09-05T00:21:47.8057354Z ##[error]The operation was canceled.
