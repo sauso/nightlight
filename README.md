@@ -366,6 +366,11 @@ Once signed in as admin, go to **Account → Add caregiver** to create additiona
 for a partner or babysitter). Caregivers can view cameras and manage children/cameras but
 can't manage other user accounts or change app-wide settings.
 
+**Changing someone’s role takes effect immediately** — on their very next action, on every device
+they’re signed in on. Demoting an admin to caregiver does *not* sign them out: they keep browsing as
+a caregiver and simply lose the admin-only screens. Deleting an account, by contrast, ends its
+sessions at once and signs that person out everywhere.
+
 ## Running behind a reverse proxy (e.g. SWAG on Unraid)
 
 A ready-to-use config is in `reverse-proxy/nightlight.subdomain.conf`. Copy it to
