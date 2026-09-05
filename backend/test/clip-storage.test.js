@@ -467,7 +467,7 @@ describe('start/stop', () => {
     // comes back with a backlog, and waiting a quarter of an hour to notice is how a disk fills.
     const old = makeClip('old.mp4', { ageDays: 40 });
     setRetention(14, 5);
-    startClipStorage();
+    startClipStorage({ mounts: MOUNTED });
     try {
       assert.deepEqual(liveClipIds(), [], 'startup did not sweep');
       assert.equal(fs.existsSync(old.abs), false);
@@ -476,9 +476,33 @@ describe('start/stop', () => {
     }
   });
 
+  test('★ start honours the storage guard — an unmapped CLIPS_DIR means it does not sweep', () => {
+    // ⚠️ THIS TEST EXISTS BECAUSE ITS ABSENCE SHIPPED A HOST-DEPENDENT SUITE, in the very PR whose
+    // subject is host-dependent suites. `startClipStorage` re-runs the guard, and it originally did so
+    // with no `mounts` seam — so it read the REAL /proc/mounts and silently overwrote whatever the
+    // `beforeEach` had set up. On Windows there is no such file, the check is skipped, storage stays
+    // OK and the four tests around this one passed. On Linux CI a temp directory sits under "/", so
+    // CLIPS_DIR reads as the container overlay, storage goes not-OK and the sweep declines: all four
+    // failed. Caught by CI, not by me.
+    //
+    // It discriminates on BOTH platforms, which is the property that matters: without the seam, the
+    // UNMAPPED argument below is ignored and a Windows run would report ready and sweep.
+    const old = makeClip('old.mp4', { ageDays: 40 });
+    setRetention(14, 5);
+    startClipStorage({ mounts: UNMAPPED });
+    try {
+      assert.equal(clipStorageReady(), false, 'the guard was not re-run with the mounts it was given');
+      assert.deepEqual(liveClipIds(), [old.id], 'startup swept with storage in a failed state');
+      assert.equal(fs.existsSync(old.abs), true);
+    } finally {
+      stopClipStorage();
+      makeReady();
+    }
+  });
+
   test('start is idempotent, and stop leaves nothing to hold the process open', () => {
-    startClipStorage();
-    startClipStorage(); // must not stack a second interval
+    startClipStorage({ mounts: MOUNTED });
+    startClipStorage({ mounts: MOUNTED }); // must not stack a second interval
     stopClipStorage();
     stopClipStorage(); // idempotent, and safe when never started
     assert.ok(true, 'no throw');
@@ -490,7 +514,7 @@ describe('start/stop', () => {
     // what handles everything after it, on a container that stays up for weeks.
     t.mock.timers.enable({ apis: ['setInterval'] });
     setRetention(14, 5);
-    startClipStorage(); // nothing to sweep yet
+    startClipStorage({ mounts: MOUNTED }); // nothing to sweep yet
     try {
       const old = makeClip('later.mp4', { ageDays: 40 });
       assert.deepEqual(liveClipIds(), [old.id], 'precondition: the clip is still here before the tick');
@@ -513,7 +537,7 @@ describe('start/stop', () => {
     // Break the sweep from underneath: getRetention's SELECT can no longer be prepared.
     db.exec('ALTER TABLE settings RENAME TO settings_hidden');
     try {
-      startClipStorage(); // the initial sweep throws...
+      startClipStorage({ mounts: MOUNTED }); // the initial sweep throws...
       t.mock.timers.tick(15 * 60 * 1000); // ...and so does the first tick
       assert.deepEqual(liveClipIds(), [old.id], 'precondition: nothing could have been swept');
 
@@ -533,11 +557,11 @@ describe('start/stop', () => {
     // `startClipStorage` guards on `if (!sweepTimer)`, so a stop that cleared the interval without
     // nulling the handle would make every later start a silent no-op — the timer gone and nothing
     // reporting it. Observed through behaviour: the restarted module must sweep again.
-    startClipStorage();
+    startClipStorage({ mounts: MOUNTED });
     stopClipStorage();
     const old = makeClip('old.mp4', { ageDays: 40 });
     setRetention(14, 5);
-    startClipStorage();
+    startClipStorage({ mounts: MOUNTED });
     try {
       assert.deepEqual(liveClipIds(), [], 'the module did not sweep after being restarted');
     } finally {

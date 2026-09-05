@@ -187,8 +187,16 @@ export function sweepClips() {
 }
 
 // Called once at boot: run the guard, sweep immediately, then on an interval.
-export function startClipStorage() {
-  checkClipStorage();
+//
+// ⚠️ `opts` is forwarded straight to checkClipStorage, and it exists for the same seam reason (see
+// there). It is NOT decoration: without it this function re-runs the guard against the real
+// /proc/mounts, which means it decides differently on every machine — and it does so AFTER a test has
+// set the status up, silently undoing it. That is not hypothetical: the first version of this had no
+// seam and the four start/stop tests passed on Windows (no /proc/mounts, so the check is skipped) and
+// failed on Linux CI (a temp dir sits under "/", so CLIPS_DIR reads as the container overlay and the
+// sweep declines). Same class of defect as everything else this module's tests exist to catch.
+export function startClipStorage(opts = {}) {
+  checkClipStorage(opts);
   try {
     sweepClips();
   } catch (e) {
