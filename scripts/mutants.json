@@ -1,0 +1,166 @@
+[
+  {
+    "label": "control: a comment edit must change nothing",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "// Resolve+delete a clip MP4",
+    "replace": "// Resolve+delete a clip MP4 [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": ["detection-events.test.js"],
+    "note": "Validates the harness. If this is ever KILLED, no other result in the run means anything."
+  },
+  {
+    "label": "unlinkClip: containment guard deleted outright",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return;",
+    "replace": "if (false) return;",
+    "expect": "killed",
+    "tests": ["detection-events.test.js"]
+  },
+  {
+    "label": "unlinkClip: path.sep dropped from the prefix check",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return;",
+    "replace": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR)) return;",
+    "expect": "killed",
+    "tests": ["detection-events.test.js"]
+  },
+  {
+    "label": "unlinkClip: stops removing the sibling thumbnail",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "try { fs.rmSync(abs.replace(/\\.mp4$/i, '.jpg'), { force: true }); } catch { /* ignore */ }",
+    "replace": ";",
+    "expect": "killed",
+    "tests": ["detection-events.test.js"]
+  },
+  {
+    "label": "getEventClipFile: containment guard deleted outright",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
+    "replace": "if (false) return null;",
+    "expect": "killed",
+    "tests": ["detection-events.test.js"]
+  },
+  {
+    "label": "getEventClipFile: path.sep dropped from the prefix check",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
+    "replace": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR)) return null;",
+    "expect": "killed",
+    "tests": ["detection-events.test.js"]
+  },
+  {
+    "label": "schema default: wake clips off on a fresh install",
+    "file": "backend/src/db.js",
+    "find": "ADD COLUMN wake_clips_enabled INTEGER NOT NULL DEFAULT 1",
+    "replace": "ADD COLUMN wake_clips_enabled INTEGER NOT NULL DEFAULT 0",
+    "expect": "killed",
+    "tests": ["settings-wake-clips.test.js"]
+  },
+  {
+    "label": "schema default: wake clip length 30s -> 7s",
+    "file": "backend/src/db.js",
+    "find": "ADD COLUMN wake_clip_seconds INTEGER NOT NULL DEFAULT 30",
+    "replace": "ADD COLUMN wake_clip_seconds INTEGER NOT NULL DEFAULT 7",
+    "expect": "killed",
+    "tests": ["settings-wake-clips.test.js"]
+  },
+  {
+    "label": "schema default: wake clip retention 14d -> 3d",
+    "file": "backend/src/db.js",
+    "find": "ADD COLUMN wake_clip_retention_days INTEGER NOT NULL DEFAULT 14",
+    "replace": "ADD COLUMN wake_clip_retention_days INTEGER NOT NULL DEFAULT 3",
+    "expect": "killed",
+    "tests": ["settings-wake-clips.test.js"]
+  },
+
+  {
+    "label": "threshold MOTION_ACTIVE 0.01 -> 0.25 (a real climb-out stops counting)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const MOTION_ACTIVE = 0.01;",
+    "replace": "const MOTION_ACTIVE = 0.25;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "what the numbers MEAN"
+  },
+  {
+    "label": "threshold MOTION_ACTIVE 0.01 -> 0.0001 (the noise floor becomes a wake)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const MOTION_ACTIVE = 0.01;",
+    "replace": "const MOTION_ACTIVE = 0.0001;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "what the numbers MEAN"
+  },
+  {
+    "label": "threshold SOUND_ACTIVE 6 -> 20 (a crying child is inaudible)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const SOUND_ACTIVE = 6;",
+    "replace": "const SOUND_ACTIVE = 20;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "what the numbers MEAN"
+  },
+  {
+    "label": "threshold SOUND_ACTIVE 6 -> 1 (the room itself is a cry)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const SOUND_ACTIVE = 6;",
+    "replace": "const SOUND_ACTIVE = 1;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "what the numbers MEAN"
+  },
+  {
+    "label": "threshold ONSET_QUIET_MIN 15 -> 1 (one quiet minute declares a child asleep)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const ONSET_QUIET_MIN = 15;",
+    "replace": "const ONSET_QUIET_MIN = 1;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "what the numbers MEAN"
+  },
+  {
+    "label": "threshold ONSET_QUIET_MIN 15 -> 40 (the watcher never arms)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const ONSET_QUIET_MIN = 15;",
+    "replace": "const ONSET_QUIET_MIN = 40;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "what the numbers MEAN"
+  },
+  {
+    "label": "threshold WAKE_ACTIVE_MIN 5 -> 60 (an hour of crying is not a wake)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const WAKE_ACTIVE_MIN = 5;",
+    "replace": "const WAKE_ACTIVE_MIN = 60;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "what the numbers MEAN"
+  },
+  {
+    "label": "threshold WAKE_ACTIVE_MIN 5 -> 1 (every roll-over records a clip)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const WAKE_ACTIVE_MIN = 5;",
+    "replace": "const WAKE_ACTIVE_MIN = 1;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "what the numbers MEAN"
+  },
+  {
+    "label": "threshold WAKE_GAP_MIN 3 -> 60 (two wakes an hour apart become one)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const WAKE_GAP_MIN = 3;",
+    "replace": "const WAKE_GAP_MIN = 60;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "what the numbers MEAN"
+  },
+  {
+    "label": "threshold WAKE_GAP_MIN 3 -> 0 (a single quiet minute splits a wake)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const WAKE_GAP_MIN = 3;",
+    "replace": "const WAKE_GAP_MIN = 0;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "what the numbers MEAN"
+  }
+]
