@@ -270,8 +270,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   **per account as well as per source**, so a failing login can only ever affect that one account.
   Nothing to configure. If you do run a reverse proxy you can now also set **`TRUST_PROXY`** to its
   address so per-source limits see real visitors — ⚠️ only ever set it to an address you control, as a
-  wrong value lets anyone bypass the limit entirely. See the README’s reverse-proxy section.
-  **First-run setup no longer spends the login allowance** either.
+  wrong value lets anyone bypass the limit entirely. A value Nightlight can’t make sense of is ignored
+  with a warning rather than stopping the app. See the README’s reverse-proxy section.
+  **First-run setup no longer spends the login allowance** either, and **the second step of two-factor
+  sign-in is limited per account as well** — previously twenty bad attempts from one place could block
+  everyone else's 2FA for fifteen minutes.
 
 - **Demoting an admin now takes effect immediately.** Changing someone from admin to caregiver only
   applied the next time they signed in — until then their existing session kept every admin power,

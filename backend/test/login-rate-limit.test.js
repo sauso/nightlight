@@ -7,14 +7,19 @@
 // is checking on a sleeping child. It also made the control weaker than it looked: the attacker's
 // budget and the household's were the same budget.
 //
-// ⚠️ THESE TESTS RUN EVERY REQUEST FROM ONE IP ON PURPOSE. That is the un-configured production shape
-// — an installation that has not set TRUST_PROXY, where every remote user genuinely does arrive as the
-// proxy's address. If the fix only worked once TRUST_PROXY was set, it would not have fixed the
-// reported problem, and these would pass anyway if they varied the source address. Keeping them on a
-// single IP is what makes them discriminate.
+// ⚠️ THE FIRST DESCRIBE RUNS EVERY REQUEST FROM ONE IP ON PURPOSE. That is the un-configured
+// production shape — an installation that has not set TRUST_PROXY, where every remote user genuinely
+// does arrive as the proxy's address. If the fix only worked once TRUST_PROXY was set, it would not
+// have fixed the reported problem.
+//
+// ⚠️ AND THE LIMITERS ARE MODULE-LEVEL WITH AN IN-MEMORY STORE, so their state carries across every
+// case in this file. The spray case alone burns the whole 100-per-IP perClient budget. Any case added
+// after it must claim its own source address or it will 429 for reasons unrelated to what it asserts.
 import { test, describe, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { useTempDataDir, cleanupTempDataDirs, makeUser, mountRouter, call } from './helpers/harness.js';
+import {
+  useTempDataDir, cleanupTempDataDirs, makeUser, mountRouter, mountRouterTrustingProxy, call,
+} from './helpers/harness.js';
 
 useTempDataDir();
 
@@ -102,5 +107,120 @@ describe('the login limiter isolates accounts (#248)', () => {
     });
     assert.notEqual(res.status, 429, 'setup was refused because login attempts had exhausted a shared budget');
     assert.equal(res.status, 400, 'expected the normal "already completed" refusal');
+  });
+});
+
+// -------------------------------------------------------------------------------------------
+// Everything below exists because adversarial review of this PR found the suite could not tell the
+// shipped code apart from two regressions the change explicitly forbids.
+
+describe('the key really is IP + account, not one or the other', () => {
+  // ⚠️ The describe above sends every request from 127.0.0.1, which is the right shape for the
+  // un-configured-proxy case — but it means a mutant keying on the USERNAME ALONE passed all of it.
+  // That mutant is the targeted-lockout bug the source comment calls unacceptable: a bare username key
+  // lets someone lock a specific user out on purpose by failing their login from elsewhere. Proving
+  // the IP is part of the key needs two different source addresses, which needs a trusted proxy.
+  let proxied;
+  before(async () => { proxied = await mountRouterTrustingProxy('/api/auth', authRouter); });
+  after(async () => { await proxied?.close(); });
+
+  const from = (ip, username, password = 'wrong-password') =>
+    call(`${proxied.url}/api/auth/login`, {
+      method: 'POST',
+      body: { username, password },
+      headers: { 'x-forwarded-for': ip },
+    });
+
+  test('★ an attacker cannot lock a real user out of their own account from elsewhere', async () => {
+    let last;
+    for (let i = 0; i < 21; i++) last = await from('9.9.9.9', 'alice');
+    assert.equal(last.status, 429, 'the attacker was never limited — nothing is being tested');
+
+    const victim = await call(`${proxied.url}/api/auth/login`, {
+      method: 'POST',
+      body: { username: 'alice', password: 'correct-horse' },
+      headers: { 'x-forwarded-for': '8.8.8.8' },
+    });
+    assert.notEqual(victim.status, 429, 'an attacker locked the real user out of their own account');
+    assert.equal(victim.status, 200, `the victim should sign in normally, got ${victim.status}`);
+  });
+});
+
+describe('a blocked account stops consuming the shared client budget', () => {
+  // ⚠️ THE ORDER OF THE TWO LIMITERS IS BEHAVIOUR, NOT STYLE, and nothing asserted it. `loginLimiter`
+  // is `[perAccount, perClient]`: once perAccount rejects, express-rate-limit ends the request and
+  // perClient never runs, so one account's flood costs the shared budget only its own 20. Swap them
+  // and every one of those attempts is charged to the client bucket too — so a single account hammered
+  // hard drains the household's 100 and locks everyone else out, which is most of issue #248 back
+  // again. Mutation testing showed the swap passed every other case in this file.
+  let proxied;
+  before(async () => { proxied = await mountRouterTrustingProxy('/api/auth', authRouter); });
+  after(async () => { await proxied?.close(); });
+
+  test('★ one account hammered far past its limit does not exhaust the client budget', async () => {
+    const ip = '198.51.100.7';
+    const hit = (username) =>
+      call(`${proxied.url}/api/auth/login`, {
+        method: 'POST',
+        body: { username, password: 'wrong-password' },
+        headers: { 'x-forwarded-for': ip },
+      });
+
+    // 120 attempts against ONE account — six times its own budget, and beyond the 100 client budget.
+    for (let i = 0; i < 120; i++) await hit('alice');
+
+    const other = await call(`${proxied.url}/api/auth/login`, {
+      method: 'POST',
+      body: { username: 'bob', password: 'correct-horse' },
+      headers: { 'x-forwarded-for': ip },
+    });
+    assert.notEqual(
+      other.status,
+      429,
+      'one account\'s flood drained the shared client budget — the limiters are running in the wrong order'
+    );
+    assert.equal(other.status, 200, `the other account should sign in normally, got ${other.status}`);
+  });
+});
+
+describe('the MFA second step is limited per account too', () => {
+  // ⚠️ THIS ROUTE HAD NO PER-ACCOUNT ISOLATION AT ALL. Its body is `{ mfaToken, code }` — no username —
+  // and it has no requireAuth, so `req.user` is unset too. The account key was therefore the empty
+  // string for EVERY caller: a flat 20-per-IP bucket shared by every account, identical in shape and
+  // size to the defect this PR exists to fix, scoped to exactly the users who enabled 2FA.
+  //
+  // ⚠️ Each case claims its OWN source IP — see the note at the top of this file about limiter state
+  // carrying across cases. Sharing 127.0.0.1 here made these 429 for reasons unrelated to the assertion.
+  let proxied;
+  before(async () => { proxied = await mountRouterTrustingProxy('/api/auth', authRouter); });
+  after(async () => { await proxied?.close(); });
+
+  const mfaFrom = (ip, body) =>
+    call(`${proxied.url}/api/auth/login/mfa`, { method: 'POST', body, headers: { 'x-forwarded-for': ip } });
+
+  test('★ garbage MFA attempts do not block an unrelated one', async () => {
+    const ip = '203.0.113.10';
+    let last;
+    for (let i = 0; i < 21; i++) last = await mfaFrom(ip, { mfaToken: 'garbage-token', code: '000000' });
+    assert.equal(last.status, 429, 'the limiter never engaged for repeated identical bad tokens');
+
+    const other = await mfaFrom(ip, { mfaToken: 'a-completely-different-token', code: '111111' });
+    assert.notEqual(other.status, 429, 'an unrelated MFA attempt was blocked by a shared anonymous bucket');
+  });
+
+  test('a real MFA token keys on its user, so one account cannot exhaust another', async () => {
+    // Two valid, differently-owned MFA tokens must not share a bucket. This is the case that actually
+    // matters in production: both of these are tokens a real login handed out.
+    const ip = '203.0.113.11';
+    const jwtLib = (await import('jsonwebtoken')).default;
+    const tokenFor = (id) =>
+      jwtLib.sign({ id, purpose: 'mfa' }, process.env.JWT_SECRET, { algorithm: 'HS256', expiresIn: '5m' });
+
+    let last;
+    for (let i = 0; i < 21; i++) last = await mfaFrom(ip, { mfaToken: tokenFor('u-a'), code: '000000' });
+    assert.equal(last.status, 429, "alice's MFA budget never ran out");
+
+    const bob = await mfaFrom(ip, { mfaToken: tokenFor('u-b'), code: '000000' });
+    assert.notEqual(bob.status, 429, "alice's MFA attempts locked bob out of his own second factor");
   });
 });

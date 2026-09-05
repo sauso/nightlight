@@ -2,6 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import { createHash } from 'node:crypto';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
 import { requireAuth, requireAdmin, JWT_SECRET } from '../middleware/auth.js';
@@ -78,12 +79,38 @@ const limiterMessage = { error: 'Too many attempts - please wait a few minutes a
 // keyed by subnet rather than by individual address, which a single client can rotate through freely.
 const clientKey = (req) => ipKeyGenerator(req.ip);
 
-// The account this attempt is against: the submitted username on the login routes, or the signed-in
-// user on the change-password / disable-MFA routes, which have no username in the body.
-// Lower-cased so `Admin` and `admin` cannot be used as two separate budgets against one account.
+// The account this attempt is against.
+//
+// ⚠️ EVERY ROUTE ON THIS LIMITER MUST YIELD AN ACCOUNT, OR IT SILENTLY REVERTS TO THE #248 DEFECT.
+// The first version read `req.body.username` and fell back to `req.user?.id`, which covers /login,
+// /setup, /me/password and /me/mfa/disable — but NOT `/login/mfa`, whose body is `{ mfaToken, code }`
+// and which has no requireAuth, so `req.user` is unset too. Every MFA completion therefore keyed on
+// the SAME empty string: a flat 20-per-IP bucket shared by every account, identical in shape and size
+// to the bug this whole change exists to fix, scoped to exactly the users who enabled 2FA. Found by
+// adversarial review of this PR and reproduced — 20 garbage MFA attempts blocked an unrelated user's
+// real code for fifteen minutes.
+//
+// Lower-cased so `Admin` and `admin` cannot be two budgets against one account.
 function accountKey(req) {
   const submitted = typeof req.body?.username === 'string' ? req.body.username.trim().toLowerCase() : '';
-  return submitted || req.user?.id || '';
+  if (submitted) return submitted;
+  if (req.user?.id) return req.user.id;
+
+  // /login/mfa: the account is inside the short-lived MFA token. DECODED, not verified — this only
+  // has to produce a stable bucket, and verifying here would duplicate the route's own check on every
+  // request. A forged token cannot buy extra guesses: reaching the real code check needs a token
+  // signed with JWT_SECRET, and that one always carries the same id, so it always lands in the same
+  // bucket. The perClient limiter caps the volume of forgeries regardless.
+  const mfaToken = typeof req.body?.mfaToken === 'string' ? req.body.mfaToken : '';
+  if (mfaToken) {
+    const id = jwt.decode(mfaToken)?.id;
+    if (id) return `mfa:${id}`;
+    // ⚠️ An unparseable token gets its OWN bucket rather than sharing one. Collapsing these to a
+    // constant would let a stream of garbage tokens from one source block a legitimate user's MFA
+    // completion — the same shared-bucket failure in miniature.
+    return `mfa-bad:${createHash('sha256').update(mfaToken).digest('hex').slice(0, 16)}`;
+  }
+  return '';
 }
 
 const perAccountLimiter = rateLimit({

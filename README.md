@@ -403,8 +403,12 @@ Set it to the address your proxy connects *from*:
 ```
 
 > **⚠️ Only set this to an address you control.** Whatever you trust here is allowed to declare a
-> client's IP. Too broad a value — or `true` — lets anyone forge `X-Forwarded-For` and slip the login
-> rate limit entirely, which is worse than leaving it unset. If you are not sure, leave it alone.
+> client's IP. Too broad a value — or `true`, which trusts *every* upstream — lets anyone forge
+> `X-Forwarded-For` and slip the login rate limit entirely, which is worse than leaving it unset. If
+> you are not sure, leave it alone.
+
+A value Nightlight can't make sense of is **ignored, with a warning in the log**, and the safe default
+is used instead — a typo here will never stop the app starting.
 
 **You do not have to set it.** Login attempts are limited per account *and* per source, so even with
 every remote user sharing the proxy's address, one person mistyping their password cannot lock anyone

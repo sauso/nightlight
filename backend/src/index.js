@@ -41,6 +41,7 @@ import { startSleepJob } from './lib/sleepAnalysis.js';
 import { startWakeWatcher } from './lib/wakeWatcher.js';
 import { startTimelapseSampler } from './lib/timelapse.js';
 import { logger } from './lib/logger.js';
+import { applyTrustProxy } from './lib/trustProxy.js';
 import { safeInterval, installCrashGuards, markBootComplete, reportGuardFailure } from './lib/processGuards.js';
 import { recordCameraEvent, EVENT } from './lib/cameraEvents.js';
 import { probeAudioFlowing, tracksHaveAudio } from './lib/audioLiveness.js';
@@ -89,11 +90,12 @@ const app = express();
 // ⚠️ ONLY SET THIS WHEN THE PROXY IS TRUSTED. A wrong or over-broad value lets a client forge
 // X-Forwarded-For and evade the rate limit entirely — which is worse than the shared bucket it fixes.
 // Documented with that warning in the README's reverse-proxy section.
-const TRUST_PROXY = process.env.TRUST_PROXY?.trim();
-// A bare integer is a HOP COUNT and must be passed as a number; Express treats the string '1' as an
-// IP address to trust, which matches nothing and silently leaves the setting inert.
-app.set('trust proxy', TRUST_PROXY ? (/^\d+$/.test(TRUST_PROXY) ? Number(TRUST_PROXY) : TRUST_PROXY) : 'loopback');
-if (TRUST_PROXY) logger.info(`[http] trust proxy = ${TRUST_PROXY} (from TRUST_PROXY)`);
+// ⚠️ VALIDATED, NOT PASSED STRAIGHT THROUGH. `app.set('trust proxy', 'true')` THROWS out of proxy-addr
+// during startup, and since the bad value lives in the environment every restart dies identically —
+// a permanent crash loop on a baby monitor, from one typo. `true` is also the likeliest typo, because
+// it is the canonical example in Express's own docs (where the setting takes a real boolean).
+// See lib/trustProxy.js; it falls back to 'loopback' with a loud log rather than exiting.
+applyTrustProxy(app, process.env.TRUST_PROXY);
 
 // Content-Security-Policy — ENFORCING (validated via a report-only rollout on staging that exercised
 // every feature). The report-uri below still logs any future
