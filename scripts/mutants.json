@@ -395,5 +395,258 @@
     "replace": "function stopTimelapseSampler() {",
     "expect": "killed",
     "tests": ["suite-exits-cleanly.test.js"]
+  },
+
+  {
+    "label": "★ pruneWakeClips: the wake-clip sweeper becomes a no-op",
+    "file": "backend/src/lib/recordings.js",
+    "find": "export function pruneWakeClips() {",
+    "replace": "export function pruneWakeClips() { return 0;",
+    "expect": "killed",
+    "tests": ["recordings-lifecycle.test.js"]
+  },
+  {
+    "label": "★ pruneWakeClips: sweeps MANUAL keepsakes too",
+    "file": "backend/src/lib/recordings.js",
+    "find": "        WHERE kind = 'wake' AND created_at < datetime('now', ?)",
+    "replace": "        WHERE created_at < datetime('now', ?)",
+    "expect": "killed",
+    "tests": ["recordings-lifecycle.test.js"]
+  },
+  {
+    "label": "pruneWakeClips: 0 days deletes everything instead of keeping forever",
+    "file": "backend/src/lib/recordings.js",
+    "find": "  if (retentionDays === 0) return 0;",
+    "replace": "  if (false) return 0;",
+    "expect": "killed",
+    "tests": ["recordings-lifecycle.test.js"]
+  },
+  {
+    "label": "getWakeClipSettings: 0 retention days falls through to the 14-day default",
+    "file": "backend/src/lib/recordings.js",
+    "find": "    retentionDays: Number.isFinite(days) && days >= 0 ? days : 14,",
+    "replace": "    retentionDays: Number.isFinite(days) && days > 0 ? days : 14,",
+    "expect": "killed",
+    "tests": ["recordings-lifecycle.test.js"]
+  },
+  {
+    "label": "startRecording: a double-tap starts a SECOND recording",
+    "file": "backend/src/lib/recordings.js",
+    "find": "  if (active.has(camera.id)) return recordingState(camera.id);",
+    "replace": ";",
+    "expect": "killed",
+    "tests": ["recordings-lifecycle.test.js"]
+  },
+  {
+    "label": "★ startRecording: started_at loses the pre-roll",
+    "file": "backend/src/lib/recordings.js",
+    "find": "      started_at: new Date(startMs - preRollSec * 1000).toISOString()",
+    "replace": "      started_at: new Date(startMs).toISOString()",
+    "expect": "killed",
+    "tests": ["recordings-lifecycle.test.js"]
+  },
+  {
+    "label": "★ startRecording: the pre-roll is never protected from pruning",
+    "file": "backend/src/lib/recordings.js",
+    "find": "  holdRing(camera.id, RING_OWNER.ONDEMAND, startMs - preRollSec * 1000 - 5000);",
+    "replace": ";",
+    "expect": "killed",
+    "tests": ["recordings-lifecycle.test.js"]
+  },
+  {
+    "label": "★ stopRecording: the ring hold is never released",
+    "file": "backend/src/lib/recordings.js",
+    "find": "    releaseRing(cameraId, RING_OWNER.ONDEMAND);",
+    "replace": ";",
+    "expect": "killed",
+    "tests": ["recordings-lifecycle.test.js"]
+  },
+  {
+    "label": "★ reconcileStaleRecordings: sweeps only 'pending', missing a SIGKILL (the #277 defect)",
+    "file": "backend/src/lib/recordings.js",
+    "find": "const LIVE_RECORDING_STATUSES = ['recording', 'pending'];",
+    "replace": "const LIVE_RECORDING_STATUSES = ['pending'];",
+    "expect": "killed",
+    "tests": ["recordings-lifecycle.test.js"]
+  },
+  {
+    "label": "reconcileStaleRecordings: sweeps every status, clobbering finished rows",
+    "file": "backend/src/lib/recordings.js",
+    "find": "const LIVE_RECORDING_STATUSES = ['recording', 'pending'];",
+    "replace": "const LIVE_RECORDING_STATUSES = ['recording', 'pending', 'ready', 'failed', 'uploading'];",
+    "expect": "killed",
+    "tests": ["recordings-lifecycle.test.js"]
+  },
+
+  {
+    "label": "★ the ring janitor ignores holds and prunes a recording's opening",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "  const cutoff = Math.min(Date.now() - depthMs, holdFromMs ?? Infinity);",
+    "replace": "  const cutoff = Date.now() - depthMs;",
+    "expect": "killed",
+    "tests": ["clip-recorder.test.js"]
+  },
+  {
+    "label": "the ring janitor prunes nothing at all",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "  const cutoff = Math.min(Date.now() - depthMs, holdFromMs ?? Infinity);",
+    "replace": "  const cutoff = 0;",
+    "expect": "killed",
+    "tests": ["clip-recorder.test.js"]
+  },
+  {
+    "label": "★ stopSegmenter: a hold outlives the ring it protected",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "  clearHolds(cameraId); // the ring is about to go",
+    "replace": "  ; // the ring is about to go",
+    "expect": "killed",
+    "tests": ["clip-recorder.test.js"]
+  },
+  {
+    "label": "★ extractClip: the half-written tail segment is concatenated",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "&& now - s.m > 700)",
+    "replace": "&& true)",
+    "expect": "killed",
+    "tests": ["clip-recorder.test.js"]
+  },
+  {
+    "label": "extractClip: the outBase path guard is dropped",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "  const safeBase = safePathSegment(outBase, 'outBase');",
+    "replace": "  const safeBase = String(outBase);",
+    "expect": "killed",
+    "tests": ["clip-recorder.test.js"]
+  },
+  {
+    "label": "startSegmenter: the cameraId path guard is dropped",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "  const ringDir = path.join(RING_ROOT, safePathSegment(cameraId, 'cameraId'));",
+    "replace": "  const ringDir = path.join(RING_ROOT, String(cameraId));",
+    "expect": "killed",
+    "tests": ["clip-recorder.test.js"]
+  },
+  {
+    "label": "startSegmenter: a stale ring is left in place across a restart",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "    if (f.endsWith('.mkv') || f.startsWith('concat-')) {",
+    "replace": "    if (false) {",
+    "expect": "killed",
+    "tests": ["clip-recorder.test.js", "clip-capture.test.js"]
+  },
+  {
+    "label": "holdRing: reports success when there is no ring to hold",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "  if (!entry) return false;\r\n  addHold(cameraId, owner, fromMs);",
+    "replace": "  addHold(cameraId, owner, fromMs);",
+    "expect": "killed",
+    "tests": ["clip-recorder.test.js"]
+  },
+
+  {
+    "label": "clipCapture: an already-capturing camera starts a second overlapping clip",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "  if (busyCameras.has(camera.id)) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["clip-capture.test.js"]
+  },
+  {
+    "label": "★ clipCapture: the camera is never released, so only one clip is ever cut",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "      busyCameras.delete(camera.id);",
+    "replace": ";",
+    "expect": "killed",
+    "tests": ["clip-capture.test.js"]
+  },
+  {
+    "label": "clipCapture: detect_record_clips stops gating capture",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "  if (!camera.detect_record_clips || !eventId) return;",
+    "replace": "  if (!eventId) return;",
+    "expect": "killed",
+    "tests": ["clip-capture.test.js"]
+  },
+  {
+    "label": "clipCapture: a clip is queued with no ring to cut from",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "  if (!isSegmenterRunning(camera.id)) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["clip-capture.test.js"]
+  },
+  {
+    "label": "clipCapture: a failed capture is not marked failed",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "      setClipFailed(eventId);",
+    "replace": ";",
+    "expect": "killed",
+    "tests": ["clip-capture.test.js"]
+  },
+  {
+    "label": "★ clipCapture: the storage-ready gate is dropped",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "  if (!clipStorageReady()) return;",
+    "replace": ";",
+    "expect": "killed",
+    "tests": ["clip-capture.test.js"]
+  },
+  {
+    "label": "clipCapture: a reconcile tick restarts the segmenter and wipes the ring",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "  if (isSegmenterRunning(camera.id)) return;",
+    "replace": ";",
+    "expect": "killed",
+    "tests": ["clip-capture.test.js"]
+  },
+
+  {
+    "label": "routes/recordings: DELETE reports success for an id that does not exist",
+    "file": "backend/src/routes/recordings.js",
+    "find": "  if (!row) return res.status(404).json({ error: 'No recording for this id' });\r\n  deleteRecording(req.params.id);",
+    "replace": "  deleteRecording(req.params.id);",
+    "expect": "killed",
+    "tests": ["recordings-routes.test.js"]
+  },
+  {
+    "label": "★ routes/recordings: video is served without authentication",
+    "file": "backend/src/routes/recordings.js",
+    "find": "router.get('/:id/video', requireAuthQueryOrHeader, (req, res) => {",
+    "replace": "router.get('/:id/video', (req, res) => {",
+    "expect": "killed",
+    "tests": ["recordings-routes.test.js"]
+  },
+  {
+    "label": "★ routes/recordings: the media route accepts a full session token in the URL",
+    "file": "backend/src/routes/recordings.js",
+    "find": "router.get('/:id/video', requireAuthQueryOrHeader, (req, res) => {",
+    "replace": "router.get('/:id/video', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["recordings-routes.test.js"],
+    "note": "Swapping to header-only auth breaks the <video> tag; the test that catches it is the one asserting a media token in the query string works."
+  },
+  {
+    "label": "getRecordingVideoFile: a non-ready recording becomes servable",
+    "file": "backend/src/lib/recordings.js",
+    "find": "  const row = db.prepare(\"SELECT path, status FROM recordings WHERE id = ?\").get(id);\r\n  if (!row || row.status !== 'ready') return null;",
+    "replace": "  const row = db.prepare(\"SELECT path, status FROM recordings WHERE id = ?\").get(id);\r\n  if (!row) return null;",
+    "expect": "killed",
+    "tests": ["recordings-visibility.test.js"]
+  },
+  {
+    "label": "★ jailedFile: the containment guard is dropped, so any file on the volume is servable",
+    "file": "backend/src/lib/recordings.js",
+    "find": "  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
+    "replace": ";",
+    "expect": "killed",
+    "tests": ["recordings-routes.test.js"]
+  },
+  {
+    "label": "listChildRecordings: the manual/wake distinction is dropped",
+    "file": "backend/src/lib/recordings.js",
+    "find": "AND r.kind = 'manual'",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["recordings-routes.test.js", "recordings-visibility.test.js"]
   }
 ]
