@@ -42,6 +42,10 @@ function fromCam(cam) {
     motion_mqtt_topic: cam.motion_mqtt_topic || '',
     motion_mqtt_value: cam.motion_mqtt_value || '',
     snapshot_url: cam.snapshot_url || '',
+    // The server never sends the snapshot password (issue #271) — only whether one is set. The
+    // input below starts blank and blank means 'keep whatever is stored'.
+    snapshot_has_password: !!cam.snapshot_has_password,
+    snapshot_password: '',
     sound_enabled: !!cam.detect_sound_enabled,
     sound_sensitivity: cam.sound_sensitivity ?? 50,
     sound_confirm_s: cam.sound_confirm_s ?? 4,
@@ -64,6 +68,8 @@ function toPayload(d) {
     motion_mqtt_topic: d.motion_mqtt_topic,
     motion_mqtt_value: d.motion_mqtt_value,
     snapshot_url: d.snapshot_url,
+    // Omitted when blank so the server keeps the stored password rather than clearing it.
+    ...(d.snapshot_password ? { snapshot_password: d.snapshot_password } : {}),
     sound_enabled: !!d.sound_enabled,
     sound_sensitivity: Number(d.sound_sensitivity),
     sound_confirm_s: Number(d.sound_confirm_s),
@@ -255,7 +261,23 @@ function MotionForm({ d, apply, cameraId, cam }) {
               onChange={(e) => apply({ snapshot_url: e.target.value })} />
             <div className="camera-tile__sub">
               If your camera has an HTTP snapshot endpoint, alert images are grabbed from it — instant and clearer than
-              a stream frame. Basic-auth in the URL works. Applies to both motion and sound alerts.
+              a stream frame. Applies to both motion and sound alerts.
+            </div>
+          </div>
+
+          <div className="field" style={{ marginTop: 10 }}>
+            <label htmlFor="snapshot-password">
+              Alert image password {d.snapshot_has_password ? '(saved)' : '(optional)'}
+            </label>
+            <input id="snapshot-password" type="password" autoComplete="new-password"
+              value={d.snapshot_password}
+              placeholder={d.snapshot_has_password ? 'Leave blank to keep the saved password' : 'Only if the endpoint needs one'}
+              onChange={(e) => apply({ snapshot_password: e.target.value })} />
+            <div className="camera-tile__sub">
+              {d.snapshot_has_password
+                ? 'A password is saved for this endpoint. It is never sent back to this page — leave this blank to keep it, or type a new one to replace it.'
+                : 'If the snapshot endpoint needs a username and password, put the username in the URL above and the password here.'}
+              {' '}Changing the address above to a different host drops the saved password, so it is never sent somewhere new.
             </div>
           </div>
 

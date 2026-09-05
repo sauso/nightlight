@@ -360,3 +360,42 @@ describe('the clip opt-in', () => {
     expect((await sentBody()).record_clips).toBe(true);
   });
 });
+
+// -------------------------------------------------------------------------------------------
+// The snapshot password the server will not send back — issue #271.
+//
+// The server strips the Basic-auth password from snapshot_url before it leaves, so this screen can
+// only ever be told WHETHER one is set. That makes the blank-means-keep contract load-bearing: if the
+// screen sent an empty snapshot_password on an ordinary save, the route would read it as "clear it"
+// and every save of this page would quietly break alert images.
+describe('the snapshot password field (#271)', () => {
+  const WITH_PW = { ...CAM, snapshot_url: 'http://admin@cam.local/snap.jpg', snapshot_has_password: true };
+
+  test('an ordinary save sends NO snapshot_password at all', async () => {
+    mount('motion', WITH_PW);
+    fireEvent.change(await screen.findByLabelText(/Sensitivity/), { target: { value: '30' } });
+    const body = await sentBody();
+    expect('snapshot_password' in body).toBe(false);
+    expect(body.snapshot_url).toBe('http://admin@cam.local/snap.jpg');
+  });
+
+  test('typing one sends it', async () => {
+    mount('motion', WITH_PW);
+    fireEvent.change(await screen.findByLabelText(/Alert image password/), { target: { value: 'typed-pw' } });
+    const body = await sentBody();
+    expect(body.snapshot_password).toBe('typed-pw');
+  });
+
+  test('the field never shows the stored password — only that there is one', async () => {
+    mount('motion', WITH_PW);
+    const input = await screen.findByLabelText(/Alert image password/);
+    expect(input.value).toBe('');
+    expect(input.type).toBe('password');
+    expect(await screen.findByText(/never sent back to this page/i)).toBeTruthy();
+  });
+
+  test('a camera with no stored password says so instead', async () => {
+    mount('motion', { ...CAM, snapshot_has_password: false });
+    expect(await screen.findByLabelText(/Alert image password \(optional\)/)).toBeTruthy();
+  });
+});

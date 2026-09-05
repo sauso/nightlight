@@ -27,6 +27,7 @@ import { validateRtspStream, probeRtspDetailed, ffprobeVersion } from '../lib/rt
 import { captureSnapshot, fetchHttpSnapshot } from '../lib/snapshot.js';
 import { logger } from '../lib/logger.js';
 import { startRecording, stopRecording, recordingState, getOndemandSettings } from '../lib/recordings.js';
+import { stripUrlPassword, urlHasPassword, resolveUrlPassword } from '../lib/urlCredentials.js';
 
 const router = Router();
 
@@ -199,8 +200,14 @@ function publicCamera(cam, isAdmin) {
     talk_has_password: !!talk_password,
     // Low-quality sub-stream: only the path is edited (it reuses the main stream's host/creds).
     sub_rtsp_path: subParts.path || '',
-    // Camera HTTP snapshot endpoint (admin-only — may embed Basic-auth creds), edited as-is.
-    snapshot_url: snapshot_url || '',
+    // Camera HTTP snapshot endpoint. ⚠️ THE PASSWORD IS STRIPPED, not merely gated behind admin
+    // (issue #271). This used to be returned verbatim while `rtsp_url` and `talk_password` — both also
+    // admin-only, both three lines up — were reduced first. Admin-only is a weaker guarantee than
+    // not-sent: whatever reaches the browser is in the DOM, in memory, and in any error report or
+    // session replay. Same shape as rtsp_display/rtsp_has_password, and `snapshot_password` blank on
+    // save keeps the stored one.
+    snapshot_url: stripUrlPassword(snapshot_url),
+    snapshot_has_password: urlHasPassword(snapshot_url),
   };
 }
 
@@ -956,8 +963,18 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
     motion_mqtt_topic === undefined ? existing.motion_mqtt_topic : (motion_mqtt_topic?.trim() || null);
   const motionValue =
     motion_mqtt_value === undefined ? existing.motion_mqtt_value : (motion_mqtt_value?.trim() || null);
+  // ⚠️ The client no longer receives the snapshot password (issue #271), so it cannot send it back —
+  // which means a plain save would WIPE it. resolveUrlPassword carries the stored one forward, but
+  // only while the submitted URL still points at the same protocol/host/username/path. Retype the
+  // host and the password is dropped rather than silently forwarded to somewhere else.
   const snapUrl =
-    snapshot_url === undefined ? existing.snapshot_url : (snapshot_url?.trim() || null);
+    snapshot_url === undefined
+      ? existing.snapshot_url
+      : resolveUrlPassword({
+          submitted: snapshot_url,
+          stored: existing.snapshot_url,
+          password: req.body?.snapshot_password,
+        });
   const sens =
     sensitivity === undefined
       ? existing.detect_sensitivity
