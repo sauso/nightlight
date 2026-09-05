@@ -483,3 +483,197 @@ describe('MFA enrolment', () => {
     assert.equal(db.prepare('SELECT mfa_enabled FROM users WHERE id = ?').get('u-admin').mfa_enabled, 0);
   });
 });
+
+// -------------------------------------------------------------------------------------------
+// Gaps found by adversarial review of this PR. Each existed because the file tested a route's
+// REFUSAL path (403 for a caregiver) and never its success path — so every rule applied *inside* the
+// route was unreachable by any test, and mutating it away left the suite green.
+describe('gaps found by review — the success paths nobody reached', () => {
+  const admin = async () => loginAs('alice');
+
+  test('★ a backup code is single-use', async () => {
+    // F2: no test ever completed /login/mfa with an actual backup code, so a mutant that VERIFIES the
+    // code correctly but never persists the consumed list — making it infinitely replayable — left
+    // the suite green. That is the whole point of a one-time code.
+    const token = await loginAs('alice');
+    await post('/me/mfa/setup', {}, token);
+    const secret = db.prepare('SELECT mfa_secret FROM users WHERE id = ?').get('u-admin').mfa_secret;
+    const enable = await post('/me/mfa/enable', { code: totp(secret) }, token);
+    assert.equal(enable.status, 200, JSON.stringify(enable.body));
+    const [backup] = enable.body.backup_codes;
+    assert.ok(backup, 'enabling MFA returned no backup codes');
+
+    const first = await post('/login', { username: 'alice', password: PASSWORD });
+    const used = await post('/login/mfa', { mfaToken: first.body.mfaToken, code: backup });
+    assert.equal(used.status, 200, `a fresh backup code was refused: ${JSON.stringify(used.body)}`);
+
+    // The same code again must NOT work.
+    const second = await post('/login', { username: 'alice', password: PASSWORD });
+    const replay = await post('/login/mfa', { mfaToken: second.body.mfaToken, code: backup });
+    assert.equal(replay.status, 401, 'a backup code was accepted twice — it is not being consumed');
+  });
+
+  test('POST /me/mfa/enable succeeds with a correct code, and hands back backup codes', async () => {
+    // F6: the only "enable" case asserted the wrong-code rejection, so everything after the guard —
+    // including generating and storing the backup codes — was untested.
+    const token = await loginAs('alice');
+    await post('/me/mfa/setup', {}, token);
+    const secret = db.prepare('SELECT mfa_secret FROM users WHERE id = ?').get('u-admin').mfa_secret;
+    const res = await post('/me/mfa/enable', { code: totp(secret) }, token);
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.ok(Array.isArray(res.body.backup_codes) && res.body.backup_codes.length > 0, 'no backup codes issued');
+    const row = db.prepare('SELECT mfa_enabled, mfa_backup_codes FROM users WHERE id = ?').get('u-admin');
+    assert.equal(row.mfa_enabled, 1);
+    // Stored HASHED, never in the clear — the same standard as the password.
+    assert.ok(row.mfa_backup_codes, 'no backup codes stored');
+    for (const code of res.body.backup_codes) {
+      assert.ok(!row.mfa_backup_codes.includes(code), `backup code ${code} is stored in plain text`);
+    }
+  });
+
+  test('★ PUT /users/:id sanitises the role, exactly as POST does', async () => {
+    // F3: POST /users has a test for this; PUT did not, and dropping its sanitisation left the suite
+    // green. An arbitrary role string stored verbatim is a privilege question, not a typo question.
+    const token = await admin();
+    const res = await put('/users/u-mfa', { role: 'superuser' }, token);
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(db.prepare('SELECT role FROM users WHERE id = ?').get('u-mfa').role, 'caregiver');
+  });
+
+  test('PUT /users/:id can promote and demote, and 404s for a stranger', async () => {
+    const token = await admin();
+    assert.equal((await put('/users/u-mfa', { role: 'admin' }, token)).status, 200);
+    assert.equal(db.prepare('SELECT role FROM users WHERE id = ?').get('u-mfa').role, 'admin');
+    assert.equal((await put('/users/u-mfa', { role: 'caregiver' }, token)).status, 200);
+    assert.equal(db.prepare('SELECT role FROM users WHERE id = ?').get('u-mfa').role, 'caregiver');
+    assert.equal((await put('/users/nobody', { role: 'admin' }, token)).status, 404);
+  });
+
+  test('PUT /users/:id refuses an empty username, a duplicate, and a short password', async () => {
+    const token = await admin();
+    assert.equal((await put('/users/u-mfa', { username: '   ' }, token)).status, 400);
+    assert.equal((await put('/users/u-mfa', { username: 'alice' }, token)).status, 400, 'a taken username was allowed');
+    assert.equal((await put('/users/u-mfa', { password: 'short' }, token)).status, 400);
+    // None of those may have changed anything.
+    const row = db.prepare('SELECT username FROM users WHERE id = ?').get('u-mfa');
+    assert.equal(row.username, 'bob');
+  });
+
+  test('★ an admin cannot delete their OWN account', async () => {
+    // F4: only the caregiver-403 path was tested, so deleting this guard entirely left the suite
+    // green — and an admin removing themselves is how an install ends up with no administrator.
+    const token = await admin();
+    const res = await call(`${server.url}/api/auth/users/u-admin`, { method: 'DELETE', token });
+    assert.equal(res.status, 400, 'an admin deleted their own account');
+    assert.ok(db.prepare('SELECT 1 FROM users WHERE id = ?').get('u-admin'), 'the account was removed anyway');
+  });
+
+  test('but can delete somebody else — the control', async () => {
+    const token = await admin();
+    const res = await call(`${server.url}/api/auth/users/u-mfa`, { method: 'DELETE', token });
+    assert.equal(res.status, 204);
+    assert.equal(db.prepare('SELECT 1 FROM users WHERE id = ?').get('u-mfa'), undefined);
+    // The FK cascade must take their sessions with them, or a deleted account keeps working.
+    assert.equal(db.prepare('SELECT COUNT(*) c FROM sessions WHERE user_id = ?').get('u-mfa').c, 0);
+  });
+
+  test('an admin can clear a locked-out user’s MFA', async () => {
+    const token = await admin();
+    const res = await call(`${server.url}/api/auth/users/u-mfa/mfa`, { method: 'DELETE', token });
+    assert.equal(res.status, 200);
+    const row = db.prepare('SELECT mfa_enabled, mfa_secret, mfa_backup_codes FROM users WHERE id = ?').get('u-mfa');
+    assert.equal(row.mfa_enabled, 0);
+    assert.equal(row.mfa_secret, null, 'the TOTP secret survived an admin reset');
+    assert.equal(row.mfa_backup_codes, null);
+  });
+
+  test('PUT /me edits your own name without touching anyone else', async () => {
+    // F5: this route had no test at all.
+    const token = await loginAs('alice');
+    const res = await put('/me', { first_name: '  Alicia  ', last_name: '' }, token);
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    const row = db.prepare('SELECT first_name, last_name FROM users WHERE id = ?').get('u-admin');
+    assert.equal(row.first_name, 'Alicia', 'the name was not trimmed');
+    assert.equal(row.last_name, null, 'an empty string should clear the field, not store ""');
+    assert.equal(db.prepare('SELECT first_name FROM users WHERE id = ?').get('u-mfa').first_name, null, 'it edited another account');
+  });
+
+  test('PUT /me cannot be used to change your own role', async () => {
+    // The route only reads first_name/last_name/photo from the body — assert that, because a future
+    // edit that spreads req.body into the UPDATE would be a silent privilege escalation.
+    db.prepare("UPDATE users SET role = 'caregiver' WHERE id = ?").run('u-mfa');
+    const sid = makeSession(db, 'u-mfa');
+    const token = signToken({ id: 'u-mfa', username: 'bob', role: 'caregiver', sid });
+    await put('/me', { first_name: 'Bob', role: 'admin' }, token);
+    assert.equal(db.prepare('SELECT role FROM users WHERE id = ?').get('u-mfa').role, 'caregiver', 'PUT /me changed the caller’s role');
+  });
+});
+
+// -------------------------------------------------------------------------------------------
+// Missing/blank bodies and optional fields. These are the `req.body || {}` and `x?.trim() || null`
+// branches — individually dull, collectively most of this file's branch coverage, and the shape a
+// real client sends when a form field is simply left empty.
+describe('missing and blank fields are handled, not assumed', () => {
+  test('every route survives a completely absent body', async () => {
+    // A request with no JSON body at all must produce a 4xx, never a 500 from reading a property of
+    // undefined. Asserted across the unauthenticated routes, which are the ones an outsider can reach.
+    for (const p of ['/login', '/login/mfa', '/setup']) {
+      const res = await call(`${server.url}/api/auth${p}`, { method: 'POST' });
+      assert.ok(res.status >= 400 && res.status < 500, `${p} returned ${res.status} for an empty body`);
+    }
+  });
+
+  test('optional name fields may be omitted entirely when creating a user', async () => {
+    const token = await loginAs('alice');
+    const res = await post('/users', { username: 'frank', password: 'a-long-enough-pw' }, token);
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    const row = db.prepare('SELECT first_name, last_name FROM users WHERE username = ?').get('frank');
+    assert.equal(row.first_name, null);
+    assert.equal(row.last_name, null);
+  });
+
+  test('blank names are stored as NULL, not as empty strings', async () => {
+    // `?.trim() || null` — the difference matters because the UI renders a blank string as a name.
+    const token = await loginAs('alice');
+    await post('/users', { username: 'gina', password: 'a-long-enough-pw', first_name: '   ', last_name: '' }, token);
+    const row = db.prepare('SELECT first_name, last_name FROM users WHERE username = ?').get('gina');
+    assert.equal(row.first_name, null);
+    assert.equal(row.last_name, null);
+  });
+
+  test('PUT /users/:id leaves a field alone when it is not sent', async () => {
+    const token = await loginAs('alice');
+    await put('/users/u-mfa', { first_name: 'Bobby' }, token);
+    await put('/users/u-mfa', { role: 'caregiver' }, token); // no name in this one
+    assert.equal(db.prepare('SELECT first_name FROM users WHERE id = ?').get('u-mfa').first_name, 'Bobby',
+      'an unrelated update cleared a field it did not mention');
+  });
+
+  test('PUT /users/:id with a password resets it and signs that user out elsewhere', async () => {
+    const token = await loginAs('alice');
+    makeSession(db, 'u-mfa'); // bob is logged in on a device
+    assert.ok(db.prepare('SELECT COUNT(*) c FROM sessions WHERE user_id = ?').get('u-mfa').c > 0);
+    const res = await put('/users/u-mfa', { password: 'a-brand-new-password' }, token);
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    const row = db.prepare('SELECT password_hash FROM users WHERE id = ?').get('u-mfa');
+    assert.ok(bcrypt.compareSync('a-brand-new-password', row.password_hash), 'the new password does not verify');
+    assert.equal(
+      db.prepare('SELECT COUNT(*) c FROM sessions WHERE user_id = ?').get('u-mfa').c,
+      0,
+      'an admin password reset left the user signed in — the old credential outlived itself'
+    );
+  });
+
+  test('GET /users lists accounts without any secret column', async () => {
+    const res = await call(`${server.url}/api/auth/users`, { token: await loginAs('alice') });
+    assert.equal(res.status, 200);
+    assert.ok(res.body.length >= 2);
+    assert.doesNotMatch(JSON.stringify(res.body), /\$2[aby]\$/, 'the user list returned a bcrypt hash');
+  });
+
+  test('GET /status reports whether setup has happened', async () => {
+    const res = await call(`${server.url}/api/auth/status`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.needsSetup, false, 'users exist, so setup must not be offered');
+  });
+});
