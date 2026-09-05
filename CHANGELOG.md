@@ -55,6 +55,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **The test suite could silently skip a third of itself and still report no failures.** The activity
+  tracker started two timers that nothing could stop, so `node --test` was never able to exit on its
+  own and the whole suite ran under `--test-force-exit`. On a loaded CI runner that flag ended the run
+  about six seconds in, cancelling 14 of 34 test files — reported as `fail 0, cancelled 14`, with the
+  core-logic coverage gate then reading the modules that never ran as a coverage regression. The
+  tracker now has a matching stop, which shutdown calls, and the flag is gone. No change to how
+  Nightlight itself behaves.
+
 - **Deleting a child left its recordings and timelapses on disk forever.** Their database rows kept
   pointing at a child that no longer existed, so nothing listed them and nothing ever cleaned them up —
   up to 30 timelapse videos per child, plus every manual recording. Manual recordings are the worse

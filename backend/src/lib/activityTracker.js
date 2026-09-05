@@ -149,3 +149,30 @@ export function startActivityTracker() {
   pruneActivitySamples();
   logger.info(`[activity] Bucketing motion/sound activity per minute, keeping ${RETENTION_DAYS} days.`);
 }
+
+// Stop both timers. Idempotent, and safe to call when it was never started.
+//
+// ⚠️ THIS WAS MISSING AND IT COST US THE TEST SUITE (issue #278). Two intervals with no way to clear
+// them keep the event loop alive forever, so `node --test` could never exit — which was papered over
+// with `--test-force-exit` in all three npm scripts rather than fixed here. That flag then became the
+// actual bug: under CPU contention on a 2-core CI runner the parent runner force-exited ~6s in, while
+// 14 of 34 files were still queued, and reported them as failures with `fail 0, cancelled 14`. A
+// suite that reports a third of itself as red without a single failing assertion is worse than a slow
+// one, and the coverage gate then read the modules that never ran as a regression that did not exist.
+//
+// Deliberately NOT `unref()` instead: unref would let the process exit while leaving the timers
+// running, which fixes the symptom by making the tracker's lifetime invisible. An explicit stop is
+// what shutdown() actually needs, and it is the thing a test can assert.
+export function stopActivityTracker() {
+  clearInterval(flushTimer);
+  clearInterval(pruneTimer);
+  // ⚠️ ONLY `flushTimer = null` IS LOAD-BEARING, and saying "nulls the handles" plural was an
+  // overstatement caught by adversarial review of this PR: `startActivityTracker` guards on
+  // `if (flushTimer) return` and nothing anywhere reads `pruneTimer`'s truthiness, so dropping the
+  // second line survives every test in the suite — verified by mutation. Without the first line a
+  // restart after a stop is a silent no-op.
+  // `pruneTimer` is still nulled, deliberately: releasing the handle for GC and keeping the two in
+  // the same state costs nothing, and a future guard that reads either one then cannot be wrong.
+  flushTimer = null;
+  pruneTimer = null;
+}

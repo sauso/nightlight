@@ -36,7 +36,7 @@ import { initPush } from './lib/push.js';
 import { startMediaMTX, stopMediaMTX } from './lib/mediamtxProcess.js';
 import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
 import { startSensorSampler } from './lib/sensorSampler.js';
-import { startActivityTracker } from './lib/activityTracker.js';
+import { startActivityTracker, stopActivityTracker } from './lib/activityTracker.js';
 import { startSleepJob } from './lib/sleepAnalysis.js';
 import { startWakeWatcher } from './lib/wakeWatcher.js';
 import { startTimelapseSampler } from './lib/timelapse.js';
@@ -628,6 +628,16 @@ async function shutdown() {
   await stopAllTranscoders();
   stopMediaMTX();
   stopMqtt();
+  // Grouped with the other background stops, and placed AFTER the detector stops on purpose: the
+  // detectors feed recordMotion/recordSound, so clearing the flusher earlier would only widen the
+  // window in which activity is accumulated and never written. Placing it here preserves exactly the
+  // previous behaviour while giving the process a way to exit that is not `process.exit`.
+  //
+  // ⚠️ It does NOT flush the partial minute still sitting in the in-memory buckets. That row was
+  // already lost to `process.exit(0)` before this line existed, so writing one here would be a new
+  // behaviour smuggled in under a bug fix — see issue #278. If that minute turns out to matter,
+  // it is its own change with its own test.
+  stopActivityTracker();
   process.exit(0);
 }
 process.on('SIGTERM', shutdown);
