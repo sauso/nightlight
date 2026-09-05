@@ -183,3 +183,18 @@ export function startClipStorage() {
     sweepTimer.unref?.();
   }
 }
+
+// Stop the retention sweep. Idempotent, and safe when it was never started.
+//
+// ⚠️ Found by the class guard added for issue #286, not by the issue itself — which named only
+// sleepAnalysis and sensorSampler. This one was already SAFE from the #278 failure mode, because the
+// timer is `unref()`d and so never holds the event loop open; that is why nothing ever noticed. It
+// gets a stop anyway so the rule stays uniform ("a periodic start has a matching stop", with no
+// exceptions to remember) and so shutdown can be explicit rather than relying on `process.exit(0)`
+// to take the timer down with it.
+export function stopClipStorage() {
+  clearInterval(sweepTimer);
+  // Nulled, not merely cleared: `startClipStorage` guards on `if (!sweepTimer)`, so a stale handle
+  // here would make every later restart a silent no-op.
+  sweepTimer = null;
+}

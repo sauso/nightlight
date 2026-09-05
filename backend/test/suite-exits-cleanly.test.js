@@ -30,6 +30,7 @@ import { readFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { walkSources, stripCommentsAndStrings } from './helpers/sourceScan.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BACKEND = path.resolve(HERE, '..');
@@ -59,7 +60,7 @@ function cleanEnv() {
 // Runs `body` in a FRESH node process and reports whether that process exited by itself.
 // A child is the only honest way to ask this question: a leaked handle is a property of a whole
 // process, and the process running these assertions is the same one the leak would be in.
-function childExitsOnItsOwn(body, timeoutMs = EXIT_DEADLINE_MS) {
+function childExitsOnItsOwn(body, timeoutMs = EXIT_DEADLINE_MS, modulePath = 'src/lib/activityTracker.js') {
   const dir = mkdtempSync(path.join(tmpdir(), 'nightlight-exit-'));
   const script = path.join(dir, 'probe.mjs');
   writeFileSync(
@@ -70,7 +71,7 @@ function childExitsOnItsOwn(body, timeoutMs = EXIT_DEADLINE_MS) {
       // resulting ERR_INVALID_FILE_URL_PATH makes the child exit ~1 instantly — which reads as "it
       // exited on its own" and would have made the leak test pass for entirely the wrong reason.
       // The `status === 0` assertion below is what caught that.
-      `const at = await import(${JSON.stringify(pathToFileURL(path.join(BACKEND, 'src/lib/activityTracker.js')).href)});\n` +
+      `const at = await import(${JSON.stringify(pathToFileURL(path.join(BACKEND, modulePath)).href)});\n` +
       body +
       // Printed AFTER the body, and flushed before any hang. It is what separates "the child hung
       // holding a leaked timer" from "the child hung, or crashed, somewhere earlier for an unrelated
@@ -238,5 +239,128 @@ describe('the whole suite terminates without being forced', () => {
     // vacuous again if the reporter changes under it.
     const passed = Number(/(?:^|\n)[ℹ#]\s*pass (\d+)/.exec(stdout)?.[1] ?? 0);
     assert.ok(passed > 0, `the run came back without passing any tests — did the target file move?\n${stdout.slice(-400)}`);
+  });
+});
+
+// -------------------------------------------------------------------------------------------
+// The CLASS, not just the instance — issue #286.
+//
+// #278 was one module (activityTracker) with a start and no stop. Fixing that module did not stop the
+// same shape existing elsewhere: `startSleepJob()` and `startSensorSampler()` had it too, and the only
+// reason they never cost us the suite is that the one test calling startSleepJob for real wraps it in
+// `mock.timers.enable`, so no real interval is ever created — a coincidence of how a test is written,
+// not a property of the code. Nothing called startSensorSampler in a test at all.
+//
+// ★ The guard below is the durable half: it fails closed for modules that DO NOT EXIST YET, which is
+// the property the npm-script check lacks. That check stops the symptom (`--test-force-exit`) coming
+// back; this stops the cause.
+describe('every periodic job can be stopped (#286)', () => {
+  // ⚠️ `pinsLoop` is NOT decoration. A timer that is `unref()`d does not hold the event loop open, so
+  // it can never cause the #278 failure — and for those modules the "start pins the process" control
+  // below is simply false. Asserting it anyway would be asserting something untrue about correct code.
+  // wakeWatcher and clipStorage both unref; the other three do not, which is why they were the risk.
+  const PERIODIC = [
+    { module: 'src/lib/activityTracker.js', start: 'startActivityTracker', stop: 'stopActivityTracker', pinsLoop: true },
+    { module: 'src/lib/sensorSampler.js', start: 'startSensorSampler', stop: 'stopSensorSampler', pinsLoop: true },
+    { module: 'src/lib/sleepAnalysis.js', start: 'startSleepJob', stop: 'stopSleepJob', pinsLoop: true },
+    { module: 'src/lib/wakeWatcher.js', start: 'startWakeWatcher', stop: 'stopWakeWatcher', pinsLoop: false },
+    { module: 'src/lib/clipStorage.js', start: 'startClipStorage', stop: 'stopClipStorage', pinsLoop: false },
+  ];
+
+  for (const { module, start, stop, pinsLoop } of PERIODIC) {
+    test(`${start} can be undone, and the process then exits`, () => {
+      const r = childExitsOnItsOwn(`at.${start}();\nat.${stop}();\n`, EXIT_DEADLINE_MS, module);
+      assert.ok(r.exited, `${module} had to be killed after ${start}/${stop} — a timer survived. stderr: ${r.stderr}`);
+      assert.equal(r.status, 0, `${module} exited ${r.status}: ${r.stderr}`);
+    });
+
+    test(`...and ${start} ${pinsLoop ? 'really does pin the process without it' : 'unrefs its timers, so it cannot pin the process'}`, () => {
+      const r = childExitsOnItsOwn(`at.${start}();
+`, HANG_DEADLINE_MS, module);
+      assert.ok(r.ranBody, `the probe never reached the end for ${module}: ${r.stderr}`);
+      // For a module that pins the loop this is the control that makes the pair above meaningful.
+      // For one that unrefs, the honest assertion is the opposite: it must NOT pin, because that is
+      // the property keeping it clear of #278 in the first place.
+      assert.equal(
+        r.exited,
+        !pinsLoop,
+        pinsLoop
+          ? `${start} does not hold the event loop open — the start/stop pair above proves nothing`
+          : `${start} pinned the process despite unref() — it is now exposed to the #278 failure mode`
+      );
+    });
+  }
+
+  test('★ no module exports a startX that creates an interval without a matching stopX', () => {
+    // ⚠️ THE FAIL-CLOSED GUARD. Discovered by walking src/, not by a list someone maintains — a new
+    // periodic job added next year is covered on the day it lands, which is exactly what the list
+    // above cannot do for code that does not exist yet. It has already earned that: it found
+    // clipStorage, which issue #286 did not name.
+    //
+    // ⚠️ THE ANTI-VACUOUS HALF IS INSIDE THIS TEST ON PURPOSE. It used to be a separate case that
+    // re-derived the sweep for itself, so narrowing THIS loop — or dropping the setInterval filter —
+    // left both cases green while the guard examined nothing at all. Mutation testing showed exactly
+    // that: two mutants that neutered the guard survived. Asserting on what this loop actually
+    // examined is the only version that cannot be quietly switched off.
+    const examined = [];
+    const offenders = [];
+    for (const { rel, src } of walkSources()) {
+      const code = stripCommentsAndStrings(src);
+      // A module qualifies as periodic only if it BOTH exports a start and calls setInterval — a
+      // module that merely mentions the word is not swept in.
+      if (!/\bsetInterval\s*\(/.test(code)) continue;
+      examined.push(rel);
+      for (const m of code.matchAll(/export\s+function\s+(start\w*)\s*\(/g)) {
+        const startName = m[1];
+        const stopName = startName.replace(/^start/, 'stop');
+        if (!new RegExp(String.raw`export\s+function\s+${stopName}\s*\(`).test(code)) {
+          offenders.push(`${rel}: ${startName}() has no ${stopName}()`);
+        }
+      }
+    }
+    // Anti-vacuous FIRST: if the loop examined nothing, an empty `offenders` means nothing.
+    for (const { module } of PERIODIC) {
+      const rel = module.replace(/^src\//, '');
+      assert.ok(examined.includes(rel), `the guard did not examine ${rel} — it has stopped covering it`);
+    }
+    assert.ok(
+      examined.length >= PERIODIC.length,
+      `the guard examined only ${examined.length} module(s) — the walk or the setInterval filter has stopped matching`
+    );
+
+    assert.deepEqual(
+      offenders,
+      [],
+      'a periodic job cannot be stopped (issue #286). A setInterval nothing can clear keeps `node --test` ' +
+        'alive forever, which is what forced --test-force-exit and cost a third of the suite in #278:\n  ' +
+        offenders.join('\n  ')
+    );
+  });
+
+  test('★ a stop must NULL its handle, or the next start is a silent no-op', () => {
+    // Every one of these guards on `if (timer) return` (or `if (!timer)`), so a stop that clears the
+    // handle without nulling it leaves the module permanently stopped: the restart looks like it
+    // worked and nothing runs again. Mutation testing found this uncovered for the new stops — the
+    // clear-but-do-not-null mutant survived, because every other case here stops and never restarts.
+    //
+    // Counts real setInterval calls in a child, which is the only observable difference: a restart
+    // that silently did nothing registers no new timers.
+    for (const { module, start, stop } of PERIODIC) {
+      const r = childExitsOnItsOwn(
+        `at.${start}();\n` +
+          `at.${stop}();\n` +
+          'let created = 0;\n' +
+          'const realSetInterval = globalThis.setInterval;\n' +
+          'globalThis.setInterval = (...a) => { created += 1; return realSetInterval(...a); };\n' +
+          `at.${start}();\n` +
+          'globalThis.setInterval = realSetInterval;\n' +
+          `at.${stop}();\n` +
+          `if (created === 0) { console.error('restart after stop created no timers'); process.exit(3); }\n`,
+        EXIT_DEADLINE_MS,
+        module
+      );
+      assert.ok(r.exited, `${module}: the child had to be killed — ${r.stderr}`);
+      assert.equal(r.status, 0, `${module}: ${stop}() did not null its handle, so ${start}() is now inert — ${r.stderr}`);
+    }
   });
 });
