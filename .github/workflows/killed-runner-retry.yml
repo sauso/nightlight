@@ -17,6 +17,13 @@ name: Killed-runner triage
 # goes green with nobody touching it, and the summary says which of the two things happened. A genuine
 # failure is left completely alone, so red still means red.
 
+# ⚠️⚠️ THIS DOES NOTHING UNTIL IT IS ON `main`. GitHub: "This event will only trigger a workflow run
+# if the workflow file exists on the default branch." The default branch here is `main`, and work lands
+# on `dev` — so merging this to `dev` does NOT switch it on. It starts working at the next release, and
+# until then the false-alarm notifications continue exactly as before.
+#
+# It is CI-only and never enters the Docker image (the Dockerfile copies `frontend/`, `backend/` and
+# `mediamtx/` only), so it can ride along with any release without needing one of its own.
 on:
   workflow_run:
     workflows: ["Tests and checks"]
