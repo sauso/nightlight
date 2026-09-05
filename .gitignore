@@ -19,6 +19,11 @@ data/
 .vscode/
 .idea/
 
+# ...but test fixtures are source, not cruft. `*.log` above silently swallowed a captured CI log used
+# as a fixture: the test passed locally against an untracked file and went red the moment CI checked
+# the branch out clean. Everything under a fixtures/ directory is committed on purpose.
+!**/test/fixtures/**
+
 # Firebase service-account credential — a secret, mounted into the data dir, never committed.
 firebase-service-account.json
 **/firebase-service-account.json

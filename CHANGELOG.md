@@ -55,13 +55,18 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
-- **The test suite could silently skip a third of itself and still report no failures.** The activity
-  tracker started two timers that nothing could stop, so `node --test` was never able to exit on its
-  own and the whole suite ran under `--test-force-exit`. On a loaded CI runner that flag ended the run
-  about six seconds in, cancelling 14 of 34 test files — reported as `fail 0, cancelled 14`, with the
-  core-logic coverage gate then reading the modules that never ran as a coverage regression. The
-  tracker now has a matching stop, which shutdown calls, and the flag is gone. No change to how
-  Nightlight itself behaves.
+- **The activity tracker started two timers that nothing could stop.** `node --test` could therefore
+  never exit on its own, and the whole suite ran under `--test-force-exit` to compensate. Shutdown had
+  the same gap — it stops every detector and transcoder but never these timers, and only the hard
+  `process.exit(0)` on the next line hid it. The tracker now has a matching stop, which shutdown calls,
+  and the flag is gone. No change to how Nightlight itself behaves.
+  - ⚠️ An earlier version of this entry also credited that change with fixing the intermittently red
+    CI runs. **That was wrong**, and is corrected here rather than quietly dropped: those runs were
+    the GitHub-hosted runner being killed mid-job, which still happens and is tracked in issue #278.
+    CI now tells the two apart — a run whose log carries the runner's shutdown marker *and* reports no
+    failing test anywhere is retried automatically once and labelled as an infrastructure failure. A run
+    reporting **any** failing test is left alone, as is one whose logs cannot be read or whose summary
+    is missing: it only retries what it can positively show was not a test failure.
 
 - **Deleting a child left its recordings and timelapses on disk forever.** Their database rows kept
   pointing at a child that no longer existed, so nothing listed them and nothing ever cleaned them up —
