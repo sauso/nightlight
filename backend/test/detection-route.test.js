@@ -21,7 +21,7 @@
 // real frame-diff, ONVIF, sound and clip-ring legs for an enabled camera — FFmpeg processes this
 // suite has no business spawning — and that whole block sits behind `if (!updated.disabled)`. The
 // field handling under test runs before it and is not affected by the flag.
-import { test, before, after, beforeEach } from 'node:test';
+import { test, describe, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   useTempDataDir, cleanupTempDataDirs, makeUser, makeSession, makeCamera, signToken, mountRouter, call,
@@ -64,6 +64,15 @@ const CONFIGURED = {
 
 const put = (body, token = adminToken) =>
   call(`${server.url}/api/cameras/${CAM}/detection`, { method: 'PUT', token, body });
+
+// The full body the detection screen sends. A function, not a constant, so a case that mutates it
+// cannot leak into the next one.
+const CONFIGURED_PAYLOAD = () => ({
+  motion_enabled: true, sensitivity: 61, cooldown_s: 45, confirm_s: 7,
+  schedule_enabled: true, start: 1140, end: 400, source: 'framediff',
+  motion_mqtt_topic: 'cam/motion', motion_mqtt_value: 'ON',
+  sound_enabled: true, sound_sensitivity: 72, sound_confirm_s: 6, sound_cooldown_s: 200,
+});
 
 const row = () => db.prepare('SELECT * FROM cameras WHERE id = ?').get(CAM);
 
@@ -266,4 +275,51 @@ test('★ a caregiver cannot change detection settings', async () => {
   const res = await put({ motion_enabled: true, sensitivity: 5 }, caregiverToken);
   assert.equal(res.status, 403);
   assert.equal(row().detect_sensitivity, before, 'and nothing was written on the way to being refused');
+});
+
+// -------------------------------------------------------------------------------------------
+// Snapshot credentials survive a round trip through the form — issue #271.
+//
+// ⚠️ THIS IS THE CLIENT/SERVER SEAM, and a unit test on urlCredentials.js cannot reach it. The server
+// now strips the password before sending, so the form CANNOT send it back; if the PUT handler did not
+// carry the stored one forward, every ordinary save of the detection screen would silently wipe the
+// snapshot credential and alert images would start failing with no visible cause.
+describe('snapshot_url credentials (#271)', () => {
+  const SECRET = 'snap-secret-7c1';
+  const WITH_PW = `http://admin:${SECRET}@cam.local/snap.jpg`;
+  const setStored = (v) => db.prepare('UPDATE cameras SET snapshot_url = ? WHERE id = ?').run(v, CAM);
+
+  test('a save that does not mention the password keeps it', async () => {
+    setStored(WITH_PW);
+    // Exactly what the form now sends: the stripped URL it was given, and no password field at all.
+    const res = await put({ ...CONFIGURED_PAYLOAD(), snapshot_url: 'http://admin@cam.local/snap.jpg' });
+    assert.equal(res.status, 200);
+    assert.equal(row().snapshot_url, WITH_PW, 'an ordinary save wiped the stored snapshot password');
+  });
+
+  test('and the response still never contains it', async () => {
+    setStored(WITH_PW);
+    const res = await put({ ...CONFIGURED_PAYLOAD(), snapshot_url: 'http://admin@cam.local/snap.jpg' });
+    assert.ok(!JSON.stringify(res.body).includes(SECRET), `the password came back in the PUT response: ${JSON.stringify(res.body)}`);
+    assert.equal(res.body.snapshot_has_password, true, 'the form cannot tell a password is set');
+  });
+
+  test('typing a new password replaces it', async () => {
+    setStored(WITH_PW);
+    const res = await put({ ...CONFIGURED_PAYLOAD(), snapshot_url: 'http://admin@cam.local/snap.jpg', snapshot_password: 'replaced' });
+    assert.equal(res.status, 200);
+    assert.equal(row().snapshot_url, 'http://admin:replaced@cam.local/snap.jpg');
+  });
+
+  test('★ pointing the URL at a different host does NOT forward the password', async () => {
+    setStored(WITH_PW);
+    await put({ ...CONFIGURED_PAYLOAD(), snapshot_url: 'http://somewhere-else.example/snap.jpg' });
+    assert.ok(!row().snapshot_url.includes(SECRET), `the stored credential was sent to a new host: ${row().snapshot_url}`);
+  });
+
+  test('clearing the field clears the endpoint', async () => {
+    setStored(WITH_PW);
+    await put({ ...CONFIGURED_PAYLOAD(), snapshot_url: '' });
+    assert.equal(row().snapshot_url, null);
+  });
 });

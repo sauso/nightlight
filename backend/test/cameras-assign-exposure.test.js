@@ -182,18 +182,19 @@ describe('PUT /cameras/:id/assign as an admin', () => {
     for (const field of ['rtsp_url', 'sub_rtsp_url', 'onvif_username', 'onvif_password', 'talk_password']) {
       assert.equal(r.body[field], undefined, `${field} was returned to an admin as a raw value`);
     }
-    // KNOWN AND DELIBERATE, not an oversight: snapshot_url comes back to an admin VERBATIM, embedded
-    // Basic-auth credentials included, because the edit box has to show what the operator typed. It is
-    // the one credential-bearing column publicCamera returns raw, and it is inconsistent with how the
-    // same function treats the RTSP and talk passwords (components + a has_password flag) and with
-    // diagnostics.js, which reduces this column to a boolean. Tracked separately; asserted here so the
-    // contract is explicit and a change to it is a deliberate act. Caregivers never receive it — that
-    // is asserted above.
-    assert.equal(r.body.snapshot_url, `http://admin:${PLANTED}@192.0.2.10/snap.jpg`);
-    const { snapshot_url, ...rest } = r.body;
+    // ★ FIXED in issue #271. This assertion used to pin the OPPOSITE: snapshot_url came back to an
+    // admin verbatim, embedded Basic-auth credentials included, marked "known and deliberate" because
+    // the edit box had to show what the operator typed. It was the one credential-bearing column
+    // publicCamera returned raw, three lines from two that were handled correctly. It now gets the
+    // same treatment as the RTSP password — the URL without the password, plus a has_password flag.
+    assert.equal(r.body.snapshot_url, 'http://admin@192.0.2.10/snap.jpg', 'the password is still in the URL');
+    assert.equal(r.body.snapshot_has_password, true, 'the admin cannot tell a password is set');
+    // ★★ NO CARVE-OUT ANY MORE. This used to destructure snapshot_url out before scanning, which is
+    // precisely how the leak stayed invisible: the one field that leaked was the one excluded from the
+    // check. The planted marker must now appear NOWHERE in the whole response.
     assert.ok(
-      !JSON.stringify(rest).includes(PLANTED),
-      `a raw credential reached the admin response: ${JSON.stringify(rest)}`
+      !JSON.stringify(r.body).includes(PLANTED),
+      `a raw credential reached the admin response: ${JSON.stringify(r.body)}`
     );
   });
 });

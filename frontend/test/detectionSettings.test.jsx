@@ -360,3 +360,84 @@ describe('the clip opt-in', () => {
     expect((await sentBody()).record_clips).toBe(true);
   });
 });
+
+// -------------------------------------------------------------------------------------------
+// The snapshot password the server will not send back — issue #271.
+//
+// The server strips the Basic-auth password from snapshot_url before it leaves, so this screen can
+// only ever be told WHETHER one is set. That makes the blank-means-keep contract load-bearing: if the
+// screen sent an empty snapshot_password on an ordinary save, the route would read it as "clear it"
+// and every save of this page would quietly break alert images.
+describe('the snapshot password field (#271)', () => {
+  const WITH_PW = { ...CAM, snapshot_url: 'http://admin@cam.local/snap.jpg', snapshot_has_password: true };
+
+  test('an ordinary save sends NO snapshot_password at all', async () => {
+    mount('motion', WITH_PW);
+    fireEvent.change(await screen.findByLabelText(/Sensitivity/), { target: { value: '30' } });
+    const body = await sentBody();
+    expect('snapshot_password' in body).toBe(false);
+    expect(body.snapshot_url).toBe('http://admin@cam.local/snap.jpg');
+  });
+
+  test('typing one sends it', async () => {
+    mount('motion', WITH_PW);
+    fireEvent.change(await screen.findByLabelText(/Alert image password/), { target: { value: 'typed-pw' } });
+    const body = await sentBody();
+    expect(body.snapshot_password).toBe('typed-pw');
+  });
+
+  test('the field never shows the stored password — only that there is one', async () => {
+    mount('motion', WITH_PW);
+    const input = await screen.findByLabelText(/Alert image password/);
+    expect(input.value).toBe('');
+    expect(input.type).toBe('password');
+    expect(await screen.findByText(/never sent back to this page/i)).toBeTruthy();
+  });
+
+  test('a camera with no stored password says so instead', async () => {
+    mount('motion', { ...CAM, snapshot_has_password: false });
+    expect(await screen.findByLabelText(/Alert image password \(optional\)/)).toBeTruthy();
+  });
+});
+
+// -------------------------------------------------------------------------------------------
+// The "(saved)" label must reflect the SERVER, not a snapshot taken at mount — issue #271.
+//
+// Found by adversarial review of that PR. `fromCam` runs exactly once per mount (the `initedRef`
+// guard), which is right for every editable field: the client's own value already matches what will
+// come back. `snapshot_has_password` is the one field here that is a server-computed FACT the client
+// cannot otherwise know, so freezing it at mount meant an admin who typed a password and saved was
+// still told "(optional)" until they navigated away and back — the CHANGELOG claims the label says
+// "(saved)", and mid-session it did not.
+describe('the snapshot password label follows the server (#271)', () => {
+  test('★ it becomes "(saved)" after the save that sets one, without a remount', async () => {
+    const { rerenderWith } = mount('motion', { ...CAM, snapshot_has_password: false });
+    expect(await screen.findByLabelText(/Alert image password \(optional\)/)).toBeTruthy();
+
+    // What CamerasContext.refresh() really does after a successful PUT: publishes a fresh cameras
+    // array. The harness's own `refresh` is a no-op spy, which is exactly why the shipped tests could
+    // not catch this.
+    rerenderWith({ cameras: [{ ...CAM, snapshot_has_password: true }] });
+
+    expect(await screen.findByLabelText(/Alert image password \(saved\)/)).toBeTruthy();
+  });
+
+  test('...and back to "(optional)" if the password is cleared server-side', async () => {
+    // The mirror. A one-way sync would pass the case above and still be wrong.
+    const { rerenderWith } = mount('motion', { ...CAM, snapshot_has_password: true });
+    expect(await screen.findByLabelText(/Alert image password \(saved\)/)).toBeTruthy();
+    rerenderWith({ cameras: [{ ...CAM, snapshot_has_password: false }] });
+    expect(await screen.findByLabelText(/Alert image password \(optional\)/)).toBeTruthy();
+  });
+
+  test('a server refresh does NOT clobber what the user is still typing', async () => {
+    // The reason this is derived from `cam` rather than synced INTO form state: a refresh landing
+    // mid-edit must not wipe the URL box. This is the regression a naive "re-run fromCam on every
+    // cam change" fix would introduce.
+    const { rerenderWith } = mount('motion', CAM);
+    const url = await screen.findByLabelText(/Alert image URL/);
+    fireEvent.change(url, { target: { value: 'http://typing-in-progress/snap.jpg' } });
+    rerenderWith({ cameras: [{ ...CAM, snapshot_has_password: true }] });
+    expect((await screen.findByLabelText(/Alert image URL/)).value).toBe('http://typing-in-progress/snap.jpg');
+  });
+});

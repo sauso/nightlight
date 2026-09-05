@@ -171,6 +171,26 @@ without the other, and each has its own sensitivity, confirmation delay and cool
 | **Sound confirm** | 4 s | 0–30 s | Loudness must stay above that margin, *on average*, for this long — so a pulsing cry still counts while a single bang does not. |
 | **Sound cooldown** | 120 s | 1–3600 s | Minimum gap between sound alerts from this camera. |
 
+### Alert image URL (optional)
+
+If your camera exposes an HTTP snapshot endpoint, put it here and alert images are grabbed from it
+instead of from a stream frame — faster and clearer. It applies to **both motion and sound** alerts.
+Leave it blank to use a stream frame.
+
+| Setting | Default | What it does |
+|---|---|---|
+| **Alert image URL** | blank | e.g. `http://192.168.1.50/snapshot.jpg`. If the endpoint needs a username, include it: `http://admin@192.168.1.50/snapshot.jpg`. |
+| **Alert image password** | blank | Only if the endpoint needs one. Blank means *keep whatever is already saved*. |
+
+**The password is stored but never shown again.** Like the camera's RTSP and two-way-audio passwords,
+it is never sent back to the browser — the field stays blank and the label says *(saved)* when one is
+stored. Type a new one to replace it; leave it blank to keep it.
+
+⚠️ **Changing the address to a different host drops the saved password.** If you edit the URL so it
+points at a different scheme, host, port, username or path, the stored password is *not* carried over
+and you will need to enter it again. That is deliberate: it stops one camera's credential being sent
+to a machine you just typed the name of.
+
 ### Alert schedule (quiet hours)
 
 **Cameras → edit a camera → Alert schedule.** Off by default, which means the camera alerts 24/7.

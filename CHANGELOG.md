@@ -262,6 +262,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   across all cameras. Detection itself is unchanged — this affected only the diagnostic report.
 
 ### Security
+- **The alert-image password is no longer sent back to the browser.** If your camera's snapshot URL
+  carried a username and password, the whole URL — password included — was returned to any signed-in
+  admin and sat in the settings page. Every other camera password is already handled the other way:
+  stored, never returned, with the field left blank. This one now matches. **You will see the password
+  box empty with *(saved)* beside it** — leave it blank to keep what is stored, or type a new one to
+  replace it. ⚠️ **Point the URL at a different host and the saved password is dropped**, so one
+  camera's credential can never be sent somewhere you have just retyped; you will be asked for it
+  again. Nothing to do unless you change a snapshot URL. See
+  [docs/notifications.md](docs/notifications.md).
+
 - **Notification credentials were readable without signing in.** The settings endpoint is deliberately
   reachable before you log in, because the login screen needs the app name, colours and font. It
   filtered its response by *excluding* the MQTT broker fields — correct when it was written, but the

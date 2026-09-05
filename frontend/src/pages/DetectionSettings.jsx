@@ -42,6 +42,16 @@ function fromCam(cam) {
     motion_mqtt_topic: cam.motion_mqtt_topic || '',
     motion_mqtt_value: cam.motion_mqtt_value || '',
     snapshot_url: cam.snapshot_url || '',
+    // The server never sends the snapshot password (issue #271) — only whether one is set. The input
+    // starts blank, and blank means "keep whatever is stored".
+    //
+    // ⚠️ `snapshot_has_password` is deliberately NOT held here. This object is built exactly once per
+    // mount (the initedRef guard below), which is correct for every editable field — the client's own
+    // value already matches what will come back. That flag is the one thing on this screen that is a
+    // server-computed FACT the client cannot know, so freezing it left an admin who had just saved a
+    // password still reading "(optional)" until they navigated away and back. It is read straight off
+    // `cam` at render instead. Found by adversarial review of #271.
+    snapshot_password: '',
     sound_enabled: !!cam.detect_sound_enabled,
     sound_sensitivity: cam.sound_sensitivity ?? 50,
     sound_confirm_s: cam.sound_confirm_s ?? 4,
@@ -64,6 +74,8 @@ function toPayload(d) {
     motion_mqtt_topic: d.motion_mqtt_topic,
     motion_mqtt_value: d.motion_mqtt_value,
     snapshot_url: d.snapshot_url,
+    // Omitted when blank so the server keeps the stored password rather than clearing it.
+    ...(d.snapshot_password ? { snapshot_password: d.snapshot_password } : {}),
     sound_enabled: !!d.sound_enabled,
     sound_sensitivity: Number(d.sound_sensitivity),
     sound_confirm_s: Number(d.sound_confirm_s),
@@ -181,6 +193,13 @@ function MotionForm({ d, apply, cameraId, cam }) {
   // at ONVIF add/re-probe time — otherwise a subscription would just sit idle. (A camera stuck on
   // the onvif source after losing capability still shows the button so it can be switched away.)
   const showOnvif = !!cam?.onvif_motion_capable || d.source === 'onvif';
+  // ⚠️ READ FROM `cam` ON EVERY RENDER, not held in `d`. Whether a snapshot password is stored is a
+  // server fact the client cannot compute, so it has to follow the refreshed camera row — otherwise
+  // it stays frozen at whatever it was when the screen mounted, and an admin who has just saved a
+  // password is still told there isn't one. Deriving it also means a refresh landing mid-edit updates
+  // this label WITHOUT touching anything the user is currently typing, which re-running `fromCam`
+  // would have done. Issue #271, found by adversarial review.
+  const hasSnapshotPassword = !!cam?.snapshot_has_password;
   return (
     <>
       <EnableToggle checked={d.motion_enabled} onChange={(v) => apply({ motion_enabled: v })}
@@ -255,7 +274,23 @@ function MotionForm({ d, apply, cameraId, cam }) {
               onChange={(e) => apply({ snapshot_url: e.target.value })} />
             <div className="camera-tile__sub">
               If your camera has an HTTP snapshot endpoint, alert images are grabbed from it — instant and clearer than
-              a stream frame. Basic-auth in the URL works. Applies to both motion and sound alerts.
+              a stream frame. Applies to both motion and sound alerts.
+            </div>
+          </div>
+
+          <div className="field" style={{ marginTop: 10 }}>
+            <label htmlFor="snapshot-password">
+              Alert image password {hasSnapshotPassword ? '(saved)' : '(optional)'}
+            </label>
+            <input id="snapshot-password" type="password" autoComplete="new-password"
+              value={d.snapshot_password}
+              placeholder={hasSnapshotPassword ? 'Leave blank to keep the saved password' : 'Only if the endpoint needs one'}
+              onChange={(e) => apply({ snapshot_password: e.target.value })} />
+            <div className="camera-tile__sub">
+              {hasSnapshotPassword
+                ? 'A password is saved for this endpoint. It is never sent back to this page — leave this blank to keep it, or type a new one to replace it.'
+                : 'If the snapshot endpoint needs a username and password, put the username in the URL above and the password here.'}
+              {' '}Changing the address above to a different host drops the saved password, so it is never sent somewhere new.
             </div>
           </div>
 
