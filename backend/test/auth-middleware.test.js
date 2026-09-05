@@ -29,7 +29,14 @@ before(async () => {
   const router = Router();
   router.get('/session', requireAuth, (req, res) => res.json({ user: req.user.username, role: req.user.role }));
   router.get('/admin-only', requireAuth, requireAdmin, (_req, res) => res.json({ ok: true }));
-  router.get('/media', requireAuthQueryOrHeader, (req, res) => res.json({ user: req.user.username }));
+  // `role` is returned here so a role change is OBSERVABLE through this middleware. It was absent,
+  // and that absence is why reverting requireAuthQueryOrHeader to trust the token's claim survived
+  // every test (issue #261, found by adversarial review of this PR).
+  router.get('/media', requireAuthQueryOrHeader, (req, res) => res.json({ user: req.user.username, role: req.user.role }));
+  // An admin-gated route reached through the query-or-header middleware. No such route exists in the
+  // app today — every route behind that middleware serves media to any signed-in user — which is
+  // exactly why the gap was invisible. This pins the contract before someone adds one.
+  router.get('/media-admin', requireAuthQueryOrHeader, requireAdmin, (_req, res) => res.json({ ok: true }));
   server = await mountRouter('/t', router);
 });
 
@@ -289,6 +296,46 @@ describe('a role change takes effect on the very next request (#261)', () => {
       0,
       'the cascade did not fire — this test would then be resting on the JOIN after all, so re-check it'
     );
+  });
+
+  test('★ requireAuthQueryOrHeader reads the live role too', async () => {
+    // ⚠️ THE ONE ENTRY POINT THE FIRST VERSION OF THIS SUITE DID NOT COVER. Reverting just this
+    // middleware to `req.user = payload` passed every other test in the file — verified by mutation.
+    // The PR claimed all four entry points were proven; three were. The code was always correct here,
+    // but "the code is right" and "a test would notice if it stopped being right" are different
+    // claims, and only the second one survives someone editing this file later.
+    const token = sessionToken(admin, adminSid);
+    assert.equal((await call(`${server.url}/t/media`, { token })).body.role, 'admin', 'precondition');
+    demote(admin.id);
+    const res = await call(`${server.url}/t/media`, { token });
+    assert.equal(res.status, 200, 'demotion should not break media access');
+    assert.equal(res.body.role, 'caregiver', 'requireAuthQueryOrHeader served the stale role from the token');
+  });
+
+  test('★ …and an admin gate behind it refuses a demoted admin', async () => {
+    // The consequence that would actually matter. No route in the app pairs this middleware with
+    // requireAdmin today, so this is a guard for the day someone adds one — the failure would
+    // otherwise be a silent privilege gap on exactly one path.
+    const token = sessionToken(admin, adminSid);
+    assert.equal((await call(`${server.url}/t/media-admin`, { token })).status, 200, 'precondition');
+    demote(admin.id);
+    assert.equal(
+      (await call(`${server.url}/t/media-admin`, { token })).status,
+      403,
+      'a demoted admin passed an admin gate reached through the query-or-header middleware'
+    );
+  });
+
+  test('★ …and via a MEDIA token in the query string, not just the header', async () => {
+    // The query-string path is a different branch inside the same middleware (headerToken vs
+    // req.query.token). Asserting only the header form would leave the branch that exists for Safari's
+    // native <video> untested against a role change.
+    const token = mediaToken(admin, adminSid);
+    const before = await call(`${server.url}/t/media?token=${encodeURIComponent(token)}`);
+    assert.equal(before.body.role, 'admin', 'precondition');
+    demote(admin.id);
+    const after = await call(`${server.url}/t/media?token=${encodeURIComponent(token)}`);
+    assert.equal(after.body.role, 'caregiver', 'the query-string branch served the stale role');
   });
 
   test('verifyToken reports the live role too, not the claim', async () => {
