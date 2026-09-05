@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
 import { requireAuth, requireAdmin, JWT_SECRET } from '../middleware/auth.js';
@@ -38,16 +38,86 @@ function signMediaToken(userId, sessionId) {
   });
 }
 
-// Login has no other protection against repeated guessing (no account lockout, no
-// CAPTCHA) - this is the actual backstop against brute-forcing a password. Keyed by
-// IP, not username, so it can't be used to lock a legitimate user out by deliberately
-// failing their login from elsewhere.
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
+// Login has no other protection against repeated guessing (no account lockout, no CAPTCHA) — this is
+// the actual backstop against brute-forcing a password.
+//
+// ⚠️ ONE BUCKET FOR EVERY REMOTE USER WAS THE DEFECT (issue #248). The limiter keyed on `req.ip`, and
+// behind the reverse proxy the README documents, `req.ip` is the PROXY. `index.js` trusts
+// `X-Forwarded-For` only from loopback, and SWAG reaches Nightlight by its LAN IP — never loopback. So
+// every remote user shared a single 20-per-15-minutes budget: one person mistyping their password a
+// few times locked EVERYONE out of an app whose whole point is checking on a sleeping child, with no
+// support desk to call. It also made the control weaker than it looked, since the attacker's budget
+// and the household's were the same budget.
+//
+// Two keys now, and a request must pass both:
+//
+//   perAccount — IP + username. The real brute-force control, and what stops one person's typo (or one
+//     account being attacked) from locking anyone else out. ⚠️ NOT username alone: the previous
+//     comment here was right that a bare username key lets someone lock a specific user out on
+//     purpose by failing their login from elsewhere. Including the IP keeps that attacker confined to
+//     their own bucket.
+//   perClient — IP alone, deliberately loose. Caps a spray across many usernames from one source,
+//     which per-account keying on its own would allow. Set high enough that a household sharing one
+//     proxy IP cannot hit it by accident, which is the whole complaint above.
+//
+// Both degrade sensibly when TRUST_PROXY is left at its default: even with every remote user arriving
+// as the same IP, they no longer share an account bucket. Setting TRUST_PROXY (see index.js) makes the
+// per-client key meaningful as well.
+const RATE_WINDOW_MS = 15 * 60 * 1000;
+
+// Per account, per source. 20 was the previous whole-installation budget; it is now per username, so
+// the strength against guessing ONE password is unchanged and the collateral damage is gone.
+const PER_ACCOUNT_LIMIT = 20;
+// Per source, across all accounts. Five accounts' worth — loose enough to be invisible to a household
+// behind one proxy IP, tight enough to stop an untargeted spray.
+const PER_CLIENT_LIMIT = 100;
+
+const limiterMessage = { error: 'Too many attempts - please wait a few minutes and try again.' };
+
+// ⚠️ ipKeyGenerator, not `req.ip` directly: express-rate-limit v7+ requires it so IPv6 clients are
+// keyed by subnet rather than by individual address, which a single client can rotate through freely.
+const clientKey = (req) => ipKeyGenerator(req.ip);
+
+// The account this attempt is against: the submitted username on the login routes, or the signed-in
+// user on the change-password / disable-MFA routes, which have no username in the body.
+// Lower-cased so `Admin` and `admin` cannot be used as two separate budgets against one account.
+function accountKey(req) {
+  const submitted = typeof req.body?.username === 'string' ? req.body.username.trim().toLowerCase() : '';
+  return submitted || req.user?.id || '';
+}
+
+const perAccountLimiter = rateLimit({
+  windowMs: RATE_WINDOW_MS,
+  limit: PER_ACCOUNT_LIMIT,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: limiterMessage,
+  keyGenerator: (req) => `${clientKey(req)}|${accountKey(req)}`,
+});
+
+const perClientLimiter = rateLimit({
+  windowMs: RATE_WINDOW_MS,
+  limit: PER_CLIENT_LIMIT,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: limiterMessage,
+  keyGenerator: clientKey,
+});
+
+// Applied together, in this order, so a caller who has exhausted their account budget is told so
+// rather than being charged against the looser client budget as well.
+const loginLimiter = [perAccountLimiter, perClientLimiter];
+
+// First-run only, and it 400s once any user exists — so it cannot be used for guessing and does not
+// belong on the login budget. Sharing it meant an install's very first action spent part of the
+// household's login allowance (issue #248).
+const setupLimiter = rateLimit({
+  windowMs: RATE_WINDOW_MS,
   limit: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many attempts - please wait a few minutes and try again.' },
+  message: limiterMessage,
+  keyGenerator: clientKey,
 });
 
 function userCount() {
@@ -119,7 +189,7 @@ router.get('/status', (req, res) => {
 });
 
 // One-time: create the first admin account. Locked once any user exists.
-router.post('/setup', loginLimiter, (req, res) => {
+router.post('/setup', setupLimiter, (req, res) => {
   if (userCount() > 0) {
     return res.status(400).json({ error: 'Setup already completed' });
   }

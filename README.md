@@ -386,6 +386,30 @@ reaches it by that IP, not by container name.
 Everything is proxied through a single port (4000): the app, login, all pages, and the
 video signaling handshake — no extra ports to open on your router for this part.
 
+### `TRUST_PROXY` — telling Nightlight your real client addresses
+
+| Variable | Default | What it does |
+|---|---|---|
+| `TRUST_PROXY` | `loopback` | Which upstream addresses may set `X-Forwarded-For`. Accepts an IP or CIDR (`10.0.0.20`, `172.18.0.0/16`), a comma-separated list, a hop count (`1`), or a named range. |
+
+Behind a proxy, every request arrives from the **proxy's** address unless you tell Nightlight to trust
+it. The default (`loopback`) only trusts a proxy on `127.0.0.1` — and SWAG reaches Nightlight by its
+LAN IP, so with the setup above **it is not trusted and every remote visitor looks like one client**.
+
+Set it to the address your proxy connects *from*:
+
+```bash
+-e TRUST_PROXY=10.0.0.20        # SWAG's own LAN IP
+```
+
+> **⚠️ Only set this to an address you control.** Whatever you trust here is allowed to declare a
+> client's IP. Too broad a value — or `true` — lets anyone forge `X-Forwarded-For` and slip the login
+> rate limit entirely, which is worse than leaving it unset. If you are not sure, leave it alone.
+
+**You do not have to set it.** Login attempts are limited per account *and* per source, so even with
+every remote user sharing the proxy's address, one person mistyping their password cannot lock anyone
+else out. Setting `TRUST_PROXY` makes the per-source half meaningful as well.
+
 ## Remote / internet access (watching from outside your home network)
 
 By default this is LAN-only. There are two ways to watch remotely, and each camera tile
