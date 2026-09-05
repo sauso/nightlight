@@ -42,12 +42,30 @@ const JWT_SECRET = loadOrCreateSecret();
 const touchSession = db.prepare(
   "UPDATE sessions SET last_seen_at = datetime('now') WHERE id = ? AND last_seen_at < datetime('now', '-60 seconds')"
 );
-function sessionStillValid(sessionId) {
-  if (!sessionId) return false;
-  const row = db.prepare('SELECT id FROM sessions WHERE id = ?').get(sessionId);
-  if (!row) return false;
+// Returns the session joined to its user's CURRENT row, or null. The join is the point.
+//
+// ⚠️ AUTHORISATION MUST BE EVALUATED NOW, NOT WHEN THE TOKEN WAS MINTED (issue #261). This used to
+// return a bare boolean, and every caller then trusted the `role` claim inside the JWT. Changing a
+// user's role writes to `users` and does nothing to their existing tokens, so demoting an admin did
+// not take effect until the token expired — up to 30 DAYS. That window includes the routes that set
+// roles, so the demoted user could promote themselves back and make the demotion permanent-proof.
+// Demotion is a security action: a departing carer, an account being locked down. The UI confirmed it
+// and nothing said it would not apply for a month.
+//
+// The session lookup was already happening on every authenticated request, so carrying the live role
+// out of the same query costs nothing extra. The JWT carries identity; the database decides what that
+// identity may do.
+const sessionWithUser = db.prepare(
+  'SELECT s.id AS sid, s.user_id AS user_id, u.role AS role FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ?'
+);
+function liveSession(sessionId) {
+  if (!sessionId) return null;
+  // A session whose user row has been deleted returns nothing from the JOIN, which is the behaviour we
+  // want — a deleted account's token stops working immediately, exactly as a revoked session does.
+  const row = sessionWithUser.get(sessionId);
+  if (!row) return null;
   touchSession.run(sessionId); // throttled - only actually writes if last_seen_at is stale
-  return true;
+  return row;
 }
 
 // Verify a raw JWT the same way the middleware does (signature + live session), for contexts
@@ -59,8 +77,10 @@ export function verifyToken(token, { purpose } = {}) {
   try {
     const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
     if (purpose ? payload.purpose !== purpose : payload.purpose === 'media') return null;
-    if (!sessionStillValid(payload.sid)) return null;
-    return payload;
+    const sess = liveSession(payload.sid);
+    if (!sess) return null;
+    // The role comes from the DB, never from the claim — see liveSession (issue #261).
+    return { ...payload, role: sess.role };
   } catch {
     return null;
   }
@@ -76,8 +96,10 @@ export function requireAuth(req, res, next) {
     // to ride in URL query params — it must NEVER authenticate a full API request, even though it
     // names a live session. This is what confines a leaked media URL to media, not account access.
     if (payload.purpose === 'media') return res.status(401).json({ error: 'Invalid or expired session' });
-    if (!sessionStillValid(payload.sid)) return res.status(401).json({ error: 'Invalid or expired session' });
-    req.user = payload;
+    const sess = liveSession(payload.sid);
+    if (!sess) return res.status(401).json({ error: 'Invalid or expired session' });
+    // ⚠️ The database's role overrides the token's (issue #261) — see liveSession.
+    req.user = { ...payload, role: sess.role };
     next();
   } catch {
     return res.status(401).json({ error: 'Invalid or expired session' });
@@ -101,8 +123,10 @@ export function requireAuthQueryOrHeader(req, res, next) {
     if (!headerToken && payload.purpose !== 'media') {
       return res.status(401).json({ error: 'Invalid or expired session' });
     }
-    if (!sessionStillValid(payload.sid)) return res.status(401).json({ error: 'Invalid or expired session' });
-    req.user = payload;
+    const sess = liveSession(payload.sid);
+    if (!sess) return res.status(401).json({ error: 'Invalid or expired session' });
+    // ⚠️ The database's role overrides the token's (issue #261) — see liveSession.
+    req.user = { ...payload, role: sess.role };
     next();
   } catch {
     return res.status(401).json({ error: 'Invalid or expired session' });

@@ -262,6 +262,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   across all cameras. Detection itself is unchanged — this affected only the diagnostic report.
 
 ### Security
+- **Demoting an admin now takes effect immediately.** Changing someone from admin to caregiver only
+  applied the next time they signed in — until then their existing session kept every admin power,
+  for up to 30 days, including the ability to make themselves an admin again. Nothing on screen said
+  so. Roles are now read fresh on every request, so a change applies to that person’s very next
+  action, on every device they are signed in on. They stay signed in as a caregiver rather than being
+  logged out. Deleting an account likewise ends its sessions at once.
+
 - **The alert-image password is no longer sent back to the browser.** If your camera's snapshot URL
   carried a username and password, the whole URL — password included — was returned to any signed-in
   admin and sat in the settings page. Every other camera password is already handled the other way:
