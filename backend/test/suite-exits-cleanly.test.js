@@ -164,13 +164,32 @@ describe('shutdown() actually stops the tracker', () => {
     .split('\n')
     .map((l) => l.trim());
 
-  test('shutdown() calls stopActivityTracker()', () => {
-    assert.ok(
-      indexLines.includes('stopActivityTracker();'),
-      'src/index.js no longer calls stopActivityTracker() — a SIGTERM would leave both intervals running, ' +
-        'and only the hard process.exit(0) would still be ending the process (issue #278)'
-    );
-  });
+  // ⚠️ EVERY stop, not just the first one. This started as a single assertion for
+  // stopActivityTracker, added because adversarial review of #290 found that deleting a call left the
+  // whole suite green. #286 then added three more calls and did NOT extend the assertion — so
+  // removing `stopSensorSampler();` or `stopClipStorage();` from shutdown() passed all 620 tests.
+  // The lesson was cited in the same PR that repeated it, which is why this is now derived from the
+  // list rather than written out once per name.
+  for (const stop of ['stopActivityTracker', 'stopSensorSampler', 'stopClipStorage', 'stopSleepJob']) {
+    test(`shutdown() calls ${stop}()`, () => {
+      assert.ok(
+        indexLines.includes(`${stop}();`),
+        `src/index.js no longer calls ${stop}() — a SIGTERM would leave its timer running, and only the ` +
+          'hard process.exit(0) would still be ending the process (issues #278, #286)'
+      );
+    });
+
+    test(`...and imports ${stop}, so the call is not dead text`, () => {
+      // A call to a name that was never imported throws at shutdown, which is strictly worse than not
+      // calling it — and the line-presence check above cannot tell the difference.
+      const src = readFileSync(path.join(BACKEND, 'src/index.js'), 'utf8');
+      assert.match(
+        src,
+        new RegExp(String.raw`import\s*\{[^}]*\b${stop}\b[^}]*\}\s*from`),
+        `${stop} is called in index.js but never imported`
+      );
+    });
+  }
 
   test('and imports it, rather than the call being dead text', () => {
     // Anti-vacuous companion: a call to a name that was never imported would throw at shutdown, which
@@ -397,7 +416,7 @@ describe('the guard catches the shapes people actually write (#286)', () => {
 
   for (const [name, code] of Object.entries(LEAKS)) {
     test(`catches: ${name}`, () => {
-      const offences = unstoppableTimerOffences('lib/zz-probe.js', stripCommentsAndStrings(code));
+      const offences = unstoppableTimerOffences('lib/zz-probe.js', code);
       assert.ok(offences.length > 0, `this leak shape is invisible to the guard:\n${code}`);
     });
   }
@@ -418,7 +437,7 @@ describe('the guard catches the shapes people actually write (#286)', () => {
       // one-shot `setTimeout(done, …)` it mistook for a self-rescheduling timer, and twoWayAudio for
       // naming its teardown `close()`. A guard that flags correct code is one people learn to click
       // past — this repo's own reason for keeping the definition-of-done job a warning.
-      const offences = unstoppableTimerOffences('lib/zz-probe.js', stripCommentsAndStrings(code));
+      const offences = unstoppableTimerOffences('lib/zz-probe.js', code);
       assert.deepEqual(offences, [], `correct code was flagged:\n${code}`);
     });
   }
@@ -428,12 +447,87 @@ describe('the guard catches the shapes people actually write (#286)', () => {
     // to know whether the call sits inside the body of the function it names — a parser's job. An
     // approximation was tried and false-positived on the first real file it met.
     const code = 'let t=null;\nfunction tick(){ t=setTimeout(tick,1000); }\nexport function startZz(){ tick(); }';
-    const offences = unstoppableTimerOffences('lib/zz-probe.js', stripCommentsAndStrings(code));
+    const offences = unstoppableTimerOffences('lib/zz-probe.js', code);
     assert.deepEqual(
       offences,
       [],
       'the guard now catches self-rescheduling setTimeout — good, but update this test and the comment ' +
         'in sourceScan.js, which both say it does not'
+    );
+  });
+});
+
+// -------------------------------------------------------------------------------------------
+// Shapes adversarial review of #286 got past the guard, as fixtures. Each was a REAL hang: a probe
+// importing the planted module and calling its start had to be killed on the timeout.
+describe('bypasses found by review, now closed (#286)', () => {
+  test('computed access: globalThis[\'setInterval\'](…)', () => {
+    // ⚠️ THE STRIPPER CAUSED THIS ONE. Blanking string literals — which exists to stop a comment
+    // mentioning setInterval from being read as a timer — turned `globalThis['setInterval']` into
+    // `globalThis['']`, so the identifier vanished before any scan saw it. The thing preventing false
+    // positives was creating a false NEGATIVE. Timer detection now runs on source with comments
+    // removed but strings intact; export detection still runs on the fully stripped copy.
+    const code = "export function startZz(){ globalThis['setInterval'](()=>{},1000); }";
+    assert.ok(unstoppableTimerOffences('lib/zz.js', code).length > 0, 'computed access is still invisible');
+  });
+
+  test('destructured access: const { setInterval: si } = globalThis', () => {
+    const code = 'const { setInterval: si } = globalThis;\nexport function startZz(){ si(()=>{},1000); }';
+    assert.ok(unstoppableTimerOffences('lib/zz.js', code).length > 0);
+  });
+
+  test('a module-level timer beside DECOY unref() calls', () => {
+    // ⚠️ `unrefsEverything` counted `.unref(` against `setInterval(` and could not tell WHICH object
+    // was unref'd. Two decoys on unrelated objects satisfied the count while a real interval leaked —
+    // demonstrated as an actual hang. The unref exemption is gone from rule B entirely.
+    const code = [
+      'const a = {}; const b = {};',
+      'a.unref?.(); b.unref?.();',
+      'const t = setInterval(()=>{},1000);',
+      'export const noop = () => t;',
+    ].join('\n');
+    assert.ok(unstoppableTimerOffences('lib/zz.js', code).length > 0, 'decoy unref() calls still buy a pass');
+  });
+
+  test('a comment mentioning setInterval is still NOT a timer', () => {
+    // The false-positive half of the same change: strings are now visible to the timer scan, so the
+    // comment path is the one still doing the work of not flagging prose.
+    const code = '// this module deliberately avoids setInterval\nexport function startZz(){ /* nothing */ }';
+    assert.deepEqual(unstoppableTimerOffences('lib/zz.js', code), []);
+  });
+});
+
+describe('what the guard still cannot see — stated, not hidden (#286)', () => {
+  // ⚠️ These are REAL gaps, asserted so nobody reads the guard as airtight and so closing one forces
+  // an update here. Adversarial review found all of them; each is a genuine hang.
+  const KNOWN_GAPS = {
+    'self-rescheduling setTimeout':
+      'let t=null;\nfunction tick(){ t=setTimeout(tick,1000); }\nexport function startZz(){ tick(); }',
+    'self-rescheduling setImmediate':
+      'function loop(){ setImmediate(loop); }\nexport function startZzImmediate(){ loop(); }',
+    'a stop that exists but clears nothing':
+      'let t=null;\nexport function startZz(){ t=setInterval(()=>{},1000); }\nexport function stopZz(){ /* forgot clearInterval */ }',
+  };
+  for (const [name, code] of Object.entries(KNOWN_GAPS)) {
+    test(`still not caught: ${name}`, () => {
+      assert.deepEqual(
+        unstoppableTimerOffences('lib/zz.js', code),
+        [],
+        `the guard now catches "${name}" — good. Update this test AND the limits documented in ` +
+          'sourceScan.js, which both still say it does not.'
+      );
+    });
+  }
+
+  test('the ALLOWED exemption is by FILENAME, so a new job in that file is invisible', () => {
+    // Stated because it is a genuine hole: the reason given ("safeInterval returns the timer to its
+    // caller") justifies ONE function, not the whole file forever. Narrowing it needs per-function
+    // analysis, which is a parser's job. Recorded so the next person does not assume otherwise.
+    const code = 'export function safeInterval(l,ms,fn){ return setInterval(fn,ms); }\n' +
+      'let t=null;\nexport function startLeak(){ t=setInterval(()=>{},1000); }';
+    assert.ok(
+      unstoppableTimerOffences('lib/processGuards.js', code).length > 0,
+      'the pure rule does flag it — the exemption is applied by the caller, which is where the hole is'
     );
   });
 });

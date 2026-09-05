@@ -77,11 +77,29 @@ export function stripCommentsAndStrings(src) {
 // timer with no start function at all is still flagged. If this ever needs to be airtight it needs a
 // real parser; that limit is stated here rather than left for someone to discover.
 
-/** Ways a module can create a repeating timer. Returns the reasons found, or []. */
+/**
+ * Comments removed, STRING LITERALS KEPT.
+ *
+ * ⚠️ THE FULL STRIPPER CREATES A FALSE NEGATIVE HERE, which adversarial review of #286 demonstrated
+ * with a real hang: `globalThis['setInterval'](fn, ms)` becomes `globalThis['']` once strings are
+ * blanked, so the timer is invisible to any scan that runs afterwards. Strings must stay visible when
+ * looking for a timer, and must be blanked when looking for exports — they are different questions.
+ */
+export function stripCommentsOnly(src) {
+  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*/g, '$1');
+}
+
+/**
+ * Ways a module can create a repeating timer. Returns the reasons found, or [].
+ *
+ * ⚠️ PASS SOURCE WITH COMMENTS REMOVED BUT STRINGS INTACT (`stripCommentsOnly`). Comments are stripped
+ * so a module merely *discussing* setInterval is not swept in; strings are kept so computed access
+ * cannot hide the identifier.
+ */
 export function periodicEvidence(code) {
   const reasons = [];
-  // The IDENTIFIER, not `setInterval(` — that catches `const si = setInterval` and
-  // `globalThis.setInterval` as well as a direct call.
+  // The IDENTIFIER, not `setInterval(` — catches `const si = setInterval`, `globalThis.setInterval`,
+  // `globalThis['setInterval']`, and destructuring, as well as a direct call.
   if (/\bsetInterval\b/.test(code)) reasons.push('setInterval');
   return reasons;
 }
@@ -142,8 +160,14 @@ export function unrefsEverything(code) {
  *
  * @returns {string[]} human-readable offences, empty when the module is fine
  */
-export function unstoppableTimerOffences(rel, code) {
-  const evidence = periodicEvidence(code);
+export function unstoppableTimerOffences(rel, rawSrc) {
+  // ⚠️ TWO DIFFERENT VIEWS OF THE SAME FILE, and using one for both was a demonstrated bypass.
+  // Timer detection needs strings INTACT (`globalThis['setInterval']` is a string); export detection
+  // needs them blanked, or a name mentioned inside a string reads as an export.
+  const forTimers = stripCommentsOnly(rawSrc);
+  const code = stripCommentsAndStrings(rawSrc);
+
+  const evidence = periodicEvidence(forTimers);
   if (!evidence.length) return [];
 
   const exported = exportedNames(code);
@@ -171,9 +195,16 @@ export function unstoppableTimerOffences(rel, code) {
 
   // RULE B — module level, and this is the half that fails CLOSED. A repeating timer with NO start
   // function at all still keeps the process alive, and rule A cannot see it because there is nothing
-  // named startX to pair with. So a module that creates one must either unref it or export a teardown.
-  if (!starts.length && !unrefsEverything(code) && ![...exported].some((n) => /^(stop|close)/.test(n))) {
-    offences.push(`${rel}: creates a repeating timer (${evidence.join(', ')}) with no stop and no unref()`);
+  // named startX to pair with.
+  //
+  // ⚠️ NO unref() EXEMPTION HERE ANY MORE. It used to allow a module through if it appeared to unref
+  // everything, judged by counting `.unref(` against `setInterval(` — and adversarial review defeated
+  // that with a real hang: a module-level interval that is never unref'd, sitting beside two decoy
+  // `.unref?.()` calls on unrelated objects, satisfies the count. A counting heuristic cannot tell
+  // WHICH object was unref'd, so it is gone. A module-level timer now simply needs a teardown, which
+  // no module in this codebase relies on being excused from.
+  if (!starts.length && ![...exported].some((n) => /^(stop|close)/.test(n))) {
+    offences.push(`${rel}: creates a repeating timer (${evidence.join(', ')}) with no stop or close export`);
   }
   return offences;
 }
