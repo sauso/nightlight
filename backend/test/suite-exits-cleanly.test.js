@@ -30,7 +30,9 @@ import { readFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { walkSources, stripCommentsAndStrings } from './helpers/sourceScan.js';
+import {
+  walkSources, stripCommentsAndStrings, periodicEvidence, unstoppableTimerOffences,
+} from './helpers/sourceScan.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BACKEND = path.resolve(HERE, '..');
@@ -302,22 +304,29 @@ describe('every periodic job can be stopped (#286)', () => {
     // left both cases green while the guard examined nothing at all. Mutation testing showed exactly
     // that: two mutants that neutered the guard survived. Asserting on what this loop actually
     // examined is the only version that cannot be quietly switched off.
+    // ⚠️ EXEMPTIONS CARRY A REASON, and there is exactly one. An ALLOWED map is still a skip-list, so
+    // it is the shape that can fail open — which is why each entry has to justify itself in writing
+    // and why the list is this short. Same pattern as the unbounded-fetch guard in notify-timeouts.
+    const ALLOWED = {
+      // safeInterval is a FACTORY: it returns the timer to its caller, who owns and clears it. The
+      // module never holds a handle, so it has nothing to stop. index.js calls it fire-and-forget for
+      // watchdogs that are meant to run for the process lifetime; process-guards.test.js collects and
+      // clears the ones it creates.
+      'lib/processGuards.js': 'safeInterval returns the timer; the caller owns it',
+    };
+
     const examined = [];
     const offenders = [];
     for (const { rel, src } of walkSources()) {
+      if (ALLOWED[rel]) continue;
       const code = stripCommentsAndStrings(src);
-      // A module qualifies as periodic only if it BOTH exports a start and calls setInterval — a
-      // module that merely mentions the word is not swept in.
-      if (!/\bsetInterval\s*\(/.test(code)) continue;
+      const evidence = periodicEvidence(code);
+      if (!evidence.length) continue;
       examined.push(rel);
-      for (const m of code.matchAll(/export\s+function\s+(start\w*)\s*\(/g)) {
-        const startName = m[1];
-        const stopName = startName.replace(/^start/, 'stop');
-        if (!new RegExp(String.raw`export\s+function\s+${stopName}\s*\(`).test(code)) {
-          offenders.push(`${rel}: ${startName}() has no ${stopName}()`);
-        }
-      }
+
+      offenders.push(...unstoppableTimerOffences(rel, code));
     }
+
     // Anti-vacuous FIRST: if the loop examined nothing, an empty `offenders` means nothing.
     for (const { module } of PERIODIC) {
       const rel = module.replace(/^src\//, '');
@@ -362,5 +371,69 @@ describe('every periodic job can be stopped (#286)', () => {
       assert.ok(r.exited, `${module}: the child had to be killed — ${r.stderr}`);
       assert.equal(r.status, 0, `${module}: ${stop}() did not null its handle, so ${start}() is now inert — ${r.stderr}`);
     }
+  });
+});
+
+// -------------------------------------------------------------------------------------------
+// What the guard can and cannot see — issue #286.
+//
+// ⚠️ THE FIRST VERSION OF THE GUARD CAUGHT ONE OF EIGHT LEAK SHAPES. I only found that out by writing
+// files into src/ by hand and watching the suite stay green; six walked straight past it, including
+// the two indirections that beat the unbounded-fetch scan in #262 (an alias, and a renamed export).
+// A guard that only catches the shape its author happened to write is not a guard.
+//
+// These are those probes, as fixtures. The rule is a pure function precisely so they can live here
+// instead of depending on someone remembering to re-attack it.
+describe('the guard catches the shapes people actually write (#286)', () => {
+  const LEAKS = {
+    'export function + setInterval': 'let t=null;\nexport function startZz(){ t=setInterval(()=>{},1000); }',
+    'arrow-function export': 'let t=null;\nexport const startZz = () => { t=setInterval(()=>{},1000); };',
+    'renamed export': 'let t=null;\nfunction foo(){ t=setInterval(()=>{},1000); }\nexport { foo as startZz };',
+    'aliased setInterval': 'let t=null;\nconst si = setInterval;\nexport function startZz(){ t=si(()=>{},1000); }',
+    'globalThis.setInterval': 'let t=null;\nexport function startZz(){ t=globalThis.setInterval(()=>{},1000); }',
+    'module-level timer, no start at all': 'const t = setInterval(()=>{},1000);\nexport const noop = () => t;',
+    'class method': 'export class Zz { startZz(){ this.t=setInterval(()=>{},1000); } }',
+  };
+
+  for (const [name, code] of Object.entries(LEAKS)) {
+    test(`catches: ${name}`, () => {
+      const offences = unstoppableTimerOffences('lib/zz-probe.js', stripCommentsAndStrings(code));
+      assert.ok(offences.length > 0, `this leak shape is invisible to the guard:\n${code}`);
+    });
+  }
+
+  const FINE = {
+    'a proper start/stop pair':
+      'let t=null;\nexport function startZz(){ t=setInterval(()=>{},1000); }\nexport function stopZz(){ clearInterval(t); t=null; }',
+    'teardown named close(), as twoWayAudio does':
+      'let t=null;\nexport function startZz(){ t=setInterval(()=>{},1000); }\nexport function closeZz(){ clearInterval(t); t=null; }',
+    'no timer at all': 'export function startZz(){ /* nothing periodic */ }',
+    'a one-shot setTimeout with a named callback, as onvif does':
+      'const done = () => {};\nexport function probeZz(){ setTimeout(done, 5000); }',
+  };
+
+  for (const [name, code] of Object.entries(FINE)) {
+    test(`does NOT flag: ${name}`, () => {
+      // ⚠️ The false-positive half, and it is not decoration. An earlier draft flagged onvif.js for a
+      // one-shot `setTimeout(done, …)` it mistook for a self-rescheduling timer, and twoWayAudio for
+      // naming its teardown `close()`. A guard that flags correct code is one people learn to click
+      // past — this repo's own reason for keeping the definition-of-done job a warning.
+      const offences = unstoppableTimerOffences('lib/zz-probe.js', stripCommentsAndStrings(code));
+      assert.deepEqual(offences, [], `correct code was flagged:\n${code}`);
+    });
+  }
+
+  test('⚠️ the known limit is real and stated: a self-rescheduling setTimeout is NOT caught', () => {
+    // Asserted rather than left implicit, so nobody reads the guard as airtight. Detecting this needs
+    // to know whether the call sits inside the body of the function it names — a parser's job. An
+    // approximation was tried and false-positived on the first real file it met.
+    const code = 'let t=null;\nfunction tick(){ t=setTimeout(tick,1000); }\nexport function startZz(){ tick(); }';
+    const offences = unstoppableTimerOffences('lib/zz-probe.js', stripCommentsAndStrings(code));
+    assert.deepEqual(
+      offences,
+      [],
+      'the guard now catches self-rescheduling setTimeout — good, but update this test and the comment ' +
+        'in sourceScan.js, which both say it does not'
+    );
   });
 });
