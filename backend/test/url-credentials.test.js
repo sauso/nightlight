@@ -123,3 +123,31 @@ describe('what happens on save', () => {
     assert.equal(out, 'http://cam.local/snap.jpg');
   });
 });
+
+describe('when BOTH a URL password and a typed password arrive', () => {
+  // ⚠️ Adversarial review of #271 found this precedence was never exercised: swapping the two `if`
+  // blocks in resolveUrlPassword passed the whole suite, because every existing case supplies only
+  // one of the two. Not a security defect — both values came from the same request the admin just
+  // submitted, so neither is a secret carried over from storage — but an ambiguous rule that nothing
+  // pins is one a later refactor can flip without noticing.
+  const stored = `http://admin:${SECRET}@cam.local/snap.jpg`;
+
+  test('the URL wins, because it is the more specific thing the admin typed', () => {
+    const out = resolveUrlPassword({
+      submitted: 'http://admin:in-the-url@cam.local/snap.jpg',
+      stored,
+      password: 'in-the-field',
+    });
+    assert.equal(out, 'http://admin:in-the-url@cam.local/snap.jpg');
+    assert.ok(!out.includes('in-the-field'), 'the separate field overrode a password typed into the URL');
+    assert.ok(!out.includes(SECRET), 'the stored password survived despite both inputs being explicit');
+  });
+
+  test('and neither input lets the STORED password through', () => {
+    // The property that actually matters: whichever precedence is chosen, the old secret goes.
+    for (const password of ['', 'in-the-field']) {
+      const out = resolveUrlPassword({ submitted: 'http://admin:in-the-url@cam.local/snap.jpg', stored, password });
+      assert.ok(!out.includes(SECRET), `stored password leaked with password=${JSON.stringify(password)}`);
+    }
+  });
+});
