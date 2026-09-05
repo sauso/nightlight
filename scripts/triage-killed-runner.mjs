@@ -52,8 +52,26 @@ export function classify(log, attempt = 1) {
   }
 
   const shutdown = log.includes(SHUTDOWN_MARKER);
-  const failCount = lastCount(log, 'fail');
-  const cancelledCount = lastCount(log, 'cancelled');
+  // ⚠️ THE WORST COUNT ANYWHERE IN THE LOG, NOT THE LAST ONE. Taking the last was a fail-OPEN bug —
+  // it would have retried a genuinely broken build — and adversarial review of this PR demonstrated
+  // two realistic ways to reach it, both verified by running:
+  //
+  //   1. MULTI-JOB LOGS. `gh run view --log[-failed]` concatenates every failed job, and test.yml has
+  //      five. `unit` genuinely failing (`fail 3`, no marker) alongside `frontend`'s runner being
+  //      killed (marker, `fail 0`) gave a log whose LAST count was 0 and whose marker was present, so
+  //      three real failures were classified `killed-runner` and retried away. Not contrived: runner
+  //      deaths run at 7-42% per run, so one job dying while another genuinely fails is ordinary.
+  //   2. AN EMBEDDED NESTED SUMMARY. node prints its run summary BEFORE the "failing tests:" detail
+  //      block, and backend/test/suite-exits-cleanly.test.js shells out to a nested `node --test` and
+  //      quotes that child's output in its failure message. So a real `fail 1` is printed first and the
+  //      nested decoy `fail 0` last — the fix for #278 could have retried away a genuine regression in
+  //      the very file that fixes #278.
+  //
+  // Max fails CLOSED in both: any summary anywhere reporting a failure disqualifies the whole run.
+  // The cost is a run that is never auto-retried because some unrelated text looked like a failing
+  // summary, which is the harmless direction — someone reruns it by hand.
+  const failCount = maxCount(log, 'fail');
+  const cancelledCount = maxCount(log, 'cancelled');
 
   if (!shutdown) {
     return verdict('real-failure', false, false, failCount, cancelledCount,
@@ -76,7 +94,8 @@ function verdict(decision, retry, shutdown, failCount, cancelledCount, reason) {
   return { decision, retry, shutdown, failCount, cancelledCount, reason };
 }
 
-// Reads the LAST `<word> <n>` in the log — node's run summary, rather than an earlier per-file line.
+// Reads the HIGHEST `<word> <n>` anywhere in the log. See the note at the call site for why it is the
+// maximum and not the last — taking the last was a demonstrated fail-open.
 //
 // ⚠️ KEYED ON NODE'S SUMMARY MARKER (`ℹ` for the human reporter, `#` for TAP), NOT ON LINE POSITION.
 // The first version anchored to the start of a line, which is wrong for the input this actually gets:
@@ -87,11 +106,17 @@ function verdict(decision, retry, shutdown, failCount, cancelledCount, reason) {
 //
 // The marker is also what keeps a test NAME from being read as a count: an unanchored /fail (\d+)/
 // would happily match a case titled "...fail 3 times...", but `ℹ fail 3` is the reporter's own line.
-function lastCount(log, word) {
-  const re = new RegExp(String.raw`[ℹ#]\s*${word}\s+(\d+)\b`, 'g');
-  let last = null;
-  for (const m of log.matchAll(re)) last = Number(m[1]);
-  return last;
+function maxCount(log, word) {
+  // The trailing (?!\w) rejects a count glued to a word character — `fail 3abc` from a wrapped or
+  // mangled log line is not a count, and must not be read as 3. (`\b` alone did not do this: adversarial
+  // review showed removing it changed nothing, because `\b` already sits between `3` and `a`.)
+  const re = new RegExp(String.raw`[ℹ#]\s*${word}\s+(\d+)(?!\w)`, 'g');
+  let max = null;
+  for (const m of log.matchAll(re)) {
+    const n = Number(m[1]);
+    if (max === null || n > max) max = n;
+  }
+  return max;
 }
 
 /** One-line summary for the workflow's step summary. */
@@ -112,10 +137,20 @@ export function summarise(v, runUrl) {
 
 // CLI: log on stdin, verdict as JSON on stdout, and exit 10 when the caller should retry.
 // Exit codes rather than stdout parsing, so the workflow cannot misread a decision.
+//
+// ⚠️ IT ALSO WRITES THE STEP SUMMARY ITSELF. The workflow used to rebuild that markdown inline with
+// its own `node -e` block, duplicating `summarise()` — which left the tested function dead and the
+// live one untested, free to drift apart silently. Adversarial review of this PR caught it. Writing it
+// here means there is exactly one implementation and the tests cover it.
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('triage-killed-runner.mjs')) {
   const chunks = [];
   for await (const c of process.stdin) chunks.push(c);
   const v = classify(Buffer.concat(chunks).toString('utf8'), Number(process.env.RUN_ATTEMPT || 1));
   process.stdout.write(JSON.stringify(v) + '\n');
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    const url = `https://github.com/${process.env.REPO ?? ''}/actions/runs/${process.env.RUN_ID ?? ''}`;
+    const { appendFileSync } = await import('node:fs');
+    appendFileSync(process.env.GITHUB_STEP_SUMMARY, summarise(v, url));
+  }
   process.exit(v.retry ? 10 : 0);
 }

@@ -63,9 +63,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   - ⚠️ An earlier version of this entry also credited that change with fixing the intermittently red
     CI runs. **That was wrong**, and is corrected here rather than quietly dropped: those runs were
     the GitHub-hosted runner being killed mid-job, which still happens and is tracked in issue #278.
-    CI now tells the two apart — a run whose log carries the runner's shutdown marker *and* reports
-    `fail 0` is retried automatically once and labelled as an infrastructure failure, while a run with
-    any genuinely failing test is left completely alone. Red still means red.
+    CI now tells the two apart — a run whose log carries the runner's shutdown marker *and* reports no
+    failing test anywhere is retried automatically once and labelled as an infrastructure failure. A run
+    reporting **any** failing test is left alone, as is one whose logs cannot be read or whose summary
+    is missing: it only retries what it can positively show was not a test failure.
 
 - **Deleting a child left its recordings and timelapses on disk forever.** Their database rows kept
   pointing at a child that no longer existed, so nothing listed them and nothing ever cleaned them up —

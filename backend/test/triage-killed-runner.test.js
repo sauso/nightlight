@@ -14,7 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const { classify, SHUTDOWN_MARKER } = await import(
+const { classify, SHUTDOWN_MARKER, summarise } = await import(
   new URL('../../scripts/triage-killed-runner.mjs', import.meta.url).href
 );
 
@@ -98,6 +98,101 @@ describe('it refuses to retry anything it cannot prove is safe', () => {
   });
 });
 
+describe('a failure ANYWHERE in the log disqualifies the whole run', () => {
+  // ★★ BOTH OF THESE WERE VERIFIED FAIL-OPENS before the fix, found by adversarial review of this PR.
+  // They are the reason the parser takes the MAXIMUM count rather than the last one. Each retried a
+  // genuinely broken build — the single worst thing this script can do.
+
+  test('a real failure in one job is not excused by another job\'s killed runner', () => {
+    // `gh run view --log[-failed]` concatenates every failed job, and test.yml has five of them.
+    // Runner deaths run at 7-42% per run, so one job dying while another genuinely fails is ordinary,
+    // not contrived.
+    const log = [
+      'unit\tRun the test suite\tZ ✖ test/sleepAnalysis.test.js (12ms)',
+      'unit\tRun the test suite\tZ ℹ tests 515',
+      'unit\tRun the test suite\tZ ℹ pass 512',
+      'unit\tRun the test suite\tZ ℹ fail 3',
+      'unit\tRun the test suite\tZ ℹ cancelled 0',
+      `frontend\tRun tests\tZ ##[error]${SHUTDOWN_MARKER}. This can happen ...`,
+      'frontend\tRun tests\tZ ℹ fail 0',
+      'frontend\tRun tests\tZ ℹ cancelled 2',
+    ].join('\n');
+    const v = classify(log, 1);
+    assert.equal(v.retry, false, 'it retried a run in which three tests genuinely failed');
+    assert.equal(v.decision, 'mixed');
+    assert.equal(v.failCount, 3, 'it read the killed job\'s `fail 0` instead of the failing job\'s `fail 3`');
+  });
+
+  test('...and the same holds when the killed job prints FIRST', () => {
+    // ⚠️ THE MIRROR CASE, and it was missing: mutation testing showed a parser taking the FIRST match
+    // instead of the maximum passed every other case here. Job order in a concatenated log is
+    // arbitrary, so both orders have to be hostile or the guard only works half the time.
+    const log = [
+      `frontend\tRun tests\tZ ##[error]${SHUTDOWN_MARKER}. This can happen ...`,
+      'frontend\tRun tests\tZ ℹ fail 0',
+      'frontend\tRun tests\tZ ℹ cancelled 2',
+      'unit\tRun the test suite\tZ ✖ test/sleepAnalysis.test.js (12ms)',
+      'unit\tRun the test suite\tZ ℹ fail 3',
+      'unit\tRun the test suite\tZ ℹ cancelled 0',
+    ].join('\n');
+    const v = classify(log, 1);
+    assert.equal(v.retry, false, 'it read the killed job\'s `fail 0` because that job printed first');
+    assert.equal(v.failCount, 3);
+  });
+
+  test('a nested test summary quoted inside a failure message cannot mask the real one', () => {
+    // node prints the run summary BEFORE the "failing tests:" detail block, and
+    // suite-exits-cleanly.test.js shells out to a nested `node --test` and quotes that child's output
+    // in its own failure message — so a real `fail 1` is printed first and a decoy `fail 0` last.
+    // Left unfixed, #278's own fix could retry away a genuine regression in the file that fixes #278.
+    const log = [
+      `unit\tstep\tZ ##[error]${SHUTDOWN_MARKER}.`,
+      'unit\tstep\tZ ℹ tests 8',
+      'unit\tstep\tZ ℹ pass 7',
+      'unit\tstep\tZ ℹ fail 1',
+      'unit\tstep\tZ ✖ failing tests:',
+      'unit\tstep\tZ   the run came back without passing any tests — did the target file move?',
+      'unit\tstep\tZ   ℹ tests 18',
+      'unit\tstep\tZ   ℹ pass 18',
+      'unit\tstep\tZ   ℹ fail 0',
+    ].join('\n');
+    const v = classify(log, 1);
+    assert.equal(v.retry, false, 'a nested run\'s `fail 0` masked the real `fail 1`');
+    assert.equal(v.failCount, 1);
+  });
+
+  test('a count glued to a word character is not a count', () => {
+    // `fail 3abc` from a wrapped or mangled log line must be rejected outright, not read as 3.
+    const log = [
+      `unit\tstep\tZ ##[error]${SHUTDOWN_MARKER}.`,
+      'unit\tstep\tZ ℹ fail 3abc',
+      'unit\tstep\tZ ℹ fail 0',
+      'unit\tstep\tZ ℹ cancelled 1',
+    ].join('\n');
+    assert.equal(classify(log, 1).failCount, 0, 'it read "3abc" as the number 3');
+  });
+});
+
+describe('the step summary the workflow publishes', () => {
+  // The workflow used to rebuild this markdown inline, duplicating summarise() — which left the tested
+  // function dead and the live one untested. Adversarial review caught it; the CLI now writes it, so
+  // there is one implementation and these cover it.
+  test('a retry decision says so, and carries the numbers', () => {
+    const md = summarise(classify(REAL_KILLED, 1), 'https://example/run/1');
+    assert.match(md, /retrying/i);
+    assert.match(md, /\| tests that actually failed \| `0` \|/);
+    assert.match(md, /\| test files cancelled \| `2` \|/);
+    assert.match(md, /`killed-runner`/);
+    assert.match(md, /https:\/\/example\/run\/1/);
+  });
+
+  test('a non-retry decision never claims it is retrying', () => {
+    const md = summarise(classify('unit\tstep\tZ ℹ fail 3', 1), 'https://example/run/2');
+    assert.doesNotMatch(md, /retrying/i, 'the summary told a reader a real failure was being retried');
+    assert.match(md, /Not retried/);
+  });
+});
+
 describe('the parser is not fooled by text that merely looks like a summary', () => {
   test('a test NAME containing the words is not read as a count', () => {
     // The suite really does have cases with words like "fail" in the title. Without the `ℹ`/`#`
@@ -133,8 +228,12 @@ describe('the parser is not fooled by text that merely looks like a summary', ()
     assert.equal(v.cancelledCount, 4);
   });
 
-  test('the LAST summary wins when a log carries more than one job', () => {
-    // --log-failed can return several jobs concatenated. The final summary is the run's.
+  test('the WORST count wins when a log carries more than one job', () => {
+    // ⚠️ This case used to assert the opposite — "the last summary wins", on the reasoning that the
+    // final block is the run's. That reasoning was the fail-open: --log-failed concatenates several
+    // jobs, so "last" just means "whichever job GitHub happened to print last", which has nothing to
+    // do with which job failed. Both jobs are killed runners here, so the run is still retryable; the
+    // reported figure is the worse of the two.
     const log = [
       `unit\tstep\tZ ##[error]${SHUTDOWN_MARKER}.`,
       'coverage\tstep\tZ ℹ fail 0',
@@ -143,7 +242,8 @@ describe('the parser is not fooled by text that merely looks like a summary', ()
       'unit\tstep\tZ ℹ cancelled 2',
     ].join('\n');
     const v = classify(log, 1);
-    assert.equal(v.cancelledCount, 2);
+    assert.equal(v.cancelledCount, 15, 'it reported the smaller count from whichever job printed last');
+    assert.equal(v.retry, true, 'every job here was a killed runner with nothing failing');
   });
 
   test('the shutdown marker is matched literally, not loosely', () => {

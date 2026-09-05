@@ -29,10 +29,16 @@ permissions:
 jobs:
   triage:
     # Only red runs need triage.
+    # Only red runs need triage. `timed_out` is included for completeness — the classifier still has to
+    # see the shutdown marker and `fail 0` before it retries anything, so widening the trigger cannot
+    # widen what gets retried.
     if: >
       github.event.workflow_run.conclusion == 'failure' ||
-      github.event.workflow_run.conclusion == 'cancelled'
+      github.event.workflow_run.conclusion == 'cancelled' ||
+      github.event.workflow_run.conclusion == 'timed_out'
     runs-on: ubuntu-latest
+    # A hung `gh run view` must not hold a runner for GitHub's six-hour default.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v7
@@ -62,22 +68,6 @@ jobs:
           CODE=$?
           echo "$VERDICT"
 
-          node -e '
-            const v = JSON.parse(process.argv[1]);
-            const url = `https://github.com/${process.argv[2]}/actions/runs/${process.argv[3]}`;
-            const head = v.retry
-              ? `### Not a test failure — retrying\n\nThe hosted runner was killed mid-job (issue #278). ${v.reason}.`
-              : `### Not retried\n\n${v.reason}.`;
-            const rows = [
-              "| signal | value |", "|---|---|",
-              `| runner shutdown marker | \`${v.shutdown ? "present" : "absent"}\` |`,
-              `| tests that actually failed | \`${v.failCount ?? "unknown"}\` |`,
-              `| test files cancelled | \`${v.cancelledCount ?? 0}\` |`,
-              `| decision | \`${v.decision}\` |`,
-            ];
-            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY,
-              `${head}\n\n${rows.join("\n")}\n\n[run](${url})\n`);
-          ' "$VERDICT" "$REPO" "$RUN_ID"
 
           if [ "$CODE" = "10" ]; then
             gh run rerun "$RUN_ID" --repo "$REPO" --failed \
