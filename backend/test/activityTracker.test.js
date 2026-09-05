@@ -32,7 +32,11 @@ before(() => {
   makeCamera(db, { id: 'cam-1', name: 'One' });
   makeCamera(db, { id: 'cam-2', name: 'Two' });
 });
-after(() => { db.close(); cleanupTempDataDirs(); });
+// ⚠️ stopActivityTracker IS LOAD-BEARING, not tidiness (issue #278). The interval-guard test below
+// calls startActivityTracker for real, and its two timers used to have no way to be cleared — so this
+// file alone kept `node --test` alive forever, and the whole suite was run under `--test-force-exit`
+// to compensate. That flag is what cancelled 14 files on a contended CI runner.
+after(() => { at.stopActivityTracker(); db.close(); cleanupTempDataDirs(); });
 beforeEach(() => {
   while (unsubs.length) unsubs.pop()();
   db.prepare('DELETE FROM activity_samples').run();
