@@ -131,9 +131,19 @@ for (const m of mutants) {
     }
   }
 
-  const expected = m.expect === 'survives' ? 'SURVIVED' : 'KILLED';
+  // `expect` has three values, and the third one earns its place. "equivalent" marks a mutant that
+  // changes the source but provably cannot change behaviour — a redundant fast-path guard, a bound
+  // already enforced by the line under it. Mutation literature calls these equivalent mutants and they
+  // are the standard false positive of the technique: no test can kill one, so recording it as an
+  // unexplained survivor is worse than useless — it is the noise that makes people stop reading the
+  // report. Each one carries a `note` saying WHY it cannot matter, which is a claim the next person
+  // can check.
+  const expected = m.expect === 'killed' ? 'KILLED' : 'SURVIVED';
   const ok = verdict === expected;
   if (m.expect === 'survives' && verdict === 'KILLED') harnessBroken = true;
+  if (m.expect === 'equivalent' && verdict === 'KILLED') {
+    console.error(`        NOTE: "${m.label}" was declared equivalent but a test KILLED it — the note is wrong.`);
+  }
   results.push({ ...m, verdict, ok });
   console.log(`${ok ? ' ok ' : '★★★ '}${verdict.padEnd(8)} ${m.label}`);
 }
@@ -144,10 +154,11 @@ if (harnessBroken) {
   console.error('    a comment edit cannot break the suite. EVERY result above is void.');
   process.exit(5);
 }
-const survivors = results.filter((r) => r.expect !== 'survives' && r.verdict === 'SURVIVED');
+const survivors = results.filter((r) => r.expect === 'killed' && r.verdict === 'SURVIVED');
 const errored = results.filter((r) => r.verdict === 'ERROR');
 console.log(`${results.length} mutants, ${results.filter((r) => r.verdict === 'KILLED').length} killed, ` +
-  `${survivors.length} survived, ${errored.length} errored, ` +
+  `${survivors.length} survived unexpectedly, ${errored.length} errored, ` +
+  `${results.filter((r) => r.expect === 'equivalent').length} known-equivalent, ` +
   `${results.filter((r) => r.expect === 'survives').length} control(s) correctly survived.`);
 for (const s of survivors) console.log(`  SURVIVED: ${s.label}${s.note ? ` — ${s.note}` : ''}`);
 for (const e of errored) console.log(`  ERRORED (cancelled test files, result unusable): ${e.label}`);

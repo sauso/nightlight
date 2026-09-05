@@ -26,12 +26,12 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  walkSources, stripCommentsAndStrings, periodicEvidence, unstoppableTimerOffences,
+  walkSources, scanPeriodic, unstoppableTimerOffences,
 } from './helpers/sourceScan.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -286,6 +286,9 @@ describe('every periodic job can be stopped (#286)', () => {
     { module: 'src/lib/sleepAnalysis.js', start: 'startSleepJob', stop: 'stopSleepJob', pinsLoop: true },
     { module: 'src/lib/wakeWatcher.js', start: 'startWakeWatcher', stop: 'stopWakeWatcher', pinsLoop: false },
     { module: 'src/lib/clipStorage.js', start: 'startClipStorage', stop: 'stopClipStorage', pinsLoop: false },
+    // Added in #263, not #286: created through `safeInterval`, so the literal-`setInterval` scan that
+    // built this list could not see it. Unref'd like the two above, so it never pinned the loop.
+    { module: 'src/lib/timelapse.js', start: 'startTimelapseSampler', stop: 'stopTimelapseSampler', pinsLoop: false },
   ];
 
   for (const { module, start, stop, pinsLoop } of PERIODIC) {
@@ -332,19 +335,21 @@ describe('every periodic job can be stopped (#286)', () => {
       // watchdogs that are meant to run for the process lifetime; process-guards.test.js collects and
       // clears the ones it creates.
       'lib/processGuards.js': 'safeInterval returns the timer; the caller owns it',
+      // index.js is the PROCESS, not a module. Its four watchdogs are meant to run for the lifetime of
+      // the container and end when it does; there is no importer to leak into and no lifecycle to
+      // export. It only appears here at all because the guard learned about `safeInterval` (#263) —
+      // rule B then reads "a repeating timer with no stop export", which is true and not a defect.
+      //
+      // ⚠️ The claim "no importer to leak into" is asserted, not assumed — see the test below. An
+      // exemption whose justification nothing checks is how a skip-list quietly becomes wrong.
+      'index.js': 'the process entry point: never imported, its timers end with the process',
     };
 
-    const examined = [];
-    const offenders = [];
-    for (const { rel, src } of walkSources()) {
-      if (ALLOWED[rel]) continue;
-      const code = stripCommentsAndStrings(src);
-      const evidence = periodicEvidence(code);
-      if (!evidence.length) continue;
-      examined.push(rel);
-
-      offenders.push(...unstoppableTimerOffences(rel, code));
-    }
+    // ⚠️ THE SWEEP ITSELF IS A TESTED FUNCTION NOW, not a loop written here. Written here, it passed
+    // pre-stripped source into both helpers and silently disabled the guard's computed-access
+    // detection — the helper was right and the wiring was wrong, so no mutation of the helper could
+    // have found it. See scanPeriodic's own fixtures below.
+    const { examined, offenders } = scanPeriodic(walkSources(), ALLOWED);
 
     // Anti-vacuous FIRST: if the loop examined nothing, an empty `offenders` means nothing.
     for (const { module } of PERIODIC) {
@@ -494,6 +499,107 @@ describe('bypasses found by review, now closed (#286)', () => {
     // comment path is the one still doing the work of not flagging prose.
     const code = '// this module deliberately avoids setInterval\nexport function startZz(){ /* nothing */ }';
     assert.deepEqual(unstoppableTimerOffences('lib/zz.js', code), []);
+  });
+
+  test('★ the repo\'s OWN wrapper: safeInterval (#263)', () => {
+    // The one that got through in real life. `processGuards.safeInterval` returns a genuine interval
+    // timer, but the word `setInterval` never appears at the call site, so the module was skipped
+    // before either rule ran. `lib/timelapse.js` had a start and no stop for exactly as long as the
+    // guard could not see it — a guard that only knows the platform primitive is blind to every
+    // wrapper written over it, and this codebase has one, used in five places.
+    const code = "import { safeInterval } from './processGuards.js';\n" +
+      'let t = null;\nexport function startZz(){ t = safeInterval("zz", 1000, () => {}); }';
+    assert.ok(
+      unstoppableTimerOffences('lib/zz.js', code).length > 0,
+      'a start built on safeInterval, with no stop, is still invisible to the guard'
+    );
+  });
+
+  test('...and safeInterval WITH a stop is fine — the control', () => {
+    // Without this, a rule that flagged every module mentioning safeInterval would pass the test above
+    // and fail the whole codebase; the assertion has to discriminate, not just fire.
+    const code = "import { safeInterval } from './processGuards.js';\n" +
+      'let t = null;\nexport function startZz(){ t = safeInterval("zz", 1000, () => {}); }\n' +
+      'export function stopZz(){ clearInterval(t); t = null; }';
+    assert.deepEqual(unstoppableTimerOffences('lib/zz.js', code), []);
+  });
+});
+
+describe('the SWEEP, not just the rule — testing the wiring (#263)', () => {
+  // ★ Every fixture in the block above hands source straight to `unstoppableTimerOffences`. That
+  // proves the RULE and says nothing about how the real tree reaches it, and the real tree reached it
+  // through a loop that pre-stripped the source and undid half of it. These go through `scanPeriodic`,
+  // which is what the guard above actually calls.
+  const src = (rel, code) => [{ rel, src: code }];
+
+  test('★ computed access survives the trip through the sweep', () => {
+    // The mutant this exists for: `scanPeriodic` passing `stripCommentsAndStrings(src)` instead of
+    // `stripCommentsOnly(src)`. Nothing in src/ is written this way, so the real-tree assertion cannot
+    // notice — only a synthetic source can.
+    const { examined, offenders } = scanPeriodic(
+      src('lib/zz.js', "export function startZz(){ globalThis['setInterval'](()=>{},1000); }")
+    );
+    assert.deepEqual(examined, ['lib/zz.js'], 'the sweep skipped a module that does create a timer');
+    assert.ok(offenders.length > 0, 'the sweep blanked the string before looking for the timer');
+  });
+
+  test('a name that only appears inside a STRING is not treated as an export', () => {
+    // The other half of the two-views rule, and the reason the sweep must not pre-blank OR pre-keep
+    // for both questions. Here `stopZz` exists only as text inside a log line — it is not a teardown,
+    // and a scan that read exports from strings-intact source would think it was.
+    const { offenders } = scanPeriodic(
+      src('lib/zz.js', 'let t=null;\nexport function startZz(){ t = setInterval(()=>{},1000); console.log("stopZz"); }')
+    );
+    assert.ok(offenders.length > 0, 'a stop mentioned only in a string counted as a real teardown');
+  });
+
+  test('the exemption map is honoured, and only for the exact path', () => {
+    const code = 'export function startZz(){ setInterval(()=>{},1000); }';
+    assert.deepEqual(scanPeriodic(src('lib/zz.js', code), { 'lib/zz.js': 'reason' }).examined, []);
+    assert.deepEqual(scanPeriodic(src('lib/zz.js', code), { 'lib/other.js': 'reason' }).examined, ['lib/zz.js']);
+  });
+
+  test('a module with no timer is not even examined', () => {
+    assert.deepEqual(scanPeriodic(src('lib/zz.js', 'export const x = 1;')), { examined: [], offenders: [] });
+  });
+});
+
+describe('the ALLOWED exemptions justify themselves (#263)', () => {
+  test('★ index.js really is imported by no test — which is what its exemption rests on', () => {
+    // The exemption's stated reason is "never imported, so it cannot leak into a test process". That
+    // is a CLAIM, and a claim nothing checks is how a skip-list rots: the day someone imports index.js
+    // from a suite, its four unstoppable watchdogs come with it and the guard is looking the other way.
+    // Derived from the test directory rather than a list typed here, so a new file is covered by
+    // default.
+    //
+    // ⚠️ IMPORTING is the question, not mentioning. Four suites already READ src/index.js as text
+    // (asserting that shutdown calls each stop, that it parses) and that is fine — reading a file does
+    // not run it. The first version of this matched any string containing the path and flagged all
+    // four. Known limit: a computed specifier would slip past; nothing in this suite uses one, and an
+    // AST for this would cost more than it is worth.
+    const IMPORTS_INDEX = /(?:\bfrom|\bimport\s*\()\s*['"`][^'"`]*src\/index\.js['"`]/;
+    const SELF = path.basename(fileURLToPath(import.meta.url));
+    const testDir = path.dirname(fileURLToPath(import.meta.url));
+    // This file is excluded because the three probe assertions below contain literal import
+    // statements as DATA — a scanner that reads itself matches its own pattern, which it did on the
+    // first run. Safe here specifically because this suite never imports application code: everything
+    // it exercises runs in a spawned child (see childExitsOnItsOwn).
+    const files = readdirSync(testDir).filter((f) => f.endsWith('.test.js') && f !== SELF);
+    // Anti-vacuous, and not theoretical: if the directory ever moves, `offenders` is empty because
+    // nothing was read, and an empty list is exactly what "all clear" looks like.
+    assert.ok(files.length > 20, `only ${files.length} test files found — the scan is looking in the wrong place`);
+    // ...and the pattern itself must still match the thing it is looking for.
+    assert.ok(IMPORTS_INDEX.test("import x from '../src/index.js';"), 'the import pattern no longer matches an import');
+    assert.ok(IMPORTS_INDEX.test("await import('../src/index.js')"), 'the import pattern no longer matches a dynamic import');
+    assert.ok(!IMPORTS_INDEX.test("readFileSync(new URL('../src/index.js', import.meta.url))"), 'reading the file is not importing it');
+
+    const offenders = files.filter((f) => IMPORTS_INDEX.test(readFileSync(path.join(testDir, f), 'utf8')));
+    assert.deepEqual(
+      offenders,
+      [],
+      `${offenders.join(', ')} imports src/index.js, so its exemption in the periodic-job guard no ` +
+        'longer holds. Either drop the import or drop the exemption and give index.js a teardown.'
+    );
   });
 });
 

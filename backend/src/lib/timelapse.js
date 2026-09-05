@@ -149,6 +149,23 @@ export function startTimelapseSampler() {
   logger.info(`[timelapse] frame sampler started (every ${SAMPLE_INTERVAL_MS / 1000}s during open sleep windows)`);
 }
 
+// Stop the frame sampler. Idempotent, and safe when it was never started.
+//
+// ⚠️ MISSED BY THE #286 SWEEP, and worth recording why rather than just adding it: that sweep found
+// every periodic job by scanning for the literal `setInterval`, and this one goes through
+// `safeInterval`, so the module was skipped before the pairing rule ever ran. The guard now also looks
+// for the wrapper (see test/helpers/sourceScan.js). Same class of miss as the #278 root cause — the
+// check was real, it just could not see this shape.
+//
+// Like the other unref'd jobs, this one cannot cause the #278 hang; it gets a stop so the rule stays
+// uniform and so shutdown is explicit rather than relying on process.exit to take the timer down.
+export function stopTimelapseSampler() {
+  clearInterval(sampleTimer);
+  // Nulled, not merely cleared: `startTimelapseSampler` guards on `if (sampleTimer) return`, so a
+  // stale handle here would make every later restart a silent no-op.
+  sampleTimer = null;
+}
+
 // --- assembly (called by the nightly sleep job once a night's window has closed) ---
 
 // Build a temp dir of sequentially-named hardlinks (000001.jpg…) so ffmpeg's image2 demuxer can read

@@ -39,7 +39,7 @@ import { startSensorSampler, stopSensorSampler } from './lib/sensorSampler.js';
 import { startActivityTracker, stopActivityTracker } from './lib/activityTracker.js';
 import { startSleepJob, stopSleepJob } from './lib/sleepAnalysis.js';
 import { startWakeWatcher } from './lib/wakeWatcher.js';
-import { startTimelapseSampler } from './lib/timelapse.js';
+import { startTimelapseSampler, stopTimelapseSampler } from './lib/timelapse.js';
 import { logger } from './lib/logger.js';
 import { applyTrustProxy } from './lib/trustProxy.js';
 import { safeInterval, installCrashGuards, markBootComplete, reportGuardFailure } from './lib/processGuards.js';
@@ -655,12 +655,17 @@ async function shutdown() {
   // behaviour smuggled in under a bug fix — see issue #278. If that minute turns out to matter,
   // it is its own change with its own test.
   stopActivityTracker();
-  // The other two periodic jobs, stopped for the same reason and grouped with it (issue #286). Both
-  // are cheap synchronous clearInterval calls; neither writes anything on the way out, so their order
+  // The other periodic jobs, stopped for the same reason and grouped with it (issue #286). All are
+  // cheap synchronous clearInterval calls; none writes anything on the way out, so their order
   // relative to each other does not matter.
+  //
+  // ⚠️ The timelapse sampler joined this list in #263, not #286 — that sweep found periodic jobs by
+  // scanning for the literal `setInterval`, and this one is created through `safeInterval`, so it was
+  // skipped before the pairing rule ran at all. The guard now knows about the wrapper too.
   stopSensorSampler();
   stopClipStorage();
   stopSleepJob();
+  stopTimelapseSampler();
   process.exit(0);
 }
 process.on('SIGTERM', shutdown);

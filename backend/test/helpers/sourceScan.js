@@ -101,6 +101,14 @@ export function periodicEvidence(code) {
   // The IDENTIFIER, not `setInterval(` — catches `const si = setInterval`, `globalThis.setInterval`,
   // `globalThis['setInterval']`, and destructuring, as well as a direct call.
   if (/\bsetInterval\b/.test(code)) reasons.push('setInterval');
+  // ★ THIS REPO'S OWN WRAPPER, and the guard was blind to it until #263's mutation work.
+  // `processGuards.safeInterval` returns a real interval timer, but the word `setInterval` never
+  // appears at the call site — so `\bsetInterval\b` did not match and the module was skipped entirely,
+  // before rule A or rule B ever ran. `lib/timelapse.js` was the live casualty: `startTimelapseSampler`
+  // with no `stopTimelapseSampler`, invisible to a guard shipped the day before specifically to find
+  // exactly that. A guard that only knows the platform primitive misses every wrapper written over it,
+  // and this codebase has one and uses it in five places.
+  if (/\bsafeInterval\b/.test(code)) reasons.push('safeInterval');
   return reasons;
 }
 
@@ -116,6 +124,37 @@ export function periodicEvidence(code) {
 // Removed deliberately rather than left noisy: this repo's own rule is that a check which cries wolf
 // gets clicked past, and a guard people learn to ignore is worse than no guard. If this gap ever
 // matters, it needs an AST — say so, don't approximate it.
+
+/**
+ * Sweep a set of sources for periodic jobs that cannot be stopped.
+ *
+ * ★ THIS LOOP USED TO LIVE IN THE TEST, and living there is what let it be wrong. It passed
+ * `stripCommentsAndStrings(src)` into both `periodicEvidence` and `unstoppableTimerOffences` — but
+ * those two need OPPOSITE views of a file (strings intact to find a timer, strings blanked to find
+ * exports), and `unstoppableTimerOffences` takes RAW source precisely so it can make both itself.
+ * Handing it pre-blanked source turned `globalThis['setInterval'](…)` into `globalThis['']` before any
+ * scan saw it, silently disabling the computed-access detection this suite has a passing fixture for.
+ *
+ * ⚠️ The helper was correct and the CALL SITE was wrong, so mutating the helper could never have found
+ * it — and the fixture proving computed access is caught ran against the helper directly, not through
+ * the wiring. Pulling the loop in here makes the wiring itself a pure function with its own fixtures.
+ *
+ * @param {{rel: string, src: string}[]} sources  raw sources, as walkSources() returns them
+ * @param {Record<string,string>} allowed         rel -> written reason for exemption
+ * @returns {{examined: string[], offenders: string[]}}
+ */
+export function scanPeriodic(sources, allowed = {}) {
+  const examined = [];
+  const offenders = [];
+  for (const { rel, src } of sources) {
+    if (allowed[rel]) continue;
+    // Comments removed, STRINGS INTACT — see above.
+    if (!periodicEvidence(stripCommentsOnly(src)).length) continue;
+    examined.push(rel);
+    offenders.push(...unstoppableTimerOffences(rel, src));
+  }
+  return { examined, offenders };
+}
 
 /** Every exported name, across the export forms this codebase actually uses. */
 export function exportedNames(code) {
