@@ -31,13 +31,13 @@ import { startOnvifMotion, stopOnvifMotion, isOnvifMotion, onvifMotionWanted, st
 import { startSoundDetector, isSoundDetecting, stopAllSoundDetectors } from './lib/soundDetector.js';
 import { startClipCapture, clipRingWanted, isClipCapturing, stopAllClipCapture } from './lib/clipCapture.js';
 import { stopAllRecordingsForShutdown, reconcileStaleRecordings } from './lib/recordings.js';
-import { startClipStorage } from './lib/clipStorage.js';
+import { startClipStorage, stopClipStorage } from './lib/clipStorage.js';
 import { initPush } from './lib/push.js';
 import { startMediaMTX, stopMediaMTX } from './lib/mediamtxProcess.js';
 import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
-import { startSensorSampler } from './lib/sensorSampler.js';
+import { startSensorSampler, stopSensorSampler } from './lib/sensorSampler.js';
 import { startActivityTracker, stopActivityTracker } from './lib/activityTracker.js';
-import { startSleepJob } from './lib/sleepAnalysis.js';
+import { startSleepJob, stopSleepJob } from './lib/sleepAnalysis.js';
 import { startWakeWatcher } from './lib/wakeWatcher.js';
 import { startTimelapseSampler } from './lib/timelapse.js';
 import { logger } from './lib/logger.js';
@@ -655,6 +655,12 @@ async function shutdown() {
   // behaviour smuggled in under a bug fix — see issue #278. If that minute turns out to matter,
   // it is its own change with its own test.
   stopActivityTracker();
+  // The other two periodic jobs, stopped for the same reason and grouped with it (issue #286). Both
+  // are cheap synchronous clearInterval calls; neither writes anything on the way out, so their order
+  // relative to each other does not matter.
+  stopSensorSampler();
+  stopClipStorage();
+  stopSleepJob();
   process.exit(0);
 }
 process.on('SIGTERM', shutdown);
