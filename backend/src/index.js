@@ -41,6 +41,7 @@ import { startSleepJob } from './lib/sleepAnalysis.js';
 import { startWakeWatcher } from './lib/wakeWatcher.js';
 import { startTimelapseSampler } from './lib/timelapse.js';
 import { logger } from './lib/logger.js';
+import { applyTrustProxy } from './lib/trustProxy.js';
 import { safeInterval, installCrashGuards, markBootComplete, reportGuardFailure } from './lib/processGuards.js';
 import { recordCameraEvent, EVENT } from './lib/cameraEvents.js';
 import { probeAudioFlowing, tracksHaveAudio } from './lib/audioLiveness.js';
@@ -72,13 +73,29 @@ installCrashGuards();
 
 const app = express();
 
-// The app is reached through a reverse proxy for remote access (see the HLS comment in
-// mediamtx.yml), which sets X-Forwarded-For - trusting only loopback (not a blanket
-// `true`) means only a proxy running on this same host can supply that header, so it
-// can't be spoofed by a client to fake its IP. Without this, Express falls back to the
-// proxy's own loopback address for every request, which defeats the login route's
-// per-IP rate limiting (see auth.js) for anyone connecting through the proxy.
-app.set('trust proxy', 'loopback');
+// The app is reached through a reverse proxy for remote access (see the HLS comment in mediamtx.yml),
+// which sets X-Forwarded-For. Trusting only loopback — not a blanket `true` — means only a proxy on
+// this same host can supply that header, so a client cannot spoof its own IP.
+//
+// ⚠️ BUT LOOPBACK IS THE WRONG DEFAULT FOR THE SETUP THIS PROJECT DOCUMENTS (issue #248). The README's
+// reverse-proxy section has SWAG reaching Nightlight by its LAN IP — the host's in host mode, or the
+// container's own on ipvlan — and the macvlan note even suggests running SWAG on a different host.
+// None of those is loopback, so X-Forwarded-For is ignored and `req.ip` is the PROXY for every remote
+// user. That collapsed the login limiter into one shared bucket; see auth.js.
+//
+// Configurable, defaulting to today's behaviour so nothing changes for an existing install. Accepts
+// anything Express does: an IP or CIDR (`10.0.0.20`, `172.18.0.0/16`), a comma-separated list, a hop
+// count (`1`), or a named range.
+//
+// ⚠️ ONLY SET THIS WHEN THE PROXY IS TRUSTED. A wrong or over-broad value lets a client forge
+// X-Forwarded-For and evade the rate limit entirely — which is worse than the shared bucket it fixes.
+// Documented with that warning in the README's reverse-proxy section.
+// ⚠️ VALIDATED, NOT PASSED STRAIGHT THROUGH. `app.set('trust proxy', 'true')` THROWS out of proxy-addr
+// during startup, and since the bad value lives in the environment every restart dies identically —
+// a permanent crash loop on a baby monitor, from one typo. `true` is also the likeliest typo, because
+// it is the canonical example in Express's own docs (where the setting takes a real boolean).
+// See lib/trustProxy.js; it falls back to 'loopback' with a loud log rather than exiting.
+applyTrustProxy(app, process.env.TRUST_PROXY);
 
 // Content-Security-Policy — ENFORCING (validated via a report-only rollout on staging that exercised
 // every feature). The report-uri below still logs any future

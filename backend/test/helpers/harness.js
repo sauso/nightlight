@@ -83,6 +83,22 @@ export function makeCamera(db, { id = 'cam-1', name = 'Test Cam', childId = null
 
 // Mount one router on a bare Express app and start it on an ephemeral port. Returns { url, close }.
 // Deliberately NOT the real index.js app: that one spawns MediaMTX and a transcoder per camera.
+// Same as mountRouter, but with `trust proxy` on so a test can claim its own source address via
+// X-Forwarded-For. Needed to prove a rate-limit key includes the CLIENT IP: a harness where every
+// request arrives from 127.0.0.1 cannot tell "keyed by IP+username" from "keyed by username alone",
+// and that gap let a targeted-lockout mutant survive (issue #248).
+export async function mountRouterTrustingProxy(mountPath, router) {
+  const { default: express } = await import("express");
+  const app = express();
+  app.set("trust proxy", true);
+  app.use(express.json());
+  app.use(mountPath, router);
+  app.use((err, _req, res, _next) => res.status(err.status || 500).json({ error: err.message }));
+  const server = await new Promise((resolve) => { const sv = app.listen(0, "127.0.0.1", () => resolve(sv)); });
+  const { port } = server.address();
+  return { url: `http://127.0.0.1:${port}`, close: () => new Promise((r) => server.close(r)) };
+}
+
 export async function mountRouter(mountPath, router) {
   const { default: express } = await import('express');
   const app = express();

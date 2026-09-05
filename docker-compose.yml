@@ -23,6 +23,10 @@ services:
       # the container. Defaults to 99/100 - Unraid's own "nobody"/"users" convention.
       # Find your own with `id your_username` if you want something else.
       - PUID=${PUID:-99}
+      # Which upstream addresses may set X-Forwarded-For. Blank = trust loopback only, which is
+      # safe but means every visitor through a non-loopback reverse proxy looks like one client.
+      # Only ever list an address you control - see the README and .env.example.
+      - TRUST_PROXY=${TRUST_PROXY:-}
       - PGID=${PGID:-100}
       # Your local timezone (e.g. Australia/Melbourne) - affects log timestamps only.
       # Defaults to UTC if unset. Full list: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
