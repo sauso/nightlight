@@ -1,0 +1,83 @@
+name: Killed-runner triage
+
+# Tell "the runner died" apart from "a test failed", and retry only the former. Issue #278.
+#
+# The decision logic lives in scripts/triage-killed-runner.mjs and is tested in
+# backend/test/triage-killed-runner.test.js — deliberately NOT inline here, because a
+# misclassification fails silently in the worst direction (retrying away a genuinely red suite) and
+# inline `run:` shell cannot be tested.
+#
+# ⚠️ WHY THIS IS A SEPARATE WORKFLOW AND NOT A STEP IN test.yml. When the runner is shut down, every
+# remaining step — `if: always()` and the post-steps included — is SKIPPED. Verified in the job data
+# for run 33932278201: `Run the test suite -> cancelled`, `Post Run actions/setup-node@v7 -> skipped`.
+# A job cannot report on its own death, so the triage has to run afterwards, in a different job.
+#
+# ⚠️ WHAT THIS DOES NOT DO: it cannot un-send the first notification — GitHub emails when the run
+# fails, before this handler sees it. What it does is make that email cheap: the run retries itself and
+# goes green with nobody touching it, and the summary says which of the two things happened. A genuine
+# failure is left completely alone, so red still means red.
+
+# ⚠️⚠️ THIS DOES NOTHING UNTIL IT IS ON `main`. GitHub: "This event will only trigger a workflow run
+# if the workflow file exists on the default branch." The default branch here is `main`, and work lands
+# on `dev` — so merging this to `dev` does NOT switch it on. It starts working at the next release, and
+# until then the false-alarm notifications continue exactly as before.
+#
+# It is CI-only and never enters the Docker image (the Dockerfile copies `frontend/`, `backend/` and
+# `mediamtx/` only), so it can ride along with any release without needing one of its own.
+on:
+  workflow_run:
+    workflows: ["Tests and checks"]
+    types: [completed]
+
+permissions:
+  actions: write   # needed to rerun the failed jobs
+  contents: read
+
+jobs:
+  triage:
+    # Only red runs need triage.
+    # Only red runs need triage. `timed_out` is included for completeness — the classifier still has to
+    # see the shutdown marker and `fail 0` before it retries anything, so widening the trigger cannot
+    # widen what gets retried.
+    if: >
+      github.event.workflow_run.conclusion == 'failure' ||
+      github.event.workflow_run.conclusion == 'cancelled' ||
+      github.event.workflow_run.conclusion == 'timed_out'
+    runs-on: ubuntu-latest
+    # A hung `gh run view` must not hold a runner for GitHub's six-hour default.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Classify the failure and retry it if the runner was killed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: |
+          set -uo pipefail
+
+          # --log-failed is the cheap read (only the failed jobs), and it does carry both signals —
+          # verified against run 33932688168. It comes back empty if the logs have been replaced by a
+          # later successful rerun or have expired, so fall back to the full log before giving up.
+          LOG=$(gh run view "$RUN_ID" --repo "$REPO" --log-failed 2>/dev/null || true)
+          if [ -z "$LOG" ]; then
+            LOG=$(gh run view "$RUN_ID" --repo "$REPO" --log 2>/dev/null || true)
+          fi
+
+          # Exit 10 means "retry"; 0 means "leave it alone". Exit codes rather than parsing stdout, so
+          # the workflow cannot misread the decision.
+          VERDICT=$(printf '%s' "$LOG" | node scripts/triage-killed-runner.mjs)
+          CODE=$?
+          echo "$VERDICT"
+
+
+          if [ "$CODE" = "10" ]; then
+            gh run rerun "$RUN_ID" --repo "$REPO" --failed \
+              && echo "retry requested" \
+              || echo "::warning::could not request a retry — rerun it by hand"
+          fi
