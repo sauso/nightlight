@@ -61,6 +61,28 @@ const { startMediaMTX, stopMediaMTX } = await import('../src/lib/mediamtxProcess
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// ⚠️ WAIT FOR THE HANDLER TO HAVE RUN, NOT FOR A DURATION (issue #278). Every case below asserts
+// `logged(...) === N` after a fixed sleep, and each carries the note "this case would pass vacuously"
+// — which is exactly what a slow machine turns into a FAILURE instead: the handler simply had not run
+// yet when the sleep expired. This file was one of the two that went red in CI on a commit that had
+// changed nothing (#277, then #280).
+//
+// Polling for `>= n` and then asserting `=== n` is strictly stronger than sleeping and asserting: the
+// sleep hoped the handler had run, this proves it did, and the exact-count assertion that follows is
+// untouched. The cap is a backstop for a handler that never runs at all — which still fails the test.
+//
+// ⚠️ The FLOOD assertions further down are NOT converted, deliberately. "still exactly one line after
+// two 3s retry intervals" is a negative: it has to outlive the interval it is proving nothing happened
+// in, so those stay real elapsed waits.
+async function waitForLog(needle, count = 1, capMs = 15_000) {
+  const deadline = Date.now() + capMs;
+  while (Date.now() < deadline) {
+    if (logged(needle) >= count) return;
+    await sleep(10);
+  }
+  assert.fail(`"${needle}" was logged ${logged(needle)}x, expected ${count}, within ${capMs}ms — the handler never ran`);
+}
+
 // The precondition. Counting the handler's own log line is the only observable that distinguishes "the
 // handler ran and coped" from "the spawn never happened", and it is the same technique
 // restart-cancellation.test.js uses for the same reason.
@@ -112,7 +134,7 @@ describe('ffmpeg cannot be spawned', () => {
   test('the transcoder survives it and releases the camera', async () => {
     const CAM = 'cam-enoent-1';
     await startTranscoder(CAM, 'rtsp://192.0.2.10:554/ch0', 'path_enoent_1', 'ENOENT Cam');
-    await sleep(500);
+    await waitForLog('[ffmpeg:path_enoent_1] could not start ffmpeg');
 
     assert.deepEqual(escaped, [], `a spawn failure escaped: ${escaped[0]?.message}`);
     assert.equal(logged('[ffmpeg:path_enoent_1] could not start ffmpeg'), 1, 'the spawn-failure handler never ran — this case would pass vacuously');
@@ -125,7 +147,7 @@ describe('ffmpeg cannot be spawned', () => {
   test('the motion detector survives it and releases the camera', async () => {
     const cam = camera('cam-enoent-2');
     await startMotionDetector(cam);
-    await sleep(700);
+    await waitForLog('could not start ffmpeg');
 
     assert.deepEqual(escaped, [], `a spawn failure escaped: ${escaped[0]?.message}`);
     assert.equal(logged('could not start ffmpeg'), 1, 'the spawn-failure handler never ran — this case would pass vacuously');
@@ -136,7 +158,7 @@ describe('ffmpeg cannot be spawned', () => {
   test('the sound detector survives it and releases the camera', async () => {
     const cam = camera('cam-enoent-3');
     await startSoundDetector(cam);
-    await sleep(700);
+    await waitForLog('could not start ffmpeg');
 
     assert.deepEqual(escaped, [], `a spawn failure escaped: ${escaped[0]?.message}`);
     assert.equal(logged('could not start ffmpeg'), 1, 'the spawn-failure handler never ran — this case would pass vacuously');
@@ -153,7 +175,7 @@ describe('ffmpeg cannot be spawned', () => {
     // inside extractClip. isSegmenterRunning() is therefore the assertion that matters here.
     const CAM = 'cam-enoent-clip';
     startSegmenter(CAM, 'path_enoent_clip', { preRollSec: 5, postRollSec: 5 });
-    await sleep(500);
+    await waitForLog('[clipseg:path_enoent_clip] could not start ffmpeg');
 
     assert.deepEqual(escaped, [], `a spawn failure escaped: ${escaped[0]?.message}`);
     assert.equal(logged('[clipseg:path_enoent_clip] could not start ffmpeg'), 1, 'the spawn-failure handler never ran — this case would pass vacuously');
@@ -172,9 +194,9 @@ describe('ffmpeg cannot be spawned', () => {
     // unclaimed, rather than throwing or being refused because the camera is still recorded as running.
     const CAM = 'cam-enoent-4';
     await startTranscoder(CAM, 'rtsp://192.0.2.10:554/ch0', 'path_enoent_4', 'ENOENT Cam 4');
-    await sleep(400);
+    await waitForLog('[ffmpeg:path_enoent_4] could not start ffmpeg', 1);
     await startTranscoder(CAM, 'rtsp://192.0.2.10:554/ch0', 'path_enoent_4', 'ENOENT Cam 4');
-    await sleep(400);
+    await waitForLog('[ffmpeg:path_enoent_4] could not start ffmpeg', 2);
 
     assert.deepEqual(escaped, [], `a spawn failure escaped: ${escaped[0]?.message}`);
     assert.equal(logged('[ffmpeg:path_enoent_4] could not start ffmpeg'), 2, 'the second start did not reach the spawn — the leg was still claimed');
@@ -191,7 +213,7 @@ describe('the mediamtx binary cannot be spawned', () => {
   // the very same broken image) inside an hour.
   test('it survives, says so once, and does not flood the log ring', async () => {
     await startMediaMTX(path.join(emptyBinDir, 'mediamtx.yml'));
-    await sleep(300);
+    await waitForLog('[mediamtx] could not start');
 
     assert.deepEqual(escaped, [], `a spawn failure escaped: ${escaped[0]?.message}`);
     assert.equal(logged('[mediamtx] could not start'), 1, 'the spawn-failure handler never ran — this case would pass vacuously');
