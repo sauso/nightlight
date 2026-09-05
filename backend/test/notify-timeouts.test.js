@@ -14,6 +14,7 @@ import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:net';
 import { useTempDataDir, cleanupTempDataDirs } from './helpers/harness.js';
+import { walkSources, stripCommentsAndStrings } from './helpers/sourceScan.js';
 
 useTempDataDir();
 
@@ -148,26 +149,11 @@ describe('nothing in the backend performs an UNBOUNDED fetch', () => {
   // Now every .js under src is scanned and each fetch() must pass a `signal:`. A new provider added
   // anywhere fails by default; the only ways to pass are to bound the call or to add the file to
   // ALLOWED, which is a visible decision carrying a reason rather than a silence.
-  const readAllSources = async () => {
-    const fs = await import('node:fs');
-    const path = await import('node:path');
-    const root = path.join(process.cwd(), 'src');
-    const out = [];
-    const walk = (dir) => {
-      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-        const full = path.join(dir, e.name);
-        if (e.isDirectory()) walk(full);
-        else if (e.name.endsWith('.js')) {
-          out.push({
-            rel: path.relative(root, full).split(path.sep).join('/'),
-            src: fs.readFileSync(full, 'utf8'),
-          });
-        }
-      }
-    };
-    walk(root);
-    return out;
-  };
+  // ⚠️ Both the walk and the comment/string stripper now come from test/helpers/sourceScan.js, shared
+  // with the periodic-job guard in suite-exits-cleanly.test.js (issue #286). They were duplicated, and
+  // two implementations of a fail-closed check drift — the one that drifts being the one nobody
+  // notices has stopped matching. The shared walk also resolves from its own location rather than
+  // `process.cwd()`, so it cannot silently scan the wrong tree when the runner's cwd differs.
 
   // Every entry needs a reason. These are the only unbounded fetches left in the backend.
   const ALLOWED = {
@@ -183,16 +169,8 @@ describe('nothing in the backend performs an UNBOUNDED fetch', () => {
   // A text scan is fooled by comments and string literals in BOTH directions — review of #262 hid a
   // real unbounded call from the old scan, and separately made it fail on the literal "await fetch("
   // sitting inside an explanatory comment. Strip both before matching.
-  const stripCommentsAndStrings = (src) =>
-    src
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/(^|[^:])\/\/.*/g, '$1')
-      .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
-      .replace(/"(?:[^"\\\n]|\\.)*"/g, '""')
-      .replace(/`(?:[^`\\]|\\.)*`/g, '``');
-
   test('every fetch() passes a signal, or is an allowed exception with a stated reason', async () => {
-    const files = await readAllSources();
+    const files = walkSources();
     assert.ok(files.length > 20, `the source walk found only ${files.length} files — it has stopped working`);
     // Anti-vacuous: the scan must actually be finding fetch calls, or it proves nothing at all.
     const withFetch = files.filter((f) => /\bfetch\s*\(/.test(f.src));
@@ -227,7 +205,7 @@ describe('nothing in the backend performs an UNBOUNDED fetch', () => {
   test('the notification providers in particular go through the bounded helper', async () => {
     // The positive half. The scan above proves nothing unbounded EXISTS; this proves the call sites
     // #262 was filed about are actually wired to the helper, rather than deleted or routed elsewhere.
-    const files = await readAllSources();
+    const files = walkSources();
     for (const rel of ['lib/ntfy.js', 'lib/gotify.js', 'lib/pushover.js']) {
       const f = files.find((x) => x.rel === rel);
       assert.ok(f, `${rel} has gone missing`);

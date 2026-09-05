@@ -55,6 +55,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **Shutdown now stops every background job, not just some of them.** The nightly sleep computation,
+  the temperature/humidity sampler and the recording-retention sweep each started a repeating timer
+  that nothing could switch off, so shutdown relied on the process being killed to take them down.
+  They now stop explicitly, alongside the detectors. Nothing changes in day-to-day use — this closes
+  the gap that caused the test-suite problem below, so it cannot come back through another job.
+
 - **The activity tracker started two timers that nothing could stop.** `node --test` could therefore
   never exit on its own, and the whole suite ran under `--test-force-exit` to compensate. Shutdown had
   the same gap — it stops every detector and transcoder but never these timers, and only the hard
