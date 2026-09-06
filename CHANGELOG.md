@@ -53,6 +53,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   and inflate the reported awake time — with how to recognise it in the log and what to do about
   it. Sleep and wake *times* are unaffected; only the awake/asleep totals are.
 
+### Changed
+
+- Dependency maintenance: **express-rate-limit 8.6.2 → 8.7.0**, **lucide-react 1.33.0 → 1.37.0**,
+  **react-router-dom 7.18.2 → 7.18.3**, and the build/test tooling **@vitejs/plugin-react 6.0.5 → 6.1.1**
+  and **@testing-library/react 16.3.2 → 16.3.3**. No behaviour change: none of the icons Nightlight uses
+  were among those redrawn in lucide 1.37, and nothing here alters a setting, a screen or an API.
+
 ### Fixed
 
 - **A camera whose video process failed to start could take the whole app down with it.** If starting
