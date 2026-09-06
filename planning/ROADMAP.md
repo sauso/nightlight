@@ -405,7 +405,8 @@ newly makes reachable.**
   **The last big one left.**
 - `lib/motionDetector.js` — zone-mask maths
 - ✅ `routes/auth.js` — **DONE 2026-09-05** (#295): 86.5 → 99.6% lines. ⚠️ Branches are **73%**, under
-  the 80 bar and hidden by the aggregate; worth a deliberate pass rather than bolting on.
+  the 80 bar and hidden by the aggregate; worth a deliberate pass rather than bolting on — tracked as
+  **§3 E2**.
 - ✅ `lib/clipStorage.js` — **DONE 2026-09-06** (#296), 100% lines, along with the other four clip
   modules. It had no test file at all, which is how `sweepClips(){ return; }` — deleting the entire
   retention sweeper — passed a green 389-test suite.
@@ -587,7 +588,8 @@ observed locally.
 ## 3. Idea backlog
 
 Not committed — each is specced far enough to start, ordered by value-for-effort. Suggested first
-three: **A1**, **A2**, **C1**.
+three: **A1**, **A2**, **C1**. For *maintenance* rather than features, see **§E** — those are agreed
+and unblocked, and are the right thing to reach for in a gap.
 
 ### A. Builds on the shipped sleep + climate + clips data
 - **A1. Weekly sleep digest** — `IDEA` · *small*. Aggregate the existing per-night summaries per child:
@@ -625,6 +627,47 @@ three: **A1**, **A2**, **C1**.
   live view of one camera/child until expiry, revocable anytime. Reuses the JWT + `sessions` row model
   with a new narrow scope; a `guest_grants` row checked in auth middleware. No settings, no history —
   just live. **Open:** almost certainly view-only (no talk).
+
+### E. Maintenance and housekeeping
+Not features — small, agreed, unblocked work with no dependency on the holdout. **This is the list to
+pick from when there is a gap**, which is why it is one list rather than four notes in four places.
+
+- **E1. Clear the `qs` and `uuid` advisories** — `NEXT` · *small*. `npm audit --omit=dev` on the backend
+  reports **9 moderate** advisories: `qs` (array-limit bypass, DoS via attacker-controlled `isBuffer`)
+  and `uuid` (missing buffer bounds check in v3/v5/v6). Both are **transitive through
+  `gaxios`/`teeny-request`**, i.e. Firebase Admin, not direct dependencies. The frontend reports 0.
+  - **Confirmed pre-existing, not introduced by the 2026-09-06 dependency batch** — that lockfile diff
+    touches neither package (0 changed lines mentioning them).
+  - `qs` has a **non-breaking** `npm audit fix`. `uuid` needs `--force`, which can move majors.
+  - ⚠️ **Read what `--force` actually proposes before running it**, and re-run the suite plus a real
+    image build after — `firebase-admin` is on the push path, and a broken push is silent until an
+    alert fails to arrive.
+
+- **E2. `routes/auth.js` branch coverage** — `NEXT` · *small*. **73%**, under the 80 bar, and invisible
+  because the gate is an aggregate. Lines are 99.6% and functions 100%, so what is missing is the
+  either-or paths, not whole functions. See §2.3, where it sits on the coverage list.
+
+- **E3. Fix the third state in `02-add-camera`'s e2e wait** — `NEXT` · *small*. The spec clicks **Add
+  camera**, then waits up to 8 s for the **Save anyway** button that appears when the pre-save stream
+  validation fails against a cold synthetic source. Its `catch` treats "the button never appeared" as
+  *"validated on the first try"* — but there is a third state: **validation failed AND the button was
+  slower than 8 s**. The run then continues as though the camera had been saved and fails ~20 s later
+  waiting for "Save changes", which points at the wrong thing entirely.
+  - Observed 2026-09-06 on the dependency batch; the screenshot showed the app correctly reporting an
+    unreachable camera. Re-run 3× on the identical image: 3/3 passed, so it is a flake, not a
+    regression — but it costs an investigation every time it fires.
+  - **Fix:** decide between the two outcomes explicitly rather than inferring from a timeout — wait for
+    *either* "Save changes" *or* "Save anyway", and fail with a message naming which appeared.
+
+- **E4. Move the soak stack into the repo as `e2e/soak/`** — `NEXT` · *small*. It currently lives
+  outside the repo on the dev machine, which was the right call while it was unproven. **It has earned
+  its place**: it validated #257 end to end, caught the #274 review's finding in a live container,
+  proved #254's per-leg isolation, measured the shutdown-grace gap that became #279, and confirmed
+  #297's fix under fault injection. None of that was reachable from a unit test.
+  - Brings with it the two fault-injection recipes (hide `ffmpeg`; hide `mediamtx`) that are currently
+    only in an agent's notes.
+  - It already mounts `e2e/fakecam/mediamtx.yml` from the repo, so the move mostly means the compose
+    file and a README. ⚠️ Keep the warning that it must never be pointed at a bedroom camera.
 
 ---
 
