@@ -22,6 +22,18 @@ building goes to §4 *with the evidence*, so it doesn't get re-proposed later.
 
 ## 1. Next up
 
+> **⏳ EVERYTHING IN THIS SECTION IS GATED ON THE SAME DATE.** A detection **holdout** has been running
+> since 2026-08-30 and ends ~**2026-09-09**: production is deliberately frozen on 0.29.0 so the nights
+> it collects are an unbiased measure of the current detector. **Do not tune on those nights, and do not
+> change anything feeding `activity_samples` or `sleepAnalysis` until it closes** — that includes 1.2's
+> remaining items, 1.4's statistic mismatch, and the one-word `Math.round` → `Math.floor` fix in
+> `txIdx` (issue #260, which moves reported bedtimes by a minute on about half of all nights).
+>
+> Integrity checked 2026-09-06, counts only, no times read: **~1,435 of a possible 1,440 samples per
+> camera per day** since 08-25, every night computed `status=ok` for both children, no sampling gap over
+> five minutes. The data is there; only the scoring waits. ⚠️ One known hole to expect at scoring time —
+> Renz has **no `wake_at` on 2 of the 12 nights** (08-25, 08-31), so his wake set is 10, not 12.
+
 ### 1.1 Fix Raffa's bed-zone discrimination — `CLOSED` (shipped in 0.27.0; kept for the diagnosis)
 **Closed 2026-08-29.** Four consecutive owner-confirmed mornings on the re-aimed camera: 05:09
 (08-25), 05:53 (08-27), 05:54 (08-28) and 05:20 (08-29), every one exact. The framing question is
@@ -214,7 +226,7 @@ it's small, leave it alone. **Measure first.**
 
 ---
 
-### 1.4 The ambient sound baseline can freeze — `NEXT`
+### 1.4 The ambient sound baseline — freeze `SHIPPED`, statistic mismatch `NEXT`
 
 ★★★ **VERIFIED 2026-08-31 in production logs, not inferred.** One camera’s ambient baseline sat at
 exactly `-63.5 dB` for **1891 consecutive log lines — 7.9 unbroken hours** — while the room ran
@@ -263,9 +275,38 @@ reachable from a test. Extract the reading pipeline behind an injectable clock f
 **“a 6-minute continuous cry must stay above `SOUND_ACTIVE`”**, plus asserting the floor’s exact
 value at a known time after a known step (which is what pins the window length).
 
-**Held until the monitor phase ends (~2026-09-09)**: the fix changes the input to the frozen sleep
-algorithm, and a mid-holdout change to `activityTracker` would perturb the very measurement the
-phase exists to take. Documented as a known limitation in `docs/notifications.md` meanwhile.
+---
+
+**✅ THE FREEZE IS FIXED — on `dev`, not yet in production.** A steady level sitting in the trap band
+is now absorbed into the baseline after five minutes, so the absorbing state described above no longer
+exists. The old workaround (raising that camera's `sound_sensitivity` to 90+) is no longer needed.
+
+⚠️ **The fix itself shipped a regression that its first version did not catch**, and it is worth
+keeping here because it is the shape to watch for: the new state was hoisted to module scope, so it
+spanned an FFmpeg outage — the reader restarts a few seconds after any stream hiccup, and the level
+learned before the outage was carried across it as though the room had been making the same noise
+throughout. Fixed in the same PR; the second half of it (a first reading taken from five seconds of
+audio rather than 0.2, and time off-stream not counting as time listening) is in the same changelog
+entry. ★ **A grid-aligned fixture hid it**: every synthetic minute landed on a boundary, so the gap
+the bug needed never occurred in the tests.
+
+**⏳ STILL OPEN — and it is the bigger half: the statistic mismatch.** Everything above under "THE ROOT
+CAUSE IS DEEPER THAN THE FREEZE" is untouched. `sound_peak` is still the per-minute **maximum** of ~300
+windows measured against a floor that tracks a **central tendency**, so the 6 dB `SOUND_ACTIVE`
+threshold is still really a statement about the room's variance. The measurement that sizes the work
+stands: the affected room would still read ~41% of minutes active against 19% for the other, even with
+a perfectly healthy baseline.
+
+**Held until the monitor phase ends (~2026-09-09).** Not because it is hard, but because it changes the
+input to the frozen sleep algorithm, and a mid-holdout change to `activityTracker` would perturb the
+very measurement the phase exists to take. Documented as a known limitation in `docs/notifications.md`
+meanwhile.
+
+**Prerequisite, and it is now DONE**: `soundDetector.js` was untestable (`handleReading` was a closure
+inside `launch()` inside `startSoundDetector`). The reading pipeline was extracted behind an injectable
+clock as `lib/soundBaseline.js`, which is in the `test:core` include list at 100% lines. The
+discriminating test named above — *"a 6-minute continuous cry must stay above `SOUND_ACTIVE`"* — is in
+`soundBaseline.test.js`.
 
 ## 2. Specced, not built
 
@@ -317,9 +358,20 @@ pins thresholds over an explicit include list, CI runs it on every push and PR
 *regresses* on a module already in the list. **That include list IS the definition of "core logic" —
 extend it as each module reaches the bar, and never shrink it to make the check go green.**
 
-In the gate today at **97.8% lines**: `db.js`, `middleware/auth.js`, `lib/mfa.js`,
-`lib/detectionEvents.js`, `routes/timelapses.js`, `lib/wakeWatcher.js`, `lib/bedTransitionRules.js`,
-**`lib/sleepAnalysis.js`** (added 2026-08-29 at 99.5% lines / 97.4% functions).
+In the gate today at **97.6% lines / 86.8% branches / 93.8% functions**, across 21 modules: `db.js`,
+`middleware/auth.js`, **`routes/auth.js`**, `lib/mfa.js`, `lib/detectionEvents.js`,
+`routes/timelapses.js`, `lib/wakeWatcher.js`, `lib/activityTracker.js`, `lib/bedTransitions.js`,
+`lib/bedTransitionRules.js`, **`lib/sleepAnalysis.js`**, `lib/sleepReviews.js`, `lib/soundBaseline.js`,
+`lib/processGuards.js`, `lib/ringHolds.js`, `lib/urlCredentials.js`, and the five clip modules
+**`lib/clipStorage.js`, `lib/clipCapture.js`, `lib/clipRecorder.js`, `lib/recordings.js`,
+`routes/recordings.js`** (added 2026-09-06).
+
+⚠️ **THE THRESHOLDS ARE AGGREGATES ACROSS THE WHOLE LIST, not per file.** A module at 88% sits happily
+under a green gate — `lib/clipRecorder.js` does, and so does `routes/auth.js` at 73% *branches*. That
+is not a flaw to fix by adding per-file gates; it is the reason the include list must keep growing, and
+the reason to read a module's own row (`npm run test:core 2>&1 | grep -E '^ℹ +<file>\.js'`) rather than
+the summary line. Admitting the clip modules moved the aggregate 98.6 → 97.6, which is the gap becoming
+visible rather than a regression.
 
 **Tranche A of the sleepAnalysis work is DONE** (84.1% -> 99.5%): `sleepInsights` + `pearson`,
 `runNightlySleepJob` + `startSleepJob`, `getStoredNights`, the window gates, and `nightClimate`'s
@@ -349,9 +401,30 @@ that path until a person could ask for a recompute. **When adding a control, loo
 newly makes reachable.**
 
 **Still to bring up to the bar and add to the list**, in priority order:
-- `routes/cameras.js` (1,036 lines) — the biggest surface, and the one with real authz branching
-- `routes/auth.js` (422) — login, the two-step MFA exchange, session lifecycle
-- `lib/clipStorage.js` + `lib/motionDetector.js` — retention maths and zone-mask maths
+- `routes/cameras.js` (1,036 lines) — the biggest surface, and the one with real authz branching.
+  **The last big one left.**
+- `lib/motionDetector.js` — zone-mask maths
+- ✅ `routes/auth.js` — **DONE 2026-09-05** (#295): 86.5 → 99.6% lines. ⚠️ Branches are **73%**, under
+  the 80 bar and hidden by the aggregate; worth a deliberate pass rather than bolting on.
+- ✅ `lib/clipStorage.js` — **DONE 2026-09-06** (#296), 100% lines, along with the other four clip
+  modules. It had no test file at all, which is how `sweepClips(){ return; }` — deleting the entire
+  retention sweeper — passed a green 389-test suite.
+
+**★ COVERAGE MEASURES EXECUTION; MUTATION TESTING MEASURES DISCRIMINATION** — the lesson of #263, and
+now a command rather than a memory. `node scripts/mutate.mjs` breaks the source one way at a time from
+a catalogue (`scripts/mutants.json`, **84 mutants**) and reports any the tests fail to kill. It guards
+the four ways such a run lies: a mutant that never applied, a restore that reverted uncommitted work, a
+broken harness (a no-op control mutant must SURVIVE, or the whole run is declared void), and a
+name-pattern that matched nothing. **Deliberately not in CI** — ~12 minutes, and this repo's own rule
+is that a check people skim is worse than no check. Run it when adding tests to core logic, and add the
+mutants your change should be killing.
+
+⚠️ **Four "trap tests" were found and rewritten** in the same pass, all the same shape: *the test's
+NAME stated the invariant, and its FIXTURE guaranteed the invariant could not be violated.* One
+asserted `assert.ok(true, 'no throw')` for a containment guard that a successful escape also satisfies;
+one asserted defaults its own `beforeEach` had just written; one derived every fixture, loop bound and
+test name from the constants it was meant to pin. **Ask of every test: what value of the thing under
+test would make this fail?**
 
 **★ Daylight saving — FOUND AND FIXED 2026-08-29, and worth remembering as a pattern.** `localDateStr`
 shifted days by adding 86,400,000 ms and reading the local date off the result. A day is not 24 hours
@@ -374,10 +447,15 @@ something odd", which only the e2e stack reproduces.
   suite ran whatever the published tag pointed at, so on a dev -> main PR a green run could be proving
   the PREVIOUS build. **The same applies locally**: `bash e2e/test.sh` on its own tests the last
   published image, not your working tree — build first.
-- **Phase 5 — front-end testing — `NEXT`.** Target **>= 80% of the front end**, exercised in BOTH roles
-  (admin and caregiver), since role gating is real in the UI (`isAdmin` branches in the tiles, camera
-  pages and settings) and is exactly where the timelapse-delete bug hid. Two layers: component tests for
-  logic and rendering, and role-based Playwright flows for what a person actually does.
+- **Phase 5 — front-end testing — `SHIPPED` (2026-09-02).** The >= 80% target is met and **gated**:
+  `vite.config.js` pins `{ lines: 80, functions: 80, branches: 75, statements: 80 }` and CI runs
+  `npm run test:coverage`, so it ratchets exactly as the backend gate does. 36 component test files.
+  `test/helpers/render.jsx` renders every screen as **both** an admin and a caregiver, which is the
+  half that matters — role gating is real in the UI and is exactly where the timelapse-delete bug hid.
+  ⚠️ **Raise the coverage; never lower the threshold or widen the exclude list** — the config says so
+  at the line itself, because that is the failure mode for a ratchet.
+  ★ The e2e half also grew, 6 → 49 specs, including the auth surface. **Unit tests cannot catch a
+  client/server seam bug — only e2e can**, which is how the morning-review seam defect was found.
 - **Phase 6 — Android instrumented tests (Espresso)** in `nightlight-mobile` — `SPECCED`, was Phase 5.
   Only the Capacitor scaffold stub exists. Local emulators were unusable (no nested virt) but **GitHub
   Linux runners have KVM**, so a CI emulator is realistic. Target the genuinely native bits: the
