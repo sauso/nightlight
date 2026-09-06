@@ -6,6 +6,7 @@ import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
 import { recordSound } from './activityTracker.js';
 import { createSoundAnalyser, marginDb } from './soundBaseline.js';
+import { killIfSpawned } from './processGuards.js';
 
 // Server-side SOUND detection, parallel to motionDetector.js. Per camera with sound detection
 // enabled, a cheap audio-only FFmpeg leg reads the already-published MediaMTX stream and reports a
@@ -246,16 +247,10 @@ export function stopSoundDetector(cameraId) {
         resolve();
       }
     };
-    // See stopTranscoder for the full reasoning: a process that never spawned throws on kill()
-    // (EINVAL, verified on win32 — an uncaught throw, the same crash class as #257) and emits
-    // 'error'/'close' but never 'exit', so waiting on 'exit' alone stalls for the whole timeout.
-    const kill = (sig) => {
-      try {
-        entry.proc.kill(sig);
-      } catch {
-        /* never spawned, or already reaped */
-      }
-    };
+    // See stopTranscoder for the full reasoning: a process that never spawned must not be killed
+    // directly (on Linux that signals the whole process group — see killIfSpawned in processGuards.js),
+    // and it emits 'error'/'close' but never 'exit', so waiting on 'exit' alone stalls for the whole timeout.
+    const kill = (sig) => killIfSpawned(entry.proc, sig);
     entry.proc.once('exit', done);
     entry.proc.once('error', done);
     kill('SIGTERM');

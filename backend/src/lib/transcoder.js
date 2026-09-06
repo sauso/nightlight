@@ -3,6 +3,7 @@ import { logger, isNoisyMediaLine } from './logger.js';
 import { recordCameraEvent, EVENT } from './cameraEvents.js';
 import { ffprobeAudioCodec } from './rtspProbe.js';
 import { hlsPathName, upsertPath, isPathConfiguredCorrectly } from './mediamtx.js';
+import { killIfSpawned } from './processGuards.js';
 
 // camera_id -> { proc, stopped }
 const processes = new Map();
@@ -182,7 +183,7 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraNam
               `[ffmpeg:${mediamtxPath}] camera sent a corrupt timestamp - restarting now rather than let the session run poisoned`
             );
             recordCameraEvent(cameraId, cameraName, EVENT.RESTART, 'camera sent a corrupt timestamp');
-            proc.kill('SIGTERM');
+            killIfSpawned(proc, 'SIGTERM');
           }
         });
     });
@@ -242,18 +243,15 @@ export function stopTranscoder(cameraId) {
     // A process that never spawned has no OS process behind it, and stop() can land in that window
     // (it is ~5ms wide: spawn() returns synchronously, 'error' arrives on a later tick). Two
     // consequences, both found by adversarial review of PR #274:
-    //   1. kill() THROWS on it — EINVAL, verified on win32 — and that throw is uncaught, which is the
-    //      very crash class #257 is about, one layer down. clipRecorder's stopSegmenter already
-    //      guarded its kill; this leg did not.
+    //   1. Killing it is unsafe, and `killIfSpawned` is what makes it safe — see processGuards.js.
+    //      ⚠️ THIS USED TO SAY "kill() THROWS on it — EINVAL, verified on win32", wrapped in a
+    //      try/catch, and that was only the Windows half of the truth. On Linux it does NOT throw: it
+    //      resolves to `kill(0, SIGTERM)`, which signals the WHOLE PROCESS GROUP — the backend kills
+    //      itself, MediaMTX and every FFmpeg. A try/catch cannot help with that, and the comment
+    //      claiming it did is why nobody looked again. Measured 2026-09-06, in #263.
     //   2. It emits 'error' then 'close' but NEVER 'exit', so waiting on 'exit' alone would stall
     //      every such stop for the full force-kill timeout before resolving.
-    const kill = (sig) => {
-      try {
-        entry.proc.kill(sig);
-      } catch {
-        /* never spawned, or already reaped */
-      }
-    };
+    const kill = (sig) => killIfSpawned(entry.proc, sig);
     entry.proc.once('exit', done);
     entry.proc.once('error', done);
     kill('SIGTERM');

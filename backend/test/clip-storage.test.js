@@ -415,6 +415,32 @@ describe('★ sweepClips — the retention sweeper', () => {
     assert.equal(fs.existsSync(old.abs), false);
   });
 
+  test('★ the age pass runs FIRST — running the size pass first deletes the wrong clips', () => {
+    // ⚠️ THE ORDER IS LOAD-BEARING and the test above does not prove it: there the expired clip also
+    // had the lowest id, so age-order and id-order coincided and swapping the two blocks changed
+    // nothing. Adversarial review found that; a second reviewer traced the same swap and concluded it
+    // was an EQUIVALENT mutation. It is not, and this is the fixture that separates them — measured,
+    // not argued.
+    //
+    // Three 0.4 GiB clips against a 1 GiB cap, with the EXPIRED one written LAST so it has the highest
+    // id. The size pass walks by id (oldest row first); the age pass goes by created_at. Here they
+    // point in opposite directions:
+    //   age first: c goes (expired) -> 0.8 GiB, under the cap, size pass does nothing -> {a, b}
+    //   size first: 1.2 GiB is over, so a goes (lowest id) -> 0.8 GiB, break; then c goes -> {b}
+    // Deleting `a` is the harm: a clip inside its retention window, removed to make room for one that
+    // was about to be deleted anyway.
+    const a = makeClip('a.mp4', { bytes: 0.4 * 1024 ** 3 });
+    const b = makeClip('b.mp4', { bytes: 0.4 * 1024 ** 3 });
+    const c = makeClip('c.mp4', { bytes: 0.4 * 1024 ** 3, ageDays: 40 });
+    setRetention(14, 1);
+    sweepClips();
+    assert.deepEqual(
+      liveClipIds(), [a.id, b.id],
+      'the size cap deleted a clip inside its retention window — the age pass must run first'
+    );
+    assert.equal(fs.existsSync(c.abs), false, 'the expired clip survived');
+  });
+
   test('a clip with no recorded size still counts as swept and does not wedge the loop', () => {
     // `bytes -= c.clip_bytes || 0` — a NULL size subtracts nothing, so the loop must still terminate
     // by running out of clips rather than by getting under the cap.

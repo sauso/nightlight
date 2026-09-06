@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import { networkInterfaces } from 'os';
 import { logger } from './logger.js';
+import { killIfSpawned } from './processGuards.js';
 
 let proc = null;
 let stopped = false;
@@ -143,15 +144,15 @@ export async function startMediaMTX(configPath) {
 export function stopMediaMTX() {
   stopped = true;
   // `proc` is non-null even for a launch that never spawned (it is assigned from spawn()'s return
-  // value). Killing one of those throws `Error: kill EINVAL` — but ONLY in the window between spawn()
-  // and the 'error' event, while the child still holds a libuv handle with no OS process behind it;
-  // after 'error' the handle is nulled and kill() just returns false. Uncaught during shutdown that is
-  // the same crash class this file is fixing. Verified on win32 by
-  // spawn-failure.test.js's "stopping inside the pre-error window" case, which is the ONLY thing that
-  // kills this mutant — a case that waits for the error first cannot see it. See also stopTranscoder.
-  try {
-    proc?.kill('SIGTERM');
-  } catch {
-    /* never spawned, or already reaped */
-  }
+  // value), and killing one of those is unsafe — but ONLY in the window between spawn() and the
+  // 'error' event, while the child still holds a libuv handle with no OS process behind it; after
+  // 'error' the handle is nulled and kill() just returns false. Covered by spawn-failure.test.js's
+  // "stopping inside the pre-error window" case, which is the ONLY thing that reaches it: a case that
+  // waits for the error first cannot see it.
+  //
+  // ⚠️ THIS COMMENT USED TO SAY THE HAZARD WAS `Error: kill EINVAL`, "verified on win32", and be a
+  // try/catch. That is the Windows half only. On Linux there is no throw — the kill resolves to
+  // `kill(0, …)`, which signals the entire process group, taking MediaMTX and the backend down
+  // together during the very shutdown this is trying to make orderly. See killIfSpawned.
+  killIfSpawned(proc, 'SIGTERM');
 }

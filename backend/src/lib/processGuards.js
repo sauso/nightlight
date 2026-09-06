@@ -55,6 +55,42 @@ export function resetGuardRateLimit() {
   lastLogged.clear();
 }
 
+// Signal a child process, but ONLY if it is a real OS process. Returns true if a signal was sent.
+//
+// ★★★ THIS IS NOT DEFENSIVE TIDYING — the unguarded call is a self-inflicted outage on Linux, which is
+// the only platform Nightlight actually ships on.
+//
+// `spawn()` returns synchronously and its 'error' arrives on a later tick, so there is a ~5ms window in
+// which a launch that CANNOT WORK (no ffmpeg on PATH, an unrunnable binary) is represented by a
+// ChildProcess with `pid === undefined` and a libuv handle whose internal pid is 0. Every stop path
+// here can land in that window — `stopSegmenter`, `stopTranscoder`, the detector stops, `stopMediaMTX`
+// — because reconcile, a settings save or a shutdown can all fire immediately after a start.
+//
+// What `kill()` then does depends on the platform, and the difference is the whole point:
+//   * win32 — throws `Error: kill EINVAL`. Uncaught, that is the #257 crash class one layer down. Every
+//     one of those call sites already wraps the kill in try/catch for exactly this, and their comments
+//     say so.
+//   * POSIX — does NOT throw. It calls `kill(0, SIGTERM)`, and `kill(0, …)` means **"signal every
+//     process in my own process group"**. So the backend SIGTERMs itself, MediaMTX, every FFmpeg and
+//     anything else sharing the group. try/catch cannot help: nothing throws, it just dies.
+//
+// Measured 2026-09-06 in a `node:24` container: the test suite terminated with exit 143 at the first
+// `stopAllSegmenters` over two failed spawns, taking `node --test`, its parent and the invoking shell
+// with it. That is what had been failing CI as "the runner has received a shutdown signal". Guarding
+// the kill on `pid` made the same run exit 0. It is invisible on Windows, where the throw is caught.
+//
+// `pid` is the right discriminator and the only one available: it is set only once the child really
+// exists, and a real child can never have pid 0. The try/catch stays for the win32 throw and for a
+// process reaped between the check and the call.
+export function killIfSpawned(proc, signal = 'SIGTERM') {
+  if (!proc?.pid) return false;
+  try {
+    return proc.kill(signal);
+  } catch {
+    return false; // reaped between the check and the call, or the win32 EINVAL above
+  }
+}
+
 // setInterval for an async callback. A sync throw or a rejected promise is logged and the timer KEEPS
 // RUNNING — a watchdog that stops watching after one bad tick would silently stop healing anything,
 // which is the same outage in slow motion.

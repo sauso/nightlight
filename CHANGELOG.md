@@ -55,6 +55,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **A camera whose video process failed to start could take the whole app down with it.** If starting
+  FFmpeg or MediaMTX failed — a broken install, a missing codec binary, a bad moment during a restart —
+  and Nightlight then stopped that camera within the next few milliseconds, it would signal *every*
+  process it owns instead of the one that failed, shutting itself and all streaming down. Recovery was
+  a container restart, and the trigger was timing, so it looked like the app crashing at random. Most
+  likely during shutdown, during a camera edit, or on an install where recording was never going to
+  work in the first place. Fixes #297.
+
+- **Shutdown also stops the wake watcher now.** Like the sampler below, it had a stop that nothing
+  called. No day-to-day change.
+
 - **One more background job now stops on shutdown: the timelapse frame sampler.** It was missed by the
   sweep below because that sweep looked for the standard timer call and this job uses Nightlight's own
   wrapper around it, so the check skipped the file entirely. The check now knows about the wrapper.

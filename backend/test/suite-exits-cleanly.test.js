@@ -148,6 +148,29 @@ describe('starting the activity tracker does not pin the process open', () => {
   });
 });
 
+// ★ ONE LIST, USED TWICE. Below, it drives the assertion that shutdown() calls each stop; further
+// down, it drives the child-process probes that each stop actually works. Two lists is what let
+// `stopSensorSampler`, `stopClipStorage`, `stopTimelapseSampler` and `stopWakeWatcher` all go
+// unasserted — the last two found only when this was finally derived rather than hand-typed.
+//
+// ⚠️ Declared at module scope, ABOVE both consumers: `describe` callbacks run synchronously as the
+// file loads, so a `const` further down is in the temporal dead zone when the first one reads it.
+//
+// ⚠️ `pinsLoop` is NOT decoration. A timer that is `unref()`d does not hold the event loop open, so it
+// can never cause the #278 failure — and for those modules the "start pins the process" control is
+// simply false. Asserting it anyway would be asserting something untrue about correct code.
+// wakeWatcher, clipStorage and timelapse all unref; the other three do not, which is why they were the risk.
+const PERIODIC = [
+  { module: 'src/lib/activityTracker.js', start: 'startActivityTracker', stop: 'stopActivityTracker', pinsLoop: true },
+  { module: 'src/lib/sensorSampler.js', start: 'startSensorSampler', stop: 'stopSensorSampler', pinsLoop: true },
+  { module: 'src/lib/sleepAnalysis.js', start: 'startSleepJob', stop: 'stopSleepJob', pinsLoop: true },
+  { module: 'src/lib/wakeWatcher.js', start: 'startWakeWatcher', stop: 'stopWakeWatcher', pinsLoop: false },
+  { module: 'src/lib/clipStorage.js', start: 'startClipStorage', stop: 'stopClipStorage', pinsLoop: false },
+  // Added in #263, not #286: created through `safeInterval`, so the literal-`setInterval` scan that
+  // built this list could not see it. Unref'd like the two above, so it never pinned the loop.
+  { module: 'src/lib/timelapse.js', start: 'startTimelapseSampler', stop: 'stopTimelapseSampler', pinsLoop: false },
+];
+
 describe('shutdown() actually stops the tracker', () => {
   // ★ ADDED AFTER ADVERSARIAL REVIEW OF THIS PR. Deleting the `stopActivityTracker()` call from
   // shutdown() left the entire 513-test suite green — the production wiring was untested, and both
@@ -164,13 +187,20 @@ describe('shutdown() actually stops the tracker', () => {
     .split('\n')
     .map((l) => l.trim());
 
-  // ⚠️ EVERY stop, not just the first one. This started as a single assertion for
-  // stopActivityTracker, added because adversarial review of #290 found that deleting a call left the
-  // whole suite green. #286 then added three more calls and did NOT extend the assertion — so
-  // removing `stopSensorSampler();` or `stopClipStorage();` from shutdown() passed all 620 tests.
-  // The lesson was cited in the same PR that repeated it, which is why this is now derived from the
-  // list rather than written out once per name.
-  for (const stop of ['stopActivityTracker', 'stopSensorSampler', 'stopClipStorage', 'stopSleepJob']) {
+  // ⚠️ EVERY stop, and DERIVED — this list is `PERIODIC`, the same one the guard further down uses.
+  //
+  // ★ THIS HAS NOW BEEN GOT WRONG THREE TIMES, each time in the PR that cited the previous one.
+  // It started as a single assertion for `stopActivityTracker`, because review of #290 found that
+  // deleting the call left the whole suite green. #286 added three more calls and did not extend the
+  // assertion, so removing `stopSensorSampler();` passed all 620 tests. #263 then added
+  // `stopTimelapseSampler` and did not extend it either — while the comment sitting here CLAIMED to be
+  // "derived from the list rather than written out once per name". It was a hand-typed literal array.
+  // Found by adversarial review, which removed the call and watched 859 tests pass.
+  //
+  // So it is derived now, for real. A module added to PERIODIC is asserted here by construction, and
+  // deriving it immediately exposed a FOURTH instance: `stopWakeWatcher` had existed since #286 and
+  // shutdown never called it.
+  for (const stop of PERIODIC.map((p) => p.stop)) {
     test(`shutdown() calls ${stop}()`, () => {
       assert.ok(
         indexLines.includes(`${stop}();`),
@@ -276,21 +306,6 @@ describe('the whole suite terminates without being forced', () => {
 // the property the npm-script check lacks. That check stops the symptom (`--test-force-exit`) coming
 // back; this stops the cause.
 describe('every periodic job can be stopped (#286)', () => {
-  // ⚠️ `pinsLoop` is NOT decoration. A timer that is `unref()`d does not hold the event loop open, so
-  // it can never cause the #278 failure — and for those modules the "start pins the process" control
-  // below is simply false. Asserting it anyway would be asserting something untrue about correct code.
-  // wakeWatcher and clipStorage both unref; the other three do not, which is why they were the risk.
-  const PERIODIC = [
-    { module: 'src/lib/activityTracker.js', start: 'startActivityTracker', stop: 'stopActivityTracker', pinsLoop: true },
-    { module: 'src/lib/sensorSampler.js', start: 'startSensorSampler', stop: 'stopSensorSampler', pinsLoop: true },
-    { module: 'src/lib/sleepAnalysis.js', start: 'startSleepJob', stop: 'stopSleepJob', pinsLoop: true },
-    { module: 'src/lib/wakeWatcher.js', start: 'startWakeWatcher', stop: 'stopWakeWatcher', pinsLoop: false },
-    { module: 'src/lib/clipStorage.js', start: 'startClipStorage', stop: 'stopClipStorage', pinsLoop: false },
-    // Added in #263, not #286: created through `safeInterval`, so the literal-`setInterval` scan that
-    // built this list could not see it. Unref'd like the two above, so it never pinned the loop.
-    { module: 'src/lib/timelapse.js', start: 'startTimelapseSampler', stop: 'stopTimelapseSampler', pinsLoop: false },
-  ];
-
   for (const { module, start, stop, pinsLoop } of PERIODIC) {
     test(`${start} can be undone, and the process then exits`, () => {
       const r = childExitsOnItsOwn(`at.${start}();\nat.${stop}();\n`, EXIT_DEADLINE_MS, module);

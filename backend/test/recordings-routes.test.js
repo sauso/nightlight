@@ -23,7 +23,7 @@ useTempDataDir();
 const { default: db } = await import('../src/db.js');
 const { default: recordingsRouter } = await import('../src/routes/recordings.js');
 const { CLIPS_DIR } = await import('../src/lib/clipRecorder.js');
-const { deleteRecording, getRecordingVideoFile } = await import('../src/lib/recordings.js');
+const { deleteRecording, getRecordingVideoFile, getRecordingThumbFile } = await import('../src/lib/recordings.js');
 
 const ABS = path.resolve(CLIPS_DIR);
 const CHILD = 'kid-1';
@@ -217,6 +217,39 @@ describe('★ path containment on the serving routes', () => {
     const r = makeRecording();
     db.prepare('UPDATE recordings SET thumb_path = ? WHERE id = ?').run(outside, r.id);
     assert.equal((await call(url(`/${r.id}/thumb`), { token })).status, 404);
+  });
+
+  test('★ nor a sibling directory that merely shares the CLIPS_DIR prefix', () => {
+    // ⚠️ ASSERTED ON THE LIB, NOT THROUGH THE ROUTE, and that distinction is the finding. The guard is
+    // `startsWith(CLIPS_DIR + path.sep)`; drop the separator and "<DATA_DIR>/clips-evil/x.mp4" passes
+    // as if it were inside "<DATA_DIR>/clips". `unlinkClip` and `getEventClipFile` each got this test;
+    // `jailedFile` — the same guard, third copy — did not, and adversarial review demonstrated the
+    // sep-dropped mutant surviving all 859 tests.
+    const evilDir = `${path.basename(ABS)}-evil`;
+    const rel = path.join(evilDir, 'x.mp4');
+    const abs = path.join(path.dirname(ABS), rel);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, 'must not be served');
+    const r = makeRecording();
+    db.prepare('UPDATE recordings SET path = ? WHERE id = ?').run(path.join('..', rel), r.id);
+    assert.equal(getRecordingVideoFile(r.id), null, 'a sibling directory sharing the prefix was treated as inside');
+  });
+
+  test('★ a ready row whose file is gone resolves to null in the LIB, not just a 404 at the edge', () => {
+    // ⚠️ The route test above ("a row whose file is missing is a 404") passes even with `jailedFile`'s
+    // existsSync check deleted, because `res.sendFile` 404s on ENOENT by itself — so it was testing
+    // Express, not us. Found by adversarial review. It matters because the lib's answer is a truthy
+    // object that any future caller would branch on, and because two independent guards are the point:
+    // the route relies on `{ root }`, the lib relies on this.
+    const r = makeRecording();
+    fs.rmSync(r.abs, { force: true });
+    fs.rmSync(r.thumbAbs, { force: true });
+    assert.equal(getRecordingVideoFile(r.id), null, 'the lib returned a handle to a file that is not there');
+    assert.equal(getRecordingThumbFile(r.id), null);
+    // The control: with the files present it DOES resolve, so "always null" is not a passing state.
+    const ok = makeRecording();
+    assert.ok(getRecordingVideoFile(ok.id), 'a real recording was refused');
+    assert.ok(getRecordingThumbFile(ok.id));
   });
 });
 

@@ -38,7 +38,7 @@ import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
 import { startSensorSampler, stopSensorSampler } from './lib/sensorSampler.js';
 import { startActivityTracker, stopActivityTracker } from './lib/activityTracker.js';
 import { startSleepJob, stopSleepJob } from './lib/sleepAnalysis.js';
-import { startWakeWatcher } from './lib/wakeWatcher.js';
+import { startWakeWatcher, stopWakeWatcher } from './lib/wakeWatcher.js';
 import { startTimelapseSampler, stopTimelapseSampler } from './lib/timelapse.js';
 import { logger } from './lib/logger.js';
 import { applyTrustProxy } from './lib/trustProxy.js';
@@ -659,13 +659,18 @@ async function shutdown() {
   // cheap synchronous clearInterval calls; none writes anything on the way out, so their order
   // relative to each other does not matter.
   //
-  // ⚠️ The timelapse sampler joined this list in #263, not #286 — that sweep found periodic jobs by
-  // scanning for the literal `setInterval`, and this one is created through `safeInterval`, so it was
-  // skipped before the pairing rule ran at all. The guard now knows about the wrapper too.
+  // ⚠️ TWO of these joined the list in #263, not #286, and for two different reasons.
+  //   * The timelapse sampler was invisible to that sweep: it looked for the literal `setInterval` and
+  //     this job is created through `safeInterval`. The guard now knows about the wrapper.
+  //   * The wake watcher was NOT invisible — it has had a `stopWakeWatcher` since #286 and was in the
+  //     test's own list of periodic jobs. Shutdown simply never called it, and the assertion that
+  //     would have said so was a hand-typed array that nobody extended. It is derived now
+  //     (suite-exits-cleanly.test.js), which is what surfaced this.
   stopSensorSampler();
   stopClipStorage();
   stopSleepJob();
   stopTimelapseSampler();
+  stopWakeWatcher();
   process.exit(0);
 }
 process.on('SIGTERM', shutdown);

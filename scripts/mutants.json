@@ -642,6 +642,59 @@
     "tests": ["recordings-routes.test.js"]
   },
   {
+    "label": "★ jailedFile: path.sep dropped, so a sibling directory sharing the prefix is served",
+    "file": "backend/src/lib/recordings.js",
+    "find": "  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
+    "replace": "  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR)) return null;",
+    "expect": "killed",
+    "tests": ["recordings-routes.test.js"],
+    "note": "Found by adversarial review: the third copy of this guard was the one without the test its two siblings have."
+  },
+  {
+    "label": "★ jailedFile: the existsSync check is dropped",
+    "file": "backend/src/lib/recordings.js",
+    "find": "  return fs.existsSync(abs) ? { root: CLIPS_DIR, path: path.relative(CLIPS_DIR, abs) } : null;",
+    "replace": "  return { root: CLIPS_DIR, path: path.relative(CLIPS_DIR, abs) };",
+    "expect": "killed",
+    "tests": ["recordings-routes.test.js"],
+    "note": "Survived before: the route test that claimed to cover it passes anyway, because res.sendFile 404s on ENOENT by itself. It was testing Express."
+  },
+  {
+    "label": "★★ killIfSpawned: the pid guard is dropped (kill(0) = signal my own process group)",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "  if (!proc?.pid) return false;",
+    "replace": "  if (!proc) return false;",
+    "expect": "killed",
+    "tests": ["process-guards.test.js"],
+    "note": "The whole point. Killed by the SPY test, not by the child-process one — the obvious 'and the unguarded version dies' control is racy on Linux (libuv holds a real pid until the doomed fork is reaped)."
+  },
+  {
+    "label": "stopSegmenter: back to a raw kill on a child that may never have spawned",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "  killIfSpawned(entry.proc, 'SIGTERM');",
+    "replace": "  entry.proc?.kill('SIGTERM');",
+    "expect": "killed",
+    "tests": ["clip-recorder.test.js", "clip-capture.test.js", "spawn-failure.test.js"],
+    "note": "⚠️ Killed on win32 by the uncaught EINVAL. On Linux it is the process-group kill instead, which takes the runner down — a KILLED verdict there means something different but is still correct."
+  },
+  {
+    "label": "stopMediaMTX: back to a raw kill",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "  killIfSpawned(proc, 'SIGTERM');",
+    "replace": "  proc?.kill('SIGTERM');",
+    "expect": "killed",
+    "tests": ["spawn-failure.test.js"]
+  },
+  {
+    "label": "★ sweepClips: the size pass runs BEFORE the age pass",
+    "file": "backend/src/lib/clipStorage.js",
+    "find": "  if (days > 0) {",
+    "replace": "  if (maxGb > 0) { const cap0 = maxGb * GB; let b0 = getClipStorageTotals().bytes; if (b0 > cap0) { for (const c of getReadyClipsOldestFirst()) { if (b0 <= cap0) break; deleteClip(c.id, c.clip_path); b0 -= c.clip_bytes || 0; removed++; } } }\r\n  if (days > 0) {",
+    "expect": "killed",
+    "tests": ["clip-storage.test.js"],
+    "note": "★ THE TWO REVIEWERS DISAGREED ON THIS ONE. A said a discriminating fixture exists; B traced it and called it equivalent, reasoning that both passes remove a chronological prefix. B was wrong: the size pass orders by ROW ID and the age pass by created_at, and those diverge when the expired clip was written last. Settled by running it, not by argument."
+  },
+  {
     "label": "listChildRecordings: the manual/wake distinction is dropped",
     "file": "backend/src/lib/recordings.js",
     "find": "AND r.kind = 'manual'",
