@@ -55,6 +55,32 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **A camera whose video process failed to start could take the whole app down with it.** If starting
+  FFmpeg or MediaMTX failed — a broken install, a missing codec binary, a bad moment during a restart —
+  and Nightlight then stopped that camera within the next few milliseconds, it would signal *every*
+  process it owns instead of the one that failed, shutting itself and all streaming down. Recovery was
+  a container restart, and the trigger was timing, so it looked like the app crashing at random. Most
+  likely during shutdown, during a camera edit, or on an install where recording was never going to
+  work in the first place. Fixes #297.
+
+- **Shutdown also stops the wake watcher now.** Like the sampler below, it had a stop that nothing
+  called. No day-to-day change.
+
+- **One more background job now stops on shutdown: the timelapse frame sampler.** It was missed by the
+  sweep below because that sweep looked for the standard timer call and this job uses Nightlight's own
+  wrapper around it, so the check skipped the file entirely. The check now knows about the wrapper.
+  Nothing changes in day-to-day use — the sampler could not hold the app open, but shutdown is now
+  explicit about it rather than relying on the process being killed.
+
+- **The test suite could not tell working recording code from broken recording code.** Deliberately
+  breaking the clip-retention sweep — the job that stops recordings filling the disk — left every test
+  passing, as did removing the guard that stops a stored path reaching outside the recordings folder,
+  and several of the rules that decide when a wake is a wake. None of that was a bug in Nightlight; it
+  was a gap in what the tests could detect, so a real fault in any of it would have shipped unnoticed.
+  Recording, clip storage, the ring buffer and the recordings API are now covered, four tests that
+  could never have failed were rewritten, and the checks are re-run automatically against deliberately
+  broken copies of the code to prove they still catch it. No behaviour change.
+
 - **Shutdown now stops every background job, not just some of them.** The nightly sleep computation,
   the temperature/humidity sampler and the recording-retention sweep each started a repeating timer
   that nothing could switch off, so shutdown relied on the process being killed to take them down.
