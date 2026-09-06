@@ -71,6 +71,19 @@ shipping, ask what the change assumes about whoever installs it:
 ⚠️ If the justification for a value is one night, one camera or one child, write the sentence about
 what happens to everyone else. "Known limit, documented" is an acceptable answer; silence is not.
 
+★ **Two shapes of test that look like verification and are not**, both found repeatedly here (#263):
+- **The fixture guarantees the invariant the test name claims.** A `describe('defaults')` asserting
+  `1 / 30 / 14` one line after its own `beforeEach` wrote exactly those values; a containment test whose
+  only assertion was `assert.ok(true, 'no throw')`, which a successful escape also satisfies; a whole
+  file deriving its fixtures, loop bounds *and test names* from the constants it was meant to pin. Ask
+  what value of the thing under test would make this test fail. If the answer is "none", it is a
+  placeholder.
+- **The test depends on the machine.** `'../../../../etc/passwd'` as an escape fixture passes on Windows
+  because the file is not there, guard or no guard; a fake `ffmpeg` on PATH made four cases green while
+  the handler under test ran zero times. Anything that reads `/proc/mounts`, spawns a binary, or asks
+  the disk how full it is needs the answer INJECTED — see the `mounts` / `free` seams in
+  `lib/clipStorage.js`, and the empty-PATH technique in `spawn-failure.test.js`.
+
 **Then have a subagent attack it.** Required for anything touching the `test:core` include list,
 non-trivial control flow, or detection/sleep analysis; skippable for docs-only or a one-line config
 change, but say so in the PR. Point it at the PR body and tell it to *falsify* the claims, not confirm
@@ -102,11 +115,24 @@ npm run test:core            # THE CORE-LOGIC COVERAGE GATE. Fails if the module
                               # CI runs it on every push/PR and the release flow runs it as a gate.
                               # That include list is the DEFINITION of core logic — grow it as
                               # modules qualify, never shrink it to go green.
+                              # ⚠️ THE THRESHOLDS ARE AGGREGATES ACROSS THE WHOLE LIST, not per file.
+                              # A module at 88% can sit under a green gate. To see one module, read
+                              # its own row: npm run test:core 2>&1 | grep -E '^ℹ +<file>\.js'
 npm run test:coverage        # full coverage report, no thresholds (for finding the next gap)
 
 # Repo-level checks (no install needed, run from the repo root)
 node scripts/check-changelog.mjs   # CHANGELOG.md structure: one heading per type per version, in
                                    # Keep a Changelog order, released sections dated. Runs in CI.
+node scripts/mutate.mjs            # MUTATION TESTING. Breaks the source one way at a time (the
+                                   # catalogue is scripts/mutants.json) and reports any mutant the
+                                   # tests fail to kill. NOT in CI — it is slow and it is a tool for
+                                   # writing tests, not a gate. Run it when you add tests to core
+                                   # logic, and add the mutants your change should be killing.
+                                   #   --only=<substring>  just the mutants whose label matches
+                                   #   --full              every mutant against the WHOLE suite
+                                   #   --list              print the catalogue
+                                   # It restores every file from an in-memory byte copy and verifies
+                                   # the round-trip; it never shells out to git. See the header.
 npm start                    # node src/index.js — expects MediaMTX/ffmpeg binaries on PATH,
                               # so in practice this is normally run inside the Docker image
                               # rather than bare on a dev machine

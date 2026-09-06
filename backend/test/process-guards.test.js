@@ -25,7 +25,7 @@ import { useTempDataDir, cleanupTempDataDirs } from './helpers/harness.js';
 const scriptDir = useTempDataDir();
 
 const { logger } = await import('../src/lib/logger.js');
-const { safeInterval, reportGuardFailure, resetGuardRateLimit } = await import('../src/lib/processGuards.js');
+const { safeInterval, reportGuardFailure, resetGuardRateLimit, killIfSpawned } = await import('../src/lib/processGuards.js');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -425,6 +425,107 @@ describe('index.js wiring', () => {
       proc.on('close', (code) => resolve({ code, out }));
     });
     assert.equal(res.code, 0, `src/index.js does not parse:\n${res.out}`);
+  });
+});
+
+// -------------------------------------------------------------------------------------------
+describe('★★★ killIfSpawned — killing a child that never spawned', () => {
+  // THE DEFECT. `spawn()` returns synchronously and its 'error' arrives on a later tick, so for ~5ms a
+  // launch that cannot work is a ChildProcess with `pid === undefined` over a libuv handle whose
+  // internal pid is 0. Every stop path in this codebase can land there. Killing it:
+  //   * win32 — throws `kill EINVAL`. Uncaught, that is #257's crash class one layer down.
+  //   * POSIX — does NOT throw. It becomes `kill(0, SIGTERM)`: **signal my entire process group.**
+  //     The backend SIGTERMs itself, MediaMTX and every FFmpeg.
+  // Five call sites had the try/catch that handles the first and cannot touch the second, with comments
+  // asserting the throw was the whole hazard. Found on 2026-09-06 when the CI runner kept dying with
+  // "the runner has received a shutdown signal" on a branch that was green on Windows.
+  const guardsHref = pathToFileURL(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'lib', 'processGuards.js')
+  ).href;
+
+  // A child that spawns an unresolvable binary and then kills it the way `killLine` says. Prints
+  // SURVIVED and exits 0 only if it is still alive afterwards. Written with fs, never through a shell.
+  function killProbe(killLine) {
+    const file = path.join(scriptDir, `killprobe-${Math.random().toString(36).slice(2)}.mjs`);
+    fs.writeFileSync(
+      file,
+      [
+        `import { killIfSpawned } from ${JSON.stringify(guardsHref)};`,
+        "import { spawn } from 'node:child_process';",
+        // A name that cannot resolve on any platform, so the failure needs no PATH manipulation.
+        "const p = spawn('nightlight-no-such-binary-9f3a', []);",
+        "p.on('error', () => {}); // swallowed, exactly as the app's spawn handlers do",
+        killLine,
+        'setTimeout(() => { console.log("SURVIVED"); process.exit(0); }, 200);',
+      ].join('\n')
+    );
+    return new Promise((resolve) => {
+      const proc = spawn(process.execPath, [file], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let out = '';
+      proc.stdout.on('data', (c) => (out += c));
+      proc.stderr.on('data', (c) => (out += c));
+      proc.on('close', (code, signal) => resolve({ code, signal, out }));
+    });
+  }
+
+  test('★ a stop that lands in the pre-error window leaves the process alive', async () => {
+    // ⚠️ RUN IN A CHILD, because the failure mode is "this process is gone" — there is no other way to
+    // observe it, and observing it in-process would take the test runner down with it, which is
+    // precisely what it did in CI.
+    const guarded = await killProbe("killIfSpawned(p, 'SIGTERM');");
+    assert.match(guarded.out, /SURVIVED/, `the guarded child did not survive: ${guarded.out}`);
+    assert.equal(guarded.code, 0);
+  });
+
+  test('★★ kill() is NEVER CALLED on a child that has no pid — the assertion the guard rests on', () => {
+    // ⚠️ THIS, NOT THE CHILD-PROCESS CASE ABOVE, IS WHAT KILLS THE MUTANT. The obvious control —
+    // "and the UNGUARDED version dies" — was written first and is WRONG, because it is racy: libuv
+    // forks before it resolves the binary, so the handle holds a real pid until that doomed child is
+    // reaped, and only after that does the kill degrade to `kill(0, …)`. Under `node --test` on a
+    // loaded machine the reaping wins and the process group dies; in a quiet standalone probe it does
+    // not, and the "control" passes. Measured both ways on Linux before this was rewritten.
+    // A spy has no race: it asserts the guard's actual contract, on every platform, every run.
+    const calls = [];
+    const spy = (pid) => ({ pid, kill: (sig) => { calls.push([pid, sig]); return true; } });
+
+    assert.equal(killIfSpawned(spy(undefined)), false);
+    assert.equal(killIfSpawned(spy(0)), false, 'pid 0 is the process GROUP, never a child');
+    assert.equal(killIfSpawned(spy(null)), false);
+    assert.deepEqual(calls, [], 'kill() was called on a child that never spawned — that is the defect');
+
+    // ...and the same guard must not swallow a real one.
+    assert.equal(killIfSpawned(spy(4242), 'SIGTERM'), true);
+    assert.deepEqual(calls, [[4242, 'SIGTERM']]);
+  });
+
+  test('it reports false, and does not throw, for a missing process object', () => {
+    assert.equal(killIfSpawned(null), false);
+    assert.equal(killIfSpawned(undefined), false);
+    assert.equal(killIfSpawned({}), false, 'an object with no pid was treated as a process');
+  });
+
+  test('★ it really does signal a live child — the control for the guard itself', async () => {
+    // Without this, a `killIfSpawned` that always returned false would pass every assertion above, and
+    // shutdown would silently stop killing anything.
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
+    await new Promise((r) => child.once('spawn', r));
+    assert.ok(child.pid, 'precondition: the child really started');
+    const ended = new Promise((r) => child.once('exit', (code, signal) => r({ code, signal })));
+    assert.equal(killIfSpawned(child, 'SIGTERM'), true, 'a live child was not signalled');
+    const res = await ended;
+    assert.ok(res.signal === 'SIGTERM' || res.code !== 0, `the child was not actually terminated: ${JSON.stringify(res)}`);
+  });
+
+  test('a signal argument other than the default is passed through', () => {
+    let got = null;
+    assert.equal(killIfSpawned({ pid: 1234, kill: (s) => { got = s; return true; } }, 'SIGKILL'), true);
+    assert.equal(got, 'SIGKILL', 'the caller-chosen signal was replaced');
+  });
+
+  test('a throw from kill() is swallowed rather than escaping into a stop path', () => {
+    // The win32 EINVAL, and the race where a child is reaped between the pid check and the call. Every
+    // caller is a shutdown or a restart; a throw there is the outage this whole file exists to prevent.
+    assert.equal(killIfSpawned({ pid: 999999, kill: () => { throw new Error('ESRCH'); } }), false);
   });
 });
 

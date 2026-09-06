@@ -9,6 +9,7 @@ import { recordMotion, recordMotionOut } from './activityTracker.js';
 import { recordBedTransition, TRANSITION } from './bedTransitions.js';
 import { oobLinkKind, OOB_LINK_MS, OOB_LINK_SLOW_MS, OOB_SLOW_OUT_MIN } from './bedTransitionRules.js';
 import { childSamplingActiveNow } from './sleepAnalysis.js';
+import { killIfSpawned } from './processGuards.js';
 
 // Server-side motion detection. Per camera with detection enabled, a cheap FFmpeg leg reads
 // the already-published MediaMTX stream (the sub-stream when there is one — far cheaper to
@@ -460,16 +461,10 @@ export function stopMotionDetector(cameraId) {
         resolve();
       }
     };
-    // See stopTranscoder for the full reasoning: a process that never spawned throws on kill()
-    // (EINVAL, verified on win32 — an uncaught throw, the same crash class as #257) and emits
-    // 'error'/'close' but never 'exit', so waiting on 'exit' alone stalls for the whole timeout.
-    const kill = (sig) => {
-      try {
-        entry.proc.kill(sig);
-      } catch {
-        /* never spawned, or already reaped */
-      }
-    };
+    // See stopTranscoder for the full reasoning: a process that never spawned must not be killed
+    // directly (on Linux that signals the whole process group — see killIfSpawned in processGuards.js),
+    // and it emits 'error'/'close' but never 'exit', so waiting on 'exit' alone stalls for the whole timeout.
+    const kill = (sig) => killIfSpawned(entry.proc, sig);
     entry.proc.once('exit', done);
     entry.proc.once('error', done);
     kill('SIGTERM');

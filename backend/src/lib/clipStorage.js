@@ -20,24 +20,37 @@ import {
 const GB = 1024 * 1024 * 1024;
 // Refuse to start a new clip if the volume has less than this free. A clip is a few MB, but this is a
 // hard floor so recording can never be the thing that fills a disk out from under the DB.
-const MIN_FREE_BYTES = 500 * 1024 * 1024; // 500 MB
+// Exported so a test can state the bound instead of hoping the machine it runs on happens to be
+// either side of it — the free space on a dev box or a CI runner is not something a test may assume.
+export const MIN_FREE_BYTES = 500 * 1024 * 1024; // 500 MB
 const SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 
 let status = { ok: false, path: CLIPS_DIR, writable: false, onMount: false, reason: 'not checked' };
 let sweepTimer = null;
 
+// Reading /proc/mounts, kept separate from interpreting it.
+//
+// ⚠️ Separated so a test can supply the file's CONTENT instead of inheriting the machine it runs on.
+// Without that, this check is exercised differently everywhere: on Windows there is no /proc/mounts,
+// so the early `return true` fires and the rest is dead; on a Linux CI runner a temp directory sits
+// under "/", so the answer is always "unmapped" and the OK path is dead instead. Either way the branch
+// that DISABLES recording is one nobody's machine actually runs — the same shape as the fake-ffmpeg-on-
+// PATH problem in spawn-failure.test.js, where a suite was green for a reason unrelated to the code.
+export function readMounts() {
+  try {
+    return fs.readFileSync('/proc/mounts', 'utf8');
+  } catch {
+    return null; // not a Linux container — can't check
+  }
+}
+
 // Is CLIPS_DIR backed by a real mount (bind/volume) rather than the container overlay? A mapped
 // volume shows up in /proc/mounts as its own mountpoint; an unmapped path falls under "/" (the
 // overlay root), which means it lives on the ephemeral layer. We find the DEEPEST mountpoint that
-// contains CLIPS_DIR: if that's "/", it's unmapped. Off Linux (dev machine, no /proc/mounts) we skip
+// contains CLIPS_DIR: if that's "/", it's unmapped. With no /proc/mounts to read (dev machine) we skip
 // the check and assume fine.
-function isOnRealMount(absDir) {
-  let mounts;
-  try {
-    mounts = fs.readFileSync('/proc/mounts', 'utf8');
-  } catch {
-    return true; // not a Linux container — can't check, don't block
-  }
+export function isOnRealMount(absDir, mounts = readMounts()) {
+  if (mounts == null) return true; // can't check, don't block
   let deepest = '';
   for (const line of mounts.split('\n')) {
     const mnt = line.split(' ')[1];
@@ -53,7 +66,10 @@ function isOnRealMount(absDir) {
 
 // Run the startup guard. Creates CLIPS_DIR, checks it's writable, and warns/blocks if it's on the
 // ephemeral layer. Sets the module status used to gate capture.
-export function checkClipStorage() {
+//
+// `mounts` is the /proc/mounts content to judge against, and defaults to the real file — it is a seam
+// for tests (see isOnRealMount above), not a runtime option. No caller passes it.
+export function checkClipStorage({ mounts = readMounts() } = {}) {
   const abs = path.resolve(CLIPS_DIR);
   let writable = false;
   try {
@@ -67,7 +83,7 @@ export function checkClipStorage() {
     status = { ok: false, path: abs, writable: false, onMount: false, reason: 'not writable' };
     return status;
   }
-  const onMount = isOnRealMount(abs);
+  const onMount = isOnRealMount(abs, mounts);
   if (!onMount) {
     // Unmapped container path — clips would land on the overlay layer (lost on recreate, image bloat).
     logger.error(
@@ -98,8 +114,10 @@ export function freeBytes() {
   }
 }
 
-export function hasMinFreeSpace() {
-  return freeBytes() >= MIN_FREE_BYTES;
+// `free` is a seam for tests, as above: no caller passes it, and a test that relied on the runner's
+// actual free space could only ever exercise whichever side of the bound that machine happens to sit.
+export function hasMinFreeSpace(free = freeBytes()) {
+  return free >= MIN_FREE_BYTES;
 }
 
 function getRetention() {
@@ -169,8 +187,16 @@ export function sweepClips() {
 }
 
 // Called once at boot: run the guard, sweep immediately, then on an interval.
-export function startClipStorage() {
-  checkClipStorage();
+//
+// ⚠️ `opts` is forwarded straight to checkClipStorage, and it exists for the same seam reason (see
+// there). It is NOT decoration: without it this function re-runs the guard against the real
+// /proc/mounts, which means it decides differently on every machine — and it does so AFTER a test has
+// set the status up, silently undoing it. That is not hypothetical: the first version of this had no
+// seam and the four start/stop tests passed on Windows (no /proc/mounts, so the check is skipped) and
+// failed on Linux CI (a temp dir sits under "/", so CLIPS_DIR reads as the container overlay and the
+// sweep declines). Same class of defect as everything else this module's tests exist to catch.
+export function startClipStorage(opts = {}) {
+  checkClipStorage(opts);
   try {
     sweepClips();
   } catch (e) {

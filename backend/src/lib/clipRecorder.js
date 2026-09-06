@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { logger, isNoisyMediaLine } from './logger.js';
 import { addHold, removeHold, effectiveHold, clearHolds } from './ringHolds.js';
+import { killIfSpawned } from './processGuards.js';
 
 // Event-recording capture core (Stage 1, "Option A"; shipped in 0.17.0).
 //
@@ -259,11 +260,10 @@ export function stopSegmenter(cameraId) {
   entry.stopped = true;
   if (entry.janitor) clearInterval(entry.janitor);
   segmenters.delete(cameraId);
-  try {
-    entry.proc?.kill('SIGTERM');
-  } catch {
-    /* already gone */
-  }
+  // ⚠️ killIfSpawned, NOT proc.kill — see processGuards.js. A launch whose spawn has failed but whose
+  // 'error' has not arrived yet has `pid === undefined`, and killing THAT on Linux signals the whole
+  // process group: the backend SIGTERMs itself. This exact call is the one that was measured doing it.
+  killIfSpawned(entry.proc, 'SIGTERM');
 }
 
 export function stopAllSegmenters() {
