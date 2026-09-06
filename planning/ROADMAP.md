@@ -664,6 +664,11 @@ Recorded so they don't get re-litigated. Each was considered and consciously par
 ## 5. Operational runbooks
 
 Not plans — living procedures, kept alongside this file:
+- **`deploy-runbook.md`** — staging → release → production on Unraid, with the gate at each step and
+  why it exists. Read it when something does not look right; the `/release` and `/deploy-staging`
+  skills are the automation of the same steps. ★ Holds the two traps that mislead most: the guard
+  script prints the **OCI revision label, which is empty on production** (use `NIGHTLIGHT_GIT_SHA`),
+  and `--stop-timeout 30` in the DockerMan templates only takes effect on the next `update_container`.
 - **`sleep-marker-review-runbook.md`** — pull a night's OOB / into-bed markers, `bed_transitions`, and
   shadow onset/wake off staging. Read-only. Note it deliberately warns that prod is a *different*
   database with different camera IDs — don't cross the two.
