@@ -97,7 +97,8 @@ improve between runs, and lets findings be raised as issues while they are fresh
 3. **Read its report; verify its findings yourself.** ⚠️ Non-negotiable. These agents produce
    confident, plausible, wrong findings. Trust them on *correctness* (does the comment match the
    code), not on *design*.
-4. **Raise one GitHub issue per confirmed finding** (§7).
+4. **Raise one GitHub issue per confirmed finding** (§7) — ⚠️ **unless it is a security defect, which
+   goes to a private draft advisory instead, never a public issue** (§7).
 5. **Update the ledger** (§8) with candidates, verdict split, findings, tokens, duration.
 6. Only then launch the next agent.
 
@@ -152,6 +153,27 @@ report.
 - State plainly in the issue whether the claim is *demonstrated* or *suspected*. An issue that
   overstates its evidence is the same defect as the comment it reports.
 
+### ⚠️ When the finding is a security defect, it does NOT get a public issue
+
+★ **Learned on agent 3, 2026-09-09.** A false reassurance about *credentials* is not a documentation
+bug — it is a vulnerability report, and this repo's image is publicly distributed. Filing it as a
+normal issue would disclose an unfixed credential leak to everyone running it, and **public disclosure
+cannot be undone.**
+
+So: **a security finding goes to a GitHub draft security advisory**, which is private to repo admins
+and is the same vehicle already used for `GHSA-43c3-wrx8-fq39` and `GHSA-qffc-965c-x74m`. Create it
+with `gh api repos/sauso/nightlight/security-advisories -X POST --input <payload.json>`.
+
+⚠️ **The API rejects the obvious payload twice over**: `severity` must be one of
+`critical|high|medium|low` (**not** `moderate`, the word GitHub's own UI displays), and a
+`vulnerabilities` array is required — a `package` with an `ecosystem` (`other` is valid) and a
+`vulnerable_version_range`. Build that JSON with a script and **verify the description round-trips**;
+an advisory body is markdown full of backticks and is exactly the payload that shell expansion eats.
+
+★ **The instruction "raise an issue for each finding" was given before anyone knew a finding would be
+a vulnerability.** Do not read a general instruction as authorising an irreversible public disclosure —
+take the private path and say plainly that you did, and why.
+
 ## 8. Ledger
 
 Fill in as each agent lands. This is the resume point — the audit spans sessions.
@@ -160,7 +182,7 @@ Fill in as each agent lands. This is the resume point — the audit spans sessio
 |---|---|---|---|---|---|---|---|---|---|
 | 1 | `sleepAnalysis.js` | 47 | 3 | 40 | **0** | 4 | 153k | 8m48s | 0 |
 | 2 | `index.js` + `db.js` | 36 | 2 | 32 | **2** | 0 | 187k | 7m29s | #304, #305 |
-| 3 | `cameras.js` + `auth.js` | 31 | | | | | | | |
+| 3 | `cameras.js` + `auth.js` | 31 | 0 | 29 | **1** | 1 | 186k | 7m28s | GHSA-wcgj-6p3c-vr9h |
 | 4 | clip pipeline | 55 | | | | | | | |
 | 5 | detection | ~45 | | | | | | | |
 | 6 | media/camera | ~35 | | | | | | | |
