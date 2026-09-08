@@ -192,7 +192,7 @@ these are the files whose house style is to name the night that set each number.
 (app wiring, routes, the clip pipeline) returned **6 findings across 122**. Drift lives where the
 comments were written once and the surrounding feature kept moving, not where they are actively
 maintained. Expect agents 6–8 to look more like the second group.
-| 6 | media/camera | ~35 | | | | | | | |
+| 6 | media/camera | 33 | 0 | 24 | **5** | 4 | 173k | 9m20s | #313, #314, #315 |
 | 7 | backend tail | ~80 | | | | | | | |
 | 8 | frontend | 76 | | | | | | | |
 | V | verifier over all findings | — | | | | | | | |
