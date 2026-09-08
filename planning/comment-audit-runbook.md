@@ -158,7 +158,7 @@ Fill in as each agent lands. This is the resume point — the audit spans sessio
 
 | agent | scope | cands | NOT-A-CLAIM | TRUE | FALSE | UNVERIF | tokens | duration | issues |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | `sleepAnalysis.js` | 47 | | | | | | | |
+| 1 | `sleepAnalysis.js` | 47 | 3 | 40 | **0** | 4 | 153k | 8m48s | 0 |
 | 2 | `index.js` + `db.js` | 36 | | | | | | | |
 | 3 | `cameras.js` + `auth.js` | 31 | | | | | | | |
 | 4 | clip pipeline | 55 | | | | | | | |
@@ -168,9 +168,22 @@ Fill in as each agent lands. This is the resume point — the audit spans sessio
 | 8 | frontend | 76 | | | | | | | |
 | V | verifier over all findings | — | | | | | | | |
 
-**Cost model, to be corrected after agent 1.** Pre-run estimate was ~180–250k tokens per agent and
-1.5M–2.5M total, extrapolated from a 171k verification run. That estimate did **not** account for the
-NOT-A-CLAIM fraction, so it is expected to be high. Replace these numbers with measurements.
+**Cost model — one measurement so far (agent 1).** 153k tokens, 8m48s, 15 tool calls for 47 candidates
+over 1,352 lines. That is **~113 tokens per line of source** or **~3.3k per candidate** — and the two
+scalings disagree about the total (~2.2M by lines, ~1.4M by candidates), because agent 1's file is
+unusually candidate-dense. Agent 2 has a different lines-per-candidate ratio and will discriminate
+between them. Until then, plan on **1.4M–2.2M total** and do not narrow it on one data point.
+
+⚠️ **The NOT-A-CLAIM fraction was much smaller than predicted** — 3 of 47, not the large majority the
+sample of two suggested. `sleepAnalysis.js` is unusually claim-dense; do not assume the other agents
+inherit that ratio in either direction.
+
+⚠️ **Watch the tool-call count as a quality signal, not just cost.** Agent 1 spent 15 tool calls on 47
+candidates, so most TRUE verdicts were judged from the file already in context rather than by opening
+what the comment referred to. That is often legitimate for a self-contained module — but **N1 was only
+findable by a two-hop trace into another file**, so a low hop rate is exactly the blind spot this audit
+is meant to close. Later briefs should require an explicit hop for any claim about behaviour defined in
+another module, and the report should state which verdicts were reached without one.
 
 ## 9. Prior findings this audit follows on from
 
