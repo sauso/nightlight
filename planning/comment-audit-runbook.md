@@ -183,7 +183,7 @@ Fill in as each agent lands. This is the resume point — the audit spans sessio
 | 1 | `sleepAnalysis.js` | 47 | 3 | 40 | **0** | 4 | 153k | 8m48s | 0 |
 | 2 | `index.js` + `db.js` | 36 | 2 | 32 | **2** | 0 | 187k | 7m29s | #304, #305 |
 | 3 | `cameras.js` + `auth.js` | 31 | 0 | 29 | **1** | 1 | 186k | 7m28s | GHSA-wcgj-6p3c-vr9h |
-| 4 | clip pipeline | 55 | | | | | | | |
+| 4 | clip pipeline | 55 | 0 | 52 | **3** | 0 | 182k | 12m14s | #308, #309, #310 |
 | 5 | detection | ~45 | | | | | | | |
 | 6 | media/camera | ~35 | | | | | | | |
 | 7 | backend tail | ~80 | | | | | | | |
