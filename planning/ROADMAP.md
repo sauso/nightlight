@@ -715,6 +715,12 @@ Not plans — living procedures, kept alongside this file:
 - **`sleep-marker-review-runbook.md`** — pull a night's OOB / into-bed markers, `bed_transitions`, and
   shadow onset/wake off staging. Read-only. Note it deliberately warns that prod is a *different*
   database with different camera IDs — don't cross the two.
+- **`comment-audit-runbook.md`** — the provably-complete pass over every reassurance-shaped comment
+  ("never", "cannot", "handled"), checking each against the code beside it. ★ Driven by an
+  **enumerated candidate list** so completeness is checkable — 441 candidates across 92 files, worked
+  8 agents at a time, one at a time. Exists because this class of defect is invisible to the test
+  suite: #297 hid behind a comment asserting a hazard was "verified on win32" in a Linux-only product.
+  Holds the running ledger — start there to see what has been covered.
 
 ---
 
