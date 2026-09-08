@@ -159,7 +159,7 @@ Fill in as each agent lands. This is the resume point — the audit spans sessio
 | agent | scope | cands | NOT-A-CLAIM | TRUE | FALSE | UNVERIF | tokens | duration | issues |
 |---|---|---|---|---|---|---|---|---|---|
 | 1 | `sleepAnalysis.js` | 47 | 3 | 40 | **0** | 4 | 153k | 8m48s | 0 |
-| 2 | `index.js` + `db.js` | 36 | | | | | | | |
+| 2 | `index.js` + `db.js` | 36 | 2 | 32 | **2** | 0 | 187k | 7m29s | #304, #305 |
 | 3 | `cameras.js` + `auth.js` | 31 | | | | | | | |
 | 4 | clip pipeline | 55 | | | | | | | |
 | 5 | detection | ~45 | | | | | | | |
@@ -168,22 +168,31 @@ Fill in as each agent lands. This is the resume point — the audit spans sessio
 | 8 | frontend | 76 | | | | | | | |
 | V | verifier over all findings | — | | | | | | | |
 
-**Cost model — one measurement so far (agent 1).** 153k tokens, 8m48s, 15 tool calls for 47 candidates
-over 1,352 lines. That is **~113 tokens per line of source** or **~3.3k per candidate** — and the two
-scalings disagree about the total (~2.2M by lines, ~1.4M by candidates), because agent 1's file is
-unusually candidate-dense. Agent 2 has a different lines-per-candidate ratio and will discriminate
-between them. Until then, plan on **1.4M–2.2M total** and do not narrow it on one data point.
+**Cost model — settled by agent 2. Scope by LINES, not by candidate count.**
 
-⚠️ **The NOT-A-CLAIM fraction was much smaller than predicted** — 3 of 47, not the large majority the
-sample of two suggested. `sleepAnalysis.js` is unusually claim-dense; do not assume the other agents
-inherit that ratio in either direction.
+| | lines | cands | tokens | tok/line | tok/cand |
+|---|---|---|---|---|---|
+| agent 1 | 1,352 | 47 | 153k | 113 | 3.3k |
+| agent 2 | 1,452 | 36 | 187k | 129 | 5.2k |
 
-⚠️ **Watch the tool-call count as a quality signal, not just cost.** Agent 1 spent 15 tool calls on 47
-candidates, so most TRUE verdicts were judged from the file already in context rather than by opening
-what the comment referred to. That is often legitimate for a self-contained module — but **N1 was only
-findable by a two-hop trace into another file**, so a low hop rate is exactly the blind spot this audit
-is meant to close. Later briefs should require an explicit hop for any claim about behaviour defined in
-another module, and the report should state which verdicts were reached without one.
+Tokens-per-line agree within 14%; tokens-per-candidate differ by 59%. **Lines is the predictor.**
+Projecting 19,426 scoped lines at ~130 tok/line gives **~2.5M total**, plus the verifier — the *upper*
+end of the original guess, not the lower. Budget accordingly.
+
+⚠️ **The hop rule costs ~14% and is worth every token.** Agent 2 read well beyond its 1,452 scoped
+lines (12 external modules opened), which is why its tok/line is higher. It bought **both** of the
+audit's first two findings — neither was visible from the file it lived in. Do not drop the hop rule
+to save budget.
+
+⚠️ **Wall clock is ~8 min per ~1,400-line scope**, near-constant across both runs. ~16,600 scoped lines
+remain → roughly **1.5–2 hours** for agents 3–8 plus the verifier.
+
+⚠️ **Two predictions this runbook made were wrong; both are corrected above.** The NOT-A-CLAIM fraction
+was predicted as "a large majority" and came in at 3/47 then 2/36 — it is **small**, because the
+pattern's false positives are rarer in real code than a two-line sample suggested. And the cost range
+was quoted as 1.4M–2.2M when the answer is ~2.5M. ★ Both errors came from extrapolating a confident
+number off one unrepresentative sample — the same failure this audit exists to catch, committed in the
+audit's own planning doc.
 
 ## 9. Prior findings this audit follows on from
 
