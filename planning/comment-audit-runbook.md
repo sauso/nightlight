@@ -184,7 +184,14 @@ Fill in as each agent lands. This is the resume point — the audit spans sessio
 | 2 | `index.js` + `db.js` | 36 | 2 | 32 | **2** | 0 | 187k | 7m29s | #304, #305 |
 | 3 | `cameras.js` + `auth.js` | 31 | 0 | 29 | **1** | 1 | 186k | 7m28s | GHSA-wcgj-6p3c-vr9h |
 | 4 | clip pipeline | 55 | 0 | 52 | **3** | 0 | 182k | 12m14s | #308, #309, #310 |
-| 5 | detection | ~45 | | | | | | | |
+| 5 | detection | 39 | 0 | 35 | **0** | 4 | 134k | 6m41s | 0 |
+
+★ **Pattern after five agents: the well-tended core is clean, the plumbing is not.** Agents 1 and 5
+(`sleepAnalysis`, the detection layer) returned **0 findings between them across 86 candidates** —
+these are the files whose house style is to name the night that set each number. Agents 2, 3 and 4
+(app wiring, routes, the clip pipeline) returned **6 findings across 122**. Drift lives where the
+comments were written once and the surrounding feature kept moving, not where they are actively
+maintained. Expect agents 6–8 to look more like the second group.
 | 6 | media/camera | ~35 | | | | | | | |
 | 7 | backend tail | ~80 | | | | | | | |
 | 8 | frontend | 76 | | | | | | | |
