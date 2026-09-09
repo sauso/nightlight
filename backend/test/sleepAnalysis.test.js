@@ -449,6 +449,116 @@ test('★★ one second past it, the exit stands', () => {
   assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '20:44');
 });
 
+// ★★★ THE ADVERSARIAL REVIEW'S FINDING on this guard, and the reason it gives up its veto.
+//
+// The corroboration below is NOT enough on its own, because the two directions are asymmetric. Forward
+// (the reversal guard) the claim is "he came back and stayed", so occupancy across the next 150 minutes
+// is the right evidence. Backward the claim is "he was in bed one second ago" — and 150 minutes of
+// hindsight says nothing about that. `MAX_POST_EXIT_ACTIVE_MIN` deliberately allows up to 20 ACTIVE
+// minutes after a real departure (a parent stripping the bed), and every one of them corroborates a
+// spurious `into_bed` that happens to sit just before the real exit.
+//
+// The reviewer's exact fixture: a genuine 05:50 exit, an invented `into_bed` 30 s before it, and a
+// parent handling the bed 40 minutes later. Before the fallback this reported `wake_at = null` —
+// "still asleep" for a child who had got up — which is worse than the wrong time the guard fixes.
+//
+// ⚠️ Tightening the witness window instead was measured and does NOT work: on the real nights the
+// false tail (2026-09-09) and a REAL exit (2026-08-31) both show exactly 3 occupied minutes in the
+// following 30. There is nothing to tighten to.
+function layRealExitBehindASpuriousReturn(afterExit) {
+  laySamples(at(19, 30), at(5, 49, 1), [[at(19, 30), at(19, 40)]], STILL_OCCUPIED);
+  laySamples(at(5, 49, 1), at(5, 50, 1), [[at(5, 49, 1), at(5, 50, 1)]], STILL_OCCUPIED); // climbing out
+  laySamples(at(5, 50, 1), at(7, 0, 1), afterExit.ranges, afterExit.still); // he is gone from here on
+  insertTransition.run(CAM, 'into_bed', 0.02, sqlTime(at(5, 49, 1, 40))); // noise: nobody returned
+  insertTransition.run(CAM, 'out_of_bed', 0.04, sqlTime(at(5, 50, 1, 10))); // the real departure
+}
+
+test('★★★ a parent handling the empty bed cannot turn a real departure into "still asleep"', () => {
+  layRealExitBehindASpuriousReturn({
+    still: STILL_EMPTY, // the bed IS empty — he left
+    ranges: [[at(6, 30, 1), at(6, 33, 1)]], // ...but a parent strips it 40 minutes later
+  });
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.status, 'ok');
+  assert.ok(night.wake_at, 'the night must not come back as "still asleep"');
+  assert.equal(hhmm(night.wake_at), '05:50', 'the real departure, handed back because nothing later exists');
+});
+
+test('★★ ...and neither can a bed that keeps micro-moving after he leaves', () => {
+  // The same shape with the other post-exit condition a review demonstrated: no parent, but the bed
+  // never reads dead flat. STILL_OCCUPIED is under MOTION_ACTIVE, so the empty run still forms — and
+  // it is over OCCUPANCY_MIN_PEAK, so it corroborates the invented return just as well.
+  layRealExitBehindASpuriousReturn({ still: STILL_OCCUPIED, ranges: [] });
+
+  const night = computeNight(CHILD, DATE);
+  assert.ok(night.wake_at, 'the night must not come back as "still asleep"');
+  assert.equal(hhmm(night.wake_at), '05:50');
+});
+
+test('★★ both guards firing on one night still leaves a wake', () => {
+  // The review's second finding: the reversal guard rejects the real 05:50 exit (a corroborated return
+  // at 05:52), and this guard then rejects the 05:52:30 tail that used to be the accidental answer —
+  // so the two together were strictly worse than either alone. With the fallback the tail is handed
+  // back, which is exactly what the reversal guard alone reported.
+  laySamples(at(19, 30), at(5, 53, 1), [[at(19, 30), at(19, 40)], [at(5, 49, 1), at(5, 53, 1)]], STILL_OCCUPIED);
+  laySamples(at(5, 53, 1), at(7, 0, 1), [], STILL_OCCUPIED); // he is back in it, still and alive
+  insertTransition.run(CAM, 'out_of_bed', 0.04, sqlTime(at(5, 50, 1, 10)));
+  insertTransition.run(CAM, 'into_bed', 0.05, sqlTime(at(5, 52, 1))); // reverses the exit above
+  insertTransition.run(CAM, 'out_of_bed', 0.04, sqlTime(at(5, 52, 1, 30))); // ...and its tail, 30 s later
+
+  const night = computeNight(CHILD, DATE);
+  assert.ok(night.wake_at, 'two guards must not add up to "still asleep"');
+  assert.equal(hhmm(night.wake_at), '05:52');
+});
+
+test('★★ an into_bed at the IDENTICAL second still cancels the exit', () => {
+  // ⚠️ `bed_transitions.created_at` has one-second resolution, so a tie is representable, and a review
+  // found it escaping through a `<` that should be `<=`. A tie is the strongest case for this guard:
+  // if the two markers cannot even be ordered, nothing establishes that the child left.
+  laySettlingTailNight(0);
+  assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '05:49');
+});
+
+test('★★ the return is indexed with txIdx, not a hand-rolled floor (#260 lives on this seam)', () => {
+  // ⚠️ A review mutated `txIdx(back.created_at)` into an inline `Math.floor(...)` and it SURVIVED the
+  // whole suite — the source comment claimed the convention and nothing checked it. It is not cosmetic:
+  // `txIdx` currently ROUNDS, so a return at :29 and one at :31 land on different minutes, and with the
+  // only corroborating minutes sitting on that boundary the two give different nights.
+  //
+  // Occupancy exists in exactly OCCUPANCY_MIN_MINUTES minutes, 05:49-05:51. A return at 05:49:31 rounds
+  // UP to 05:50, leaving only 2 witnessed minutes — one short — so the guard stays silent.
+  // ★ When #260 flips txIdx from round to floor, THIS TEST WILL FAIL. That is the point: the wake path
+  // sits on the same seam as onset, and it must not move silently.
+  // A LATER real exit is what makes the seam observable at all: without one the fallback below hands
+  // the skipped exit straight back and both cases agree, which is how the first version of this test
+  // passed for the wrong reason (both `null`).
+  const layWitnessOnTheBoundary = (second) => {
+    laySamples(at(19, 30), at(5, 49, 1), [[at(19, 30), at(19, 40)], [at(5, 48, 1), at(5, 49, 1)]], STILL_OCCUPIED);
+    laySamples(at(5, 49, 1), at(5, 52, 1), [], STILL_OCCUPIED); // exactly OCCUPANCY_MIN_MINUTES occupied
+    // ⚠️ The later exit's own active minute has to sit OUTSIDE the 150-minute witness window, or it
+    // becomes the third occupied minute itself and both cases fire. 08:30 is 161 min after 05:49.
+    laySamples(at(5, 52, 1), at(9, 0, 1), [[at(8, 30, 1), at(8, 31, 1)]], STILL_EMPTY);
+    insertTransition.run(CAM, 'into_bed', 0.02, sqlTime(at(5, 49, 1, second)));
+    insertTransition.run(CAM, 'out_of_bed', 0.04, sqlTime(at(5, 49, 1, second + 10)));
+    insertTransition.run(CAM, 'out_of_bed', 0.04, sqlTime(at(8, 30, 1, 5))); // the later, real departure
+  };
+
+  layWitnessOnTheBoundary(29); // rounds DOWN to 05:49 -> all 3 minutes witnessed -> guard fires
+  const rounded = computeNight(CHILD, DATE);
+  db.prepare('DELETE FROM bed_transitions').run();
+  db.prepare('DELETE FROM activity_samples').run();
+  layWitnessOnTheBoundary(31); // rounds UP to 05:50 -> only 2 witnessed -> guard silent
+  const notRounded = computeNight(CHILD, DATE);
+
+  assert.equal(hhmm(rounded.wake_at), '08:30', 'the :29 return is witnessed, so the tail is skipped');
+  assert.equal(hhmm(notRounded.wake_at), '05:49', 'the :31 return is one witness minute short, so the exit stands');
+  assert.notEqual(
+    hhmm(rounded.wake_at), hhmm(notRounded.wake_at),
+    'two seconds apart must straddle the minute boundary — if these match, txIdx no longer rounds'
+  );
+});
+
 test('★★ a spurious into_bed does NOT let this guard eat a real departure', () => {
   // ★★★ The same corroboration lesson as the guard above, and the same reason: without it, this rule
   // is a NEW way to report `wake_at = null` — "still asleep" for a child who plainly got up — which is

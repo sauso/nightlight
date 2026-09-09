@@ -843,6 +843,9 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     // 23:57 which swallowed the true 05:09 departure whole, reporting the wake at 07:09 — two hours
     // late. Verified over 400k random timelines that the candidate START set is identical to the old
     // one, bridged or not; only the run extents differ.
+    // The best exit that ONLY the settling-tail guard rejected, kept across every candidate gap. See
+    // the guard for why: it must never be the reason a night reports no wake at all.
+    let settlingFallback = null;
     const firstMin = Math.max(algoOnset, 0);
     for (let i = firstMin; i < totalMinExt; i++) {
       if (cribActExt[i]) continue; // an absence begins on a quiet minute
@@ -926,17 +929,54 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
           // let this classifier's documented failure mode (62% of transitions are provably wrong)
           // veto a genuine departure and report `wake_at = null` — "still asleep" for a child who got
           // up, which is worse than the bug being fixed.
+          //
+          // ⚠️⚠️ `<=` ON THE ORDERING, NOT `<`. `bed_transitions.created_at` has one-second resolution,
+          // so an `into_bed` and an `out_of_bed` at the IDENTICAL second are representable — and that
+          // is the strongest case for this guard, not an exclusion: if the two cannot even be ordered,
+          // nothing can establish that the child left. An adversarial review found the tie escaping.
           const settlingTail = transitions.find((back) => back.type === TRANSITION.INTO_BED
-            && txMs(back.created_at) < txMs(t.created_at)
+            && txMs(back.created_at) <= txMs(t.created_at)
             && txMs(t.created_at) - txMs(back.created_at) <= JITTER_REENTRY_MS
             // ⚠️ txIdx, not a hand-rolled floor — same reason as the reversal guard above.
             && bedOccupiedFrom(txIdx(back.created_at)));
-          if (settlingTail) continue;
           const dt = Math.abs(txMs(t.created_at) - emptyStartMs);
+          if (settlingTail) {
+            // ⚠️⚠️ THIS GUARD MUST NEVER BE THE REASON A NIGHT HAS NO WAKE AT ALL — the same rule the
+            // reversal guard's corroboration exists to satisfy, and an adversarial review showed the
+            // corroboration alone does not achieve it here.
+            //
+            // Why not: the two directions are asymmetric. Forward, the claim is "he came back and
+            // stayed", so occupancy over the next 150 minutes is exactly the right evidence. Backward,
+            // the claim is "he was in bed one second ago" — and 150 minutes of hindsight cannot speak
+            // to that. Worse, MAX_POST_EXIT_ACTIVE_MIN deliberately ALLOWS up to 20 active minutes
+            // after a real departure (the documented parent-handles-the-bed case), and every one of
+            // them corroborates. Demonstrated: a genuine 05:50 exit, a spurious `into_bed` 30 s
+            // before it, and a parent tidying the bed at 06:30 — the exit was rejected, no later
+            // candidate existed, and the night reported `wake_at = null`, "still asleep" for a child
+            // who had got up. That is worse than the wrong TIME this guard exists to fix.
+            //
+            // Tightening the witness window was tried and does not work: on the real nights the false
+            // tail and a REAL exit both show exactly 3 occupied minutes in the following 30. So the
+            // guard keeps its reach and gives up its veto instead — it may SKIP an exit in favour of a
+            // later one, but if there is no later one it hands this one back.
+            if (dt <= WAKE_SNAP_MS && (settlingFallback == null || dt < settlingFallback.dt)) {
+              settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at };
+            }
+            continue;
+          }
           if (dt <= WAKE_SNAP_MS && (best == null || dt < best.dt)) best = { dt, ms: txMs(t.created_at), at: t.created_at };
         }
         if (best) { transitionExitMs = best.ms; exitTransitionAt = best.at; break; } // corroborated departure - the morning exit
       }
+
+    // Nothing survived, and the settling-tail guard is the only reason: hand back what it skipped
+    // rather than report a child who plainly got up as still asleep. See that guard for the evidence.
+    // Deliberately NOT extended to the reversal guard — that one has its own corroboration and its own
+    // tests, and widening it here would be a second, unmeasured change.
+    if (transitionExitMs == null && settlingFallback != null) {
+      transitionExitMs = settlingFallback.ms;
+      exitTransitionAt = settlingFallback.at;
+    }
     }
   }
 
