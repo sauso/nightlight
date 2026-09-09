@@ -193,7 +193,17 @@ these are the files whose house style is to name the night that set each number.
 comments were written once and the surrounding feature kept moving, not where they are actively
 maintained. Expect agents 6–8 to look more like the second group.
 | 6 | media/camera | 33 | 0 | 24 | **5** | 4 | 173k | 9m20s | #313, #314, #315 |
-| 7 | backend tail | ~80 | | | | | | | |
+| 7a | backend tail — sleep/detection support (17 files) | 64 | 0 | 63 | **1** | 0 | 202k | 10m09s | #317 |
+| 7b | backend tail — notifications/auth/routes (21 files) | 55 | | | | | | | |
+
+⚠️ **Agent 7 was split, and the estimate that said to split it was too small.** The runbook guessed
+~80 candidates over ~4,000 lines; the real remainder was **119 candidates across 38 files and 4,915
+lines** — ~610k tokens for one agent at the measured rate, far past what one context holds. Splitting
+by **lines** (2,507 / 2,408) rather than by candidate count is what made each half tractable.
+
+⚠️ **A run was lost to a session limit** partway through 7a's first attempt and had to be relaunched
+from scratch. Nothing was recoverable from it. That is the argument for the per-agent ledger entry and
+for the incremental-write instruction: **assume any run can die and leave nothing behind.**
 | 8 | frontend | 76 | | | | | | | |
 | V | verifier over all findings | — | | | | | | | |
 
