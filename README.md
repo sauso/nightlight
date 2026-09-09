@@ -329,7 +329,9 @@ measurement**, and (like everything here) never a safety device — see the warn
     recorded, and tapping it lets you change your mind.
   - **Any night can be reviewed, not just last night.** The sleep detail page has **Was this night
     right?** for whichever night you are looking at — that is how you correct a night you already
-    answered, since the card only ever offers nights you haven't.
+    answered, since the card only ever offers nights you haven't. Saving from there keeps you on that
+    night and shows the receipt in place, so working back through a run of nights doesn't send you to
+    re-pick the date each time.
   - **Reviews are kept forever** — unlike the sleep minute-data behind them (30 days) or the recorded
     events (45 days). They are a few hundred bytes a night, and their whole value is being comparable
     years later. A recorded event you have **judged** is also kept past the usual 45 days, along with
