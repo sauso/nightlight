@@ -11,8 +11,9 @@ let spawnFailures = 0;
 let lastAdvertised = null;
 
 const RESTART_DELAY_MS = 3000;
-// At container start the host network may not have surfaced a routable address yet; wait briefly
-// for one before the first launch so MediaMTX never advertises only loopback for WebRTC.
+// At container start the host network may not have surfaced a routable address yet; wait up to
+// TRIES × INTERVAL (5 s) for one before the first launch, so MediaMTX is unlikely to advertise only
+// loopback for WebRTC. A BUDGET, NOT A GUARANTEE — see the header comment on detectHostIPv4s.
 const NETWORK_WAIT_TRIES = 10;
 const NETWORK_WAIT_INTERVAL_MS = 500;
 
@@ -25,10 +26,20 @@ function forwardLines(chunk, onLine) {
 }
 
 // This host's routable (non-loopback) IPv4 addresses. We pass these to MediaMTX explicitly as
-// MTX_WEBRTCADDITIONALHOSTS so it ALWAYS advertises a reachable WebRTC ICE candidate. MediaMTX's
-// own interface auto-detection (webrtcIPsFromInterfaces) has been seen to latch onto 127.0.0.1
-// when it runs before host networking is ready at container start - which silently breaks WebRTC
-// for every client (no media, while all stream health still reads green) until a restart.
+// MTX_WEBRTCADDITIONALHOSTS so it advertises a reachable WebRTC ICE candidate rather than relying on
+// its own interface auto-detection (webrtcIPsFromInterfaces), which has been seen to latch onto
+// 127.0.0.1 when it runs before host networking is ready at container start - silently breaking
+// WebRTC for every client (no media, while all stream health still reads green) until a restart.
+//
+// ⚠️ THIS IS A MITIGATION WITH A 5-SECOND BUDGET, NOT A GUARANTEE — three comments in this file used
+// to say "ALWAYS"/"never" (issue #313). If no routable IP has appeared by then we launch anyway, and
+// there is NO RECOVERY while MediaMTX stays up: the host list is recomputed only on a relaunch, which
+// happens on unexpected exit, and startMediaMTX is called once (index.js). A MediaMTX that starts
+// loopback-only runs loopback-only.
+//
+// ★ IF YOU ARE DIAGNOSING "everything green, no video": look for `no routable host IP found` in the
+// log at startup. That error IS the signal the budget was not enough, and the fix is to restart the
+// container once the network is up.
 function detectHostIPv4s() {
   const out = [];
   for (const list of Object.values(networkInterfaces())) {
@@ -54,8 +65,9 @@ export async function startMediaMTX(configPath) {
   function launch() {
     // MediaMTX reads its own env-var overrides (like MTX_WEBRTCADDITIONALHOSTS) from whatever
     // process spawns it. Advertise PUBLIC_HOST (if set, for outside-the-LAN access) AND every
-    // detected host IP, so WebRTC clients always get a reachable candidate regardless of
-    // MediaMTX's own detection timing (see detectHostIPv4s). Recomputed on every (re)launch.
+    // detected host IP, so WebRTC clients get a reachable candidate independently of MediaMTX's own
+    // detection timing (see detectHostIPv4s — and note its warning: if the list is EMPTY here, this
+    // launch advertises nothing and stays that way until a relaunch). Recomputed on every (re)launch.
     const env = { ...process.env };
     const hosts = [];
     if (process.env.PUBLIC_HOST) {
