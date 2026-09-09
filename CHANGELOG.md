@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.30.1] - 2026-09-10
+
 ### Fixed
 - **A stir in the night is no longer mistaken for the morning.** If a child shifted enough to register
   as getting out of bed and was back down a minute later, and then slept very still, the bed looked
