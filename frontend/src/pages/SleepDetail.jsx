@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, ChevronDown, Moon, DoorOpen, Thermometer, Sparkles, Zap, AudioLines, Play, Video } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
@@ -9,6 +9,7 @@ import ClipPlayerModal from '../components/ClipPlayerModal.jsx';
 import MediaPlayerModal from '../components/MediaPlayerModal.jsx';
 import RecomputeNight from '../components/RecomputeNight.jsx';
 import ReviewNightButton from '../components/ReviewNightButton.jsx';
+import ReviewReceipt from '../components/ReviewReceipt.jsx';
 
 // Sleep detail: a to-scale timeline of one night for a child, with the wake-ups marked, plus a date
 // picker to browse back through the retained nights (~30 days of activity_samples). Reached by tapping
@@ -39,6 +40,7 @@ const SEG_CLASS = {
 
 export default function SleepDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { settings } = useSettings();
   const tz = settings.timezone || 'UTC';
   const { kids } = useCameras();
@@ -48,6 +50,8 @@ export default function SleepDetail() {
   const [maxDate, setMaxDate] = useState(null); // latest browsable night (last completed)
   const [date, setDate] = useState(null); // selected night's local start date
   const [night, setNight] = useState(undefined); // undefined = loading
+  // The receipt for a correction just saved, when we arrived here from the review screen.
+  const [receipt, setReceipt] = useState(null);
 
   // Local calendar 'today' in the app tz, and the default max = yesterday (a completed night).
   const todayLocal = useMemo(
@@ -98,6 +102,25 @@ export default function SleepDetail() {
     return () => { alive = false; if (t) clearInterval(t); };
   }, [id, date, maxDate]);
 
+  // ⚠️ THE RECEIPT HAS TO FOLLOW YOU HERE, and this is not a nicety.
+  //
+  // Saving a correction used to land on the child's page, where the morning prompt turns into
+  // "Thanks — that's recorded". Sending you to the night you just corrected is better for working
+  // through a backlog, but the first attempt at it simply dropped that confirmation — and the e2e
+  // suite caught what the unit tests could not. A save that shows nothing is indistinguishable from
+  // one that failed, which is the exact report that caused the receipt to be built in the first place.
+  //
+  // Fetched for THIS date rather than reusing the child page's "pending" card, because that card is
+  // about the most recent reviewable night and you may well have just corrected an older one.
+  useEffect(() => {
+    if (searchParams.get('saved') !== '1' || !date) { setReceipt(null); return; }
+    let alive = true;
+    api.get(`/children/${id}/review/${date}`)
+      .then((r) => { if (alive) setReceipt(r?.true_onset_at || r?.true_wake_at ? r : null); })
+      .catch(() => { /* the receipt is confirmation, not function — never block the night on it */ });
+    return () => { alive = false; };
+  }, [id, date, searchParams]);
+
   const minDate = maxDate ? addDays(maxDate, -(HISTORY_DAYS - 1)) : null;
   const canPrev = date && minDate && date > minDate;
   const canNext = date && maxDate && date < maxDate;
@@ -141,6 +164,11 @@ export default function SleepDetail() {
             <ChevronRight size={20} />
           </button>
         </div>
+
+        {receipt && (
+          <ReviewReceipt onsetAt={receipt.true_onset_at} wakeAt={receipt.true_wake_at} fmtTime={fmtTime}
+            onOpen={() => navigate(`/children/${id}/review/${date}`)} />
+        )}
 
         <NightBody night={night} fmtTime={fmtTime} tz={tz} tempUnit={settings.temp_unit}
           childId={id} date={date} onRecomputed={setNight} />

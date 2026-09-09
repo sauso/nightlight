@@ -16,6 +16,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   into bed now cancels the exit, which is what it always meant. Measured over ten nights of recorded
   ground truth: the wake time is right within five minutes on 15 nights out of 20, up from 12, and the
   average error is less than half what it was.
+- **Saving a night's correction now returns you to that night, and confirms it there.** Correcting a
+  run of older nights meant going back into Sleep and re-picking the date after every save. You now
+  land on the night you just corrected, with the same *"Thanks — that's recorded"* receipt reading your
+  times back, so the next night is one tap away.
 
 ## [0.30.0] - 2026-09-09
 
