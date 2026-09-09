@@ -108,7 +108,15 @@ export function scrubSecrets(value, secret) {
       return s;
     }
     if (Array.isArray(v)) return v.map(walk);
+    // ⚠️ PLAIN OBJECTS ONLY. Rebuilding from Object.entries turns a Date into `{}` and a Buffer into
+    // a map of numeric keys — it would silently DESTROY the field rather than scrub it. Nothing in
+    // the report is a class instance today (checked: probeOnvifCamera returns flat primitives, and
+    // `generated_at` is already an ISO string), so this guard is for the field somebody adds later.
+    // Such a value is passed through untouched: a scrubber that corrupts the diagnostic it is
+    // protecting gets switched off, and silent corruption is worse than an unscrubbed non-string.
     if (v && typeof v === 'object') {
+      const proto = Object.getPrototypeOf(v);
+      if (proto !== Object.prototype && proto !== null) return v;
       const out = {};
       for (const [k, x] of Object.entries(v)) out[k] = walk(x);
       return out;

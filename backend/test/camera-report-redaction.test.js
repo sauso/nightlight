@@ -146,6 +146,26 @@ describe('scrubSecrets — the backstop on the assembled report', () => {
     assert.equal(out.e, 'connected to 192.0.2.10:554 ok');
   });
 
+  test('a Date or a Buffer is passed through, not flattened into {}', () => {
+    // Found by review of #335: the walk rebuilds objects from Object.entries, which turns a Date into
+    // `{}` and a Buffer into a map of numeric keys — DESTROYING the field rather than scrubbing it.
+    // Nothing in the report is a class instance today, so this pins the guard for whoever adds one.
+    const d = new Date('2026-09-09T08:30:56Z');
+    const b = Buffer.from('hello');
+    const out = scrubSecrets({ when: d, blob: b, nested: { when: d } }, PASS);
+    assert.ok(out.when instanceof Date, `Date became ${JSON.stringify(out.when)}`);
+    assert.equal(out.when.toISOString(), d.toISOString());
+    assert.ok(Buffer.isBuffer(out.blob), 'Buffer was flattened');
+    assert.ok(out.nested.when instanceof Date, 'a Date one level down was flattened');
+  });
+
+  test('an object with a null prototype is still walked', () => {
+    // Object.create(null) is a plain bag of data, not a class instance — it must still be scrubbed.
+    const bag = Object.create(null);
+    bag.e = `rtsp://u:${PASS}@h/1`;
+    assert.ok(!JSON.stringify(scrubSecrets(bag, PASS)).includes(PASS));
+  });
+
   test('works with no secret supplied, falling back to the pattern alone', () => {
     const out = scrubSecrets({ e: `rtsp://${USER}:${PASS}@h/1` });
     assert.ok(!JSON.stringify(out).includes(PASS));
