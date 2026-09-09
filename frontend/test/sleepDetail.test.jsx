@@ -98,6 +98,47 @@ describe('which night it opens on', () => {
     await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-24?detail=1'));
   });
 
+  // ★★ THE RECEIPT MUST FOLLOW THE SAVE. e2e caught the absence of this when the first attempt at the
+  // `?date=` navigation shipped: the confirmation "Thanks — that's recorded" lives on the CHILD page,
+  // and routing here instead dropped it. A save that shows nothing is indistinguishable from one that
+  // failed — the report that caused the receipt to exist at all. Unit tests could not see it, because
+  // each screen passed its own tests; only crossing the seam exposed it.
+  test('★★ arriving from a save shows the receipt for that night', async () => {
+    const get = vi.fn((path) => {
+      if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'tonight', night: { night_date: '2026-08-30' } });
+      if (path.includes('/sleep/insights')) return Promise.resolve(null);
+      if (path.includes('/review/')) return Promise.resolve({ true_onset_at: '2026-08-24 09:30:00', true_wake_at: '2026-08-24 20:15:00' });
+      if (path.includes('/sleep/')) return Promise.resolve(NIGHT);
+      return Promise.resolve(null);
+    });
+    vi.spyOn(api, 'get').mockImplementation(get);
+    mountAt('/children/kid-1/sleep?date=2026-08-24&saved=1');
+
+    await waitFor(() => expect(screen.getByText('Thanks — that’s recorded')).toBeVisible());
+    // The receipt must be for the night just corrected, so it reads back the times that were saved.
+    await waitFor(() => expect(get.mock.calls.map((c) => c[0])).toContain('/children/kid-1/review/2026-08-24'));
+  });
+
+  test('★★ and without the saved flag there is no receipt', async () => {
+    // Browsing to an old night must not claim you just recorded something. Asserting the absence
+    // matters as much as the presence: a receipt that shows on every visit is a lie, not a courtesy.
+    const get = vi.fn((path) => {
+      if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'tonight', night: { night_date: '2026-08-30' } });
+      if (path.includes('/review/')) return Promise.resolve({ true_onset_at: '2026-08-24 09:30:00', true_wake_at: '2026-08-24 20:15:00' });
+      if (path.includes('/sleep/insights')) return Promise.resolve(null);
+      if (path.includes('/sleep/')) return Promise.resolve(NIGHT);
+      return Promise.resolve(null);
+    });
+    vi.spyOn(api, 'get').mockImplementation(get);
+    mountAt('/children/kid-1/sleep?date=2026-08-24');
+
+    // Wait for the night itself to have been requested, so the absence below is a real absence rather
+    // than a screen that simply has not finished loading yet.
+    await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-24?detail=1'));
+    expect(screen.queryByText('Thanks — that’s recorded')).toBeNull();
+    expect(get.mock.calls.map((c) => c[0]).some((p) => p.includes('/review/'))).toBe(false);
+  });
+
   test('★ but never past the newest browsable night', async () => {
     // 2026-09-30 is beyond the live night, so the picker could not reach it. A URL must not either.
     const get = mockSleep({ live: { scope: 'tonight', night: { night_date: '2026-08-30' } } });
