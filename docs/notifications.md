@@ -31,6 +31,11 @@ call to Pushover — nothing to bake into an app.
 3. In Nightlight, go to **Settings → Push notifications → Pushover**: paste the **application API
    token** and your **user/group key**, tick **Enable Pushover notifications**, and **Save** (it
    verifies the tokens with Pushover). Use **Send test** to confirm it reaches your phone.
+   **Device** (optional, default blank) narrows alerts to one Pushover device — its name as shown in
+   the Pushover app, or several separated by commas. ⚠️ Unlike the token and key beside it, **leaving
+   Device blank does not keep the saved value — it clears it**, which is how you go back to alerting
+   all of your devices. (Blank means "keep" only for the secrets, because the server never sends those
+   back for you to see.)
 4. Enable **Motion detection** on a camera (**Cameras → edit**, or on Add). Motion alerts arrive in
    the Pushover app with a **snapshot** of what triggered them, and tapping one deep-links back into
    the Nightlight app.
@@ -144,14 +149,133 @@ Nightlight app. Only the short message + snapshot pass through ntfy — never yo
    "Nightlight") and copy its **application token**.
 2. Install the **Gotify** Android app and point it at your server (or use the web UI).
 3. In Nightlight: **Settings → Push notifications → Gotify**. Set the **Server URL**, paste the
-   **application token**, optionally adjust **Priority** (0–10), tick **Enable**, **Save**, and
-   **Send test**.
+   **application token**, optionally adjust **Priority** (0–10, default **5**), tick **Enable**,
+   **Save**, and **Send test**. Higher priorities show more prominently in the Gotify app and can
+   bypass its quiet settings; **0 still delivers**, just quietly — it is a valid choice here, not
+   "unset". Out-of-range values are clamped to 0–10 by the server.
 
 Gotify alerts are **text only** (no image — Gotify has no native attachments); tapping one opens the
 camera. Only the short message passes through your Gotify server.
 
+## Detection settings on a camera
+
+**Cameras → edit** a camera. Motion and sound are independent detectors — either can be enabled
+without the other, and each has its own sensitivity, confirmation delay and cooldown.
+
+| Setting | Default | Range | What it does |
+|---|---|---|---|
+| **Motion sensitivity** | 50 | 1–100 | How much of the detection zone must change between frames. Higher = more sensitive. |
+| **Motion confirm** | 3 s | 0–30 s | Motion must persist this long before alerting. 0 alerts on the first frame. |
+| **Motion cooldown** | 60 s | 1–3600 s | Minimum gap between motion alerts from this camera. |
+| **Sound sensitivity** | 50 | 1–100 | How far above the room's own ambient level a noise must rise. Higher = smaller margin = easier to trigger: roughly **+18 dB at 1, +11 dB at 50, +4 dB at 100**. |
+| **Sound confirm** | 4 s | 0–30 s | Loudness must stay above that margin, *on average*, for this long — so a pulsing cry still counts while a single bang does not. |
+| **Sound cooldown** | 120 s | 1–3600 s | Minimum gap between sound alerts from this camera. |
+
+### Alert image URL (optional)
+
+If your camera exposes an HTTP snapshot endpoint, put it here and alert images are grabbed from it
+instead of from a stream frame — faster and clearer. It applies to **both motion and sound** alerts.
+Leave it blank to use a stream frame.
+
+| Setting | Default | What it does |
+|---|---|---|
+| **Alert image URL** | blank | e.g. `http://192.168.1.50/snapshot.jpg`. If the endpoint needs a username, include it: `http://admin@192.168.1.50/snapshot.jpg`. |
+| **Alert image password** | blank | Only if the endpoint needs one. Blank means *keep whatever is already saved*. |
+
+**The password is stored but never shown again.** Like the camera's RTSP and two-way-audio passwords,
+it is never sent back to the browser — the field stays blank and the label says *(saved)* when one is
+stored. Type a new one to replace it; leave it blank to keep it.
+
+⚠️ **Changing the address to a different host drops the saved password.** If you edit the URL so it
+points at a different scheme, host, port, username or path, the stored password is *not* carried over
+and you will need to enter it again. That is deliberate: it stops one camera's credential being sent
+to a machine you just typed the name of.
+
+### Alert schedule (quiet hours)
+
+**Cameras → edit a camera → Alert schedule.** Off by default, which means the camera alerts 24/7.
+Turn on **Only alert during set hours** and set a **From** and **To** time.
+
+| Setting | Default | What it does |
+|---|---|---|
+| **Only alert during set hours** | Off (alerting 24/7) | Restricts alerts to the window below. |
+| **From / To** | 20:00 – 07:00 offered on a camera that has never had a schedule | The window during which alerts are allowed. |
+
+- **Overnight windows work.** From 20:00 to 07:00 is one window that crosses midnight, not an empty one.
+- **The window is shared by motion and sound** — there is not one schedule each.
+- **Times are in the app timezone** (**Settings → General**), not the browser's or the camera's. On a
+  fresh install that timezone is **UTC** until you set it, so set it before relying on a schedule.
+- ⚠️ **It suppresses alerts, not detection.** Outside the window there is no push *and* no in-app
+  alert, but the camera is still watched: **sleep tracking keeps recording normally**, so a night is
+  unaffected by the schedule. This is the opposite of turning motion or sound detection off, which
+  does stop the signal sleep tracking uses.
+- A window whose From and To are the same time is treated as **always on**, not "never".
+
+Sound is measured **relative to each room's own ambient level**, which the app learns continuously —
+not as an absolute loudness. A room next to a busy road and a silent room both settle at "0 over
+ambient", so the same sensitivity means the same thing in both.
+
+### ⚠️ Sound sensitivity also changes sleep tracking
+
+This is the one that surprises people, because motion sensitivity does **not** work this way — it only
+affects alerts. Sound sensitivity affects **both**. The same margin that decides when to notify you
+also decides when a *steady* background noise gets absorbed into the room's ambient level, and sleep
+tracking counts a minute as "awake" partly from sound.
+
+**How long a steady noise takes to be learned.** A source that starts up mid-night — a white-noise
+machine switched on at bedtime, a fan, an air purifier, a heater — is folded into the room's ambient
+level, after which it stops both alerting and counting toward "awake". How long that takes depends on
+how loud it is relative to the margin:
+
+| The source sits… | Absorbed after | Why |
+| --- | --- | --- |
+| **above** the full margin | 45 seconds | It is alerting, so it is dealt with quickly. |
+| **between half and all** of the margin | 5 minutes | Deliberately slower: this band is also where a moderate cry sits, and a cry must not be able to quietly raise its own baseline and silence itself. |
+| **below** half the margin | continuously | Ordinary tracking, roughly a 20-second time constant. |
+
+**The trade this makes.** A moderate cry — loud enough to sit in that middle band, not loud enough to
+alert — that runs for more than five minutes is treated as ambient too, so its recorded loudness fades
+toward zero. That is a real loss of signal and it is a deliberate choice: the alternative, which
+shipped until the fix noted below, was a room whose ambient level could get stuck permanently.
+
+> **The middle row of that table used to be a one-way trap** (fixed 2026-09-02 — see the CHANGELOG
+> entry *"A white-noise machine could make a whole night read as awake"*). A noise landing in that band
+> was neither absorbed nor tracked, and the ambient level froze *for as long as the source ran*.
+> Measured on a real install (2026-08-31), a white-noise machine roughly 9 dB over ambient at sound
+> sensitivity 49 held one camera's ambient at exactly `-63.5 dB` for **7.9 unbroken hours**, marked
+> **66% of the night's minutes as active with no motion at all**, and produced a seven-hour "awake"
+> span that never happened. It re-armed every night. Sleep and wake *times* were unaffected — only the
+> awake/asleep totals. The old workaround (raising sound sensitivity to 90+) is no longer needed; if
+> you applied it, you can put that camera back to whatever suits its alerting.
+
+**How to tell what your ambient level is doing.** The container log prints a level line every 15
+seconds per camera:
+
+```
+[sound] "Nursery" ambient=-63.5dB peak=-55.2dB maxAvgOver=+7.8 (fires at +11)
+```
+
+A healthy `ambient=` drifts by a few tenths of a dB continuously, and settles onto a steady source
+within the times in the table above. If it sits at *exactly* the same value for hours while
+`maxAvgOver` stays between half and all of the "fires at" figure, you are running a version from
+before that fix.
+
+**Still true regardless of version:** sleep tracking scores each minute on that minute's *loudest*
+window, so a room with a lot of variation — a white-noise machine close to the microphone is the usual
+cause — reads as noisier than its average suggests, and can still overstate awake time even with a
+perfectly tracking ambient level. Moving the camera further from the noise source is the reliable
+remedy.
+
 ## Troubleshooting
 
+- **"Send test" says it timed out after 10s.** Nightlight gives any notification provider **10
+  seconds** to accept a message before giving up, and reports it rather than waiting. The usual cause
+  is a self-hosted **ntfy** or **Gotify** server that is half up — accepting the connection but never
+  answering — so check the server is actually serving, and that the Server URL includes the right
+  scheme and port. This applies to real alerts too: an alert that can't be delivered in ten seconds is
+  dropped with a line in the log, not queued. Nightlight is a doorbell, not a mail server — a motion
+  alert that arrives minutes late is worse than none. *(Before this limit existed, a half-up server
+  left the Test button spinning for five minutes with no feedback.)*
 - **Server log says Firebase initialized, but no notification arrives.** Make sure the phone opted in
   (Account → Notifications) and granted the OS notification permission, that the camera has motion
   detection on, and that the app has been opened at least once since enabling (so it registered its

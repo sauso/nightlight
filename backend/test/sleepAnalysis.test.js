@@ -9,7 +9,7 @@
 // DATA_DIR is pointed at a throwaway directory BEFORE sleepAnalysis is imported, because db.js opens
 // the database at module load. Hence the dynamic import below.
 
-import { test, before, after, beforeEach } from 'node:test';
+import { test, before, after, beforeEach, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -28,8 +28,20 @@ const TZ = 'Australia/Melbourne'; // UTC+10 in July, no DST edge to reason about
 const TZ_OFF = 10 * 3600 * 1000;
 
 // A local wall-clock time on the night of DATE (dayShift 1 = the following morning) as a UTC Date.
-const at = (h, m, dayShift = 0) => new Date(Date.UTC(2026, 6, 1 + dayShift, h, m) - TZ_OFF);
-const sqlTime = (d) => d.toISOString().slice(0, 19).replace('T', ' ').replace(/:\d\d$/, ':00');
+// `s` exists for bed transitions only — see the note on sqlTime below.
+const at = (h, m, dayShift = 0, s = 0) => new Date(Date.UTC(2026, 6, 1 + dayShift, h, m, s) - TZ_OFF);
+
+// ⚠️ THIS USED TO ZERO THE SECONDS, and that made it one of the four trap fixtures named in issue
+// #263. The two tables it writes are not alike:
+//   * `activity_samples.bucket_start` is genuinely always `:00` — activityTracker's minuteBucketUtc
+//     writes minute buckets, so forcing it changed nothing there.
+//   * `bed_transitions.created_at` carries the REAL SECOND of the event, and that is the only input
+//     that distinguishes rounding a transition to the nearest minute from flooring it. Zeroing it
+//     erased the discriminating input from every transition this file inserts, which is why the
+//     defect in issue #260 is invisible to a 690-test suite (see the known-gap test at the end).
+// It now preserves whatever `at()` was given, which is still `:00` unless a test asks otherwise — so
+// every existing fixture is byte-identical, and a test that cares about seconds can now express it.
+const sqlTime = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
 const utcMs = (u) => new Date(u.replace(' ', 'T') + 'Z').getTime();
 const hhmm = (u) =>
   u ? new Date(u.replace(' ', 'T') + 'Z').toLocaleString('en-AU', { timeZone: TZ, hour12: false, hour: '2-digit', minute: '2-digit' }) : null;
@@ -675,4 +687,59 @@ test('a child who moves just three times in two and a half hours still counts as
   const night = computeNight(CHILD, DATE);
   assert.equal(night.status, 'ok');
   assert.equal(hhmm(night.onset_at), '19:40', 'three small movements is a child, not an empty bed');
+});
+
+// -------------------------------------------------------------------------------------------
+describe('⚠️ seconds on a bed transition — the trap fixture, and the gap it was hiding (#260, #263)', () => {
+  // `sqlTime` above used to force `:00` onto every timestamp it wrote. For activity_samples that was
+  // harmless (they really are minute buckets); for bed_transitions it erased the real second of the
+  // event — the ONLY input that can tell rounding a transition to the nearest minute from flooring it.
+  // That is trap #4 of the four named in issue #263, and the reason issue #260 is invisible to this
+  // suite: the fix for #260 is a single word (`Math.round` -> `Math.floor` in `txIdx`) and applying it
+  // leaves every other test in this file green.
+  //
+  // The fixture is repaired here. The DEFECT is deliberately NOT fixed in this PR: it moves reported
+  // bedtimes by a minute, and the detection holdout running to ~2026-09-09 is scoring exactly those
+  // times against ground truth. So the current behaviour is pinned instead, loudly, and the test that
+  // WILL fail when #260 lands is written out below ready to swap in.
+  const onsetForPutDownAt = (seconds) => {
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+    db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+    // The same night as the early-bedtime test above: quiet from 18:20, one stir at 02:00. The room is
+    // already still when the put-down lands, so onset IS the put-down minute — which makes the minute
+    // index the transition resolves to directly observable in the reported time.
+    laySamples(at(18, 20), at(7, 0, 1), [[at(2, 0, 1), at(2, 8, 1)]], STILL_OCCUPIED);
+    insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 38, 0, seconds)));
+    return hhmm(computeNight(CHILD, DATE).onset_at);
+  };
+
+  test('the fixture can now carry a real second — without this the rest of the block is untestable', () => {
+    // Asserted rather than assumed: if sqlTime ever goes back to zeroing seconds, this fails FIRST and
+    // says why, instead of the tests below quietly passing for the wrong reason.
+    assert.equal(sqlTime(at(18, 38, 0, 31)), '2026-07-01 08:38:31', 'sqlTime is discarding the seconds again');
+    assert.equal(sqlTime(at(18, 38)), '2026-07-01 08:38:00', 'the default is still a whole minute');
+  });
+
+  test('a put-down at :29 and one at :31 are in the SAME minute', () => {
+    // The control for the pin below. Both timestamps are 18:38 by every reading a person would make;
+    // if these ever stop being the same wall-clock minute the pin is meaningless.
+    assert.equal(sqlTime(at(18, 38, 0, 29)).slice(0, 16), sqlTime(at(18, 38, 0, 31)).slice(0, 16));
+  });
+
+  test('★ STILL NOT FIXED (#260): the second half of a minute reports a minute late', () => {
+    // ⚠️ WHEN #260 IS FIXED THIS TEST FAILS, AND THAT IS ITS JOB. Replace it with:
+    //
+    //     assert.equal(onsetForPutDownAt(31), onsetForPutDownAt(29),
+    //       'the reported bedtime must not depend on which half of the minute the put-down fell in');
+    //
+    // ...and delete this comment. The error is one-directional — rounding only ever pushes up — so
+    // bedtime is late, never early, on roughly half of all nights, and asleep_minutes is short by one.
+    assert.equal(onsetForPutDownAt(29), '18:38', 'the first half of the minute already reports late');
+    assert.equal(
+      onsetForPutDownAt(31),
+      '18:39',
+      'a put-down at :31 no longer reports a minute late — #260 appears to be FIXED. ' +
+        'Swap this test for the equality assertion in the comment above and close the issue.'
+    );
+  });
 });

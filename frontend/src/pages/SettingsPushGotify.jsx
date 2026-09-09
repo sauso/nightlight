@@ -53,8 +53,15 @@ export default function SettingsPushGotify() {
             </label>
             <div className="field">
               <label htmlFor="gotify-server">Server URL</label>
+              {/* ⚠️ `disabled={busy || !loaded}` like every other control here, and it is not
+                  cosmetic: the load handler replaces the WHOLE form object, so anything typed into a
+                  field left editable during the fetch is thrown away the instant the response lands —
+                  the text vanishes with no error and nothing to explain it. This field was the only
+                  one missing the guard. Same failure as the SettingsContext value that arrived a
+                  moment after boot and destroyed a user's typing. */}
               <input id="gotify-server" value={form.server_url || ''} onChange={(e) => setForm({ ...form, server_url: e.target.value })}
-                placeholder="https://gotify.example.com" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
+                placeholder="https://gotify.example.com" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                disabled={busy || !loaded} />
             </div>
             <div className="field">
               <SecretField
@@ -70,7 +77,8 @@ export default function SettingsPushGotify() {
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
               <label htmlFor="gotify-priority">Priority (0–10)</label>
-              <input id="gotify-priority" type="number" min="0" max="10" value={form.priority ?? 5} onChange={(e) => setForm({ ...form, priority: e.target.value })} />
+              <input id="gotify-priority" type="number" min="0" max="10" value={form.priority ?? 5} onChange={(e) => setForm({ ...form, priority: e.target.value })}
+                disabled={busy || !loaded} />
               <div className="camera-tile__sub">Higher shows more prominently and can bypass quiet settings in the Gotify app.</div>
             </div>
           </div>

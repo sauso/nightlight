@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import db from '../db.js';
 import { logger } from './logger.js';
+import { safeInterval } from './processGuards.js';
 import { CLIPS_DIR } from './clipRecorder.js';
 import { clipStorageReady, hasMinFreeSpace } from './clipStorage.js';
 import { captureSnapshot, fetchHttpSnapshot } from './snapshot.js';
@@ -140,9 +141,29 @@ async function sampleTick() {
 
 export function startTimelapseSampler() {
   if (sampleTimer) return;
-  sampleTimer = setInterval(() => { sampleTick(); }, SAMPLE_INTERVAL_MS);
+  // sampleTick guards its own body, but its first two checks (clipStorageReady/hasMinFreeSpace) sit
+  // OUTSIDE that try — a throw there rejects the floating promise, which used to mean an unhandled
+  // rejection and a dead process. safeInterval catches it and keeps the timer alive. See #254.
+  sampleTimer = safeInterval('timelapse-sampler', SAMPLE_INTERVAL_MS, sampleTick);
   sampleTimer.unref?.();
   logger.info(`[timelapse] frame sampler started (every ${SAMPLE_INTERVAL_MS / 1000}s during open sleep windows)`);
+}
+
+// Stop the frame sampler. Idempotent, and safe when it was never started.
+//
+// ⚠️ MISSED BY THE #286 SWEEP, and worth recording why rather than just adding it: that sweep found
+// every periodic job by scanning for the literal `setInterval`, and this one goes through
+// `safeInterval`, so the module was skipped before the pairing rule ever ran. The guard now also looks
+// for the wrapper (see test/helpers/sourceScan.js). Same class of miss as the #278 root cause — the
+// check was real, it just could not see this shape.
+//
+// Like the other unref'd jobs, this one cannot cause the #278 hang; it gets a stop so the rule stays
+// uniform and so shutdown is explicit rather than relying on process.exit to take the timer down.
+export function stopTimelapseSampler() {
+  clearInterval(sampleTimer);
+  // Nulled, not merely cleared: `startTimelapseSampler` guards on `if (sampleTimer) return`, so a
+  // stale handle here would make every later restart a silent no-op.
+  sampleTimer = null;
 }
 
 // --- assembly (called by the nightly sleep job once a night's window has closed) ---
@@ -188,6 +209,22 @@ export function discardTimelapseFrames(childId, nightDate) {
   rmrf(dir);
   if (frames.length) logger.info(`[timelapse] child ${childId} ${nightDate}: discarded ${frames.length} frame(s) — no one in the bed`);
   return frames.length;
+}
+
+// Every frame this child has on disk, assembled or not — for deleting the child itself (issue #259).
+//
+// ⚠️ NOT THE SAME AS deleting their `timelapses` rows, and that gap was found by adversarial review of
+// PR #284. Frames are sampled every 2 minutes into FRAMES_ROOT/<childId>/<nightDate>/ while a sleep
+// window is open, and a `timelapses` row only exists once the night is ASSEMBLED at the end of it. So
+// deleting a child mid-night leaves a scratch directory that nothing ever touches again: the only
+// things that clean it are assembleTimelapse's success path and discardTimelapseFrames, both driven by
+// the nightly job for a child that no longer exists. Same leak as #259, one directory along.
+export function discardAllTimelapseFrames(childId) {
+  const dir = path.join(FRAMES_ROOT, safeSeg(childId));
+  const nights = safeReaddir(dir).length;
+  rmrf(dir);
+  if (nights) logger.info(`[timelapse] child ${childId}: discarded frames for ${nights} night(s)`);
+  return nights;
 }
 
 // Delete one timelapse: the row, the MP4 and its thumbnail. Admin-only at the route. The files are

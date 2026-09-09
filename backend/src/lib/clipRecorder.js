@@ -2,6 +2,8 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { logger, isNoisyMediaLine } from './logger.js';
+import { addHold, removeHold, effectiveHold, clearHolds } from './ringHolds.js';
+import { killIfSpawned } from './processGuards.js';
 
 // Event-recording capture core (Stage 1, "Option A"; shipped in 0.17.0).
 //
@@ -47,7 +49,8 @@ const RING_ROOT = path.join(CLIPS_DIR, '.ring');
 const SEGMENT_SEC = 2;
 const RESTART_DELAY_MS = 5000;
 
-// cameraId -> { proc, stopped, ringDir, ringDepthMs, janitor, holdFromMs }
+// cameraId -> { proc, stopped, ringDir, ringDepthMs, janitor }. Holds live in ringHolds.js, keyed by
+// owner, because two features share this ring — see #255.
 const segmenters = new Map();
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -128,21 +131,25 @@ export function isSegmenterRunning(cameraId) {
   return segmenters.has(cameraId);
 }
 
-// Protect ring segments back to `fromMs` from pruning, for the duration of an on-demand recording (see
-// pruneRing). Returns false if no segmenter is running for the camera, so the caller can refuse to
-// start a recording that would have nothing to cut.
-export function holdRing(cameraId, fromMs) {
+// Protect ring segments back to `fromMs` from pruning (see pruneRing), on behalf of ONE named owner.
+// Returns false if no segmenter is running for the camera, so the caller can refuse to start a
+// recording that would have nothing to cut.
+//
+// `owner` is required and comes from RING_OWNER. Two features hold this ring — on-demand Record and
+// automatic wake clips — and before #255 they shared a single slot, so whichever acted last silently
+// replaced the other's protection and whichever finished first destroyed it. See ringHolds.js.
+export function holdRing(cameraId, owner, fromMs) {
   const entry = segmenters.get(cameraId);
   if (!entry) return false;
-  entry.holdFromMs = fromMs;
+  addHold(cameraId, owner, fromMs);
   return true;
 }
 
-// Resume normal depth-based pruning. Always call this when a recording ends (including on failure),
-// or the ring for that camera grows until the segmenter next restarts.
-export function releaseRing(cameraId) {
-  const entry = segmenters.get(cameraId);
-  if (entry) entry.holdFromMs = null;
+// Resume normal pruning for ONE owner. Always call this when that owner's work ends (including on
+// failure), or its hold keeps the ring growing until the segmenter next restarts. Other owners'
+// holds are untouched — that is the whole point of #255.
+export function releaseRing(cameraId, owner) {
+  removeHold(cameraId, owner);
 }
 
 // Start (or restart) the continuous segmenter for a camera. `pathName` is the camera's local MediaMTX
@@ -166,7 +173,7 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
   // and exits within a second, every 5s). We used to log an ERROR on every one of those, which
   // spammed ~30 identical lines per camera blip. Now we log the first, then go quiet, and log a
   // recovery when it comes back — see the exit handler.
-  const entry = { proc: null, stopped: false, ringDir, ringDepthMs, janitor: null, fastFails: 0, holdFromMs: null };
+  const entry = { proc: null, stopped: false, ringDir, ringDepthMs, janitor: null, fastFails: 0 };
   segmenters.set(cameraId, entry);
 
   function launch() {
@@ -175,6 +182,30 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
       stdio: ['ignore', 'ignore', 'pipe'],
     });
     entry.proc = proc;
+
+    proc.on('error', (err) => {
+      // A spawn that never started. Node emits 'error' INSTEAD OF 'exit', so the exit handler below
+      // never runs — and an EventEmitter 'error' with no listener THROWS, taking the backend down. The
+      // sibling extractClip spawn already handles this; the segmenter did not. See issue #257.
+      //
+      // No relaunch: an unrunnable binary fails identically every time. Instead DELETE the map entry,
+      // exactly as the transcoder/detector legs do — because every "is this camera covered?" predicate
+      // here is `segmenters.has(cameraId)` (see isSegmenterRunning), which does not look at entry.proc
+      // at all. Nulling the field alone left the camera reading as running: startClipCapture's guard
+      // (clipCapture.js) would skip it forever, holdRing() would still return true, and an on-demand
+      // Record would pass its gate, write a recordings row and only fail ~20s later inside extractClip.
+      // That is precisely the "permanently dead and invisible to the healing pass" failure this whole
+      // change exists to prevent. Found by adversarial review of PR #274 — the first version of this
+      // handler shipped a comment claiming isSegmenterRunning() reported false; it did not.
+      //
+      // The janitor interval is assigned after launch() returns, but 'error' is emitted asynchronously,
+      // so it is always set by the time we get here — clear it or the pruner outlives the segmenter.
+      logger.error(`[clipseg:${pathName}] could not start ffmpeg: ${err.code || err.message}`);
+      if (segmenters.get(cameraId) === entry) {
+        if (entry.janitor) clearInterval(entry.janitor);
+        segmenters.delete(cameraId);
+      }
+    });
 
     let lastLine = '';
     proc.stderr.on('data', (chunk) => {
@@ -215,7 +246,7 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
   }
 
   launch();
-  entry.janitor = setInterval(() => pruneRing(ringDir, entry.ringDepthMs, entry.holdFromMs), SEGMENT_SEC * 1000);
+  entry.janitor = setInterval(() => pruneRing(ringDir, entry.ringDepthMs, effectiveHold(cameraId)), SEGMENT_SEC * 1000);
   logger.info(
     `[clipseg:${pathName}] segmenter started (ring ${ringDir}, depth ${Math.round(ringDepthMs / 1000)}s)`
   );
@@ -223,16 +254,16 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
 }
 
 export function stopSegmenter(cameraId) {
+  clearHolds(cameraId); // the ring is about to go; a surviving hold would apply to the next one
   const entry = segmenters.get(cameraId);
   if (!entry) return;
   entry.stopped = true;
   if (entry.janitor) clearInterval(entry.janitor);
   segmenters.delete(cameraId);
-  try {
-    entry.proc?.kill('SIGTERM');
-  } catch {
-    /* already gone */
-  }
+  // ⚠️ killIfSpawned, NOT proc.kill — see processGuards.js. A launch whose spawn has failed but whose
+  // 'error' has not arrived yet has `pid === undefined`, and killing THAT on Linux signals the whole
+  // process group: the backend SIGTERMs itself. This exact call is the one that was measured doing it.
+  killIfSpawned(entry.proc, 'SIGTERM');
 }
 
 export function stopAllSegmenters() {

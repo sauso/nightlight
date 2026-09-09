@@ -263,7 +263,7 @@ function tzOffsetMs(instant, tz) {
 
 // A wall-clock local time (moZero is 0-based) in tz -> the corresponding UTC Date. One refinement pass
 // handles DST edges cleanly enough for a night window.
-function zonedToUtc(y, moZero, d, h, mi, tz) {
+export function zonedToUtc(y, moZero, d, h, mi, tz) {
   const guess = Date.UTC(y, moZero, d, h, mi, 0);
   let off = tzOffsetMs(new Date(guess), tz);
   off = tzOffsetMs(new Date(guess - off), tz);
@@ -272,7 +272,7 @@ function zonedToUtc(y, moZero, d, h, mi, tz) {
 
 const pad = (n) => String(n).padStart(2, '0');
 // Format a Date as the UTC 'YYYY-MM-DD HH:MM:00' string that matches activity_samples.bucket_start.
-function toSqlUtc(date) {
+export function toSqlUtc(date) {
   return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:00`;
 }
 function parseHm(s) {
@@ -1331,4 +1331,22 @@ export function startSleepJob() {
   runNightlySleepJob(); // backfill the last completed night on boot
   jobTimer = setInterval(runNightlySleepJob, 30 * 60 * 1000); // and catch the window closing within 30 min
   logger.info('[sleep] Nightly sleep computation scheduled (every 30 min; last completed night).');
+}
+
+// Stop the nightly job. Idempotent, and safe when it was never started.
+//
+// ⚠️ THIS EXISTS BECAUSE A START WITH NO STOP IS HOW ISSUE #278 HAPPENED (see #286). The activity
+// tracker had exactly this shape: an interval nothing could clear, so `node --test` could never exit,
+// which was papered over with `--test-force-exit` — and that flag went on to cancel a third of the
+// suite on a contended runner while reporting `fail 0`. The only reason this module never did the same
+// is that the one test calling `startSleepJob()` for real wraps it in `mock.timers.enable`, so the
+// interval is never actually created. That is a coincidence of how a test is written, not a property
+// of this code.
+//
+// shutdown() in index.js calls this alongside the detectors and the activity tracker.
+export function stopSleepJob() {
+  clearInterval(jobTimer);
+  // Nulled, not merely cleared: `startSleepJob` guards on `if (jobTimer) return`, so a stale handle
+  // here would make every later restart a silent no-op.
+  jobTimer = null;
 }

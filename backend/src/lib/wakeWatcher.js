@@ -3,6 +3,7 @@ import { logger } from './logger.js';
 import { onMinuteFlushed } from './activityTracker.js';
 import { SLEEP_THRESHOLDS, childTracksSleep, childWindowActiveNow } from './sleepAnalysis.js';
 import { holdRing, releaseRing, isSegmenterRunning } from './clipRecorder.js';
+import { RING_OWNER } from './ringHolds.js';
 import { captureWakeClip, pruneWakeClips } from './recordings.js';
 
 // Live wake detection, for recording only — it never alerts.
@@ -59,7 +60,7 @@ function slot(cameraId) {
 // Drop any ring hold this camera is holding and forget the in-flight run. Safe to call repeatedly.
 function endRun(cameraId, st, why) {
   if (st.run?.holding) {
-    releaseRing(cameraId);
+    releaseRing(cameraId, RING_OWNER.WAKE);
     if (why) logger.info(`[wake] "${cameraId}" run ended (${why}) — ring released, nothing recorded`);
   }
   st.run = null;
@@ -113,7 +114,7 @@ export function handleMinute({ cameraId, bucketStart, motionPeak, soundPeak }) {
       // Hold from the first active minute so the wake's opening survives the ~63s ring long enough to
       // find out whether this is a wake or just a stir.
       if (isSegmenterRunning(cameraId)) {
-        holdRing(cameraId, at - HOLD_LEAD_MS);
+        holdRing(cameraId, RING_OWNER.WAKE, at - HOLD_LEAD_MS);
         st.run.holding = true;
       }
     }
@@ -132,7 +133,7 @@ export function handleMinute({ cameraId, bucketStart, motionPeak, soundPeak }) {
         .catch((err) => logger.error(`[wake] capture failed for "${camera.name}": ${err.message}`))
         .finally(() => {
           if (st.run?.holding && st.run.startMs === startMs) {
-            releaseRing(cameraId);
+            releaseRing(cameraId, RING_OWNER.WAKE);
             st.run.holding = false;
           }
         });

@@ -9,7 +9,7 @@ which is which.
 | **Automatic clips** | A motion/sound **alert** | Yes — it's an alert | 14 days / 5 GB (both configurable) | On the alert, in the Alerts feed |
 | **Wake clips** | Your child **waking up** | **No — silent by design** | 14 days (configurable) | On the wake-up, in the night's sleep detail |
 | **On-demand recordings** | You pressing **Record** | No | **Forever, until you delete them** | The **Recordings** card on the child's page |
-| **Bed-transition frames** | Your child getting **into or out of bed** | No | 45 days | Not shown — diagnostic only |
+| **Bed-transition frames** | Your child getting **into or out of bed** | No | 45 days — **or forever once you judge one** | The morning review on the child's page |
 
 All three are configured under **Settings → Recording** (admin only), and all three write to the same
 place on disk — see [Where recordings are stored](#where-recordings-are-stored).
@@ -92,8 +92,11 @@ They exist so that a sleep timeline which looks wrong can be *looked at* rather 
 
 - **One JPEG per transition**, roughly 20–40 a night across two cameras — in the region of 5 MB a
   night, and about **220 MB** once the 45-day retention is full.
-- **Kept for 45 days**, matching the transitions themselves, and deleted with them. Not configurable:
-  they are bounded, small, and useless once the transition they belong to has aged out.
+- **Kept for 45 days**, matching the transitions themselves, and deleted with them — *unless you have
+  marked that event right or wrong in the morning review, in which case the event and its frame are
+  kept indefinitely.* A frame somebody has looked at and labelled is the scarce thing here; deleting
+  one on a timer would throw away the only record of what the camera actually saw. Unjudged frames
+  still age out, so the folder stays bounded in normal use.
 - **Stored in `transition-snapshots/` in your data directory**, named by the transition's id. Deleting
   the folder is safe — the app recreates it and simply has no pictures for older transitions.
 
@@ -123,6 +126,64 @@ Capture a moment yourself. Because every camera keeps a rolling buffer, pressing
 Recordings appear in the **Recordings** card on the child's page. **They are never deleted
 automatically** — unlike the other two kinds, these are keepsakes someone chose to keep, so deleting
 one is the only way to reclaim its space.
+
+**When the buffering starts.** As soon as a camera is added, and again whenever Nightlight restarts —
+you don't have to turn anything else on. Note what this costs, since it applies to *every* camera while
+this setting is on: one extra FFmpeg process per camera, reading the stream Nightlight already pulls
+(no second connection to the camera itself), writing a rolling buffer under `clips/.ring/`. The buffer
+is sized to the deeper of the two pre-rolls plus a small margin — about **a minute** at the default
+settings — and old segments are continuously discarded, so it doesn't grow. Turning **Show a Record
+button on each camera** off stops the buffering on every camera that isn't also saving detection clips.
+
+**No Record button on a camera?** The button hides itself when that camera isn't buffering, because
+reaching backward is the whole point and there'd be nothing to reach into. Check that on-demand
+recording is on above, and that the camera isn't disabled. If the clips folder itself failed its
+start-up check, the container log says so with a line beginning `[clips] CLIPS_DIR` — either *not
+writable* or *NOT a mapped volume*; see [Where recordings are stored](#where-recordings-are-stored).
+*(Older versions only started buffering a camera that also had **detection** clips switched on — which
+is off by default — so on a fresh install the button never appeared at all. If you are on one of those,
+turning detection clips on for that camera, or re-saving the camera, brings it back.)*
+
+**A recording that's in progress when Nightlight restarts.** The clip is assembled from the buffer at
+the moment you press stop, so a restart during that step has to be waited for. Nightlight now finishes
+it on the way down — but only if your container is given time to shut down, which is what
+`--stop-timeout 30` (or Compose's `stop_grace_period: 30s`, or the Unraid template's *Extra
+Parameters*) is for. Stopping takes a few seconds and the container exits as soon as it's done. Without
+that setting Docker may kill it part-way, and the recording is marked **failed** instead — see
+[Quick start](../README.md#quick-start) and [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
+
+Nightlight waits **up to 6 seconds** for that final step, which is enough for the recordings this is
+for. It's a fixed limit: **raising the stop timeout past 30 seconds won't buy a long recording more
+time**, because the wait isn't derived from it. A recording still being assembled after 6 seconds is
+given up on, and marked **failed** the next time Nightlight starts — a bounded wait, not a promise.
+
+**When a recording can't be saved, it says so.** A recording that fails — the camera was offline and
+the buffer had no frames in it, the clip couldn't be assembled, or a restart interrupted it — appears
+in the **Recordings** card as a greyed entry reading *Couldn't be saved*, rather than never appearing.
+Tapping it explains what happened and offers to remove it. There's nothing to play, so it has no
+thumbnail and no play button.
+
+⚠️ **Deleting a child deletes its recordings, its wake clips and its timelapses** — files and all,
+including frames already collected for a timelapse that hasn't been assembled yet. Recordings have no
+automatic retention, so they would otherwise sit on disk forever with nothing left able to list or
+remove them: the child page is the only place they appear. **Save anything you want to keep before
+removing a child**, and note that only an **admin** can remove one.
+
+Alert clips are the exception — they belong to the *camera*, not the child, so they survive and are
+swept by the normal retention rules.
+
+**Removing a failed one doesn't ask twice.** Deleting a recording that *worked* takes two taps — a
+confirmation, because the video is gone for good and there's no retention sweep that would have removed
+it anyway. A failed entry has no video to lose, so **Remove** clears it immediately.
+
+This is deliberately different from the other two kinds of video: alert clips and wake clips are
+tidied up automatically, so a failed one just disappears. Recordings have **no automatic retention**
+(see above), so a failed one stays until you remove it — which is why it's shown at all. A recording
+that silently never appeared was indistinguishable from the app having ignored the button.
+
+**Record on a camera that's offline** will start and then save nothing — the buffer exists but has no
+frames in it. The button doesn't currently distinguish "buffering" from "buffering something", so this
+is the case you're most likely to meet the *Couldn't be saved* entry in.
 
 ---
 

@@ -1,15 +1,23 @@
 import { Router } from 'express';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { normalizePhoto } from '../lib/photo.js';
 import { getStoredNights, computeNight, computeAndStoreNight, currentNightDate, childTracksSleep, sleepInsights } from '../lib/sleepAnalysis.js';
 import { startMotionDetector } from '../lib/motionDetector.js';
+import { deleteRecording } from '../lib/recordings.js';
+import { deleteTimelapse, discardAllTimelapseFrames } from '../lib/timelapse.js';
+import { getNightReview, saveNightReview, reviewCardState, localHmToUtcSql, applyVerdicts,
+  applyCorrection, applyCorrections, transitionInstant } from '../lib/sleepReviews.js';
 
 const router = Router();
 router.use(requireAuth);
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+// The UTC shape every timestamp in this database uses. Only used to sanity-check the values the
+// client echoes back as "what you showed me"; times a person TYPES arrive as wall-clock 'HH:MM'.
+const UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
 function withCameras(child) {
   const cameras = db
@@ -100,7 +108,9 @@ router.get('/:id/sleep/live', (req, res) => {
   if (current) {
     return res.json({ scope: 'tonight', night: computeNight(req.params.id, current) });
   }
-  const nights = getStoredNights(req.params.id, 1);
+  // Corrections are laid over the stored row — see applyCorrection. A night somebody has told us
+  // the truth about must not keep showing the algorithm's version of it.
+  const nights = applyCorrections(req.params.id, getStoredNights(req.params.id, 1));
   return res.json({ scope: 'last', night: nights[0] || null });
 });
 
@@ -118,7 +128,7 @@ router.get('/:id/sleep', (req, res) => {
   const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
   const nights = Math.min(60, Math.max(1, parseInt(req.query.nights, 10) || 14));
-  res.json({ nights: getStoredNights(req.params.id, nights) });
+  res.json({ nights: applyCorrections(req.params.id, getStoredNights(req.params.id, nights)) });
 });
 
 // Compute one night on demand for a specific LOCAL start date ('YYYY-MM-DD'). ?detail=1 includes the
@@ -141,9 +151,9 @@ router.get('/:id/sleep/:date', (req, res) => {
   }
   const wantStore = req.query.store === '1' && req.user?.role === 'admin';
   if (!wantStore) {
-    return res.json(computeNight(req.params.id, req.params.date, {
+    return res.json(applyCorrection(req.params.id, computeNight(req.params.id, req.params.date, {
       includeTimeline: req.query.debug === '1' || req.query.detail === '1',
-    }));
+    })));
   }
   // Storing a recompute can only ever improve or re-score a night, never un-score one — see the
   // allowDowngrade guard in computeAndStoreNight. A refusal is the user's fault only in the sense that
@@ -159,10 +169,122 @@ router.get('/:id/sleep/:date', (req, res) => {
   res.json(summary);
 });
 
-router.delete('/:id', (req, res) => {
-  db.prepare('UPDATE cameras SET child_id = NULL WHERE child_id = ?').run(req.params.id);
-  db.prepare('DELETE FROM children WHERE id = ?').run(req.params.id);
-  db.prepare('DELETE FROM sleep_nights WHERE child_id = ?').run(req.params.id);
+// --- Morning review: what actually happened, from the person who was there --------------------------
+//
+// Deliberately separate from /sleep/:date. That route is the app's OWN answer and recomputes on every
+// call; this one records a human's, and never changes once given. Keeping them apart is what stops the
+// ground truth being quietly re-derived from the thing it is supposed to be judging.
+
+// Is there a night waiting to be reviewed? Drives the card on the child's page. Always 200 — "nothing
+// to review" is a normal answer, not an error, and a 404 here would light up the console every morning.
+router.get('/:id/review/pending', (req, res) => {
+  const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
+  if (!child) return res.status(404).json({ error: 'Child not found' });
+  res.json(reviewCardState(req.params.id));
+});
+
+router.get('/:id/review/:date', (req, res) => {
+  const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
+  if (!child) return res.status(404).json({ error: 'Child not found' });
+  if (!DATE_ONLY.test(req.params.date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+  res.json(getNightReview(req.params.id, req.params.date));
+});
+
+// Save the night's true times, any per-transition verdicts, and/or a dismissal. Every field is
+// optional: dismissing is just a save with nothing else in it, which is why one route covers both.
+router.put('/:id/review/:date', (req, res) => {
+  const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
+  if (!child) return res.status(404).json({ error: 'Child not found' });
+  if (!DATE_ONLY.test(req.params.date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+
+  const body = req.body || {};
+  const { true_onset_local: onsetHm, true_wake_local: wakeHm, note, dismissed, verdicts } = body;
+
+  // The client sends what the person typed — a wall-clock 'HH:MM' — and the server resolves it against
+  // the app's configured timezone and the night's date. `undefined` back from localHmToUtcSql means the
+  // value was malformed, which is NOT the same as `null` (nothing recorded) and must not be stored as
+  // if it were, or a garbled entry would silently become "no ground truth for this night".
+  const onsetHm2 = localHmToUtcSql(req.params.date, onsetHm);
+  const wakeHm2 = localHmToUtcSql(req.params.date, wakeHm);
+  for (const [label, v] of [['true_onset_local', onsetHm2], ['true_wake_local', wakeHm2]]) {
+    if (v === undefined) return res.status(400).json({ error: `${label} must be a time like 19:33` });
+  }
+
+  // Naming a recorded frame beats typing a time: it is second-accurate rather than rounded from
+  // memory, and it records WHICH picture means "they got up". So when a frame is named it WINS over
+  // any typed value — the client clears the id the moment somebody edits the time by hand, which keeps
+  // exactly one source of truth for each of the two moments.
+  const onsetFromFrame = transitionInstant(req.params.id, req.params.date, body.true_onset_transition_id);
+  const wakeFromFrame = transitionInstant(req.params.id, req.params.date, body.true_wake_transition_id);
+  for (const [label, v] of [['true_onset_transition_id', onsetFromFrame], ['true_wake_transition_id', wakeFromFrame]]) {
+    if (v === undefined) return res.status(400).json({ error: `${label} is not an event of this night` });
+  }
+  const onset = onsetFromFrame ?? onsetHm2;
+  const wake = wakeFromFrame ?? wakeHm2;
+  if (note != null && typeof note !== 'string') {
+    return res.status(400).json({ error: 'note must be text' });
+  }
+  // Anything not a string reaches better-sqlite3 as an unbindable value and comes back as a 500 whose
+  // body Cloudflare strips — the user would see nothing at all. Same reasoning as the verdict check.
+  for (const [label, v] of [['computed_onset_at', body.computed_onset_at], ['computed_wake_at', body.computed_wake_at]]) {
+    if (v != null && !UTC_TIMESTAMP.test(String(v))) {
+      return res.status(400).json({ error: `${label} must be 'YYYY-MM-DD HH:MM:SS' in UTC` });
+    }
+  }
+
+  // Verdicts are scoped to THIS child and THIS night inside applyVerdicts, and rejected as a batch.
+  const check = applyVerdicts(req.params.id, req.params.date, verdicts);
+  if (check.error) return res.status(400).json({ error: check.error });
+
+  const review = saveNightReview(req.params.id, req.params.date, {
+    // `undefined` means "not supplied, keep what is stored" — a stale card on a second phone sending
+    // only `{dismissed:true}` must not blank times a parent entered on the first.
+    trueOnsetAt: onsetHm === undefined && body.true_onset_transition_id === undefined ? undefined : onset,
+    trueWakeAt: wakeHm === undefined && body.true_wake_transition_id === undefined ? undefined : wake,
+    trueOnsetTransitionId: body.true_onset_transition_id === undefined
+      ? undefined : (body.true_onset_transition_id == null ? null : Number(body.true_onset_transition_id)),
+    trueWakeTransitionId: body.true_wake_transition_id === undefined
+      ? undefined : (body.true_wake_transition_id == null ? null : Number(body.true_wake_transition_id)),
+    // What the person was LOOKING at when they judged, echoed back from the GET. Deliberately not
+    // recomputed here — see saveNightReview.
+    computedOnsetAt: body.computed_onset_at,
+    computedWakeAt: body.computed_wake_at,
+    note,
+    dismissed,
+  });
+  res.json({ review, verdicts_applied: check.applied });
+});
+
+// ⚠️ DELETING A CHILD MUST TAKE ITS VIDEO WITH IT (issue #259). `timelapses` and `recordings` both
+// carry a `child_id`, and neither was touched here — so the rows survived pointing at a child that no
+// longer existed, every listing query that filters on the child returned nothing, and the FILES stayed
+// on disk forever with no way left to reach them. The schema does not save us either: it has only two
+// REFERENCES clauses and neither is on these tables, so there is no ON DELETE to fall back on.
+//
+// Worst for manual recordings, which have NO retention sweep BY DESIGN — they are keepsakes kept until
+// a person deletes them, so deleting the child removed the only route to ever reclaiming that space.
+// Storage is the resource this app is most sensitive to; the whole clip-retention system exists
+// because the disk fills.
+//
+// ⚠️ DESTROY, NOT ORPHAN — a deliberate choice between the two the issue offers. Deleting a child is an
+// explicit, confirmed act about that child, and a "no child" bucket would be a new surface to build,
+// explain and prune. What is NOT acceptable is the third option we had: keeping them forever while
+// hiding them. Said plainly in the changelog and docs so nobody meets it as a surprise.
+// ⚠️ ADMIN-ONLY, added with the media deletion above (adversarial review of PR #284). This router only
+// applied `requireAuth`, so a CAREGIVER could delete a child — verified, it returned 204 — while every
+// other destructive route in the app (deleting a camera, a user, an alert) requires an admin. That was
+// already wrong; making this call also erase video off the disk is what made it untenable to leave.
+router.delete('/:id', requireAdmin, (req, res) => {
+  const id = req.params.id;
+  db.prepare('UPDATE cameras SET child_id = NULL WHERE child_id = ?').run(id);
+  // Before the child row goes, so a failure part-way leaves the child (and its media) still reachable
+  // rather than stranding exactly the rows this exists to clean up.
+  for (const r of db.prepare('SELECT id FROM recordings WHERE child_id = ?').all(id)) deleteRecording(r.id);
+  for (const t of db.prepare('SELECT id FROM timelapses WHERE child_id = ?').all(id)) deleteTimelapse(t.id);
+  // Frames for a night still in progress have no timelapses row yet, so the loop above cannot see them.
+  discardAllTimelapseFrames(id);
+  db.prepare('DELETE FROM children WHERE id = ?').run(id);
+  db.prepare('DELETE FROM sleep_nights WHERE child_id = ?').run(id);
   res.status(204).end();
 });
 

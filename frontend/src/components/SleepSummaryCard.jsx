@@ -109,7 +109,14 @@ export default function SleepSummaryCard({ childId }) {
         <div className="night__sleep-head">{head}</div>
         <div className="night__sleep-big">{fmtDur(night.asleep_minutes)} asleep{tonight ? ' so far' : ''}</div>
         <div className="night__soon">{bits.join(' · ')}</div>
-        <div className="night__est">Estimated from movement &amp; sound — not a medical measurement.</div>
+        {/* Say plainly when these are the times a PERSON gave us rather than the ones we worked out.
+            Without it, a corrected card is indistinguishable from a detector that suddenly got it
+            right — and the estimate disclaimer below would be a lie about where the number came from. */}
+        {night.corrected ? (
+          <div className="night__est"><span className="sleep-corrected">You corrected this</span></div>
+        ) : (
+          <div className="night__est">Estimated from movement &amp; sound — not a medical measurement.</div>
+        )}
       </>
     );
   }

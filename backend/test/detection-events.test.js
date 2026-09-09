@@ -26,6 +26,24 @@ function makeClipFile(name) {
   return rel;
 }
 
+// A file OUTSIDE CLIPS_DIR that a containment guard must refuse to reach. Placed in DATA_DIR
+// (CLIPS_DIR's parent), which is this suite's own temp directory — so a test that DOES escape
+// destroys only its own fixture, never anything on the machine running the suite.
+//
+// ⚠️ It has to be a file that really exists. `'../../../../etc/passwd'` was the previous spelling and
+// it made the assertion depend on the HOST: on Linux the guard is what returns null, but on Windows
+// (and in any container without that file) the `fs.existsSync` at the end returns null anyway, so the
+// test passed with the guard deleted. Confirmed by mutation — it was the first survivor this repo's
+// mutation harness found. Same class as the fake-ffmpeg-on-PATH problem in spawn-failure.test.js:
+// green on one machine, for a reason that has nothing to do with the code under test.
+const OUTSIDE_DIR = path.dirname(CLIPS_DIR);
+function plantOutside(name) {
+  const abs = path.join(OUTSIDE_DIR, name);
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, 'must not be deleted or served');
+  return abs;
+}
+
 const rowOf = (id) => db.prepare('SELECT * FROM detection_events WHERE id = ?').get(id);
 
 before(() => { fs.mkdirSync(CLIPS_DIR, { recursive: true }); });
@@ -157,9 +175,32 @@ test('getEventClipFile returns null when the row points at a file that is gone',
 });
 
 test('★ getEventClipFile refuses a path that escapes CLIPS_DIR', () => {
+  // The file is planted first: without it the route would decline for the boring reason that the
+  // target does not exist, which is what let this test pass with no guard at all.
+  plantOutside('served.mp4');
   const id = ev.recordDetectionEvent('cam-1', 'Nursery', ev.ALERT.MOTION);
-  ev.setClipReady(id, '../../../../etc/passwd', 5, 100);
+  ev.setClipReady(id, path.join('..', 'served.mp4'), 5, 100);
+  assert.equal(ev.getEventClipFile(id), null, 'a tampered row escaped the jail — this file would be served');
+});
+
+test('★ nor a sibling directory sharing the CLIPS_DIR prefix', () => {
+  // As above, the separator in `CLIPS_DIR + path.sep` is what makes "<DATA_DIR>/clips-evil" outside
+  // "<DATA_DIR>/clips". Nothing else distinguishes the two spellings of the check.
+  const evil = path.join(`${path.basename(CLIPS_DIR)}-evil`, 'served.mp4');
+  plantOutside(evil);
+  const id = ev.recordDetectionEvent('cam-1', 'Nursery', ev.ALERT.MOTION);
+  ev.setClipReady(id, path.join('..', evil), 5, 100);
   assert.equal(ev.getEventClipFile(id), null);
+});
+
+test('the control: a legitimate in-jail clip IS served', () => {
+  // Without this, both assertions above would also pass if getEventClipFile always returned null.
+  const id = ev.recordDetectionEvent('cam-1', 'Nursery', ev.ALERT.MOTION);
+  const rel = makeClipFile('servable.mp4');
+  ev.setClipReady(id, rel, 5, 100);
+  const got = ev.getEventClipFile(id);
+  assert.ok(got, 'a valid clip was refused');
+  assert.equal(path.resolve(got.root, got.path), path.resolve(CLIPS_DIR, rel));
 });
 
 test('getEventClipFile returns null for an unknown event id', () => {
@@ -238,10 +279,69 @@ test('getClips lists only playable clips, newest first, and caps the limit', () 
   assert.equal(ev.getClips(0).length, 0);
 });
 
-test('unlinkClip refuses a path outside CLIPS_DIR and tolerates a missing file', () => {
-  // Must not throw in either case — it runs inside the retention sweeper.
-  ev.unlinkClip('../../../../etc/passwd');
+// --- unlinkClip containment -------------------------------------------------------------------
+//
+// ⚠️ These replace a single test named "unlinkClip refuses a path outside CLIPS_DIR" whose only
+// assertion was `assert.ok(true, 'no throw')`. It was one of the four trap tests named in issue #263:
+// the NAME stated the invariant, the BODY could not observe it. Deleting the containment guard
+// outright left it green, because a successful escape does not throw either — it just deletes
+// somebody else's file, silently, which is the entire failure mode.
+//
+// The fix is to give the assertion something to see: plant a REAL file outside the jail and require
+// it to survive. Each case below is written against a specific way the guard could be weakened, and
+// each was confirmed to fail with that weakening applied (see the PR body's mutant table).
+
+test('★ unlinkClip does not delete a file above CLIPS_DIR', () => {
+  const victim = plantOutside('escaped.mp4');
+  ev.unlinkClip(path.join('..', 'escaped.mp4'));
+  assert.equal(fs.existsSync(victim), true, 'a ../ path escaped the jail and deleted a file outside it');
+});
+
+test('★ nor its sibling thumbnail — the second rm is jailed by the same check', () => {
+  // unlinkClip removes `<clip>.mp4` AND `<clip>.jpg`. The guard runs once, before both, so a test that
+  // only watched the .mp4 would miss a future refactor that resolved the .jpg separately.
+  const mp4 = plantOutside('escaped-pair.mp4');
+  const jpg = plantOutside('escaped-pair.jpg');
+  ev.unlinkClip(path.join('..', 'escaped-pair.mp4'));
+  assert.equal(fs.existsSync(mp4), true, 'the mp4 outside the jail was deleted');
+  assert.equal(fs.existsSync(jpg), true, 'the thumbnail outside the jail was deleted');
+});
+
+test('★ nor a sibling directory that merely starts with the same characters', () => {
+  // The guard is `abs.startsWith(CLIPS_DIR + path.sep)`, not `abs.startsWith(CLIPS_DIR)`. Drop the
+  // separator and "<DATA_DIR>/clips-evil/x.mp4" passes as if it were inside "<DATA_DIR>/clips".
+  // This is the only case that distinguishes the two spellings, and nothing else in the suite does.
+  const victim = plantOutside(path.join(`${path.basename(CLIPS_DIR)}-evil`, 'x.mp4'));
+  ev.unlinkClip(path.join('..', `${path.basename(CLIPS_DIR)}-evil`, 'x.mp4'));
+  assert.equal(fs.existsSync(victim), true, 'a sibling directory sharing the CLIPS_DIR prefix was treated as inside it');
+});
+
+test('★ nor a file named by absolute path', () => {
+  // path.resolve(CLIPS_DIR, '/abs/path') ignores the base entirely, so a tampered row holding an
+  // absolute path never passes through the relative-join the guard might be assumed to rely on.
+  const victim = plantOutside('absolute.mp4');
+  ev.unlinkClip(victim);
+  assert.equal(fs.existsSync(victim), true, 'an absolute clip_path escaped the jail');
+});
+
+test('the control: a path INSIDE CLIPS_DIR really is deleted', () => {
+  // Without this, every assertion above would also pass if unlinkClip deleted nothing at all — which
+  // is precisely the shape of trap the tests above exist to remove. Asserts the thumbnail too, so
+  // "deletes the mp4 but silently stopped removing thumbnails" is not a passing state either.
+  const rel = makeClipFile('really-deleted.mp4');
+  const jpg = path.join(CLIPS_DIR, rel).replace(/\.mp4$/, '.jpg');
+  fs.writeFileSync(jpg, 'thumb');
+  ev.unlinkClip(rel);
+  assert.equal(fs.existsSync(path.join(CLIPS_DIR, rel)), false, 'a legitimate clip was NOT deleted');
+  assert.equal(fs.existsSync(jpg), false, 'the sibling thumbnail was left behind');
+});
+
+test('unlinkClip tolerates a missing file and a null path', () => {
+  // Must not throw in either case — it runs inside the retention sweeper, which has no error handling
+  // of its own per clip and would abandon the rest of the sweep.
   ev.unlinkClip('clips-test/does-not-exist.mp4');
   ev.unlinkClip(null);
+  ev.unlinkClip('');
+  ev.unlinkClip(undefined);
   assert.ok(true, 'no throw');
 });

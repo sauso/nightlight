@@ -9,6 +9,7 @@ import {
   holdRing,
   releaseRing,
 } from './clipRecorder.js';
+import { RING_OWNER } from './ringHolds.js';
 import { hasMinFreeSpace } from './clipStorage.js';
 
 // On-demand recording: the tile's Record button. This is the SAME capture machinery as detection
@@ -30,7 +31,7 @@ import { hasMinFreeSpace } from './clipStorage.js';
 const TAIL_SEC = 2;
 // After Stop we only need the final segment to close — the recorded span is already in the past — so
 // extractClip gets this short settle instead of waiting out a post-roll it has no reason to wait for.
-const SEGMENT_SETTLE_MS = 5000;
+export const SEGMENT_SETTLE_MS = 5000;
 const MAX_ACTIVE_MS = 15 * 60 * 1000; // absolute backstop if a stop timer were ever lost
 
 // cameraId -> { id, startMs, timer, userId }
@@ -77,7 +78,7 @@ export function startRecording(camera, userId = null) {
 
   const startMs = Date.now();
   // Reach back over the pre-roll, and protect those segments for as long as we're recording.
-  holdRing(camera.id, startMs - preRollSec * 1000 - 5000);
+  holdRing(camera.id, RING_OWNER.ONDEMAND, startMs - preRollSec * 1000 - 5000);
 
   const info = db
     .prepare(
@@ -108,7 +109,7 @@ export function startRecording(camera, userId = null) {
  * recording (a Stop with no active recording is a no-op, not an error). Never throws: a capture failure
  * marks the row 'failed' and is logged, it doesn't surface as a request error the user can't act on.
  */
-export async function stopRecording(cameraId) {
+export async function stopRecording(cameraId, { settleMs = SEGMENT_SETTLE_MS } = {}) {
   const a = active.get(cameraId);
   if (!a) return null;
   clearTimeout(a.timer);
@@ -129,7 +130,7 @@ export async function stopRecording(cameraId) {
       postRollSec,
       at: a.startMs,
       outBase: `rec-${a.id}`,
-      settleMs: SEGMENT_SETTLE_MS,
+      settleMs,
     });
     // extractClip writes under CLIPS_DIR/<cameraId>/<outBase>.{mp4,jpg}; store paths relative to
     // CLIPS_DIR (posix separators) so the serving route can re-jail them.
@@ -154,13 +155,93 @@ export async function stopRecording(cameraId) {
     logger.error(`[rec] recording ${a.id} failed for "${cam.name}": ${err.message}`);
     return a.id;
   } finally {
-    releaseRing(cameraId);
+    releaseRing(cameraId, RING_OWNER.ONDEMAND);
   }
 }
 
+// Shutdown only. extractClip opens with SEGMENT_SETTLE_MS (5s) so the in-progress segment closes; on
+// the way down that is longer than the budget allows, and one 2s segment plus margin is enough to
+// leave a usable clip. The tail may lose up to ~1s — far better than losing the recording.
+export const SHUTDOWN_SETTLE_MS = 2500;
+// ⚠️ THIS COMMENT USED TO READ "Docker's default stop grace is 10s", and that is false — there is no
+// such default (Engine 29 documents none; a bare `docker stop` was measured SIGKILLing at ~4s). The
+// budget is NOT derived from Docker's behaviour. It is a deliberate cap on how long shutdown will wait
+// for a clip, chosen so the whole of shutdown stays inside the 9s bound index.js documents, which is
+// in turn what the DECLARED 30s grace is sized from (issue #279: `stop_grace_period` in
+// docker-compose.yml, `--stop-timeout 30` in the Unraid template and the README).
+// ⚠️ Raising this does NOT let a longer recording finish "if the grace allows" — the cap is absolute
+// and independent of the grace (`stopAllRecordings` races the work against it).
+// Which test stops you changing it, precisely — because an earlier version of THIS comment named the
+// wrong one, and a second adversarial review of #279 proved it by raising the value and watching that
+// test pass. Three guards, three different thresholds:
+//   * recordings-shutdown.test.js catches any RAISE: its bound is max(budget, 6000) + 3000 <= 9000.
+//   * shutdown-grace-declared.test.js catches any change UP OR DOWN, via the docs tripwire — three
+//     user-facing files state this value in seconds and must agree with it. (A LOWERING is otherwise
+//     invisible: 4500 cleared every arithmetic check while leaving three documents saying "6 seconds".)
+//   * that same file's grace arithmetic — ceil((budget + 9000)/1000) vs the DECLARED 30s — only bites
+//     above 21000. It is the weakest of the three, and naming it alone was the false claim.
+// Over budget we give up and let reconcileStaleRecordings mark the row on next boot.
+export const SHUTDOWN_BUDGET_MS = 6000;
+// Exported so a test can assert the relationship between them: a settle longer than the budget makes
+// the whole save path permanently inert, and that mutant survived the first review of #277.
+
 // Stop every in-flight recording (shutdown). Best-effort: we still try to save what was captured.
-export async function stopAllRecordings() {
-  await Promise.allSettled([...active.keys()].map((id) => stopRecording(id)));
+//
+// ⚠️ This used to be the ONLY un-awaited stop in shutdown(), and the timings made the loss certain,
+// not merely likely: extractClip settles for 5s while stopAllTranscoders bounds the rest of shutdown
+// at 3s, so process.exit(0) always won. The comment above the call site promised the opposite. #256.
+export async function stopAllRecordings({ settleMs = SEGMENT_SETTLE_MS, budgetMs = null } = {}) {
+  const work = Promise.allSettled([...active.keys()].map((id) => stopRecording(id, { settleMs })));
+  if (!budgetMs) return void (await work);
+  // Resolve, never reject, on timeout: shutdown must continue either way.
+  let timer;
+  const budget = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      logger.error(`[rec] gave up waiting for in-flight recording(s) after ${budgetMs}ms - they will be marked failed on next start.`);
+      resolve();
+    }, budgetMs);
+  });
+  await Promise.race([work, budget]);
+  clearTimeout(timer);
+}
+
+// Shutdown-path wrapper, so index.js states intent rather than repeating two constants.
+export async function stopAllRecordingsForShutdown() {
+  await stopAllRecordings({ settleMs: SHUTDOWN_SETTLE_MS, budgetMs: SHUTDOWN_BUDGET_MS });
+}
+
+// At boot, NEITHER live status can legitimately still be set. A row is 'recording' from startRecording
+// until the user stops it, and 'pending' from then until extractClip finishes — both describe work held
+// in the in-process `active` map, which is gone. So a row in either state is debris from a shutdown or
+// a crash that never got to finish, and leaving it is the visible half of #256.
+//
+// ⚠️ WHAT THIS SWEEP MEANS CHANGED WITH #276, and this comment used to say the opposite. It once read
+// "listChildRecordings filters on status='ready', so the row is invisible forever" — true then, false
+// now: the list returns 'ready' AND 'failed'. So sweeping a row to 'failed' is no longer what HIDES it,
+// it is precisely what puts it on the child's page with an explanation. Leaving it 'pending' is what
+// would hide it, because the two live statuses are the ones the list still excludes.
+//
+// ⚠️ SWEEPING ONLY 'pending' WAS NOT ENOUGH, and the first version of this did exactly that while its
+// comment claimed to cover "a SIGKILL or a power cut". Found by adversarial review of PR #277, which
+// demonstrated it: a container killed mid-recording leaves 'recording', which that sweep skipped on
+// every subsequent boot — the same bug this function exists to fix, one status along.
+//
+// This is the layer that covers what the shutdown budget cannot: a SIGKILL or a power cut, where no
+// shutdown handler runs at all. Returns how many rows it cleaned up.
+//
+// The two terminal statuses ('ready', 'failed') are deliberately NOT listed: this is an allow-list of
+// live states, so a status added later is skipped rather than silently clobbered.
+const LIVE_RECORDING_STATUSES = ['recording', 'pending'];
+
+export function reconcileStaleRecordings() {
+  const placeholders = LIVE_RECORDING_STATUSES.map(() => '?').join(', ');
+  const res = db
+    .prepare(`UPDATE recordings SET status='failed' WHERE status IN (${placeholders})`)
+    .run(...LIVE_RECORDING_STATUSES);
+  if (res.changes > 0) {
+    logger.error(`[rec] marked ${res.changes} unfinished recording(s) as failed - they were interrupted by a restart.`);
+  }
+  return res.changes;
 }
 
 // --- Automatic wake clips (roadmap 2.4) -------------------------------------------------------
@@ -296,13 +377,28 @@ export function wakeClipStats() {
     .get();
 }
 
+// The Recordings card on a child's page.
+//
+// ⚠️ 'failed' IS INCLUDED DELIBERATELY (issue #276), and it is the visible half of #256. A recording
+// can fail two ways: the extraction itself throws (stopRecording's catch), or a restart interrupts it
+// and reconcileStaleRecordings marks it on the next boot. Either way the user pressed Record, the
+// button behaved, and then nothing ever appeared — no error, no entry, indistinguishable from the app
+// having ignored the press. Showing the row as a failure is the whole point: an explanation beats a
+// silence. The row already carries started_at, duration_s and camera_id, so there is something to show.
+//
+// ⚠️ This does NOT make a failed recording servable. getRecordingVideoFile/getRecordingThumbFile still
+// require status === 'ready', and must keep doing so — the file is missing or truncated, which is what
+// 'failed' means. The card renders these as non-playable; it does not ask for their media.
+//
+// The other statuses stay hidden on purpose: 'recording' and 'pending' are live, in-flight states that
+// resolve within seconds, and showing them would put a row on screen that is about to change.
 export function listChildRecordings(childId, limit = 50) {
   return db
     .prepare(
       `SELECT r.id, r.camera_id, r.child_id, r.status, r.started_at, r.ended_at, r.duration_s, r.bytes,
               r.created_at, c.name AS camera_name
          FROM recordings r LEFT JOIN cameras c ON c.id = r.camera_id
-        WHERE r.child_id = ? AND r.status = 'ready' AND r.kind = 'manual'
+        WHERE r.child_id = ? AND r.status IN ('ready', 'failed') AND r.kind = 'manual'
         ORDER BY r.created_at DESC LIMIT ?`
     )
     .all(childId, Math.min(200, Math.max(1, limit)));

@@ -59,10 +59,17 @@ const camForSnapshotStmt = db.prepare(
   'SELECT id, name, snapshot_url, mediamtx_path FROM cameras WHERE id = ?'
 );
 // Rows about to age out that carry an image, so the JPEGs go with them and never orphan on disk.
+//
+// A transition somebody has JUDGED is exempt from the sweep, deliberately. The 45-day window exists to
+// stop an unbounded table of machine-generated guesses; a frame a person has labelled is the opposite
+// of that — it is the scarce thing, the ground truth an occupancy check would have to be measured
+// against, and it accrues at a handful a night. Dropping those on a timer would defeat the point of
+// collecting them. Unreviewed rows still age out normally, so the table stays bounded in practice.
+const AGED_UNJUDGED = `created_at < datetime('now', ?) AND verdict IS NULL`;
 const agedWithSnapshotStmt = db.prepare(
-  `SELECT id FROM bed_transitions WHERE created_at < datetime('now', ?) AND snapshot = 1`
+  `SELECT id FROM bed_transitions WHERE ${AGED_UNJUDGED} AND snapshot = 1`
 );
-const pruneByAgeStmt = db.prepare(`DELETE FROM bed_transitions WHERE created_at < datetime('now', ?)`);
+const pruneByAgeStmt = db.prepare(`DELETE FROM bed_transitions WHERE ${AGED_UNJUDGED}`);
 
 // Grab the frame and attach it. Deliberately fire-and-forget and fully swallowed: the detector runs
 // several times a second and a camera that is slow to answer must never delay it, and a transition
@@ -121,14 +128,14 @@ export function recordBedTransition(cameraId, type, peak = null) {
 }
 
 // All transitions for the given cameras within [startSql, endSql) (UTC 'YYYY-MM-DD HH:MM:SS' strings),
-// ascending by time. Returns [{ id, camera_id, type, created_at, peak, snapshot }]. Empty array for no
+// ascending by time. Returns [{ id, camera_id, type, created_at, peak, snapshot, verdict }]. Empty for no
 // cameras.
 export function getBedTransitions(cameraIds, startSql, endSql) {
   if (!cameraIds || cameraIds.length === 0) return [];
   const ph = cameraIds.map(() => '?').join(',');
   return db
     .prepare(
-      `SELECT id, camera_id, type, created_at, peak, snapshot FROM bed_transitions
+      `SELECT id, camera_id, type, created_at, peak, snapshot, verdict FROM bed_transitions
          WHERE camera_id IN (${ph}) AND created_at >= ? AND created_at < ?
          ORDER BY created_at ASC`
     )
@@ -154,5 +161,39 @@ export function getImpossibleTransitions({ limit = 200 } = {}) {
     if (before && before.type === r.type) out.push({ ...r, contradicts: before.id, contradicts_at: before.created_at });
     prev.set(r.camera_id, r);
   }
-  return out.reverse().slice(0, Math.min(500, Math.max(1, limit)));
+  // Newest first ACROSS ALL CAMERAS, then trim. The query orders by camera_id first, so `out` comes
+  // out grouped by camera and only then by time. Reversing THAT yields every row of one camera
+  // before any row of another, so the slice dropped whole cameras rather than old rows: with two
+  // children and the limit reached, one child's transitions came back and the other child's were
+  // silently absent. Measured 2026-08-31 at ~197 pairs against a limit of 200.
+  //
+  // (The scan itself does NOT depend on that grouping — `prev` is keyed on camera_id, so a pair is
+  // confined to one camera by the map key, not by row order. Sorting here rather than changing the
+  // query keeps the two concerns separate.)
+  //
+  // ⚠️ Nothing in the app calls this yet — it is invoked ad hoc while diagnosing the classifier, and
+  // is the report the zone repaint gets scored against at the end of a monitor phase. Wire it to a
+  // route or move it to scripts/ before it drifts.
+  //
+  // Sort on the timestamp itself, tie-broken by id so the order is total and a page is stable when
+  // two cameras fire inside the same second.
+  out.sort((a, b) => (a.created_at === b.created_at ? b.id - a.id : a.created_at < b.created_at ? 1 : -1));
+  return out.slice(0, Math.min(500, Math.max(1, limit)));
+}
+
+// Record what a person said about one transition: 'correct', 'wrong', or 'unclear' — or null to clear
+// it again. Anything else is rejected rather than stored, because these values are the labels a future
+// occupancy check gets measured against and a typo'd one is worse than a missing one. Returns whether
+// a row was actually updated.
+// The single source of truth for what a verdict may be. Exported so the route, the lib and the UI all
+// validate against ONE list — a second copy would drift, and a typo'd label is worse than a missing one
+// because everything else gets measured against these.
+export const VERDICTS = Object.freeze(['correct', 'wrong', 'unclear']);
+const setVerdictStmt = db.prepare('UPDATE bed_transitions SET verdict = ? WHERE id = ?');
+
+export function setTransitionVerdict(id, verdict) {
+  const n = Number(id);
+  if (!Number.isInteger(n) || n <= 0) return false;
+  if (verdict != null && !VERDICTS.includes(verdict)) return false;
+  return setVerdictStmt.run(verdict ?? null, n).changes > 0;
 }

@@ -15,6 +15,7 @@ import PushBanner from './components/PushBanner.jsx';
 import Login from './pages/Login.jsx';
 import Children from './pages/Children.jsx';
 import ChildDetail from './pages/ChildDetail.jsx';
+import NightReview from './pages/NightReview.jsx';
 import SleepDetail from './pages/SleepDetail.jsx';
 import ChildSettings from './pages/ChildSettings.jsx';
 import Cameras from './pages/Cameras.jsx';
@@ -80,14 +81,18 @@ function useReloadAfterBackground() {
   }, []);
 }
 
-function Protected({ children }) {
+// Exported for tests. These two are the ONLY thing standing between a caregiver and every
+// admin screen, and the loading branch matters as much as the role one: returning null rather
+// than redirecting is what stops a page refresh bouncing a signed-in user to the login screen
+// while auth is still resolving.
+export function Protected({ children }) {
   const { user, loading } = useAuth();
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
   return children;
 }
 
-function AdminProtected({ children }) {
+export function AdminProtected({ children }) {
   const { user, loading } = useAuth();
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
@@ -132,6 +137,7 @@ function Shell() {
                     <Route path="/children/new" element={<ChildSettings />} />
                     <Route path="/children/:id" element={<ChildDetail />} />
                     <Route path="/children/:id/sleep" element={<SleepDetail />} />
+                    <Route path="/children/:id/review/:date" element={<NightReview />} />
                     <Route path="/children/:id/edit" element={<ChildSettings />} />
                     <Route path="/cameras" element={<Cameras />} />
                     {/* Per-camera settings + split detection screens are admin-only (camera
@@ -175,11 +181,17 @@ function Shell() {
 export default function App() {
   return (
     <ErrorBoundary>
-      <SettingsProvider>
-        <AuthProvider>
+      {/* AuthProvider is OUTSIDE SettingsProvider so the settings can be re-fetched when the signed-in
+          user changes: GET /settings answers an admin with more than it answers an anonymous visitor,
+          and signing in happens in-page (Login navigates, it does not reload), so a provider that
+          fetched once at mount would keep the anonymous response for the whole session and leave the
+          admin settings forms seeding from fields that were never sent. AuthProvider does not read
+          settings, so this nesting has no cycle. */}
+      <AuthProvider>
+        <SettingsProvider>
           <Shell />
-        </AuthProvider>
-      </SettingsProvider>
+        </SettingsProvider>
+      </AuthProvider>
     </ErrorBoundary>
   );
 }

@@ -29,18 +29,20 @@ import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder
 import { startMotionDetector, stopMotionDetector, isDetecting, stopAllMotionDetectors, motionLegWanted } from './lib/motionDetector.js';
 import { startOnvifMotion, stopOnvifMotion, isOnvifMotion, onvifMotionWanted, stopAllOnvifMotion } from './lib/onvifMotion.js';
 import { startSoundDetector, isSoundDetecting, stopAllSoundDetectors } from './lib/soundDetector.js';
-import { startClipCapture, isClipCapturing, stopAllClipCapture } from './lib/clipCapture.js';
-import { stopAllRecordings } from './lib/recordings.js';
-import { startClipStorage } from './lib/clipStorage.js';
+import { startClipCapture, clipRingWanted, isClipCapturing, stopAllClipCapture } from './lib/clipCapture.js';
+import { stopAllRecordingsForShutdown, reconcileStaleRecordings } from './lib/recordings.js';
+import { startClipStorage, stopClipStorage } from './lib/clipStorage.js';
 import { initPush } from './lib/push.js';
 import { startMediaMTX, stopMediaMTX } from './lib/mediamtxProcess.js';
 import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
-import { startSensorSampler } from './lib/sensorSampler.js';
-import { startActivityTracker } from './lib/activityTracker.js';
-import { startSleepJob } from './lib/sleepAnalysis.js';
-import { startWakeWatcher } from './lib/wakeWatcher.js';
-import { startTimelapseSampler } from './lib/timelapse.js';
+import { startSensorSampler, stopSensorSampler } from './lib/sensorSampler.js';
+import { startActivityTracker, stopActivityTracker } from './lib/activityTracker.js';
+import { startSleepJob, stopSleepJob } from './lib/sleepAnalysis.js';
+import { startWakeWatcher, stopWakeWatcher } from './lib/wakeWatcher.js';
+import { startTimelapseSampler, stopTimelapseSampler } from './lib/timelapse.js';
 import { logger } from './lib/logger.js';
+import { applyTrustProxy } from './lib/trustProxy.js';
+import { safeInterval, installCrashGuards, markBootComplete, reportGuardFailure } from './lib/processGuards.js';
 import { recordCameraEvent, EVENT } from './lib/cameraEvents.js';
 import { probeAudioFlowing, tracksHaveAudio } from './lib/audioLiveness.js';
 import { notifyCameraOffline, notifyCameraRecovered } from './lib/cameraStatusAlert.js';
@@ -63,15 +65,37 @@ startActivityTracker(); // bucket motion/sound activity per minute (Stage-2 slee
 startSleepJob(); // compute the nightly per-child sleep summary from that timeline
 startWakeWatcher(); // record a short clip when a wake starts — deliberately WITHOUT alerting
 
+// Before anything can fail: a background task that throws must not take the monitor down at 3am.
+// The individual call sites are guarded too (see safeInterval and the per-camera try/catch in the
+// watchdogs); this is the backstop for the ones nobody has thought of. See lib/processGuards.js for
+// why an unattended monitor deliberately does NOT follow Node's exit-on-uncaught guidance.
+installCrashGuards();
+
 const app = express();
 
-// The app is reached through a reverse proxy for remote access (see the HLS comment in
-// mediamtx.yml), which sets X-Forwarded-For - trusting only loopback (not a blanket
-// `true`) means only a proxy running on this same host can supply that header, so it
-// can't be spoofed by a client to fake its IP. Without this, Express falls back to the
-// proxy's own loopback address for every request, which defeats the login route's
-// per-IP rate limiting (see auth.js) for anyone connecting through the proxy.
-app.set('trust proxy', 'loopback');
+// The app is reached through a reverse proxy for remote access (see the HLS comment in mediamtx.yml),
+// which sets X-Forwarded-For. Trusting only loopback — not a blanket `true` — means only a proxy on
+// this same host can supply that header, so a client cannot spoof its own IP.
+//
+// ⚠️ BUT LOOPBACK IS THE WRONG DEFAULT FOR THE SETUP THIS PROJECT DOCUMENTS (issue #248). The README's
+// reverse-proxy section has SWAG reaching Nightlight by its LAN IP — the host's in host mode, or the
+// container's own on ipvlan — and the macvlan note even suggests running SWAG on a different host.
+// None of those is loopback, so X-Forwarded-For is ignored and `req.ip` is the PROXY for every remote
+// user. That collapsed the login limiter into one shared bucket; see auth.js.
+//
+// Configurable, defaulting to today's behaviour so nothing changes for an existing install. Accepts
+// anything Express does: an IP or CIDR (`10.0.0.20`, `172.18.0.0/16`), a comma-separated list, a hop
+// count (`1`), or a named range.
+//
+// ⚠️ ONLY SET THIS WHEN THE PROXY IS TRUSTED. A wrong or over-broad value lets a client forge
+// X-Forwarded-For and evade the rate limit entirely — which is worse than the shared bucket it fixes.
+// Documented with that warning in the README's reverse-proxy section.
+// ⚠️ VALIDATED, NOT PASSED STRAIGHT THROUGH. `app.set('trust proxy', 'true')` THROWS out of proxy-addr
+// during startup, and since the bad value lives in the environment every restart dies identically —
+// a permanent crash loop on a baby monitor, from one typo. `true` is also the likeliest typo, because
+// it is the canonical example in Express's own docs (where the setting takes a real boolean).
+// See lib/trustProxy.js; it falls back to 'loopback' with a loud log rather than exiting.
+applyTrustProxy(app, process.env.TRUST_PROXY);
 
 // Content-Security-Policy — ENFORCING (validated via a report-only rollout on staging that exercised
 // every feature). The report-uri below still logs any future
@@ -234,9 +258,20 @@ app.get('*', (req, res) => {
 const PORT = process.env.PORT || 4000;
 const server = app.listen(PORT, () => {
   logger.info(`Baby monitor backend listening on port ${PORT}`);
+  // From here on a background fault should be survived, not fatal. BEFORE this point it is a failed
+  // start, and the guards exit non-zero instead of leaving a healthy-looking container with no server
+  // bound — see the boot/steady-state note in lib/processGuards.js.
+  markBootComplete();
   // Run the clip-storage guard + retention sweeper BEFORE reconcile, so reconcile only starts
   // segmenters once storage is known usable (startClipCapture gates on it).
   startClipStorage();
+  // Any recording still marked 'recording' or 'pending' is debris from a restart that interrupted it —
+  // there is no in-process state left for either. Sweeping it to 'failed' is what makes it VISIBLE:
+  // since #276 the child's page lists 'ready' and 'failed', and excludes the two live statuses, so a
+  // row left 'pending' is the one that stays hidden forever. See #256 and #276.
+  // (This comment previously said listChildRecordings "filters on 'ready'" — true before #276, and a
+  // false reason attached to a still-true conclusion, which is the hardest kind to notice.)
+  reconcileStaleRecordings();
   startTimelapseSampler(); // sample sleep-window frames for the nightly memories timelapse (gated on clip storage)
   reconcileCameraPaths();
   initPush();
@@ -308,7 +343,7 @@ async function handleTalkConnection(ws, camera, user) {
 // Also re-check periodically (not just at startup) — if MediaMTX is ever restarted
 // on its own (e.g. after a config change, or a crash) without the app restarting too,
 // this makes it self-heal within a few minutes instead of needing a manual restart.
-setInterval(reconcileCameraPaths, 5 * 60 * 1000);
+safeInterval('reconcile', 5 * 60 * 1000, reconcileCameraPaths);
 
 // Housekeeping: every login inserts a sessions row, and only an explicit logout
 // deletes it, so abandoned rows accumulate forever. Anything idle past the JWT's own
@@ -319,7 +354,7 @@ function purgeExpiredSessions() {
   if (changes > 0) logger.info(`Purged ${changes} expired session(s).`);
 }
 purgeExpiredSessions();
-setInterval(purgeExpiredSessions, 24 * 60 * 60 * 1000);
+safeInterval('purge-sessions', 24 * 60 * 60 * 1000, purgeExpiredSessions);
 
 // Second, independent layer of defense: even with FFmpeg's own read timeout (see
 // transcoder.js), a stalled connection could conceivably hang in a way that never
@@ -347,99 +382,117 @@ const offlineAlerted = new Set(); // camera_ids already notified for the current
 const WATCHDOG_INTERVAL_MS = 15 * 1000;
 const STUCK_THRESHOLD_MS = 30 * 1000;
 
-setInterval(async () => {
+safeInterval('camera-watchdog', WATCHDOG_INTERVAL_MS, async () => {
   const cameras = db.prepare('SELECT * FROM cameras').all();
   // Read the offline-alert config once per tick (not per camera).
   const offlineCfg = db.prepare(
     "SELECT camera_offline_alert_enabled AS enabled, camera_offline_alert_minutes AS minutes FROM settings WHERE id = 'app'"
   ).get();
   for (const cam of cameras) {
-    // A disabled camera intentionally has no path/transcoder - skip it entirely so the
-    // watchdog doesn't read it as "unready", log phantom offline events, or try to restart
-    // it. Clear any tracked state so re-enabling starts clean (seeds silently, no event).
-    if (cam.disabled) {
-      notReadySince.delete(cam.id);
-      subNotReadySince.delete(cam.id);
-      onlineState.delete(cam.id);
-      offlineSince.delete(cam.id);
-      offlineAlerted.delete(cam.id);
-      continue;
-    }
-    const status = await getPathStatus(cam.mediamtx_path);
-
-    // Record sustained up/down transitions (see onlineState above). A brief blip that
-    // self-heals between two polls never flips this and so never logs an event here -
-    // those fine-grained restarts are recorded by the transcoder itself instead.
-    const wasOnline = onlineState.get(cam.id);
-    if (wasOnline === undefined) {
-      onlineState.set(cam.id, status.ready); // seed silently, no event
-    } else if (status.ready && !wasOnline) {
-      onlineState.set(cam.id, true);
-      recordCameraEvent(cam.id, cam.name, EVENT.ONLINE, 'stream recovered');
-    } else if (!status.ready && wasOnline) {
-      onlineState.set(cam.id, false);
-      recordCameraEvent(cam.id, cam.name, EVENT.OFFLINE, 'stream stopped delivering frames');
-    }
-
-    // Offline-duration notification (see offlineSince/offlineAlerted above). Independent of the 30s
-    // restart timer below. Fires one push once the outage passes the admin's threshold, and a "back
-    // online" push on recovery. Only notifies when enabled; recovery only fires if we actually alerted.
-    if (status.ready) {
-      if (offlineAlerted.has(cam.id)) notifyCameraRecovered(cam, offlineSince.get(cam.id));
-      offlineSince.delete(cam.id);
-      offlineAlerted.delete(cam.id);
-    } else {
-      if (!offlineSince.has(cam.id)) offlineSince.set(cam.id, Date.now());
-      if (
-        offlineCfg?.enabled &&
-        !offlineAlerted.has(cam.id) &&
-        Date.now() - offlineSince.get(cam.id) >= offlineCfg.minutes * 60 * 1000
-      ) {
-        offlineAlerted.add(cam.id);
-        notifyCameraOffline(cam, offlineCfg.minutes);
-      }
-    }
-
-    // Sub-stream (Low quality) wedge check — independent of the main path above, and BEFORE its early
-    // `continue`, so it runs even when the main stream is healthy. Mirrors the main logic: if the sub path
-    // stays not-ready past the threshold, force-restart just the sub leg (startSubStream → stopTranscoder
-    // SIGTERM→SIGKILL → relaunch), which clears a wedged FFmpeg that the reconcile can't (it's still alive).
-    if (subConfigured(cam)) {
-      const subReady = (await getPathStatus(subPathName(cam.mediamtx_path))).ready;
-      if (subReady) {
+    // One camera must not take the others down with it. Without this the FIRST camera to throw
+    // skips every camera after it for this tick — and since the fault repeats every tick, one bad
+    // camera would permanently block its siblings' watchdog. `continue` inside a try still
+    // continues the loop, so the body below is unchanged apart from its indentation.
+    try {
+      // A disabled camera intentionally has no path/transcoder - skip it entirely so the
+      // watchdog doesn't read it as "unready", log phantom offline events, or try to restart
+      // it. Clear any tracked state so re-enabling starts clean (seeds silently, no event).
+      if (cam.disabled) {
+        notReadySince.delete(cam.id);
         subNotReadySince.delete(cam.id);
+        onlineState.delete(cam.id);
+        offlineSince.delete(cam.id);
+        offlineAlerted.delete(cam.id);
+        continue;
+      }
+      const status = await getPathStatus(cam.mediamtx_path);
+
+      // Record sustained up/down transitions (see onlineState above). A brief blip that
+      // self-heals between two polls never flips this and so never logs an event here -
+      // those fine-grained restarts are recorded by the transcoder itself instead.
+      const wasOnline = onlineState.get(cam.id);
+      if (wasOnline === undefined) {
+        onlineState.set(cam.id, status.ready); // seed silently, no event
+      } else if (status.ready && !wasOnline) {
+        onlineState.set(cam.id, true);
+        recordCameraEvent(cam.id, cam.name, EVENT.ONLINE, 'stream recovered');
+      } else if (!status.ready && wasOnline) {
+        onlineState.set(cam.id, false);
+        recordCameraEvent(cam.id, cam.name, EVENT.OFFLINE, 'stream stopped delivering frames');
+      }
+
+      // Offline-duration notification (see offlineSince/offlineAlerted above). Independent of the 30s
+      // restart timer below. Fires one push once the outage passes the admin's threshold, and a "back
+      // online" push on recovery. Only notifies when enabled; recovery only fires if we actually alerted.
+      if (status.ready) {
+        if (offlineAlerted.has(cam.id)) notifyCameraRecovered(cam, offlineSince.get(cam.id));
+        offlineSince.delete(cam.id);
+        offlineAlerted.delete(cam.id);
       } else {
-        const subSince = subNotReadySince.get(cam.id);
-        if (!subSince) {
-          subNotReadySince.set(cam.id, Date.now());
-        } else if (Date.now() - subSince > STUCK_THRESHOLD_MS) {
-          logger.error(`Sub-stream (Low) for "${cam.name}" unready over ${STUCK_THRESHOLD_MS / 1000}s - force-restarting it.`);
-          recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'sub-stream force-restarted by watchdog (unready 30s+)');
-          await startSubStream(cam);
-          subNotReadySince.delete(cam.id);
+        if (!offlineSince.has(cam.id)) offlineSince.set(cam.id, Date.now());
+        if (
+          offlineCfg?.enabled &&
+          !offlineAlerted.has(cam.id) &&
+          Date.now() - offlineSince.get(cam.id) >= offlineCfg.minutes * 60 * 1000
+        ) {
+          offlineAlerted.add(cam.id);
+          notifyCameraOffline(cam, offlineCfg.minutes);
         }
       }
-    } else {
-      subNotReadySince.delete(cam.id);
-    }
 
-    if (status.ready) {
-      notReadySince.delete(cam.id);
-      continue;
-    }
-    const since = notReadySince.get(cam.id);
-    if (!since) {
-      notReadySince.set(cam.id, Date.now());
-    } else if (Date.now() - since > STUCK_THRESHOLD_MS) {
-      logger.error(
-        `Camera "${cam.name}" has been unready for over ${STUCK_THRESHOLD_MS / 1000}s - force-restarting its transcoder.`
-      );
-      recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'force-restarted by watchdog (unready 30s+)');
-      await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
-      notReadySince.delete(cam.id);
+      // ⚠️ The sub leg gets its OWN try, INSIDE the per-camera one. Adversarial review of PR #275
+      // found that sharing a single per-camera try was not enough: the sub leg runs FIRST, and
+      // `startSubStream` is the one genuinely bare `upsertPath` in the codebase. A sub path MediaMTX
+      // keeps rejecting therefore threw every tick before the main-leg code below could run, so
+      // `notReadySince` was never seeded and the MAIN transcoder could never be force-restarted for
+      // that camera — with MediaMTX itself perfectly up. Isolating per camera was right; isolating
+      // only per camera was still one outage short.
+      try {
+        // Sub-stream (Low quality) wedge check — independent of the main path above, and BEFORE its early
+        // `continue`, so it runs even when the main stream is healthy. Mirrors the main logic: if the sub path
+        // stays not-ready past the threshold, force-restart just the sub leg (startSubStream → stopTranscoder
+        // SIGTERM→SIGKILL → relaunch), which clears a wedged FFmpeg that the reconcile can't (it's still alive).
+        if (subConfigured(cam)) {
+          const subReady = (await getPathStatus(subPathName(cam.mediamtx_path))).ready;
+          if (subReady) {
+            subNotReadySince.delete(cam.id);
+          } else {
+            const subSince = subNotReadySince.get(cam.id);
+            if (!subSince) {
+              subNotReadySince.set(cam.id, Date.now());
+            } else if (Date.now() - subSince > STUCK_THRESHOLD_MS) {
+              logger.error(`Sub-stream (Low) for "${cam.name}" unready over ${STUCK_THRESHOLD_MS / 1000}s - force-restarting it.`);
+              recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'sub-stream force-restarted by watchdog (unready 30s+)');
+              await startSubStream(cam);
+              subNotReadySince.delete(cam.id);
+            }
+          }
+        } else {
+          subNotReadySince.delete(cam.id);
+        }
+      } catch (err) {
+        reportGuardFailure(`camera-watchdog:sub:${cam.name}`, err);
+      }
+      if (status.ready) {
+        notReadySince.delete(cam.id);
+        continue;
+      }
+      const since = notReadySince.get(cam.id);
+      if (!since) {
+        notReadySince.set(cam.id, Date.now());
+      } else if (Date.now() - since > STUCK_THRESHOLD_MS) {
+        logger.error(
+          `Camera "${cam.name}" has been unready for over ${STUCK_THRESHOLD_MS / 1000}s - force-restarting its transcoder.`
+        );
+        recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'force-restarted by watchdog (unready 30s+)');
+        await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
+        notReadySince.delete(cam.id);
+      }
+    } catch (err) {
+      reportGuardFailure(`camera-watchdog:${cam.name}`, err);
     }
   }
-}, WATCHDOG_INTERVAL_MS);
+});
 
 // Third watchdog: audio liveness. The frame watchdog above can't see a camera whose AUDIO track
 // stalls while video keeps flowing - the path still reads "ready" and frames keep arriving, so it
@@ -457,36 +510,41 @@ const audioStallCounts = new Map(); // camera_id -> consecutive stalled checks
 const AUDIO_CHECK_INTERVAL_MS = 30 * 1000;
 const AUDIO_STALL_RESTART_THRESHOLD = 2;
 
-setInterval(async () => {
+safeInterval('audio-watchdog', AUDIO_CHECK_INTERVAL_MS, async () => {
   const cameras = db.prepare('SELECT * FROM cameras').all();
   for (const cam of cameras) {
-    if (cam.disabled) {
-      audioStallCounts.delete(cam.id);
-      continue;
-    }
-    const status = await getPathStatus(cam.mediamtx_path);
-    // Only meaningful once the stream is up AND actually carries audio - never restart a camera
-    // that legitimately has no audio track (its "no audio flowing" is correct, not a stall).
-    if (!status.ready || !tracksHaveAudio(status.tracks)) {
-      audioStallCounts.delete(cam.id);
-      continue;
-    }
-    const flowing = await probeAudioFlowing(cam.mediamtx_path);
-    if (flowing !== false) {
-      // true (flowing) or null (couldn't tell) - clear the counter, don't act on an unknown.
-      audioStallCounts.delete(cam.id);
-      continue;
-    }
-    const stalls = (audioStallCounts.get(cam.id) || 0) + 1;
-    audioStallCounts.set(cam.id, stalls);
-    if (stalls >= AUDIO_STALL_RESTART_THRESHOLD) {
-      logger.error(`Camera "${cam.name}" audio has stalled (declared but not flowing) - restarting its transcoder.`);
-      recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'audio stalled - restarted by watchdog');
-      await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
-      audioStallCounts.delete(cam.id);
+    // Same per-camera isolation as the frame watchdog above.
+    try {
+      if (cam.disabled) {
+        audioStallCounts.delete(cam.id);
+        continue;
+      }
+      const status = await getPathStatus(cam.mediamtx_path);
+      // Only meaningful once the stream is up AND actually carries audio - never restart a camera
+      // that legitimately has no audio track (its "no audio flowing" is correct, not a stall).
+      if (!status.ready || !tracksHaveAudio(status.tracks)) {
+        audioStallCounts.delete(cam.id);
+        continue;
+      }
+      const flowing = await probeAudioFlowing(cam.mediamtx_path);
+      if (flowing !== false) {
+        // true (flowing) or null (couldn't tell) - clear the counter, don't act on an unknown.
+        audioStallCounts.delete(cam.id);
+        continue;
+      }
+      const stalls = (audioStallCounts.get(cam.id) || 0) + 1;
+      audioStallCounts.set(cam.id, stalls);
+      if (stalls >= AUDIO_STALL_RESTART_THRESHOLD) {
+        logger.error(`Camera "${cam.name}" audio has stalled (declared but not flowing) - restarting its transcoder.`);
+        recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'audio stalled - restarted by watchdog');
+        await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
+        audioStallCounts.delete(cam.id);
+      }
+    } catch (err) {
+      reportGuardFailure(`audio-watchdog:${cam.name}`, err);
     }
   }
-}, AUDIO_CHECK_INTERVAL_MS);
+});
 
 // MediaMTX only learns about a camera when it's added/edited through our API, or from
 // this reconciliation. Important: every actual config write to MediaMTX forces it to
@@ -536,8 +594,10 @@ async function reconcileCameraPaths(attempt = 1) {
       if (cam.detect_sound_enabled && !isSoundDetecting(cam.id)) {
         await startSoundDetector(cam).catch((e) => logger.error(`[sound] start failed: ${e.message}`));
       }
-      // Keep the optional clip-recording segmenter alive the same way (its own ring off the same path).
-      if (cam.detect_record_clips && !isClipCapturing(cam.id)) {
+      // Keep the clip/recording ring alive the same way (its own leg off the same path). The condition
+      // lives in clipRingWanted — this used to test `detect_record_clips` alone, which left on-demand
+      // recording unarmed on every restart for anyone who hadn't also turned on detection clips.
+      if (clipRingWanted(cam) && !isClipCapturing(cam.id)) {
         startClipCapture(cam);
       }
     }
@@ -558,15 +618,59 @@ async function reconcileCameraPaths(attempt = 1) {
 // rather than letting `docker stop` just kill the whole process tree indiscriminately.
 async function shutdown() {
   logger.info('Shutting down - stopping transcoders and MediaMTX.');
+  // Started HERE, awaited below. The only ordering that actually matters is that an in-flight
+  // recording finishes cutting BEFORE stopAllClipCapture takes the ring away; the detector stops are
+  // unrelated to it and can overlap.
+  //
+  // ⚠️ THE REASON IT IS NOT SIMPLY AWAITED IN PLACE IS ARITHMETIC, and awaiting in place was a real
+  // regression caught by adversarial review of PR #277. Each detector stop is bounded by its own 3s
+  // force-kill, and so is the transcoder stop: awaiting in sequence gave 3 + 3 + 6 + 3 = 15s worst
+  // case, where before that PR it was 3 + 3 + 3 = 9s. Overlapping the recording wait with the
+  // detector stops restores that: max(6, 3+3) + 3 = 9s. Asserted in recordings-shutdown.test.js,
+  // because it is not observable any other way.
+  //
+  // ⚠️ 9s is the number the DEPLOYMENT grace is sized from — see issue #279 and the
+  // `stop_grace_period` / `--stop-timeout 30` declarations in docker-compose.yml, unraid-template.xml
+  // and the README. An earlier version of this comment said 15s exceeded "Docker's DEFAULT 10s stop
+  // grace"; soak-testing this on Docker Engine 29.7.2 showed there is no such guarantee — `docker
+  // stop` with no `-t` SIGKILLed the container after ~4s, losing exactly the recording this code
+  // exists to save. Keep the bound under 9s AND keep the grace declared; neither alone is enough.
+  const recordingsFinished = stopAllRecordingsForShutdown();
   await stopAllMotionDetectors();
   await stopAllOnvifMotion();
   await stopAllSoundDetectors();
-  // Finish any in-flight recording first — it cuts from the ring the segmenters own.
-  stopAllRecordings().catch(() => {});
+  // Finish any in-flight recording before the ring goes — it cuts from the segments the ring owns.
+  await recordingsFinished;
   stopAllClipCapture();
   await stopAllTranscoders();
   stopMediaMTX();
   stopMqtt();
+  // Grouped with the other background stops, and placed AFTER the detector stops on purpose: the
+  // detectors feed recordMotion/recordSound, so clearing the flusher earlier would only widen the
+  // window in which activity is accumulated and never written. Placing it here preserves exactly the
+  // previous behaviour while giving the process a way to exit that is not `process.exit`.
+  //
+  // ⚠️ It does NOT flush the partial minute still sitting in the in-memory buckets. That row was
+  // already lost to `process.exit(0)` before this line existed, so writing one here would be a new
+  // behaviour smuggled in under a bug fix — see issue #278. If that minute turns out to matter,
+  // it is its own change with its own test.
+  stopActivityTracker();
+  // The other periodic jobs, stopped for the same reason and grouped with it (issue #286). All are
+  // cheap synchronous clearInterval calls; none writes anything on the way out, so their order
+  // relative to each other does not matter.
+  //
+  // ⚠️ TWO of these joined the list in #263, not #286, and for two different reasons.
+  //   * The timelapse sampler was invisible to that sweep: it looked for the literal `setInterval` and
+  //     this job is created through `safeInterval`. The guard now knows about the wrapper.
+  //   * The wake watcher was NOT invisible — it has had a `stopWakeWatcher` since #286 and was in the
+  //     test's own list of periodic jobs. Shutdown simply never called it, and the assertion that
+  //     would have said so was a hand-typed array that nobody extended. It is derived now
+  //     (suite-exits-cleanly.test.js), which is what surfaced this.
+  stopSensorSampler();
+  stopClipStorage();
+  stopSleepJob();
+  stopTimelapseSampler();
+  stopWakeWatcher();
   process.exit(0);
 }
 process.on('SIGTERM', shutdown);

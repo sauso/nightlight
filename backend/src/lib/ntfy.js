@@ -1,5 +1,6 @@
 import db from '../db.js';
 import { logger } from './logger.js';
+import { postWithTimeout } from './httpNotify.js';
 
 // ntfy notifications (https://ntfy.sh, or any self-hosted ntfy server). The server POSTs the alert
 // straight to a topic; the recipient subscribes in the ntfy app or a browser. The snapshot is sent
@@ -64,9 +65,13 @@ export async function sendNtfy({ title, message, click, image, priority } = {}) 
       body = headerSafe(message);
     }
 
-    const res = await fetch(`${c.serverUrl}/${encodeURIComponent(c.topic)}`, { method: 'POST', headers, body });
+    const res = await postWithTimeout(
+      `${c.serverUrl}/${encodeURIComponent(c.topic)}`,
+      { method: 'POST', headers, body },
+      { label: 'ntfy' }
+    );
     if (!res.ok) {
-      const text = await res.text().catch(() => '');
+      const text = res.text;
       logger.error(`[ntfy] send failed (${res.status}): ${text.slice(0, 200)}`);
       return { ok: false, error: `HTTP ${res.status}${text ? ` — ${text.slice(0, 140)}` : ''}` };
     }

@@ -9,6 +9,7 @@ import { recordMotion, recordMotionOut } from './activityTracker.js';
 import { recordBedTransition, TRANSITION } from './bedTransitions.js';
 import { oobLinkKind, OOB_LINK_MS, OOB_LINK_SLOW_MS, OOB_SLOW_OUT_MIN } from './bedTransitionRules.js';
 import { childSamplingActiveNow } from './sleepAnalysis.js';
+import { killIfSpawned } from './processGuards.js';
 
 // Server-side motion detection. Per camera with detection enabled, a cheap FFmpeg leg reads
 // the already-published MediaMTX stream (the sub-stream when there is one — far cheaper to
@@ -22,6 +23,24 @@ import { childSamplingActiveNow } from './sleepAnalysis.js';
 
 // camera_id -> { proc, stopped }
 const detectors = new Map();
+
+// Cameras with a relaunch SCHEDULED but no process yet — the 5s gap between an ffmpeg exit and the
+// restart. The exit handler removes the camera from `detectors` before arming that timer, so during
+// the gap the entry is unreachable and `entry.stopped`, the only brake on the relaunch, cannot be set.
+// stop() was therefore a no-op inside the window, and a camera deleted or disabled mid-restart kept
+// respawning ffmpeg every 5s for the life of the container — invisible to isDetecting(), so no
+// watchdog or reconcile pass could see or heal it, while it went on writing activity_samples outside
+// the sleep window. Keeping the timer handle here is what makes the relaunch cancellable. See #253.
+const pendingRestarts = new Map(); // cameraId -> timeout handle
+
+// Cancel a scheduled relaunch, if any. Safe to call for a camera that has none.
+function cancelPendingRestart(cameraId) {
+  const t = pendingRestarts.get(cameraId);
+  if (t) {
+    clearTimeout(t);
+    pendingRestarts.delete(cameraId);
+  }
+}
 
 const RESTART_DELAY_MS = 5000;
 const FORCE_KILL_TIMEOUT_MS = 3000;
@@ -81,9 +100,12 @@ const READY_POLL_MS = 2000;
 
 // Map 1..100 sensitivity to the fraction of zone pixels that must change for a frame to count
 // as "active". Higher sensitivity => smaller fraction => easier to trigger.
-function activeFractionThreshold(sensitivity) {
+// Exported for tests only — it and buildZoneMask below are the two pure functions on this path, and
+// everything else here is welded to a spawned ffmpeg process.
+export function activeFractionThreshold(sensitivity) {
   const s = Math.min(100, Math.max(1, sensitivity || 50));
-  // ~10% of the zone at sensitivity 1, ~2.5% at 50, ~0.2% at 100.
+  // Linear in sensitivity: 10% of the zone at 1, ~5.2% at 50, ~1.2% at 90, 0.2% at 100.
+  // (This line previously said "~2.5% at 50", which the formula has never produced.)
   return 0.002 + (0.1 - 0.002) * ((100 - s) / 99);
 }
 
@@ -92,7 +114,7 @@ function activeFractionThreshold(sensitivity) {
 // diagonal boxes are handled correctly, each pixel counted once). Returns { mask, zonePixels }: mask
 // is a Uint8Array(FW*FH) of 0/1, or null when the whole frame is used (no/degenerate zone), in which
 // case zonePixels is the full frame. A legacy single-object zone still works (treated as one rect).
-function buildZoneMask(camera) {
+export function buildZoneMask(camera) {
   let rects = null;
   if (camera.detect_zone) {
     try {
@@ -221,6 +243,22 @@ export async function startMotionDetector(camera) {
     ];
     const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     entry.proc = proc;
+
+    proc.on('error', (err) => {
+      // A spawn that never started. Node emits 'error' INSTEAD OF 'exit' here, so nothing downstream
+      // runs — and with no listener on it an EventEmitter 'error' THROWS, taking the whole backend down.
+      // On a baby monitor that is an outage. ENOENT (no ffmpeg on PATH — a broken image layer, a bad
+      // volume mount) is the obvious trigger; EACCES, and EMFILE/EAGAIN under file-descriptor or fork
+      // pressure, arrive the same way. See issue #257.
+      //
+      // Deliberately NOT scheduling the 5s relaunch the exit path uses: a binary that cannot be executed
+      // fails identically every time, so that would be a hot loop writing a log line every five seconds
+      // forever. Clearing the map entry instead lets the reconcile pass (every 5 minutes) retry at a
+      // sane cadence, and isDetecting() reports the truth in the meantime — without this the leg would be
+      // left claimed by a process that never existed, and reconcile would skip it as healthy.
+      logger.error(`[detect:${path}] could not start ffmpeg: ${err.code || err.message}`);
+      if (detectors.get(camera.id) === entry) detectors.delete(camera.id);
+    });
 
     let prev = null;
     let buf = Buffer.alloc(0);
@@ -392,9 +430,10 @@ export async function startMotionDetector(camera) {
         // reconnect quietly, re-picking sub vs main. Only a real failure is logged loudly.
         if (code === 0) logger.raw(`detect:${path}`, 'stream ended, reconnecting');
         else logger.error(`[detect:${path}] exited (code ${code}), restarting in 5s`);
-        setTimeout(() => {
+        pendingRestarts.set(camera.id, setTimeout(() => {
+          pendingRestarts.delete(camera.id);
           if (!entry.stopped && !detectors.has(camera.id)) launch().catch(() => {});
-        }, RESTART_DELAY_MS);
+        }, RESTART_DELAY_MS));
       }
     });
   }
@@ -403,6 +442,10 @@ export async function startMotionDetector(camera) {
 }
 
 export function stopMotionDetector(cameraId) {
+  // FIRST, before the early return: a camera in the 5s restart gap has no entry but does have a
+  // relaunch armed, and stop() used to return without cancelling it (#253).
+  cancelPendingRestart(cameraId);
+
   const entry = detectors.get(cameraId);
   if (!entry) return Promise.resolve();
   entry.stopped = true;
@@ -418,11 +461,16 @@ export function stopMotionDetector(cameraId) {
         resolve();
       }
     };
+    // See stopTranscoder for the full reasoning: a process that never spawned must not be killed
+    // directly (on Linux that signals the whole process group — see killIfSpawned in processGuards.js),
+    // and it emits 'error'/'close' but never 'exit', so waiting on 'exit' alone stalls for the whole timeout.
+    const kill = (sig) => killIfSpawned(entry.proc, sig);
     entry.proc.once('exit', done);
-    entry.proc.kill('SIGTERM');
+    entry.proc.once('error', done);
+    kill('SIGTERM');
     setTimeout(() => {
       if (!resolved) {
-        entry.proc.kill('SIGKILL');
+        kill('SIGKILL');
         done();
       }
     }, FORCE_KILL_TIMEOUT_MS);
@@ -430,5 +478,8 @@ export function stopMotionDetector(cameraId) {
 }
 
 export async function stopAllMotionDetectors() {
-  await Promise.all([...detectors.keys()].map(stopMotionDetector));
+  // Union of both maps: a camera in its restart gap is in pendingRestarts only, and iterating
+  // detectors alone would leave its relaunch armed through shutdown.
+  const ids = new Set([...detectors.keys(), ...pendingRestarts.keys()]);
+  await Promise.all([...ids].map(stopMotionDetector));
 }

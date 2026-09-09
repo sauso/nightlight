@@ -8,8 +8,36 @@
 # Audio is G.711 µ-law (pcm_mulaw), matching what real IP cameras typically send
 # on the WebRTC-copied track — so the pipeline is exercised the same way prod is,
 # not with an AAC source WebRTC couldn't carry.
+#
+# TWO paths, and the difference between them is the point:
+#   test    — open, no credentials. Every spec that just needs "a camera" uses it.
+#   secure  — requires a username and password to READ.
+# ★ Why `secure` exists: the app's promise about camera credentials is that a
+# password is never returned to the browser and that a blank password on edit
+# keeps the stored one. Against an open camera the second half is unfalsifiable —
+# the only observable is a `rtsp_has_password` boolean, which stays true even if
+# the server kept the WRONG password, or a literal, or an empty string. Against a
+# path that actually rejects bad credentials, "the stream still works after the
+# edit" IS the assertion, and a regression that drops or mangles the password
+# breaks the stream where a test can see it. See playwright/tests/09.
 
 logLevel: warn
+
+# MediaMTX v1.20 internal auth. Anonymous access is preserved for everything
+# except reading `secure`, so adding this changes nothing for the existing specs.
+authInternalUsers:
+  - user: any
+    permissions:
+      # The runOnInit generators below publish over loopback with no credentials,
+      # so publishing must stay open — it isn't what these tests are about.
+      - action: publish
+      - action: read
+        path: test
+  - user: e2ecam
+    pass: e2e-cam-pw
+    permissions:
+      - action: read
+        path: secure
 
 paths:
   test:
@@ -25,4 +53,19 @@ paths:
       -c:v libx264 -profile:v baseline -pix_fmt yuv420p -preset ultrafast -tune zerolatency -g 30
       -c:a pcm_mulaw -ar 8000 -ac 1
       -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/test
+    runOnInitRestart: yes
+
+  secure:
+    # Same generator, smaller frame — this path exists to exercise authentication,
+    # not decoding, and a second 640x480 encode is pure CPU on a machine already
+    # running the app, MediaMTX and a browser. Audio is kept because the transcoder
+    # produces its two audio tracks from it, and a video-only source would take a
+    # different path through the pipeline than every other spec.
+    runOnInit: >
+      ffmpeg -hide_banner -loglevel warning -re
+      -f lavfi -i testsrc=size=320x240:rate=10
+      -f lavfi -i sine=frequency=500:sample_rate=8000
+      -c:v libx264 -profile:v baseline -pix_fmt yuv420p -preset ultrafast -tune zerolatency -g 20
+      -c:a pcm_mulaw -ar 8000 -ac 1
+      -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/secure
     runOnInitRestart: yes

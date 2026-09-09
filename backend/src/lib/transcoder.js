@@ -3,9 +3,29 @@ import { logger, isNoisyMediaLine } from './logger.js';
 import { recordCameraEvent, EVENT } from './cameraEvents.js';
 import { ffprobeAudioCodec } from './rtspProbe.js';
 import { hlsPathName, upsertPath, isPathConfiguredCorrectly } from './mediamtx.js';
+import { killIfSpawned } from './processGuards.js';
 
 // camera_id -> { proc, stopped }
 const processes = new Map();
+
+// Cameras with a relaunch SCHEDULED but no process yet — the 5s gap between an ffmpeg exit and the
+// restart. The exit handler removes the camera from `processes` before arming that timer, so during
+// the gap the entry is unreachable and `entry.stopped`, the only brake on the relaunch, cannot be set
+// by anything. stopTranscoder() was therefore a no-op inside the window: deleting or disabling a
+// camera mid-restart left ffmpeg respawning every 5s for the life of the container, invisible to
+// isRunning() and so unreachable by the watchdog or reconcile. A flapping camera restarts every 5s,
+// so the window is effectively always open for exactly the camera you would want to stop.
+// Keeping the timer handle here is what makes the relaunch cancellable. See issue #253.
+const pendingRestarts = new Map(); // cameraId -> timeout handle
+
+// Cancel a scheduled relaunch, if any. Safe to call for a camera that has none.
+function cancelPendingRestart(cameraId) {
+  const t = pendingRestarts.get(cameraId);
+  if (t) {
+    clearTimeout(t);
+    pendingRestarts.delete(cameraId);
+  }
+}
 
 // rtsp_url -> source audio codec (probed once, reused across restarts — the codec doesn't change while
 // a camera stays put). Lets buildArgs pick the right WebRTC audio track without an ffprobe per restart.
@@ -121,6 +141,22 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraNam
     const entry = { proc, stopped: false };
     processes.set(cameraId, entry);
 
+    proc.on('error', (err) => {
+      // A spawn that never started. Node emits 'error' INSTEAD OF 'exit' here, so nothing downstream
+      // runs — and with no listener on it an EventEmitter 'error' THROWS, taking the whole backend down.
+      // On a baby monitor that is an outage. ENOENT (no ffmpeg on PATH — a broken image layer, a bad
+      // volume mount) is the obvious trigger; EACCES, and EMFILE/EAGAIN under file-descriptor or fork
+      // pressure, arrive the same way. See issue #257.
+      //
+      // Deliberately NOT scheduling the 5s relaunch the exit path uses: a binary that cannot be executed
+      // fails identically every time, so that would be a hot loop writing a log line every five seconds
+      // forever. Clearing the map entry instead lets the reconcile pass (every 5 minutes) retry at a
+      // sane cadence, and isRunning() reports the truth in the meantime — without this the leg would be
+      // left claimed by a process that never existed, and reconcile would skip it as healthy.
+      logger.error(`[ffmpeg:${mediamtxPath}] could not start ffmpeg: ${err.code || err.message}`);
+      if (processes.get(cameraId) === entry) processes.delete(cameraId);
+    });
+
     let lastLine = '';
     // This camera occasionally sends one corrupted RTP timestamp (jumping to
     // billions, near the 32-bit rollover point) which poisons every downstream
@@ -147,7 +183,7 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraNam
               `[ffmpeg:${mediamtxPath}] camera sent a corrupt timestamp - restarting now rather than let the session run poisoned`
             );
             recordCameraEvent(cameraId, cameraName, EVENT.RESTART, 'camera sent a corrupt timestamp');
-            proc.kill('SIGTERM');
+            killIfSpawned(proc, 'SIGTERM');
           }
         });
     });
@@ -171,12 +207,13 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraNam
         if (!restarting) {
           recordCameraEvent(cameraId, cameraName, EVENT.RESTART, `stream ended (exit code ${code})`);
         }
-        setTimeout(() => {
+        pendingRestarts.set(cameraId, setTimeout(() => {
+          pendingRestarts.delete(cameraId);
           // Re-checked at fire time too: startTranscoder (watchdog, camera edit)
           // may have started a new owner during the 5s delay - launching anyway
           // would create exactly the two-lineage fight described above.
           if (!entry.stopped && !processes.has(cameraId)) launch();
-        }, RESTART_DELAY_MS);
+        }, RESTART_DELAY_MS));
       }
     });
   }
@@ -185,6 +222,11 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraNam
 }
 
 export function stopTranscoder(cameraId) {
+  // FIRST, and before the early return below: a camera in the 5s restart gap has no entry in
+  // `processes` but does have a relaunch armed. Without this, stop() returned Promise.resolve() and
+  // the relaunch fired anyway (#253).
+  cancelPendingRestart(cameraId);
+
   const entry = processes.get(cameraId);
   if (!entry) return Promise.resolve();
 
@@ -198,17 +240,33 @@ export function stopTranscoder(cameraId) {
       resolved = true;
       resolve();
     }
+    // A process that never spawned has no OS process behind it, and stop() can land in that window
+    // (it is ~5ms wide: spawn() returns synchronously, 'error' arrives on a later tick). Two
+    // consequences, both found by adversarial review of PR #274:
+    //   1. Killing it is unsafe, and `killIfSpawned` is what makes it safe — see processGuards.js.
+    //      ⚠️ THIS USED TO SAY "kill() THROWS on it — EINVAL, verified on win32", wrapped in a
+    //      try/catch, and that was only the Windows half of the truth. On Linux it does NOT throw: it
+    //      resolves to `kill(0, SIGTERM)`, which signals the WHOLE PROCESS GROUP — the backend kills
+    //      itself, MediaMTX and every FFmpeg. A try/catch cannot help with that, and the comment
+    //      claiming it did is why nobody looked again. Measured 2026-09-06, in #263.
+    //   2. It emits 'error' then 'close' but NEVER 'exit', so waiting on 'exit' alone would stall
+    //      every such stop for the full force-kill timeout before resolving.
+    const kill = (sig) => killIfSpawned(entry.proc, sig);
     entry.proc.once('exit', done);
-    entry.proc.kill('SIGTERM');
+    entry.proc.once('error', done);
+    kill('SIGTERM');
     // Belt-and-suspenders: don't let a stuck process block a restart indefinitely.
     setTimeout(() => {
       if (resolved) return;
-      entry.proc.kill('SIGKILL');
+      kill('SIGKILL');
       done();
     }, FORCE_KILL_TIMEOUT_MS);
   });
 }
 
 export async function stopAllTranscoders() {
-  await Promise.all([...processes.keys()].map(stopTranscoder));
+  // The union of both maps: a camera sitting in its restart gap is in `pendingRestarts` only, and
+  // iterating `processes` alone would leave its relaunch armed through shutdown.
+  const ids = new Set([...processes.keys(), ...pendingRestarts.keys()]);
+  await Promise.all([...ids].map(stopTranscoder));
 }
