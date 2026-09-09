@@ -194,7 +194,7 @@ comments were written once and the surrounding feature kept moving, not where th
 maintained. Expect agents 6–8 to look more like the second group.
 | 6 | media/camera | 33 | 0 | 24 | **5** | 4 | 173k | 9m20s | #313, #314, #315 |
 | 7a | backend tail — sleep/detection support (17 files) | 64 | 0 | 63 | **1** | 0 | 202k | 10m09s | #317 |
-| 7b | backend tail — notifications/auth/routes (21 files) | 55 | | | | | | | |
+| 7b | backend tail — notifications/auth/routes (21 files) | 55 | 0 | 51 | **2** | 2 | 190k | 9m23s | #319, #320 |
 
 ⚠️ **Agent 7 was split, and the estimate that said to split it was too small.** The runbook guessed
 ~80 candidates over ~4,000 lines; the real remainder was **119 candidates across 38 files and 4,915
