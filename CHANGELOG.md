@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-09-09
+
 ### Added
 - **Tell Nightlight when it got a night wrong.** The morning after, a child's page asks **Was last night
   right?** — confirm the sleep and wake times with one tap, or correct them; and mark each recorded *got
