@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import { redactCredentials } from './urlCredentials.js';
 
 // Quick "does this RTSP URL actually work?" check, used to validate a camera before saving
 // it (catches wrong credentials, wrong path, unreachable IP up front instead of silently
@@ -53,6 +54,33 @@ export function ffprobeAudioCodec(rtspUrl) {
 // Full stream/codec dump of an RTSP URL for the "unsupported camera" report — the details needed to
 // add support (video codec/profile/resolution/pixel format, audio codec/sample-rate/channels). Never
 // throws; on failure returns { ok:false, error, stderr } with the last ffprobe error lines.
+//
+// ⚠️ THE OUTPUT OF THIS FUNCTION IS PUBLISHED. It goes into the camera report, which exists to be
+// attached to a public GitHub issue — so every string it returns is credential-redacted. Do not add
+// a new field here without asking what ffmpeg might have put in it.
+/**
+ * Turn ffprobe's raw stderr into the `{ error, stderr }` the report publishes.
+ *
+ * ⚠️ REDACTION HAPPENS HERE, AND THIS IS WHY THE FUNCTION IS EXPORTED. ffprobe prefixes its failure
+ * line with the input URL, password included — and the failure case is the ONLY case that reaches
+ * here, and the only case the report is offered in, so "it only leaks on error" was never a
+ * mitigation (GHSA-wcgj-6p3c-vr9h). Pulled out of the spawn callback so a test can feed it real
+ * captured ffprobe output; the leak lived for two releases partly because the redaction point was
+ * unreachable without a live camera and a live failure.
+ *
+ * @param {string} err  raw stderr
+ * @param {{timedOut:boolean, code:number|null}} how the process ended
+ */
+export function shapeProbeFailure(err, { timedOut, code }) {
+  const lines = String(err || '').split('\n').map((l) => redactCredentials(l.trim())).filter(Boolean);
+  // A timeout kills ffprobe with SIGKILL, so `code` is null — report that as a reachability
+  // problem rather than the meaningless "ffprobe exited null".
+  const error = timedOut
+    ? `Timed out after ${DETAILED_TIMEOUT_MS / 1000}s — no response from the camera (wrong IP/port, offline, or blocked by a firewall)`
+    : (lines[lines.length - 1] || `ffprobe exited ${code}`);
+  return { error, stderr: lines.slice(-8) };
+}
+
 export function probeRtspDetailed(rtspUrl) {
   return new Promise((resolve) => {
     const args = [
@@ -105,13 +133,7 @@ export function probeRtspDetailed(rtspUrl) {
           })),
         });
       } else {
-        const lines = err.split('\n').map((l) => l.trim()).filter(Boolean);
-        // A timeout kills ffprobe with SIGKILL, so `code` is null — report that as a reachability
-        // problem rather than the meaningless "ffprobe exited null".
-        const error = timedOut
-          ? `Timed out after ${DETAILED_TIMEOUT_MS / 1000}s — no response from the camera (wrong IP/port, offline, or blocked by a firewall)`
-          : (lines[lines.length - 1] || `ffprobe exited ${code}`);
-        resolve({ ok: false, error, stderr: lines.slice(-8) });
+        resolve({ ok: false, ...shapeProbeFailure(err, { timedOut, code }) });
       }
     });
   });

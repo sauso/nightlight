@@ -204,7 +204,11 @@ on ONVIF cameras — pan/tilt and two-way audio. The fully tested and **recommen
 audio); on those, set the camera's audio codec to **G711 (a-law)** for reliable sound (some builds
 default to AAC, which not all of them stream well — see `KNOWN-ISSUES.md`). Most other ONVIF cameras
 work too, and Hikvision two-way audio (ISAPI) is supported. If a camera won't connect, the **Add
-camera** screen can generate a redacted **camera report** to help add support for it.
+camera** screen can generate a redacted **camera report** to help add support for it. The report is
+a JSON file that stays on your device — it holds the camera's address, username, ONVIF result and
+stream codecs, with any password replaced by `***`. It is meant to be attached to a GitHub issue, so
+it is worth opening and reading before you post it: the redaction covers passwords, not everything a
+particular camera's firmware might put in an error message.
 
 **Adding a camera**
 
