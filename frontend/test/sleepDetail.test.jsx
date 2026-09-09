@@ -80,6 +80,40 @@ describe('which night it opens on', () => {
     await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-30?detail=1'));
   });
 
+  // ★ `?date=` — how saving a review returns you to the night you just corrected.
+  //
+  // Without it the screen always opened on the LIVE night, so correcting a backlog of older nights
+  // meant re-picking the date after every save. These three tests pin the whole contract, because the
+  // dangerous half is the clamp: a screen that honoured any date in the URL would happily load a night
+  // past the one the picker allows, or a malformed one, and render a convincing "no sleep data".
+  const mountAt = (route, tz = 'Australia/Melbourne') =>
+    renderAsAdmin(
+      <Routes><Route path="/children/:id/sleep" element={<SleepDetail />} /></Routes>,
+      { kids: [KID], settings: { timezone: tz }, route }
+    );
+
+  test('★ a date in the query string wins over the live night', async () => {
+    const get = mockSleep({ live: { scope: 'tonight', night: { night_date: '2026-08-30' } } });
+    mountAt('/children/kid-1/sleep?date=2026-08-24');
+    await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-24?detail=1'));
+  });
+
+  test('★ but never past the newest browsable night', async () => {
+    // 2026-09-30 is beyond the live night, so the picker could not reach it. A URL must not either.
+    const get = mockSleep({ live: { scope: 'tonight', night: { night_date: '2026-08-30' } } });
+    mountAt('/children/kid-1/sleep?date=2026-09-30');
+    await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-30?detail=1'));
+  });
+
+  test('★ and a malformed date falls back rather than requesting it', async () => {
+    const get = mockSleep({ live: { scope: 'tonight', night: { night_date: '2026-08-30' } } });
+    mountAt('/children/kid-1/sleep?date=yesterday');
+    await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-30?detail=1'));
+    // Asserting the fallback alone would pass if the component simply ignored the param on a later
+    // render; this pins that the bad value was never requested at all.
+    expect(get.mock.calls.map((c) => c[0]).some((p) => p.includes('yesterday'))).toBe(false);
+  });
+
   test('★★ and when the server cannot say, YESTERDAY in the app timezone', async () => {
     // The fallback is `todayLocal - 1`, and `todayLocal` is computed with Intl in `settings.timezone`.
     // Under the suite's Pacific/Auckland clock those are different dates for part of every day, so a
