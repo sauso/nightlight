@@ -22,17 +22,36 @@ building goes to §4 *with the evidence*, so it doesn't get re-proposed later.
 
 ## 1. Next up
 
-> **⏳ EVERYTHING IN THIS SECTION IS GATED ON THE SAME DATE.** A detection **holdout** has been running
-> since 2026-08-30 and ends ~**2026-09-09**: production is deliberately frozen on 0.29.0 so the nights
-> it collects are an unbiased measure of the current detector. **Do not tune on those nights, and do not
-> change anything feeding `activity_samples` or `sleepAnalysis` until it closes** — that includes 1.2's
-> remaining items, 1.4's statistic mismatch, and the one-word `Math.round` → `Math.floor` fix in
-> `txIdx` (issue #260, which moves reported bedtimes by a minute on about half of all nights).
+> **✅ THE HOLDOUT IS CLOSED AND SCORED — 2026-09-09.** Ten nights per child, scored against the
+> owner's recorded ground truth. This section is no longer gated.
 >
-> Integrity checked 2026-09-06, counts only, no times read: **~1,435 of a possible 1,440 samples per
-> camera per day** since 08-25, every night computed `status=ok` for both children, no sampling gap over
-> five minutes. The data is there; only the scoring waits. ⚠️ One known hole to expect at scoring time —
-> Renz has **no `wake_at` on 2 of the 12 nights** (08-25, 08-31), so his wake set is 10, not 12.
+> **The scorecard.** Wake: Renz median **1 min** (his is the best number in the system); Raffa median
+> 12 min but **catastrophic on four of ten nights** — −121, −158, −102 and −30. Onset: Raffa is late on
+> **all ten** nights (+3 to +27, median +13 — a systematic bias, so correctable); Renz has two
+> catastrophic outliers (−387, −164) and is otherwise good.
+>
+> ★ **Raffa's early wakes are diagnosed.** He stirs, it registers as an `out_of_bed`, he is back in bed
+> 1–3 minutes later, and then sleeps so still the bed reads *empty* at `MOTION_ACTIVE` for hours. The
+> `into_bed` that falsifies the gap is already in the table and nothing looks at it. Measured: those
+> false gaps are 80–84% of minutes below 0.0005 and only 3–7% above 0.01, against 21–24% for Renz —
+> **Raffa is the stiller sleeper, which is why it hits him and not Renz.** A candidate fix is in
+> **PR #327**, held out of 0.30.0 pending a correctness fix the adversarial review found.
+>
+> ⚠️ **The zone repaint FAILED its pre-registered criterion.** Impossible repeats went 52.7% → **58.6%**
+> (Raffa) and 65.1% → **65.8%** (Renz) while transitions nearly doubled on a smaller window. Tighter
+> zones see the child more and the linking rule did not keep up. **More zone work is low-yield; the
+> classifier is the limiter.** Renz's "bed exactly 0" rate did improve, 6.5% → 4.8%.
+>
+> ⚠️⚠️ **Three integrity problems to fix before the next measurement run**, or it will be as
+> compromised as this one: ground truth was captured on **staging** while **prod** was the thing under
+> test (morning review only reaches production in this release); Renz's production zone **changed
+> mid-holdout** with no audit trail, detectable only by diffing against staging; and 19 of 20
+> ground-truth wakes were **picked from the detector's own transitions**, so they cannot reveal a wake
+> that produced none.
+>
+> ⚠️ **0.30.0 changes the inputs.** It ships the sound dead-band fix, which changes `activity_samples`.
+> **Record the deploy timestamp as a cutoff**, exactly as `2026-08-30 07:40:00 UTC` was for the zone
+> repaint. Any before/after comparison spanning it is invalid.
 
 ### 1.1 Fix Raffa's bed-zone discrimination — `CLOSED` (shipped in 0.27.0; kept for the diagnosis)
 **Closed 2026-08-29.** Four consecutive owner-confirmed mornings on the re-aimed camera: 05:09
