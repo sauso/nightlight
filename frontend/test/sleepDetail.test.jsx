@@ -98,6 +98,22 @@ describe('which night it opens on', () => {
     await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-24?detail=1'));
   });
 
+  // ⚠️⚠️ THE SHAPE HERE IS THE ROUTE'S, NOT A CONVENIENT ONE. `GET /children/:id/review/:date`
+  // returns `{ computed, review, transitions }` — the saved times live under `review`.
+  //
+  // ★ This is not a detail, it is the bug this fixture exists to prevent recurring: the first version
+  // of the receipt read the times from the ROOT of the response, and the first version of this test
+  // mocked that same wrong shape. Both agreed, both were green, and the receipt never appeared in the
+  // real app. Only e2e — which talks to an actual server — could tell them apart. A mock is only
+  // evidence to the extent it matches what the server really sends.
+  const REVIEW_RESPONSE = {
+    child_id: 'kid-1',
+    night_date: '2026-08-24',
+    computed: { status: 'ok', onset_at: '2026-08-24 09:28:00', wake_at: '2026-08-24 20:14:00' },
+    review: { true_onset_at: '2026-08-24 09:30:00', true_wake_at: '2026-08-24 20:15:00' },
+    transitions: [],
+  };
+
   // ★★ THE RECEIPT MUST FOLLOW THE SAVE. e2e caught the absence of this when the first attempt at the
   // `?date=` navigation shipped: the confirmation "Thanks — that's recorded" lives on the CHILD page,
   // and routing here instead dropped it. A save that shows nothing is indistinguishable from one that
@@ -107,7 +123,7 @@ describe('which night it opens on', () => {
     const get = vi.fn((path) => {
       if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'tonight', night: { night_date: '2026-08-30' } });
       if (path.includes('/sleep/insights')) return Promise.resolve(null);
-      if (path.includes('/review/')) return Promise.resolve({ true_onset_at: '2026-08-24 09:30:00', true_wake_at: '2026-08-24 20:15:00' });
+      if (path.includes('/review/')) return Promise.resolve(REVIEW_RESPONSE);
       if (path.includes('/sleep/')) return Promise.resolve(NIGHT);
       return Promise.resolve(null);
     });
@@ -124,7 +140,7 @@ describe('which night it opens on', () => {
     // matters as much as the presence: a receipt that shows on every visit is a lie, not a courtesy.
     const get = vi.fn((path) => {
       if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'tonight', night: { night_date: '2026-08-30' } });
-      if (path.includes('/review/')) return Promise.resolve({ true_onset_at: '2026-08-24 09:30:00', true_wake_at: '2026-08-24 20:15:00' });
+      if (path.includes('/review/')) return Promise.resolve(REVIEW_RESPONSE);
       if (path.includes('/sleep/insights')) return Promise.resolve(null);
       if (path.includes('/sleep/')) return Promise.resolve(NIGHT);
       return Promise.resolve(null);

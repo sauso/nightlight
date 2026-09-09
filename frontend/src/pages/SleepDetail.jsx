@@ -115,8 +115,13 @@ export default function SleepDetail() {
   useEffect(() => {
     if (searchParams.get('saved') !== '1' || !date) { setReceipt(null); return; }
     let alive = true;
+    // ⚠️ The saved times are under `review`, NOT at the top level: GET /review/:date returns
+    // { computed, review, transitions }. Reading them from the root silently yields undefined and the
+    // receipt simply never appears — which is what shipped, because the unit test mocked the shape I
+    // had assumed rather than the one the route returns. Only e2e, which talks to the real server,
+    // could tell the difference.
     api.get(`/children/${id}/review/${date}`)
-      .then((r) => { if (alive) setReceipt(r?.true_onset_at || r?.true_wake_at ? r : null); })
+      .then((r) => { if (alive) setReceipt(r?.review?.true_onset_at || r?.review?.true_wake_at ? r.review : null); })
       .catch(() => { /* the receipt is confirmation, not function — never block the night on it */ });
     return () => { alive = false; };
   }, [id, date, searchParams]);
