@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, ChevronDown, Moon, DoorOpen, Thermometer, Sparkles, Zap, AudioLines, Play, Video } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
@@ -44,6 +44,7 @@ export default function SleepDetail() {
   const { kids } = useCameras();
   const kid = kids.find((k) => k.id === id);
 
+  const [searchParams] = useSearchParams();
   const [maxDate, setMaxDate] = useState(null); // latest browsable night (last completed)
   const [date, setDate] = useState(null); // selected night's local start date
   const [night, setNight] = useState(undefined); // undefined = loading
@@ -56,19 +57,33 @@ export default function SleepDetail() {
 
   // Start on the live night — the one in progress if a window is open (so you land on "tonight · so
   // far"), else the last completed night. That date is also the max the picker allows.
+  //
+  // ...UNLESS `?date=` names one. Saving a review returns you here, and landing on the live night
+  // instead of the night you just corrected meant re-picking the date for every older night you
+  // wanted to fix — which is exactly when someone is working through a backlog of them. The param is
+  // additive: every existing link into this page has none and is unaffected.
   useEffect(() => {
     let alive = true;
     const fallback = addDays(todayLocal, -1);
+    // Only a well-formed local date is honoured; anything else falls through to the live night rather
+    // than loading a night that cannot exist.
+    const wanted = /^\d{4}-\d{2}-\d{2}$/.test(searchParams.get('date') || '') ? searchParams.get('date') : null;
     api.get(`/children/${id}/sleep/live`)
       .then((r) => {
         const nd = r?.night?.night_date || fallback;
         if (!alive) return;
-        setMaxDate(nd > fallback ? nd : fallback);
-        setDate(nd);
+        const max = nd > fallback ? nd : fallback;
+        setMaxDate(max);
+        // Clamp: the picker will not go past `max`, so neither may a hand-typed or stale URL.
+        setDate(wanted && wanted <= max ? wanted : nd);
       })
-      .catch(() => { if (alive) { setMaxDate(fallback); setDate(fallback); } });
+      .catch(() => {
+        if (!alive) return;
+        setMaxDate(fallback);
+        setDate(wanted && wanted <= fallback ? wanted : fallback);
+      });
     return () => { alive = false; };
-  }, [id, todayLocal]);
+  }, [id, todayLocal, searchParams]);
 
   useEffect(() => {
     if (!date) return;
