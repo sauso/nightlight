@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, ChevronDown, Moon, DoorOpen, Thermometer, Sparkles, Zap, AudioLines, Play, Video } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
@@ -9,6 +9,7 @@ import ClipPlayerModal from '../components/ClipPlayerModal.jsx';
 import MediaPlayerModal from '../components/MediaPlayerModal.jsx';
 import RecomputeNight from '../components/RecomputeNight.jsx';
 import ReviewNightButton from '../components/ReviewNightButton.jsx';
+import ReviewReceipt from '../components/ReviewReceipt.jsx';
 
 // Sleep detail: a to-scale timeline of one night for a child, with the wake-ups marked, plus a date
 // picker to browse back through the retained nights (~30 days of activity_samples). Reached by tapping
@@ -39,14 +40,18 @@ const SEG_CLASS = {
 
 export default function SleepDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { settings } = useSettings();
   const tz = settings.timezone || 'UTC';
   const { kids } = useCameras();
   const kid = kids.find((k) => k.id === id);
 
+  const [searchParams] = useSearchParams();
   const [maxDate, setMaxDate] = useState(null); // latest browsable night (last completed)
   const [date, setDate] = useState(null); // selected night's local start date
   const [night, setNight] = useState(undefined); // undefined = loading
+  // The receipt for a correction just saved, when we arrived here from the review screen.
+  const [receipt, setReceipt] = useState(null);
 
   // Local calendar 'today' in the app tz, and the default max = yesterday (a completed night).
   const todayLocal = useMemo(
@@ -56,19 +61,33 @@ export default function SleepDetail() {
 
   // Start on the live night — the one in progress if a window is open (so you land on "tonight · so
   // far"), else the last completed night. That date is also the max the picker allows.
+  //
+  // ...UNLESS `?date=` names one. Saving a review returns you here, and landing on the live night
+  // instead of the night you just corrected meant re-picking the date for every older night you
+  // wanted to fix — which is exactly when someone is working through a backlog of them. The param is
+  // additive: every existing link into this page has none and is unaffected.
   useEffect(() => {
     let alive = true;
     const fallback = addDays(todayLocal, -1);
+    // Only a well-formed local date is honoured; anything else falls through to the live night rather
+    // than loading a night that cannot exist.
+    const wanted = /^\d{4}-\d{2}-\d{2}$/.test(searchParams.get('date') || '') ? searchParams.get('date') : null;
     api.get(`/children/${id}/sleep/live`)
       .then((r) => {
         const nd = r?.night?.night_date || fallback;
         if (!alive) return;
-        setMaxDate(nd > fallback ? nd : fallback);
-        setDate(nd);
+        const max = nd > fallback ? nd : fallback;
+        setMaxDate(max);
+        // Clamp: the picker will not go past `max`, so neither may a hand-typed or stale URL.
+        setDate(wanted && wanted <= max ? wanted : nd);
       })
-      .catch(() => { if (alive) { setMaxDate(fallback); setDate(fallback); } });
+      .catch(() => {
+        if (!alive) return;
+        setMaxDate(fallback);
+        setDate(wanted && wanted <= fallback ? wanted : fallback);
+      });
     return () => { alive = false; };
-  }, [id, todayLocal]);
+  }, [id, todayLocal, searchParams]);
 
   useEffect(() => {
     if (!date) return;
@@ -82,6 +101,30 @@ export default function SleepDetail() {
     const t = date === maxDate ? setInterval(load, 2 * 60 * 1000) : null;
     return () => { alive = false; if (t) clearInterval(t); };
   }, [id, date, maxDate]);
+
+  // ⚠️ THE RECEIPT HAS TO FOLLOW YOU HERE, and this is not a nicety.
+  //
+  // Saving a correction used to land on the child's page, where the morning prompt turns into
+  // "Thanks — that's recorded". Sending you to the night you just corrected is better for working
+  // through a backlog, but the first attempt at it simply dropped that confirmation — and the e2e
+  // suite caught what the unit tests could not. A save that shows nothing is indistinguishable from
+  // one that failed, which is the exact report that caused the receipt to be built in the first place.
+  //
+  // Fetched for THIS date rather than reusing the child page's "pending" card, because that card is
+  // about the most recent reviewable night and you may well have just corrected an older one.
+  useEffect(() => {
+    if (searchParams.get('saved') !== '1' || !date) { setReceipt(null); return; }
+    let alive = true;
+    // ⚠️ The saved times are under `review`, NOT at the top level: GET /review/:date returns
+    // { computed, review, transitions }. Reading them from the root silently yields undefined and the
+    // receipt simply never appears — which is what shipped, because the unit test mocked the shape I
+    // had assumed rather than the one the route returns. Only e2e, which talks to the real server,
+    // could tell the difference.
+    api.get(`/children/${id}/review/${date}`)
+      .then((r) => { if (alive) setReceipt(r?.review?.true_onset_at || r?.review?.true_wake_at ? r.review : null); })
+      .catch(() => { /* the receipt is confirmation, not function — never block the night on it */ });
+    return () => { alive = false; };
+  }, [id, date, searchParams]);
 
   const minDate = maxDate ? addDays(maxDate, -(HISTORY_DAYS - 1)) : null;
   const canPrev = date && minDate && date > minDate;
@@ -126,6 +169,11 @@ export default function SleepDetail() {
             <ChevronRight size={20} />
           </button>
         </div>
+
+        {receipt && (
+          <ReviewReceipt onsetAt={receipt.true_onset_at} wakeAt={receipt.true_wake_at} fmtTime={fmtTime}
+            onOpen={() => navigate(`/children/${id}/review/${date}`)} />
+        )}
 
         <NightBody night={night} fmtTime={fmtTime} tz={tz} tempUnit={settings.temp_unit}
           childId={id} date={date} onRecomputed={setNight} />

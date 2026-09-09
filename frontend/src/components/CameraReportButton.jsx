@@ -12,7 +12,8 @@ const ISSUE_URL =
   encodeURIComponent(
     '**Camera make / model:**\n\n\n**What happens when you try to add it?**\n\n\n' +
     '---\n_Please attach the camera report downloaded from the Add camera screen (drag the .json ' +
-    'onto this box). It has the stream codecs + ONVIF details and no password._\n'
+    'onto this box). It has the stream codecs + ONVIF details, with passwords redacted — please ' +
+    'open it and check before posting._\n'
   );
 
 // Shown on the add/edit-camera screen when a probe or stream check fails. Builds a redacted
@@ -75,8 +76,9 @@ export default function CameraReportButton({ payload }) {
       <div className="onvif-box__title">Camera not connecting?</div>
       <p className="onvif-box__hint">
         Generate a diagnostic report and attach it to a GitHub issue so support can be added for this
-        camera. It captures the stream's codecs and any ONVIF details —{' '}
-        <strong>no password is included</strong>, so you can open and review it first.
+        camera. It captures the stream's codecs and any ONVIF details, with{' '}
+        <strong>passwords redacted</strong> — the file stays on your device, so open and check it
+        before you post it anywhere.
       </p>
       {error && <div className="onvif-box__err">{error}</div>}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>

@@ -59,14 +59,28 @@ test('correcting a night records MY times and shows them back', async ({ page })
   await page.locator('input[type="time"]').nth(1).fill('06:05');
   await page.getByRole('button', { name: 'Save review' }).click();
 
-  // Back on the child's page the prompt must become a RECEIPT, not simply vanish. A prompt that
-  // disappears on save is indistinguishable from one that failed — which is exactly what was reported.
+  // ★ The prompt must become a RECEIPT, not simply vanish. A save that shows nothing is
+  // indistinguishable from one that failed — exactly what was reported before the receipt existed.
+  //
+  // ⚠️ It now appears on the SLEEP DETAIL screen, not the child's page: saving returns you to the night
+  // you just corrected, so a backlog of older nights can be worked through without re-picking the date
+  // every time. THIS ASSERTION IS WHY THAT CHANGE IS SAFE — the first attempt at it moved the
+  // navigation and dropped the receipt, and this line is what caught it. Both frontend unit suites
+  // stayed green throughout, because each screen passed its own tests; only crossing the seam saw it.
+  await expect(page).toHaveURL(/\/sleep\?date=.*saved=1/);
   await expect(page.getByText('Thanks — that’s recorded')).toBeVisible();
   // ⚠️ '6:05', not '06:05'. The card formats with Intl `hour: 'numeric'`, which does NOT zero-pad,
   // so a single-digit hour loses its leading zero on the way to the screen even though the value the
   // person typed and the value stored are both 06:05. Asserting the padded form fails against a
   // perfectly correct app.
   await expect(page.getByText(/You said 20:15 to 6:05/)).toBeVisible();
+
+  // ⚠️ And the CHILD page must have changed too. Asserting the prompt is absent from the sleep screen
+  // would be trivially true — it never appears there — so the check goes where it means something: back
+  // on the page that asked the question, the prompt must now be the receipt. Without this the suite
+  // would happily pass while the morning card still asked a question already answered.
+  await page.goto(childPage);
+  await expect(page.getByText('Thanks — that’s recorded')).toBeVisible();
   await expect(page.getByText('Was last night right?')).toHaveCount(0);
 });
 

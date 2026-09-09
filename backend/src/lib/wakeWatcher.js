@@ -130,6 +130,11 @@ export function handleMinute({ cameraId, bucketStart, motionPeak, soundPeak }) {
       // Fire and forget: the capture awaits a segment settle, and the watcher must stay responsive to
       // the next minute. The ring hold is released once the cut is done, not before.
       captureWakeClip(camera, startMs)
+        // Belt and braces: captureWakeClip is now guaranteed not to reject (issue #309 moved its
+        // pre-flight work inside the try), so this branch should be unreachable. Kept because THIS
+        // `.catch()` is the only reason the old gap never bit — a rejection here silently ends wake
+        // detection for every camera for the rest of the night, and that is too expensive a thing to
+        // guard with an assumption about another module.
         .catch((err) => logger.error(`[wake] capture failed for "${camera.name}": ${err.message}`))
         .finally(() => {
           if (st.run?.holding && st.run.startMs === startMs) {

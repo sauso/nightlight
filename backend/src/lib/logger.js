@@ -1,3 +1,7 @@
+// urlCredentials.js imports nothing, so this cannot create a cycle even though almost everything
+// imports the logger. Keep it that way.
+import { redactCredentials } from './urlCredentials.js';
+
 // Writes to stdout/stderr (captured by `docker logs`) rather than a file in the data
 // volume - simpler to access day-to-day, and Docker's own log rotation (configured at
 // the container level - see docker-compose.yml / the Unraid template's extra
@@ -46,10 +50,25 @@ function pushToBuffer(line) {
   if (buffer.length > MAX_BUFFERED_LINES) buffer.shift();
 }
 
+// ⚠️ EVERY LINE IS CREDENTIAL-REDACTED HERE, AT THE ONE CHOKE POINT (GHSA-wcgj-6p3c-vr9h follow-up).
+//
+// This buffer is not private: `routes/diagnostics.js` puts `server_logs: logger.getRecent()` into the
+// support bundle verbatim, and that bundle's own note promises "no passwords or tokens" — a file the
+// user is told to attach to a public issue. So a credential reaching the log is a credential
+// published, and the promise was being made by a file that never checked.
+//
+// Doing it per-producer was tried first and immediately proved wrong: the camera-report route was
+// fixed, and a route-level test still failed because `lib/onvif.js` logs the same operator-supplied
+// address on its own line. That is the advisory's whole lesson — ONE unredacted producer is enough —
+// and there is no reason to keep re-learning it once per module.
+//
+// Nothing legitimate is lost: this only rewrites `//user:pass@` into `//user:***@`, a shape that has
+// no innocent meaning in a log line. Callers that key off a raw ffmpeg string (see the note on
+// NOISY_MEDIA_LINE above) test the raw line before logging, so this cannot affect behaviour.
 function write(stream, level, args) {
-  const line = `${timestamp()} [${level}] ${args
+  const line = redactCredentials(`${timestamp()} [${level}] ${args
     .map((a) => (typeof a === 'string' ? a : JSON.stringify(a)))
-    .join(' ')}`;
+    .join(' ')}`);
   stream(line);
   pushToBuffer(line);
 }

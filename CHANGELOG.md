@@ -9,6 +9,52 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.30.1] - 2026-09-10
+
+### Fixed
+- **A stir in the night is no longer mistaken for the morning.** If a child shifted enough to register
+  as getting out of bed and was back down a minute later, and then slept very still, the bed looked
+  empty and the night was reported as ending there — sometimes two and a half hours early. Getting back
+  into bed now cancels the exit, which is what it always meant. Measured over ten nights of recorded
+  ground truth: the wake time is right within five minutes on 15 nights out of 20, up from 12, and the
+  average error is less than half what it was.
+- **...and neither is the second half of that same stir.** The fix above cancelled the exit, but a
+  *got out of bed* logged again within a minute of the child climbing back in was still treated as a
+  fresh departure — so a night could still end at the stir, three minutes later than before. The night
+  of 2026-09-09 was reported as a child up for the day at **8:41pm** with 1h15m of sleep (**8:44pm**
+  and 1h18m once the fix above landed), when he had simply got out and climbed straight back into bed.
+  A *got out of bed* within a minute of getting in is now read as the tail of that one movement, and
+  that night reads **9h51m**. Scored across 44 child-nights of recorded ground truth (every reviewed
+  night, on both installations): 311 minutes of wake error removed, 82 added.
+  **Known limit:** a real departure less than a minute after getting into bed is read the same way,
+  because the two look identical in what the cameras record. Where it is the only *got out of bed* of
+  the night it is still used — a night is never left with no wake time at all — but where a later one
+  exists, the later one is reported instead.
+- **Saving a night's correction now returns you to that night, and confirms it there.** Correcting a
+  run of older nights meant going back into Sleep and re-picking the date after every save. You now
+  land on the night you just corrected, with the same *"Thanks — that's recorded"* receipt reading your
+  times back, so the next night is one tap away.
+- **Hardened wake-clip capture against a full or busy disk.** The capture is meant to swallow its own
+  failures — it runs on a timer behind the wake detector — but a failure in the few steps before the
+  recording started could escape that. **Nothing was affected in practice**, because the one thing
+  that calls it already guarded against this; the risk was to whatever called it next. A wake clip
+  that fails partway through is now also marked failed rather than left showing as in progress.
+
+### Security
+- **The camera report no longer contains your camera's password.** When a camera failed to connect,
+  the diagnostic report offered on the **Add camera** screen embedded the RTSP password inside
+  FFmpeg's error text — while the app told you the file contained no password and pre-filled a
+  GitHub issue saying so on your behalf. Passwords are now replaced with `***` everywhere in the
+  report, and the wording no longer promises more than it delivers. If you have already attached a
+  camera report to a public issue, treat that camera's password as disclosed and change it.
+  (GHSA-wcgj-6p3c-vr9h)
+- **Passwords are now stripped from the server log too, and so from the support bundle.** If you
+  pasted a full `rtsp://user:password@camera/path` address into the camera form — which is a natural
+  thing to do when a camera won't connect — that password was written to the log, and the support
+  bundle republishes recent log lines while telling you it contains no passwords. Log lines are now
+  redacted as they are written, whatever produced them. If you have already shared a support bundle
+  taken after entering a camera address that way, change that camera's password.
+
 ## [0.30.0] - 2026-09-09
 
 ### Added
