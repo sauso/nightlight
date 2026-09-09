@@ -79,6 +79,23 @@ const MORNING_ABSENCE_MIN = 20;
 // the data disproves it — in-bed motion is sparse enough that MID-SLEEP empty runs of 226 min
 // (2026-08-23 Raffa) and 312 min (2026-08-25 Raffa, five hours before he actually got up) are normal.
 const MAX_POST_EXIT_ACTIVE_MIN = 20;
+// An `out_of_bed` this soon after the child got back INTO the bed is the tail of that same movement,
+// classified twice — not a second departure. Nobody climbs into a bed and leaves it again inside a
+// minute. See the guard in the departure scan for the measured nights; this is the bound itself.
+//
+// ONE MINUTE IS NOT A FITTED NUMBER, it is the resolution of every piece of evidence that could
+// contradict it. All the corroborating data here — `cribAct`, `cribOcc`, `bedOccupiedFrom` — comes from
+// `activity_samples`, which is bucketed per minute. Two transitions inside the same minute share a
+// single row, so there is no observation anywhere in this system that can tell them apart. Below that
+// resolution the ordering is unverifiable, and a rule that trusts it is trusting nothing.
+//
+// ⚠️ IT DOES NOT SEPARATE CLEANLY, AND NO WINDOW WOULD. Measured on the reviewed nights: the false
+// tails sit at 13 s (2026-09-06 Raffa), 26 s (2026-09-08) and 39 s (2026-09-09) — but a REAL exit sits
+// at 34 s (2026-08-31 Renz, 07:10:42), inside the false population. The two overlap, so any threshold
+// buys the Raffa nights at the price of that Renz one. It is bought deliberately: across all 44 scored
+// child-nights (22 reviewed nights × prod and staging, which see different `activity_samples`) this
+// removes 311 minutes of wake error and adds 82. See the PR for the per-night table.
+const JITTER_REENTRY_MS = 60 * 1000;
 // A bedtime is never a rigid clock time — a tired child can be asleep well before the window opens, and
 // clipping onset to window_start silently loses that sleep (and misreports the night's length). So the
 // timeline is built from this far BEFORE window_start; symmetric with WAKE_LOOKAHEAD_MS at the other
@@ -826,6 +843,9 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     // 23:57 which swallowed the true 05:09 departure whole, reporting the wake at 07:09 — two hours
     // late. Verified over 400k random timelines that the candidate START set is identical to the old
     // one, bridged or not; only the run extents differ.
+    // The best exit that ONLY the settling-tail guard rejected, kept across every candidate gap. See
+    // the guard for why: it must never be the reason a night reports no wake at all.
+    let settlingFallback = null;
     const firstMin = Math.max(algoOnset, 0);
     for (let i = firstMin; i < totalMinExt; i++) {
       if (cribActExt[i]) continue; // an absence begins on a quiet minute
@@ -890,11 +910,73 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
             // of quietly holding its own opinion.
             && bedOccupiedFrom(txIdx(u.created_at)));
           if (reversedBy) continue;
+          // AN EXIT THE CHILD NEVER LEFT FOR. The guard above rejects an exit that a later `into_bed`
+          // reverses — but it is a test on ONE transition, and the failure it exists for arrives as a
+          // CLUSTER. The classifier emits `out → in → out` for a single climb-back-in, and the third
+          // marker, seconds after the return, is not itself reversed by anything: nothing follows it.
+          // So it corroborates the very gap the second marker just falsified, and the rejection buys
+          // three minutes instead of the night.
+          //
+          // ★ Measured, prod 2026-09-09 (the owner reported it: "he got out but went back to bed a few
+          // minutes later"). Raffa: `out 20:41:30`, `into_bed 20:43:57`, `out 20:44:36` — then nothing
+          // until 05:17. His bed reads EXACTLY 0.0000 for the eleven hours after it, because he sleeps
+          // that still, so the gap passes MORNING_ABSENCE_MIN and MAX_POST_EXIT_ACTIVE_MIN on its own
+          // terms. Reported: wake 20:41, **asleep 1h15m**. Proved by ablation on a prod snapshot —
+          // deleting that one row alone moves the night to 05:17 and 9h51m.
+          //
+          // This is the same predicate as the reversal guard with the window on the other side, and the
+          // corroboration requirement is kept for the same reason: an UNCORROBORATED `into_bed` would
+          // let this classifier's documented failure mode (62% of transitions are provably wrong)
+          // veto a genuine departure and report `wake_at = null` — "still asleep" for a child who got
+          // up, which is worse than the bug being fixed.
+          //
+          // ⚠️⚠️ `<=` ON THE ORDERING, NOT `<`. `bed_transitions.created_at` has one-second resolution,
+          // so an `into_bed` and an `out_of_bed` at the IDENTICAL second are representable — and that
+          // is the strongest case for this guard, not an exclusion: if the two cannot even be ordered,
+          // nothing can establish that the child left. An adversarial review found the tie escaping.
+          const settlingTail = transitions.find((back) => back.type === TRANSITION.INTO_BED
+            && txMs(back.created_at) <= txMs(t.created_at)
+            && txMs(t.created_at) - txMs(back.created_at) <= JITTER_REENTRY_MS
+            // ⚠️ txIdx, not a hand-rolled floor — same reason as the reversal guard above.
+            && bedOccupiedFrom(txIdx(back.created_at)));
           const dt = Math.abs(txMs(t.created_at) - emptyStartMs);
+          if (settlingTail) {
+            // ⚠️⚠️ THIS GUARD MUST NEVER BE THE REASON A NIGHT HAS NO WAKE AT ALL — the same rule the
+            // reversal guard's corroboration exists to satisfy, and an adversarial review showed the
+            // corroboration alone does not achieve it here.
+            //
+            // Why not: the two directions are asymmetric. Forward, the claim is "he came back and
+            // stayed", so occupancy over the next 150 minutes is exactly the right evidence. Backward,
+            // the claim is "he was in bed one second ago" — and 150 minutes of hindsight cannot speak
+            // to that. Worse, MAX_POST_EXIT_ACTIVE_MIN deliberately ALLOWS up to 20 active minutes
+            // after a real departure (the documented parent-handles-the-bed case), and every one of
+            // them corroborates. Demonstrated: a genuine 05:50 exit, a spurious `into_bed` 30 s
+            // before it, and a parent tidying the bed at 06:30 — the exit was rejected, no later
+            // candidate existed, and the night reported `wake_at = null`, "still asleep" for a child
+            // who had got up. That is worse than the wrong TIME this guard exists to fix.
+            //
+            // Tightening the witness window was tried and does not work: on the real nights the false
+            // tail and a REAL exit both show exactly 3 occupied minutes in the following 30. So the
+            // guard keeps its reach and gives up its veto instead — it may SKIP an exit in favour of a
+            // later one, but if there is no later one it hands this one back.
+            if (dt <= WAKE_SNAP_MS && (settlingFallback == null || dt < settlingFallback.dt)) {
+              settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at };
+            }
+            continue;
+          }
           if (dt <= WAKE_SNAP_MS && (best == null || dt < best.dt)) best = { dt, ms: txMs(t.created_at), at: t.created_at };
         }
         if (best) { transitionExitMs = best.ms; exitTransitionAt = best.at; break; } // corroborated departure - the morning exit
       }
+
+    // Nothing survived, and the settling-tail guard is the only reason: hand back what it skipped
+    // rather than report a child who plainly got up as still asleep. See that guard for the evidence.
+    // Deliberately NOT extended to the reversal guard — that one has its own corroboration and its own
+    // tests, and widening it here would be a second, unmeasured change.
+    if (transitionExitMs == null && settlingFallback != null) {
+      transitionExitMs = settlingFallback.ms;
+      exitTransitionAt = settlingFallback.at;
+    }
     }
   }
 
