@@ -291,6 +291,14 @@ measurement**, and (like everything here) never a safety device — see the warn
   reaching in for a toy or a blanket) does not restart that count; several minutes together do, because
   that is a person at the bed rather than a passing arm. The wake is only accepted where a recorded
   **got out of bed** backs it up, so a quiet spell alone can never end the night early.
+- **A child who gets out and climbs straight back in has not got up.** If a *got into bed* follows a
+  *got out of bed* shortly after, the night carries on rather than ending there — and so does a second
+  *got out of bed* logged within a minute of that return, because climbing back into a bed and leaving
+  it again inside a minute is one movement being read twice, not two trips. This matters most for a
+  very still sleeper: once they settle, their bed can look identical to an empty one for hours, so a
+  false exit at 8:40pm would otherwise be reported as the end of the night.
+  **Known limit:** a genuine departure less than a minute after getting into bed is read the same way
+  and will be missed; the two are not distinguishable from what the cameras record.
 - **Tell it when it got a night wrong.** The morning after, the child's page offers **Was last night
   right?** — confirm the times or correct them, and mark any recorded *got into / out of bed* event as
   right, wrong, or "can't tell" against the still frame it was decided from. It appears once per night

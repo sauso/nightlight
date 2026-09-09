@@ -79,6 +79,23 @@ const MORNING_ABSENCE_MIN = 20;
 // the data disproves it — in-bed motion is sparse enough that MID-SLEEP empty runs of 226 min
 // (2026-08-23 Raffa) and 312 min (2026-08-25 Raffa, five hours before he actually got up) are normal.
 const MAX_POST_EXIT_ACTIVE_MIN = 20;
+// An `out_of_bed` this soon after the child got back INTO the bed is the tail of that same movement,
+// classified twice — not a second departure. Nobody climbs into a bed and leaves it again inside a
+// minute. See the guard in the departure scan for the measured nights; this is the bound itself.
+//
+// ONE MINUTE IS NOT A FITTED NUMBER, it is the resolution of every piece of evidence that could
+// contradict it. All the corroborating data here — `cribAct`, `cribOcc`, `bedOccupiedFrom` — comes from
+// `activity_samples`, which is bucketed per minute. Two transitions inside the same minute share a
+// single row, so there is no observation anywhere in this system that can tell them apart. Below that
+// resolution the ordering is unverifiable, and a rule that trusts it is trusting nothing.
+//
+// ⚠️ IT DOES NOT SEPARATE CLEANLY, AND NO WINDOW WOULD. Measured on the reviewed nights: the false
+// tails sit at 13 s (2026-09-06 Raffa), 26 s (2026-09-08) and 39 s (2026-09-09) — but a REAL exit sits
+// at 34 s (2026-08-31 Renz, 07:10:42), inside the false population. The two overlap, so any threshold
+// buys the Raffa nights at the price of that Renz one. It is bought deliberately: across all 44 scored
+// child-nights (22 reviewed nights × prod and staging, which see different `activity_samples`) this
+// removes 311 minutes of wake error and adds 82. See the PR for the per-night table.
+const JITTER_REENTRY_MS = 60 * 1000;
 // A bedtime is never a rigid clock time — a tired child can be asleep well before the window opens, and
 // clipping onset to window_start silently loses that sleep (and misreports the night's length). So the
 // timeline is built from this far BEFORE window_start; symmetric with WAKE_LOOKAHEAD_MS at the other
@@ -890,6 +907,31 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
             // of quietly holding its own opinion.
             && bedOccupiedFrom(txIdx(u.created_at)));
           if (reversedBy) continue;
+          // AN EXIT THE CHILD NEVER LEFT FOR. The guard above rejects an exit that a later `into_bed`
+          // reverses — but it is a test on ONE transition, and the failure it exists for arrives as a
+          // CLUSTER. The classifier emits `out → in → out` for a single climb-back-in, and the third
+          // marker, seconds after the return, is not itself reversed by anything: nothing follows it.
+          // So it corroborates the very gap the second marker just falsified, and the rejection buys
+          // three minutes instead of the night.
+          //
+          // ★ Measured, prod 2026-09-09 (the owner reported it: "he got out but went back to bed a few
+          // minutes later"). Raffa: `out 20:41:30`, `into_bed 20:43:57`, `out 20:44:36` — then nothing
+          // until 05:17. His bed reads EXACTLY 0.0000 for the eleven hours after it, because he sleeps
+          // that still, so the gap passes MORNING_ABSENCE_MIN and MAX_POST_EXIT_ACTIVE_MIN on its own
+          // terms. Reported: wake 20:41, **asleep 1h15m**. Proved by ablation on a prod snapshot —
+          // deleting that one row alone moves the night to 05:17 and 9h51m.
+          //
+          // This is the same predicate as the reversal guard with the window on the other side, and the
+          // corroboration requirement is kept for the same reason: an UNCORROBORATED `into_bed` would
+          // let this classifier's documented failure mode (62% of transitions are provably wrong)
+          // veto a genuine departure and report `wake_at = null` — "still asleep" for a child who got
+          // up, which is worse than the bug being fixed.
+          const settlingTail = transitions.find((back) => back.type === TRANSITION.INTO_BED
+            && txMs(back.created_at) < txMs(t.created_at)
+            && txMs(t.created_at) - txMs(back.created_at) <= JITTER_REENTRY_MS
+            // ⚠️ txIdx, not a hand-rolled floor — same reason as the reversal guard above.
+            && bedOccupiedFrom(txIdx(back.created_at)));
+          if (settlingTail) continue;
           const dt = Math.abs(txMs(t.created_at) - emptyStartMs);
           if (dt <= WAKE_SNAP_MS && (best == null || dt < best.dt)) best = { dt, ms: txMs(t.created_at), at: t.created_at };
         }

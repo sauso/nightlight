@@ -1065,5 +1065,71 @@
       "camera-report-redaction.test.js"
     ],
     "note": "error and stderr are separate fields; both must be redacted."
+  },
+  {
+    "label": "jitter: the settling-tail guard deleted outright",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (settlingTail) continue;",
+    "replace": ";",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "note": "This is the whole fix. Without it prod 2026-09-09 reports Raffa's night as 1h15m."
+  },
+  {
+    "label": "jitter: the window boundary is inclusive",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "<= JITTER_REENTRY_MS",
+    "replace": "< JITTER_REENTRY_MS",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "note": "A tail at exactly JITTER_REENTRY_MS must still be treated as the same movement."
+  },
+  {
+    "label": "jitter: the window is one minute, not wider",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const JITTER_REENTRY_MS = 60 * 1000;",
+    "replace": "const JITTER_REENTRY_MS = 600 * 1000;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "note": "Widening is the dangerous direction: a REAL exit 34s after a return is on record (2026-08-31 Renz), and the populations overlap, so a wider window eats genuine departures."
+  },
+  {
+    "label": "jitter: the window is one minute, not narrower",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const JITTER_REENTRY_MS = 60 * 1000;",
+    "replace": "const JITTER_REENTRY_MS = 30 * 1000;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "note": "30s was measured and rejected: it misses the 39s tail that cost prod 2026-09-09 its whole night."
+  },
+  {
+    "label": "jitter: the tail is looked for on the wrong side of the return",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& txMs(back.created_at) < txMs(t.created_at)",
+    "replace": "&& txMs(back.created_at) > txMs(t.created_at)",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "note": "The reversal guard above already looks FORWARD from the exit. This one must look BACK, or it is a duplicate of that guard with a shorter window."
+  },
+  {
+    "label": "jitter: a settling tail is believed without an occupied bed behind it",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& bedOccupiedFrom(txIdx(back.created_at)));",
+    "replace": "&& true);",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "note": "Same lesson as the reversal guard's own corroboration mutant: without it a spurious into_bed lets this guard reject a REAL departure and the night reports wake_at = null."
   }
 ]

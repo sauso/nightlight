@@ -16,6 +16,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   into bed now cancels the exit, which is what it always meant. Measured over ten nights of recorded
   ground truth: the wake time is right within five minutes on 15 nights out of 20, up from 12, and the
   average error is less than half what it was.
+- **...and neither is the second half of that same stir.** The fix above cancelled the exit, but a
+  *got out of bed* logged again within a minute of the child climbing back in was still treated as a
+  fresh departure — so a night could still end at the stir, three minutes later than before. On
+  2026-09-09 that reported a child as up for the day at **8:41pm**, with 1h15m of sleep, when he had
+  simply got out and climbed straight back into bed. A *got out of bed* within a minute of getting in
+  is now read as the tail of that one movement. Scored across 44 child-nights of recorded ground truth
+  (every reviewed night, on both installations): 311 minutes of wake error removed, 82 added.
+  **Known limit:** a real departure less than a minute after getting into bed is now missed — the two
+  look identical in what the cameras record, and one such night is on record.
 - **Saving a night's correction now returns you to that night, and confirms it there.** Correcting a
   run of older nights meant going back into Sleep and re-picking the date after every save. You now
   land on the night you just corrected, with the same *"Thanks — that's recorded"* receipt reading your
