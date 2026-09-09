@@ -141,8 +141,15 @@ router.get('/:id/sleep/:date', (req, res) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(req.params.date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
   // The SAVED row, computed once the morning after and never revisited. This is what the child's
   // "last night" card shows, and it is the only thing a recompute can actually change — so it is the
-  // only honest "before" to compare against. Everything else on this route recomputes, and comparing a
-  // recompute against a recompute can never differ.
+  // only honest "before" to compare against.
+  //
+  // ⚠️ A RECOMPUTE IS NOT TIME-INVARIANT, so two fresh computes are not a valid before/after either.
+  // This used to say comparing a recompute against a recompute "can never differ" (issue #319). It
+  // can: `computeNight` analyses an open night only up to `Date.now()` (`inProgress` / `effEndMs`),
+  // and a completed night's wake keeps DRIFTING LATER through the morning — measured at 2h40m between
+  // two recomputes of the same night in this repo (see lib/sleepReviews.js), and corroborated by the
+  // 2026-09-09 holdout scoring. That drift is why `computeAndStoreNight` has an `allowDowngrade`
+  // guard: re-scoring is not a neutral operation and can make a night WORSE.
   if (req.query.stored === '1') {
     const row = db
       .prepare('SELECT * FROM sleep_nights WHERE child_id = ? AND night_date = ?')

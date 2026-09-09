@@ -41,8 +41,17 @@ export function urlUsername(raw) {
 
 /**
  * The URL with the password removed and the username kept — what an admin may see.
- * Unparseable input is returned unchanged EXCEPT that it is not trusted to be password-free:
- * callers get `null` so they cannot accidentally display something they have not inspected.
+ *
+ * Three cases, and it always returns a string (issue #320 — this used to document a `null` return
+ * that no branch produces, so a caller's `=== null` is a check that never fires):
+ *   - parseable      → the password-stripped URL
+ *   - unparseable, but demonstrably credential-free (no `@`) → the trimmed original
+ *   - anything else  → `''`
+ *
+ * The last case is the point: input that cannot be shown to be safe is reduced rather than echoed,
+ * so a caller cannot accidentally display something uninspected.
+ *
+ * @returns {string}
  */
 export function stripUrlPassword(raw) {
   const u = parse(raw);

@@ -17,9 +17,14 @@ import { SortableContext, rectSortingStrategy, arrayMove } from '@dnd-kit/sortab
 // position and reappears where it was when it is switched back on, rather than being shunted to the
 // end by the first drag anyone does. That means the indices must be looked up in `full`, never in the
 // list on screen; computing them from the visible subset would write an order missing every disabled
-// camera. The component around this mounts the WebRTC/HLS player stack and cannot run under jsdom
-// (see the coverage exclusions in vite.config.js), which is exactly why this logic lives out here
-// where it can be tested — same arrangement as CameraTile's `detectionPayload`.
+// camera. It lives out here because it is pure logic worth testing directly — same arrangement as
+// CameraTile's `detectionPayload`.
+//
+// ⚠️ NOT because the component is untestable. This used to say the surrounding component "cannot run
+// under jsdom" and cited a coverage exclusion in vite.config.js as evidence; that exclusion has since
+// been removed precisely because the claim was false, and liveMonitor.test.jsx / appShell.test.jsx
+// render this component under jsdom today (issue #322). If you are deciding whether to write a test
+// for something in here: you can.
 export function reorderCameras(full, activeId, overId) {
   const oldIndex = full.findIndex((c) => c.id === activeId);
   const newIndex = full.findIndex((c) => c.id === overId);

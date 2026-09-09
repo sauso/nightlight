@@ -407,6 +407,25 @@ describe('★ captureWakeClip refuses quietly — it runs behind a detector', ()
     // acceptable outcomes; throwing is not, and that is what this asserts.
     if (id != null) assert.equal(rowOf(id).status, 'failed');
   });
+
+  test('★ a throw from the PRE-FLIGHT work also resolves, not just one from the capture', async () => {
+    // REGRESSION, issue #309. The JSDoc said "Never throws" and the try opened AFTER the free-space
+    // check and the INSERT, so anything that failed in that window — SQLITE_BUSY, a disk error —
+    // rejected the promise instead. The one live caller happened to have its own `.catch()`, which is
+    // why nothing noticed; the next caller, trusting the JSDoc, would not have had one.
+    //
+    // A non-finite wakeStartMs reaches `new Date(NaN).toISOString()` in exactly that window and
+    // throws RangeError. The specific input matters less than WHERE it throws: the previous test
+    // fails inside extractClip, which was always covered.
+    armRing();
+    setSettings({ wake_clips_enabled: 1 });
+    const before = db.prepare('SELECT COUNT(*) n FROM recordings').get().n;
+    assert.equal(await captureWakeClip(camera(), NaN), null, 'rejected instead of resolving to null');
+    // And it did not leave a half-written row behind claiming to be in progress.
+    const stranded = db.prepare("SELECT COUNT(*) n FROM recordings WHERE status = 'pending'").get().n;
+    assert.equal(stranded, 0, `left ${stranded} pending row(s) after throwing`);
+    assert.ok(db.prepare('SELECT COUNT(*) n FROM recordings').get().n >= before);
+  });
 });
 
 describe('★ wake-clip retention — the sweeper that runs unattended every night', () => {

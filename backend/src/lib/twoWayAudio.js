@@ -231,7 +231,10 @@ class OnvifBackchannelTalk {
         }
       };
       // No per-request timeout otherwise (the socket's own timeout is disabled after connect), so an
-      // unanswered request would hang forever — reject instead so start()/close() can't wedge. Destroy
+      // unanswered request would hang forever — reject instead so start() can't wedge. (NOT close():
+      // it no longer awaits a reply at all and has its own 250 ms backstop — see its comment below.
+      // This sentence used to credit the timeout with protecting close() too, which stopped being
+      // true ninety lines away in this same file. Issue #314.) Destroy
       // the socket too: after a timeout we no longer know where the response framing is, so a late reply
       // would be mis-parsed as the *next* request's response (wrong CSeq, wrong status).
       timer = setTimeout(() => {

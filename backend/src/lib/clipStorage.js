@@ -18,8 +18,19 @@ import {
 // Shipped in 0.17.0.
 
 const GB = 1024 * 1024 * 1024;
-// Refuse to start a new clip if the volume has less than this free. A clip is a few MB, but this is a
-// hard floor so recording can never be the thing that fills a disk out from under the DB.
+// Refuse to START a new clip if the volume has less than this free, so recording is unlikely to be
+// the thing that fills a disk out from under the DB.
+//
+// ⚠️ WHAT THIS DOES AND DOES NOT GUARANTEE. `hasMinFreeSpace()` is a PRE-FLIGHT check only: callers
+// ask it before writing (recordings.js, clipCapture.js, timelapse.js), nothing re-checks during a
+// write, and nothing accounts for writes already in flight on other cameras. So the guarantee is "a
+// recording will not start below 500 MB" — not "the disk cannot fill".
+//
+// The size of one write has grown since this was written: on-demand recording (0.25.0) is capped at
+// 600 s at ~172 KiB/s, so ~100 MiB, where an alert clip is a few MB. Five concurrent max-length
+// recordings can consume the whole reserve, and each one's pre-flight check passed before any of
+// them had written a byte. Whether an aggregate or mid-write check is worth adding is a live design
+// question (issue #308) and depends on real deployment sizes; it is not asserted here either way.
 // Exported so a test can state the bound instead of hoping the machine it runs on happens to be
 // either side of it — the free space on a dev box or a CI runner is not something a test may assume.
 export const MIN_FREE_BYTES = 500 * 1024 * 1024; // 500 MB
