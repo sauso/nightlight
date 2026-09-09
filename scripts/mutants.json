@@ -922,5 +922,148 @@
       "sleepAnalysis.test.js"
     ],
     "note": "Uncapped, occupancy hours later vouches for a return that never happened. Survived a green suite until the cap test existed - and it is the same boundary the floor/round index defect lived on."
+  },
+  {
+    "label": "redact: no-op replacement publishes the password",
+    "file": "backend/src/lib/urlCredentials.js",
+    "find": "'$1$2:***@'",
+    "replace": "'$1$2:$3@'",
+    "expect": "killed",
+    "tests": [
+      "camera-report-redaction.test.js"
+    ],
+    "note": "GHSA-wcgj-6p3c-vr9h. The original defect, expressed as a mutant."
+  },
+  {
+    "label": "redact: only the FIRST credential per line is scrubbed",
+    "file": "backend/src/lib/urlCredentials.js",
+    "find": "@/g, ",
+    "replace": "@/, ",
+    "expect": "killed",
+    "tests": [
+      "camera-report-redaction.test.js"
+    ],
+    "note": "ffmpeg prints two URLs on one line when it falls back to the sub-stream."
+  },
+  {
+    "label": "redact: drop the // anchor (eats emails and SDP attributes)",
+    "file": "backend/src/lib/urlCredentials.js",
+    "find": "  return text.replace(/(\\/\\/)([^/\\s:@]*):([^/\\s@]+)@/g, '$1$2:***@');",
+    "replace": "  return text.replace(/(\\/?\\/?)([^/\\s:@]*):([^/\\s@]+)@/g, '$1$2:***@');",
+    "expect": "killed",
+    "tests": [
+      "camera-report-redaction.test.js"
+    ],
+    "note": "Over-broad redaction destroys the diagnostic, which gets the scrubber switched off."
+  },
+  {
+    "label": "redact: forbid a raw colon inside the password",
+    "file": "backend/src/lib/urlCredentials.js",
+    "find": "  return text.replace(/(\\/\\/)([^/\\s:@]*):([^/\\s@]+)@/g, '$1$2:***@');",
+    "replace": "  return text.replace(/(\\/\\/)([^/\\s:@]*):([^/\\s:@]+)@/g, '$1$2:***@');",
+    "expect": "killed",
+    "tests": [
+      "camera-report-redaction.test.js"
+    ],
+    "note": "Reachable when an operator pastes a whole rtsp:// URL into the address box."
+  },
+  {
+    "label": "redact: require a non-empty username",
+    "file": "backend/src/lib/urlCredentials.js",
+    "find": "  return text.replace(/(\\/\\/)([^/\\s:@]*):([^/\\s@]+)@/g, '$1$2:***@');",
+    "replace": "  return text.replace(/(\\/\\/)([^/\\s:@]+):([^/\\s@]+)@/g, '$1$2:***@');",
+    "expect": "killed",
+    "tests": [
+      "camera-report-redaction.test.js"
+    ],
+    "note": "The docstring claims the user may be empty; this pins that claim."
+  },
+  {
+    "label": "scrub: literal threshold moved off 4",
+    "file": "backend/src/lib/urlCredentials.js",
+    "find": "  const lit = typeof secret === 'string' && secret.length >= 4 ? secret : null;",
+    "replace": "  const lit = typeof secret === 'string' && secret.length >= 5 ? secret : null;",
+    "expect": "killed",
+    "tests": [
+      "camera-report-redaction.test.js"
+    ],
+    "note": "A deliberate trade-off, so it is pinned from both sides."
+  },
+  {
+    "label": "scrub: skip the encoded-literal pass",
+    "file": "backend/src/lib/urlCredentials.js",
+    "find": "if (encLit) s = s.split(encLit).join",
+    "replace": "if (false && encLit) s = s.split(encLit).join",
+    "expect": "killed",
+    "tests": [
+      "camera-report-redaction.test.js"
+    ],
+    "note": "Survived until the fixture stopped being a full URL that redactCredentials already handled."
+  },
+  {
+    "label": "scrub: flatten class instances instead of passing them through",
+    "file": "backend/src/lib/urlCredentials.js",
+    "find": "proto !== Object.prototype && proto !== null",
+    "replace": "false",
+    "expect": "killed",
+    "tests": [
+      "camera-report-redaction.test.js"
+    ],
+    "note": "Would silently destroy a Date/Buffer field rather than scrub it."
+  },
+  {
+    "label": "scrub: prototype guard that also skips Object.create(null)",
+    "file": "backend/src/lib/urlCredentials.js",
+    "find": "proto !== Object.prototype && proto !== null",
+    "replace": "proto !== Object.prototype",
+    "expect": "killed",
+    "tests": [
+      "camera-report-redaction.test.js"
+    ],
+    "note": "The plausible wrong version of the guard: a null-prototype bag is data and must be walked."
+  },
+  {
+    "label": "route: publish the report without scrubbing it",
+    "file": "backend/src/routes/cameras.js",
+    "find": "const safe = scrubSecrets(report, password);",
+    "replace": "const safe = report;",
+    "expect": "killed",
+    "tests": [
+      "camera-report-route.test.js"
+    ],
+    "note": "THE WIRING. Survived every test until camera-report-route.test.js existed."
+  },
+  {
+    "label": "logger: stop redacting credentials at the choke point",
+    "file": "backend/src/lib/logger.js",
+    "find": "const line = redactCredentials(`${timestamp()}",
+    "replace": "const line = ((x)=>x)(`${timestamp()}",
+    "expect": "killed",
+    "tests": [
+      "camera-report-route.test.js"
+    ],
+    "note": "server_logs is republished verbatim inside the diagnostics bundle, under a note promising no passwords. Per-producer redaction was tried and lib/onvif.js immediately defeated it."
+  },
+  {
+    "label": "route: trust the scrub instead of checking it",
+    "file": "backend/src/routes/cameras.js",
+    "find": "const leak = findCredentialLeak(safe, password);",
+    "replace": "const leak = null;",
+    "expect": "survives",
+    "tests": [
+      "camera-report-route.test.js"
+    ],
+    "note": "EQUIVALENT-ish BY DESIGN: this is a backstop for a field nobody has added yet, so with the current report shape scrubSecrets already leaves nothing for it to catch. Recorded so its survival is not read as a gap. If a future field makes it killable, change expect to killed."
+  },
+  {
+    "label": "probe: build stderr from the UNredacted lines",
+    "file": "backend/src/lib/rtspProbe.js",
+    "find": "return { error, stderr: lines.slice(-8) };",
+    "replace": "return { error, stderr: String(err || '').split('\n').slice(-8) };",
+    "expect": "killed",
+    "tests": [
+      "camera-report-redaction.test.js"
+    ],
+    "note": "error and stderr are separate fields; both must be redacted."
   }
 ]
