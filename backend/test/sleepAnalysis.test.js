@@ -281,12 +281,17 @@ test('a lone minute of a parent reaching in does not break the morning absence',
 // minutes later. The bound is not a new constant — MORNING_ABSENCE_MIN is the absence the rule
 // requires, so a return inside it contradicts the very claim being made. On the real nights the false
 // returns were 1-3 minutes and the true exit's next into_bed was 69.
+// ⚠️ STILL_OCCUPIED until the real exit, and it is load-bearing, not decoration. The child IS in this
+// bed from the stir until 05:49, so the bed carries occupancy-level micro-motion — which is precisely
+// what the guard demands before it will believe the return. A fixture using the empty-bed floor would
+// describe a bed nobody is in and would (correctly) not be treated as a reversal at all.
 function layReversedExitNight() {
-  laySamples(at(19, 30), at(7, 0, 1), [
+  laySamples(at(19, 30), at(5, 52, 1), [
     [at(19, 30), at(19, 40)], // settling
     [at(3, 11, 1), at(3, 13, 1)], // the stir: out of bed and straight back in
     [at(5, 49, 1), at(5, 52, 1)], // the real morning exit
-  ]);
+  ], STILL_OCCUPIED);
+  laySamples(at(5, 52, 1), at(7, 0, 1), [], STILL_EMPTY); // gone: the bed reads empty afterwards
   insertTransition.run(CAM, 'out_of_bed', 0.045, sqlTime(at(3, 11, 1)));
   insertTransition.run(CAM, 'into_bed', 0.023, sqlTime(at(3, 12, 1))); // back in bed one minute later
   insertTransition.run(CAM, 'out_of_bed', 0.039, sqlTime(at(5, 49, 1))); // the real departure
@@ -298,6 +303,55 @@ test('★ an exit reversed a minute later is not the morning departure', () => {
   const night = computeNight(CHILD, DATE);
   assert.equal(night.status, 'ok');
   assert.equal(hhmm(night.wake_at), '05:49', 'the real exit, not the 03:11 stir he came straight back from');
+});
+
+test('★★ a spurious into_bed over an EMPTY bed does not cancel a real departure', () => {
+  // ★★★ THE ADVERSARIAL REVIEW'S FINDING, and the reason the guard demands corroboration.
+  //
+  // The first version trusted the bare transition row. This night is a genuine 05:09 departure — bed
+  // empty for the rest of the window — followed by a classifier-invented into_bed six minutes later
+  // with NO occupancy behind it. Trusting it rejected the real departure, the scan found no later
+  // candidate, and the night reported wake_at = NULL: "still asleep" for a child who had plainly got
+  // up. That is worse than the bug the guard exists to fix, which at least produced a wrong time.
+  //
+  // 62% of this classifier's transitions are provably wrong (same type twice running), so an
+  // uncorroborated into_bed is its documented failure mode rather than a contrived input.
+  laySamples(at(19, 30), at(5, 9, 1), [[at(19, 30), at(19, 40)], [at(5, 0, 1), at(5, 9, 1)]], STILL_OCCUPIED);
+  laySamples(at(5, 9, 1), at(7, 0, 1), [], STILL_EMPTY); // gone, and the bed reads empty
+  insertTransition.run(CAM, 'out_of_bed', 0.04, sqlTime(at(5, 9, 1))); // the real departure
+  insertTransition.run(CAM, 'into_bed', 0.02, sqlTime(at(5, 15, 1))); // noise: nobody actually returned
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.status, 'ok');
+  assert.equal(hhmm(night.wake_at), '05:09', 'an into_bed with an empty bed behind it is not a return');
+  assert.ok(night.wake_at, 'and the night must not come back as "still asleep"');
+});
+
+// ★★ THE BOUNDARY ITSELF, both sides. The adversarial review found the guard's window had no test
+// anywhere between 20 and 69 minutes: a mutant widening it to 50 minutes survived a green suite, as
+// did narrowing it to 2. MORNING_ABSENCE_MIN is shared with the absence-length threshold and has
+// already been retuned once (10 -> 20), so a future retune would silently move this window with
+// nothing catching it. These two pin the edge rather than a comfortable distance from it.
+const layReturnAfter = (mins) => {
+  laySamples(at(19, 30), at(5, 52, 1), [
+    [at(19, 30), at(19, 40)],
+    [at(3, 11, 1), at(3, 13, 1)],
+    [at(5, 49, 1), at(5, 52, 1)],
+  ], STILL_OCCUPIED);
+  laySamples(at(5, 52, 1), at(7, 0, 1), [], STILL_EMPTY);
+  insertTransition.run(CAM, 'out_of_bed', 0.045, sqlTime(at(3, 11, 1)));
+  insertTransition.run(CAM, 'into_bed', 0.023, sqlTime(at(3, 11 + mins, 1)));
+  insertTransition.run(CAM, 'out_of_bed', 0.039, sqlTime(at(5, 49, 1)));
+};
+
+test('★★ a return at exactly MORNING_ABSENCE_MIN still cancels the exit', () => {
+  layReturnAfter(20); // 20 minutes exactly — the boundary is inclusive
+  assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '05:49');
+});
+
+test('★★ a return one minute past it does not', () => {
+  layReturnAfter(21); // 21 minutes — outside the absence being claimed, so the exit stands
+  assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '03:11');
 });
 
 test('★ but an exit is NOT disqualified by a return long afterwards', () => {

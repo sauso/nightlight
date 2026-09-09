@@ -737,10 +737,31 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       )
       .all(...scoreCams, analysisStartSql, txEndSql);
     const cribActExt = new Array(totalMinExt).fill(false);
+    // Occupancy-level micro-motion, from the SAME rows. Twenty times more sensitive than
+    // MOTION_ACTIVE, and it answers a different question: not "did something happen in this bed" but
+    // "is anyone in it at all". `null` = no sample, a gap that must not read as an empty bed.
+    const cribOccExt = new Array(totalMinExt).fill(null);
     for (const r of extRows) {
       const i = idxOf(r.t);
-      if (i >= 0 && i < totalMinExt && r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) cribActExt[i] = true;
+      if (i < 0 || i >= totalMinExt) continue;
+      if (r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) cribActExt[i] = true;
+      if (r.motion_peak != null) cribOccExt[i] = r.motion_peak >= OCCUPANCY_MIN_PEAK;
     }
+
+    // Is the bed demonstrably OCCUPIED from minute `from` onwards?
+    //
+    // Deliberately mirrors bedOccupiedAfter's contract INCLUDING its failure direction: its only
+    // caller uses a true result to REJECT something, so it returns FALSE when it cannot tell. An
+    // unreadable stretch then leaves the pre-existing behaviour untouched instead of inventing a
+    // reversal out of missing data.
+    const bedOccupiedFrom = (from) => {
+      const to = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt);
+      let moved = 0;
+      for (let i = Math.max(from, 0); i < to; i++) {
+        if (cribOccExt[i] === true && ++moved >= OCCUPANCY_MIN_MINUTES) return true;
+      }
+      return false;
+    };
     // Suffix count of bed-active minutes from each index to the end, so we can cheaply ask "how much
     // in-bed motion remains after this point?" for each candidate gap.
     const activeSuffix = new Array(totalMinExt + 1).fill(0);
@@ -842,9 +863,25 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
           // into_bed at 06:58, 69 minutes later, when he was put down again — rejecting an exit for
           // any later return would have broken the night this fixes. Both directions are pinned by
           // tests.
+          //
+          // ⚠️⚠️ THE RETURN MUST BE CORROBORATED BY AN OCCUPIED BED. This half is not optional, and
+          // leaving it out is a worse bug than the one being fixed. The first version of this guard
+          // trusted the bare transition row; an adversarial review showed that a SPURIOUS into_bed
+          // after a genuine departure then rejects it, the scan finds no later candidate, and the
+          // night reports `wake_at = null` — "still asleep" for a child who plainly got up. With 62%
+          // of transitions on record as provably wrong (same type twice in a row), an uncorroborated
+          // into_bed is this classifier's documented failure mode, not a hypothetical.
+          //
+          // ⚠️ Corroborate at OCCUPANCY_MIN_PEAK, NOT MOTION_ACTIVE. The whole case being fixed is a
+          // child who returns and then lies very still, so demanding real movement after the return
+          // would reject exactly the nights this exists for. Measured on the four false gaps: 80-84%
+          // of minutes sit below 0.0005, but 13-15% carry micro-motion above it, while a genuinely
+          // empty bed reads dead throughout. Micro-motion is what separates "he came back" from "the
+          // classifier imagined it".
           const reversedBy = transitions.find((u) => u.type === TRANSITION.INTO_BED
             && txMs(u.created_at) > txMs(t.created_at)
-            && txMs(u.created_at) - txMs(t.created_at) <= MORNING_ABSENCE_MIN * 60000);
+            && txMs(u.created_at) - txMs(t.created_at) <= MORNING_ABSENCE_MIN * 60000
+            && bedOccupiedFrom(Math.floor((txMs(u.created_at) - analysisStartUtc.getTime()) / 60000)));
           if (reversedBy) continue;
           const dt = Math.abs(txMs(t.created_at) - emptyStartMs);
           if (dt <= WAKE_SNAP_MS && (best == null || dt < best.dt)) best = { dt, ms: txMs(t.created_at), at: t.created_at };

@@ -5,7 +5,9 @@
     "find": "// Resolve+delete a clip MP4",
     "replace": "// Resolve+delete a clip MP4 [CONTROL MUTANT]",
     "expect": "survives",
-    "tests": ["detection-events.test.js"],
+    "tests": [
+      "detection-events.test.js"
+    ],
     "note": "Validates the harness. If this is ever KILLED, no other result in the run means anything."
   },
   {
@@ -14,7 +16,9 @@
     "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return;",
     "replace": "if (false) return;",
     "expect": "killed",
-    "tests": ["detection-events.test.js"]
+    "tests": [
+      "detection-events.test.js"
+    ]
   },
   {
     "label": "unlinkClip: path.sep dropped from the prefix check",
@@ -22,7 +26,9 @@
     "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return;",
     "replace": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR)) return;",
     "expect": "killed",
-    "tests": ["detection-events.test.js"]
+    "tests": [
+      "detection-events.test.js"
+    ]
   },
   {
     "label": "unlinkClip: stops removing the sibling thumbnail",
@@ -30,7 +36,9 @@
     "find": "try { fs.rmSync(abs.replace(/\\.mp4$/i, '.jpg'), { force: true }); } catch { /* ignore */ }",
     "replace": ";",
     "expect": "killed",
-    "tests": ["detection-events.test.js"]
+    "tests": [
+      "detection-events.test.js"
+    ]
   },
   {
     "label": "getEventClipFile: containment guard deleted outright",
@@ -38,7 +46,9 @@
     "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
     "replace": "if (false) return null;",
     "expect": "killed",
-    "tests": ["detection-events.test.js"]
+    "tests": [
+      "detection-events.test.js"
+    ]
   },
   {
     "label": "getEventClipFile: path.sep dropped from the prefix check",
@@ -46,7 +56,9 @@
     "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
     "replace": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR)) return null;",
     "expect": "killed",
-    "tests": ["detection-events.test.js"]
+    "tests": [
+      "detection-events.test.js"
+    ]
   },
   {
     "label": "schema default: wake clips off on a fresh install",
@@ -54,7 +66,9 @@
     "find": "ADD COLUMN wake_clips_enabled INTEGER NOT NULL DEFAULT 1",
     "replace": "ADD COLUMN wake_clips_enabled INTEGER NOT NULL DEFAULT 0",
     "expect": "killed",
-    "tests": ["settings-wake-clips.test.js"]
+    "tests": [
+      "settings-wake-clips.test.js"
+    ]
   },
   {
     "label": "schema default: wake clip length 30s -> 7s",
@@ -62,7 +76,9 @@
     "find": "ADD COLUMN wake_clip_seconds INTEGER NOT NULL DEFAULT 30",
     "replace": "ADD COLUMN wake_clip_seconds INTEGER NOT NULL DEFAULT 7",
     "expect": "killed",
-    "tests": ["settings-wake-clips.test.js"]
+    "tests": [
+      "settings-wake-clips.test.js"
+    ]
   },
   {
     "label": "schema default: wake clip retention 14d -> 3d",
@@ -70,16 +86,19 @@
     "find": "ADD COLUMN wake_clip_retention_days INTEGER NOT NULL DEFAULT 14",
     "replace": "ADD COLUMN wake_clip_retention_days INTEGER NOT NULL DEFAULT 3",
     "expect": "killed",
-    "tests": ["settings-wake-clips.test.js"]
+    "tests": [
+      "settings-wake-clips.test.js"
+    ]
   },
-
   {
     "label": "threshold MOTION_ACTIVE 0.01 -> 0.25 (a real climb-out stops counting)",
     "file": "backend/src/lib/sleepAnalysis.js",
     "find": "const MOTION_ACTIVE = 0.01;",
     "replace": "const MOTION_ACTIVE = 0.25;",
     "expect": "killed",
-    "tests": ["wake-watcher.test.js"],
+    "tests": [
+      "wake-watcher.test.js"
+    ],
     "namePattern": "what the numbers MEAN"
   },
   {
@@ -88,7 +107,9 @@
     "find": "const MOTION_ACTIVE = 0.01;",
     "replace": "const MOTION_ACTIVE = 0.0001;",
     "expect": "killed",
-    "tests": ["wake-watcher.test.js"],
+    "tests": [
+      "wake-watcher.test.js"
+    ],
     "namePattern": "what the numbers MEAN"
   },
   {
@@ -97,7 +118,9 @@
     "find": "const SOUND_ACTIVE = 6;",
     "replace": "const SOUND_ACTIVE = 20;",
     "expect": "killed",
-    "tests": ["wake-watcher.test.js"],
+    "tests": [
+      "wake-watcher.test.js"
+    ],
     "namePattern": "what the numbers MEAN"
   },
   {
@@ -106,7 +129,9 @@
     "find": "const SOUND_ACTIVE = 6;",
     "replace": "const SOUND_ACTIVE = 1;",
     "expect": "killed",
-    "tests": ["wake-watcher.test.js"],
+    "tests": [
+      "wake-watcher.test.js"
+    ],
     "namePattern": "what the numbers MEAN"
   },
   {
@@ -115,7 +140,9 @@
     "find": "const ONSET_QUIET_MIN = 15;",
     "replace": "const ONSET_QUIET_MIN = 1;",
     "expect": "killed",
-    "tests": ["wake-watcher.test.js"],
+    "tests": [
+      "wake-watcher.test.js"
+    ],
     "namePattern": "what the numbers MEAN"
   },
   {
@@ -124,7 +151,9 @@
     "find": "const ONSET_QUIET_MIN = 15;",
     "replace": "const ONSET_QUIET_MIN = 40;",
     "expect": "killed",
-    "tests": ["wake-watcher.test.js"],
+    "tests": [
+      "wake-watcher.test.js"
+    ],
     "namePattern": "what the numbers MEAN"
   },
   {
@@ -133,7 +162,9 @@
     "find": "const WAKE_ACTIVE_MIN = 5;",
     "replace": "const WAKE_ACTIVE_MIN = 60;",
     "expect": "killed",
-    "tests": ["wake-watcher.test.js"],
+    "tests": [
+      "wake-watcher.test.js"
+    ],
     "namePattern": "what the numbers MEAN"
   },
   {
@@ -142,7 +173,9 @@
     "find": "const WAKE_ACTIVE_MIN = 5;",
     "replace": "const WAKE_ACTIVE_MIN = 1;",
     "expect": "killed",
-    "tests": ["wake-watcher.test.js"],
+    "tests": [
+      "wake-watcher.test.js"
+    ],
     "namePattern": "what the numbers MEAN"
   },
   {
@@ -151,7 +184,9 @@
     "find": "const WAKE_GAP_MIN = 3;",
     "replace": "const WAKE_GAP_MIN = 60;",
     "expect": "killed",
-    "tests": ["wake-watcher.test.js"],
+    "tests": [
+      "wake-watcher.test.js"
+    ],
     "namePattern": "what the numbers MEAN"
   },
   {
@@ -160,7 +195,9 @@
     "find": "const WAKE_GAP_MIN = 3;",
     "replace": "const WAKE_GAP_MIN = 0;",
     "expect": "killed",
-    "tests": ["wake-watcher.test.js"],
+    "tests": [
+      "wake-watcher.test.js"
+    ],
     "namePattern": "what the numbers MEAN"
   },
   {
@@ -169,17 +206,20 @@
     "find": "const txIdx = (t) => Math.round((txMs(t) - analysisStartUtc.getTime()) / 60000);",
     "replace": "const txIdx = (t) => Math.floor((txMs(t) - analysisStartUtc.getTime()) / 60000);",
     "expect": "killed",
-    "tests": ["sleepAnalysis.test.js"],
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
     "note": "Not a defect being guarded against — the OPPOSITE. #260 is still open and its fix is held for the detection holdout; this proves the suite will now say so the moment it lands."
   },
-
   {
     "label": "★ sweepClips: the whole sweeper becomes a no-op",
     "file": "backend/src/lib/clipStorage.js",
     "find": "export function sweepClips() {",
     "replace": "export function sweepClips() { return;",
     "expect": "killed",
-    "tests": ["clip-storage.test.js"],
+    "tests": [
+      "clip-storage.test.js"
+    ],
     "note": "Issue #263's headline: this survived a green 389-test suite."
   },
   {
@@ -188,7 +228,9 @@
     "find": "  if (!status.ok) return;",
     "replace": "  if (false) return;",
     "expect": "killed",
-    "tests": ["clip-storage.test.js"]
+    "tests": [
+      "clip-storage.test.js"
+    ]
   },
   {
     "label": "sweepClips: 0 days deletes everything instead of keeping forever",
@@ -196,7 +238,9 @@
     "find": "  if (days > 0) {",
     "replace": "  if (days >= 0) {",
     "expect": "killed",
-    "tests": ["clip-storage.test.js"]
+    "tests": [
+      "clip-storage.test.js"
+    ]
   },
   {
     "label": "sweepClips: 0 GB becomes a zero-byte cap",
@@ -204,7 +248,9 @@
     "find": "  if (maxGb > 0) {",
     "replace": "  if (maxGb >= 0) {",
     "expect": "killed",
-    "tests": ["clip-storage.test.js"]
+    "tests": [
+      "clip-storage.test.js"
+    ]
   },
   {
     "label": "sweepClips: the size-cap GATE triggers exactly ON the limit",
@@ -212,7 +258,9 @@
     "find": "    if (bytes > cap) {",
     "replace": "    if (bytes >= cap) {",
     "expect": "equivalent",
-    "tests": ["clip-storage.test.js"],
+    "tests": [
+      "clip-storage.test.js"
+    ],
     "note": "EQUIVALENT, verified by reading both paths: with bytes === cap the mutant enters the loop and the very first `if (bytes <= cap) break` fires, so nothing is deleted either way. This `if` is a fast path, not the boundary. The real boundary is the break, mutated below."
   },
   {
@@ -221,7 +269,9 @@
     "find": "        if (bytes <= cap) break;",
     "replace": "        if (false) break;",
     "expect": "killed",
-    "tests": ["clip-storage.test.js"]
+    "tests": [
+      "clip-storage.test.js"
+    ]
   },
   {
     "label": "sweepClips: the size pass keeps going when it lands exactly on the cap",
@@ -229,7 +279,9 @@
     "find": "        if (bytes <= cap) break;",
     "replace": "        if (bytes < cap) break;",
     "expect": "killed",
-    "tests": ["clip-storage.test.js"],
+    "tests": [
+      "clip-storage.test.js"
+    ],
     "note": "The boundary the `bytes >= cap` gate above only LOOKS like it owns."
   },
   {
@@ -238,7 +290,9 @@
     "find": "        bytes -= c.clip_bytes || 0;",
     "replace": "        bytes -= 0;",
     "expect": "killed",
-    "tests": ["clip-storage.test.js"]
+    "tests": [
+      "clip-storage.test.js"
+    ]
   },
   {
     "label": "sweepClips: clears the row but leaves the file on disk",
@@ -246,7 +300,9 @@
     "find": "      deleteClip(id, clip_path);",
     "replace": "      deleteClip(id, null);",
     "expect": "killed",
-    "tests": ["clip-storage.test.js"]
+    "tests": [
+      "clip-storage.test.js"
+    ]
   },
   {
     "label": "size-cap retention deletes NEWEST first",
@@ -254,7 +310,10 @@
     "find": "ORDER BY id ASC",
     "replace": "ORDER BY id DESC",
     "expect": "killed",
-    "tests": ["clip-storage.test.js", "detection-events.test.js"]
+    "tests": [
+      "clip-storage.test.js",
+      "detection-events.test.js"
+    ]
   },
   {
     "label": "startClipStorage: no immediate sweep, only the 15-minute one",
@@ -262,7 +321,9 @@
     "find": "    sweepClips();\r\n  } catch (e) {",
     "replace": "    void 0;\r\n  } catch (e) {",
     "expect": "killed",
-    "tests": ["clip-storage.test.js"]
+    "tests": [
+      "clip-storage.test.js"
+    ]
   },
   {
     "label": "stopClipStorage: clears the timer but does not null it",
@@ -270,7 +331,9 @@
     "find": "  clearInterval(sweepTimer);\r\n  // Nulled, not merely cleared: `startClipStorage` guards on `if (!sweepTimer)`, so a stale handle",
     "replace": "  clearInterval(sweepTimer);\r\n  if (true) return;\r\n  // Nulled, not merely cleared: `startClipStorage` guards on `if (!sweepTimer)`, so a stale handle",
     "expect": "killed",
-    "tests": ["clip-storage.test.js"]
+    "tests": [
+      "clip-storage.test.js"
+    ]
   },
   {
     "label": "MIN_FREE_BYTES 500MB -> 0 (a full disk is fine)",
@@ -278,7 +341,9 @@
     "find": "export const MIN_FREE_BYTES = 500 * 1024 * 1024;",
     "replace": "export const MIN_FREE_BYTES = 0;",
     "expect": "killed",
-    "tests": ["clip-storage.test.js"]
+    "tests": [
+      "clip-storage.test.js"
+    ]
   },
   {
     "label": "hasMinFreeSpace: the floor becomes exclusive",
@@ -286,7 +351,9 @@
     "find": "  return free >= MIN_FREE_BYTES;",
     "replace": "  return free > MIN_FREE_BYTES;",
     "expect": "killed",
-    "tests": ["clip-storage.test.js"]
+    "tests": [
+      "clip-storage.test.js"
+    ]
   },
   {
     "label": "isOnRealMount: \"/\" counts as a real mount (the overlay layer passes)",
@@ -294,7 +361,9 @@
     "find": "  return deepest !== '' && deepest !== '/';",
     "replace": "  return deepest !== '';",
     "expect": "killed",
-    "tests": ["clip-storage.test.js"]
+    "tests": [
+      "clip-storage.test.js"
+    ]
   },
   {
     "label": "isOnRealMount: takes the last match rather than the deepest",
@@ -302,7 +371,9 @@
     "find": "      if (m.length > deepest.length) deepest = m;",
     "replace": "      deepest = m;",
     "expect": "killed",
-    "tests": ["clip-storage.test.js"]
+    "tests": [
+      "clip-storage.test.js"
+    ]
   },
   {
     "label": "isOnRealMount: prefix match without a separator",
@@ -310,7 +381,9 @@
     "find": "    const withSep = m === '/' ? '/' : m + '/';",
     "replace": "    const withSep = m;",
     "expect": "killed",
-    "tests": ["clip-storage.test.js"]
+    "tests": [
+      "clip-storage.test.js"
+    ]
   },
   {
     "label": "isOnRealMount: /proc/mounts space escapes left undecoded",
@@ -318,7 +391,9 @@
     "find": "    const m = mnt.replace(/\\\\040/g, ' ');",
     "replace": "    const m = mnt;",
     "expect": "killed",
-    "tests": ["clip-storage.test.js"]
+    "tests": [
+      "clip-storage.test.js"
+    ]
   },
   {
     "label": "checkClipStorage: an unwritable directory is reported as fine",
@@ -326,7 +401,9 @@
     "find": "    status = { ok: false, path: abs, writable: false, onMount: false, reason: 'not writable' };",
     "replace": "    status = { ok: true, path: abs, writable: true, onMount: true, reason: 'ok' };",
     "expect": "killed",
-    "tests": ["clip-storage.test.js"]
+    "tests": [
+      "clip-storage.test.js"
+    ]
   },
   {
     "label": "checkClipStorage: an unmapped container path is accepted",
@@ -334,7 +411,9 @@
     "find": "  if (!onMount) {",
     "replace": "  if (false) {",
     "expect": "killed",
-    "tests": ["clip-storage.test.js"]
+    "tests": [
+      "clip-storage.test.js"
+    ]
   },
   {
     "label": "clipStorageStats: on-demand recordings folded into the clip total",
@@ -342,7 +421,9 @@
     "find": "    .prepare(\"SELECT COUNT(*) n, COALESCE(SUM(bytes),0) b FROM recordings WHERE status='ready'\")",
     "replace": "    .prepare('SELECT COUNT(*) n, COALESCE(SUM(bytes),0) b FROM recordings')",
     "expect": "killed",
-    "tests": ["clip-storage.test.js"]
+    "tests": [
+      "clip-storage.test.js"
+    ]
   },
   {
     "label": "getRetention: the 14d/5GB fallback is dropped (retention silently disabled)",
@@ -350,16 +431,19 @@
     "find": "    days: Number.isFinite(days) ? days : 14,",
     "replace": "    days: days,",
     "expect": "killed",
-    "tests": ["clip-storage.test.js"]
+    "tests": [
+      "clip-storage.test.js"
+    ]
   },
-
   {
     "label": "★ the periodic guard stops recognising safeInterval",
     "file": "backend/test/helpers/sourceScan.js",
     "find": "  if (/\\bsafeInterval\\b/.test(code)) reasons.push('safeInterval');",
     "replace": ";",
     "expect": "killed",
-    "tests": ["suite-exits-cleanly.test.js"]
+    "tests": [
+      "suite-exits-cleanly.test.js"
+    ]
   },
   {
     "label": "★ the periodic sweep pre-blanks strings again (the WIRING bug)",
@@ -367,7 +451,9 @@
     "find": "    if (!periodicEvidence(stripCommentsOnly(src)).length) continue;",
     "replace": "    if (!periodicEvidence(stripCommentsAndStrings(src)).length) continue;",
     "expect": "killed",
-    "tests": ["suite-exits-cleanly.test.js"],
+    "tests": [
+      "suite-exits-cleanly.test.js"
+    ],
     "note": "The defect this PR found: correct helper, wrong call site. Only a synthetic source can catch it — nothing in src/ uses computed access."
   },
   {
@@ -376,7 +462,9 @@
     "find": "    offenders.push(...unstoppableTimerOffences(rel, src));",
     "replace": "    offenders.push(...unstoppableTimerOffences(rel, stripCommentsAndStrings(src)));",
     "expect": "killed",
-    "tests": ["suite-exits-cleanly.test.js"],
+    "tests": [
+      "suite-exits-cleanly.test.js"
+    ],
     "note": "The exact shape of the original wiring bug: the rule's strings-intact view is destroyed before it can take it."
   },
   {
@@ -385,7 +473,9 @@
     "find": "    offenders.push(...unstoppableTimerOffences(rel, src));",
     "replace": "    offenders.push(...unstoppableTimerOffences(rel, stripCommentsOnly(src)));",
     "expect": "equivalent",
-    "tests": ["suite-exits-cleanly.test.js"],
+    "tests": [
+      "suite-exits-cleanly.test.js"
+    ],
     "note": "EQUIVALENT: unstoppableTimerOffences re-derives both views from what it is given, and stripCommentsOnly is idempotent — stripping comments twice, and blanking strings in already-comment-free source, gives the identical pair. Only pre-blanking STRINGS does damage."
   },
   {
@@ -394,16 +484,19 @@
     "find": "export function stopTimelapseSampler() {",
     "replace": "function stopTimelapseSampler() {",
     "expect": "killed",
-    "tests": ["suite-exits-cleanly.test.js"]
+    "tests": [
+      "suite-exits-cleanly.test.js"
+    ]
   },
-
   {
     "label": "★ pruneWakeClips: the wake-clip sweeper becomes a no-op",
     "file": "backend/src/lib/recordings.js",
     "find": "export function pruneWakeClips() {",
     "replace": "export function pruneWakeClips() { return 0;",
     "expect": "killed",
-    "tests": ["recordings-lifecycle.test.js"]
+    "tests": [
+      "recordings-lifecycle.test.js"
+    ]
   },
   {
     "label": "★ pruneWakeClips: sweeps MANUAL keepsakes too",
@@ -411,7 +504,9 @@
     "find": "        WHERE kind = 'wake' AND created_at < datetime('now', ?)",
     "replace": "        WHERE created_at < datetime('now', ?)",
     "expect": "killed",
-    "tests": ["recordings-lifecycle.test.js"]
+    "tests": [
+      "recordings-lifecycle.test.js"
+    ]
   },
   {
     "label": "pruneWakeClips: 0 days deletes everything instead of keeping forever",
@@ -419,7 +514,9 @@
     "find": "  if (retentionDays === 0) return 0;",
     "replace": "  if (false) return 0;",
     "expect": "killed",
-    "tests": ["recordings-lifecycle.test.js"]
+    "tests": [
+      "recordings-lifecycle.test.js"
+    ]
   },
   {
     "label": "getWakeClipSettings: 0 retention days falls through to the 14-day default",
@@ -427,7 +524,9 @@
     "find": "    retentionDays: Number.isFinite(days) && days >= 0 ? days : 14,",
     "replace": "    retentionDays: Number.isFinite(days) && days > 0 ? days : 14,",
     "expect": "killed",
-    "tests": ["recordings-lifecycle.test.js"]
+    "tests": [
+      "recordings-lifecycle.test.js"
+    ]
   },
   {
     "label": "startRecording: a double-tap starts a SECOND recording",
@@ -435,7 +534,9 @@
     "find": "  if (active.has(camera.id)) return recordingState(camera.id);",
     "replace": ";",
     "expect": "killed",
-    "tests": ["recordings-lifecycle.test.js"]
+    "tests": [
+      "recordings-lifecycle.test.js"
+    ]
   },
   {
     "label": "★ startRecording: started_at loses the pre-roll",
@@ -443,7 +544,9 @@
     "find": "      started_at: new Date(startMs - preRollSec * 1000).toISOString()",
     "replace": "      started_at: new Date(startMs).toISOString()",
     "expect": "killed",
-    "tests": ["recordings-lifecycle.test.js"]
+    "tests": [
+      "recordings-lifecycle.test.js"
+    ]
   },
   {
     "label": "★ startRecording: the pre-roll is never protected from pruning",
@@ -451,7 +554,9 @@
     "find": "  holdRing(camera.id, RING_OWNER.ONDEMAND, startMs - preRollSec * 1000 - 5000);",
     "replace": ";",
     "expect": "killed",
-    "tests": ["recordings-lifecycle.test.js"]
+    "tests": [
+      "recordings-lifecycle.test.js"
+    ]
   },
   {
     "label": "★ stopRecording: the ring hold is never released",
@@ -459,7 +564,9 @@
     "find": "    releaseRing(cameraId, RING_OWNER.ONDEMAND);",
     "replace": ";",
     "expect": "killed",
-    "tests": ["recordings-lifecycle.test.js"]
+    "tests": [
+      "recordings-lifecycle.test.js"
+    ]
   },
   {
     "label": "★ reconcileStaleRecordings: sweeps only 'pending', missing a SIGKILL (the #277 defect)",
@@ -467,7 +574,9 @@
     "find": "const LIVE_RECORDING_STATUSES = ['recording', 'pending'];",
     "replace": "const LIVE_RECORDING_STATUSES = ['pending'];",
     "expect": "killed",
-    "tests": ["recordings-lifecycle.test.js"]
+    "tests": [
+      "recordings-lifecycle.test.js"
+    ]
   },
   {
     "label": "reconcileStaleRecordings: sweeps every status, clobbering finished rows",
@@ -475,16 +584,19 @@
     "find": "const LIVE_RECORDING_STATUSES = ['recording', 'pending'];",
     "replace": "const LIVE_RECORDING_STATUSES = ['recording', 'pending', 'ready', 'failed', 'uploading'];",
     "expect": "killed",
-    "tests": ["recordings-lifecycle.test.js"]
+    "tests": [
+      "recordings-lifecycle.test.js"
+    ]
   },
-
   {
     "label": "★ the ring janitor ignores holds and prunes a recording's opening",
     "file": "backend/src/lib/clipRecorder.js",
     "find": "  const cutoff = Math.min(Date.now() - depthMs, holdFromMs ?? Infinity);",
     "replace": "  const cutoff = Date.now() - depthMs;",
     "expect": "killed",
-    "tests": ["clip-recorder.test.js"]
+    "tests": [
+      "clip-recorder.test.js"
+    ]
   },
   {
     "label": "the ring janitor prunes nothing at all",
@@ -492,7 +604,9 @@
     "find": "  const cutoff = Math.min(Date.now() - depthMs, holdFromMs ?? Infinity);",
     "replace": "  const cutoff = 0;",
     "expect": "killed",
-    "tests": ["clip-recorder.test.js"]
+    "tests": [
+      "clip-recorder.test.js"
+    ]
   },
   {
     "label": "★ stopSegmenter: a hold outlives the ring it protected",
@@ -500,7 +614,9 @@
     "find": "  clearHolds(cameraId); // the ring is about to go",
     "replace": "  ; // the ring is about to go",
     "expect": "killed",
-    "tests": ["clip-recorder.test.js"]
+    "tests": [
+      "clip-recorder.test.js"
+    ]
   },
   {
     "label": "★ extractClip: the half-written tail segment is concatenated",
@@ -508,7 +624,9 @@
     "find": "&& now - s.m > 700)",
     "replace": "&& true)",
     "expect": "killed",
-    "tests": ["clip-recorder.test.js"]
+    "tests": [
+      "clip-recorder.test.js"
+    ]
   },
   {
     "label": "extractClip: the outBase path guard is dropped",
@@ -516,7 +634,9 @@
     "find": "  const safeBase = safePathSegment(outBase, 'outBase');",
     "replace": "  const safeBase = String(outBase);",
     "expect": "killed",
-    "tests": ["clip-recorder.test.js"]
+    "tests": [
+      "clip-recorder.test.js"
+    ]
   },
   {
     "label": "startSegmenter: the cameraId path guard is dropped",
@@ -524,7 +644,9 @@
     "find": "  const ringDir = path.join(RING_ROOT, safePathSegment(cameraId, 'cameraId'));",
     "replace": "  const ringDir = path.join(RING_ROOT, String(cameraId));",
     "expect": "killed",
-    "tests": ["clip-recorder.test.js"]
+    "tests": [
+      "clip-recorder.test.js"
+    ]
   },
   {
     "label": "startSegmenter: a stale ring is left in place across a restart",
@@ -532,7 +654,10 @@
     "find": "    if (f.endsWith('.mkv') || f.startsWith('concat-')) {",
     "replace": "    if (false) {",
     "expect": "killed",
-    "tests": ["clip-recorder.test.js", "clip-capture.test.js"]
+    "tests": [
+      "clip-recorder.test.js",
+      "clip-capture.test.js"
+    ]
   },
   {
     "label": "holdRing: reports success when there is no ring to hold",
@@ -540,16 +665,19 @@
     "find": "  if (!entry) return false;\r\n  addHold(cameraId, owner, fromMs);",
     "replace": "  addHold(cameraId, owner, fromMs);",
     "expect": "killed",
-    "tests": ["clip-recorder.test.js"]
+    "tests": [
+      "clip-recorder.test.js"
+    ]
   },
-
   {
     "label": "clipCapture: an already-capturing camera starts a second overlapping clip",
     "file": "backend/src/lib/clipCapture.js",
     "find": "  if (busyCameras.has(camera.id)) {",
     "replace": "  if (false) {",
     "expect": "killed",
-    "tests": ["clip-capture.test.js"]
+    "tests": [
+      "clip-capture.test.js"
+    ]
   },
   {
     "label": "★ clipCapture: the camera is never released, so only one clip is ever cut",
@@ -557,7 +685,9 @@
     "find": "      busyCameras.delete(camera.id);",
     "replace": ";",
     "expect": "killed",
-    "tests": ["clip-capture.test.js"]
+    "tests": [
+      "clip-capture.test.js"
+    ]
   },
   {
     "label": "clipCapture: detect_record_clips stops gating capture",
@@ -565,7 +695,9 @@
     "find": "  if (!camera.detect_record_clips || !eventId) return;",
     "replace": "  if (!eventId) return;",
     "expect": "killed",
-    "tests": ["clip-capture.test.js"]
+    "tests": [
+      "clip-capture.test.js"
+    ]
   },
   {
     "label": "clipCapture: a clip is queued with no ring to cut from",
@@ -573,7 +705,9 @@
     "find": "  if (!isSegmenterRunning(camera.id)) {",
     "replace": "  if (false) {",
     "expect": "killed",
-    "tests": ["clip-capture.test.js"]
+    "tests": [
+      "clip-capture.test.js"
+    ]
   },
   {
     "label": "clipCapture: a failed capture is not marked failed",
@@ -581,7 +715,9 @@
     "find": "      setClipFailed(eventId);",
     "replace": ";",
     "expect": "killed",
-    "tests": ["clip-capture.test.js"]
+    "tests": [
+      "clip-capture.test.js"
+    ]
   },
   {
     "label": "★ clipCapture: the storage-ready gate is dropped",
@@ -589,7 +725,9 @@
     "find": "  if (!clipStorageReady()) return;",
     "replace": ";",
     "expect": "killed",
-    "tests": ["clip-capture.test.js"]
+    "tests": [
+      "clip-capture.test.js"
+    ]
   },
   {
     "label": "clipCapture: a reconcile tick restarts the segmenter and wipes the ring",
@@ -597,16 +735,19 @@
     "find": "  if (isSegmenterRunning(camera.id)) return;",
     "replace": ";",
     "expect": "killed",
-    "tests": ["clip-capture.test.js"]
+    "tests": [
+      "clip-capture.test.js"
+    ]
   },
-
   {
     "label": "routes/recordings: DELETE reports success for an id that does not exist",
     "file": "backend/src/routes/recordings.js",
     "find": "  if (!row) return res.status(404).json({ error: 'No recording for this id' });\r\n  deleteRecording(req.params.id);",
     "replace": "  deleteRecording(req.params.id);",
     "expect": "killed",
-    "tests": ["recordings-routes.test.js"]
+    "tests": [
+      "recordings-routes.test.js"
+    ]
   },
   {
     "label": "★ routes/recordings: video is served without authentication",
@@ -614,7 +755,9 @@
     "find": "router.get('/:id/video', requireAuthQueryOrHeader, (req, res) => {",
     "replace": "router.get('/:id/video', (req, res) => {",
     "expect": "killed",
-    "tests": ["recordings-routes.test.js"]
+    "tests": [
+      "recordings-routes.test.js"
+    ]
   },
   {
     "label": "★ routes/recordings: the media route accepts a full session token in the URL",
@@ -622,7 +765,9 @@
     "find": "router.get('/:id/video', requireAuthQueryOrHeader, (req, res) => {",
     "replace": "router.get('/:id/video', requireAuth, (req, res) => {",
     "expect": "killed",
-    "tests": ["recordings-routes.test.js"],
+    "tests": [
+      "recordings-routes.test.js"
+    ],
     "note": "Swapping to header-only auth breaks the <video> tag; the test that catches it is the one asserting a media token in the query string works."
   },
   {
@@ -631,7 +776,9 @@
     "find": "  const row = db.prepare(\"SELECT path, status FROM recordings WHERE id = ?\").get(id);\r\n  if (!row || row.status !== 'ready') return null;",
     "replace": "  const row = db.prepare(\"SELECT path, status FROM recordings WHERE id = ?\").get(id);\r\n  if (!row) return null;",
     "expect": "killed",
-    "tests": ["recordings-visibility.test.js"]
+    "tests": [
+      "recordings-visibility.test.js"
+    ]
   },
   {
     "label": "★ jailedFile: the containment guard is dropped, so any file on the volume is servable",
@@ -639,7 +786,9 @@
     "find": "  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
     "replace": ";",
     "expect": "killed",
-    "tests": ["recordings-routes.test.js"]
+    "tests": [
+      "recordings-routes.test.js"
+    ]
   },
   {
     "label": "★ jailedFile: path.sep dropped, so a sibling directory sharing the prefix is served",
@@ -647,7 +796,9 @@
     "find": "  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
     "replace": "  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR)) return null;",
     "expect": "killed",
-    "tests": ["recordings-routes.test.js"],
+    "tests": [
+      "recordings-routes.test.js"
+    ],
     "note": "Found by adversarial review: the third copy of this guard was the one without the test its two siblings have."
   },
   {
@@ -656,7 +807,9 @@
     "find": "  return fs.existsSync(abs) ? { root: CLIPS_DIR, path: path.relative(CLIPS_DIR, abs) } : null;",
     "replace": "  return { root: CLIPS_DIR, path: path.relative(CLIPS_DIR, abs) };",
     "expect": "killed",
-    "tests": ["recordings-routes.test.js"],
+    "tests": [
+      "recordings-routes.test.js"
+    ],
     "note": "Survived before: the route test that claimed to cover it passes anyway, because res.sendFile 404s on ENOENT by itself. It was testing Express."
   },
   {
@@ -665,7 +818,9 @@
     "find": "  if (!proc?.pid) return false;",
     "replace": "  if (!proc) return false;",
     "expect": "killed",
-    "tests": ["process-guards.test.js"],
+    "tests": [
+      "process-guards.test.js"
+    ],
     "note": "The whole point. Killed by the SPY test, not by the child-process one — the obvious 'and the unguarded version dies' control is racy on Linux (libuv holds a real pid until the doomed fork is reaped)."
   },
   {
@@ -674,7 +829,11 @@
     "find": "  killIfSpawned(entry.proc, 'SIGTERM');",
     "replace": "  entry.proc?.kill('SIGTERM');",
     "expect": "killed",
-    "tests": ["clip-recorder.test.js", "clip-capture.test.js", "spawn-failure.test.js"],
+    "tests": [
+      "clip-recorder.test.js",
+      "clip-capture.test.js",
+      "spawn-failure.test.js"
+    ],
     "note": "⚠️ Killed on win32 by the uncaught EINVAL. On Linux it is the process-group kill instead, which takes the runner down — a KILLED verdict there means something different but is still correct."
   },
   {
@@ -683,7 +842,9 @@
     "find": "  killIfSpawned(proc, 'SIGTERM');",
     "replace": "  proc?.kill('SIGTERM');",
     "expect": "killed",
-    "tests": ["spawn-failure.test.js"]
+    "tests": [
+      "spawn-failure.test.js"
+    ]
   },
   {
     "label": "★ sweepClips: the size pass runs BEFORE the age pass",
@@ -691,7 +852,9 @@
     "find": "  if (days > 0) {",
     "replace": "  if (maxGb > 0) { const cap0 = maxGb * GB; let b0 = getClipStorageTotals().bytes; if (b0 > cap0) { for (const c of getReadyClipsOldestFirst()) { if (b0 <= cap0) break; deleteClip(c.id, c.clip_path); b0 -= c.clip_bytes || 0; removed++; } } }\r\n  if (days > 0) {",
     "expect": "killed",
-    "tests": ["clip-storage.test.js"],
+    "tests": [
+      "clip-storage.test.js"
+    ],
     "note": "★ THE TWO REVIEWERS DISAGREED ON THIS ONE. A said a discriminating fixture exists; B traced it and called it equivalent, reasoning that both passes remove a chronological prefix. B was wrong: the size pass orders by ROW ID and the age pass by created_at, and those diverge when the expired clip was written last. Settled by running it, not by argument."
   },
   {
@@ -700,6 +863,53 @@
     "find": "AND r.kind = 'manual'",
     "replace": "",
     "expect": "killed",
-    "tests": ["recordings-routes.test.js", "recordings-visibility.test.js"]
+    "tests": [
+      "recordings-routes.test.js",
+      "recordings-visibility.test.js"
+    ]
+  },
+  {
+    "label": "wake: a reversed exit is only reversed if the bed is OCCUPIED after the return",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& bedOccupiedFrom(Math.floor((txMs(u.created_at) - analysisStartUtc.getTime()) / 60000)));",
+    "replace": "&& true);",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "note": "Drops the corroboration, restoring the version an adversarial review rejected: a spurious into_bed then cancels a REAL departure and the night reports wake_at = null, worse than the bug being fixed."
+  },
+  {
+    "label": "wake: the reversal window boundary is inclusive",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "<= MORNING_ABSENCE_MIN * 60000",
+    "replace": "< MORNING_ABSENCE_MIN * 60000",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "note": "A return at exactly MORNING_ABSENCE_MIN must still cancel the exit."
+  },
+  {
+    "label": "wake: the reversal window is MORNING_ABSENCE_MIN, not wider",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "MORNING_ABSENCE_MIN * 60000",
+    "replace": "MORNING_ABSENCE_MIN * 150000",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "note": "Widening to 50 min survived a green suite before the boundary pair existed. MORNING_ABSENCE_MIN is shared and has been retuned once (10->20), so a future retune must not silently move this window."
+  },
+  {
+    "label": "wake: the reversal window is MORNING_ABSENCE_MIN, not narrower",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "MORNING_ABSENCE_MIN * 60000",
+    "replace": "MORNING_ABSENCE_MIN * 6000",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "note": "Narrowing to 2 min also survived before the boundary pair."
   }
 ]
