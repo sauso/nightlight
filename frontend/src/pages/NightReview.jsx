@@ -120,10 +120,7 @@ export default function NightReview() {
         computed_wake_at: data?.computed?.wake_at ?? null,
         verdicts,
       });
-      // Back to the night just corrected, not the child page. Correcting a backlog of older nights
-      // means saving and immediately wanting the next one, and landing on the child screen cost a
-      // tab-hop plus a date re-pick every single time.
-      navigate(`/children/${id}/sleep?date=${date}`);
+      navigate(`/children/${id}`);
     } catch (e) {
       setError(e.message || 'Could not save');
       setBusy(false);

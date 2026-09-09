@@ -64,10 +64,6 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
-- **Saving a night's correction now returns you to that night, not to the child's page.** Correcting a
-  run of older nights meant hopping back into Sleep and re-picking the date after every single save.
-  The sleep screen now accepts a night in its address, so saving a review lands you back on the night
-  you just corrected with the next one a single tap away.
 - **A camera whose video process failed to start could take the whole app down with it.** If starting
   FFmpeg or MediaMTX failed — a broken install, a missing codec binary, a bad moment during a restart —
   and Nightlight then stopped that camera within the next few milliseconds, it would signal *every*
