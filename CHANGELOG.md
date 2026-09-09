@@ -21,6 +21,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   land on the night you just corrected, with the same *"Thanks — that's recorded"* receipt reading your
   times back, so the next night is one tap away.
 
+### Security
+- **The camera report no longer contains your camera's password.** When a camera failed to connect,
+  the diagnostic report offered on the **Add camera** screen embedded the RTSP password inside
+  FFmpeg's error text — while the app told you the file contained no password and pre-filled a
+  GitHub issue saying so on your behalf. Passwords are now replaced with `***` everywhere in the
+  report, and the wording no longer promises more than it delivers. If you have already attached a
+  camera report to a public issue, treat that camera's password as disclosed and change it.
+  (GHSA-wcgj-6p3c-vr9h)
+
 ## [0.30.0] - 2026-09-09
 
 ### Added

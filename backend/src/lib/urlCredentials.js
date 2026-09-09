@@ -53,6 +53,72 @@ export function stripUrlPassword(raw) {
 }
 
 /**
+ * Replace the password in every `//user:pass@host` occurrence in a block of free text.
+ *
+ * THE DEFECT THIS EXISTS FOR (GHSA-wcgj-6p3c-vr9h). The "unsupported camera" report embeds
+ * ffprobe's stderr, and ffprobe prefixes its failure line with the input URL — credentials and
+ * all. That report is built specifically to be attached to a PUBLIC GitHub issue, and the UI told
+ * the user it contained no password. `validateRtspStream()` already stripped the URL prefix, but
+ * only because it wanted a tidy message; the function whose output was meant to be published did
+ * not.
+ *
+ * ⚠️ This scrubs the pattern ANYWHERE in the line, not just as a prefix, deliberately. Stripping a
+ * leading URL (what `validateRtspStream` does) is a formatting choice that happens to redact; it
+ * breaks the moment ffmpeg words a message differently, and we do not control ffmpeg's wording.
+ * The username is kept — it is already returned in the report as `rtsp_username`, and knowing the
+ * probe authenticated as the right user is part of what the report is for.
+ *
+ * @param {string} text
+ * @returns {string} the text with every embedded password replaced by `***`
+ */
+export function redactCredentials(text) {
+  if (typeof text !== 'string' || !text) return text;
+  // user may be empty (`//:pass@`); password is everything up to the '@' that isn't a '/' or space,
+  // so an encoded password containing ':' or '%' still matches.
+  return text.replace(/(\/\/)([^/\s:@]*):([^/\s@]+)@/g, '$1$2:***@');
+}
+
+/**
+ * Deep-scrub an object about to leave the server: every string is `redactCredentials`'d, and any
+ * literal occurrence of `secret` is replaced.
+ *
+ * ⚠️ THIS IS A BACKSTOP, NOT THE FIX. The fix is that each producer redacts its own output. This
+ * exists because the report is assembled from several sources — ffprobe stderr, ONVIF fault
+ * strings, error messages from libraries we do not control — and the advisory's lesson was that
+ * one unredacted producer is enough. `secret` catches a password that appears on its own, outside
+ * URL form, which no pattern can recognise.
+ *
+ * @param {*} value  any JSON-shaped value
+ * @param {string} [secret]  a literal to replace wherever it appears
+ */
+export function scrubSecrets(value, secret) {
+  // Only literals long enough to be distinctive. A 1-3 char password would match substrings all
+  // over the report ("554", "h264") and mangle the diagnostic without adding protection the URL
+  // pattern above doesn't already give.
+  const lit = typeof secret === 'string' && secret.length >= 4 ? secret : null;
+  const walk = (v) => {
+    if (typeof v === 'string') {
+      let s = redactCredentials(v);
+      if (lit) s = s.split(lit).join('***');
+      // The URL-encoded form is what ends up inside an assembled RTSP URL.
+      if (lit) {
+        const enc = encodeURIComponent(lit);
+        if (enc !== lit) s = s.split(enc).join('***');
+      }
+      return s;
+    }
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === 'object') {
+      const out = {};
+      for (const [k, x] of Object.entries(v)) out[k] = walk(x);
+      return out;
+    }
+    return v;
+  };
+  return walk(value);
+}
+
+/**
  * Work out the password a save should end up with, then rebuild the URL.
  *
  * Order of precedence:

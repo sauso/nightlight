@@ -27,7 +27,7 @@ import { validateRtspStream, probeRtspDetailed, ffprobeVersion } from '../lib/rt
 import { captureSnapshot, fetchHttpSnapshot } from '../lib/snapshot.js';
 import { logger } from '../lib/logger.js';
 import { startRecording, stopRecording, recordingState, getOndemandSettings } from '../lib/recordings.js';
-import { stripUrlPassword, urlHasPassword, resolveUrlPassword } from '../lib/urlCredentials.js';
+import { stripUrlPassword, urlHasPassword, resolveUrlPassword, scrubSecrets } from '../lib/urlCredentials.js';
 
 const router = Router();
 
@@ -264,8 +264,17 @@ router.post('/onvif-probe', requireAdmin, async (req, res) => {
 // validation), the add screen offers to build this — a redacted JSON bundle of exactly what's needed
 // to add support for a new camera: the address (no password), what ONVIF returned (or the fault), and
 // a full ffprobe stream/codec dump of the main + low streams. The user downloads it and attaches it
-// to a GitHub issue. Read-only; creates nothing. NEVER includes the password (only host/port/path/
-// user + a has_password flag) — same allow-list discipline as the diagnostics bundle.
+// to a GitHub issue. Read-only; creates nothing.
+//
+// The camera block is an allow-list (host/port/path/user + a has_password flag), same discipline as
+// the diagnostics bundle. The ONVIF and stream blocks are NOT — they carry messages produced by
+// ffmpeg and by the ONVIF library, whose wording we do not control. Those are credential-redacted
+// by their producers and then scrubbed again here before the response is sent.
+//
+// ⚠️ GHSA-wcgj-6p3c-vr9h: this comment used to say "NEVER includes the password", and the report
+// shipped the RTSP password in ffprobe's stderr for two releases. The allow-list was real; it just
+// did not cover the two fields that were pasted in wholesale. Redaction is now asserted on the
+// assembled report rather than reasoned about per-field.
 router.post('/probe-report', requireAdmin, async (req, res) => {
   const b = req.body || {};
   const host = String(b.host || b.rtsp_host || '').trim();
@@ -309,7 +318,7 @@ router.post('/probe-report', requireAdmin, async (req, res) => {
 
   const report = {
     report: 'nightlight-camera-probe',
-    note: 'Redacted camera report for adding support — address, ONVIF result, and stream codecs, but NO password. Review before sharing.',
+    note: 'Camera report for adding support — address, ONVIF result, and stream codecs. Passwords are redacted (shown as ***). Review before sharing.',
     generated_at: new Date().toISOString(),
     app: {
       version: appVersion,
@@ -334,7 +343,9 @@ router.post('/probe-report', requireAdmin, async (req, res) => {
   };
 
   logger.info(`[camera-report] built for ${host}:${port}${rtspPath} (onvif ${onvif.ok ? 'ok' : 'failed'}, main ${mainStream.ok ? 'ok' : 'failed'})`);
-  res.json(report);
+  // Last gate before a file the user is told to publish. `scrubSecrets` is deliberately redundant
+  // with the producers' own redaction — see its comment for why one unredacted producer was enough.
+  res.json(scrubSecrets(report, password));
 });
 
 // PTZ control. Any signed-in user can reposition a camera (day-to-day, like reordering) -
