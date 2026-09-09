@@ -61,13 +61,27 @@ jobs:
         run: |
           set -uo pipefail
 
-          # --log-failed is the cheap read (only the failed jobs), and it does carry both signals —
-          # verified against run 33932688168. It comes back empty if the logs have been replaced by a
-          # later successful rerun or have expired, so fall back to the full log before giving up.
-          LOG=$(gh run view "$RUN_ID" --repo "$REPO" --log-failed 2>/dev/null || true)
-          if [ -z "$LOG" ]; then
-            LOG=$(gh run view "$RUN_ID" --repo "$REPO" --log 2>/dev/null || true)
-          fi
+          # ⚠️ THE PER-JOB LOGS API IS THE ONLY SOURCE THAT CARRIES THE MARKER, and getting this wrong
+          # is what made the very first live firing return the wrong answer. On run 33946313906 —
+          # a genuine killed runner — the three sources disagreed:
+          #
+          #   gh run view --log-failed   0 lines (empty)
+          #   gh run view --log          3322 lines, marker ABSENT  <- it drops job-level ##[error]
+          #   gh api .../jobs/<id>/logs  marker PRESENT
+          #
+          # The handler read the second, found no marker, and classified a killed runner as a real
+          # failure. Note which way that failed: it declined to retry, so the cost was a missed retry,
+          # never a red build retried away. The unit tests could not catch it because the fixture came
+          # from the jobs API — the module was right and the plumbing was reading the wrong pipe.
+          #
+          # Fetch each job's log and concatenate. `|| true` on every call: a log can be expired or still
+          # uploading, and that must never read as a test failure.
+          JOB_IDS=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" --jq '.jobs[].id' 2>/dev/null || true)
+          LOG=""
+          for JID in $JOB_IDS; do
+            LOG="$LOG
+          $(gh api "repos/$REPO/actions/jobs/$JID/logs" 2>/dev/null || true)"
+          done
 
           # Exit 10 means "retry"; 0 means "leave it alone". Exit codes rather than parsing stdout, so
           # the workflow cannot misread the decision.
