@@ -204,7 +204,21 @@ by **lines** (2,507 / 2,408) rather than by candidate count is what made each ha
 ⚠️ **A run was lost to a session limit** partway through 7a's first attempt and had to be relaunched
 from scratch. Nothing was recoverable from it. That is the argument for the per-agent ledger entry and
 for the incremental-write instruction: **assume any run can die and leave nothing behind.**
-| 8 | frontend | 76 | | | | | | | |
+| 8a | frontend — players, tile, native bridge, sleep views (13 files) | 43 | 1 | 37 | **1** | 4 | 240k | 14m30s | #322, #323 |
+| 8b | frontend — settings pages, contexts, infra (20 files) | 33 | | | | | | | |
+
+★★ **The cross-repo hop found NOTHING, and that is a real result.** All 12 `nativeBridge.js` /
+`twoWayTalk.js` claims about the native Android side were checked against the actual Kotlin
+(`BackgroundAudioPlugin.kt`, `AudioService.kt`, `PipPlugin.kt`, `DownloadPlugin.kt`,
+`ServerConfigPlugin.kt`) plus the installed `@capacitor/core`. **Every method name, event name and
+payload shape matched exactly — no signature drift.** The workspace `CLAUDE.md` names that seam as the
+one most likely to rot; it has not. Worth knowing, and only checkable by an agent given both repos.
+
+⚠️ **Agent 8 needed splitting too, and I only knew because I measured first.** Estimated at 76
+candidates over ~5,600 lines; the candidate-bearing files actually total **6,083 lines across 33
+files** — 490k–760k tokens for one agent at the measured rate. **Measure the real line count before
+launching, every time.** The estimate in the partition table above was wrong for both agent 7 and
+agent 8.
 | V | verifier over all findings | — | | | | | | | |
 
 **Cost model — settled by agent 2. Scope by LINES, not by candidate count.**
