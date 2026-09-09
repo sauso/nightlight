@@ -73,8 +73,15 @@ export function stripUrlPassword(raw) {
  */
 export function redactCredentials(text) {
   if (typeof text !== 'string' || !text) return text;
-  // user may be empty (`//:pass@`); password is everything up to the '@' that isn't a '/' or space,
-  // so an encoded password containing ':' or '%' still matches.
+  // The user may be empty (`//:pass@`). The password is everything up to the '@' that is not a '/'
+  // or whitespace, so a percent-encoded password matches — `encodeURIComponent`'s entire output
+  // alphabet (`!%'()*-.0-9A-Z_a-z~`) contains nothing that breaks `[^/\s@]`, and every RTSP URL on
+  // this path is built by `assembleRtspUrl`, which encodes. A RAW '/' or space in the password
+  // segment does defeat this — unreachable here for that reason, and `findCredentialLeak` is the
+  // backstop if it ever becomes reachable.
+  // ⚠️ Do NOT restate this as "an encoded password containing ':' still matches": encodeURIComponent
+  // emits '%3A', never a literal colon, so that phrasing described a case that cannot occur — and a
+  // test named after it sat clear of the boundary it claimed to pin.
   return text.replace(/(\/\/)([^/\s:@]*):([^/\s@]+)@/g, '$1$2:***@');
 }
 
@@ -93,18 +100,30 @@ export function redactCredentials(text) {
  */
 export function scrubSecrets(value, secret) {
   // Only literals long enough to be distinctive. A 1-3 char password would match substrings all
-  // over the report ("554", "h264") and mangle the diagnostic without adding protection the URL
-  // pattern above doesn't already give.
+  // over the report ("554", "h264") and mangle the diagnostic beyond use.
+  //
+  // ⚠️ THIS IS A REAL, ACCEPTED TRADE-OFF, NOT A FREE ONE — an earlier version of this comment
+  // claimed a short password was still covered by the URL pattern, which is FALSE for the bare
+  // (non-URL) form that is the whole reason the literal pass exists. A 3-character password
+  // appearing outside URL form is NOT scrubbed. That is judged acceptable: sub-4-char credentials
+  // are vanishingly rare, and the alternative mangles every report. `findCredentialLeak` at the
+  // route is the backstop that stops such a report being published anyway.
   const lit = typeof secret === 'string' && secret.length >= 4 ? secret : null;
+  // encodeURIComponent throws URIError on a lone surrogate, and a password is arbitrary user input.
+  // A scrubber must never be the thing that fails.
+  let encLit = null;
+  if (lit) {
+    try {
+      const e = encodeURIComponent(lit);
+      if (e !== lit) encLit = e;
+    } catch { /* unpaired surrogate — the literal form below still applies */ }
+  }
   const walk = (v) => {
     if (typeof v === 'string') {
       let s = redactCredentials(v);
       if (lit) s = s.split(lit).join('***');
       // The URL-encoded form is what ends up inside an assembled RTSP URL.
-      if (lit) {
-        const enc = encodeURIComponent(lit);
-        if (enc !== lit) s = s.split(enc).join('***');
-      }
+      if (encLit) s = s.split(encLit).join('***');
       return s;
     }
     if (Array.isArray(v)) return v.map(walk);
@@ -169,4 +188,41 @@ export function resolveUrlPassword({ submitted, stored, password }) {
 // and path must all match; a query-string change is not enough to warrant dropping the password.
 function sameTarget(a, b) {
   return a.protocol === b.protocol && a.host === b.host && a.username === b.username && a.pathname === b.pathname;
+}
+
+/**
+ * Does this about-to-be-published value still contain a credential? Returns the reason, or null.
+ *
+ * ⚠️ FAIL CLOSED. `scrubSecrets` walks what it recognises and passes anything else through
+ * UNTOUCHED — deliberately, because a scrubber that corrupts the diagnostic it protects gets
+ * switched off. The cost of that choice is that an unrecognised container (a class instance, a
+ * cross-realm object) would be published unscrubbed, which trades a loud failure for a silent one
+ * in a security control. This is the loud failure: the caller checks the SERIALISED output, which
+ * is what actually gets written to the file, and refuses to send it if a credential survived.
+ *
+ * This is remediation step 2 of GHSA-wcgj-6p3c-vr9h — "assert the invariant rather than describing
+ * it". The advisory exists because four separate places DESCRIBED this guarantee and none checked.
+ *
+ * @param {*} payload  the value about to be serialised and sent
+ * @param {string} [secret]  a literal that must not appear
+ * @returns {string|null} a short reason if a credential is present, else null
+ */
+export function findCredentialLeak(payload, secret) {
+  let json;
+  try {
+    json = JSON.stringify(payload);
+  } catch {
+    // Circular or unserialisable: it cannot be published either, so treat it as unsafe.
+    return 'payload could not be serialised for inspection';
+  }
+  if (typeof json !== 'string') return 'payload serialised to nothing';
+  // The same pattern redactCredentials replaces — but NOT matching its own `***` marker, or the gate
+  // rejects every correctly-redacted report. (It did exactly that on first run: `rtsp://u:***@h`
+  // still matches `[^/\s@]+`. Caught because the route test asserted 200, not merely "no sentinel" —
+  // a test that only checked for the password would have called this a pass.)
+  if (/(\/\/)([^/\s:@]*):(?!\*\*\*@)([^/\s@]+)@/.test(json)) return 'an embedded URL credential survived redaction';
+  if (typeof secret === 'string' && secret.length >= 4 && json.includes(secret)) {
+    return 'the camera password appears verbatim';
+  }
+  return null;
 }

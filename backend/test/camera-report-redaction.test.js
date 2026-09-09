@@ -19,7 +19,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 const { shapeProbeFailure } = await import('../src/lib/rtspProbe.js');
-const { redactCredentials, scrubSecrets } = await import('../src/lib/urlCredentials.js');
+const { redactCredentials, scrubSecrets, findCredentialLeak } = await import('../src/lib/urlCredentials.js');
 
 const PASS = 'FAKEPASS_SENTINEL_123';
 const USER = 'demouser';
@@ -58,10 +58,53 @@ describe('redactCredentials', () => {
     assert.equal(redactCredentials(line).match(new RegExp(PASS, 'g')), null);
   });
 
-  test('handles a URL-encoded password containing : and %', () => {
+  test('handles a percent-encoded password', () => {
+    // ⚠️ THIS TEST USED TO BE NAMED "containing : and %" and its fixture contained NO literal colon —
+    // encodeURIComponent emits '%3A', never ':'. So the name stated an invariant the fixture sat
+    // clear of, and forbidding ':' in the password character class left it green. The colon case is
+    // real but arrives by a different route; it is pinned separately below.
     const enc = encodeURIComponent('p@ss:w%rd!');
+    assert.ok(!enc.includes(':'), 'fixture assumption broke: encodeURIComponent emitted a literal colon');
     const out = redactCredentials(`rtsp://${USER}:${enc}@h/ch0: 401`);
     assert.ok(!out.includes(enc), `encoded password survived: ${out}`);
+  });
+
+  test('★ a RAW colon inside the password is still redacted', () => {
+    // Reachable: an operator pastes `rtsp://admin:pa:ss@host/ch0` into the address box (nothing
+    // validates it as an address), and the route copies that field into the report. assembleRtspUrl
+    // would have encoded it, but this string never went through assembleRtspUrl.
+    // Kills the mutant that forbids ':' in the password class.
+    const out = redactCredentials('rtsp://admin:pa:ss:word@192.0.2.10:554/ch0: 401');
+    assert.ok(!out.includes('pa:ss:word'), `colon-bearing password survived: ${out}`);
+    assert.ok(out.includes('admin'), 'the username was lost');
+  });
+
+  test('★ an empty username (`//:pass@`) is still redacted', () => {
+    // The docstring says the user may be empty; nothing tested it, so `*`→`+` in the username class
+    // survived. ffmpeg emits this shape for a URL built with no user but a password.
+    const out = redactCredentials(`rtsp://:${PASS}@192.0.2.10:554/ch0: 401`);
+    assert.ok(!out.includes(PASS), `password survived with an empty username: ${out}`);
+  });
+
+  test('★ `user:@host` — an EMPTY password is left alone, not turned into `***`', () => {
+    // Kills `+`→`*` on the password class. There is no secret here; inventing a `***` would tell the
+    // reader a password was present and hidden, which is a different and false statement.
+    const line = 'rtsp://admin:@192.0.2.10:554/ch0: 401';
+    assert.equal(redactCredentials(line), line);
+  });
+
+  test('★ the `//` anchor holds — a `scheme:user@host` URI is NOT mangled', () => {
+    // Kills the mutant that makes the leading `//` optional. Without the anchor, anything shaped
+    // like `word:word@word` is eaten — and SIP/mailto URIs of exactly that shape turn up in ONVIF
+    // faults and SDP dumps, which is most of what this report carries. Redacting one would invent a
+    // password that was never there and destroy a real diagnostic detail.
+    //
+    // ⚠️ The first version of this test used `contact=support@example.com` with a colon EARLIER in
+    // the line, and the mutant SURVIVED it: whitespace between the colon and the '@' already blocks
+    // the match, anchor or not. The fixture has to be colon-to-'@' unbroken to test the anchor.
+    for (const line of ['sip:admin@192.0.2.10', 'mailto:ops@example.com reported the fault']) {
+      assert.equal(redactCredentials(line), line, `mangled a non-URL: ${line}`);
+    }
   });
 
   test('leaves a credential-free line completely alone', () => {
@@ -123,11 +166,23 @@ describe('scrubSecrets — the backstop on the assembled report', () => {
     assert.ok(!JSON.stringify(out).includes(PASS));
   });
 
-  test('the URL-ENCODED form of the password is removed too', () => {
-    // assembleRtspUrl percent-encodes, so this is the form that actually appears in ffprobe output.
+  test('the URL-ENCODED form of the password is removed OUTSIDE url form', () => {
+    // ⚠️ THIS TEST USED TO PASS FOR THE WRONG REASON: its fixture was a full `rtsp://u:pass@h` URL,
+    // which `redactCredentials` already handles — so deleting the entire encodeURIComponent branch
+    // left it green. The branch exists for the encoded form appearing on its OWN, which is what this
+    // fixture now is. assembleRtspUrl percent-encodes, so this is the form that reaches ffmpeg.
     const raw = 'p@ss word';
-    const out = scrubSecrets({ e: `rtsp://u:${encodeURIComponent(raw)}@h/1 failed` }, raw);
-    assert.ok(!JSON.stringify(out).includes(encodeURIComponent(raw)));
+    const enc = encodeURIComponent(raw);
+    assert.notEqual(enc, raw, 'fixture must actually encode to something different');
+    const out = scrubSecrets({ e: `authentication failed for ${enc} (retrying)` }, raw);
+    assert.ok(!JSON.stringify(out).includes(enc), `encoded password survived outside URL form: ${JSON.stringify(out)}`);
+  });
+
+  test('★ the 4-character boundary on the literal scrub is where the comment says', () => {
+    // Kills `>= 4` → `>= 5`. The threshold is a deliberate trade-off (see scrubSecrets), so it is
+    // pinned on BOTH sides — a boundary asserted only from the passing side is not a boundary.
+    assert.ok(!JSON.stringify(scrubSecrets({ e: 'tried abcd' }, 'abcd')).includes('abcd'), '4 chars must be scrubbed');
+    assert.ok(JSON.stringify(scrubSecrets({ e: 'tried abc' }, 'abc')).includes('abc'), '3 chars must NOT be (it would mangle the report)');
   });
 
   test('the report survives scrubbing intact — structure, non-strings, and nulls', () => {
@@ -164,6 +219,44 @@ describe('scrubSecrets — the backstop on the assembled report', () => {
     const bag = Object.create(null);
     bag.e = `rtsp://u:${PASS}@h/1`;
     assert.ok(!JSON.stringify(scrubSecrets(bag, PASS)).includes(PASS));
+  });
+
+  test('a non-string secret does not silently disable the literal scrub', () => {
+    // `password` was the one request field not String()-wrapped in the route, and scrubSecrets
+    // type-checks its argument — so a JSON number quietly reduced protection to the URL pattern.
+    // The route now coerces; this pins what happens if a caller does not.
+    const out = scrubSecrets({ e: 'tried 12345678' }, 12345678);
+    assert.equal(out.e, 'tried 12345678', 'a non-string is ignored — the route must coerce, and does');
+    assert.ok(!JSON.stringify(scrubSecrets({ e: 'tried 12345678' }, '12345678')).includes('12345678'));
+  });
+
+  test('a lone surrogate in the password does not make the scrubber throw', () => {
+    // encodeURIComponent throws URIError on an unpaired surrogate, and a password is arbitrary user
+    // input. Before the guard this rejected the request AFTER ~30s of probing, so it never answered.
+    const lit = '\uD800abcd';
+    const out = scrubSecrets({ e: `tried ${lit} here` }, lit);
+    assert.ok(!out.e.includes(lit), 'the literal form must still be scrubbed');
+  });
+
+  test('findCredentialLeak passes a correctly-redacted report and catches an unredacted one', () => {
+    // ⚠️ BOTH DIRECTIONS. The first assertion is the one that matters: the gate's own `***` marker
+    // matches the credential pattern, so a naive check rejects every correct report — which is
+    // exactly what happened on first run, and a one-sided test would not have shown it.
+    assert.equal(findCredentialLeak({ e: `rtsp://${USER}:***@h/ch0` }, PASS), null, 'a redacted report was refused');
+    assert.ok(findCredentialLeak({ e: `rtsp://${USER}:${PASS}@h/ch0` }, PASS), 'an embedded credential got through');
+    assert.ok(findCredentialLeak({ e: `bare ${PASS}` }, PASS), 'a bare password got through');
+    // A class instance scrubSecrets passes through untouched is the case this gate exists for.
+    assert.ok(findCredentialLeak({ e: new String(`rtsp://u:${PASS}@h`) }, PASS), 'a String object got through');
+  });
+
+  test('findCredentialLeak refuses a payload it cannot even inspect', () => {
+    // A circular or unserialisable report cannot be published either, so "I could not check it" must
+    // mean "do not send it". The alternative — treating an uninspectable payload as clean — is the
+    // exact fail-open shape this gate exists to remove.
+    const circular = { a: 1 };
+    circular.self = circular;
+    assert.ok(findCredentialLeak(circular, PASS), 'an uninspectable payload was declared safe');
+    assert.ok(findCredentialLeak(undefined, PASS), 'a payload that serialises to nothing was declared safe');
   });
 
   test('works with no secret supplied, falling back to the pattern alone', () => {

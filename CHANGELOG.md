@@ -29,6 +29,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   report, and the wording no longer promises more than it delivers. If you have already attached a
   camera report to a public issue, treat that camera's password as disclosed and change it.
   (GHSA-wcgj-6p3c-vr9h)
+- **Passwords are now stripped from the server log too, and so from the support bundle.** If you
+  pasted a full `rtsp://user:password@camera/path` address into the camera form — which is a natural
+  thing to do when a camera won't connect — that password was written to the log, and the support
+  bundle republishes recent log lines while telling you it contains no passwords. Log lines are now
+  redacted as they are written, whatever produced them. If you have already shared a support bundle
+  taken after entering a camera address that way, change that camera's password.
 
 ## [0.30.0] - 2026-09-09
 
