@@ -824,6 +824,28 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
           // wake as 19:20 and the whole night as 0h00m asleep. A departure before the child fell asleep
           // is not a departure. Latent until onset moved earlier; the earlier onset merely exposed it.
           if (txMs(t.created_at) < analysisStartUtc.getTime() + algoOnset * 60000) continue;
+          // AN EXIT THAT WAS REVERSED IS NOT A DEPARTURE. If the child is back in bed inside the
+          // absence this gap claims, the claim is false on its own terms — so the window is
+          // MORNING_ABSENCE_MIN itself rather than a new number to tune.
+          //
+          // ★ Measured on the 10-night holdout scored 2026-09-09. Raffa's wake was reported -121,
+          // -158, -102 and -30 minutes early on four of ten nights. Every one is the same shape: he
+          // stirred, it registered as an out_of_bed, he was back in bed 1-3 minutes later, and then
+          // slept so still that the bed read empty (MOTION_ACTIVE) for hours. The into_bed that
+          // falsifies the gap was already in the table and nothing looked at it.
+          //
+          // ⚠️ Peak cannot do this job: the REAL exits (0.021-0.039) are often weaker than the false
+          // ones. Nor can a lower empty-bed threshold — micro-motion above OCCUPANCY_MIN_PEAK is
+          // 13-15% of the false gaps and 13-18% of the correct ones, i.e. it does not separate them.
+          //
+          // ⚠️ The bound has to be short. On the same night the TRUE 05:49 exit was followed by an
+          // into_bed at 06:58, 69 minutes later, when he was put down again — rejecting an exit for
+          // any later return would have broken the night this fixes. Both directions are pinned by
+          // tests.
+          const reversedBy = transitions.find((u) => u.type === TRANSITION.INTO_BED
+            && txMs(u.created_at) > txMs(t.created_at)
+            && txMs(u.created_at) - txMs(t.created_at) <= MORNING_ABSENCE_MIN * 60000);
+          if (reversedBy) continue;
           const dt = Math.abs(txMs(t.created_at) - emptyStartMs);
           if (dt <= WAKE_SNAP_MS && (best == null || dt < best.dt)) best = { dt, ms: txMs(t.created_at), at: t.created_at };
         }

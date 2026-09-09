@@ -262,6 +262,62 @@ test('a lone minute of a parent reaching in does not break the morning absence',
   assert.equal(hhmm(night.wake_at), '06:00', 'the departure, not the bed-stripping 47 minutes later');
 });
 
+// --- An exit that is reversed was not the morning departure -----------------------------------
+//
+// ★ THE HOLDOUT'S BIGGEST FINDING (10 nights scored, 2026-09-09). Raffa's wake was reported HOURS
+// early on four of ten nights: -121, -158, -102 and -30 minutes. The shape below is 2026-09-07.
+//
+// He stirred at 03:11, it registered as an out_of_bed, and he was back in bed a minute later — then
+// slept so still that the bed read EMPTY (`MOTION_ACTIVE` = 0.01) right through to the real exit at
+// 05:49. The gap test fired on the 03:11 exit and the night was reported as ending there.
+//
+// ⚠️ Measured, so nobody re-derives it: across those four false gaps the bed is 80-84% of minutes
+// below 0.0005 and only 3-7% above 0.01, while Renz's spans run 21-24% above 0.01. Raffa is the
+// stiller sleeper, which is why it hit him on four nights and Renz on none. Lowering the empty-bed
+// threshold to OCCUPANCY_MIN_PEAK does NOT separate them — micro-motion is 13-15% of Raffa's false
+// gaps and 13-18% of Renz's correct ones.
+//
+// What DOES separate them is already in the data and was being ignored: the into_bed one to three
+// minutes later. The bound is not a new constant — MORNING_ABSENCE_MIN is the absence the rule
+// requires, so a return inside it contradicts the very claim being made. On the real nights the false
+// returns were 1-3 minutes and the true exit's next into_bed was 69.
+function layReversedExitNight() {
+  laySamples(at(19, 30), at(7, 0, 1), [
+    [at(19, 30), at(19, 40)], // settling
+    [at(3, 11, 1), at(3, 13, 1)], // the stir: out of bed and straight back in
+    [at(5, 49, 1), at(5, 52, 1)], // the real morning exit
+  ]);
+  insertTransition.run(CAM, 'out_of_bed', 0.045, sqlTime(at(3, 11, 1)));
+  insertTransition.run(CAM, 'into_bed', 0.023, sqlTime(at(3, 12, 1))); // back in bed one minute later
+  insertTransition.run(CAM, 'out_of_bed', 0.039, sqlTime(at(5, 49, 1))); // the real departure
+}
+
+test('★ an exit reversed a minute later is not the morning departure', () => {
+  layReversedExitNight();
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.status, 'ok');
+  assert.equal(hhmm(night.wake_at), '05:49', 'the real exit, not the 03:11 stir he came straight back from');
+});
+
+test('★ but an exit is NOT disqualified by a return long afterwards', () => {
+  // The guard must not eat the correct answer. On the same real night an into_bed followed the true
+  // 05:49 exit at 06:58 — 69 minutes later, comfortably outside the absence the rule requires. A rule
+  // that rejected any exit with a later into_bed anywhere in the quiet run would break this night
+  // while "fixing" the one above, so both directions are pinned.
+  laySamples(at(19, 30), at(7, 30, 1), [
+    [at(19, 30), at(19, 40)],
+    [at(5, 49, 1), at(5, 52, 1)], // the real exit
+    [at(6, 58, 1), at(7, 2, 1)], // put back down for a morning nap, over an hour later
+  ]);
+  insertTransition.run(CAM, 'out_of_bed', 0.039, sqlTime(at(5, 49, 1)));
+  insertTransition.run(CAM, 'into_bed', 0.09, sqlTime(at(6, 58, 1)));
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.status, 'ok');
+  assert.equal(hhmm(night.wake_at), '05:49', 'a return 69 minutes later says nothing about the 05:49 exit');
+});
+
 test('a run of active minutes is NOT bridged — only isolated ones are', () => {
   // The counterpart to the test above, and the reason bridging is safe: TWO consecutive minutes of
   // movement is a person at the bed, not a passing arm, and must still end an absence.

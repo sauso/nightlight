@@ -62,6 +62,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **A stir in the night is no longer mistaken for the morning.** If a child shifted enough to register
+  as getting out of bed and was back down a minute later, and then slept very still, the bed looked
+  empty and the night was reported as ending there — sometimes two and a half hours early. Getting back
+  into bed now cancels the exit, which is what it always meant. Measured over ten nights of recorded
+  ground truth: the wake time is right within five minutes on 15 nights out of 20, up from 12, and the
+  average error is less than half what it was.
 - **Saving a night's correction now returns you to that night, not to the child's page.** Correcting a
   run of older nights meant hopping back into Sleep and re-picking the date after every single save.
   The sleep screen now accepts a night in its address, so saving a review lands you back on the night
