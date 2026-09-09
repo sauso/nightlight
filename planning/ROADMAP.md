@@ -30,12 +30,21 @@ building goes to §4 *with the evidence*, so it doesn't get re-proposed later.
 > **all ten** nights (+3 to +27, median +13 — a systematic bias, so correctable); Renz has two
 > catastrophic outliers (−387, −164) and is otherwise good.
 >
-> ★ **Raffa's early wakes are diagnosed.** He stirs, it registers as an `out_of_bed`, he is back in bed
-> 1–3 minutes later, and then sleeps so still the bed reads *empty* at `MOTION_ACTIVE` for hours. The
-> `into_bed` that falsifies the gap is already in the table and nothing looks at it. Measured: those
-> false gaps are 80–84% of minutes below 0.0005 and only 3–7% above 0.01, against 21–24% for Renz —
-> **Raffa is the stiller sleeper, which is why it hits him and not Renz.** A candidate fix is in
-> **PR #327**, held out of 0.30.0 pending a correctness fix the adversarial review found.
+> ★ **Raffa's early wakes are diagnosed AND FIXED — shipped in 0.30.1 (PR #327 + PR #342).** He stirs,
+> it registers as an `out_of_bed`, he is back in bed 1–3 minutes later, and then sleeps so still the bed
+> reads *empty* at `MOTION_ACTIVE` for hours. The `into_bed` that falsifies the gap was already in the
+> table and nothing looked at it. Measured: those false gaps are 80–84% of minutes below 0.0005 and only
+> 3–7% above 0.01, against 21–24% for Renz — **Raffa is the stiller sleeper, which is why it hits him
+> and not Renz.**
+>
+> ⚠️ **#327 alone was not enough, and the residual was worse than it looked.** Its guard tests ONE
+> transition, but the classifier emits `out → in → out` for a single climb-back-in, and the third marker
+> then corroborates the very gap the return falsified. On 2026-09-09 that reported Raffa as up for the
+> day at 8:44pm with 1h18m of sleep. #342 reads an `out_of_bed` within a minute of a corroborated return
+> as the tail of that one movement; the night reads 9h51m. **Re-scored across 44 child-nights (all 22
+> reviewed nights × prod AND staging): wake mean-abs error 16.3 → 11.4 min on staging and 17.1 → 11.6 on
+> prod, with no new null wakes.** Cost, stated: one Renz night regresses +3 → +27, because the false
+> tails (13/26/39 s) and one REAL exit (34 s) overlap and no window separates them.
 >
 > ⚠️ **The zone repaint FAILED its pre-registered criterion.** Impossible repeats went 52.7% → **58.6%**
 > (Raffa) and 65.1% → **65.8%** (Renz) while transitions nearly doubled on a smaller window. Tighter
@@ -108,6 +117,13 @@ about how OFTEN it moves, never how hard.**
 tell a parent's hands leaving the bed from a child climbing out, because motion in two zones is all it
 has. That is item 3, and it is the same gap §2.5 (camera occupancy) exists to close from the other
 side.
+
+★ **Item 1 (no occupancy state) is still open, but the wake path no longer depends on it.** 0.30.1
+(#327 + #342) defends against the `out → in → out` cluster *inside the morning-departure scan* rather
+than in the classifier: a return cancels the exit before it, and an exit within a minute of a
+corroborated return is read as the tail of that same movement. **That is a workaround, not the fix** —
+the classifier still emits physically impossible sequences, and every other consumer of
+`bed_transitions` still sees them. Item 1 closes when `motionDetector.js` carries the state.
 
 **Two of the three causes below have since been addressed; item 2 has not.** The owner enlarged Renz's
 bed zone on 2026-08-27 after spotting in the timelapse that he sleeps with his head outside it, and the
