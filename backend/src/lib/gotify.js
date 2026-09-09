@@ -1,5 +1,6 @@
 import db from '../db.js';
 import { logger } from './logger.js';
+import { postWithTimeout } from './httpNotify.js';
 
 // Gotify notifications (self-hosted, https://gotify.net). The server POSTs to a Gotify application's
 // message endpoint with that application's token; the recipient runs the Gotify server + app. Text
@@ -41,13 +42,17 @@ export async function sendGotify({ title, message, click, priority } = {}) {
     };
     if (click) payload.extras = { 'client::notification': { click: { url: click } } };
 
-    const res = await fetch(`${c.serverUrl}/message?token=${encodeURIComponent(c.appToken)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    const res = await postWithTimeout(
+      `${c.serverUrl}/message?token=${encodeURIComponent(c.appToken)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      { label: 'gotify' }
+    );
     if (!res.ok) {
-      const text = await res.text().catch(() => '');
+      const text = res.text;
       logger.error(`[gotify] send failed (${res.status}): ${text.slice(0, 200)}`);
       return { ok: false, error: `HTTP ${res.status}${text ? ` — ${text.slice(0, 140)}` : ''}` };
     }

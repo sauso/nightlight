@@ -14,7 +14,7 @@
   <WebUI>http://[IP]:[PORT:4000]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/sauso/nightlight/main/unraid-template.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/sauso/nightlight/main/frontend/public/icons/icon-512.png</Icon>
-  <ExtraParams>--log-opt max-size=10m --log-opt max-file=3</ExtraParams>
+  <ExtraParams>--log-opt max-size=10m --log-opt max-file=3 --stop-timeout 30</ExtraParams>
   <Date></Date>
   <Description>Self-hosted baby monitor with low-latency multi-camera streaming (WebRTC + HLS) from RTSP cameras. No cloud, no subscription.</Description>
   <Requires></Requires>

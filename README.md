@@ -56,6 +56,7 @@ docker run -d \
   --restart unless-stopped \
   --log-opt max-size=10m \
   --log-opt max-file=3 \
+  --stop-timeout 30 \
   -e PUID=99 \
   -e PGID=100 \
   -e TZ=UTC \
@@ -80,6 +81,17 @@ The `--log-opt` flags cap Docker's own log storage at 10MB × 3 files - without 
 logs default to growing unbounded, which can be a real problem on Unraid specifically
 since Docker's storage there is a fixed-size image that can break the whole Docker
 service if it fills up.
+
+`--stop-timeout 30` gives Nightlight enough time to stop cleanly. It needs a few seconds
+on the way down — an on-demand recording is assembled from the buffer at that point, and
+being killed part-way through loses it. Stopping normally takes **1-5 seconds**, so 30 is
+deliberately generous — and costs nothing, because the container exits as soon as it's
+finished rather than waiting out the timeout. Don't rely on Docker's own default here:
+recent versions don't document one, and it has been measured killing the container after
+about 4 seconds, which was enough to lose the recording. **If you deployed before this
+was added**, add `--stop-timeout 30` yourself (or `stop_grace_period: 30s` under the
+service in Compose, or the Unraid template's "Extra Parameters" field). Nothing else breaks
+without it — a recording lost this way is marked failed rather than disappearing silently.
 
 Or with Docker Compose:
 
@@ -124,6 +136,13 @@ Apps tab), install it locally by placing the file where Unraid looks for user te
 
 This is a single container — no extra plugins needed, Unraid's normal Docker UI handles it
 directly.
+
+**Already installed from an older copy of the template?** Check that **Extra Parameters**
+(Advanced view, on the container's edit page) contains `--stop-timeout 30`, and add it if
+not. Unraid builds the container from the saved template, so a template downloaded before
+this was added keeps the old value until you edit it — and without it a recording that was
+in progress when the container restarts can be cut short. See the note under
+[Quick start](#quick-start) for what it does.
 
 ## Networking modes
 
@@ -268,6 +287,39 @@ measurement**, and (like everything here) never a safety device — see the warn
   reaching in for a toy or a blanket) does not restart that count; several minutes together do, because
   that is a person at the bed rather than a passing arm. The wake is only accepted where a recorded
   **got out of bed** backs it up, so a quiet spell alone can never end the night early.
+- **Tell it when it got a night wrong.** The morning after, the child's page offers **Was last night
+  right?** — confirm the times or correct them, and mark any recorded *got into / out of bed* event as
+  right, wrong, or "can't tell" against the still frame it was decided from. It appears once per night
+  and goes for good once answered **or dismissed**; nothing is asked about nights with no times to
+  confirm. Either an admin or a caregiver can answer, deliberately — the person who was in the room at
+  5am is the one who knows. Type times on your own clock; they are recorded against the timezone in
+  Settings, the same one the sleep card displays.
+  - **Confirming that a night was right is worth as much as correcting one** — it is what makes a
+    future change to sleep detection provable rather than arguable. Confirming and correcting are
+    separate buttons on purpose: the times we guessed are never one stray tap from being recorded as
+    fact.
+  - **Point at the picture instead of typing.** Each recorded event has **Put down here** /
+    **Up for the day here** — tap the frame that shows the real moment and the time is taken from
+    it, exact to the second rather than rounded from memory. Typing a time by hand instead clears
+    the picked frame, so only one of them is ever the answer.
+    - This is **not** the same as marking an event *correct*. An exit can be perfectly real and
+      still not be the end of the night — a child who gets out at 5:45, goes back, and gets up
+      again at 6:00 had two genuine exits and only one of them ended the night.
+  - **Your times become the ones shown.** Once you correct a night, the child's card, the history list
+    and the sleep detail page all show *your* times, marked **You corrected this**, with the total
+    sleep recalculated to match. This is different from **Recompute this night**, which re-runs the
+    detector: correcting records what *you* know, recomputing re-asks the *app*.
+  - **The detector's own answer is kept underneath, not overwritten.** That is deliberate — it is what
+    a future improvement gets scored against. Nothing you enter here changes how sleep is detected.
+  - **The card confirms it.** After you answer, the prompt becomes a short receipt showing what you
+    recorded, and tapping it lets you change your mind.
+  - **Any night can be reviewed, not just last night.** The sleep detail page has **Was this night
+    right?** for whichever night you are looking at — that is how you correct a night you already
+    answered, since the card only ever offers nights you haven't.
+  - **Reviews are kept forever** — unlike the sleep minute-data behind them (30 days) or the recorded
+    events (45 days). They are a few hundred bytes a night, and their whole value is being comparable
+    years later. A recorded event you have **judged** is also kept past the usual 45 days, along with
+    its frame, so a labelled picture is never deleted on a timer.
 - **Noise on its own doesn't delay bedtime.** A bedroom microphone hears the whole house, and
   bedtime is usually its loudest hour — a sibling being settled, a TV, adults talking. So when
   working out **when your child fell asleep**, a noisy minute counts as awake only if that room
@@ -314,6 +366,11 @@ Once signed in as admin, go to **Account → Add caregiver** to create additiona
 for a partner or babysitter). Caregivers can view cameras and manage children/cameras but
 can't manage other user accounts or change app-wide settings.
 
+**Changing someone’s role takes effect immediately** — on their very next action, on every device
+they’re signed in on. Demoting an admin to caregiver does *not* sign them out: they keep browsing as
+a caregiver and simply lose the admin-only screens. Deleting an account, by contrast, ends its
+sessions at once and signs that person out everywhere.
+
 ## Running behind a reverse proxy (e.g. SWAG on Unraid)
 
 A ready-to-use config is in `reverse-proxy/nightlight.subdomain.conf`. Copy it to
@@ -328,6 +385,34 @@ reaches it by that IP, not by container name.
 
 Everything is proxied through a single port (4000): the app, login, all pages, and the
 video signaling handshake — no extra ports to open on your router for this part.
+
+### `TRUST_PROXY` — telling Nightlight your real client addresses
+
+| Variable | Default | What it does |
+|---|---|---|
+| `TRUST_PROXY` | `loopback` | Which upstream addresses may set `X-Forwarded-For`. Accepts an IP or CIDR (`10.0.0.20`, `172.18.0.0/16`), a comma-separated list, a hop count (`1`), or a named range. |
+
+Behind a proxy, every request arrives from the **proxy's** address unless you tell Nightlight to trust
+it. The default (`loopback`) only trusts a proxy on `127.0.0.1` — and SWAG reaches Nightlight by its
+LAN IP, so with the setup above **it is not trusted and every remote visitor looks like one client**.
+
+Set it to the address your proxy connects *from*:
+
+```bash
+-e TRUST_PROXY=10.0.0.20        # SWAG's own LAN IP
+```
+
+> **⚠️ Only set this to an address you control.** Whatever you trust here is allowed to declare a
+> client's IP. Too broad a value — or `true`, which trusts *every* upstream — lets anyone forge
+> `X-Forwarded-For` and slip the login rate limit entirely, which is worse than leaving it unset. If
+> you are not sure, leave it alone.
+
+A value Nightlight can't make sense of is **ignored, with a warning in the log**, and the safe default
+is used instead — a typo here will never stop the app starting.
+
+**You do not have to set it.** Login attempts are limited per account *and* per source, so even with
+every remote user sharing the proxy's address, one person mistyping their password cannot lock anyone
+else out. Setting `TRUST_PROXY` makes the per-source half meaningful as well.
 
 ## Remote / internet access (watching from outside your home network)
 
@@ -499,7 +584,8 @@ recovery window) with what each one means and whether it needs any action, see
 git clone https://github.com/sauso/nightlight.git
 cd nightlight
 docker build -t nightlight .
-docker run -d --name nightlight --network host -e PUID=99 -e PGID=100 -v ./data:/app/data nightlight
+docker run -d --name nightlight --network host --stop-timeout 30 \
+  -e PUID=99 -e PGID=100 -v ./data:/app/data nightlight
 ```
 
 ## Project layout

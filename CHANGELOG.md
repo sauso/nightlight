@@ -9,6 +9,361 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-09-09
+
+### Added
+- **Tell Nightlight when it got a night wrong.** The morning after, a child's page asks **Was last night
+  right?** — confirm the sleep and wake times with one tap, or correct them; and mark each recorded *got
+  into / out of bed* event right, wrong or "can't tell" against the still frame it was decided from.
+  - **Point at the picture instead of typing a time.** Each recorded event offers **Put down here**
+    / **Up for the day here** — tap the frame showing the real moment and the time comes from it,
+    exact to the second. Which frame you picked is remembered, not just the time it produced.
+    This is deliberately separate from marking an event *correct*: an exit can be real and still
+    not be the end of the night.
+  - **Your times become the ones shown.** Once you correct a night, the child's card, the sleep history
+    and the detail page all show *your* times, marked **You corrected this**, with total sleep
+    recalculated to match. This is different from **Recompute this night**, which re-runs the detector:
+    correcting records what *you* know, recomputing re-asks the *app*.
+  - **The detector's own answer is kept underneath, not overwritten** — it is what a future improvement
+    gets scored against. Nothing you enter changes how sleep is detected.
+  - **Confirming that a night was right matters as much as correcting one**, and the two are separate
+    buttons on purpose: times Nightlight guessed are never one stray tap from being recorded as fact.
+  - The prompt shows once per night and becomes a short receipt once answered, which you can tap to
+    change your mind. Dismissing it stops it coming back for that night.
+  - **The card is always about last night** — it asks if you haven't answered, shows what you said if
+    you have, and stays quiet if you dismissed it. **Any other night is reviewed from the sleep
+    detail page**, which has **Was this night right?** for whichever night you are looking at — that
+    is also how you change a night you already answered.
+  - **Recompute says when it won't help.** On a night you have corrected, the times shown are yours,
+    so recomputing re-runs the detector underneath without changing what you see — the sleep detail
+    page now says so rather than leaving the button looking broken.
+  - **The event list stays out of the way** until you ask for it — a night carries twenty to thirty-five
+    recorded in-and-out-of-bed events, and the two times are the point.
+  - Reviews are kept forever, and an event you have judged keeps its frame past the usual 45 days.
+  - See **README → Sleep tracking**.
+
+- **The alert schedule is documented** — its default, that the window is shared by motion and sound,
+  that overnight windows work, and that it uses the app timezone (which is **UTC** until you set it).
+  With the contrast that catches people out: it silences *alerts* only — **sleep tracking keeps
+  recording through the quiet hours**, unlike turning a detector off. Also documents Pushover's
+  **Device** field (where a blank value *clears* rather than keeps) and Gotify's **Priority** default.
+
+- **Camera detection settings are documented** — motion and sound sensitivity, confirm and
+  cooldown, each with its default and its range, plus what sound sensitivity means in dB over a
+  room’s own ambient level. Includes a **known limitation**: a constant noise source such as a
+  white-noise machine or fan can, at certain sensitivity settings, be counted as continuous noise
+  and inflate the reported awake time — with how to recognise it in the log and what to do about
+  it. Sleep and wake *times* are unaffected; only the awake/asleep totals are.
+
+### Changed
+
+- Dependency maintenance: **express-rate-limit 8.6.2 → 8.7.0**, **lucide-react 1.33.0 → 1.37.0**,
+  **react-router-dom 7.18.2 → 7.18.3**, and the build/test tooling **@vitejs/plugin-react 6.0.5 → 6.1.1**
+  and **@testing-library/react 16.3.2 → 16.3.3**. No behaviour change: none of the icons Nightlight uses
+  were among those redrawn in lucide 1.37, and nothing here alters a setting, a screen or an API.
+
+### Fixed
+
+- **A camera whose video process failed to start could take the whole app down with it.** If starting
+  FFmpeg or MediaMTX failed — a broken install, a missing codec binary, a bad moment during a restart —
+  and Nightlight then stopped that camera within the next few milliseconds, it would signal *every*
+  process it owns instead of the one that failed, shutting itself and all streaming down. Recovery was
+  a container restart, and the trigger was timing, so it looked like the app crashing at random. Most
+  likely during shutdown, during a camera edit, or on an install where recording was never going to
+  work in the first place. Fixes #297.
+
+- **Shutdown also stops the wake watcher now.** Like the sampler below, it had a stop that nothing
+  called. No day-to-day change.
+
+- **One more background job now stops on shutdown: the timelapse frame sampler.** It was missed by the
+  sweep below because that sweep looked for the standard timer call and this job uses Nightlight's own
+  wrapper around it, so the check skipped the file entirely. The check now knows about the wrapper.
+  Nothing changes in day-to-day use — the sampler could not hold the app open, but shutdown is now
+  explicit about it rather than relying on the process being killed.
+
+- **The test suite could not tell working recording code from broken recording code.** Deliberately
+  breaking the clip-retention sweep — the job that stops recordings filling the disk — left every test
+  passing, as did removing the guard that stops a stored path reaching outside the recordings folder,
+  and several of the rules that decide when a wake is a wake. None of that was a bug in Nightlight; it
+  was a gap in what the tests could detect, so a real fault in any of it would have shipped unnoticed.
+  Recording, clip storage, the ring buffer and the recordings API are now covered, four tests that
+  could never have failed were rewritten, and the checks are re-run automatically against deliberately
+  broken copies of the code to prove they still catch it. No behaviour change.
+
+- **Shutdown now stops every background job, not just some of them.** The nightly sleep computation,
+  the temperature/humidity sampler and the recording-retention sweep each started a repeating timer
+  that nothing could switch off, so shutdown relied on the process being killed to take them down.
+  They now stop explicitly, alongside the detectors. Nothing changes in day-to-day use — this closes
+  the gap that caused the test-suite problem below, so it cannot come back through another job.
+
+- **The activity tracker started two timers that nothing could stop.** `node --test` could therefore
+  never exit on its own, and the whole suite ran under `--test-force-exit` to compensate. Shutdown had
+  the same gap — it stops every detector and transcoder but never these timers, and only the hard
+  `process.exit(0)` on the next line hid it. The tracker now has a matching stop, which shutdown calls,
+  and the flag is gone. No change to how Nightlight itself behaves.
+  - ⚠️ An earlier version of this entry also credited that change with fixing the intermittently red
+    CI runs. **That was wrong**, and is corrected here rather than quietly dropped: those runs were
+    the GitHub-hosted runner being killed mid-job, which still happens and is tracked in issue #278.
+    CI now tells the two apart — a run whose log carries the runner's shutdown marker *and* reports no
+    failing test anywhere is retried automatically once and labelled as an infrastructure failure. A run
+    reporting **any** failing test is left alone, as is one whose logs cannot be read or whose summary
+    is missing: it only retries what it can positively show was not a test failure.
+
+- **Deleting a child left its recordings and timelapses on disk forever.** Their database rows kept
+  pointing at a child that no longer existed, so nothing listed them and nothing ever cleaned them up —
+  up to 30 timelapse videos per child, plus every manual recording. Manual recordings are the worse
+  half: they have **no automatic retention by design**, so deleting the child removed the only way left
+  to reclaim that space. ⚠️ **Deleting a child now deletes its recordings and timelapses too**, files
+  included — **and their wake clips too**, which live alongside recordings. That is a deliberate choice
+  — the alternative was keeping them in a "no child" bucket — so if you want to keep a child's videos,
+  save them before removing the child. Frames already collected for tonight's not-yet-finished
+  timelapse go as well. Alert clips are unaffected: those hang off the camera, not the child, and are
+  swept by the normal retention rules. See [docs/recording.md](docs/recording.md).
+  ⚠️ **Deleting a child is now admin-only**, like deleting a camera or a user. It was previously
+  available to any signed-in account, which mattered much less when it only unassigned a camera.
+
+- **A notification server that stopped answering could hang the Test button for five minutes.**
+  Nightlight now gives any provider — Pushover, ntfy or Gotify — **10 seconds** to accept a message,
+  then gives up and says so. The case that bites is a self-hosted ntfy or Gotify that accepts the
+  connection and never replies, which is exactly how a half-up server fails; previously there was no
+  limit at all beyond a five-minute network default, so **Send test** simply spun with no feedback.
+  Real alerts were never blocked by this — they're sent in the background — but each stuck one held
+  its snapshot image in memory for those five minutes, so a camera flapping during a network problem
+  could pile them up. An alert that can't be delivered in ten seconds is now dropped with a line in
+  the log: this is a doorbell, not a mail server, and a motion alert that arrives minutes late is
+  worse than none. See [docs/notifications.md](docs/notifications.md).
+
+- **Pressing Record during a wake could destroy the wake clip.** Automatic wake clips and manual
+  recordings both protect the recent buffer from being cleaned up, but they shared a single slot with
+  no notion of who had claimed it. So a parent watching a wake on their phone and pressing Record
+  replaced the wake clip's protection, and when that manual recording finished it released protection
+  the wake clip still needed — losing its opening, or the clip entirely. Exactly the moment the
+  feature exists to capture. Each now holds its own claim, and the buffer is kept back as far as the
+  earliest of them needs.
+
+- **A recording in progress when Nightlight restarted was lost, and never appeared or explained
+  itself.** A clip is assembled from the buffer after you press stop, and shutdown did not wait for
+  that step — so a restart during it lost the recording, and left it stuck half-finished forever.
+  Because the list showed finished recordings only, it simply never appeared.
+  - Shutdown now waits up to **6 seconds** for an in-flight recording to finish. A long recording can
+    still be cut short — that is a fixed, bounded wait, not a promise, and **allowing your container
+    longer to stop does not extend it**.
+  - **Nightlight now tells Docker it needs those seconds**, in every supplied way of creating the
+    container: the Compose file, the Unraid template, and the `docker run` examples. Without that,
+    Docker decides how long to wait and recent versions no longer promise the familiar 10 seconds —
+    measured as low as 4, which is short enough to lose the recording anyway. ⚠️ **An existing
+    install does not pick this up on its own**: add `--stop-timeout 30` to your `docker run`,
+    `stop_grace_period: 30s` under the service in Compose, or `--stop-timeout 30` to the Unraid
+    template's **Extra Parameters** field. Nothing else misbehaves without it. See
+    [README → Quick start](README.md#quick-start).
+  - Any recording left unfinished by a restart, a crash or a power cut is now marked failed on the
+    next start rather than sitting in limbo — whether it was still capturing or already being
+    assembled.
+  - **And a recording that couldn't be saved now says so, instead of never appearing.** However a
+    recording fails — an offline camera with nothing in its buffer, a clip that couldn't be assembled,
+    or a restart part-way — it shows in the **Recordings** card as *Couldn't be saved*. Tap it for what
+    happened and to remove it. Previously the list showed finished recordings only, so a failure was
+    silent and indistinguishable from the Record button having been ignored. There is nothing to play,
+    so these have no thumbnail and no play button, and unlike alert or wake clips they are not tidied
+    up for you — recordings have no automatic retention, so a failed one stays until you remove it.
+    See [docs/recording.md](docs/recording.md).
+
+- **A background check that failed could shut Nightlight down.** The 15-second camera watchdog, the
+  30-second audio check, the 5-minute reconcile and the timelapse sampler each ran unprotected, so an
+  error inside one of them exited the whole app — an outage on a monitor that is normally left
+  unattended overnight. The two ways it could happen: the low-resolution stream failing to register
+  with the streaming server while that server is restarting, and the database being momentarily locked
+  when a check reads its camera list.
+  - A failure in one of those jobs is now written to the log as `[guard:…] background task failed
+    (continuing)` and skipped; the job runs again on its next tick.
+  - A failure while checking one camera no longer skips the cameras after it in the same pass.
+  - A repeating failure is now reported once a minute rather than every tick, so it cannot scroll the
+    rest of the log out of view.
+  - Once running, Nightlight survives unexpected errors elsewhere rather than exiting — but a failure
+    while it is still *starting* now exits properly, so your container restarts instead of sitting
+    there looking healthy with nothing serving. See [KNOWN-ISSUES.md](KNOWN-ISSUES.md) for what these
+    log lines mean and when to worry about them.
+
+- **A missing video component could crash Nightlight instead of disabling one camera.** Nightlight runs
+  a helper program (FFmpeg) per camera, and the streaming server (MediaMTX) alongside it. If one of
+  those could not be started at all — missing from the image after a bad update, wrong permissions, or
+  the system briefly out of file handles — the failure was unhandled and took the whole app down rather
+  than affecting one camera. It then happened again on every restart, so the app looked broken with
+  nothing explaining why.
+  - Each of those launches now reports the real reason in the log ("could not start ffmpeg: ENOENT")
+    and carries on. A camera whose helper could not start is shown as not running and is retried by the
+    regular five-minute check; the rest of the app, including your other cameras, keeps working.
+  - Event recording recovers too. A camera whose recording buffer could not start is now correctly
+    reported as not recording, so the five-minute check restarts it — previously it would have been
+    treated as healthy forever, and pressing **Record** would have appeared to work and then produced
+    no clip.
+  - Shutting down while a helper was in the act of failing to start could itself crash the app. Fixed.
+  - If MediaMTX itself cannot start, Nightlight keeps retrying (nothing else would bring it back) but
+    now says so once and then roughly once a minute, instead of once every three seconds — at that rate
+    it filled the whole in-app log within the hour and pushed out the very messages explaining the
+    fault.
+
+- **An interrupted update could leave Nightlight unable to start again.** When a new version adds
+  fields to the database it applies them in groups, and each change used to be saved on its own. If the
+  container was stopped, ran out of memory, or lost power *during* that step — a window of
+  milliseconds, on the first start after an update — a group could be left half applied. There was no
+  way back from it: depending on which group, Nightlight would either fail to start on every attempt
+  afterwards, or start normally and then report a missing field the first time you used that feature.
+  Recovering meant editing the database by hand.
+  - The whole step is now applied as one unit. A start either brings the database fully up to date or
+    leaves it exactly as it was and tries again next time, so an interruption costs you a restart
+    rather than the install.
+  - **No action needed, and nothing changes on a normal update.** This only affects what happens if a
+    start is interrupted at that exact moment.
+
+- **Deleting or turning off a camera could leave it running in the background.** If you removed a
+  camera, or switched it off, during the few seconds after its video connection had dropped and before
+  Nightlight retried it, the retry went ahead anyway — and then kept retrying every five seconds for as
+  long as the container ran. The camera showed as stopped the whole time, so nothing reported it and
+  nothing cleaned it up; it simply used CPU in the background, and for a camera assigned to a child it
+  also kept writing movement data outside the sleep window.
+  - Most likely to bite on a camera that was **already dropping in and out**, which is exactly the one
+    you would be turning off. Restarting the container cleared it.
+  - Stopping a camera now cancels a pending retry as well as the running connection, in all three
+    places that retry: the video stream, motion detection and sound detection.
+
+- **The MQTT settings page could go blank instead of loading.** If the server answered with an empty
+  or unreadable body — a proxy that strips it, a truncated response — the page crashed to the
+  "Something went wrong" screen rather than simply showing empty fields. It now opens normally and
+  you can fill it in.
+- **A white-noise machine could make a whole night read as "awake".** Each room's ambient sound level
+  is learned continuously, but a noise that started up mid-night and settled between *half* and *all*
+  of the alert margin above that level was neither absorbed into it nor tracked by it — so the ambient
+  level froze for as long as the source ran, and every minute afterwards was measured against a floor
+  from before the noise existed. On one install it held at exactly the same value for **7.9 unbroken
+  hours**, marked 66% of the night's minutes as active with no motion at all, and reported a
+  seven-hour awake span that never happened — every night, because a machine switched on at bedtime is
+  exactly the kind of sudden change that triggered it. A steady noise in that range is now learned
+  after five minutes. Sleep and wake *times* were not affected by this; only awake/asleep totals were.
+  See **docs/notifications.md → Sound sensitivity also changes sleep tracking** for what this trades
+  away and how to read the level line. The old workaround — raising that camera's sound sensitivity to
+  90 or above — is no longer needed.
+- **A camera's learned ambient level is no longer thrown away when its audio reader restarts.** It was
+  re-learned from a single 0.2-second sample, so a restart that happened during a cry set the room's
+  "normal" to the cry, and the reader restarts a few seconds after any stream hiccup. It now keeps
+  what it has learned across restarts, and a first-time reading is taken from five seconds of audio.
+  Time spent off the stream no longer counts as time spent listening either: a restart takes a few
+  seconds and can wait up to 45 more for the camera's stream to come back, and that silence used to
+  be treated as though the room had been making the same noise throughout — enough, on its own, to
+  push a cry that stopped during the outage into the room's "normal" level for about a minute.
+- **Two-factor could tell you it was off when it simply couldn't check.** If the account screen failed
+  to reach the server, the two-factor card read a confident **Off** — to an account that may well have
+  had it on. It now says **Unknown** and explains why, rather than claiming an account is unprotected
+  on no evidence.
+
+- **The detection sensitivity sliders had no name a screen reader could read.** The label beside them
+  was not attached to the control, so both announced only "slider, 50" with nothing to say what they
+  adjusted.
+- **Pop-up dialogs were not announced as dialogs.** Every modal in the app — including the ones that
+  confirm a deletion or ask for your password — was read by assistive technology as just another part
+  of the page behind it. They are now proper dialogs, labelled by their own heading.
+
+- **Gotify settings could silently discard what you typed.** The **Server URL** and **Priority** boxes
+  accepted input before the saved config had finished loading, and the arriving config then replaced
+  it — your text vanished with nothing on screen to explain why. Both now wait for the load, like the
+  other fields on that page always did.
+- **The Firebase page went blank-and-dead with no explanation** when it couldn't reach the server to
+  ask whether push was set up: every control stayed greyed out and nothing said why. It now shows the
+  reason. The controls deliberately stay disabled — with the status unknown, the page will not guess
+  and tell you your Firebase files are missing when they may be perfectly fine.
+
+- **The Record button never appeared on a fresh install.** Recording on demand reaches *backward* in
+  time, so it needs the camera to already be buffering — and the button hides itself when it isn't.
+  Buffering was being started only for cameras that had **detection clips** switched on, which is off
+  by default and lives on a different screen, so a newly added camera never buffered and the button
+  never showed. Adding a camera didn't start it at all, and a restart took it away again. Every camera
+  now buffers whenever **Show a Record button on each camera** is on, as the setting has always
+  claimed. (Invisible to anyone who had also turned on detection clips, which armed the buffer for the
+  other reason.)
+- **Turning a camera back on only restarted its video.** Re-enabling a camera brought the stream back
+  but left motion detection, camera-reported (ONVIF) motion, sound detection and clip buffering
+  stopped, because each of them checks whether the camera is disabled and was being asked before the
+  camera had been marked enabled. They came back on their own within five minutes, when the periodic
+  reconcile noticed — but nothing appeared to be wrong in the meantime, so a camera that had just been
+  switched on silently missed anything that happened in those minutes.
+- **Saving General settings could undo a Recording setting you had just changed.** The General screen
+  was still writing back the three on-demand recording settings — the Record button switch, its
+  capture-before and its auto-stop — even though those moved to their own **Recording** screen and are
+  no longer shown on General. If one of them changed after General was opened (from another device, or
+  another tab), saving General silently put the old value back, with nothing shown to either person.
+  General now saves only the settings it actually shows.
+- **A camera tile could show “NaN°C” instead of a temperature.** A malformed MQTT sensor
+  payload parses to `NaN`, which counts as a number, so it was rendered rather than skipped. A
+  reading that cannot be read now shows nothing at all, which is what a missing reading looked
+  like everywhere else.
+- **The “impossible transitions” diagnostic could hide one child entirely.** The report of
+  contradictory bed events (the same type twice in a row) was ordered by camera before being
+  trimmed to its row limit, so once one camera had filled that limit the other camera’s events
+  were dropped wholesale instead of the oldest events being dropped. It is now newest-first
+  across all cameras. Detection itself is unchanged — this affected only the diagnostic report.
+
+### Security
+- **One person mistyping their password could lock everyone out of signing in.** Behind a reverse
+  proxy — the setup the README documents — every remote visitor looked like the *same* client, so all
+  of them shared a single allowance of 20 login attempts per 15 minutes. Twenty failures from anywhere
+  locked out the whole household for a quarter of an hour, and it made the protection weaker than it
+  looked, because an attacker and your family were spending the same budget. Attempts are now counted
+  **per account as well as per source**, so a failing login can only ever affect that one account.
+  Nothing to configure. If you do run a reverse proxy you can now also set **`TRUST_PROXY`** to its
+  address so per-source limits see real visitors — ⚠️ only ever set it to an address you control, as a
+  wrong value lets anyone bypass the limit entirely. A value Nightlight can’t make sense of is ignored
+  with a warning rather than stopping the app. See the README’s reverse-proxy section.
+  **First-run setup no longer spends the login allowance** either, and **the second step of two-factor
+  sign-in is limited per account as well** — previously twenty bad attempts from one place could block
+  everyone else's 2FA for fifteen minutes.
+
+- **Demoting an admin now takes effect immediately.** Changing someone from admin to caregiver only
+  applied the next time they signed in — until then their existing session kept every admin power,
+  for up to 30 days, including the ability to make themselves an admin again. Nothing on screen said
+  so. Roles are now read fresh on every request, so a change applies to that person’s very next
+  action, on every device they are signed in on. They stay signed in as a caregiver rather than being
+  logged out. Deleting an account likewise ends its sessions at once.
+
+- **The alert-image password is no longer sent back to the browser.** If your camera's snapshot URL
+  carried a username and password, the whole URL — password included — was returned to any signed-in
+  admin and sat in the settings page. Every other camera password is already handled the other way:
+  stored, never returned, with the field left blank. This one now matches. **You will see the password
+  box empty with *(saved)* beside it** — leave it blank to keep what is stored, or type a new one to
+  replace it. ⚠️ **Point the URL at a different host and the saved password is dropped**, so one
+  camera's credential can never be sent somewhere you have just retyped; you will be asked for it
+  again. Nothing to do unless you change a snapshot URL. See
+  [docs/notifications.md](docs/notifications.md).
+
+- **Notification credentials were readable without signing in.** The settings endpoint is deliberately
+  reachable before you log in, because the login screen needs the app name, colours and font. It
+  filtered its response by *excluding* the MQTT broker fields — correct when it was written, but the
+  ntfy, Gotify and Pushover integrations later added their own token columns alongside them, and those
+  were served to anyone who could reach the app. Affected: the Pushover application token and user key,
+  the ntfy access token and password, and the Gotify application token.
+  - It now returns an explicit **list of what is allowed out**, rather than a list of what is held
+    back, so a credential added in future is private by default instead of public by default.
+  - Signing in as an admin returns the extra settings the admin pages need, exactly as before —
+    **no setting has moved or disappeared from any screen.** Provider tokens are still shown only on
+    their own settings pages, still masked.
+  - **If your Nightlight has ever been reachable from outside your home network, rotate those tokens.**
+    Instances only reachable on your own LAN were exposed only to devices already on that network.
+
+- **Camera passwords could reach a caregiver account.** Assigning a camera to a child is meant to be
+  everyday caregiving, so that action is open to caregivers as well as admins — but it was the one
+  camera action that replied with the camera's full database record instead of the filtered version
+  every other camera screen uses. That record includes the stream address with the password embedded
+  in it, and the ONVIF and two-way-audio logins. On most cameras the ONVIF login is the camera's own
+  administrator account, so this reached past Nightlight to the camera itself.
+  - It now replies through the same filter as everywhere else. Admins still get what the camera edit
+    form needs — the address in separate fields, and whether a stream password is set rather than the
+    password itself. **Nothing changes on screen for anyone.** (One exception, unchanged by this and
+    the same on every other camera screen: if you put a username and password into the **Snapshot
+    URL** field, admins do get that field back verbatim, because the edit box has to show what you
+    typed. Caregivers never see it.)
+  - **Only relevant if you have caregiver accounts.** If you do, and you would rather not rely on
+    those people having ignored it, change the camera's password in the camera's own settings and
+    then update it in Nightlight.
+
 ## [0.29.0] - 2026-08-30
 
 ### Added

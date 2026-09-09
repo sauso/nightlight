@@ -5,18 +5,42 @@ import { inActiveWindow } from './detectSchedule.js';
 import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
 import { recordSound } from './activityTracker.js';
+import { createSoundAnalyser, marginDb } from './soundBaseline.js';
+import { killIfSpawned } from './processGuards.js';
 
 // Server-side SOUND detection, parallel to motionDetector.js. Per camera with sound detection
 // enabled, a cheap audio-only FFmpeg leg reads the already-published MediaMTX stream and reports a
 // windowed loudness (RMS dBFS) a few times a second. We track a ROLLING ambient baseline so a
-// white-noise machine / fan is learned continuously (not a one-time boot calibration): turn the
-// machine on an hour after boot and the baseline rises to the new floor within its time constant.
+// white-noise machine / fan is learned continuously (not a one-time boot calibration).
 // An alert fires when loudness stays a sensitivity-controlled margin ABOVE that ambient for
 // sound_confirm_s, rate-limited by sound_cooldown_s and gated by the same quiet-hours schedule as
 // motion. Never touches the WebRTC/HLS pipeline — a separate, tiny reader off 127.0.0.1:8554.
+//
+// This file is now only the PLUMBING — ffmpeg lifecycle, restart/back-off, logging. Everything that
+// decides what the ambient floor is and when to alert lives in soundBaseline.js, which is pure and
+// tested. ⚠️ The old header claimed the baseline "rises to the new floor within its time constant";
+// that was FACTUALLY FALSE for any step landing inside the dead band, and the comment stated it
+// confidently for months while the opposite shipped. See soundBaseline.js's DEAD_BAND_MAX_MS.
 
 // camera_id -> { proc, stopped }
 const detectors = new Map();
+
+// Cameras with a relaunch SCHEDULED but no process yet — the 5s gap between an ffmpeg exit and the
+// restart. The exit handler removes the camera from `detectors` before arming that timer, so during
+// the gap the entry is unreachable and `entry.stopped`, the only brake on the relaunch, cannot be set.
+// stop() was therefore a no-op inside the window, and a camera deleted or disabled mid-restart kept
+// respawning ffmpeg every 5s for the life of the container, invisible to isSoundDetecting(). Keeping
+// the timer handle here is what makes the relaunch cancellable. See #253.
+const pendingRestarts = new Map(); // cameraId -> timeout handle
+
+// Cancel a scheduled relaunch, if any. Safe to call for a camera that has none.
+function cancelPendingRestart(cameraId) {
+  const t = pendingRestarts.get(cameraId);
+  if (t) {
+    clearTimeout(t);
+    pendingRestarts.delete(cameraId);
+  }
+}
 
 const RESTART_DELAY_MS = 5000;
 const FORCE_KILL_TIMEOUT_MS = 3000;
@@ -31,27 +55,9 @@ const WIN_RATE = 8000;
 const WIN_SAMPLES = 1600;
 const WIN_BYTES = WIN_SAMPLES * 2; // s16le = 2 bytes/sample, mono
 
-// Ambient baseline EMA. At ~5 readings/s, alpha 0.01 gives a ~20 s time constant — slow enough that
-// a cry doesn't get absorbed before it alerts, fast enough to track a fan/AC/white-noise change.
-const BASELINE_ALPHA = 0.01;
-// A level that stays elevated far longer than any cry burst is treated as a NEW ambient floor (the
-// white-noise machine was switched on, a fan, a running tap, the TV) and folded into the baseline so
-// it stops alerting. A cry alerts well before this.
-const REBASELINE_MS = 45000;
-
 // If a launch yields no loudness readings at all and exits quickly this many times in a row, the
 // camera almost certainly has no audio track — stop trying (and say so) instead of restart-looping.
 const NO_AUDIO_MAX_STRIKES = 3;
-
-// Map 1..100 sensitivity to how many dB the trailing-average loudness must exceed the ambient
-// baseline by. Higher sensitivity => smaller margin => easier to trigger. ~18 dB (needs a clearly
-// loud sound) at 1, ~4 dB (quite sensitive) at 100, ~11 dB at the 50 default. This is compared
-// against the AVERAGE over the confirm window, so a pulsing cry (loud on average) clears it even
-// though its quiet moments dip below.
-function marginDb(sensitivity) {
-  const s = Math.min(100, Math.max(1, sensitivity || 50));
-  return 4 + (18 - 4) * ((100 - s) / 99);
-}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -83,6 +89,23 @@ export async function startSoundDetector(camera) {
   const trailN = Math.max(3, Math.round(confirmMs / READING_MS));
   let noAudioStrikes = 0;
 
+  // ⚠️ DELIBERATELY OUTSIDE `launch()`: the analyser (and with it the learned ambient floor) must
+  // OUTLIVE an ffmpeg relaunch. It used to be re-created per launch, so every restart — and the
+  // detector restarts 5 s after any exit — threw away hours of learning and re-seeded the floor from
+  // a single 200 ms window. A relaunch during a cry therefore seeded ambient AT CRY LEVEL. It is also
+  // why two containers could never be assumed comparable for a sound A/B: they had independent,
+  // arbitrarily-seeded floors.
+  //
+  // ⚠️ RESIDUAL, not fixed here: the floor is still lost if `startSoundDetector` itself is called
+  // again, which the 5-minute reconcile tick does when `isSoundDetecting` is false. `detectors` is
+  // cleared on ffmpeg's exit and repopulated 5 s later, so a tick landing in that gap (~1.7% of
+  // exits) re-creates the analyser. Left alone deliberately: closing it means moving the detector
+  // registry's lifetime out of this function, and the 5 s seed window now costs 5 s of readings
+  // rather than an arbitrary single sample.
+  // `readingMs` is how the analyser recognises a hole in the stream: because it now survives an
+  // ffmpeg restart, it has to be able to tell "45 s of sustained noise" from "45 s of outage".
+  const analyser = createSoundAnalyser({ margin, trailN, cooldownMs, readingMs: READING_MS });
+
   async function launch() {
     const entry = { proc: null, stopped: false };
     detectors.set(camera.id, entry);
@@ -103,13 +126,25 @@ export async function startSoundDetector(camera) {
     ];
     const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     entry.proc = proc;
+
+    proc.on('error', (err) => {
+      // A spawn that never started. Node emits 'error' INSTEAD OF 'exit' here, so nothing downstream
+      // runs — and with no listener on it an EventEmitter 'error' THROWS, taking the whole backend down.
+      // On a baby monitor that is an outage. ENOENT (no ffmpeg on PATH — a broken image layer, a bad
+      // volume mount) is the obvious trigger; EACCES, and EMFILE/EAGAIN under file-descriptor or fork
+      // pressure, arrive the same way. See issue #257.
+      //
+      // Deliberately NOT scheduling the 5s relaunch the exit path uses: a binary that cannot be executed
+      // fails identically every time, so that would be a hot loop writing a log line every five seconds
+      // forever. Clearing the map entry instead lets the reconcile pass (every 5 minutes) retry at a
+      // sane cadence, and isSoundDetecting() reports the truth in the meantime — without this the leg would be
+      // left claimed by a process that never existed, and reconcile would skip it as healthy.
+      logger.error(`[sound:${path}] could not start ffmpeg: ${err.code || err.message}`);
+      if (detectors.get(camera.id) === entry) detectors.delete(camera.id);
+    });
     const startedAt = Date.now();
     logger.info(`[sound] watching "${camera.name}" — fires at +${Math.round(margin)} dB over ambient, sustained ${Math.round(confirmMs / 1000)}s`);
 
-    let baseline = null; // rolling ambient level (dBFS)
-    let loudSince = 0; // start of the current elevated run (0 = not currently elevated)
-    let lastAlert = 0;
-    const recent = []; // last trailN readings, for the trailing average
     let sawReading = false;
     let pcm = Buffer.alloc(0);
     // Periodic level line (throttled) so the ambient baseline + recent peak are visible for tuning
@@ -125,8 +160,9 @@ export async function startSoundDetector(camera) {
       const now = Date.now();
       if (rms > windowPeak) windowPeak = rms;
       if (now - lastLevelLog >= LEVEL_LOG_MS) {
+        const b = analyser.baseline;
         logger.info(
-          `[sound] "${camera.name}" ambient=${baseline === null ? '?' : baseline.toFixed(1)}dB ` +
+          `[sound] "${camera.name}" ambient=${b === null ? '?' : b.toFixed(1)}dB ` +
             `peak=${windowPeak === -Infinity ? '?' : windowPeak.toFixed(1)}dB ` +
             `maxAvgOver=${windowMaxOver === -Infinity ? '?' : `+${windowMaxOver.toFixed(1)}`} (fires at +${Math.round(margin)})`
         );
@@ -134,41 +170,16 @@ export async function startSoundDetector(camera) {
         windowMaxOver = -Infinity;
         lastLevelLog = now;
       }
-      if (baseline === null) {
-        baseline = rms;
-        return;
-      }
 
-      // Feed loudness-above-ambient into the per-minute activity timeline (independent of the alert
-      // margin/cooldown), so sleep tracking sees continuous noise level, not just cry alerts.
-      recordSound(camera.id, Math.max(0, rms - baseline));
-
-      // Trailing average over the confirm window. A cry is loud ON AVERAGE across those seconds even
-      // as it pulses, so averaging is far more robust than requiring every instant to clear the bar.
-      recent.push(rms);
-      if (recent.length > trailN) recent.shift();
-      const over = recent.reduce((a, b) => a + b, 0) / recent.length - baseline;
-      if (recent.length >= trailN && over > windowMaxOver) windowMaxOver = over;
-
-      if (recent.length >= trailN && over >= margin) {
-        if (!loudSince) loudSince = now;
-        // A steady elevated source held far longer than a cry burst becomes the new ambient (the
-        // white-noise machine was switched on, a fan, the TV) so it stops alerting.
-        if (now - loudSince >= REBASELINE_MS) {
-          baseline += over; // absorb the elevation into the ambient
-          loudSince = 0;
-          recent.length = 0;
-          return;
-        }
-        if (now - lastAlert >= cooldownMs && inActiveWindow(camera)) {
-          lastAlert = now;
-          fireDetectionAlert(camera, ALERT.SOUND, `+${Math.round(over)} dB over ambient`, { snapshotPath: path }).catch(() => {});
-        }
-      } else {
-        loudSince = 0;
-        // Track the ambient floor, but freeze while the average is already creeping up toward a
-        // trigger, so a cry's ramp-up can't quietly raise its own baseline and desensitise itself.
-        if (over < margin * 0.5) baseline += BASELINE_ALPHA * (rms - baseline);
+      const r = analyser.push(rms, now);
+      if (r.recordDb !== null) recordSound(camera.id, r.recordDb);
+      if (r.confirmed && r.over > windowMaxOver) windowMaxOver = r.over;
+      // The analyser reports that the ALERT RULES are satisfied; the quiet-hours schedule is this
+      // layer's business. `markAlerted` only runs when a notification actually went out, so the
+      // cooldown is never consumed by an alert that was suppressed by the schedule.
+      if (r.wouldAlert && inActiveWindow(camera)) {
+        analyser.markAlerted(now);
+        fireDetectionAlert(camera, ALERT.SOUND, `+${Math.round(r.over)} dB over ambient`, { snapshotPath: path }).catch(() => {});
       }
     }
 
@@ -208,9 +219,10 @@ export async function startSoundDetector(camera) {
       }
       if (code === 0) logger.raw(`sound:${path}`, 'stream ended, reconnecting');
       else logger.error(`[sound:${path}] exited (code ${code}), restarting in 5s`);
-      setTimeout(() => {
+      pendingRestarts.set(camera.id, setTimeout(() => {
+        pendingRestarts.delete(camera.id);
         if (!entry.stopped && !detectors.has(camera.id)) launch().catch(() => {});
-      }, RESTART_DELAY_MS);
+      }, RESTART_DELAY_MS));
     });
   }
 
@@ -218,6 +230,10 @@ export async function startSoundDetector(camera) {
 }
 
 export function stopSoundDetector(cameraId) {
+  // FIRST, before the early return: a camera in the 5s restart gap has no entry but does have a
+  // relaunch armed, and stop() used to return without cancelling it (#253).
+  cancelPendingRestart(cameraId);
+
   const entry = detectors.get(cameraId);
   if (!entry) return Promise.resolve();
   entry.stopped = true;
@@ -231,11 +247,16 @@ export function stopSoundDetector(cameraId) {
         resolve();
       }
     };
+    // See stopTranscoder for the full reasoning: a process that never spawned must not be killed
+    // directly (on Linux that signals the whole process group — see killIfSpawned in processGuards.js),
+    // and it emits 'error'/'close' but never 'exit', so waiting on 'exit' alone stalls for the whole timeout.
+    const kill = (sig) => killIfSpawned(entry.proc, sig);
     entry.proc.once('exit', done);
-    entry.proc.kill('SIGTERM');
+    entry.proc.once('error', done);
+    kill('SIGTERM');
     setTimeout(() => {
       if (!resolved) {
-        entry.proc.kill('SIGKILL');
+        kill('SIGKILL');
         done();
       }
     }, FORCE_KILL_TIMEOUT_MS);
@@ -243,5 +264,8 @@ export function stopSoundDetector(cameraId) {
 }
 
 export async function stopAllSoundDetectors() {
-  await Promise.all([...detectors.keys()].map(stopSoundDetector));
+  // Union of both maps: a camera in its restart gap is in pendingRestarts only, and iterating
+  // detectors alone would leave its relaunch armed through shutdown.
+  const ids = new Set([...detectors.keys(), ...pendingRestarts.keys()]);
+  await Promise.all([...ids].map(stopSoundDetector));
 }

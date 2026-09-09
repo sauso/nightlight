@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { readFileSync } from 'fs';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
-import { requireAuth, requireAdmin, requireAuthQueryOrHeader } from '../middleware/auth.js';
+import { requireAuth, requireAdmin, requireAuthQueryOrHeader, isAdminRequest } from '../middleware/auth.js';
 import { upsertPath, removePath, getPathStatus, toPathName, hlsPathName } from '../lib/mediamtx.js';
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
 import { recordCameraEvent, EVENT } from '../lib/cameraEvents.js';
@@ -10,7 +10,8 @@ import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.j
 import { startMotionDetector, stopMotionDetector, motionLegWanted } from '../lib/motionDetector.js';
 import { startOnvifMotion, stopOnvifMotion, onvifMotionWanted } from '../lib/onvifMotion.js';
 import { startSoundDetector, stopSoundDetector } from '../lib/soundDetector.js';
-import { startClipCapture, stopClipCapture, isClipCapturing } from '../lib/clipCapture.js';
+import { startClipCapture, stopClipCapture, clipRingWanted, isClipCapturing } from '../lib/clipCapture.js';
+import { transitionSnapshotPath } from '../lib/bedTransitions.js';
 import {
   getRecentDetectionEvents,
   clearDetectionEvents,
@@ -26,6 +27,7 @@ import { validateRtspStream, probeRtspDetailed, ffprobeVersion } from '../lib/rt
 import { captureSnapshot, fetchHttpSnapshot } from '../lib/snapshot.js';
 import { logger } from '../lib/logger.js';
 import { startRecording, stopRecording, recordingState, getOndemandSettings } from '../lib/recordings.js';
+import { stripUrlPassword, urlHasPassword, resolveUrlPassword } from '../lib/urlCredentials.js';
 
 const router = Router();
 
@@ -46,6 +48,17 @@ router.get('/alerts/:id/snapshot', requireAuthQueryOrHeader, (req, res) => {
   // { root, path } form: Express jails the send under root and rejects any `..`, on top of the
   // integer-only id validation upstream (belt-and-suspenders against path traversal).
   res.sendFile(file.path, { root: file.root, dotfiles: 'deny' });
+});
+
+// The frame captured at one bed transition. Query-token auth like the alert snapshot above, for the
+// same reason: an <img> cannot attach an Authorization header. These are diagnostic stills behind the
+// morning review — see lib/bedTransitions.js for why they are collected at all.
+router.get('/bed-transitions/:id/snapshot', requireAuthQueryOrHeader, (req, res) => {
+  const file = transitionSnapshotPath(req.params.id);
+  if (!file) return res.status(404).json({ error: 'No frame for this transition' });
+  // transitionSnapshotPath coerces the id to a positive integer and builds the path itself, so nothing
+  // user-supplied reaches the filesystem; sendFile's dotfile guard is the second layer.
+  res.sendFile(file, { dotfiles: 'deny' });
 });
 
 // Recorded clip for an alert — same query-token auth as the snapshot above (a <video> element
@@ -187,8 +200,14 @@ function publicCamera(cam, isAdmin) {
     talk_has_password: !!talk_password,
     // Low-quality sub-stream: only the path is edited (it reuses the main stream's host/creds).
     sub_rtsp_path: subParts.path || '',
-    // Camera HTTP snapshot endpoint (admin-only — may embed Basic-auth creds), edited as-is.
-    snapshot_url: snapshot_url || '',
+    // Camera HTTP snapshot endpoint. ⚠️ THE PASSWORD IS STRIPPED, not merely gated behind admin
+    // (issue #271). This used to be returned verbatim while `rtsp_url` and `talk_password` — both also
+    // admin-only, both three lines up — were reduced first. Admin-only is a weaker guarantee than
+    // not-sent: whatever reaches the browser is in the DOM, in memory, and in any error report or
+    // session replay. Same shape as rtsp_display/rtsp_has_password, and `snapshot_password` blank on
+    // save keeps the stored one.
+    snapshot_url: stripUrlPassword(snapshot_url),
+    snapshot_has_password: urlHasPassword(snapshot_url),
   };
 }
 
@@ -471,7 +490,7 @@ router.post('/:id/snooze', requireAuth, (req, res) => {
 
 router.get('/', async (req, res) => {
   const cameras = db.prepare('SELECT * FROM cameras ORDER BY sort_order, created_at').all();
-  const isAdmin = req.user?.role === 'admin';
+  const isAdmin = isAdminRequest(req);
   const withStatus = await Promise.all(
     cameras.map(async (cam) => ({
       ...publicCamera(cam, isAdmin),
@@ -674,6 +693,13 @@ router.post('/', requireAdmin, async (req, res) => {
   await startTranscoder(id, rtsp_url, mediamtx_path, name.trim());
   const added = db.prepare('SELECT * FROM cameras WHERE id = ?').get(id);
   if (subConfigured(added)) await startSubStream(added).catch((e) => logger.error(`[substream] add failed: ${e.message}`));
+  // Start buffering straight away. This call was simply MISSING: a new camera got no ring until
+  // something else happened to start one, so with on-demand recording on (the default) and detection
+  // clips off (also the default) the tile's Record button never appeared on a newly added camera —
+  // `can_record` stays false while nothing is buffering. Detection clips are off at this point by
+  // definition (they're configured later, on the detection screen), so on-demand is the only reason
+  // the ring can be wanted here — which is exactly the case that was missed.
+  startClipCapture(added);
   subscribeAllCameraTopics();
   res.status(201).json(publicCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(id), true));
 });
@@ -867,12 +893,26 @@ router.put('/:id/enabled', requireAdmin, async (req, res) => {
     } catch (e) {
       return res.status(502).json({ error: `Could not re-register stream with MediaMTX: ${e.message}` });
     }
-    await startTranscoder(req.params.id, existing.rtsp_url, existing.mediamtx_path, existing.name);
-    if (subConfigured(existing)) await startSubStream(existing).catch((e) => logger.error(`[substream] enable failed: ${e.message}`));
-    if (motionLegWanted(existing)) await startMotionDetector(existing).catch(() => {});
-    if (onvifMotionWanted(existing)) await startOnvifMotion(existing).catch(() => {});
-    if (existing.detect_sound_enabled) await startSoundDetector(existing).catch(() => {});
-    if (existing.detect_record_clips) startClipCapture(existing);
+    // ⚠️ THE START CALLS MUST SEE THE CAMERA AS IT IS ABOUT TO BE, NOT AS IT IS. `existing` was read
+    // at the top of this handler, before the UPDATE at the bottom, so its `disabled` is still 1 — and
+    // `motionLegWanted`, `onvifMotionWanted`, `startSoundDetector` and `clipRingWanted` ALL return
+    // early for a disabled camera. Handing them `existing` made four of the five restarts below
+    // silent no-ops: re-enabling a camera brought its stream back but left motion detection, ONVIF
+    // motion, sound detection and the recording ring stopped until `reconcileCameraPaths` noticed —
+    // up to 5 minutes later, and for the ring (before this change) never, since reconcile pre-gated
+    // it on detect_record_clips. Only the transcoder and sub-stream, which don't check the flag,
+    // actually came back.
+    // The UPDATE deliberately stays at the bottom: a failed upsertPath above returns 502 and must
+    // leave the camera recorded as disabled, so the flag is corrected here rather than written early.
+    const cam = { ...existing, disabled: 0 };
+    await startTranscoder(req.params.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
+    if (subConfigured(cam)) await startSubStream(cam).catch((e) => logger.error(`[substream] enable failed: ${e.message}`));
+    if (motionLegWanted(cam)) await startMotionDetector(cam).catch(() => {});
+    if (onvifMotionWanted(cam)) await startOnvifMotion(cam).catch(() => {});
+    if (cam.detect_sound_enabled) await startSoundDetector(cam).catch(() => {});
+    // Re-arm the ring on whichever grounds want it (clipRingWanted, not detect_record_clips alone —
+    // otherwise re-enabling a camera silently left its Record button missing).
+    startClipCapture(cam);
   } else {
     await stopTranscoder(req.params.id);
     await stopSubStream(existing).catch(() => {});
@@ -923,8 +963,18 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
     motion_mqtt_topic === undefined ? existing.motion_mqtt_topic : (motion_mqtt_topic?.trim() || null);
   const motionValue =
     motion_mqtt_value === undefined ? existing.motion_mqtt_value : (motion_mqtt_value?.trim() || null);
+  // ⚠️ The client no longer receives the snapshot password (issue #271), so it cannot send it back —
+  // which means a plain save would WIPE it. resolveUrlPassword carries the stored one forward, but
+  // only while the submitted URL still points at the same protocol/host/username/path. Retype the
+  // host and the password is dropped rather than silently forwarded to somewhere else.
   const snapUrl =
-    snapshot_url === undefined ? existing.snapshot_url : (snapshot_url?.trim() || null);
+    snapshot_url === undefined
+      ? existing.snapshot_url
+      : resolveUrlPassword({
+          submitted: snapshot_url,
+          stored: existing.snapshot_url,
+          password: req.body?.snapshot_password,
+        });
   const sens =
     sensitivity === undefined
       ? existing.detect_sensitivity
@@ -984,8 +1034,9 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
     } else {
       await stopSoundDetector(updated.id).catch(() => {});
     }
-    // Clip-recording segmenter follows its own opt-in.
-    if (updated.detect_record_clips) startClipCapture(updated);
+    // The ring follows BOTH the per-camera clip opt-in just saved and the global on-demand setting —
+    // turning detection clips off must not take the Record button away with them.
+    if (clipRingWanted(updated)) startClipCapture(updated);
     else stopClipCapture(updated.id);
   }
   // Re-subscribe MQTT so a new/changed/removed motion topic takes effect immediately.
@@ -1010,7 +1061,11 @@ router.put('/:id/assign', async (req, res) => {
     if (motionLegWanted(updated)) await startMotionDetector(updated).catch(() => {});
     else await stopMotionDetector(updated.id).catch(() => {});
   }
-  res.json(updated);
+  // Through publicCamera like every other camera response. This route is deliberately open to
+  // caregivers (assignment is day-to-day caregiving, not administration), and it was the ONLY site in
+  // this file returning the raw row — which handed rtsp_url, with the stream password embedded in it,
+  // plus the ONVIF and talk credentials, to any signed-in caregiver. See GHSA-43c3-wrx8-fq39.
+  res.json(publicCamera(updated, isAdminRequest(req)));
 });
 
 router.delete('/:id', requireAdmin, async (req, res) => {

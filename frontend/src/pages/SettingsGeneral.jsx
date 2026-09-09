@@ -28,8 +28,16 @@ export default function SettingsGeneral() {
     setError('');
     setSaved(false);
     try {
-      // Only the general fields — the settings PUT keeps any field left out unchanged, so MQTT
-      // (its own sub-page) isn't touched from here.
+      // Only the general fields — the settings PUT keeps any field left out unchanged (each one falls
+      // back to its stored value when the key is absent, see routes/settings.js), so MQTT and
+      // Recording, which have their own sub-pages, aren't touched from here.
+      //
+      // ⚠️ Send ONLY what this screen actually shows. It used to also post ondemand_enabled,
+      // ondemand_pre_roll_s and ondemand_max_duration_s — left behind when on-demand recording moved
+      // out to its own page. Writing back a setting nobody can see here is never useful and is
+      // occasionally harmful: the Recording page's switch applies the instant it is flipped, so a
+      // General page still holding the old value would silently revert it on its next Save, with
+      // nothing shown to either person.
       await api.put('/settings', {
         app_name: form.app_name,
         accent_color: form.accent_color,
@@ -38,9 +46,6 @@ export default function SettingsGeneral() {
         timezone: form.timezone,
         font_choice: form.font_choice,
         temp_unit: form.temp_unit,
-        ondemand_enabled: form.ondemand_enabled,
-        ondemand_pre_roll_s: form.ondemand_pre_roll_s,
-        ondemand_max_duration_s: form.ondemand_max_duration_s,
       });
       await refresh();
       setSaved(true);

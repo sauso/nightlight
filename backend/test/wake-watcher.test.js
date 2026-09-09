@@ -245,6 +245,131 @@ describe('a camera that stops reporting mid-wake', () => {
   });
 });
 
+// -------------------------------------------------------------------------------------------
+// ★ THE NUMBERS THEMSELVES. Everything above this line derives its fixtures, its loop bounds and even
+// its test NAMES from SLEEP_THRESHOLDS, which makes it a good test of the state machine and no test at
+// all of the thresholds: issue #263 confirmed that all 18 tests pass with `WAKE_ACTIVE_MIN` at 60 and
+// `MOTION_ACTIVE` at 0.25 — one quiet minute declaring a child asleep, or an hour of crying not
+// counting as a wake, and the suite stays green. That is one of the four trap shapes the issue names,
+// and it is the subtlest, because the derivation looks like good practice.
+//
+// The parameterised tests stay: the state machine genuinely IS parameterised, and re-deriving the
+// numbers by hand in twenty places would be worse. What is added here is the missing half — the values
+// pinned against literals, and a handful of fixtures whose numbers are REAL READINGS rather than
+// expressions in the constants.
+describe('★ the calibrated thresholds are pinned, not merely referenced', () => {
+  test('the five exported constants have exactly these values', () => {
+    // ⚠️ CHANGING A NUMBER HERE IS A DELIBERATE ACT. Each was measured on two cameras in one house
+    // (see the provenance comments in sleepAnalysis.js); they are hypotheses about every other room,
+    // not laws. If you are re-tuning, update this test in the SAME commit and say in the PR which
+    // nights moved it — that is the house rule for a calibrated number.
+    assert.deepEqual(
+      { ...SLEEP_THRESHOLDS },
+      {
+        MOTION_ACTIVE: 0.01, // in-bed changed-fraction above this = real movement (a sleeping room reads ~0)
+        SOUND_ACTIVE: 6, // dB over ambient = a clear noise/cry
+        ONSET_QUIET_MIN: 15, // continuous quiet minutes before we call it asleep
+        WAKE_ACTIVE_MIN: 5, // active minutes inside one run before it is a wake, not a stir
+        WAKE_GAP_MIN: 3, // quiet minutes bridged inside a single wake
+      }
+    );
+  });
+
+  test('the live watcher and the nightly job share ONE definition, by reference', () => {
+    // wakeWatcher imports SLEEP_THRESHOLDS rather than copying the numbers, so a clip can never appear
+    // for a wake the morning timeline does not show. Object.freeze is what stops a caller mutating the
+    // shared object out from under the other half.
+    assert.equal(Object.isFrozen(SLEEP_THRESHOLDS), true, 'a caller could rewrite the thresholds at runtime');
+  });
+});
+
+describe('★ what the numbers MEAN, in real readings rather than expressions', () => {
+  // These use literal values taken from the measurements the constants were set from, so each fails if
+  // its threshold drifts — without any test needing to name the constant. Between them they band every
+  // number: raising or lowering it past the stated point breaks a named test with a stated reason.
+
+  // 20 > ONSET_QUIET_MIN (15), spelled as a literal so this settles independently of the constant.
+  const settleLiterally = () => {
+    for (let i = 0; i < 20; i++) quiet();
+    assert.equal(_state().get(CAM).asleep, true, 'twenty quiet minutes did not arm the watcher');
+  };
+
+  test('a bed reading of 0.05 is movement — a genuine climb-out reads 0.07-0.10', () => {
+    // Fails if MOTION_ACTIVE rises above 0.05. The spurious outside-bed readings on record top out at
+    // 0.023 and the quietest genuine event measured 0.074, so anything at or above 0.05 must count.
+    settleLiterally();
+    let fired = null;
+    for (let i = 0; i < 10; i++) fired = minute({ motion: 0.05 }) || fired;
+    assert.ok(fired?.captured, 'a real movement reading was treated as a quiet minute');
+  });
+
+  test('a bed reading of 0.001 is not — a motionless child still registers ~0.0002-0.004', () => {
+    // Fails if MOTION_ACTIVE drops below 0.001, which would make a still, occupied bed look like a
+    // wake every night. The measured in-bed floor for the STILLEST genuine bedtime on record is 0.0045.
+    settleLiterally();
+    for (let i = 0; i < 10; i++) assert.equal(minute({ motion: 0.001 }), null, 'the noise floor was read as a wake');
+  });
+
+  test('8 dB over ambient is a cry; 2 dB is the room', () => {
+    // Bands SOUND_ACTIVE into (2, 8]. A sound-only wake is the case that never produces an alert, so
+    // both directions matter: too high and a crying child is invisible, too low and the house next door
+    // records a clip every night.
+    settleLiterally();
+    let fired = null;
+    for (let i = 0; i < 10; i++) fired = minute({ sound: 8 }) || fired;
+    assert.ok(fired?.captured, '8 dB over ambient did not count as a noise');
+
+    _state().clear();
+    clock = 0;
+    settleLiterally();
+    for (let i = 0; i < 10; i++) assert.equal(minute({ sound: 2 }), null, '2 dB over ambient was treated as a cry');
+  });
+
+  test('three quiet minutes is not asleep; twenty is', () => {
+    // Bands ONSET_QUIET_MIN into (3, 20]. The low end is the one that matters: at 1, a child put down
+    // and briefly still is "asleep", and the first minute of settling gets recorded as a wake.
+    for (let i = 0; i < 3; i++) quiet();
+    assert.equal(_state().get(CAM).asleep, false, 'three quiet minutes was enough to call it asleep');
+    for (let i = 0; i < 17; i++) quiet();
+    assert.equal(_state().get(CAM).asleep, true, 'twenty quiet minutes was not enough');
+  });
+
+  test('ten active minutes is a wake; two is a stir', () => {
+    // Bands WAKE_ACTIVE_MIN into (2, 10]. At 60 (the mutant #263 reports surviving) an hour of crying
+    // records nothing; at 1 every roll-over produces a clip and fills the disk.
+    settleLiterally();
+    let captures = 0;
+    for (let i = 0; i < 10; i++) if (minute({ motion: 0.05 })?.captured) captures++;
+    assert.equal(captures, 1, 'ten active minutes did not produce exactly one clip');
+
+    _state().clear();
+    clock = 0;
+    settleLiterally();
+    assert.equal(minute({ motion: 0.05 }), null);
+    assert.equal(minute({ motion: 0.05 }), null, 'two active minutes recorded a clip');
+  });
+
+  test('a two-minute pause stays one wake; a thirty-minute one does not', () => {
+    // Bands WAKE_GAP_MIN into [2, 30). Intermittent crying with short pauses is the ordinary shape of a
+    // real wake; half an hour of quiet in between is two separate ones.
+    settleLiterally();
+    let captures = 0;
+    for (let i = 0; i < 10; i++) {
+      if (minute({ motion: 0.05 })?.captured) captures++;
+      if (i < 9) { quiet(); quiet(); }
+    }
+    assert.equal(captures, 1, 'two-minute pauses split one wake into several (or into none)');
+
+    _state().clear();
+    clock = 0;
+    settleLiterally();
+    minute({ motion: 0.05 });
+    minute({ motion: 0.05 });
+    for (let i = 0; i < 30; i++) quiet();
+    assert.equal(_state().get(CAM).run, null, 'a thirty-minute silence did not end the run');
+  });
+});
+
 describe('lifecycle', () => {
   test('start is idempotent and stop clears all state', () => {
     startWakeWatcher();

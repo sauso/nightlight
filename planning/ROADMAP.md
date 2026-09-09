@@ -22,6 +22,37 @@ building goes to §4 *with the evidence*, so it doesn't get re-proposed later.
 
 ## 1. Next up
 
+> **✅ THE HOLDOUT IS CLOSED AND SCORED — 2026-09-09.** Ten nights per child, scored against the
+> owner's recorded ground truth. This section is no longer gated.
+>
+> **The scorecard.** Wake: Renz median **1 min** (his is the best number in the system); Raffa median
+> 12 min but **catastrophic on four of ten nights** — −121, −158, −102 and −30. Onset: Raffa is late on
+> **all ten** nights (+3 to +27, median +13 — a systematic bias, so correctable); Renz has two
+> catastrophic outliers (−387, −164) and is otherwise good.
+>
+> ★ **Raffa's early wakes are diagnosed.** He stirs, it registers as an `out_of_bed`, he is back in bed
+> 1–3 minutes later, and then sleeps so still the bed reads *empty* at `MOTION_ACTIVE` for hours. The
+> `into_bed` that falsifies the gap is already in the table and nothing looks at it. Measured: those
+> false gaps are 80–84% of minutes below 0.0005 and only 3–7% above 0.01, against 21–24% for Renz —
+> **Raffa is the stiller sleeper, which is why it hits him and not Renz.** A candidate fix is in
+> **PR #327**, held out of 0.30.0 pending a correctness fix the adversarial review found.
+>
+> ⚠️ **The zone repaint FAILED its pre-registered criterion.** Impossible repeats went 52.7% → **58.6%**
+> (Raffa) and 65.1% → **65.8%** (Renz) while transitions nearly doubled on a smaller window. Tighter
+> zones see the child more and the linking rule did not keep up. **More zone work is low-yield; the
+> classifier is the limiter.** Renz's "bed exactly 0" rate did improve, 6.5% → 4.8%.
+>
+> ⚠️⚠️ **Three integrity problems to fix before the next measurement run**, or it will be as
+> compromised as this one: ground truth was captured on **staging** while **prod** was the thing under
+> test (morning review only reaches production in this release); Renz's production zone **changed
+> mid-holdout** with no audit trail, detectable only by diffing against staging; and 19 of 20
+> ground-truth wakes were **picked from the detector's own transitions**, so they cannot reveal a wake
+> that produced none.
+>
+> ⚠️ **0.30.0 changes the inputs.** It ships the sound dead-band fix, which changes `activity_samples`.
+> **Record the deploy timestamp as a cutoff**, exactly as `2026-08-30 07:40:00 UTC` was for the zone
+> repaint. Any before/after comparison spanning it is invalid.
+
 ### 1.1 Fix Raffa's bed-zone discrimination — `CLOSED` (shipped in 0.27.0; kept for the diagnosis)
 **Closed 2026-08-29.** Four consecutive owner-confirmed mornings on the re-aimed camera: 05:09
 (08-25), 05:53 (08-27), 05:54 (08-28) and 05:20 (08-29), every one exact. The framing question is
@@ -86,7 +117,15 @@ upstream cause of the false arrivals, not the classifier's thresholds. Separatel
 a slow link window (see the entry under `[Unreleased]`), which fixes the missed unaided climb-out.
 What remains is the occupancy state and telling a parent leaving from a child getting out.
 
-**What's wrong**, measured on 2026-08-26 against owner ground truth (nobody entered Renz's room all
+⚠️⚠️ **EVERY FIGURE IN THIS SECTION IS PRE-REPAINT, AND IS THEREFORE HISTORICAL.** Both bed zones were
+redrawn over real frames on 2026-08-30 (details at the end of the section), which changed the input to
+every measurement below. The 62% impossible-pair rate, the 38.5% / 23.4% zone areas and the minute
+counts all describe the **old** zones and must not be quoted as the current state. They are kept
+because they are what motivated the work, and because they are the arithmetic the re-measurement will
+repeat — not because they are still true. The holdout runs to ~2026-09-09; nothing here is re-measured
+before then. (This warning used to sit *below* the numbers, which is not where a reader meets them.)
+
+**What was wrong**, measured on 2026-08-26 against owner ground truth (nobody entered Renz's room all
 night; Raffa put down 19:10, his mother out at 19:19):
 
 - **No occupancy state.** `motionDetector.js` runs the out-of-bed and into-bed detectors as independent
@@ -103,11 +142,11 @@ night; Raffa put down 19:10, his mother out at 19:19):
   opened a child-out interval that ran until the first false arrival at 23:12.
 
 ★★ **MEASURED 2026-08-29, and item 1 now has a hard target.** Across the 238 transitions then stored
-on prod, **147 (62%) are the same type twice in a row** with nothing between — Raffa Room 61 of 109
-(56%), Renz Room 86 of 129 (67%). You cannot get into a bed you are already in, so at least one of every
-pair is wrong. `getImpossibleTransitions()` in `lib/bedTransitions.js` returns them, each naming the
-event it contradicts, per camera. **Item 1 should collapse most of those 147, and that is now a number
-this work can be scored against rather than an argument.**
+on prod **at that time**, **147 (62%) were the same type twice in a row** with nothing between — Raffa
+Room 61 of 109 (56%), Renz Room 86 of 129 (67%). You cannot get into a bed you are already in, so at
+least one of every pair is wrong. `getImpossibleTransitions()` in `lib/bedTransitions.js` returns them,
+each naming the event it contradicts, per camera. **The durable thing here is the QUERY, not the 147:
+it is re-runnable, and item 1 is scored against whatever it returns after the holdout.**
 
 ★★ **0.29.0 ships the missing evidence: a saved frame at every transition** (`bed_transitions.snapshot`
 + `transition-snapshots/`, 45-day retention in lockstep). Until now the detector recorded *when* it
@@ -119,10 +158,48 @@ diagnose item 3 and the only honest test set for §2.5.
 and the occupancy guard rather than trusting raw event labels. They are why per-event markers still
 cannot be drawn, which is exactly what "done when" below asks for.
 
+★★★ **MEASURED 2026-08-30 — RENZ'S ZONE DOES NOT SIT ON HIS BED, AND NOTHING CHECKS THAT IT DOES.**
+Drawn over a real transition snapshot, his painted `detect_zone` is a rough rectangle over the LEFT of
+the room. It includes wall and **a curtain that moves**, and it stops at x=62% while the bed runs to
+about x=80% — excluding the foot end past where the safety rail stops, which is the gap he climbs out
+through. So his exits appear as motion *outside* the bed, the exit rule has no bed motion to link from,
+and the curtain manufactures transitions that never happened.
+
+| | body moving in the room (outside ≥ 0.05) | ...with the bed **exactly 0.0000** | linkable |
+|---|---|---|---|
+| Raffa | 308 min | **5 (2%)** | 97% |
+| Renz | 636 min | **41 (6%)** | 77% |
+
+2026-08-29: last bed motion 05:52, bed then **0.0000**, a plain body burst outside at 05:59 (0.070) —
+seven minutes later, far outside even the slow window, so no candidate ever opened. Next recorded exit
+**07:36** against an observed ~06:00.
+
+⚠️⚠️ **His zone WAS 38.5% of frame — LARGER than Raffa's 23.4%. Every number said it was fine.** Area and
+rect count prove nothing about whether a zone is in the right *place*. This was only visible by drawing
+it over a frame, which the transition snapshots now make possible.
+
+★★★ **UPDATE 2026-08-30 — step 0 below is DONE, and every measurement in this section above
+is PRE-REPAINT.** Both zones were redrawn over real frames and mirrored prod → staging
+(byte-identical: Raffa sha `22feeadf13ca7dc1`, Renz sha `cfa17b32a5368d7f`). Renz went 38.5% →
+**22.57%** of frame, Raffa 23.4% → **13.02%**. A **10-day monitor phase runs to ~2026-09-09 as a
+HOLDOUT** — those nights are deliberately not tuned on, and the tables above are re-measured at the
+end with identical arithmetic. Until then treat the 62% / 38.5% / 23.4% figures and the minute
+counts as **historical**, not as the current state.
+
+**Two pieces of work, and the first is free:**
+0. **Repaint the zone** to follow the mattress and exclude the curtain. No code. Do this first, then
+   re-measure the table above before building anything — it may move most of the gap on its own.
+1b. **Warn when a zone looks wrong.** Nothing today tells anyone their zone excludes the bed; it fails
+   silently and looks like a detector problem. Candidates: flag a zone whose area overlaps little of
+   where in-bed motion actually occurs, or simply show the zone over a recent frame in settings.
+   ★ This is the generalisable half — every installation paints its own zone, and every one of them can
+   be wrong in exactly this way.
+
 **Work:**
 1. Track believed occupancy; ignore an `into_bed` while already in bed and an `out_of_bed` while already
    out. (Alone this collapses the four arrivals to one.) — **still open**, and still the cheapest win.
-   ★ Target: the 147 impossible pairs above.
+   ★ Target: whatever `getImpossibleTransitions()` returns when it is re-run after the holdout. It
+   returned 147 pairs against the OLD zones — historical, see the warning at the top of this section.
    ★ This is *inferred* occupancy and needs no model — do it regardless of §2.5, which would supply the
    same fact as independent evidence from the camera. They are complementary; neither waits on the other.
 2. Record the outside channel's **peak and duration** alongside each transition — new columns on
@@ -167,6 +244,88 @@ with noise in the sibling's room? If that number is large, the wake rule needs t
 it's small, leave it alone. **Measure first.**
 
 ---
+
+### 1.4 The ambient sound baseline — freeze `SHIPPED`, statistic mismatch `NEXT`
+
+★★★ **VERIFIED 2026-08-31 in production logs, not inferred.** One camera’s ambient baseline sat at
+exactly `-63.5 dB` for **1891 consecutive log lines — 7.9 unbroken hours** — while the room ran
+8–12 dB above it. The working camera in the same house shows a dispersed cluster of baseline values
+(an EMA hunting a floor); the stuck one shows an isolated spike with no adjacent values at all.
+
+**The mechanism.** `soundDetector.js` takes exactly one of three paths per reading, keyed on `over`
+(trailing-average loudness minus baseline), where `margin = marginDb(sound_sensitivity)`:
+
+| `over` | what happens to the baseline |
+|---|---|
+| `< margin/2` | the EMA tracks the room |
+| `[margin/2, margin)` | **nothing at all** |
+| `>= margin`, held 45 s | absorbed into the baseline |
+
+The middle band is an **absorbing state**: the only thing that lowers `over` is the baseline rising,
+and the baseline only rises in the other two branches. The guard is also one-sided — a room *below*
+the baseline always pulls it down — so the floor ratchets toward the quiet level and cannot climb
+back. `loudSince` resets on any dip under `margin`, so a source hovering around the margin never
+completes the 45 s clock. It is a **step response**: a slow ramp is absorbed fine, an instant step is
+not — and a white-noise machine switched on at bedtime against a daytime baseline re-arms it nightly.
+
+⚠⚠ **This is not one house.** The trap band sits *below* the alert margin and *above* sleep’s
+`SOUND_ACTIVE`, so it produces no alert, no log line and no error while marking every minute active.
+The shipped default `sound_sensitivity = 50` puts the band at 5.5–11.1 dB — squarely where a nursery
+white-noise machine or fan lands. Turning sensitivity *down* to reduce alerts moves the band *up*.
+
+★★★ **THE ROOT CAUSE IS DEEPER THAN THE FREEZE, and it decides the fix.** `sound_peak` is the
+per-minute **MAXIMUM** of ~300 windows (`activityTracker.js`) measured against a floor that tracks a
+**central tendency**, so `max - mean ≈ 2.9σ`: sleep’s 6 dB threshold is really a statement about the
+room’s **variance**, not its loudness. Simulated on a stationary, silent room, share of minutes
+reading “active”: at σ = 2.0, **36%** with a correctly-tracking EMA and **100%** with a p10 floor.
+❌ **Do not just swap the floor** — a low-percentile floor under a MAX recorder is *worse*, and it
+reproduces the corruption it was meant to remove. ✅ **Match the statistics**: record a percentile or
+mean of the minute’s excursion rather than its max, or define the floor at whatever statistic the
+recorder uses. That fixes the freeze and the variance problem together.
+
+**Measured on the affected room**: even with a perfectly healthy baseline it would still read ~41% of
+minutes active (against 19% for the other room), so fixing only the freeze is a partial fix.
+
+**Prerequisite work.** `soundDetector.js` has **no tests** and is not in the `test:core` include
+list; `handleReading` is a closure inside `launch()` inside `startSoundDetector`, so nothing is
+reachable from a test. Extract the reading pipeline behind an injectable clock first.
+⚠️ **Tests must discriminate, not merely pass.** “Step the level, assert it decays” is passed by a
+2-minute window, by a median floor and by a p90 floor alike. The test that kills all three is
+**“a 6-minute continuous cry must stay above `SOUND_ACTIVE`”**, plus asserting the floor’s exact
+value at a known time after a known step (which is what pins the window length).
+
+---
+
+**✅ THE FREEZE IS FIXED — on `dev`, not yet in production.** A steady level sitting in the trap band
+is now absorbed into the baseline after five minutes, so the absorbing state described above no longer
+exists. The old workaround (raising that camera's `sound_sensitivity` to 90+) is no longer needed.
+
+⚠️ **The fix itself shipped a regression that its first version did not catch**, and it is worth
+keeping here because it is the shape to watch for: the new state was hoisted to module scope, so it
+spanned an FFmpeg outage — the reader restarts a few seconds after any stream hiccup, and the level
+learned before the outage was carried across it as though the room had been making the same noise
+throughout. Fixed in the same PR; the second half of it (a first reading taken from five seconds of
+audio rather than 0.2, and time off-stream not counting as time listening) is in the same changelog
+entry. ★ **A grid-aligned fixture hid it**: every synthetic minute landed on a boundary, so the gap
+the bug needed never occurred in the tests.
+
+**⏳ STILL OPEN — and it is the bigger half: the statistic mismatch.** Everything above under "THE ROOT
+CAUSE IS DEEPER THAN THE FREEZE" is untouched. `sound_peak` is still the per-minute **maximum** of ~300
+windows measured against a floor that tracks a **central tendency**, so the 6 dB `SOUND_ACTIVE`
+threshold is still really a statement about the room's variance. The measurement that sizes the work
+stands: the affected room would still read ~41% of minutes active against 19% for the other, even with
+a perfectly healthy baseline.
+
+**Held until the monitor phase ends (~2026-09-09).** Not because it is hard, but because it changes the
+input to the frozen sleep algorithm, and a mid-holdout change to `activityTracker` would perturb the
+very measurement the phase exists to take. Documented as a known limitation in `docs/notifications.md`
+meanwhile.
+
+**Prerequisite, and it is now DONE**: `soundDetector.js` was untestable (`handleReading` was a closure
+inside `launch()` inside `startSoundDetector`). The reading pipeline was extracted behind an injectable
+clock as `lib/soundBaseline.js`, which is in the `test:core` include list at 100% lines. The
+discriminating test named above — *"a 6-minute continuous cry must stay above `SOUND_ACTIVE`"* — is in
+`soundBaseline.test.js`.
 
 ## 2. Specced, not built
 
@@ -218,9 +377,20 @@ pins thresholds over an explicit include list, CI runs it on every push and PR
 *regresses* on a module already in the list. **That include list IS the definition of "core logic" —
 extend it as each module reaches the bar, and never shrink it to make the check go green.**
 
-In the gate today at **97.8% lines**: `db.js`, `middleware/auth.js`, `lib/mfa.js`,
-`lib/detectionEvents.js`, `routes/timelapses.js`, `lib/wakeWatcher.js`, `lib/bedTransitionRules.js`,
-**`lib/sleepAnalysis.js`** (added 2026-08-29 at 99.5% lines / 97.4% functions).
+In the gate today at **97.6% lines / 86.8% branches / 93.8% functions**, across 21 modules: `db.js`,
+`middleware/auth.js`, **`routes/auth.js`**, `lib/mfa.js`, `lib/detectionEvents.js`,
+`routes/timelapses.js`, `lib/wakeWatcher.js`, `lib/activityTracker.js`, `lib/bedTransitions.js`,
+`lib/bedTransitionRules.js`, **`lib/sleepAnalysis.js`**, `lib/sleepReviews.js`, `lib/soundBaseline.js`,
+`lib/processGuards.js`, `lib/ringHolds.js`, `lib/urlCredentials.js`, and the five clip modules
+**`lib/clipStorage.js`, `lib/clipCapture.js`, `lib/clipRecorder.js`, `lib/recordings.js`,
+`routes/recordings.js`** (added 2026-09-06).
+
+⚠️ **THE THRESHOLDS ARE AGGREGATES ACROSS THE WHOLE LIST, not per file.** A module at 88% sits happily
+under a green gate — `lib/clipRecorder.js` does, and so does `routes/auth.js` at 73% *branches*. That
+is not a flaw to fix by adding per-file gates; it is the reason the include list must keep growing, and
+the reason to read a module's own row (`npm run test:core 2>&1 | grep -E '^ℹ +<file>\.js'`) rather than
+the summary line. Admitting the clip modules moved the aggregate 98.6 → 97.6, which is the gap becoming
+visible rather than a regression.
 
 **Tranche A of the sleepAnalysis work is DONE** (84.1% -> 99.5%): `sleepInsights` + `pearson`,
 `runNightlySleepJob` + `startSleepJob`, `getStoredNights`, the window gates, and `nightClimate`'s
@@ -250,9 +420,31 @@ that path until a person could ask for a recompute. **When adding a control, loo
 newly makes reachable.**
 
 **Still to bring up to the bar and add to the list**, in priority order:
-- `routes/cameras.js` (1,036 lines) — the biggest surface, and the one with real authz branching
-- `routes/auth.js` (422) — login, the two-step MFA exchange, session lifecycle
-- `lib/clipStorage.js` + `lib/motionDetector.js` — retention maths and zone-mask maths
+- `routes/cameras.js` (1,036 lines) — the biggest surface, and the one with real authz branching.
+  **The last big one left.**
+- `lib/motionDetector.js` — zone-mask maths
+- ✅ `routes/auth.js` — **DONE 2026-09-05** (#295): 86.5 → 99.6% lines. ⚠️ Branches are **73%**, under
+  the 80 bar and hidden by the aggregate; worth a deliberate pass rather than bolting on — tracked as
+  **§3 E2**.
+- ✅ `lib/clipStorage.js` — **DONE 2026-09-06** (#296), 100% lines, along with the other four clip
+  modules. It had no test file at all, which is how `sweepClips(){ return; }` — deleting the entire
+  retention sweeper — passed a green 389-test suite.
+
+**★ COVERAGE MEASURES EXECUTION; MUTATION TESTING MEASURES DISCRIMINATION** — the lesson of #263, and
+now a command rather than a memory. `node scripts/mutate.mjs` breaks the source one way at a time from
+a catalogue (`scripts/mutants.json`, **84 mutants**) and reports any the tests fail to kill. It guards
+the four ways such a run lies: a mutant that never applied, a restore that reverted uncommitted work, a
+broken harness (a no-op control mutant must SURVIVE, or the whole run is declared void), and a
+name-pattern that matched nothing. **Deliberately not in CI** — ~12 minutes, and this repo's own rule
+is that a check people skim is worse than no check. Run it when adding tests to core logic, and add the
+mutants your change should be killing.
+
+⚠️ **Four "trap tests" were found and rewritten** in the same pass, all the same shape: *the test's
+NAME stated the invariant, and its FIXTURE guaranteed the invariant could not be violated.* One
+asserted `assert.ok(true, 'no throw')` for a containment guard that a successful escape also satisfies;
+one asserted defaults its own `beforeEach` had just written; one derived every fixture, loop bound and
+test name from the constants it was meant to pin. **Ask of every test: what value of the thing under
+test would make this fail?**
 
 **★ Daylight saving — FOUND AND FIXED 2026-08-29, and worth remembering as a pattern.** `localDateStr`
 shifted days by adding 86,400,000 ms and reading the local date off the result. A day is not 24 hours
@@ -275,10 +467,15 @@ something odd", which only the e2e stack reproduces.
   suite ran whatever the published tag pointed at, so on a dev -> main PR a green run could be proving
   the PREVIOUS build. **The same applies locally**: `bash e2e/test.sh` on its own tests the last
   published image, not your working tree — build first.
-- **Phase 5 — front-end testing — `NEXT`.** Target **>= 80% of the front end**, exercised in BOTH roles
-  (admin and caregiver), since role gating is real in the UI (`isAdmin` branches in the tiles, camera
-  pages and settings) and is exactly where the timelapse-delete bug hid. Two layers: component tests for
-  logic and rendering, and role-based Playwright flows for what a person actually does.
+- **Phase 5 — front-end testing — `SHIPPED` (2026-09-02).** The >= 80% target is met and **gated**:
+  `vite.config.js` pins `{ lines: 80, functions: 80, branches: 75, statements: 80 }` and CI runs
+  `npm run test:coverage`, so it ratchets exactly as the backend gate does. 36 component test files.
+  `test/helpers/render.jsx` renders every screen as **both** an admin and a caregiver, which is the
+  half that matters — role gating is real in the UI and is exactly where the timelapse-delete bug hid.
+  ⚠️ **Raise the coverage; never lower the threshold or widen the exclude list** — the config says so
+  at the line itself, because that is the failure mode for a ratchet.
+  ★ The e2e half also grew, 6 → 49 specs, including the auth surface. **Unit tests cannot catch a
+  client/server seam bug — only e2e can**, which is how the morning-review seam defect was found.
 - **Phase 6 — Android instrumented tests (Espresso)** in `nightlight-mobile` — `SPECCED`, was Phase 5.
   Only the Capacitor scaffold stub exists. Local emulators were unusable (no nested virt) but **GitHub
   Linux runners have KVM**, so a CI emulator is realistic. Target the genuinely native bits: the
@@ -410,7 +607,8 @@ observed locally.
 ## 3. Idea backlog
 
 Not committed — each is specced far enough to start, ordered by value-for-effort. Suggested first
-three: **A1**, **A2**, **C1**.
+three: **A1**, **A2**, **C1**. For *maintenance* rather than features, see **§E** — those are agreed
+and unblocked, and are the right thing to reach for in a gap.
 
 ### A. Builds on the shipped sleep + climate + clips data
 - **A1. Weekly sleep digest** — `IDEA` · *small*. Aggregate the existing per-night summaries per child:
@@ -448,6 +646,47 @@ three: **A1**, **A2**, **C1**.
   live view of one camera/child until expiry, revocable anytime. Reuses the JWT + `sessions` row model
   with a new narrow scope; a `guest_grants` row checked in auth middleware. No settings, no history —
   just live. **Open:** almost certainly view-only (no talk).
+
+### E. Maintenance and housekeeping
+Not features — small, agreed, unblocked work with no dependency on the holdout. **This is the list to
+pick from when there is a gap**, which is why it is one list rather than four notes in four places.
+
+- **E1. Clear the `qs` and `uuid` advisories** — `NEXT` · *small*. `npm audit --omit=dev` on the backend
+  reports **9 moderate** advisories: `qs` (array-limit bypass, DoS via attacker-controlled `isBuffer`)
+  and `uuid` (missing buffer bounds check in v3/v5/v6). Both are **transitive through
+  `gaxios`/`teeny-request`**, i.e. Firebase Admin, not direct dependencies. The frontend reports 0.
+  - **Confirmed pre-existing, not introduced by the 2026-09-06 dependency batch** — that lockfile diff
+    touches neither package (0 changed lines mentioning them).
+  - `qs` has a **non-breaking** `npm audit fix`. `uuid` needs `--force`, which can move majors.
+  - ⚠️ **Read what `--force` actually proposes before running it**, and re-run the suite plus a real
+    image build after — `firebase-admin` is on the push path, and a broken push is silent until an
+    alert fails to arrive.
+
+- **E2. `routes/auth.js` branch coverage** — `NEXT` · *small*. **73%**, under the 80 bar, and invisible
+  because the gate is an aggregate. Lines are 99.6% and functions 100%, so what is missing is the
+  either-or paths, not whole functions. See §2.3, where it sits on the coverage list.
+
+- **E3. Fix the third state in `02-add-camera`'s e2e wait** — `NEXT` · *small*. The spec clicks **Add
+  camera**, then waits up to 8 s for the **Save anyway** button that appears when the pre-save stream
+  validation fails against a cold synthetic source. Its `catch` treats "the button never appeared" as
+  *"validated on the first try"* — but there is a third state: **validation failed AND the button was
+  slower than 8 s**. The run then continues as though the camera had been saved and fails ~20 s later
+  waiting for "Save changes", which points at the wrong thing entirely.
+  - Observed 2026-09-06 on the dependency batch; the screenshot showed the app correctly reporting an
+    unreachable camera. Re-run 3× on the identical image: 3/3 passed, so it is a flake, not a
+    regression — but it costs an investigation every time it fires.
+  - **Fix:** decide between the two outcomes explicitly rather than inferring from a timeout — wait for
+    *either* "Save changes" *or* "Save anyway", and fail with a message naming which appeared.
+
+- **E4. Move the soak stack into the repo as `e2e/soak/`** — `NEXT` · *small*. It currently lives
+  outside the repo on the dev machine, which was the right call while it was unproven. **It has earned
+  its place**: it validated #257 end to end, caught the #274 review's finding in a live container,
+  proved #254's per-leg isolation, measured the shutdown-grace gap that became #279, and confirmed
+  #297's fix under fault injection. None of that was reachable from a unit test.
+  - Brings with it the two fault-injection recipes (hide `ffmpeg`; hide `mediamtx`) that are currently
+    only in an agent's notes.
+  - It already mounts `e2e/fakecam/mediamtx.yml` from the repo, so the move mostly means the compose
+    file and a README. ⚠️ Keep the warning that it must never be pointed at a bedroom camera.
 
 ---
 
@@ -487,9 +726,20 @@ Recorded so they don't get re-litigated. Each was considered and consciously par
 ## 5. Operational runbooks
 
 Not plans — living procedures, kept alongside this file:
+- **`deploy-runbook.md`** — staging → release → production on Unraid, with the gate at each step and
+  why it exists. Read it when something does not look right; the `/release` and `/deploy-staging`
+  skills are the automation of the same steps. ★ Holds the two traps that mislead most: the guard
+  script prints the **OCI revision label, which is empty on production** (use `NIGHTLIGHT_GIT_SHA`),
+  and `--stop-timeout 30` in the DockerMan templates only takes effect on the next `update_container`.
 - **`sleep-marker-review-runbook.md`** — pull a night's OOB / into-bed markers, `bed_transitions`, and
   shadow onset/wake off staging. Read-only. Note it deliberately warns that prod is a *different*
   database with different camera IDs — don't cross the two.
+- **`comment-audit-runbook.md`** — the provably-complete pass over every reassurance-shaped comment
+  ("never", "cannot", "handled"), checking each against the code beside it. ★ Driven by an
+  **enumerated candidate list** so completeness is checkable — 441 candidates across 92 files, worked
+  8 agents at a time, one at a time. Exists because this class of defect is invisible to the test
+  suite: #297 hid behind a comment asserting a hazard was "verified on win32" in a Linux-only product.
+  Holds the running ledger — start there to see what has been covered.
 
 ---
 

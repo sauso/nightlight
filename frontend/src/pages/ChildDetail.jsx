@@ -12,6 +12,8 @@ import SensorHistoryCard from '../components/SensorHistoryCard.jsx';
 import SleepSummaryCard from '../components/SleepSummaryCard.jsx';
 import TimelapseCard from '../components/TimelapseCard.jsx';
 import RecordingsCard from '../components/RecordingsCard.jsx';
+import MorningReviewCard from '../components/MorningReviewCard.jsx';
+import { useSettings } from '../lib/SettingsContext.jsx';
 import { ageLabel } from '../lib/age.js';
 
 // A child's hub: their identity + (later) last night's sleep, then their cameras and their alerts.
@@ -24,6 +26,13 @@ export default function ChildDetail() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const { kids, cameras } = useCameras();
+  const { settings } = useSettings();
+  // Same formatter the sleep card uses, so the card and the review agree to the minute.
+  const fmtTime = (utc) => {
+    if (!utc) return '';
+    const d = new Date(String(utc).replace(' ', 'T') + 'Z');
+    return new Intl.DateTimeFormat([], { timeZone: settings?.timezone || undefined, hour: 'numeric', minute: '2-digit' }).format(d);
+  };
   const kid = kids.find((k) => k.id === id);
   const childCams = cameras.filter((c) => c.child_id === id);
   const [alerts, setAlerts] = useState([]);
@@ -76,6 +85,8 @@ export default function ChildDetail() {
           </div>
           <SleepSummaryCard childId={id} />
         </div>
+
+        <MorningReviewCard childId={id} fmtTime={fmtTime} />
 
         <TimelapseCard childId={id} />
         <RecordingsCard childId={id} />

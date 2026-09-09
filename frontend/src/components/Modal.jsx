@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useId, useRef } from 'react';
 
 // The shared modal. On phone-width screens it's a SHEET: it hugs the bottom edge (or the top, with
 // placement="top"), rounded on the inner side only, capped at a comfortable reading width.
@@ -12,6 +12,7 @@ import { useEffect, useRef } from 'react';
 // rules would silently lose. Only the two values the visual-viewport effect computes below stay inline.
 export default function Modal({ title, onClose, children, placement = 'bottom', headerAction = null, wide = false }) {
   const top = placement === 'top';
+  const titleId = useId();
   const overlayRef = useRef(null);
 
   // Keep the modal inside the region the on-screen keyboard leaves visible. Without this, a tall form
@@ -45,9 +46,14 @@ export default function Modal({ title, onClose, children, placement = 'bottom', 
 
   return (
     <div ref={overlayRef} className={overlayClass} onClick={onClose}>
-      <div className="card modal-card" onClick={(e) => e.stopPropagation()}>
+      {/* role/aria-modal so assistive tech announces this as a dialog and treats the page behind it
+          as inert — without them a screen reader reads the modal as one more region of the page, and
+          several of these ask for a password or confirm a destructive action. `aria-labelledby`
+          points at the visible heading, so the dialog announces itself by the title already on
+          screen rather than needing a duplicate label that could drift out of step with it. */}
+      <div className="card modal-card" role="dialog" aria-modal="true" aria-labelledby={titleId} onClick={(e) => e.stopPropagation()}>
         <div className="modal-card__head">
-          <h2>{title}</h2>
+          <h2 id={titleId}>{title}</h2>
           <div className="modal-card__actions">
             {headerAction}
             <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>

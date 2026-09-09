@@ -38,26 +38,57 @@ export function renderAs(
   ui,
   { settings = {}, cameras = [], kids = [], error = '', loading = false, route = '/' } = {}
 ) {
-  const auth = { user, loading, login: vi.fn(), logout: vi.fn(), refresh: vi.fn() };
-  const settingsValue = { settings: { ...DEFAULT_SETTINGS, ...settings }, loading, refresh: vi.fn() };
-  const camerasValue = { kids, cameras, error, refresh: vi.fn() };
+  // Kept in scope so the returned handles always refer to the CURRENT render, not the first one.
+  let auth;
+  let settingsValue;
+  let camerasValue;
+  const build = (opts) => {
+    // ⚠️ `opts.user`, not the `user` argument, so `rerenderWith({ user })` can publish a user that
+    // was not there at first paint. That transition is real — AuthContext resolves asynchronously, so
+    // every screen renders once with `user: null` — and a form that fails to pick the user up when it
+    // lands stays empty and then saves those blanks over the real values.
+    // The spies are rebuilt each time, so grab handles from the returned `auth` AFTER a rerenderWith.
+    auth = { user: opts.user, loading: opts.loading, login: vi.fn(), logout: vi.fn(), refresh: vi.fn() };
+    settingsValue = { settings: { ...DEFAULT_SETTINGS, ...opts.settings }, loading: opts.loading, refresh: vi.fn() };
+    camerasValue = { kids: opts.kids, cameras: opts.cameras, error: opts.error, refresh: vi.fn() };
+    return (
+      <MemoryRouter initialEntries={[opts.route]}>
+        <AuthContext.Provider value={auth}>
+          <SettingsContext.Provider value={settingsValue}>
+            <CamerasContext.Provider value={camerasValue}>{opts.ui}</CamerasContext.Provider>
+          </SettingsContext.Provider>
+        </AuthContext.Provider>
+      </MemoryRouter>
+    );
+  };
 
-  const result = render(
-    <MemoryRouter initialEntries={[route]}>
-      <AuthContext.Provider value={auth}>
-        <SettingsContext.Provider value={settingsValue}>
-          <CamerasContext.Provider value={camerasValue}>{ui}</CamerasContext.Provider>
-        </SettingsContext.Provider>
-      </AuthContext.Provider>
-    </MemoryRouter>
-  );
-  return { ...result, user: userEvent.setup(), auth, settingsValue, camerasValue };
+  let opts = { settings, cameras, kids, error, loading, route, ui, user };
+  const result = render(build(opts));
+
+  // ⚠️ RTL's own `rerender` replaces the tree WITHOUT the providers, so anything using a context
+  // explodes. `rerenderWith` re-renders the same screen inside the same providers with some values
+  // changed — which is the only way to test what happens when a context value ARRIVES, as
+  // SettingsContext's real timezone does a moment after boot. That transition silently destroyed a
+  // user's typing once; a test for it needs to be able to reproduce it.
+  const rerenderWith = (changes) => {
+    opts = { ...opts, ...changes };
+    result.rerender(build(opts));
+  };
+
+  return { ...result, rerenderWith, user: userEvent.setup(), auth, settingsValue, camerasValue };
 }
 
 export const renderAsAdmin = (ui, opts) => renderAs(ADMIN, ui, opts);
 export const renderAsCaregiver = (ui, opts) => renderAs(CAREGIVER, ui, opts);
 
 // Run the same assertions for both roles without duplicating the body.
-export function forEachRole(fn) {
-  for (const [name, who] of [['admin', ADMIN], ['caregiver', CAREGIVER]]) fn(name, who);
+//
+// ⚠️ RETURNS A PROMISE — `await forEachRole(...)` whenever the body is async. It did not, once, and an
+// async body's assertions then ran after the test had already resolved: the test passed against a
+// component that rendered NOTHING AT ALL. A helper that silently discards a rejected promise turns
+// every test written with it into a decoration, so it now collects them and the caller can await.
+// Sequential, not Promise.all: each role renders into the SAME document, so running them concurrently
+// puts two copies of the screen on the page and every query becomes ambiguous.
+export async function forEachRole(fn) {
+  for (const [name, who] of [['admin', ADMIN], ['caregiver', CAREGIVER]]) await fn(name, who);
 }

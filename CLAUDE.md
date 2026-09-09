@@ -53,6 +53,37 @@ That last line is not ceremony. PR #229 shipped eight lines of bare index arithm
 rationale in the commit message only — the comments were written, then lost to a `git checkout --` that
 reverted an over-fitted attempt, and nothing caught it.
 
+**It has to work for someone else.** This image is publicly distributed, and every threshold in
+`sleepAnalysis.js` / `bedTransitionRules.js` was measured on **two cameras in one house**. Before
+shipping, ask what the change assumes about whoever installs it:
+- **Environment** — never hard-code a timezone, offset or locale. Read `settings.timezone` and use the
+  DST-safe `zonedToUtc` / `toSqlUtc` in `sleepAnalysis.js`. A review window anchored on a literal
+  `04:00Z` shipped once; it is midday only in Melbourne, and on a default install (`timezone` defaults
+  to `'UTC'`) it hid every morning transition.
+- **Per-installation setup** — the detector only sees what the painted `detect_zone` covers, and nothing
+  validates that the zone sits on the bed. Renz's is 38.5% of frame (larger than Raffa's), so every
+  number said it was fine; drawn over a real frame it includes a moving curtain and stops short of the
+  foot end of the bed, which is exactly where he climbs out. Area and rect count prove nothing —
+  **draw the zone over a transition snapshot and look at it.**
+- **Calibrated numbers** — fine to ship, but say which nights set them, and prefer deriving a threshold
+  from the room over hard-coding it.
+
+⚠️ If the justification for a value is one night, one camera or one child, write the sentence about
+what happens to everyone else. "Known limit, documented" is an acceptable answer; silence is not.
+
+★ **Two shapes of test that look like verification and are not**, both found repeatedly here (#263):
+- **The fixture guarantees the invariant the test name claims.** A `describe('defaults')` asserting
+  `1 / 30 / 14` one line after its own `beforeEach` wrote exactly those values; a containment test whose
+  only assertion was `assert.ok(true, 'no throw')`, which a successful escape also satisfies; a whole
+  file deriving its fixtures, loop bounds *and test names* from the constants it was meant to pin. Ask
+  what value of the thing under test would make this test fail. If the answer is "none", it is a
+  placeholder.
+- **The test depends on the machine.** `'../../../../etc/passwd'` as an escape fixture passes on Windows
+  because the file is not there, guard or no guard; a fake `ffmpeg` on PATH made four cases green while
+  the handler under test ran zero times. Anything that reads `/proc/mounts`, spawns a binary, or asks
+  the disk how full it is needs the answer INJECTED — see the `mounts` / `free` seams in
+  `lib/clipStorage.js`, and the empty-PATH technique in `spawn-failure.test.js`.
+
 **Then have a subagent attack it.** Required for anything touching the `test:core` include list,
 non-trivial control flow, or detection/sleep analysis; skippable for docs-only or a one-line config
 change, but say so in the PR. Point it at the PR body and tell it to *falsify* the claims, not confirm
@@ -84,11 +115,24 @@ npm run test:core            # THE CORE-LOGIC COVERAGE GATE. Fails if the module
                               # CI runs it on every push/PR and the release flow runs it as a gate.
                               # That include list is the DEFINITION of core logic — grow it as
                               # modules qualify, never shrink it to go green.
+                              # ⚠️ THE THRESHOLDS ARE AGGREGATES ACROSS THE WHOLE LIST, not per file.
+                              # A module at 88% can sit under a green gate. To see one module, read
+                              # its own row: npm run test:core 2>&1 | grep -E '^ℹ +<file>\.js'
 npm run test:coverage        # full coverage report, no thresholds (for finding the next gap)
 
 # Repo-level checks (no install needed, run from the repo root)
 node scripts/check-changelog.mjs   # CHANGELOG.md structure: one heading per type per version, in
                                    # Keep a Changelog order, released sections dated. Runs in CI.
+node scripts/mutate.mjs            # MUTATION TESTING. Breaks the source one way at a time (the
+                                   # catalogue is scripts/mutants.json) and reports any mutant the
+                                   # tests fail to kill. NOT in CI — it is slow and it is a tool for
+                                   # writing tests, not a gate. Run it when you add tests to core
+                                   # logic, and add the mutants your change should be killing.
+                                   #   --only=<substring>  just the mutants whose label matches
+                                   #   --full              every mutant against the WHOLE suite
+                                   #   --list              print the catalogue
+                                   # It restores every file from an in-memory byte copy and verifies
+                                   # the round-trip; it never shells out to git. See the header.
 npm start                    # node src/index.js — expects MediaMTX/ffmpeg binaries on PATH,
                               # so in practice this is normally run inside the Docker image
                               # rather than bare on a dev machine
@@ -98,10 +142,12 @@ cd frontend && npm install
 npm run dev
 npm run build                # outputs to frontend/dist, copied into the image as ./public
 
-# Full stack, matching production
+# Full stack, matching production.
+# --stop-timeout: shutdown finishes an in-flight recording, which needs a few seconds. Docker's own
+# default is unspecified and was measured at ~4s — short enough to SIGKILL mid-save (issue #279).
 docker build -t nightlight .
-docker run -d --name nightlight --network host -e PUID=99 -e PGID=100 \
-  -v ./data:/app/data nightlight
+docker run -d --name nightlight --network host --stop-timeout 30 \
+  -e PUID=99 -e PGID=100 -v ./data:/app/data nightlight
 docker logs -f nightlight
 ```
 

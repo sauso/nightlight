@@ -9,6 +9,24 @@ import {
   closestCenter,
 } from '@dnd-kit/core';
 import { SortableContext, rectSortingStrategy, arrayMove } from '@dnd-kit/sortable';
+
+// Move `activeId` to where `overId` sits, in the FULL camera list.
+//
+// ⚠️ Exported and pure on purpose. The grid only renders ENABLED cameras, but the order that gets
+// saved covers every camera including the disabled ones — so a disabled camera keeps its saved
+// position and reappears where it was when it is switched back on, rather than being shunted to the
+// end by the first drag anyone does. That means the indices must be looked up in `full`, never in the
+// list on screen; computing them from the visible subset would write an order missing every disabled
+// camera. The component around this mounts the WebRTC/HLS player stack and cannot run under jsdom
+// (see the coverage exclusions in vite.config.js), which is exactly why this logic lives out here
+// where it can be tested — same arrangement as CameraTile's `detectionPayload`.
+export function reorderCameras(full, activeId, overId) {
+  const oldIndex = full.findIndex((c) => c.id === activeId);
+  const newIndex = full.findIndex((c) => c.id === overId);
+  // A drag onto something not in the list would make arrayMove(-1) silently move the LAST camera.
+  if (oldIndex === -1 || newIndex === -1) return full;
+  return arrayMove(full, oldIndex, newIndex);
+}
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import {
@@ -74,9 +92,7 @@ export default function LiveMonitor() {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     setOrderedCameras((current) => {
-      const oldIndex = current.findIndex((c) => c.id === active.id);
-      const newIndex = current.findIndex((c) => c.id === over.id);
-      const next = arrayMove(current, oldIndex, newIndex);
+      const next = reorderCameras(current, active.id, over.id);
       api.put('/cameras/reorder', { order: next.map((c) => c.id) }).catch(() => {});
       return next;
     });

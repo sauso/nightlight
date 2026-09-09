@@ -113,6 +113,66 @@ track — but it can't fix (1), a camera that simply won't stream AAC.
 Nightlight's native path: it streams reliably and gives sound in both Low latency and Compatibility.
 This is how the Sonoff/Thingino cameras are happiest — flip AAC → G711A in the camera's web UI.
 
+## A `[guard:…]` error in the log, and Nightlight keeps running
+
+**What you see:** a line like
+`[guard:camera-watchdog:Nursery] background task failed (continuing): TypeError: fetch failed …`,
+followed by the app carrying on normally.
+
+**Why:** background jobs — the 15-second camera watchdog, the 30-second audio check, the 5-minute
+reconcile, the timelapse sampler — are wrapped so that a failure in one of them is reported and
+skipped instead of taking the whole app down. The commonest cause is the streaming server (MediaMTX)
+being briefly unavailable, which is also exactly what makes a camera look unready in the first place,
+so the two tend to appear together.
+
+**What to do:** if it appears once or twice around a camera restart, ignore it — the next tick
+(15-30 seconds later) retries on its own. If the *same* guard line repeats steadily for many minutes,
+something is genuinely stuck: check the log above it for what that camera or the streaming server was
+doing, and restart the container if cameras are not recovering.
+
+> Nightlight deliberately keeps running after an unexpected error rather than exiting, because it is
+> normally left unattended overnight — a monitor that is degraded is more useful at 3am than one that
+> has quit. The trade-off is that these lines are worth reading rather than assuming the app is fine
+> just because it is still up.
+
+## Video comes back before Record does, after a restart
+
+**What you see:** a camera's picture returns a minute or so after a restart or a glitch, but pressing
+**Record** still says *"This camera isn't buffering yet — it may be offline."* for a few minutes more.
+
+**Why:** two different mechanisms heal them. The live stream is watched every 15 seconds and restarted
+quickly; the recording buffer is restored by a housekeeping pass that runs every 5 minutes. So there is
+a window where the picture is healthy and there is nothing yet to cut a clip from. Measured on a test
+container: picture back after ~60 seconds, recording available on the next 5-minute pass.
+
+**What to do:** wait for the next few minutes and try again. Nothing is wrong, and no action is needed.
+
+---
+
+## An interrupted recording shows as failed rather than disappearing
+
+**What you see:** an entry reading *Couldn't be saved* in the Recordings card, for a recording that was
+in progress when Nightlight restarted (a deploy, a reboot, a power cut).
+
+**Why:** a clip is assembled from the buffer *after* you press stop, and a restart during that step
+loses it. Nightlight now marks such a recording as failed when it next starts, rather than leaving it
+stuck half-finished forever. It tries to finish the clip first, but only for up to 6 seconds — a fixed
+limit that allowing your container longer to stop does **not** extend — so a long recording may still
+be lost.
+
+**What to do:** re-record if you still need it, then tap the entry and choose **Remove** to clear it —
+recordings have no automatic retention, so it stays until you do. *(Older versions hid these
+entirely: the recording simply never appeared, with nothing explaining why. If you are on an older
+version, a recording that vanished after a restart was almost certainly this.)*
+
+⚠️ **Check your container actually grants that time**, especially on an install created before this
+was added. Nightlight needs a few seconds to stop cleanly and it declares that as `--stop-timeout 30` /
+`stop_grace_period: 30s`; **Docker's own default is not a reliable substitute** — recent versions
+document none, and it has been measured killing the container after about 4 seconds — enough to lose
+the recording it was in the middle of saving. Verify with `docker inspect -f '{{.Config.StopTimeout}}' nightlight`:
+`30` is right; `<nil>` means nothing is set and Docker will decide for you. See
+[Quick start](README.md#quick-start) for where to add it.
+
 ---
 
 ## Confirmed bugs (fix pending)

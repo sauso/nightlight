@@ -29,6 +29,9 @@ services:
     # Defaults to the staging image; CI can override (e.g. to test an image built
     # from the exact PR commit) via NIGHTLIGHT_IMAGE.
     image: ${NIGHTLIGHT_IMAGE:-sauso/nightlight:dev}
+    # Same declaration as production (see docker-compose.yml) — deliberately, so the stack this suite
+    # runs is the one users get. Costs nothing here: the app exits as soon as it has finished stopping.
+    stop_grace_period: 30s
     depends_on:
       - fakecam
     environment:

@@ -77,3 +77,22 @@ export function startSensorSampler() {
     `[sensors] Sampling temperature/humidity every ${SAMPLE_INTERVAL_MS / 60000} min, keeping ${RETENTION_DAYS} days.`
   );
 }
+
+// Stop both timers. Idempotent, and safe when it was never started.
+//
+// ⚠️ THIS EXISTS BECAUSE A START WITH NO STOP IS HOW ISSUE #278 HAPPENED (see #286). The activity
+// tracker had exactly this shape and it cost the test suite: an interval nothing could clear meant
+// `node --test` could never exit, which was papered over with `--test-force-exit`, and that flag then
+// cancelled a third of the suite on a contended runner while reporting `fail 0`. Nothing calls
+// `startSensorSampler()` in a test at all today, which is the only reason this module never did the
+// same — an absence, not a safeguard.
+//
+// shutdown() in index.js calls this alongside the detectors and the activity tracker.
+export function stopSensorSampler() {
+  clearInterval(sampleTimer);
+  clearInterval(pruneTimer);
+  // Nulled, not merely cleared: `startSensorSampler` guards on `if (sampleTimer) return`, so a stale
+  // handle here would make every later restart a silent no-op.
+  sampleTimer = null;
+  pruneTimer = null;
+}

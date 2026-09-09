@@ -1,5 +1,6 @@
 import db from '../db.js';
 import { logger } from './logger.js';
+import { postWithTimeout, parseJson } from './httpNotify.js';
 
 // Pushover notifications (https://pushover.net) — a self-hosted-friendly alternative to Firebase/FCM.
 // The recipient installs the Pushover app (iOS/Android/desktop, one-time ~$5/platform) and the server
@@ -49,8 +50,8 @@ export async function validatePushover(appToken, userKey, device = '') {
     const dev = String(device || '').trim();
     if (dev && !dev.includes(',')) params.device = dev;
     const body = new URLSearchParams(params);
-    const res = await fetch(`${API}/users/validate.json`, { method: 'POST', body });
-    const data = await res.json().catch(() => ({}));
+    const res = await postWithTimeout(`${API}/users/validate.json`, { method: 'POST', body }, { label: 'pushover' });
+    const data = parseJson(res.text);
     if (data.status === 1) return { ok: true };
     const msg = Array.isArray(data.errors) && data.errors.length ? data.errors.join('; ') : 'Pushover rejected the token or user/group key.';
     return { ok: false, error: msg };
@@ -79,9 +80,9 @@ export async function sendPushover({ title, message, url, urlTitle, priority, im
     if (image && image.length) {
       form.set('attachment', new Blob([image], { type: 'image/jpeg' }), 'snapshot.jpg');
     }
-    const res = await fetch(`${API}/messages.json`, { method: 'POST', body: form });
+    const res = await postWithTimeout(`${API}/messages.json`, { method: 'POST', body: form }, { label: 'pushover' });
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
+      const data = parseJson(res.text);
       const msg = Array.isArray(data.errors) && data.errors.length ? data.errors.join('; ') : `HTTP ${res.status}`;
       logger.error(`[pushover] send failed (${res.status}): ${msg}`);
       return { ok: false, error: msg };

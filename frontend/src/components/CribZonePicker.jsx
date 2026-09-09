@@ -21,8 +21,12 @@ import { api } from '../lib/api.js';
 // encoded into rects on the way out and rasterised back on the way in; the grid is fixed, so a
 // grid-painted zone round-trips through the database exactly.
 
-const COLS = 32;
-const ROWS = 18;
+// Exported for tests. vite.config.js's coverage note is explicit that a component's pure logic
+// should be extracted into exported helpers rather than left buried where nothing can reach it —
+// and the round-trip below is a claim this file's header makes ("a grid-painted zone round-trips
+// through the database exactly") that nothing checked.
+export const COLS = 32;
+export const ROWS = 18;
 const N = COLS * ROWS;
 
 const FILL_ALPHA = 0.55; // solid enough to read as a highlight, sheer enough to check the fit
@@ -35,7 +39,7 @@ const toRects = (zone) => (!zone ? [] : Array.isArray(zone) ? zone : [zone]);
 
 // Stored rects -> painted cells. A cell is on when its centre falls inside any rect, which is exact
 // for a zone this picker wrote and a sane approximation for an older hand-drawn box.
-function rectsToCells(zone) {
+export function rectsToCells(zone) {
   const cells = new Uint8Array(N);
   for (const r of toRects(zone)) {
     if (!r || !['x', 'y', 'w', 'h'].every((k) => typeof r[k] === 'number')) continue;
@@ -54,7 +58,7 @@ function rectsToCells(zone) {
 // Painted cells -> the smallest sensible list of rects: horizontal runs per row, each grown down
 // into the row above it when the columns line up. A solid blob stores as a handful of rects rather
 // than one per row. Edges are rounded (not widths) so neighbouring rects stay flush.
-function cellsToRects(cells) {
+export function cellsToRects(cells) {
   const out = [];
   for (let row = 0; row < ROWS; row++) {
     const y0 = q(row / ROWS);

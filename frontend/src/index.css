@@ -2558,6 +2558,17 @@ input[type='range'] {
 .rec-strip__item:hover { border-color: var(--peri); color: var(--text-primary); }
 .rec-strip__item img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
 .rec-strip__item span:last-child { display: block; padding: 5px 6px; font-size: 11px; line-height: 1.25; }
+/* A recording that couldn't be saved (issue #276). It has no thumbnail to show, so the tile keeps the
+   same footprint as its neighbours — a shorter tile would make the strip ragged — and fills the image
+   area with a warning glyph instead. Muted rather than alarming: it is an explanation, not an alert. */
+.rec-strip__item--failed { border-style: dashed; border-color: var(--border); }
+.rec-strip__item--failed:hover { border-color: var(--offline); }
+.rec-strip__failed {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; aspect-ratio: 16 / 9;
+  background: var(--bg-elevated); color: var(--offline);
+}
+
 .rec-strip__play {
   position: absolute; top: 34%; left: 50%; transform: translate(-50%, -50%);
   width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
@@ -2643,3 +2654,92 @@ input[type='range'] {
      desktop dialog there's room to let it use the height it's given. */
   .modal-overlay--wide .clip-player { max-height: 74vh; }
 }
+
+/* Morning review — the "was last night right?" card and the screen behind it.
+   Chrome is --peri (this is something to interact with), not --accent: it is an invitation, not the
+   primary action on the page. The card must read as dismissable at a glance or it becomes nagging. */
+.review-card { display: flex; align-items: stretch; padding: 0; overflow: hidden; }
+
+.review-card__body {
+  flex: 1; display: flex; align-items: center; gap: 12px;
+  padding: 14px 4px 14px 16px; background: none; border: 0; cursor: pointer; text-align: left;
+}
+
+.review-card__icon {
+  flex-shrink: 0; width: 34px; height: 34px; border-radius: 10px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--peri); background: rgba(124, 131, 219, 0.12);
+}
+
+.review-card__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.review-card__go { color: var(--peri); font-size: 20px; padding-right: 12px; }
+
+.review-card__dismiss {
+  order: 2; align-self: flex-start; flex-shrink: 0;
+  padding: 10px 12px; background: none; border: 0; cursor: pointer; color: var(--text-secondary);
+}
+.review-card__dismiss:hover { color: var(--text-primary); }
+
+.review-event {
+  display: flex; gap: 12px; padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+.review-event:first-of-type { border-top: 0; }
+
+.review-event__frame {
+  width: 96px; height: 72px; flex-shrink: 0;
+  object-fit: cover; border-radius: 8px; background: var(--bg-elevated);
+}
+.review-event__frame--none {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; color: var(--text-secondary); border: 1px dashed var(--border);
+}
+
+.review-event__body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.review-event__when { font-size: 13.5px; color: var(--text-primary); }
+.review-event__verdicts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+
+.review-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; line-height: 1; padding: 6px 11px;
+  border-radius: 999px; border: 1px solid var(--border);
+  background: var(--bg-elevated); color: var(--text-secondary); cursor: pointer;
+}
+.review-chip:hover { color: var(--text-primary); border-color: var(--peri-soft); }
+.review-chip--on { background: var(--peri); border-color: var(--peri); color: #fff; }
+
+/* The review card's answered state, and the confirm-or-correct block on the review screen. */
+.review-card--done .review-card__body { padding-right: 4px; }
+
+.review-card__icon--done { color: var(--live); background: rgba(127, 191, 163, 0.14); }
+
+.review-shown { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 14px; }
+.review-shown > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.review-shown__label { color: var(--text-secondary); font-size: 13.5px; }
+.review-shown strong { font-size: 17px; font-variant-numeric: tabular-nums; }
+
+.review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.review-actions .btn { flex: 1 1 auto; }
+
+/* "You corrected this" — shown wherever a night's times came from a person rather than the detector. */
+.sleep-corrected {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; font-weight: 600; color: var(--peri);
+  background: rgba(124, 131, 219, 0.12); padding: 2px 9px; border-radius: 999px;
+}
+
+.review-events__toggle {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 4px 0; background: none; border: 0; cursor: pointer; text-align: left;
+}
+.review-events__toggle-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+
+.sleep-detail__recompute-note {
+  margin-top: 8px; font-size: 12.5px; line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* "Up for the day here" — naming the moment, as distinct from judging the event. Given the accent
+   rather than the periwinkle chrome because it is the one action on this row that changes the night. */
+.review-chip--moment { border-color: var(--accent-dim); color: var(--text-primary); }
+.review-chip--moment.review-chip--on { background: var(--accent); border-color: var(--accent); color: #2b2118; }

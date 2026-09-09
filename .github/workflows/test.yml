@@ -71,13 +71,25 @@ jobs:
       - name: Install front-end dependencies
         working-directory: frontend
         run: npm ci
-      - name: Run component tests
+      # NOW A BLOCKING GATE. The >= 80% threshold lives in vite.config.js and this runs it, on the
+      # same principle the backend core-logic gate was switched on: only once the suite actually
+      # passes it, so it never trains anyone to click past a red check. Met 2026-09-02 at
+      # 87.5 statements / 82.9 branches / 80.8 functions / 90.2 lines, measured on the front end
+      # that CAN be tested (see the exclude list in vite.config.js, where every entry has to
+      # justify itself).
+      #
+      # /!\ THE FUNCTION PERCENTAGE IS NOT DETERMINISTIC. Three runs of the same tree on the same
+      # machine gave 80.71 / 80.59 / 80.59 - about 0.12 of a point, one or two functions out of ~810.
+      # So the target is not "clear 80", it is "clear 80 by more than the noise": the first attempt
+      # cleared it by 0.09 locally and went red here. If this job is red while a dev machine is
+      # green, re-measure on a CLEAN checkout before concluding anything about the runner - an
+      # earlier note here blamed the runner, and a clean local checkout of that same commit
+      # reproduced the failing number exactly.
+      # Raise the coverage, never lower the threshold or widen the exclude list, which is the same
+      # thing wearing a different hat.
+      - name: Run component tests + coverage gate
         working-directory: frontend
-        run: npm test
-      # NOTE: the >= 80% front-end coverage threshold is configured in vite.config.js but is NOT a
-      # blocking gate yet - the suite is at the very start of Phase 5 and would fail every run, which
-      # would train everyone to ignore it. Promote this to `npm run test:coverage` once the target is
-      # actually met, the same way the backend core-logic gate was only switched on once it passed.
+        run: npm run test:coverage
 
   changelog:
     name: CHANGELOG structure

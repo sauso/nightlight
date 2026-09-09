@@ -12,7 +12,8 @@ import { markClipPending, setClipReady, setClipFailed } from './detectionEvents.
 import { clipStorageReady, hasMinFreeSpace } from './clipStorage.js';
 
 // Stage 1 recording — the glue between the capture core (clipRecorder.js) and the app:
-//   * lifecycle: start/stop a camera's segmenter to match its `detect_record_clips` opt-in,
+//   * lifecycle: start/stop a camera's segmenter to match whether anything wants a ring
+//     (clipRingWanted — the per-camera `detect_record_clips` opt-in OR global on-demand recording),
 //     driven from the same places the motion/sound detectors are (routes + reconcile + startup).
 //   * job queue: when a detection fires on a recording-enabled camera, fireDetectionAlert calls
 //     enqueueClip(), which cuts the [pre, post] clip and writes clip_* onto the event row.
@@ -51,15 +52,34 @@ function pump() {
   }
 }
 
-// Start (idempotently) a camera's segmenter if it opts into clip recording. No-op if already running
-// so a reconcile tick never drops the ring. Mirrors startMotionDetector's guard.
+// Should this camera be buffering at all? The ring feeds TWO features and either one is reason enough
+// to run it: detection clips reach back over the pre-roll when something fires, and on-demand
+// recording reaches back when someone presses Record. On-demand's pre-roll is the whole point of that
+// feature, so `ondemand_enabled` is what turns its buffering off — exactly as docs/recording.md says
+// ("Switching this off also stops the per-camera buffering").
+//
+// ⚠️ CALL THIS AT EVERY CALL SITE — never re-derive the condition. It exists because the condition WAS
+// duplicated, and the copies drifted: startClipCapture had the rule right, but reconcile
+// (index.js), re-enabling a camera and saving detection settings all pre-gated on
+// `detect_record_clips` alone, and adding a camera never started the ring at all. Since
+// `detect_record_clips` DEFAULTS TO 0, the on-demand half was unreachable from every one of those
+// paths, so on a default install the Record button never appeared — the tile hides it when
+// `can_record` is false. Measured 2026-09-01 on the e2e stack: a freshly added camera reported
+// `can_record: false` indefinitely; a no-op PUT (the one call site with the rule right) flipped it to
+// true; a container restart put it back to false. Invisible in this house because both cameras have
+// detection clips switched on, which armed the ring for the other reason.
+// This is the same class of defect as an early-bedtime path that shipped inert: a correct no-op and a
+// dead branch look identical from outside.
+export function clipRingWanted(camera) {
+  if (!camera || camera.disabled) return false;
+  return !!camera.detect_record_clips || getOndemandSettings().enabled;
+}
+
+// Start (idempotently) a camera's segmenter if either feature wants the ring. No-op if already running
+// so a reconcile tick never drops it. Mirrors startMotionDetector's guard.
 export function startClipCapture(camera) {
-  if (camera.disabled) return;
-  // The ring is needed by EITHER feature: detection clips (reach back over the pre-roll when something
-  // fires) or on-demand recording (reach back when someone presses Record). On-demand's pre-roll is the
-  // whole point of the feature, so its buffering is what the ondemand_enabled setting turns off.
+  if (!clipRingWanted(camera)) return;
   const ond = getOndemandSettings();
-  if (!camera.detect_record_clips && !ond.enabled) return;
   // Storage unusable (unmapped/unwritable CLIPS_DIR) — don't run a segmenter that can't produce clips.
   if (!clipStorageReady()) return;
   if (isSegmenterRunning(camera.id)) return;

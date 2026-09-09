@@ -9,7 +9,7 @@
 //   2. A FULL SESSION token must never be accepted from a query string. Query strings leak into proxy
 //      and CDN access logs, browser history and Referer headers. Only the short-lived media capability
 //      may travel that way; a session token is header-only.
-import { test, before, after, beforeEach } from 'node:test';
+import { test, describe, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { useTempDataDir, cleanupTempDataDirs, makeUser, makeSession, signToken, mountRouter, call } from './helpers/harness.js';
 
@@ -29,7 +29,14 @@ before(async () => {
   const router = Router();
   router.get('/session', requireAuth, (req, res) => res.json({ user: req.user.username, role: req.user.role }));
   router.get('/admin-only', requireAuth, requireAdmin, (_req, res) => res.json({ ok: true }));
-  router.get('/media', requireAuthQueryOrHeader, (req, res) => res.json({ user: req.user.username }));
+  // `role` is returned here so a role change is OBSERVABLE through this middleware. It was absent,
+  // and that absence is why reverting requireAuthQueryOrHeader to trust the token's claim survived
+  // every test (issue #261, found by adversarial review of this PR).
+  router.get('/media', requireAuthQueryOrHeader, (req, res) => res.json({ user: req.user.username, role: req.user.role }));
+  // An admin-gated route reached through the query-or-header middleware. No such route exists in the
+  // app today — every route behind that middleware serves media to any signed-in user — which is
+  // exactly why the gap was invisible. This pins the contract before someone adds one.
+  router.get('/media-admin', requireAuthQueryOrHeader, requireAdmin, (_req, res) => res.json({ ok: true }));
   server = await mountRouter('/t', router);
 });
 
@@ -216,4 +223,126 @@ test('a successful request refreshes last_seen_at only once it is stale', () => 
   verifyToken(sessionToken(admin, adminSid));
   const again = db.prepare('SELECT last_seen_at FROM sessions WHERE id = ?').get(adminSid).last_seen_at;
   assert.equal(again, after, 'a fresh last_seen_at should NOT be rewritten');
+});
+
+// -------------------------------------------------------------------------------------------
+// Authorisation is evaluated NOW, not when the token was minted — issue #261.
+//
+// The defect: requireAdmin authorised from the `role` claim inside the JWT. Changing a user's role
+// wrote to `users` and did nothing to their existing tokens, so a demoted admin kept every admin
+// capability until the token expired — up to 30 DAYS. That window includes the routes that set roles,
+// so the demoted user could promote themselves back and make the demotion permanent-proof.
+//
+// Demotion is a security action — a departing carer, an account being locked down. The UI confirmed it
+// and nothing said it would not apply for a month.
+describe('a role change takes effect on the very next request (#261)', () => {
+  const demote = (id) => db.prepare("UPDATE users SET role = 'caregiver' WHERE id = ?").run(id);
+  const promote = (id) => db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(id);
+
+  test('★ a demoted admin loses admin routes immediately, holding the SAME token', async () => {
+    const token = sessionToken(admin, adminSid);
+    assert.equal((await call(`${server.url}/t/admin-only`, { token })).status, 200, 'precondition: the admin can reach it');
+
+    demote(admin.id);
+
+    const after = await call(`${server.url}/t/admin-only`, { token });
+    assert.equal(after.status, 403, 'a demoted admin still reached an admin-only route with their old token');
+  });
+
+  test('...and the token still authenticates — demotion is not a logout', async () => {
+    // The distinction matters: a demoted user should keep working as a caregiver, not be kicked out
+    // mid-feed. Asserting only the 403 above would pass for an implementation that simply killed the
+    // session, which is a different behaviour with a different cost.
+    const token = sessionToken(admin, adminSid);
+    demote(admin.id);
+    const res = await call(`${server.url}/t/session`, { token });
+    assert.equal(res.status, 200, 'demotion logged the user out instead of reducing their role');
+    assert.equal(res.body.role, 'caregiver', 'the response still reported the stale role from the token');
+  });
+
+  test('★ a promoted caregiver does NOT stay locked out by a stale token', async () => {
+    // The mirror. Same lookup, but the failure would be a privilege ESCALATION rather than a lingering
+    // one, so it is asserted separately rather than assumed to follow.
+    const token = sessionToken(caregiver, caregiverSid);
+    assert.equal((await call(`${server.url}/t/admin-only`, { token })).status, 403);
+    promote(caregiver.id);
+    assert.equal(
+      (await call(`${server.url}/t/admin-only`, { token })).status,
+      200,
+      'a promotion did not take effect either — the role is not being read live'
+    );
+  });
+
+  test('a FORGED admin claim is ignored — the database decides', async () => {
+    // The strongest form: a caregiver's session with `role: 'admin'` written into the token. Signed
+    // with the real secret, so it is a perfectly valid token; only the claim is a lie.
+    const forged = signToken({ id: caregiver.id, username: caregiver.username, role: 'admin', sid: caregiverSid });
+    const res = await call(`${server.url}/t/admin-only`, { token: forged });
+    assert.equal(res.status, 403, 'a role claim in the token was trusted over the user row');
+  });
+
+  test('deleting the user invalidates the token immediately', async () => {
+    // ⚠️ THIS PASSES BECAUSE OF THE FOREIGN KEY, NOT BECAUSE OF THE JOIN, and an earlier comment here
+    // claimed the opposite. `sessions.user_id` is `ON DELETE CASCADE` with `foreign_keys = ON`
+    // (db.js), so deleting the user deletes the session and the lookup finds nothing either way.
+    // Mutation testing proved it: swapping JOIN for LEFT JOIN — which would let a userless session
+    // through with a null role — does not fail this test, because the session no longer exists to be
+    // let through. Kept as a real guarantee about deletion; just do not read it as covering the JOIN.
+    const token = sessionToken(admin, adminSid);
+    db.prepare('DELETE FROM users WHERE id = ?').run(admin.id);
+    assert.equal((await call(`${server.url}/t/session`, { token })).status, 401);
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE id = ?').get(adminSid).n,
+      0,
+      'the cascade did not fire — this test would then be resting on the JOIN after all, so re-check it'
+    );
+  });
+
+  test('★ requireAuthQueryOrHeader reads the live role too', async () => {
+    // ⚠️ THE ONE ENTRY POINT THE FIRST VERSION OF THIS SUITE DID NOT COVER. Reverting just this
+    // middleware to `req.user = payload` passed every other test in the file — verified by mutation.
+    // The PR claimed all four entry points were proven; three were. The code was always correct here,
+    // but "the code is right" and "a test would notice if it stopped being right" are different
+    // claims, and only the second one survives someone editing this file later.
+    const token = sessionToken(admin, adminSid);
+    assert.equal((await call(`${server.url}/t/media`, { token })).body.role, 'admin', 'precondition');
+    demote(admin.id);
+    const res = await call(`${server.url}/t/media`, { token });
+    assert.equal(res.status, 200, 'demotion should not break media access');
+    assert.equal(res.body.role, 'caregiver', 'requireAuthQueryOrHeader served the stale role from the token');
+  });
+
+  test('★ …and an admin gate behind it refuses a demoted admin', async () => {
+    // The consequence that would actually matter. No route in the app pairs this middleware with
+    // requireAdmin today, so this is a guard for the day someone adds one — the failure would
+    // otherwise be a silent privilege gap on exactly one path.
+    const token = sessionToken(admin, adminSid);
+    assert.equal((await call(`${server.url}/t/media-admin`, { token })).status, 200, 'precondition');
+    demote(admin.id);
+    assert.equal(
+      (await call(`${server.url}/t/media-admin`, { token })).status,
+      403,
+      'a demoted admin passed an admin gate reached through the query-or-header middleware'
+    );
+  });
+
+  test('★ …and via a MEDIA token in the query string, not just the header', async () => {
+    // The query-string path is a different branch inside the same middleware (headerToken vs
+    // req.query.token). Asserting only the header form would leave the branch that exists for Safari's
+    // native <video> untested against a role change.
+    const token = mediaToken(admin, adminSid);
+    const before = await call(`${server.url}/t/media?token=${encodeURIComponent(token)}`);
+    assert.equal(before.body.role, 'admin', 'precondition');
+    demote(admin.id);
+    const after = await call(`${server.url}/t/media?token=${encodeURIComponent(token)}`);
+    assert.equal(after.body.role, 'caregiver', 'the query-string branch served the stale role');
+  });
+
+  test('verifyToken reports the live role too, not the claim', async () => {
+    // The WebSocket handshake does not go through requireAuth, so it needs its own assertion —
+    // otherwise talk-back authorisation could keep trusting a stale claim after the HTTP path stopped.
+    const token = sessionToken(admin, adminSid);
+    demote(admin.id);
+    assert.equal(verifyToken(token)?.role, 'caregiver', 'verifyToken returned the stale role from the token');
+  });
 });

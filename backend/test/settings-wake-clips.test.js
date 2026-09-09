@@ -46,11 +46,62 @@ beforeEach(() => {
 });
 
 describe('defaults', () => {
-  test('wake clips are on, 30s, kept 14 days', () => {
-    const s = get();
-    assert.equal(s.wake_clips_enabled, 1);
-    assert.equal(s.wake_clip_seconds, 30);
-    assert.equal(s.wake_clip_retention_days, 14);
+  // ⚠️ THESE ARE THE SCHEMA'S DEFAULTS, READ FROM THE SCHEMA — not from the row the `beforeEach` above
+  // writes. That distinction is the whole point of this block, and getting it wrong is one of the four
+  // trap tests named in issue #263: this used to assert `1 / 30 / 14` against the settings row, one
+  // line after its own fixture had written exactly `1 / 30 / 14` with an explicit UPDATE. It tested
+  // the fixture. Confirmed at the time by changing the db.js defaults to `0 / 7 / 3` with the suite
+  // still green — a fresh install would have shipped with three-day retention and nothing would have
+  // noticed.
+  //
+  // Two independent readings, because each catches something the other cannot:
+  //   * PRAGMA table_info reports the DEFAULT clause as written, which is what a column added by a
+  //     later ALTER TABLE actually carries.
+  //   * inserting a bare row proves the default is what a real install RECEIVES — it would catch a
+  //     migration that re-created the table, or a trigger, or an INSERT elsewhere that supplies its
+  //     own values.
+  const DEFAULTS = { wake_clips_enabled: 1, wake_clip_seconds: 30, wake_clip_retention_days: 14 };
+
+  test('the schema declares them: on, 30s, kept 14 days', () => {
+    const cols = Object.fromEntries(
+      db.prepare('PRAGMA table_info(settings)').all().map((c) => [c.name, c.dflt_value])
+    );
+    for (const [name, expected] of Object.entries(DEFAULTS)) {
+      assert.equal(Number(cols[name]), expected, `settings.${name} declares DEFAULT ${cols[name]}, expected ${expected}`);
+    }
+  });
+
+  test('and a brand-new settings row receives them', () => {
+    // `id TEXT PRIMARY KEY DEFAULT 'app'` — so a second row with a different id is legal and gives a
+    // clean read of what every column defaults to, without touching the 'app' row the rest of the
+    // file depends on.
+    db.prepare("INSERT INTO settings (id) VALUES ('fresh-install-probe')").run();
+    try {
+      const fresh = db.prepare('SELECT * FROM settings WHERE id = ?').get('fresh-install-probe');
+      for (const [name, expected] of Object.entries(DEFAULTS)) {
+        assert.equal(fresh[name], expected, `a fresh install gets ${name} = ${fresh[name]}, expected ${expected}`);
+      }
+    } finally {
+      db.prepare("DELETE FROM settings WHERE id = 'fresh-install-probe'").run();
+    }
+  });
+
+  test('the fixture does not decide the answer — it writes something else first', () => {
+    // A tripwire on the two tests above. If someone later moves the `beforeEach` UPDATE to also touch
+    // a fresh row, or replaces PRAGMA with a row read, this fails: the values below are deliberately
+    // NOT the defaults, so any reading that comes from the fixture rather than the schema is wrong.
+    db.prepare(
+      'UPDATE settings SET wake_clips_enabled = 0, wake_clip_seconds = 99, wake_clip_retention_days = 111 WHERE id = ?'
+    ).run('app');
+    db.prepare("INSERT INTO settings (id) VALUES ('fresh-install-probe-2')").run();
+    try {
+      const fresh = db.prepare('SELECT * FROM settings WHERE id = ?').get('fresh-install-probe-2');
+      assert.equal(fresh.wake_clip_seconds, 30, 'the new row inherited the app row, so these tests read the fixture');
+      assert.equal(fresh.wake_clips_enabled, 1);
+      assert.equal(fresh.wake_clip_retention_days, 14);
+    } finally {
+      db.prepare("DELETE FROM settings WHERE id = 'fresh-install-probe-2'").run();
+    }
   });
 });
 
@@ -74,6 +125,28 @@ describe('saving', () => {
     assert.equal(s.app_name, 'Casa');
     assert.equal(s.wake_clip_seconds, 45, 'an unrelated save must not disturb wake-clip settings');
     assert.equal(s.wake_clips_enabled, 1);
+  });
+
+  test('★ a General-page save leaves the ON-DEMAND settings alone', async () => {
+    // The front end relies on this, so it is worth its own test rather than being assumed from the
+    // wake-clip case above. The General settings screen used to post ondemand_enabled,
+    // ondemand_pre_roll_s and ondemand_max_duration_s — left behind when on-demand recording moved to
+    // its own page — which meant a stale General form could silently revert a Record-button toggle
+    // somebody had just made elsewhere. Those keys were removed from its payload, and that removal is
+    // only safe because this route falls back to each field's STORED value when a key is absent.
+    // Take that fallback away and the fix turns into the bug it replaced, with the setting reset on
+    // every visit to General.
+    await put({ ondemand_enabled: false, ondemand_pre_roll_s: 12, ondemand_max_duration_s: 90 });
+
+    // Exactly what the General screen sends now: its own seven fields, none of them on-demand.
+    const r = await put({ app_name: 'Casa', timezone: 'Australia/Melbourne', temp_unit: 'F' });
+    assert.equal(r.status, 200);
+
+    const s = get();
+    assert.equal(s.app_name, 'Casa');
+    assert.equal(s.ondemand_enabled, 0, 'a save that omits the Record-button switch must not turn it back on');
+    assert.equal(s.ondemand_pre_roll_s, 12, 'nor reset the pre-roll');
+    assert.equal(s.ondemand_max_duration_s, 90, 'nor the auto-stop');
   });
 
   test('0 days is accepted and means keep forever', async () => {
