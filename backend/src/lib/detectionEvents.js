@@ -62,8 +62,10 @@ const overCountWithSnapshotStmt = db.prepare(
 // removed alongside the rows and never orphaned on disk.
 //
 // This is the BACKSTOP, not the user-facing retention. The configurable day and size caps shipped
-// (see lib/clipStorage.js, which reads them from settings and re-sweeps on every settings save);
-// this comment used to describe them as still to come (issue #317). Both are wanted: the caps are
+// (lib/clipStorage.js reads them from settings; routes/settings.js re-runs the sweep on save, but
+// only when a retention value actually CHANGED — a tightened cap applies at once instead of waiting
+// for the next 15-minute sweep). This comment used to describe the caps as still to come (#317).
+// Both mechanisms are wanted: the caps are
 // what an admin controls, and this keeps a clip row and its MP4 from outliving each other whatever
 // the caps are set to.
 const agedWithClipStmt = db.prepare(

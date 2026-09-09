@@ -20,10 +20,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   run of older nights meant going back into Sleep and re-picking the date after every save. You now
   land on the night you just corrected, with the same *"Thanks — that's recorded"* receipt reading your
   times back, so the next night is one tap away.
-- **A wake clip that fails on a full or busy disk no longer risks stopping wake detection.** The
-  capture was meant to swallow its own failures — it runs on a timer behind the detector — but a
-  failure in the few steps before the recording started could escape and take the watcher down with
-  it for the rest of the night. It now cannot.
+- **Hardened wake-clip capture against a full or busy disk.** The capture is meant to swallow its own
+  failures — it runs on a timer behind the wake detector — but a failure in the few steps before the
+  recording started could escape that. **Nothing was affected in practice**, because the one thing
+  that calls it already guarded against this; the risk was to whatever called it next. A wake clip
+  that fails partway through is now also marked failed rather than left showing as in progress.
 
 ## [0.30.0] - 2026-09-09
 

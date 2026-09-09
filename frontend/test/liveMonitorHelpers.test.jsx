@@ -1,10 +1,16 @@
 // `reorderCameras` — the drag-to-reorder logic behind the live grid.
 //
-// ⚠️ SCOPE, stated plainly: LiveMonitor itself renders one CameraTile per camera and so mounts the
-// whole WebRTC/HLS player stack, plus Capacitor picture-in-picture and pointer-gesture
-// pull-to-refresh. None of that exists in jsdom, so the component is excluded from coverage and is
-// covered for real by the Playwright suite. This is the logic that CAN be tested honestly, extracted
-// for that purpose — the same arrangement as CameraTile's `detectionPayload`.
+// ⚠️ SCOPE, stated plainly: this file covers the pure reordering logic only. LiveMonitor itself
+// mounts one CameraTile per camera — the WebRTC/HLS player stack, Capacitor picture-in-picture,
+// pointer-gesture pull-to-refresh — and the end-to-end behaviour of that is covered by the
+// Playwright suite, which drives real streams.
+//
+// ⚠️ The component IS mountable under jsdom, and this comment used to say it was not, citing a
+// coverage exclusion in vite.config.js. That exclusion has been REMOVED, deliberately, as a worked
+// example of the claim being false (the removal note is still there at vite.config.js:86), and
+// liveMonitor.test.jsx / appShell.test.jsx render the component today. This was the second copy of
+// that claim; the one in LiveMonitor.jsx was corrected under issue #322 and this one was missed.
+// If you are deciding whether a LiveMonitor test is possible: it is.
 //
 // ★ WHY IT EARNS A TEST. The grid shows only ENABLED cameras, but the order it SAVES covers every
 // camera, disabled ones included. That asymmetry is the whole point: a camera switched off keeps its

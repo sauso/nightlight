@@ -280,8 +280,11 @@ const server = app.listen(PORT, () => {
 // --- Two-way audio (talk-back) over WebSocket ---
 // The client opens ws(s)://<origin>/api/talk?camera=<id>&token=<jwt> and streams raw G.711 mu-law
 // audio as binary frames; we forward them to the camera's speaker (see lib/twoWayAudio.js). Auth is a
-// MEDIA-scoped token, NOT the session token the REST API takes - the two are not interchangeable in
-// either direction. Any signed-in user may talk; it's a caregiving action, like PTZ.
+// MEDIA-scoped token, NOT the session token the REST API takes: this handler REJECTS a session token,
+// and the ordinary `requireAuth` routes reject a media one. (The exception, so nobody is surprised by
+// it: the handful of routes behind `requireAuthQueryOrHeader` — HLS segments, snapshots, clips —
+// deliberately accept a media token in `?token=`, because an <img>/<video> cannot set a header.)
+// Any signed-in user may talk; it's a caregiving action, like PTZ.
 //
 // ⚠️ This used to say "the same JWT+session as the REST API", which described the world before the
 // JWT-in-URLs hardening in 0.25.0 and would lead someone "simplifying" this handler to put FULL

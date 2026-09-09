@@ -401,11 +401,31 @@ describe('★ captureWakeClip refuses quietly — it runs behind a detector', ()
   test('★ a failed capture resolves rather than rejecting — a bad clip must not stop the watcher', async () => {
     // It is called from a timer inside the wake watcher. An unhandled rejection there takes wake
     // detection down for every camera, for the rest of the night, silently.
+    //
+    // ⚠️ THIS TEST'S ONLY REAL ASSERTION IS THAT IT DOES NOT REJECT. It used to end with
+    // `if (id != null) assert.equal(rowOf(id).status, 'failed')`, which NEVER RAN: this path always
+    // resolves null, so the guard was permanently false and the row's fate went unchecked. The row
+    // is now asserted in the test below, which finds it by query instead of by return value.
     armRing();
-    const id = await captureWakeClip(camera(), Date.now() - 60_000);
-    // Either it produced a row it then marked failed, or it declined before writing one. Both are
-    // acceptable outcomes; throwing is not, and that is what this asserts.
-    if (id != null) assert.equal(rowOf(id).status, 'failed');
+    assert.equal(await captureWakeClip(camera(), Date.now() - 60_000), null);
+  });
+
+  test('★ a capture that fails after the INSERT leaves the row `failed`, never `pending`', async () => {
+    // The row is written 'pending' BEFORE the clip is cut, so a failure between the two must move it
+    // on. A row stuck 'pending' shows in the UI as a recording forever in progress, and the storage
+    // readout counts it.
+    //
+    // ⚠️ FIND THE ROW BY QUERY, NOT BY RETURN VALUE. captureWakeClip returns null on failure — which
+    // is exactly why the previous test could not check this — so a test that starts from the returned
+    // id is testing nothing. Deleting the `UPDATE ... status='failed'` line left the whole suite
+    // green until this existed.
+    armRing();
+    setSettings({ wake_clips_enabled: 1 });
+    const before = db.prepare("SELECT COALESCE(MAX(id), 0) m FROM recordings WHERE kind = 'wake'").get().m;
+    assert.equal(await captureWakeClip(camera(), Date.now() - 60_000), null, 'expected this capture to fail');
+    const row = db.prepare("SELECT id, status FROM recordings WHERE kind = 'wake' AND id > ? ORDER BY id DESC LIMIT 1").get(before);
+    assert.ok(row, 'no wake row was inserted — the fixture no longer reaches the INSERT, so this test is inert');
+    assert.equal(row.status, 'failed', `row ${row.id} was left '${row.status}'`);
   });
 
   test('★ a throw from the PRE-FLIGHT work also resolves, not just one from the capture', async () => {
@@ -421,10 +441,13 @@ describe('★ captureWakeClip refuses quietly — it runs behind a detector', ()
     setSettings({ wake_clips_enabled: 1 });
     const before = db.prepare('SELECT COUNT(*) n FROM recordings').get().n;
     assert.equal(await captureWakeClip(camera(), NaN), null, 'rejected instead of resolving to null');
-    // And it did not leave a half-written row behind claiming to be in progress.
-    const stranded = db.prepare("SELECT COUNT(*) n FROM recordings WHERE status = 'pending'").get().n;
-    assert.equal(stranded, 0, `left ${stranded} pending row(s) after throwing`);
-    assert.ok(db.prepare('SELECT COUNT(*) n FROM recordings').get().n >= before);
+    // ⚠️ WHAT THIS DOES *NOT* PROVE, stated so nobody reads more into it. NaN throws at the
+    // `new Date(NaN).toISOString()` line, which is BEFORE the INSERT — so "no pending row" here is
+    // true of every possible implementation and cannot fail. The stranded-row property is a real one
+    // and is asserted by the test above, on a path that actually writes a row. An earlier version
+    // of this test asserted it here and called that verification; it was not.
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM recordings').get().n, before,
+      'the throw happened after a row was written — move the stranded-row assertion here');
   });
 });
 
