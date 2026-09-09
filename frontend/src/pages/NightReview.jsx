@@ -12,7 +12,17 @@ import AppHeader from '../components/AppHeader.jsx';
 // That was fine while the errors were hours. It stopped being fine when they reached ~10 minutes,
 // because the error became smaller than the measurement; and the same handful of nights was used to
 // design a change AND to validate it, so nothing was ever held out. This screen is the fix: precise,
-// dated, captured while it is fresh, and never rewritten afterwards.
+// dated, and captured while it is fresh.
+//
+// ⚠️ NOT immutable, despite what this used to claim (issue #323). The save is an UPSERT
+// (lib/sleepReviews.js) and there is no already-reviewed guard, so a person may revise an answer and
+// the revision REPLACES the previous one — including its `reviewed_at`. That is almost certainly the
+// right design (someone who mis-taps should be able to correct it), but it means the table cannot
+// distinguish a first answer from a revised one. ★ That already cost something: the holdout scoring
+// read the clustered `reviewed_at` values as evidence the reviews were recorded in one retrospective
+// sitting, and the schema does not actually support that conclusion. If an analysis ever needs to
+// tell the two apart, the table needs a `first_reviewed_at` or a revision counter — it is not
+// recoverable afterwards.
 //
 // Two things are collected, and they answer different questions. The TIMES give a scored ground-truth
 // set, and are also what the child's card then displays. The per-event VERDICTS give labelled frames:

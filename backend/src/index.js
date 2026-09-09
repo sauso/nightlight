@@ -279,9 +279,16 @@ const server = app.listen(PORT, () => {
 
 // --- Two-way audio (talk-back) over WebSocket ---
 // The client opens ws(s)://<origin>/api/talk?camera=<id>&token=<jwt> and streams raw G.711 mu-law
-// audio as binary frames; we forward them to the camera's speaker (see lib/twoWayAudio.js). Auth is
-// the same JWT+session as the REST API (passed as a query param, since browsers can't set headers on
-// a WebSocket handshake), and any signed-in user may talk - it's a caregiving action, like PTZ.
+// audio as binary frames; we forward them to the camera's speaker (see lib/twoWayAudio.js). Auth is a
+// MEDIA-scoped token, NOT the session token the REST API takes: this handler REJECTS a session token,
+// and the ordinary `requireAuth` routes reject a media one. (The exception, so nobody is surprised by
+// it: the handful of routes behind `requireAuthQueryOrHeader` — HLS segments, snapshots, clips —
+// deliberately accept a media token in `?token=`, because an <img>/<video> cannot set a header.)
+// Any signed-in user may talk; it's a caregiving action, like PTZ.
+//
+// ⚠️ This used to say "the same JWT+session as the REST API", which described the world before the
+// JWT-in-URLs hardening in 0.25.0 and would lead someone "simplifying" this handler to put FULL
+// SESSION TOKENS IN WEBSOCKET URLS. The narrowing is the point - see the note on verifyToken below.
 const talkWss = new WebSocketServer({ noServer: true });
 server.on('upgrade', (req, socket, head) => {
   let url;
@@ -356,11 +363,17 @@ function purgeExpiredSessions() {
 purgeExpiredSessions();
 safeInterval('purge-sessions', 24 * 60 * 60 * 1000, purgeExpiredSessions);
 
-// Second, independent layer of defense: even with FFmpeg's own read timeout (see
-// transcoder.js), a stalled connection could conceivably hang in a way that never
-// triggers it. This watches MediaMTX's own "is this path actually receiving frames"
-// status directly, and force-restarts a camera's transcoder if it's been stuck
-// not-ready for too long - regardless of what the FFmpeg process itself is doing.
+// The ONLY thing that recovers a wedged camera stream. This watches MediaMTX's own "is this path
+// actually receiving frames" status directly, and force-restarts a camera's transcoder if it's been
+// stuck not-ready for too long - regardless of what the FFmpeg process itself is doing. That
+// independence is what makes it work: a stalled FFmpeg is alive, so nothing about the process itself
+// says anything is wrong.
+//
+// ⚠️ This used to call itself a "second layer of defense" behind "FFmpeg's own read timeout (see
+// transcoder.js)". THERE IS NO SUCH TIMEOUT ON THE STREAMING PATH - transcoder.js sets no
+// `-rw_timeout`. The `-rw_timeout` flags in the codebase are all in lib/rtspProbe.js, which is the
+// add/edit validation path, so grepping for the flag finds hits and confirms the wrong thing. Do not
+// treat this watchdog as redundant: on a baby monitor it is the whole recovery mechanism.
 const notReadySince = new Map(); // camera_id -> timestamp
 // Same idea for the optional low-res SUB stream. Its transcoder can wedge (FFmpeg alive but no longer
 // publishing — seen after a camera drops/reconnects or a codec change), which the reconcile can't catch

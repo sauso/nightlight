@@ -274,10 +274,28 @@ export function getWakeClipSettings() {
  * Cut the opening of a wake that has already happened. `wakeStartMs` is the wake's first active
  * minute, which by now is several minutes old — the caller is expected to have held the ring from
  * that point (see lib/wakeWatcher.js), because the ring is only ~63s deep by default.
- * Resolves the recordings row id, or null if nothing could be captured. Never throws: this runs on a
- * timer behind a detector, and a failed clip must not take the watcher down with it.
+ * Resolves the recordings row id, or null if nothing could be captured.
+ *
+ * NEVER THROWS, and that is enforced by the wrapper below rather than asserted. This runs on a timer
+ * behind a detector (lib/wakeWatcher.js) and a failed clip must not take the watcher down with it.
+ *
+ * ⚠️ The guarantee used to be stated here and not implemented (issue #309): `hasMinFreeSpace()` and
+ * the `INSERT` both sat OUTSIDE the try, so a SQLITE_BUSY or an I/O error rejected the promise. The
+ * catch itself also writes to the database, so wrapping only the body would still have left a hole.
+ * The one live caller happened to have its own `.catch()`; the next one, added by someone who read
+ * this JSDoc and reasonably believed it, would not have.
  */
 export async function captureWakeClip(camera, wakeStartMs) {
+  try {
+    return await captureWakeClipInner(camera, wakeStartMs);
+  } catch (err) {
+    // Deliberately swallowed. The detector timer is more important than the clip.
+    logger.error(`[wake] clip capture threw for "${camera?.name}": ${err?.message}`);
+    return null;
+  }
+}
+
+async function captureWakeClipInner(camera, wakeStartMs) {
   const { enabled, clipSeconds } = getWakeClipSettings();
   if (!enabled) return null;
   if (!isSegmenterRunning(camera.id)) {
@@ -425,8 +443,14 @@ export function getRecordingThumbFile(id) {
   return jailedFile(row.thumb_path);
 }
 
-// Delete a recording and its files. These are keepsakes with no automatic retention, so removing one is
-// always an explicit user action.
+// Delete a recording and its files — ANY recording, of any kind. Callers are both user-initiated
+// (the delete endpoint, and deleting a child cascading to its recordings) and automatic:
+// `pruneWakeClips` above calls this on a schedule.
+//
+// ⚠️ Do not assume a caller is a person. This used to say removal is "always an explicit user
+// action", which is true of MANUAL recordings — they are keepsakes with no automatic retention —
+// but that is a property of one KIND of recording, not of this function. It is stated correctly on
+// `pruneWakeClips`, which is where it belongs.
 export function deleteRecording(id) {
   const row = db.prepare('SELECT path, thumb_path FROM recordings WHERE id = ?').get(id);
   if (!row) return false;
