@@ -354,6 +354,25 @@ test('★★ a return one minute past it does not', () => {
   assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '03:11');
 });
 
+test('★★ the occupancy witness window is CAPPED, not open to the end of the night', () => {
+  // ⚠️ A review found that removing `Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt)` — letting the
+  // window run to the end of the timeline — survived the whole suite. Nothing pinned the cap, which is
+  // the same boundary the index-convention defect lived on.
+  //
+  // Here the child stirs at 03:11 and does NOT come back: the bed is empty from 03:13 onwards, and the
+  // only occupancy in the night sits far past the witness window, in the morning after a parent puts
+  // him down again. Uncapped, that distant occupancy would corroborate the 03:12 return and cancel a
+  // departure that really happened.
+  laySamples(at(19, 30), at(3, 13, 1), [[at(19, 30), at(19, 40)], [at(3, 11, 1), at(3, 13, 1)]], STILL_OCCUPIED);
+  laySamples(at(3, 13, 1), at(6, 30, 1), [], STILL_EMPTY); // gone — and 197 min is well past the 150-min window
+  laySamples(at(6, 30, 1), at(7, 30, 1), [], STILL_OCCUPIED); // put back down long afterwards
+  insertTransition.run(CAM, 'out_of_bed', 0.045, sqlTime(at(3, 11, 1)));
+  insertTransition.run(CAM, 'into_bed', 0.023, sqlTime(at(3, 12, 1)));
+
+  const night = computeNight(CHILD, DATE);
+  assert.equal(hhmm(night.wake_at), '03:11', 'occupancy 197 minutes later must not vouch for the return');
+});
+
 test('★ but an exit is NOT disqualified by a return long afterwards', () => {
   // The guard must not eat the correct answer. On the same real night an into_bed followed the true
   // 05:49 exit at 06:58 — 69 minutes later, comfortably outside the absence the rule requires. A rule

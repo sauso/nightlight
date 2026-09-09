@@ -881,7 +881,14 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
           const reversedBy = transitions.find((u) => u.type === TRANSITION.INTO_BED
             && txMs(u.created_at) > txMs(t.created_at)
             && txMs(u.created_at) - txMs(t.created_at) <= MORNING_ABSENCE_MIN * 60000
-            && bedOccupiedFrom(Math.floor((txMs(u.created_at) - analysisStartUtc.getTime()) / 60000)));
+            // ⚠️ txIdx, NOT a hand-rolled Math.floor. This indexes an array built by `idxOf`, and a
+            // second conversion written out longhand is free to disagree with it — mine did. A review
+            // demonstrated the divergence: an into_bed at :31 seconds lands a minute apart under floor
+            // and round, and with the only corroborating minutes sitting on that boundary the two give
+            // different nights. The file already has one named helper for this; using it means this
+            // call moves with issue #260 when the round-vs-floor question is settled globally, instead
+            // of quietly holding its own opinion.
+            && bedOccupiedFrom(txIdx(u.created_at)));
           if (reversedBy) continue;
           const dt = Math.abs(txMs(t.created_at) - emptyStartMs);
           if (dt <= WAKE_SNAP_MS && (best == null || dt < best.dt)) best = { dt, ms: txMs(t.created_at), at: t.created_at };

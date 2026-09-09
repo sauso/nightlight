@@ -871,7 +871,7 @@
   {
     "label": "wake: a reversed exit is only reversed if the bed is OCCUPIED after the return",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "&& bedOccupiedFrom(Math.floor((txMs(u.created_at) - analysisStartUtc.getTime()) / 60000)));",
+    "find": "&& bedOccupiedFrom(txIdx(u.created_at)));",
     "replace": "&& true);",
     "expect": "killed",
     "tests": [
@@ -911,5 +911,16 @@
       "sleepAnalysis.test.js"
     ],
     "note": "Narrowing to 2 min also survived before the boundary pair."
+  },
+  {
+    "label": "wake: the occupancy witness window is capped",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt)",
+    "replace": "totalMinExt",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "note": "Uncapped, occupancy hours later vouches for a return that never happened. Survived a green suite until the cap test existed - and it is the same boundary the floor/round index defect lived on."
   }
 ]
