@@ -59,8 +59,15 @@ const overCountWithSnapshotStmt = db.prepare(
    )`
 );
 // Same two prunes, restricted to rows that carry a recorded clip, so the (much larger) MP4 files are
-// removed alongside the rows and never orphaned on disk. This is the backstop retention for clips
-// until the configurable day/size caps land (Stage 1 phase 3).
+// removed alongside the rows and never orphaned on disk.
+//
+// This is the BACKSTOP, not the user-facing retention. The configurable day and size caps shipped
+// (lib/clipStorage.js reads them from settings; routes/settings.js re-runs the sweep on save, but
+// only when a retention value actually CHANGED — a tightened cap applies at once instead of waiting
+// for the next 15-minute sweep). This comment used to describe the caps as still to come (#317).
+// Both mechanisms are wanted: the caps are
+// what an admin controls, and this keeps a clip row and its MP4 from outliving each other whatever
+// the caps are set to.
 const agedWithClipStmt = db.prepare(
   `SELECT clip_path FROM detection_events WHERE created_at < datetime('now', ?) AND clip_path IS NOT NULL`
 );

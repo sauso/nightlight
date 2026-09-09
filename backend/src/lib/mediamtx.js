@@ -4,7 +4,16 @@
 // Host networking means MediaMTX's API is reachable on localhost from the backend container.
 const MEDIAMTX_API = process.env.MEDIAMTX_API || 'http://127.0.0.1:9997';
 
-// Turn a camera name + id into a safe MediaMTX path name (alphanumeric, dashes, underscores).
+// Turn a camera ID into a safe MediaMTX path name (alphanumeric, dashes, underscores).
+//
+// The id, deliberately — NOT the camera's name, which this comment used to claim (issue #315).
+// The path must survive a rename: it is baked into MediaMTX's config, the transcoder's publish
+// target and every client's stream URL, so deriving it from an editable field would break or
+// migrate a live stream every time someone corrected a typo.
+//
+// The sanitising replace is therefore a no-op on the only input this ever gets — its one caller
+// passes a freshly generated UUID (routes/cameras.js). Keep it anyway: this value reaches a
+// MediaMTX path, and the guard costs nothing.
 export function toPathName(id) {
   return `cam_${id.replace(/[^a-zA-Z0-9_-]/g, '')}`;
 }

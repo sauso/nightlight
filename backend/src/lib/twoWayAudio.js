@@ -175,8 +175,13 @@ const BACKCHANNEL_REQUIRE = 'Require: www.onvif.org/ver20/backchannel';
 // long talk isn't torn down, which means an individual RTSP request has no backstop of its own: a
 // camera that accepts the TCP connection but never answers a request (some Hikvisions do exactly
 // this to an ONVIF-backchannel DESCRIBE/SETUP/TEARDOWN they don't really support) would otherwise
-// leave the awaiting caller hung forever — including the TEARDOWN inside close(), which is awaited
-// by verifyBackchannel and, through it, by the /onvif-probe HTTP handler.
+// leave the awaiting caller hung forever — in practice `start()`, and through verifyBackchannel the
+// /onvif-probe HTTP handler.
+//
+// ⚠️ NOT close(): it stopped awaiting its TEARDOWN and has its own 250 ms backstop (see close()).
+// This is the SECOND copy of that stale claim in this file — the first was corrected under issue
+// #314 and this one was left standing, so the two comments contradicted each other for a while.
+// If you are correcting a claim here, grep the whole file for the other copies first.
 const RTSP_REQUEST_TIMEOUT_MS = 5000;
 
 class OnvifBackchannelTalk {
@@ -231,7 +236,10 @@ class OnvifBackchannelTalk {
         }
       };
       // No per-request timeout otherwise (the socket's own timeout is disabled after connect), so an
-      // unanswered request would hang forever — reject instead so start()/close() can't wedge. Destroy
+      // unanswered request would hang forever — reject instead so start() can't wedge. (NOT close():
+      // it no longer awaits a reply at all and has its own 250 ms backstop — see its comment below.
+      // This sentence used to credit the timeout with protecting close() too, which stopped being
+      // true ninety lines away in this same file. Issue #314.) Destroy
       // the socket too: after a timeout we no longer know where the response framing is, so a late reply
       // would be mis-parsed as the *next* request's response (wrong CSeq, wrong status).
       timer = setTimeout(() => {

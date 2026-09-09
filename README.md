@@ -204,7 +204,11 @@ on ONVIF cameras — pan/tilt and two-way audio. The fully tested and **recommen
 audio); on those, set the camera's audio codec to **G711 (a-law)** for reliable sound (some builds
 default to AAC, which not all of them stream well — see `KNOWN-ISSUES.md`). Most other ONVIF cameras
 work too, and Hikvision two-way audio (ISAPI) is supported. If a camera won't connect, the **Add
-camera** screen can generate a redacted **camera report** to help add support for it.
+camera** screen can generate a redacted **camera report** to help add support for it. The report is
+a JSON file that stays on your device — it holds the camera's address, username, ONVIF result and
+stream codecs, with any password replaced by `***`. It is meant to be attached to a GitHub issue, so
+it is worth opening and reading before you post it: the redaction covers passwords, not everything a
+particular camera's firmware might put in an error message.
 
 **Adding a camera**
 
@@ -287,6 +291,16 @@ measurement**, and (like everything here) never a safety device — see the warn
   reaching in for a toy or a blanket) does not restart that count; several minutes together do, because
   that is a person at the bed rather than a passing arm. The wake is only accepted where a recorded
   **got out of bed** backs it up, so a quiet spell alone can never end the night early.
+- **A child who gets out and climbs straight back in has not got up.** If a *got into bed* follows a
+  *got out of bed* shortly after, the night carries on rather than ending there — and so does a second
+  *got out of bed* logged within a minute of that return, because climbing back into a bed and leaving
+  it again inside a minute is one movement being read twice, not two trips. This matters most for a
+  very still sleeper: once they settle, their bed can look identical to an empty one for hours, so a
+  false exit shortly after bedtime would otherwise be reported as the end of the night.
+  **Known limit:** a genuine departure less than a minute after getting into bed is read the same way,
+  because the two are not distinguishable from what the cameras record. Where that is the only *got
+  out of bed* of the night it is still used, so the night is never left with no wake time at all; where
+  a later one exists, the later one is reported instead.
 - **Tell it when it got a night wrong.** The morning after, the child's page offers **Was last night
   right?** — confirm the times or correct them, and mark any recorded *got into / out of bed* event as
   right, wrong, or "can't tell" against the still frame it was decided from. It appears once per night
@@ -315,7 +329,9 @@ measurement**, and (like everything here) never a safety device — see the warn
     recorded, and tapping it lets you change your mind.
   - **Any night can be reviewed, not just last night.** The sleep detail page has **Was this night
     right?** for whichever night you are looking at — that is how you correct a night you already
-    answered, since the card only ever offers nights you haven't.
+    answered, since the card only ever offers nights you haven't. Saving from there keeps you on that
+    night and shows the receipt in place, so working back through a run of nights doesn't send you to
+    re-pick the date each time.
   - **Reviews are kept forever** — unlike the sleep minute-data behind them (30 days) or the recorded
     events (45 days). They are a few hundred bytes a night, and their whole value is being comparable
     years later. A recorded event you have **judged** is also kept past the usual 45 days, along with

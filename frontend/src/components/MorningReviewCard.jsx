@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ClipboardCheck, Check, X } from 'lucide-react';
+import { ClipboardCheck, X } from 'lucide-react';
 import { api } from '../lib/api.js';
+import ReviewReceipt from './ReviewReceipt.jsx';
 
 // "Was last night right?" — the prompt that turns a morning's recollection into data, and afterwards
 // the receipt that says it landed.
@@ -44,18 +45,7 @@ export default function MorningReviewCard({ childId, fmtTime }) {
 
   if (card.state === 'done') {
     return (
-      <div className="card review-card review-card--done">
-        <button type="button" className="review-card__body" onClick={open}>
-          <span className="review-card__icon review-card__icon--done"><Check size={20} /></span>
-          <span className="review-card__text">
-            <span className="card-title">Thanks — that’s recorded</span>
-            <span className="camera-tile__sub">
-              You said {fmtTime(card.true_onset_at) || '—'} to {fmtTime(card.true_wake_at) || '—'}. Tap to change it.
-            </span>
-          </span>
-          <span className="review-card__go" aria-hidden="true">›</span>
-        </button>
-      </div>
+      <ReviewReceipt onsetAt={card.true_onset_at} wakeAt={card.true_wake_at} fmtTime={fmtTime} onOpen={open} />
     );
   }
 
