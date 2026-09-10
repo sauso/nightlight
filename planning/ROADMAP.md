@@ -228,6 +228,9 @@ counts as **historical**, not as the current state.
    as an `out_of_bed` (the parent's hands leaving the bed), so that night had no bedtime `into_bed` at
    all and the drawn marker was 40 minutes adrift. The reported bedtime survived it, but only because
    the sleep analysis no longer depends on the label being right.
+   ★ **Build this together with §1.5 Gap B** — both read a corroborated `out_of_bed`/`into_bed` pair as
+   one event and are scored by the same 44-child-night harness, so doing them separately means writing
+   the same evidence walk twice.
 4. **New: log-driven tuning is now possible.** The exit rule logs rejected links (`[oob] … link
    rejected`) with the actual gap and outside magnitude, so the real distribution can be read off a
    week of logs rather than guessed. Read it before moving `OOB_LINK_SLOW_MS` or `OOB_SLOW_OUT_MIN`.
@@ -342,6 +345,89 @@ inside `launch()` inside `startSoundDetector`). The reading pipeline was extract
 clock as `lib/soundBaseline.js`, which is in the `test:core` include list at 100% lines. The
 discriminating test named above — *"a 6-minute continuous cry must stay above `SOUND_ACTIVE`"* — is in
 `soundBaseline.test.js`.
+
+### 1.5 A wake-up the parent can actually see — `NEXT`
+
+Raised by the owner 2026-09-10: *"Renz's alerts appear in the wake-ups section but they don't for
+Raffa"*, and separately *"he got up at 20:41 and was put back at 20:43 — why no wake-up and no alert?"*
+Both reproduce on prod **and** staging. Neither is a detection failure: **the alerts fired, the
+transitions were recorded, and the display has nowhere to put either.** Two independent gaps.
+
+⚠️ **First, what is NOT wrong, so it does not get re-investigated.** `alertsInRange` (`SleepDetail.jsx`)
+is camera-agnostic and symmetric — there is no per-child logic anywhere in the path. The alerts are
+plainly visible on the child page because **"Recent alerts" is a flat `/cameras/alerts` feed with no
+sleep logic in it at all**. The gap is only between the alert feed and the *Wake-ups* list.
+
+#### Gap A — the morning wake is not a row, so an alert at the moment of waking cannot render
+
+`sleepAnalysis.js` builds the list as `for (let i = onset; i < sleepEnd; )`. **`sleepEnd` is the start
+of the final wake**, so `wakes[]` holds *only mid-night awakenings*; the morning wake is reported as
+`wake_at` in the summary line instead. Alerts render only inside a wake row (`WakeItem`), so **an alert
+at the exact minute the child woke has nothing to attach to.**
+
+Measured over the last 14 nights on prod, using the UI's own ±3 min `ALERT_MARGIN_MS`:
+
+| | renders (inside a mid-night wake) | at the morning wake, **cannot** render |
+|---|---|---|
+| Raffa | 12 | **9, on 7 of 14 nights** |
+| Renz | 286 | 19, on 8 of 14 nights |
+
+★ **One omission, wildly different cost per child**: the missing row is worth **+75%** on top of
+everything Raffa displays and **+6.6%** for Renz — not because the code treats them differently, but
+because **Raffa's waking IS a morning event while Renz's is spread through the night.**
+★ **This is the cheap one and it is display-only** — it cannot move any number the holdout scored
+against, so it is safe to land before any detection change. Additive to the response shape
+(a running SPA is a client that cannot be updated).
+**Done when** the morning wake appears as a row carrying its alerts, and a test asserts an alert at
+exactly `wake_at` is attached to it — that test fails today.
+
+#### Gap B — a real out-of-bed episode is invisible because the rule ignores `bed_transitions`
+
+Raffa 2026-09-09: `846 20:41:30 out · 847 20:43:57 in · 848 20:44:36 out` — an unambiguous out/in pair.
+Fresh compute on 0.30.1 reports `wake_count 0, awake_minutes 0`. Why: the only active minutes are
+20:41, 20:44 and 20:45 (20:42–43 are dead); the run walk bridges the 2-minute gap (`WAKE_GAP_MIN` 3)
+into **one run of 3 active minutes**, against **`WAKE_ACTIVE_MIN = 5`**. Three is not five, so it is
+classified a brief stir.
+
+★★★ **The wake-COUNT path reads only per-minute activity and ignores `bed_transitions` entirely**,
+while the wake-TIME path (`USE_TRANSITION_TIMES`) treats them as authoritative. A child who climbs out,
+is put back, and lies still is *structurally* incapable of reaching five active minutes.
+
+⚠️ **Do NOT fix this by lowering `WAKE_ACTIVE_MIN`.** It exists to stop brief stirs counting, it was
+tuned, and 5 → 3 changes every night in the corpus. The candidate is *"a corroborated `out_of_bed` →
+`into_bed` pair after onset counts as an awakening"*, which costs nothing on nights with no transitions.
+**Score it on the 44 child-nights (both environments) before believing it** — same scorer as #342.
+★ Shares its evidence source with §1.2 item 3 (parent-leaves vs child-exits); build them together.
+
+#### Why the two children differ at all — measured, so it is not re-litigated
+
+Classifying every in-window alert by the timeline segment it lands in, last 14 nights:
+
+| segment | Raffa | Renz |
+|---|---|---|
+| settling (pre-onset) | 29.2% | 5.3% |
+| asleep | 1.3% | 11.2% |
+| stir (<5 active min) | 5.2% | 19.9% |
+| **wake (the only one that renders)** | **6.5%** | **56.6%** |
+| awake (after the final wake) | 57.8% | 7.0% |
+
+Raffa: 18 wakes over 14 nights, **6 nights with an entirely empty Wake-ups section**; Renz: 94 wakes,
+**0** empty nights. Underneath it he is simply the stiller sleeper (3–7% active minutes vs 21–24%,
+corroborated independently by the zone baseline 15.6% vs 25.2%).
+
+⚠️ The two cameras are also **configured differently, all four in the direction of Renz alerting more**:
+`sound_sensitivity` 49 vs 70 (**+11.2 dB vs +8.2 dB** via `marginDb()` = `4 + 14*((100-s)/99)`;
+~3 dB is a doubling of sound power), `detect_confirm_s` 3 s vs 2 s, `detect_start` 19:00 vs 19:30,
+`detect_zone` 13.0% vs 22.7% of frame. **Raising Raffa's sensitivity to match is the wrong fix** —
+Renz is at ~34 alerts/night, which is the alert-fatigue tradeoff, on a baby monitor, at 3 am.
+
+#### What this assumes about someone else's house
+
+Nothing child-specific: both gaps are about **where a child's waking falls in the night**, and a child
+who sleeps through and wakes in the morning is the *common* case, not this house's. Gap A helps every
+such install and costs nothing where it doesn't apply. ⚠️ The per-camera settings above are this
+installation's, quoted only to explain the observed rates — **no threshold in either gap's fix may be
+derived from them.**
 
 ## 2. Specced, not built
 
