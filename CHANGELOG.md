@@ -9,6 +9,23 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+- **Wake clips can be turned on without ever producing one.** "Record wake-ups without alerting" only
+  ever started buffering if detection clips or on-demand recording were also on for that camera — so a
+  household that wanted silent wake clips *and nothing else* got a setting that looked accepted and
+  produced nothing, every night, with no error anywhere. The recording page's three sections are
+  presented as independent choices; now they are. Turning wake clips on or off — per child's sleep
+  tracking, the global switch in Settings → Recording, or assigning/unassigning a camera to a child —
+  arms or disarms the buffer immediately.
+- **A camera unassigned from a child, or a child deleted, could leave its recording buffer running
+  forever.** The periodic reconciliation that keeps every camera's buffer in sync only ever started one
+  that should be running; nothing had ever told it to stop one that shouldn't be. Wake clips made this
+  reachable for the first time — a camera's buffer can now stop being wanted at a moment nothing else
+  catches — so unassigning a camera, or deleting the child it was assigned to, could leave an ffmpeg
+  process quietly running (and its clip buffer quietly using disk) with no way back short of an unrelated
+  settings change or a restart. Both the immediate case (unassigning/deleting) and the general safety net
+  (the periodic check now stops a buffer that's no longer wanted, not just starts one that is) are fixed.
+
 ## [0.30.1] - 2026-09-10
 
 ### Fixed
