@@ -55,6 +55,7 @@ const { default: camerasRouter } = await import('../src/routes/cameras.js');
 const { CLIPS_DIR, isSegmenterRunning } = await import('../src/lib/clipRecorder.js');
 const { checkClipStorage } = await import('../src/lib/clipStorage.js');
 const { startClipCapture, stopAllClipCapture } = await import('../src/lib/clipCapture.js');
+const { stopAllMotionDetectors } = await import('../src/lib/motionDetector.js');
 
 const MOUNTED = `/dev/sda1 / ext4 rw 0 0\n/dev/sdb1 ${path.resolve(CLIPS_DIR)} xfs rw 0 0\n`;
 
@@ -83,6 +84,16 @@ before(async () => {
 
 after(async () => {
   stopAllClipCapture();
+  // PUT /:id/assign (and reconcileChildLegs) also call startMotionDetector as a side effect of
+  // exercising the route — a second, unrelated ffmpeg-spawn subsystem this file was never tearing
+  // down. On the ENOENT path that leaves an orphaned ChildProcess + its piped stdout/stderr Sockets
+  // as active libuv handles, which silently keeps the process alive forever (not a timeout — verified
+  // waiting 90s+ with nothing happening). Reproduced identically on native Windows and in two different
+  // Docker base images while chasing an unrelated question about running this suite under Codex, so
+  // it isn't platform-specific; CI's own runners apparently don't hit the same handle-count/timing
+  // window, which is why `npm test` looked green there despite the underlying leak being real. Same
+  // stop-all index.js already calls on real shutdown (see recordings-shutdown.test.js).
+  await stopAllMotionDetectors();
   await childrenServer.close();
   await settingsServer.close();
   await camerasServer.close();
@@ -91,8 +102,9 @@ after(async () => {
   try { fs.rmSync(emptyBinDir, { recursive: true, force: true }); } catch { /* best effort */ }
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   stopAllClipCapture();
+  await stopAllMotionDetectors();
   fs.rmSync(path.join(CLIPS_DIR, '.ring'), { recursive: true, force: true }); // clean slate for the dir-existence checks
   db.prepare('DELETE FROM children').run();
   db.prepare('DELETE FROM cameras').run();
