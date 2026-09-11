@@ -5,7 +5,7 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { normalizePhoto } from '../lib/photo.js';
 import { getStoredNights, computeNight, computeAndStoreNight, currentNightDate, childTracksSleep, sleepInsights } from '../lib/sleepAnalysis.js';
 import { startMotionDetector } from '../lib/motionDetector.js';
-import { clipRingWanted, startClipCapture, stopClipCapture } from '../lib/clipCapture.js';
+import { reconcileClipRing } from '../lib/clipCapture.js';
 import { deleteRecording } from '../lib/recordings.js';
 import { deleteTimelapse, discardAllTimelapseFrames } from '../lib/timelapse.js';
 import { getNightReview, saveNightReview, reviewCardState, localHmToUtcSql, applyVerdicts,
@@ -44,8 +44,7 @@ function withCameras(child) {
 export function reconcileChildLegs(childId) {
   for (const cam of db.prepare('SELECT * FROM cameras WHERE child_id = ?').all(childId)) {
     startMotionDetector(cam).catch(() => {});
-    if (clipRingWanted(cam)) startClipCapture(cam);
-    else stopClipCapture(cam.id);
+    reconcileClipRing(cam);
   }
 }
 
@@ -295,7 +294,18 @@ router.put('/:id/review/:date', (req, res) => {
 // already wrong; making this call also erase video off the disk is what made it untenable to leave.
 router.delete('/:id', requireAdmin, (req, res) => {
   const id = req.params.id;
+  // Captured BEFORE the UPDATE below nulls child_id — after it, `WHERE child_id = ?` would find nothing
+  // and a wake-only ring on one of these cameras would never be told to stop (issue #387 adversarial
+  // review: confirmed clipRingWanted flips true->false across this delete while nothing issues the
+  // stop). index.js's periodic reconcile now has a stop branch too, so a miss here would only cost up
+  // to 5 minutes rather than leaking forever — but deleting a child is exactly the moment "this camera's
+  // wake-only reason is gone" should take effect immediately, same as reconcileChildLegs does elsewhere.
+  const affectedCameraIds = db.prepare('SELECT id FROM cameras WHERE child_id = ?').all(id).map((r) => r.id);
   db.prepare('UPDATE cameras SET child_id = NULL WHERE child_id = ?').run(id);
+  for (const camId of affectedCameraIds) {
+    const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(camId);
+    if (cam) reconcileClipRing(cam); // no `else` needed -- a stale id just has nothing to reconcile
+  }
   // Before the child row goes, so a failure part-way leaves the child (and its media) still reachable
   // rather than stranding exactly the rows this exists to clean up.
   for (const r of db.prepare('SELECT id FROM recordings WHERE child_id = ?').all(id)) deleteRecording(r.id);

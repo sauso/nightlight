@@ -29,7 +29,7 @@ import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder
 import { startMotionDetector, stopMotionDetector, isDetecting, stopAllMotionDetectors, motionLegWanted } from './lib/motionDetector.js';
 import { startOnvifMotion, stopOnvifMotion, isOnvifMotion, onvifMotionWanted, stopAllOnvifMotion } from './lib/onvifMotion.js';
 import { startSoundDetector, isSoundDetecting, stopAllSoundDetectors } from './lib/soundDetector.js';
-import { startClipCapture, clipRingWanted, isClipCapturing, stopAllClipCapture } from './lib/clipCapture.js';
+import { reconcileClipRing, stopAllClipCapture } from './lib/clipCapture.js';
 import { stopAllRecordingsForShutdown, reconcileStaleRecordings } from './lib/recordings.js';
 import { startClipStorage, stopClipStorage } from './lib/clipStorage.js';
 import { initPush } from './lib/push.js';
@@ -610,9 +610,14 @@ async function reconcileCameraPaths(attempt = 1) {
       // Keep the clip/recording ring alive the same way (its own leg off the same path). The condition
       // lives in clipRingWanted — this used to test `detect_record_clips` alone, which left on-demand
       // recording unarmed on every restart for anyone who hadn't also turned on detection clips.
-      if (clipRingWanted(cam) && !isClipCapturing(cam.id)) {
-        startClipCapture(cam);
-      }
+      //
+      // reconcileClipRing has BOTH directions (see clipCapture.js) — until issue #387's adversarial
+      // review, this only had the start half, so a camera that stopped wanting the ring for any reason
+      // nothing else happened to catch (assign to no child, a child deleted, any future caller that
+      // forgets clipRingWanted) kept its segmenter, and so its ffmpeg process, running indefinitely.
+      // Confirmed live: PUT /api/cameras/:id/assign (unassign) and DELETE /api/children/:id both left a
+      // wake-only ring running with no path back before this fix.
+      reconcileClipRing(cam);
     }
     if (fixedCount > 0) {
       logger.info(`Reconciled ${fixedCount} of ${cameras.length} camera path(s) with MediaMTX.`);

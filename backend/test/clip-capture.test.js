@@ -44,7 +44,7 @@ const ev = await import('../src/lib/detectionEvents.js');
 const { isSegmenterRunning, CLIPS_DIR } = await import('../src/lib/clipRecorder.js');
 const { checkClipStorage } = await import('../src/lib/clipStorage.js');
 const {
-  clipRingWanted, startClipCapture, stopClipCapture, restartClipCapture,
+  clipRingWanted, startClipCapture, stopClipCapture, restartClipCapture, reconcileClipRing,
   isClipCapturing, stopAllClipCapture, enqueueClip,
 } = await import('../src/lib/clipCapture.js');
 
@@ -276,8 +276,50 @@ describe('★ wake clips actually start the segmenter, not just the predicate (i
     startClipCapture(c);
     assert.equal(isSegmenterRunning('cam-1'), true, 'precondition: the wake-only ring is running');
     db.prepare('UPDATE children SET track_sleep = 0 WHERE id = ?').run('kid-1');
-    if (clipRingWanted(c)) startClipCapture(c); else stopClipCapture(c.id);
+    reconcileClipRing(c); // the actual function children.js/cameras.js/index.js all call now
     assert.equal(isSegmenterRunning('cam-1'), false, 'the ring kept running after sleep tracking was turned off');
+  });
+});
+
+// --- reconcileClipRing: the shared start-or-stop decision (issue #387) ----------------------------
+//
+// Every caller that used to hand-roll `if (clipRingWanted(cam)) startClipCapture(cam); else
+// stopClipCapture(cam.id);` now calls this instead — index.js's periodic reconcile (which previously
+// had ONLY the start half; see its own comment), cameras.js's /assign route, and children.js's
+// reconcileChildLegs and DELETE /:id. One tested implementation instead of four copies that can drift
+// independently, which is exactly how issue #387 (and the on-demand bug before it) happened in the
+// first place.
+describe('★ reconcileClipRing — the single start-or-stop decision every caller now shares', () => {
+  test('starts a wanted ring that is not running', () => {
+    const c = cam({ detect_record_clips: 1 });
+    assert.equal(isSegmenterRunning('cam-1'), false, 'precondition');
+    reconcileClipRing(c);
+    assert.equal(isSegmenterRunning('cam-1'), true);
+  });
+
+  test('★ THE FIX: stops a running ring that is no longer wanted', () => {
+    const c = cam({ detect_record_clips: 1 });
+    startClipCapture(c);
+    assert.equal(isSegmenterRunning('cam-1'), true, 'precondition');
+    setSettings({ ondemand_enabled: 0 });
+    reconcileClipRing({ ...c, detect_record_clips: 0 });
+    assert.equal(isSegmenterRunning('cam-1'), false, 'a no-longer-wanted ring kept running');
+  });
+
+  test('leaves an already-running, still-wanted ring alone (does not restart/wipe it)', () => {
+    const c = cam({ detect_record_clips: 1 });
+    startClipCapture(c);
+    const ring = path.join(CLIPS_DIR, '.ring', 'cam-1');
+    fs.writeFileSync(path.join(ring, 'seg-marker.mkv'), 'x');
+    reconcileClipRing(c);
+    assert.equal(fs.existsSync(path.join(ring, 'seg-marker.mkv')), true, 'a no-op reconcile wiped the ring');
+  });
+
+  test('leaves an already-stopped, still-unwanted ring alone', () => {
+    setSettings({ ondemand_enabled: 0 });
+    const c = cam({ detect_record_clips: 0 });
+    reconcileClipRing(c);
+    assert.equal(isSegmenterRunning('cam-1'), false);
   });
 });
 

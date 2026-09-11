@@ -82,8 +82,20 @@ function pump() {
 // silent no-op: `captureWakeClipInner` (recordings.js) requires `isSegmenterRunning`, found nothing,
 // logged, and returned null every single night. The Recording page's three sections read as
 // independent choices, so nothing in the UI hinted that the third one depended on the other two ever
-// having been on. `childTracksSleep` alone is not enough — a child can track sleep with wake clips
-// globally disabled, and a camera with no `child_id` can never produce one.
+// having been on.
+//
+// ⚠️ `!!camera.child_id &&` is a fast-path, not a correctness requirement — a Claude adversarial review
+// confirmed `childTracksSleep(null|undefined|'')` already returns false on its own, so the guard changes
+// no observable output. It stays because it skips a DB query for every unassigned camera on every
+// reconcile pass, which is most cameras in most reconcile ticks. Do not "simplify" it away expecting a
+// behavior change — there isn't one, and mutation-testing this line will correctly find it equivalent.
+//
+// ⚠️ THIS PREDICATE NOW DEPENDS ON child_id, WHICH CHANGES AT RUNTIME (assign/unassign, child delete) —
+// unlike detect_record_clips and ondemand_enabled, which only change via a settings save. The same
+// review found the two places that change it had NOT been updated to re-evaluate the ring:
+// routes/cameras.js's PUT /:id/assign and routes/children.js's DELETE /:id (see their comments) — both
+// fixed alongside this one. index.js's periodic reconcile also gained the STOP half it was missing, as
+// the backstop for the next caller that forgets.
 export function clipRingWanted(camera) {
   if (!camera || camera.disabled) return false;
   if (camera.detect_record_clips || getOndemandSettings().enabled) return true;
@@ -121,6 +133,22 @@ export const isClipCapturing = isSegmenterRunning;
 
 export function stopAllClipCapture() {
   stopAllSegmenters();
+}
+
+// Reconcile one camera's ring against clipRingWanted: start if wanted and not running, stop if running
+// and no longer wanted. Used by index.js's periodic reconcileCameraPaths, which previously had only the
+// start half (issue #387 adversarial review) — every OTHER leg reconciled there (motion, ONVIF motion)
+// already had both directions, so a missed call site anywhere else self-healed within 5 minutes; the
+// ring's missing stop half meant a camera that stopped wanting it kept its segmenter (and so its ffmpeg
+// process) running forever. Exported here, not left inline in index.js, because index.js has import-time
+// side effects (it spawns MediaMTX/transcoders) that every existing test deliberately avoids triggering
+// — this lets the stop half be tested directly instead.
+export function reconcileClipRing(camera) {
+  if (clipRingWanted(camera) && !isSegmenterRunning(camera.id)) {
+    startClipCapture(camera);
+  } else if (!clipRingWanted(camera) && isSegmenterRunning(camera.id)) {
+    stopClipCapture(camera.id);
+  }
 }
 
 // Enqueue a clip for a just-fired detection event. Best-effort and fully guarded — a recording failure

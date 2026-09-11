@@ -2,13 +2,19 @@
 // to 5 minutes for the periodic reconcile (issue #387, the 2026-09-11 Codex review's R3).
 //
 // clipRing.test.js pins the PREDICATE (clipRingWanted now accounts for wake clips) and
-// clip-capture.test.js pins that startClipCapture/stopClipCapture actually produce a real segmenter
-// for that predicate. Neither exercises the two ROUTE call sites this file is for:
+// clip-capture.test.js pins that startClipCapture/stopClipCapture/reconcileClipRing actually produce a
+// real segmenter for that predicate. Neither exercises the FOUR route call sites this file is for:
 //   * PUT /api/children/:id — reconcileChildLegs, when "Track sleep" changes.
 //   * PUT /api/settings — the wakeClipsChanged re-arm, when the global wake-clip switch changes.
+//   * PUT /api/cameras/:id/assign — reconcileClipRing, when a camera's child_id changes.
+//   * DELETE /api/children/:id — reconcileClipRing per affected camera, when a child (and so its
+//     cameras' child_id) goes away.
 // A regression here looks exactly like children-route.test.js's own documented gap: nothing crashes,
 // nothing errors, the setting just silently doesn't take effect until the next reconcile (or, before
-// this fix existed at all, never).
+// this fix existed at all, never — the last two routes had NO reconcile at all until an adversarial
+// review of this same issue found them: assign is the path someone actually takes to reach wake-clip
+// eligibility, and unassign/delete leaked a running ffmpeg segmenter permanently, since index.js's own
+// periodic reconcile had only the start half at the time — see clipCapture.js's reconcileClipRing.
 //
 // ⚠️ PATH IS EMPTIED BEFORE ANY IMPORT, same reasoning as clip-capture.test.js: startClipCapture spawns
 // real ffmpeg on a machine that has one. Emptying PATH makes the spawn fail identically everywhere.
@@ -45,21 +51,24 @@ useTempDataDir();
 const { default: db } = await import('../src/db.js');
 const { default: childrenRouter, reconcileChildLegs } = await import('../src/routes/children.js');
 const { default: settingsRouter } = await import('../src/routes/settings.js');
+const { default: camerasRouter } = await import('../src/routes/cameras.js');
 const { CLIPS_DIR, isSegmenterRunning } = await import('../src/lib/clipRecorder.js');
 const { checkClipStorage } = await import('../src/lib/clipStorage.js');
 const { startClipCapture, stopAllClipCapture } = await import('../src/lib/clipCapture.js');
 
 const MOUNTED = `/dev/sda1 / ext4 rw 0 0\n/dev/sdb1 ${path.resolve(CLIPS_DIR)} xfs rw 0 0\n`;
 
-let childrenServer, settingsServer, token;
+let childrenServer, settingsServer, camerasServer, token;
 const KID = 'kid-1';
 
 const putChild = (body) => call(`${childrenServer.url}/api/children/${KID}`, { method: 'PUT', token, body });
 const putSettings = (body) => call(`${settingsServer.url}/api/settings`, { method: 'PUT', token, body });
-const camRow = () => db.prepare('SELECT * FROM cameras WHERE id = ?').get('cam-1');
-const ringDir = () => path.join(CLIPS_DIR, '.ring', 'cam-1');
-const markerPath = () => path.join(ringDir(), 'marker.mkv');
-const plantMarker = () => fs.writeFileSync(markerPath(), 'x');
+const putAssign = (camId, body) => call(`${camerasServer.url}/api/cameras/${camId}/assign`, { method: 'PUT', token, body });
+const deleteChild = (id) => call(`${childrenServer.url}/api/children/${id}`, { method: 'DELETE', token });
+const camRow = (id = 'cam-1') => db.prepare('SELECT * FROM cameras WHERE id = ?').get(id);
+const ringDir = (id = 'cam-1') => path.join(CLIPS_DIR, '.ring', id);
+const markerPath = (id = 'cam-1') => path.join(ringDir(id), 'marker.mkv');
+const plantMarker = (id = 'cam-1') => fs.writeFileSync(markerPath(id), 'x');
 
 before(async () => {
   fs.mkdirSync(CLIPS_DIR, { recursive: true });
@@ -67,6 +76,7 @@ before(async () => {
   assert.equal(st.ok, true, `clip storage did not come up ready (${st.reason}) — every test here would be vacuous`);
   childrenServer = await mountRouter('/api/children', childrenRouter);
   settingsServer = await mountRouter('/api/settings', settingsRouter);
+  camerasServer = await mountRouter('/api/cameras', camerasRouter);
   const admin = makeUser(db, { id: 'u-a', username: 'admin', role: 'admin' });
   token = signToken({ id: admin.id, sub: admin.id, username: admin.username, role: 'admin', sid: makeSession(db, admin.id) });
 });
@@ -75,6 +85,7 @@ after(async () => {
   stopAllClipCapture();
   await childrenServer.close();
   await settingsServer.close();
+  await camerasServer.close();
   db.close();
   cleanupTempDataDirs();
   try { fs.rmSync(emptyBinDir, { recursive: true, force: true }); } catch { /* best effort */ }
@@ -151,4 +162,74 @@ describe('★ settings.js: the global wake-clip switch re-arms every camera imme
     assert.equal(res.status, 200);
     assert.equal(fs.existsSync(markerPath()), true, 'an unrelated settings save restarted (and wiped) the ring');
   });
+});
+
+describe('★ cameras.js: PUT /:id/assign reconciles the ring immediately (issue #387)', () => {
+  // ★ THE REGRESSION AS FOUND: assigning a camera to a sleep-tracked, wake-eligible child is the path
+  // someone actually takes to reach wake-clip eligibility in the first place (create child -> assign
+  // camera -> toggle tracking, or assign a camera that's already tracking) — and this route never
+  // reconciled the ring at all before the adversarial review found it, so the FIRST night after assigning
+  // buffered nothing until the periodic reconcile caught up (up to 5 min).
+  test('assigning a camera to a wake-eligible child starts the ring right away', async () => {
+    db.prepare('DELETE FROM cameras').run();
+    makeCamera(db, { id: 'cam-2', name: 'Unassigned', childId: null });
+    assert.equal(fs.existsSync(ringDir('cam-2')), false, 'precondition: unassigned, nothing buffering');
+    const res = await putAssign('cam-2', { child_id: KID });
+    assert.equal(res.status, 200);
+    assert.equal(db.prepare('SELECT child_id FROM cameras WHERE id = ?').get('cam-2').child_id, KID);
+    assert.equal(fs.existsSync(ringDir('cam-2')), true, 'PUT /assign did not start the wake-only ring');
+  });
+
+  // ⚠️ "Does a same-child assign avoid a needless restart" is NOT tested here, and trying it found a
+  // real limit of this harness rather than a bug: seeding "already running" via a direct startClipCapture
+  // call, then checking a marker survived an HTTP round trip, is flaky in THIS environment for the
+  // opposite reason the STOP-direction tests are unprovable — the empty-PATH segmenter can die naturally
+  // (~10-20ms) DURING the round trip, so by the time the route's reconcile runs it may correctly (from
+  // its own perspective) see "wanted, not running" and legitimately restart. That is startClipCapture
+  // doing exactly what "starting twice does not restart it" (clip-capture.test.js) already proves it
+  // does when the ring is ACTUALLY still running — the flakiness is in this test's precondition
+  // surviving the round trip, not in the code. Left undone rather than asserted unreliably.
+  //
+  // ⚠️ The STOP direction (unassigning a camera whose only reason to buffer was wake clips) is NOT
+  // re-proven here through HTTP, for the reason documented at the top of this file: isSegmenterRunning
+  // dies on its own from the empty-PATH spawn failure faster than the round trip, so the check would
+  // pass whether or not the route's reconcile actually ran. reconcileClipRing's stop branch is proven
+  // directly and synchronously in clip-capture.test.js ("★ THE FIX: stops a running ring that is no
+  // longer wanted") — what's specific to THIS route is that it calls reconcileClipRing(updated) at all
+  // on assign, which the two tests above already establish (one via a real state change, one via its
+  // absence). Full live-process proof of the unassign path belongs in e2e with a real ffmpeg, same as
+  // clipRing.test.js's own header says about the on-demand bug this issue's fix mirrors.
+});
+
+describe('★ children.js: DELETE /:id reconciles every affected camera\'s ring (issue #387)', () => {
+  test('deleting the child a camera is assigned to clears child_id', async () => {
+    const res = await deleteChild(KID);
+    assert.equal(res.status, 204);
+    assert.equal(camRow('cam-1').child_id, null, 'the camera was not detached from the deleted child');
+  });
+
+  test('deleting an unrelated child does not restart (and so does not wipe) another child\'s ring', async () => {
+    makeChild(db, { id: 'kid-other', track: 1 });
+    startClipCapture(camRow()); // cam-1 belongs to KID, not kid-other
+    plantMarker();
+    assert.equal(fs.existsSync(markerPath()), true, 'precondition: the marker is there to begin with');
+    const res = await deleteChild('kid-other');
+    assert.equal(res.status, 204);
+    assert.equal(fs.existsSync(markerPath()), true, "deleting an unrelated child restarted (and wiped) this one's camera ring");
+  });
+
+  // ⚠️ HONEST GAP, found by actually trying rather than assumed: neither test above discriminates the
+  // fix's real subject — that affectedCameraIds is captured BEFORE `UPDATE ... SET child_id = NULL`,
+  // not after (see the route's own comment for why the order matters: a `WHERE child_id = ?` re-query
+  // after the null-out finds nothing, silently skipping reconciliation for every camera the delete just
+  // affected). I mutation-tested this directly — reverting the capture-before-update fix entirely still
+  // left both tests above green. The child_id-cleared check is true regardless of ordering (that's a
+  // separate UPDATE either way), and the "unrelated child" control exercises a different child than the
+  // one the ordering bug is about. Every remaining way to observe "was reconcileClipRing actually called
+  // on the affected camera" reduces to the same live-segmenter-over-HTTP race documented at the top of
+  // this file and on the /assign block above — including here, since a stop has no filesystem trace to
+  // check instead. This one specific ordering fix is verified by direct code reading (it is a two-line,
+  // easily-inspected reordering) and by the adversarial review's own live probe, not by a committed
+  // regression test — same class of limit clipRing.test.js's header already accepts for the on-demand
+  // bug this issue mirrors, deferred there to e2e with a real ffmpeg.
 });
