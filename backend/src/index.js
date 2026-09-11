@@ -29,7 +29,7 @@ import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder
 import { startMotionDetector, stopMotionDetector, isDetecting, stopAllMotionDetectors, motionLegWanted } from './lib/motionDetector.js';
 import { startOnvifMotion, stopOnvifMotion, isOnvifMotion, onvifMotionWanted, stopAllOnvifMotion } from './lib/onvifMotion.js';
 import { startSoundDetector, isSoundDetecting, stopAllSoundDetectors } from './lib/soundDetector.js';
-import { startClipCapture, clipRingWanted, isClipCapturing, stopAllClipCapture } from './lib/clipCapture.js';
+import { reconcileClipRing, stopAllClipCapture } from './lib/clipCapture.js';
 import { stopAllRecordingsForShutdown, reconcileStaleRecordings } from './lib/recordings.js';
 import { startClipStorage, stopClipStorage } from './lib/clipStorage.js';
 import { initPush } from './lib/push.js';
@@ -610,9 +610,25 @@ async function reconcileCameraPaths(attempt = 1) {
       // Keep the clip/recording ring alive the same way (its own leg off the same path). The condition
       // lives in clipRingWanted — this used to test `detect_record_clips` alone, which left on-demand
       // recording unarmed on every restart for anyone who hadn't also turned on detection clips.
-      if (clipRingWanted(cam) && !isClipCapturing(cam.id)) {
-        startClipCapture(cam);
-      }
+      //
+      // reconcileClipRing has BOTH directions (see clipCapture.js) — until issue #387's adversarial
+      // review, this only had the start half, so a camera that stopped wanting the ring for any reason
+      // nothing else happened to catch (assign to no child, a child deleted, any future caller that
+      // forgets clipRingWanted) kept its segmenter, and so its ffmpeg process, running indefinitely.
+      // Confirmed live: PUT /api/cameras/:id/assign (unassign) and DELETE /api/children/:id both left a
+      // wake-only ring running with no path back before this fix.
+      //
+      // ⚠️ THIS CALL SITE IS UNTESTED, honestly: index.js spawns MediaMTX/transcoders at import time,
+      // which every existing test deliberately avoids triggering (see clip-capture.test.js's own
+      // header), so nothing here can import this file to prove the line still calls reconcileClipRing.
+      // reconcileClipRing itself IS thoroughly tested (clip-capture.test.js), so a bug in the DECISION
+      // would be caught — a future edit silently deleting or bypassing this call would not be. Confirmed
+      // by a second adversarial review pass (issue #387 follow-up) as a genuine structural limit, not
+      // one given up on early — closing it for real needs either an e2e test with a real ffmpeg
+      // (clipRing.test.js's own header defers the analogous on-demand-recording case there) or
+      // extracting reconcileCameraPaths's loop body into something importable, which wasn't judged
+      // worth the risk of touching for this fix alone.
+      reconcileClipRing(cam);
     }
     if (fixedCount > 0) {
       logger.info(`Reconciled ${fixedCount} of ${cameras.length} camera path(s) with MediaMTX.`);
