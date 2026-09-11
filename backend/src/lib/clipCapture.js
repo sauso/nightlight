@@ -1,6 +1,7 @@
 import db from '../db.js';
 import { logger } from './logger.js';
-import { getOndemandSettings } from './recordings.js';
+import { getOndemandSettings, getWakeClipSettings } from './recordings.js';
+import { childTracksSleep } from './sleepAnalysis.js';
 import {
   startSegmenter,
   stopSegmenter,
@@ -13,11 +14,13 @@ import { clipStorageReady, hasMinFreeSpace } from './clipStorage.js';
 
 // Stage 1 recording — the glue between the capture core (clipRecorder.js) and the app:
 //   * lifecycle: start/stop a camera's segmenter to match whether anything wants a ring
-//     (clipRingWanted — the per-camera `detect_record_clips` opt-in OR global on-demand recording),
-//     driven from the same places the motion/sound detectors are (routes + reconcile + startup).
+//     (clipRingWanted — the per-camera `detect_record_clips` opt-in, global on-demand recording, or
+//     wake clips for a sleep-tracked child), driven from the same places the motion/sound detectors
+//     are (routes + reconcile + startup).
 //   * job queue: when a detection fires on a recording-enabled camera, fireDetectionAlert calls
 //     enqueueClip(), which cuts the [pre, post] clip and writes clip_* onto the event row.
-// Shipped in 0.17.0.
+// Shipped in 0.17.0. Wake-clip eligibility added later (issue #387) — see the comment on
+// clipRingWanted below for why it was missing.
 
 // Small in-process queue so a burst of triggers across cameras can't spawn unbounded ffmpeg. Each job
 // occupies a worker for roughly the post-roll (extractClip waits it out) plus a quick concat.
@@ -52,11 +55,13 @@ function pump() {
   }
 }
 
-// Should this camera be buffering at all? The ring feeds TWO features and either one is reason enough
-// to run it: detection clips reach back over the pre-roll when something fires, and on-demand
-// recording reaches back when someone presses Record. On-demand's pre-roll is the whole point of that
-// feature, so `ondemand_enabled` is what turns its buffering off — exactly as docs/recording.md says
-// ("Switching this off also stops the per-camera buffering").
+// Should this camera be buffering at all? The ring feeds THREE features and any one of them is reason
+// enough to run it: detection clips reach back over the pre-roll when something fires, on-demand
+// recording reaches back when someone presses Record, and a wake clip reaches back over
+// WAKE_CLIP_LEAD_SEC when the sleep tracker's wake watcher calls captureWakeClip (recordings.js). On-
+// demand's pre-roll is the whole point of that feature, so `ondemand_enabled` is what turns its
+// buffering off — exactly as docs/recording.md says ("Switching this off also stops the per-camera
+// buffering").
 //
 // ⚠️ CALL THIS AT EVERY CALL SITE — never re-derive the condition. It exists because the condition WAS
 // duplicated, and the copies drifted: startClipCapture had the rule right, but reconcile
@@ -70,9 +75,19 @@ function pump() {
 // detection clips switched on, which armed the ring for the other reason.
 // This is the same class of defect as an early-bedtime path that shipped inert: a correct no-op and a
 // dead branch look identical from outside.
+//
+// ⚠️ THE SAME BUG RECURRED FOR WAKE CLIPS (issue #387, flagged by the 2026-09-11 Codex review). Wake
+// clips shipped as a third consumer of the ring but were never added to this predicate, so a household
+// that turned OFF detection clips and on-demand recording while leaving "Record wake-ups" on got a
+// silent no-op: `captureWakeClipInner` (recordings.js) requires `isSegmenterRunning`, found nothing,
+// logged, and returned null every single night. The Recording page's three sections read as
+// independent choices, so nothing in the UI hinted that the third one depended on the other two ever
+// having been on. `childTracksSleep` alone is not enough — a child can track sleep with wake clips
+// globally disabled, and a camera with no `child_id` can never produce one.
 export function clipRingWanted(camera) {
   if (!camera || camera.disabled) return false;
-  return !!camera.detect_record_clips || getOndemandSettings().enabled;
+  if (camera.detect_record_clips || getOndemandSettings().enabled) return true;
+  return !!camera.child_id && childTracksSleep(camera.child_id) && getWakeClipSettings().enabled;
 }
 
 // Start (idempotently) a camera's segmenter if either feature wants the ring. No-op if already running

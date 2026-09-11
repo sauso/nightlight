@@ -82,6 +82,13 @@ chip; expand it and press play.
 night. The average wake-up runs ~19 minutes, so recording wake-ups *end to end* would be ~1.1 GiB a
 night — which is why the clip is deliberately bounded to its opening rather than the whole wake-up.
 
+**A note on buffering.** Capturing a wake-up's *opening* means Nightlight has to already be holding a
+few seconds of recent video before the wake-up is even confirmed — the same rolling buffer that powers
+on-demand recording and detection clips. Turning "Record wake-ups without alerting" on keeps that
+buffer running on each of the child's assigned cameras, the same as switching on-demand recording on
+would, even if both of the other two recording features are off. Turning it off drops that buffering
+immediately, unless something else on the same camera still needs it.
+
 ---
 
 ## Bed-transition frames (diagnostic, not shown anywhere)

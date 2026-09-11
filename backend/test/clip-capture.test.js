@@ -30,7 +30,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { useTempDataDir, cleanupTempDataDirs, makeCamera } from './helpers/harness.js';
+import { useTempDataDir, cleanupTempDataDirs, makeCamera, makeChild } from './helpers/harness.js';
 
 // Before any import that can spawn: an empty directory as the entire PATH, so nothing resolves.
 // `node --test` runs each test FILE in its own process, so this cannot leak into another suite.
@@ -48,9 +48,9 @@ const {
   isClipCapturing, stopAllClipCapture, enqueueClip,
 } = await import('../src/lib/clipCapture.js');
 
-const cam = (extra = {}) => {
+const cam = (extra = {}, childId = null) => {
   db.prepare('DELETE FROM cameras').run();
-  makeCamera(db, { id: 'cam-1', name: 'Nursery', extra });
+  makeCamera(db, { id: 'cam-1', name: 'Nursery', childId, extra });
   return db.prepare('SELECT * FROM cameras WHERE id = ?').get('cam-1');
 };
 
@@ -107,9 +107,10 @@ after(() => {
 beforeEach(() => {
   stopAllClipCapture();
   db.prepare('DELETE FROM detection_events').run();
+  db.prepare('DELETE FROM children').run();
   // Post-roll 0 so a capture settles in ~4.5s rather than ~19.5s — see the note on `settled`. The
   // shipped default is 15; nothing here depends on the value, only on it being small.
-  setSettings({ ondemand_enabled: 1, clip_pre_roll_s: 5, clip_post_roll_s: 0 });
+  setSettings({ ondemand_enabled: 1, clip_pre_roll_s: 5, clip_post_roll_s: 0, wake_clips_enabled: 1 });
 });
 
 // --- the precondition every other test here rests on ----------------------------------------------
@@ -212,6 +213,71 @@ describe('starting and stopping a camera’s ring', () => {
     stopAllClipCapture();
     assert.equal(isSegmenterRunning('cam-1'), false);
     assert.equal(isSegmenterRunning('cam-2'), false);
+  });
+});
+
+// --- wake clips as a third reason to buffer (issue #387) ------------------------------------------
+//
+// clipRingWanted's other two reasons (detect_record_clips, on-demand) are proven above by starting a
+// real segmenter. This proves the same for wake clips: not just that the PREDICATE returns true
+// (clipRing.test.js already pins that), but that startClipCapture, handed a wake-only camera, actually
+// produces a running segmenter — which is the thing captureWakeClipInner (recordings.js) needs to find
+// when a wake fires, and the thing that was silently missing before this fix.
+describe('★ wake clips actually start the segmenter, not just the predicate (issue #387)', () => {
+  test('a wake-only camera — detection clips and on-demand both off — gets a real segmenter', () => {
+    setSettings({ ondemand_enabled: 0 });
+    makeChild(db, { id: 'kid-1', track: 1 });
+    startClipCapture(cam({ detect_record_clips: 0 }, 'kid-1'));
+    assert.equal(isSegmenterRunning('cam-1'), true, 'wake-only eligibility did not start a segmenter');
+  });
+
+  test('the same camera with sleep tracking off does NOT get one', () => {
+    setSettings({ ondemand_enabled: 0 });
+    makeChild(db, { id: 'kid-1', track: 0 });
+    startClipCapture(cam({ detect_record_clips: 0 }, 'kid-1'));
+    assert.equal(isSegmenterRunning('cam-1'), false);
+  });
+
+  test('the same camera with wake clips disabled globally does NOT get one', () => {
+    setSettings({ ondemand_enabled: 0, wake_clips_enabled: 0 });
+    makeChild(db, { id: 'kid-1', track: 1 });
+    startClipCapture(cam({ detect_record_clips: 0 }, 'kid-1'));
+    assert.equal(isSegmenterRunning('cam-1'), false);
+  });
+
+  test('restartClipCapture stops a wake-only ring once wake clips are turned off globally — the same call settings.js makes on save', () => {
+    // Mirrors the sibling "restarting a camera that no longer wants the ring leaves it stopped" test
+    // below, for the THIRD reason a camera can want a ring. settings.js's PUT handler re-arms every
+    // enabled camera through exactly this function when wake_clips_enabled changes (routes/settings.js)
+    // — this is the synchronous, non-racy proof of that STOP direction; see
+    // test/children-clip-ring-reconcile.test.js's header for why a real HTTP call to that route cannot
+    // prove it (isSegmenterRunning dies on its own, from the empty-PATH spawn failure, faster than an
+    // awaited round trip).
+    setSettings({ ondemand_enabled: 0, wake_clips_enabled: 1 });
+    makeChild(db, { id: 'kid-1', track: 1 });
+    const c = cam({ detect_record_clips: 0 }, 'kid-1');
+    startClipCapture(c);
+    assert.equal(isSegmenterRunning('cam-1'), true, 'precondition: the wake-only ring is running');
+    setSettings({ wake_clips_enabled: 0 });
+    restartClipCapture(c);
+    assert.equal(isSegmenterRunning('cam-1'), false, 'a restart left a wake-only ring running after wake clips were turned off');
+  });
+
+  test('re-evaluating after "Track sleep" turns off stops an already-running wake-only ring', () => {
+    // Proves the STOP direction against a real running segmenter, which the pure-predicate tests in
+    // clipRing.test.js cannot: they never start anything, so a version of clipRingWanted that flipped
+    // to false but left an existing ring alone would still pass every one of them. This calls the same
+    // two functions children.js's reconcileChildLegs calls, in the same order — but not that function
+    // itself; the route-level wiring (a real PUT -> reconcileChildLegs -> here) is covered separately in
+    // test/children-clip-ring-reconcile.test.js, which needs its own PATH-emptied process.
+    setSettings({ ondemand_enabled: 0 });
+    makeChild(db, { id: 'kid-1', track: 1 });
+    const c = cam({ detect_record_clips: 0 }, 'kid-1');
+    startClipCapture(c);
+    assert.equal(isSegmenterRunning('cam-1'), true, 'precondition: the wake-only ring is running');
+    db.prepare('UPDATE children SET track_sleep = 0 WHERE id = ?').run('kid-1');
+    if (clipRingWanted(c)) startClipCapture(c); else stopClipCapture(c.id);
+    assert.equal(isSegmenterRunning('cam-1'), false, 'the ring kept running after sleep tracking was turned off');
   });
 });
 

@@ -232,6 +232,9 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
   // above, but note wake clips accrue every night whether or not anyone looks at them.
   let wakeEnabled = existing.wake_clips_enabled;
   if (wake_clips_enabled !== undefined) wakeEnabled = wake_clips_enabled ? 1 : 0;
+  // Turning wake clips on or off changes which cameras clipRingWanted() says need a ring (issue #387)
+  // — same re-arm as on-demand's own on/off, below.
+  const wakeClipsChanged = wakeEnabled !== existing.wake_clips_enabled;
   let wakeSeconds = existing.wake_clip_seconds;
   if (wake_clip_seconds !== undefined) {
     const n = parseInt(wake_clip_seconds, 10);
@@ -302,9 +305,12 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
   );
   refreshMqttConnection();
   // New pre/post-roll changes the required ring depth, so re-arm any camera that's recording.
-  if (clipLenChanged || ondemandChanged) {
+  if (clipLenChanged || ondemandChanged || wakeClipsChanged) {
     // Every enabled camera, not just the clip-recording ones: with on-demand on, a camera that doesn't
-    // record detections still needs a ring for Record's pre-roll (and must lose it when turned off).
+    // record detections still needs a ring for Record's pre-roll (and must lose it when turned off) —
+    // and the same is true of a camera whose only reason to buffer is a sleep-tracked child's wake
+    // clips (issue #387). restartClipCapture -> clipRingWanted re-evaluates all three reasons, so this
+    // is a no-op for any camera none of them apply to.
     for (const cam of db.prepare('SELECT * FROM cameras WHERE disabled = 0').all()) {
       restartClipCapture(cam);
     }

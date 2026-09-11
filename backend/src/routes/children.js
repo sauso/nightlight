@@ -5,6 +5,7 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { normalizePhoto } from '../lib/photo.js';
 import { getStoredNights, computeNight, computeAndStoreNight, currentNightDate, childTracksSleep, sleepInsights } from '../lib/sleepAnalysis.js';
 import { startMotionDetector } from '../lib/motionDetector.js';
+import { clipRingWanted, startClipCapture, stopClipCapture } from '../lib/clipCapture.js';
 import { deleteRecording } from '../lib/recordings.js';
 import { deleteTimelapse, discardAllTimelapseFrames } from '../lib/timelapse.js';
 import { getNightReview, saveNightReview, reviewCardState, localHmToUtcSql, applyVerdicts,
@@ -31,9 +32,20 @@ function withCameras(child) {
 // periodic reconcile). startMotionDetector stops then re-checks motionLegWanted, which is now window-
 // gated, so this handles both directions: tracking off (or a window that no longer contains now) stops
 // the leg; the leg (re)starts here only if the window is currently open, else at bedtime via reconcile.
-function reconcileChildLegs(childId) {
+//
+// The clip ring needs the same immediate treatment, for the same reason (issue #387): clipRingWanted
+// now depends on childTracksSleep, so flipping "Track sleep" off must stop a wake-only ring right away
+// rather than leaving it running until the next periodic reconcile — and turning it on must start one
+// immediately rather than leaving the first night's wake unrecorded while nothing buffers.
+// Exported (only) for children-clip-ring-reconcile.test.js: startClipCapture spawns ffmpeg, and on any
+// machine that HAS one the async spawn failure that empties test PATH races a real HTTP round trip and
+// tears down isSegmenterRunning's map entry regardless of what this function does — so the STOP
+// direction can only be verified reliably with a direct, same-tick call, not through the route.
+export function reconcileChildLegs(childId) {
   for (const cam of db.prepare('SELECT * FROM cameras WHERE child_id = ?').all(childId)) {
     startMotionDetector(cam).catch(() => {});
+    if (clipRingWanted(cam)) startClipCapture(cam);
+    else stopClipCapture(cam.id);
   }
 }
 

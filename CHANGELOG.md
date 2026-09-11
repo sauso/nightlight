@@ -9,6 +9,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+- **Wake clips can be turned on without ever producing one.** "Record wake-ups without alerting" only
+  ever started buffering if detection clips or on-demand recording were also on for that camera — so a
+  household that wanted silent wake clips *and nothing else* got a setting that looked accepted and
+  produced nothing, every night, with no error anywhere. The recording page's three sections are
+  presented as independent choices; now they are. Turning wake clips on or off (per child's sleep
+  tracking, or the global switch in Settings → Recording) arms or disarms the buffer immediately.
+
 ## [0.30.1] - 2026-09-10
 
 ### Fixed
