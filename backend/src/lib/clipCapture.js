@@ -144,9 +144,14 @@ export function stopAllClipCapture() {
 // side effects (it spawns MediaMTX/transcoders) that every existing test deliberately avoids triggering
 // — this lets the stop half be tested directly instead.
 export function reconcileClipRing(camera) {
-  if (clipRingWanted(camera) && !isSegmenterRunning(camera.id)) {
+  // Evaluated once, not per branch — clipRingWanted can run 1-3 DB queries and this runs over every
+  // camera on every 5-minute reconcile tick. (startClipCapture still re-checks it internally on the
+  // start path; that copy stays, per "CALL THIS AT EVERY CALL SITE" above — it's what makes
+  // startClipCapture itself safe to call from anywhere, not just from here.)
+  const wanted = clipRingWanted(camera);
+  if (wanted && !isSegmenterRunning(camera.id)) {
     startClipCapture(camera);
-  } else if (!clipRingWanted(camera) && isSegmenterRunning(camera.id)) {
+  } else if (!wanted && isSegmenterRunning(camera.id)) {
     stopClipCapture(camera.id);
   }
 }

@@ -218,18 +218,27 @@ describe('★ children.js: DELETE /:id reconciles every affected camera\'s ring 
     assert.equal(fs.existsSync(markerPath()), true, "deleting an unrelated child restarted (and wiped) this one's camera ring");
   });
 
-  // ⚠️ HONEST GAP, found by actually trying rather than assumed: neither test above discriminates the
-  // fix's real subject — that affectedCameraIds is captured BEFORE `UPDATE ... SET child_id = NULL`,
-  // not after (see the route's own comment for why the order matters: a `WHERE child_id = ?` re-query
-  // after the null-out finds nothing, silently skipping reconciliation for every camera the delete just
-  // affected). I mutation-tested this directly — reverting the capture-before-update fix entirely still
-  // left both tests above green. The child_id-cleared check is true regardless of ordering (that's a
-  // separate UPDATE either way), and the "unrelated child" control exercises a different child than the
-  // one the ordering bug is about. Every remaining way to observe "was reconcileClipRing actually called
-  // on the affected camera" reduces to the same live-segmenter-over-HTTP race documented at the top of
-  // this file and on the /assign block above — including here, since a stop has no filesystem trace to
-  // check instead. This one specific ordering fix is verified by direct code reading (it is a two-line,
-  // easily-inspected reordering) and by the adversarial review's own live probe, not by a committed
-  // regression test — same class of limit clipRing.test.js's header already accepts for the on-demand
-  // bug this issue mirrors, deferred there to e2e with a real ffmpeg.
+  // ★ THE FIX I INITIALLY CALLED UNTESTABLE, AND WAS WRONG: my first two tests above don't discriminate
+  // the fix's real subject (affectedCameraIds captured BEFORE `UPDATE ... SET child_id = NULL`, not
+  // after — see the route's comment for why the order matters). I mutation-tested that and confirmed
+  // it: reverting the capture-before-update fix entirely left both tests above green, AND — found on a
+  // second adversarial review pass — so did deleting the ENTIRE per-camera reconcile loop. Neither test
+  // exercises the loop body at all.
+  //
+  // The error was assuming the affected camera's reconcile must be a STOP to observe, which is where
+  // the real live-segmenter-over-HTTP race lives (documented at the top of this file). It doesn't have
+  // to be: give the camera an independent reason to want the ring that OUTLIVES its child
+  // (`detect_record_clips = 1`) and leave it not yet running. Now the loop's only correct action is a
+  // START, which — like every other START in this file — writes the ring directory SYNCHRONOUSLY and
+  // is never undone by the empty-PATH spawn's later failure. Capture-after-update (the bug) means the
+  // loop body never runs at all: no camera found, no reconcile, no directory. Capture-before-update (the
+  // fix) means it does.
+  test('★ reconciles a camera that still WANTS a ring — proves the affected-camera loop actually ran', async () => {
+    db.prepare('UPDATE cameras SET detect_record_clips = 1 WHERE id = ?').run('cam-1');
+    assert.equal(fs.existsSync(ringDir()), false, 'precondition: nothing buffering yet');
+    const res = await deleteChild(KID);
+    assert.equal(res.status, 204);
+    assert.equal(fs.existsSync(ringDir()), true,
+      'DELETE /:id did not reconcile the affected camera — affectedCameraIds was captured AFTER the UPDATE, or the loop never ran');
+  });
 });

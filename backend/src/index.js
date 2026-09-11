@@ -617,6 +617,17 @@ async function reconcileCameraPaths(attempt = 1) {
       // forgets clipRingWanted) kept its segmenter, and so its ffmpeg process, running indefinitely.
       // Confirmed live: PUT /api/cameras/:id/assign (unassign) and DELETE /api/children/:id both left a
       // wake-only ring running with no path back before this fix.
+      //
+      // ⚠️ THIS CALL SITE IS UNTESTED, honestly: index.js spawns MediaMTX/transcoders at import time,
+      // which every existing test deliberately avoids triggering (see clip-capture.test.js's own
+      // header), so nothing here can import this file to prove the line still calls reconcileClipRing.
+      // reconcileClipRing itself IS thoroughly tested (clip-capture.test.js), so a bug in the DECISION
+      // would be caught — a future edit silently deleting or bypassing this call would not be. Confirmed
+      // by a second adversarial review pass (issue #387 follow-up) as a genuine structural limit, not
+      // one given up on early — closing it for real needs either an e2e test with a real ffmpeg
+      // (clipRing.test.js's own header defers the analogous on-demand-recording case there) or
+      // extracting reconcileCameraPaths's loop body into something importable, which wasn't judged
+      // worth the risk of touching for this fix alone.
       reconcileClipRing(cam);
     }
     if (fixedCount > 0) {

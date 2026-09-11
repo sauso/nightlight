@@ -10,7 +10,7 @@ import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.j
 import { startMotionDetector, stopMotionDetector, motionLegWanted } from '../lib/motionDetector.js';
 import { startOnvifMotion, stopOnvifMotion, onvifMotionWanted } from '../lib/onvifMotion.js';
 import { startSoundDetector, stopSoundDetector } from '../lib/soundDetector.js';
-import { startClipCapture, stopClipCapture, clipRingWanted, isClipCapturing, reconcileClipRing } from '../lib/clipCapture.js';
+import { startClipCapture, stopClipCapture, isClipCapturing, reconcileClipRing } from '../lib/clipCapture.js';
 import { transitionSnapshotPath } from '../lib/bedTransitions.js';
 import {
   getRecentDetectionEvents,
@@ -1071,10 +1071,11 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
     } else {
       await stopSoundDetector(updated.id).catch(() => {});
     }
-    // The ring follows BOTH the per-camera clip opt-in just saved and the global on-demand setting —
-    // turning detection clips off must not take the Record button away with them.
-    if (clipRingWanted(updated)) startClipCapture(updated);
-    else stopClipCapture(updated.id);
+    // The ring follows all three reasons a camera can want it (clipRingWanted) — turning detection
+    // clips off must not take the Record button away with them, and now a wake-only camera's edit
+    // must not drop its buffer either. reconcileClipRing (issue #387) so this stays one implementation
+    // with index.js/cameras.js's /assign/children.js instead of a fifth copy free to drift from them.
+    reconcileClipRing(updated);
   }
   // Re-subscribe MQTT so a new/changed/removed motion topic takes effect immediately.
   refreshMqttConnection();
