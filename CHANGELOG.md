@@ -31,6 +31,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   rounded instead. The error only ever pushed the time later, never earlier, so onset was late (and the
   night's total sleep a minute short) on nights where the transition happened to land in the second half
   of a minute — roughly half of them.
+- **A morning sleep report could stay wrong forever if it was generated too soon.** The report is
+  written as soon as a child's tracking window closes, but confirming exactly when they got up can take
+  a couple of hours of real, quiet time to be sure of — and the very first report used to freeze
+  permanently at whatever partial answer was available in that first minute, even once the true
+  wake-up time became obvious from later, quieter data. Wake time and total sleep now keep updating for
+  a few hours after the window closes and settle for good only once there has been enough real time to
+  be certain; whether the bed was slept in at all is decided immediately and never changes retroactively
+  — only the wake time and duration can still refine.
 
 ### Security
 - **A talk-back call now ends promptly if your access is removed while it's open.** Two-way audio only

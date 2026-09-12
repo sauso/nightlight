@@ -266,6 +266,20 @@ cause — reads as noisier than its average suggests, and can still overstate aw
 perfectly tracking ambient level. Moving the camera further from the noise source is the reliable
 remedy.
 
+## Sleep report notifications
+
+Separate from the motion/sound alerts above: once a tracked child's sleep window closes for the night,
+a one-line summary ("asleep 8h12, 2 wakes, up 06:47") is sent through every provider enabled above,
+using the same 10-second-timeout fan-out. There is currently no setting to turn this off on its own —
+it follows whichever providers are configured for motion alerts.
+
+**The report can arrive before the night's full story is known, and is not resent once it is.**
+Working out exactly when a child got up can take up to a few hours of real, quiet time to confirm — the
+notification fires as soon as the window closes, using whatever is known at that moment, and is not
+re-sent later even if the wake time it reported turns out to have been provisional. The *stored* report
+(the child's sleep card and detail page) keeps itself up to date as more evidence comes in over the
+next few hours and settles once it's certain — only the one-time notification can be a little behind.
+
 ## Troubleshooting
 
 - **"Send test" says it timed out after 10s.** Nightlight gives any notification provider **10
