@@ -520,16 +520,20 @@ test('★★ an into_bed at the IDENTICAL second still cancels the exit', () => 
   assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '05:49');
 });
 
-test('★★ the return is indexed with txIdx, not a hand-rolled floor (#260 lives on this seam)', () => {
+test('★★ the return is indexed with txIdx, consistently, on both sides of the second (#260 fixed)', () => {
   // ⚠️ A review mutated `txIdx(back.created_at)` into an inline `Math.floor(...)` and it SURVIVED the
-  // whole suite — the source comment claimed the convention and nothing checked it. It is not cosmetic:
-  // `txIdx` currently ROUNDS, so a return at :29 and one at :31 land on different minutes, and with the
-  // only corroborating minutes sitting on that boundary the two give different nights.
+  // whole suite — the source comment claimed the convention and nothing checked it. Before #260 was
+  // fixed, that mutation was actually DETECTABLE here: `txIdx` rounded, so a return at :29 and one at
+  // :31 landed on different minutes, and with the only corroborating minutes sitting on that boundary
+  // the two gave different nights (see git history for that version of this test).
   //
-  // Occupancy exists in exactly OCCUPANCY_MIN_MINUTES minutes, 05:49-05:51. A return at 05:49:31 rounds
-  // UP to 05:50, leaving only 2 witnessed minutes — one short — so the guard stays silent.
-  // ★ When #260 flips txIdx from round to floor, THIS TEST WILL FAIL. That is the point: the wake path
-  // sits on the same seam as onset, and it must not move silently.
+  // Now that txIdx floors — matching the file's own stated rule for a real-second timestamp — :29 and
+  // :31 both resolve to the SAME minute, so they must produce the SAME result. That symmetry is itself
+  // the regression test for #260 on this call site: the wake path sits on the same txIdx seam as onset,
+  // and this proves it moved when #260 did rather than quietly keeping its own rounding.
+  //
+  // Occupancy exists in exactly OCCUPANCY_MIN_MINUTES minutes, 05:49-05:51. Both :29 and :31 now floor
+  // into 05:49, so both see all 3 minutes witnessed and the guard fires in both cases.
   // A LATER real exit is what makes the seam observable at all: without one the fallback below hands
   // the skipped exit straight back and both cases agree, which is how the first version of this test
   // passed for the wrong reason (both `null`).
@@ -544,18 +548,18 @@ test('★★ the return is indexed with txIdx, not a hand-rolled floor (#260 liv
     insertTransition.run(CAM, 'out_of_bed', 0.04, sqlTime(at(8, 30, 1, 5))); // the later, real departure
   };
 
-  layWitnessOnTheBoundary(29); // rounds DOWN to 05:49 -> all 3 minutes witnessed -> guard fires
-  const rounded = computeNight(CHILD, DATE);
+  layWitnessOnTheBoundary(29); // floors to 05:49 -> all 3 minutes witnessed -> guard fires
+  const early = computeNight(CHILD, DATE);
   db.prepare('DELETE FROM bed_transitions').run();
   db.prepare('DELETE FROM activity_samples').run();
-  layWitnessOnTheBoundary(31); // rounds UP to 05:50 -> only 2 witnessed -> guard silent
-  const notRounded = computeNight(CHILD, DATE);
+  layWitnessOnTheBoundary(31); // ALSO floors to 05:49 now -> all 3 minutes witnessed -> guard fires too
+  const late = computeNight(CHILD, DATE);
 
-  assert.equal(hhmm(rounded.wake_at), '08:30', 'the :29 return is witnessed, so the tail is skipped');
-  assert.equal(hhmm(notRounded.wake_at), '05:49', 'the :31 return is one witness minute short, so the exit stands');
-  assert.notEqual(
-    hhmm(rounded.wake_at), hhmm(notRounded.wake_at),
-    'two seconds apart must straddle the minute boundary — if these match, txIdx no longer rounds'
+  assert.equal(hhmm(early.wake_at), '08:30', 'the :29 return is witnessed, so the tail is skipped');
+  assert.equal(
+    hhmm(late.wake_at), hhmm(early.wake_at),
+    ':29 and :31 are the same minute under floor — a return at :31 must be witnessed exactly like :29, ' +
+      'not treated as one minute later'
   );
 });
 
@@ -1046,20 +1050,14 @@ describe('⚠️ seconds on a bed transition — the trap fixture, and the gap i
     assert.equal(sqlTime(at(18, 38, 0, 29)).slice(0, 16), sqlTime(at(18, 38, 0, 31)).slice(0, 16));
   });
 
-  test('★ STILL NOT FIXED (#260): the second half of a minute reports a minute late', () => {
-    // ⚠️ WHEN #260 IS FIXED THIS TEST FAILS, AND THAT IS ITS JOB. Replace it with:
-    //
-    //     assert.equal(onsetForPutDownAt(31), onsetForPutDownAt(29),
-    //       'the reported bedtime must not depend on which half of the minute the put-down fell in');
-    //
-    // ...and delete this comment. The error is one-directional — rounding only ever pushes up — so
-    // bedtime is late, never early, on roughly half of all nights, and asleep_minutes is short by one.
-    assert.equal(onsetForPutDownAt(29), '18:38', 'the first half of the minute already reports late');
+  test('★ FIXED (#260): the second half of a minute no longer reports a minute late', () => {
+    // txIdx floors, not rounds — a put-down at :31 lands in the same minute as one at :29, matching
+    // what a person reading a clock would call it. Regression: before the fix, onsetForPutDownAt(31)
+    // reported '18:39' (18:38:31 rounded UP to the next minute) while onsetForPutDownAt(29) correctly
+    // reported '18:38' — this failed until `Math.round` became `Math.floor` in txIdx.
     assert.equal(
-      onsetForPutDownAt(31),
-      '18:39',
-      'a put-down at :31 no longer reports a minute late — #260 appears to be FIXED. ' +
-        'Swap this test for the equality assertion in the comment above and close the issue.'
+      onsetForPutDownAt(31), onsetForPutDownAt(29),
+      'the reported bedtime must not depend on which half of the minute the put-down fell in'
     );
   });
 });
