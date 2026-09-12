@@ -220,8 +220,26 @@ counts as **historical**, not as the current state.
    same fact as independent evidence from the camera. They are complementary; neither waits on the other.
 2. Record the outside channel's **peak and duration** alongside each transition — new columns on
    `bed_transitions` — and require substantial outside evidence for `into_bed`, symmetric for
-   `out_of_bed`. — **lower priority now**: the zone fix removed the false arrivals this was aimed at,
-   and the evidence columns are still worth having, but no longer urgent.
+   `out_of_bed`. — **RE-OPENED 2026-09-12, exit side only.** The earlier "lower priority, no longer
+   urgent" call was right about `into_bed` and wrong to generalise to `out_of_bed` — nobody re-checked
+   the exit side separately, and it is not fixed.
+   ★★★ **Renz 2026-09-11: a confirmed `OUT OF BED` at 04:26 from a single frame of outside motion,
+   owner-corrected same morning** (marked "wrong"; real wake 06:34, over 2h later). He had genuinely
+   stirred and returned at 04:15–04:16 (both correct), then kept settling near the zone edge for ~10
+   more minutes — ordinary jitter, logged as repeated candidates opening and cancelling within
+   100–700ms. One of those bursts measured 5.7% outside motion, the bed then stayed quiet the
+   required 6s, and the detector logged a real exit. Nothing contradicted it for 2h08m (true silence,
+   verified in `activity_samples`), so the departure scan — correctly, by its own rules — trusted it.
+   The real 06:34 wake measured ~20x the motion amplitude (peak 100%, outside 99%) of the false one.
+   ⚠️ **Read from the code, not assumed: `OOB_SLOW_OUT_MIN` (5%) only gates the SLOW link (8–60s since
+   last bed motion) — the FAST link (`OOB_LINK_MS`, ≤8s) that fired this exit has NO minimum
+   outside-magnitude requirement at all**, only recency. For a marginal sleeper the fast path is the
+   one actually exercised, and it currently has zero floor, not a low one.
+   ⚠️ Neither item 1 nor item 3 would have caught this — checked against both before re-opening this
+   one. Item 1 only suppresses a *repeated same-direction* transition; this was a single, correctly-
+   ordered `into_bed` → `out_of_bed`, nothing repeats. Item 3's rule needs *continued in-bed
+   micro-motion* after the exit to call it a parent; here the bed read genuinely, fully empty for
+   2h08m — indistinguishable from a real departure by that rule. This gap is item 2's alone.
 3. Separate "parent leaves" from "child exits". Retrospective is fine: the nightly job runs after the
    night, so an `out_of_bed` followed by continued in-bed micro-motion is a parent leaving. — **still
    open, and now the most valuable item.** Measured 2026-08-27: the real put-down at 19:14 was recorded
