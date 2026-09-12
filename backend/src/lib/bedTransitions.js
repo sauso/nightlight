@@ -191,6 +191,59 @@ export function getImpossibleTransitions({ limit = 200 } = {}) {
   return out.slice(0, Math.min(500, Math.max(1, limit)));
 }
 
+// `into_bed` immediately followed (same camera) by `out_of_bed` within `maxGapMs`. Measured 2026-09-13:
+// 86 of 1053 stored transitions (~8%) match this shape, and it is NOT the classifier picking up a real
+// child getting straight back up:
+//   - A 9-case visual sample of the paired snapshots showed a parent in frame leaving via the door in
+//     every case where anyone was visible at all, and the child lying still in every single case — never
+//     the reverse.
+//   - Independently, the bed zone's own motion in the hour AFTER the `out_of_bed` (motion_peak >
+//     MOTION_ACTIVE, sleepAnalysis.js's own calibrated per-minute test) kept showing normal stirring in
+//     60% of all 86 cases — essentially impossible if the bed were actually empty, per the same
+//     assumption the empty-bed guard itself already relies on ("a sleeping room reads ~0, so does an
+//     empty one" — MOTION_ACTIVE's own comment). Only 9 of 86 (all Raffa, none Renz) showed a fully
+//     silent hour after — the one signature actually consistent with a real departure.
+// Leading theory (the owner's, unprompted, matching the visual sample exactly): a goodnight kiss —
+// leaning over the bed right after placing the child (bed active), then leaving (outside active, then
+// quiet) is precisely the shape `out_of_bed` looks for, with no child movement involved at all. This is
+// ROADMAP §1.2 item 3's exact gap (telling a parent's motion from a child's), approached from the entry
+// side rather than the exit side it was originally framed around.
+//
+// Query only, same reasoning as getImpossibleTransitions above: nothing today ACTS on this (no gating,
+// no wake_count change) — it needs owner-verdict ground truth on this specific pattern before anything
+// downstream can safely use it, and there is almost none yet (1 of 86 verdicted). This is what makes
+// that possible to build: surfacing these pairs for review, or scoring a discount rule against real
+// labels once they exist, rather than guessing.
+export function getQuickReversals({ maxGapMs = 60000, limit = 200 } = {}) {
+  const rows = db
+    .prepare(
+      `SELECT t.id, t.camera_id, c.name AS camera_name, t.type, t.created_at, t.peak,
+              t.out_peak, t.out_frames, t.snapshot, t.verdict
+         FROM bed_transitions t JOIN cameras c ON c.id = t.camera_id
+        ORDER BY t.camera_id, t.created_at ASC`
+    )
+    .all();
+  const out = [];
+  for (let i = 0; i < rows.length - 1; i++) {
+    const a = rows[i];
+    const b = rows[i + 1];
+    if (a.camera_id !== b.camera_id) continue;
+    if (a.type !== TRANSITION.INTO_BED || b.type !== TRANSITION.OUT_OF_BED) continue;
+    const gapMs = Date.parse(`${b.created_at.replace(' ', 'T')}Z`) - Date.parse(`${a.created_at.replace(' ', 'T')}Z`);
+    if (gapMs > maxGapMs) continue;
+    out.push({ into_bed: a, out_of_bed: b, gap_ms: gapMs });
+  }
+  // Same lesson as getImpossibleTransitions: sort on the actual timestamp AFTER building the list,
+  // rather than trusting the camera-grouped scan order — a naive slice on that order can silently drop
+  // an entire camera's pairs once the limit is reached.
+  out.sort((x, y) => {
+    const xt = x.out_of_bed.created_at;
+    const yt = y.out_of_bed.created_at;
+    return xt === yt ? y.out_of_bed.id - x.out_of_bed.id : xt < yt ? 1 : -1;
+  });
+  return out.slice(0, Math.min(500, Math.max(1, limit)));
+}
+
 // Record what a person said about one transition: 'correct', 'wrong', or 'unclear' — or null to clear
 // it again. Anything else is rejected rather than stored, because these values are the labels a future
 // occupancy check gets measured against and a typo'd one is worse than a missing one. Returns whether

@@ -285,6 +285,121 @@ test('limit is capped at 500 however many pairs exist, and however large the ask
   assert.equal(bt.getImpossibleTransitions({ limit: 400 }).length, 400, 'a smaller ask is honoured');
 });
 
+// --- quick reversals (into_bed immediately undone by out_of_bed) --------------------------------
+//
+// Measured 2026-09-13: 86 of 1053 stored transitions match this shape, and both a visual snapshot
+// sample and the bed zone's own subsequent motion point the same way — a parent's presence, not a
+// child getting straight back up. See getQuickReversals's own comment for the full evidence. This is
+// a query only; nothing acts on it yet.
+
+test('an into_bed immediately followed by an out_of_bed, same camera, is reported', () => {
+  const ib = seed('cam-a', 'into_bed', '2026-03-01 19:51:00');
+  const oob = seed('cam-a', 'out_of_bed', '2026-03-01 19:51:14');
+  const rows = bt.getQuickReversals();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].into_bed.id, ib);
+  assert.equal(rows[0].out_of_bed.id, oob);
+  assert.equal(rows[0].gap_ms, 14000);
+});
+
+test('the reverse order (out_of_bed then into_bed) is never reported — only a real entry can be undone', () => {
+  seed('cam-a', 'out_of_bed', '2026-03-01 05:40:00');
+  seed('cam-a', 'into_bed', '2026-03-01 05:40:10');
+  assert.deepEqual(bt.getQuickReversals(), []);
+});
+
+test('two of the same type in a row is never reported — that is getImpossibleTransitions territory', () => {
+  seed('cam-a', 'into_bed', '2026-03-01 19:51:00');
+  seed('cam-a', 'into_bed', '2026-03-01 19:51:10');
+  assert.deepEqual(bt.getQuickReversals(), []);
+});
+
+test('the default 60s window: inclusive at the boundary, excluded just past it', () => {
+  seed('cam-a', 'into_bed', '2026-03-01 10:00:00');
+  const atBoundary = seed('cam-a', 'out_of_bed', '2026-03-01 10:01:00'); // exactly 60000ms
+  assert.deepEqual(bt.getQuickReversals().map((r) => r.out_of_bed.id), [atBoundary]);
+
+  db.prepare('DELETE FROM bed_transitions').run();
+  seed('cam-a', 'into_bed', '2026-03-01 10:00:00');
+  seed('cam-a', 'out_of_bed', '2026-03-01 10:01:01'); // 61000ms — one second past
+  assert.deepEqual(bt.getQuickReversals(), []);
+});
+
+test('maxGapMs is configurable', () => {
+  seed('cam-a', 'into_bed', '2026-03-01 10:00:00');
+  seed('cam-a', 'out_of_bed', '2026-03-01 10:00:05'); // 5s later
+  assert.equal(bt.getQuickReversals({ maxGapMs: 3000 }).length, 0, 'narrower than the actual gap');
+  assert.equal(bt.getQuickReversals({ maxGapMs: 10000 }).length, 1, 'wider than the actual gap');
+});
+
+test('two cameras are never paired with each other', () => {
+  seed('cam-a', 'into_bed', '2026-03-01 10:00:00');
+  seed('cam-b', 'out_of_bed', '2026-03-01 10:00:05');
+  assert.deepEqual(bt.getQuickReversals(), []);
+});
+
+test('a non-adjacent into_bed/out_of_bed pair (something else happened between them) is not reported', () => {
+  seed('cam-a', 'into_bed', '2026-03-01 10:00:00');
+  seed('cam-a', 'out_of_bed', '2026-03-01 10:00:05');
+  seed('cam-a', 'into_bed', '2026-03-01 10:00:10'); // now the PREVIOUS row is out_of_bed, not into_bed
+  const rows = bt.getQuickReversals();
+  assert.equal(rows.length, 1, 'only the genuine adjacent pair counts');
+});
+
+test('reversals are newest-first ACROSS cameras, and the limit never drops a whole camera', () => {
+  // Mirrors getImpossibleTransitions' own regression test: cam-a seeded first (lowest ids) but holds
+  // the NEWEST pair, so id order and time order disagree.
+  seed('cam-a', 'into_bed', '2026-03-01 11:00:00');
+  const aOob = seed('cam-a', 'out_of_bed', '2026-03-01 11:00:05');
+  seed('cam-b', 'into_bed', '2026-03-01 10:00:00');
+  const bOob = seed('cam-b', 'out_of_bed', '2026-03-01 10:00:05');
+
+  const limited = bt.getQuickReversals({ limit: 1 });
+  assert.equal(limited.length, 1);
+  assert.equal(limited[0].out_of_bed.id, aOob, 'the newest reversal overall must come first');
+
+  const all = bt.getQuickReversals();
+  assert.deepEqual(all.map((r) => r.out_of_bed.id), [aOob, bOob]);
+});
+
+test('reversals sharing a timestamp are ordered by id, newest first', () => {
+  seed('cam-a', 'into_bed', '2026-03-01 10:00:00');
+  const a = seed('cam-a', 'out_of_bed', '2026-03-01 10:00:05');
+  seed('cam-b', 'into_bed', '2026-03-01 10:00:00');
+  const b = seed('cam-b', 'out_of_bed', '2026-03-01 10:00:05');
+  assert.ok(b > a);
+  assert.deepEqual(bt.getQuickReversals().map((r) => r.out_of_bed.id), [b, a]);
+});
+
+test('limit has a floor of 1', () => {
+  assert.equal(bt.getQuickReversals({ limit: 0 }).length, 0, 'no data seeded yet — floor does not invent rows');
+  seed('cam-a', 'into_bed', '2026-03-01 10:00:00');
+  seed('cam-a', 'out_of_bed', '2026-03-01 10:00:05');
+  assert.equal(bt.getQuickReversals({ limit: 0 }).length, 1, '0 would otherwise return nothing');
+  assert.equal(bt.getQuickReversals({ limit: -5 }).length, 1);
+  assert.equal(bt.getQuickReversals({ limit: 9999 }).length, 1, 'never asks for more than exist');
+});
+
+test('limit is capped at 500 however many reversals exist, and however large the ask', () => {
+  // Same standard getImpossibleTransitions holds itself to (see its own cap test above): the fixture
+  // must actually pass the cap, not just assert a number small enough that Math.min(500, …) was never
+  // exercised. 520 alternating into_bed/out_of_bed pairs, each 5s apart within its own minute so none
+  // crosses the default 60s window into the NEXT pair.
+  const insert = db.prepare(
+    `INSERT INTO bed_transitions (camera_id, type, created_at) VALUES ('cam-a', ?, ?)`
+  );
+  db.transaction(() => {
+    for (let i = 0; i < 520; i++) {
+      const m = String(Math.floor(i / 60)).padStart(2, '0');
+      const s = String(i % 60).padStart(2, '0');
+      insert.run('into_bed', `2026-04-01 ${m}:${s}:00`);
+      insert.run('out_of_bed', `2026-04-01 ${m}:${s}:05`);
+    }
+  })();
+  assert.equal(bt.getQuickReversals({ limit: 9999 }).length, 500, 'the ask is capped at 500');
+  assert.equal(bt.getQuickReversals({ limit: 400 }).length, 400, 'a smaller ask is honoured');
+});
+
 // --- verdicts ---------------------------------------------------------------------------------
 
 test('a verdict may be set, changed and cleared', () => {
