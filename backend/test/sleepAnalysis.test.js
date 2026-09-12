@@ -340,6 +340,39 @@ describe('★ departure confirmation waits for real elapsed time, not just calen
       'the two real active minutes (each masked by a duplicate quiet row) must still break the confirming quiet run'
     );
   });
+
+  test('a lone active blip next to an UNOBSERVED gap must not be bridged (adversarial review finding)', (t) => {
+    // Found by adversarial review, not by this suite: a targeted mutation reverting ONLY bridged()'s
+    // right-hand neighbor check from `=== false` to truthy/falsy survived every existing test, because
+    // none of them puts a genuine data gap (null) immediately next to an isolated active blip — the one
+    // case where the two versions disagree (`!(x || null)` is `true` since `null` is falsy, exactly the
+    // "unobserved counts as quiet enough to bridge" bug issue #350 exists to fix). The left neighbor can
+    // never discriminate this (see bridged()'s own comment for why); only the right one can.
+    //
+    // 19 real minutes of confirmed quiet after the exit, then a lone active blip, then a genuine outage
+    // (no sample at all — not a quiet reading) immediately after it, then quiet resumes. Strict bridged()
+    // must refuse to bridge the blip (its right neighbor is unobserved, not confirmed-quiet), so the run
+    // stops one minute short of MORNING_ABSENCE_MIN (19, not 20) — and the second run that starts once
+    // quiet resumes starts too far from the transition to be corroborated. Loose bridged() incorrectly
+    // treats the null neighbor as "quiet enough", stitching the run to exactly 20 minutes and confirming
+    // the departure a mutation-tester should have caught.
+    laySamples(at(19, 30), at(6, 59, 1), [
+      [at(19, 30), at(19, 40)],
+      [at(23, 0), at(23, 6)],
+      [at(6, 49, 1), at(6, 59, 1)], // stirs, then gets out
+    ]);
+    laySamples(at(6, 59, 1), at(7, 18, 1), []); // 19 min confirmed quiet after the exit
+    insertSample.run(CAM, sqlTime(at(7, 18, 1)), 0.4, 0.6); // a lone active blip
+    // (deliberately NO sample at 07:19 — a genuine outage, not confirmed quiet)
+    laySamples(at(7, 20, 1), at(7, 40, 1), []); // quiet resumes after the gap
+    insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(6, 59, 1, 30)));
+
+    t.mock.timers.enable({ apis: ['Date'], now: at(7, 40, 1).getTime() });
+    assert.notEqual(
+      hhmm(computeNight(CHILD, DATE).wake_at), '06:59',
+      'a blip next to an UNOBSERVED (not confirmed-quiet) neighbor must not be bridged into a qualifying absence'
+    );
+  });
 });
 
 // --- The metrics span extends to match a confirmed post-window departure (issue #352) --------------
