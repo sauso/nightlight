@@ -26,6 +26,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   settings change or a restart. Both the immediate case (unassigning/deleting) and the general safety net
   (the periodic check now stops a buffer that's no longer wanted, not just starts one that is) are fixed.
 
+### Security
+- **Removing a caregiver now also removes their push notifications.** Deleting an account only ever
+  removed the account itself — the device's notification subscription kept receiving alerts
+  indefinitely, including the camera-snapshot images sent with image notifications. Deleting a
+  caregiver now removes their subscription too, notifications are filtered against active accounts as
+  a second layer of protection, and any subscription orphaned by this before today is cleaned up
+  automatically on the next update.
+
 ## [0.30.1] - 2026-09-10
 
 ### Fixed

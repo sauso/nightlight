@@ -664,6 +664,13 @@ if (!pushTokenColumns.includes('base_url')) {
   db.exec('ALTER TABLE push_tokens ADD COLUMN base_url TEXT');
 }
 
+// GHSA-q98f: push_tokens.user_id was never cleaned up when its owning user was deleted (no FK/cascade
+// — unlike sessions.user_id, which does have one). routes/auth.js's DELETE /users/:id now deletes the
+// matching rows going forward; this is the one-time sweep for accounts removed BEFORE that fix existed,
+// so an already-orphaned row doesn't sit there until the next unrelated schema migration happens to run
+// this file at all. Runs every boot, but is a no-op after the first once there's nothing left to match.
+db.exec('DELETE FROM push_tokens WHERE user_id IS NOT NULL AND user_id NOT IN (SELECT id FROM users)');
+
 // Event-recording opt-in, per camera (separate from alerts — every detection still logs an event +
 // snapshot; a video clip is only captured when this is on). Turning it on starts that camera's
 // segmenter (lib/clipCapture.js). Off by default so a camera costs no disk unless asked. See
