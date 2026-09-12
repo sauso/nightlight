@@ -574,7 +574,15 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   const txEndSql = toSqlUtc(new Date(endUtc.getTime() + lookahead));
   const transitions = getBedTransitions(scoreCams, analysisStartSql, txEndSql);
   const txMs = (t) => new Date(t.replace(' ', 'T') + 'Z').getTime();
-  const txIdx = (t) => Math.round((txMs(t) - analysisStartUtc.getTime()) / 60000);
+  // FLOOR, not round (issue #260) — a transition carries a real second (`bed_transitions.created_at`),
+  // unlike activity_samples' `:00`-only bucket_start, so rounding pushes anything at :30+ into the
+  // NEXT minute: an into_bed at 19:38:31 indexed to 19:39 instead of the minute it actually happened
+  // in. One-directional (round only ever pushes up), so onset landed a minute late on ~half of all
+  // nights and asleep_minutes came up short by one. Matches the rule this file already states for wake
+  // time ("an exit recorded at 05:09:31" is minute 05:09, not 05:10) — this was the one place that
+  // didn't follow it. Every call site below already keys off txIdx rather than a hand-rolled floor
+  // specifically so this single change is what fixes all of them at once (see their own comments).
+  const txIdx = (t) => Math.floor((txMs(t) - analysisStartUtc.getTime()) / 60000);
 
   // First index starting a quiet run of >= ONSET_QUIET_MIN at or after `from` (null if none).
   //
