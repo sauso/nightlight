@@ -347,19 +347,34 @@ test('a non-adjacent into_bed/out_of_bed pair (something else happened between t
 });
 
 test('reversals are newest-first ACROSS cameras, and the limit never drops a whole camera', () => {
-  // Mirrors getImpossibleTransitions' own regression test: cam-a seeded first (lowest ids) but holds
-  // the NEWEST pair, so id order and time order disagree.
-  seed('cam-a', 'into_bed', '2026-03-01 11:00:00');
-  const aOob = seed('cam-a', 'out_of_bed', '2026-03-01 11:00:05');
-  seed('cam-b', 'into_bed', '2026-03-01 10:00:00');
-  const bOob = seed('cam-b', 'out_of_bed', '2026-03-01 10:00:05');
+  // Mirrors getImpossibleTransitions' own regression test SHAPE, not just its cast: cam-a (sorts
+  // first, and is scanned first since the SQL orders by camera_id) holds THREE older pairs; cam-b
+  // (scanned second) holds the single NEWEST pair. This is deliberately NOT "one pair each" — an
+  // earlier version of this test used one pair per camera, and because the alphabetically-first
+  // camera happened to also hold the chronologically newer pair, it kept passing even with the
+  // anti-camera-drop `.sort()` deleted entirely (found in adversarial review, 2026-09-13: the test
+  // proved nothing about the property it was named for). With cam-a holding MULTIPLE older pairs,
+  // the raw per-camera scan order is [cam-a-old×3, cam-b-newest] — slicing THAT directly at limit 2
+  // returns two cam-a rows and drops cam-b, the camera holding the actual newest pair, wholesale.
+  seed('cam-a', 'into_bed', '2026-03-01 09:00:00');
+  const aOld1 = seed('cam-a', 'out_of_bed', '2026-03-01 09:00:05');
+  seed('cam-a', 'into_bed', '2026-03-01 09:10:00');
+  const aOld2 = seed('cam-a', 'out_of_bed', '2026-03-01 09:10:05');
+  seed('cam-a', 'into_bed', '2026-03-01 09:20:00');
+  const aOld3 = seed('cam-a', 'out_of_bed', '2026-03-01 09:20:05');
+  seed('cam-b', 'into_bed', '2026-03-01 11:00:00');
+  const bNewest = seed('cam-b', 'out_of_bed', '2026-03-01 11:00:05');
 
-  const limited = bt.getQuickReversals({ limit: 1 });
-  assert.equal(limited.length, 1);
-  assert.equal(limited[0].out_of_bed.id, aOob, 'the newest reversal overall must come first');
+  const limited = bt.getQuickReversals({ limit: 2 });
+  assert.equal(limited.length, 2);
+  assert.equal(limited[0].out_of_bed.id, bNewest, 'the newest reversal overall must come first');
+  assert.ok(
+    limited.some((r) => r.out_of_bed.camera_id === 'cam-b'),
+    'a camera must never be dropped wholesale just because another camera filled the limit'
+  );
 
   const all = bt.getQuickReversals();
-  assert.deepEqual(all.map((r) => r.out_of_bed.id), [aOob, bOob]);
+  assert.deepEqual(all.map((r) => r.out_of_bed.id), [bNewest, aOld3, aOld2, aOld1]);
 });
 
 test('reversals sharing a timestamp are ordered by id, newest first', () => {
