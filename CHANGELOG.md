@@ -27,6 +27,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   (the periodic check now stops a buffer that's no longer wanted, not just starts one that is) are fixed.
 
 ### Security
+- **A talk-back call now ends promptly if your access is removed while it's open.** Two-way audio only
+  ever checked who you were at the moment the call connected — after that, an already-open call kept
+  forwarding your voice to the camera's room regardless of what happened to your account afterward. A
+  call now re-checks that access every 15 seconds for as long as it stays open, so signing someone out,
+  removing them as a caregiver, or a call simply running past its normal time limit now ends the call
+  itself, not just what a *new* call would be allowed to do.
 - **Removing a caregiver now also removes their push notifications.** Deleting an account only ever
   removed the account itself — the device's notification subscription kept receiving alerts
   indefinitely, including the camera-snapshot images sent with image notifications. Deleting a
