@@ -10,6 +10,7 @@ import { recordBedTransition, TRANSITION } from './bedTransitions.js';
 import {
   oobLinkKind, OOB_LINK_MS, OOB_LINK_SLOW_MS, OOB_SLOW_OUT_MIN,
   accumulateOutEvidence, trimOutSamples, evidenceFromSamples, EMPTY_EVIDENCE,
+  intoBedRejected, outOfBedRejected,
 } from './bedTransitionRules.js';
 import { childSamplingActiveNow } from './sleepAnalysis.js';
 import { killIfSpawned } from './processGuards.js';
@@ -268,6 +269,13 @@ export async function startMotionDetector(camera) {
     let activeSince = 0; // start of the current sustained-motion run (0 = not currently active)
     let lastActive = 0; // last frame that was above the active threshold
     let lastAlert = 0;
+    // Believed occupancy (ROADMAP §1.2 item 1) — true = in bed, false = out of bed, null = not yet
+    // known since this detector started. Shared by BOTH state machines below. LOG-ONLY for now: a
+    // retrospective check against real owner-verdicted transitions (2026-09-12) found that actually
+    // SUPPRESSING a same-direction repeat is unsafe on this classifier's current false-positive rate
+    // — see intoBedRejected/outOfBedRejected's own comment. This just tracks belief and logs when a
+    // transition contradicts it; every transition is still recorded exactly as before.
+    let believedOccupied = null;
     // Out-of-bed prototype state (see OOB_* constants above).
     let cribLastActive = 0; // last frame the bed zone itself moved
     let oobPendingAt = 0; // when a bed->outside exit candidate opened (0 = none pending)
@@ -362,6 +370,17 @@ export async function startMotionDetector(camera) {
               // Bed stayed quiet after the motion left it → treat as the child having climbed out.
               if (now - oobLastLog >= OOB_COOLDOWN_MS) {
                 oobLastLog = now;
+                // ROADMAP §1.2 item 1, LOG-ONLY for now (2026-09-12: a retrospective check against
+                // real owner-verdicted transitions found that unconditionally SUPPRESSING a repeat is
+                // unsafe — a single false transition slipping through poisons believed occupancy and
+                // can silently drop a real one afterward until an opposite-direction event resets it;
+                // confirmed happening on Renz's actual 2026-09-11 night). So this only flags, and the
+                // transition is still recorded exactly as before — zero data/behavior change.
+                if (outOfBedRejected(believedOccupied)) {
+                  logger.info(
+                    `[oob] "${camera.name}" OUT OF BED would be flagged impossible — already believed out of bed (§1.2 item 1, log-only)`
+                  );
+                }
                 logger.info(
                   `[oob] "${camera.name}" OUT OF BED — motion left the bed, quiet ${OOB_CONFIRM_QUIET_MS}ms since, outside peak ${(oobEvidence.peak * 100).toFixed(1)}%`
                 );
@@ -369,6 +388,7 @@ export async function startMotionDetector(camera) {
                   outPeak: oobEvidence.peak,
                   outFrames: oobEvidence.frames,
                 });
+                believedOccupied = false;
               }
               oobPendingAt = 0;
               oobEvidence = EMPTY_EVIDENCE;
@@ -397,6 +417,13 @@ export async function startMotionDetector(camera) {
               // Outside stayed quiet after motion entered the bed → child placed in and the parent stepped back.
               if (now - ibLastLog >= IB_COOLDOWN_MS) {
                 ibLastLog = now;
+                // ROADMAP §1.2 item 1, LOG-ONLY — see the OOB side's comment for why this flags
+                // rather than suppresses.
+                if (intoBedRejected(believedOccupied)) {
+                  logger.info(
+                    `[intobed] "${camera.name}" INTO BED would be flagged impossible — already believed in bed (§1.2 item 1, log-only)`
+                  );
+                }
                 logger.info(
                   `[intobed] "${camera.name}" INTO BED — motion entered the bed, outside quiet ${IB_CONFIRM_QUIET_MS}ms since, bed peak ${(ibPeakCrib * 100).toFixed(1)}%`
                 );
@@ -404,6 +431,7 @@ export async function startMotionDetector(camera) {
                   outPeak: ibLeadEvidence.peak,
                   outFrames: ibLeadEvidence.frames,
                 });
+                believedOccupied = true;
               }
               ibPendingAt = 0;
               ibPeakCrib = 0;

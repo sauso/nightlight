@@ -213,11 +213,30 @@ counts as **historical**, not as the current state.
 
 **Work:**
 1. Track believed occupancy; ignore an `into_bed` while already in bed and an `out_of_bed` while already
-   out. (Alone this collapses the four arrivals to one.) — **still open**, and still the cheapest win.
+   out. (Alone this collapses the four arrivals to one.)
    ★ Target: whatever `getImpossibleTransitions()` returns when it is re-run after the holdout. It
    returned 147 pairs against the OLD zones — historical, see the warning at the top of this section.
    ★ This is *inferred* occupancy and needs no model — do it regardless of §2.5, which would supply the
    same fact as independent evidence from the camera. They are complementary; neither waits on the other.
+   ✅ **LOG-ONLY IMPLEMENTATION SHIPPED 2026-09-12** — turned out NOT to be the "cheapest win" it
+   looked like. A retrospective check against real owner-verdicted transitions (both environments)
+   found that actually SUPPRESSING a same-direction repeat is unsafe on this classifier's current
+   false-positive rate: a repeat only proves at least one of the pair is wrong, never which, and the
+   naive rule always kept whichever confirmed FIRST. When a false transition slips through — the
+   clear majority of `out_of_bed` events, per item 2's same-day peak/verdict measurement — it poisons
+   belief and silently drops the REAL transition after it, until an opposite-direction event resets
+   belief. Confirmed on Renz's actual 2026-09-11 night: a false 04:26 exit would have caused the real
+   06:34 wake to be the one discarded. 22 owner-verdicted-CORRECT transitions across both environments
+   would have been wrongly dropped. **So this ships log-only**: `believedOccupied` is tracked and a
+   contradiction is logged, but every transition is still recorded exactly as before — zero data or
+   detection-behavior change. See `bed-transition-classifier-flaws.md` for the full analysis.
+   ⚠️ **STILL OPEN: an actual gate.** A "keep the last of a repeat, not the first" retrospective check
+   fixed 19 of the 22 cases found above, but isn't a small tweak: the earlier transition is already a
+   committed (sometimes human-labelled) row by the time the later one arrives, so this needs either a
+   safe retroactive-invalidation rule (never touch a verdicted row) or a downstream preference at the
+   analysis layer instead of a real-time gate. Revisit once item 2's evidence-based threshold reduces
+   the false-transition rate — some of item 1's failure cases are literally false transitions item 2
+   will eventually stop from being recorded at all, fixing the upstream cause instead of the symptom.
 2. Record the outside channel's **peak and duration** alongside each transition — new columns on
    `bed_transitions` — and require substantial outside evidence for `into_bed`, symmetric for
    `out_of_bed`. — **RE-OPENED 2026-09-12, exit side only.** The earlier "lower priority, no longer

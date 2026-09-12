@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 
 import {
   oobLinkKind, accumulateOutEvidence, trimOutSamples, evidenceFromSamples, EMPTY_EVIDENCE,
+  intoBedRejected, outOfBedRejected,
 } from '../src/lib/bedTransitionRules.js';
 
 test('an adult lifting a child out links instantly', () => {
@@ -177,4 +178,82 @@ test('a genuinely continuous lead-up (gaps under the link window) accumulates wi
     IB_LINK_MS
   );
   assert.deepEqual(combined, { peak: 0.3, frames: 2 }, 'both bursts are still inside the 8s window');
+});
+
+// --- intoBedRejected / outOfBedRejected (ROADMAP §1.2 item 1: believed occupancy) ------------------
+//
+// Measured 2026-08-29: 147 of 238 stored transitions (62%) are the SAME type twice in a row with
+// nothing between — physically impossible (you cannot get into a bed you are already in, or leave one
+// you are already out of). `believed` tracks what the data itself already implies.
+//
+// ⚠️ LOG-ONLY, deliberately (see the big comment on these functions in bedTransitionRules.js): a
+// retrospective check against real owner-verdicted transitions found that actually SUPPRESSING a
+// same-direction repeat drops real transitions too, because a false one slipping through poisons
+// belief until an opposite-direction event resets it. So these two functions are used ONLY to flag a
+// repeat in the log — motionDetector.js still records every transition unconditionally, and `believed`
+// updates on every recorded transition regardless of whether it was flagged.
+
+test('null (not yet known) never flags either direction', () => {
+  // There is nothing yet to contradict — the first transition since this detector started must be
+  // allowed through unflagged, whichever direction it is.
+  assert.equal(intoBedRejected(null), false);
+  assert.equal(outOfBedRejected(null), false);
+});
+
+test('an into_bed while already believed in bed is flagged; while out, it is not', () => {
+  assert.equal(intoBedRejected(true), true, 'already in bed — a second arrival is impossible');
+  assert.equal(intoBedRejected(false), false, 'out of bed — an arrival is exactly what is expected');
+});
+
+test('an out_of_bed while already believed out of bed is flagged; while in, it is not', () => {
+  assert.equal(outOfBedRejected(false), true, 'already out — a second departure is impossible');
+  assert.equal(outOfBedRejected(true), false, 'in bed — a departure is exactly what is expected');
+});
+
+// --- end-to-end simulation: the exact sequence motionDetector.js drives believedOccupied through ----
+//
+// Mirrors the real wiring exactly: EVERY transition is recorded, `believed` updates unconditionally
+// after each one, and the flag is purely informational — never gates storage.
+function simulateOccupancy(transitions) {
+  let believed = null;
+  const flags = [];
+  for (const type of transitions) {
+    const flagged = type === 'into_bed' ? intoBedRejected(believed) : outOfBedRejected(believed);
+    flags.push(flagged ? 'flagged' : 'ok');
+    believed = type === 'into_bed';
+  }
+  return flags;
+}
+
+test('alternating types are never flagged — this is the ordinary, healthy case', () => {
+  assert.deepEqual(
+    simulateOccupancy(['into_bed', 'out_of_bed', 'into_bed', 'out_of_bed']),
+    ['ok', 'ok', 'ok', 'ok']
+  );
+});
+
+test('★ THE 62% CASE: consecutive same-direction transitions are flagged from the second one on', () => {
+  // Renz, measured 2026-08-29: 4 consecutive into_bed with NO out_of_bed between them
+  // (bed-transition-classifier-flaws.md). This is exactly the pattern item 1 exists to surface.
+  assert.deepEqual(
+    simulateOccupancy(['into_bed', 'into_bed', 'into_bed', 'into_bed']),
+    ['ok', 'flagged', 'flagged', 'flagged']
+  );
+});
+
+test('a real pair either side of a flagged repeat is itself unflagged', () => {
+  assert.deepEqual(
+    simulateOccupancy(['into_bed', 'into_bed', 'out_of_bed']),
+    ['ok', 'flagged', 'ok'],
+    'the spurious middle event is flagged; the real departure after it is not'
+  );
+});
+
+// ★ THE REGRESSION THIS PHASE EXISTS TO AVOID — proof that gating on this flag would be unsafe today.
+// Reproduces the exact real 2026-09-11 Renz mechanism (see bedTransitionRules.js's comment): a false
+// out_of_bed slips through, and the REAL wake after it would read as an impossible repeat of the false
+// one, not of the real departure it actually is.
+test('a false transition would poison a naive gate into dropping the REAL one after it', () => {
+  const flags = simulateOccupancy(['into_bed', 'out_of_bed', /* false exit */ 'out_of_bed' /* the real wake */]);
+  assert.deepEqual(flags, ['ok', 'ok', 'flagged'], 'the REAL wake is flagged too — a gate would drop it');
 });
