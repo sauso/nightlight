@@ -312,6 +312,34 @@ describe('★ departure confirmation waits for real elapsed time, not just calen
     t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
     assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '05:09');
   });
+
+  test('a duplicate activity_samples row for the same minute must not erase real movement (adversarial review finding)', (t) => {
+    laySamples(at(19, 30), at(7, 10, 1), [
+      [at(19, 30), at(19, 40)],
+      [at(23, 0), at(23, 6)],
+      [at(6, 49, 1), at(6, 59, 1)], // stirs, then gets out right at window end
+    ]);
+    // Two consecutive minutes of REAL movement, each recorded as TWO rows for the same bucket — a
+    // forced flush catching real motion mid-minute, then the regular interval flush writing a
+    // near-zero remainder once the accumulator was already cleared (activityTracker.flushActivity is
+    // "exported for tests / forced flushes"; activity_samples has no uniqueness constraint on
+    // (camera_id, bucket_start) — see db.js). The active row is chronologically first (lower rowid),
+    // the quiet row second — exactly the ordering that would let a last-write-wins implementation
+    // silently erase the real movement this test plants, which is what happened before this fix
+    // (found by adversarial review, not by this suite).
+    insertSample.run(CAM, sqlTime(at(7, 10, 1)), 0.4, 0.6);
+    insertSample.run(CAM, sqlTime(at(7, 10, 1)), 0.0002, 0.0002);
+    insertSample.run(CAM, sqlTime(at(7, 11, 1)), 0.4, 0.6);
+    insertSample.run(CAM, sqlTime(at(7, 11, 1)), 0.0002, 0.0002);
+    laySamples(at(7, 12, 1), at(7, 30, 1), []);
+    insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(6, 59, 1, 30)));
+
+    t.mock.timers.enable({ apis: ['Date'], now: at(7, 30, 1).getTime() });
+    assert.notEqual(
+      hhmm(computeNight(CHILD, DATE).wake_at), '06:59',
+      'the two real active minutes (each masked by a duplicate quiet row) must still break the confirming quiet run'
+    );
+  });
 });
 
 // --- The metrics span extends to match a confirmed post-window departure (issue #352) --------------

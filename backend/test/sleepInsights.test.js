@@ -282,22 +282,26 @@ test('an unparseable sleep window falls back to a default instead of crashing th
 });
 
 test('a night already stored is left alone even if it was stored as no_data', () => {
-  // The guard is `isEvidenceFinal(window_end, now)`, NOT bare `existing` (issue #351) — but the
-  // window_end pinned here ('2026-07-01', months before whenever this suite actually runs) is so far in
-  // the past that isEvidenceFinal is true regardless, so this test still exercises exactly what its name
-  // says: a genuinely FINAL night is left alone. `existing.status === "ok"` is still not the guard
-  // either way: re-running a final night must never overwrite it, because activity_samples age out and a
+  // The guard checks the EXISTING row's OWN `computed_at` against isEvidenceFinal — NOT bare `existing`,
+  // and NOT the current time either (issue #351, refined by adversarial review: see the comment above
+  // the gate in runNightlySleepJob for why checking "now" instead of the row's own computed_at silently
+  // skips the one job tick that could ever complete a marginal night's evidence). `computed_at` here is
+  // pinned to one second past this night's own evidence horizon (window_end + 3h = '2026-07-02
+  // 00:00:00'), so the fixture is genuinely final BY THE MECHANISM ITSELF, not just by real-world old
+  // age — a non-parseable sentinel like the literal string 'PINNED' would (correctly, now) never compare
+  // as final and would defeat this exact test. `existing.status === "ok"` is still not the guard either
+  // way: re-running a final night must never overwrite it, because activity_samples age out and a
   // recompute of an aged-out night would replace a good row with no_data. See the sibling test right
   // below for the other half — a STILL-PROVISIONAL row, which this same guard DOES allow to be rewritten.
   const nightDate = lastCompletedNightDate(KID);
   db.prepare(
     `INSERT INTO sleep_nights (child_id, night_date, window_start, window_end, status,
        asleep_minutes, awake_minutes, wake_count, coverage_minutes, computed_at)
-     VALUES (?, ?, '2026-07-01 09:00:00', '2026-07-01 21:00:00', 'ok', 612, 8, 2, 700, 'PINNED')`
+     VALUES (?, ?, '2026-07-01 09:00:00', '2026-07-01 21:00:00', 'ok', 612, 8, 2, 700, '2026-07-02 00:00:01')`
   ).run(KID, nightDate);
   runNightlySleepJob();
   const row = db.prepare('SELECT * FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(KID, nightDate);
-  assert.equal(row.computed_at, 'PINNED', 'an existing FINAL night must never be recomputed by the job');
+  assert.equal(row.computed_at, '2026-07-02 00:00:01', 'an existing FINAL night must never be recomputed by the job');
   assert.equal(row.asleep_minutes, 612);
 });
 
@@ -310,18 +314,27 @@ test('a night already stored is left alone even if it was stored as no_data', ()
 // is bounded by) is what now decides whether a stored row is still allowed to change.
 
 test('...but a still-provisional row (the window only just closed) IS rewritten by a later run', (t) => {
-  // Same shape as the test above, except window_end is set from the MOCKED "now" itself, just past
-  // close — nowhere near the 3h evidence horizon — so this is the sibling case that guard must allow.
+  // Same shape as the test above, except BOTH window_end and computed_at are set from the MOCKED "now"
+  // itself, just past close — nowhere near the 3h evidence horizon — so this is the sibling case that
+  // guard must allow. computed_at = window close itself (well before window_end + 3h), matching a row
+  // that was written the moment the window closed, exactly like the fixture right above but genuinely
+  // still-provisional instead of genuinely final.
+  //
+  // A real, ordinary occupied night — NOT the no-camera default this file mostly uses — because with
+  // allowDowngrade:false (issue #351 adversarial review), a recompute that found no camera at all would
+  // legitimately come back `no_data`, and refusing to downgrade an existing `ok` row over that is now
+  // CORRECT behavior, not something this test should be fighting.
+  layNight3([[at3(19, 0), at3(19, 10)], [at3(23, 0), at3(23, 6)], [at3(1, 0, 1), at3(1, 9, 1)]], at3(7, 0, 1));
   t.mock.timers.enable({ apis: ['Date'], now: at3(7, 5, 1).getTime() });
   const nightDate = lastCompletedNightDate(KID);
   db.prepare(
     `INSERT INTO sleep_nights (child_id, night_date, window_start, window_end, status,
        asleep_minutes, awake_minutes, wake_count, coverage_minutes, computed_at)
-     VALUES (?, ?, ?, ?, 'ok', 612, 8, 2, 700, 'PINNED')`
-  ).run(KID, nightDate, sqlTime3(at3(19, 0)), sqlTime3(at3(7, 0, 1)));
+     VALUES (?, ?, ?, ?, 'ok', 612, 8, 2, 700, ?)`
+  ).run(KID, nightDate, sqlTime3(at3(19, 0)), sqlTime3(at3(7, 0, 1)), sqlTime3(at3(7, 0, 1)));
   runNightlySleepJob();
   const row = db.prepare('SELECT computed_at FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(KID, nightDate);
-  assert.notEqual(row.computed_at, 'PINNED', 'a still-provisional night must be recomputed, not left alone');
+  assert.notEqual(row.computed_at, sqlTime3(at3(7, 0, 1)), 'a still-provisional night must be recomputed, not left alone');
 });
 
 test('a provisional report keeps updating as its evidence window fills', async (t) => {
@@ -350,6 +363,68 @@ test('a provisional report keeps updating as its evidence window fills', async (
   assert.equal(hhmm3(row.wake_at), '07:15', 'the provisional report must update once the real departure is confirmable');
 });
 
+test('★ a departure confirmable only in the LAST 30-minute tick before the horizon is still caught (adversarial review finding)', async (t) => {
+  // Found by adversarial review, not by this suite. The naive gate — skip once `isEvidenceFinal(window_
+  // end, now)` — looks right but skips exactly the wrong tick: computeNight bounds its OWN lookahead by
+  // `min(now, horizon)`, so the tick that FIRST reaches the horizon is the ONLY tick that could ever see
+  // the full 3h of evidence — and the naive gate treats that same instant as "already final, skip".
+  // Exit at 09:35 (window_end+2h35m) needing 20 real minutes of confirming quiet resolves at 09:55 —
+  // comfortably inside the 3h horizon (10:00) in principle, but NOT YET visible at the tick before it
+  // (09:30, evidenceCutoffMs capped there, before the exit has even happened) — so the ONLY tick that
+  // can ever see the confirming quiet is the one landing exactly AT the horizon itself. Demonstrated to
+  // freeze at `wake_at = null` FOREVER under the naive gate — see this PR's own history for the repro.
+  layNight3([[at3(19, 0), at3(19, 10)], [at3(23, 0), at3(23, 6)], [at3(9, 25, 1), at3(9, 35, 1)]], at3(10, 0, 1));
+  insertTransition3.run(CAM3, 'out_of_bed', 0.4, sqlTime3(at3(9, 35, 1, 30)));
+
+  t.mock.timers.enable({ apis: ['Date'], now: at3(7, 5, 1).getTime() }); // first write
+  runNightlySleepJob();
+  t.mock.timers.tick(at3(9, 30, 1).getTime() - at3(7, 5, 1).getTime()); // exit hasn't happened yet
+  runNightlySleepJob();
+  let row = db.prepare('SELECT wake_at FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(KID, NIGHT_DATE);
+  assert.equal(row.wake_at, null, 'sanity: not yet confirmable this early');
+
+  t.mock.timers.tick(at3(10, 0, 1).getTime() - at3(9, 30, 1).getTime()); // exactly the 3h horizon
+  runNightlySleepJob();
+  row = db.prepare('SELECT wake_at FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(KID, NIGHT_DATE);
+  assert.equal(hhmm3(row.wake_at), '09:35', 'the tick exactly at the horizon must still be allowed to run once');
+
+  t.mock.timers.tick(30 * 60 * 1000); // well past — must stay exactly as it was captured
+  runNightlySleepJob();
+  row = db.prepare('SELECT wake_at FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(KID, NIGHT_DATE);
+  assert.equal(hhmm3(row.wake_at), '09:35', 'stable after — frozen the moment a write happened at-or-after the horizon');
+});
+
+test('★ a camera removed mid-provisional-window must not downgrade an already-scored night (adversarial review finding)', (t) => {
+  // Found by adversarial review, not by this suite. Before this fix, computeAndStoreNight's default
+  // allowDowngrade:true meant a SECOND provisional pass that happened to see less data than the first —
+  // e.g. the camera was unassigned/deleted, or reassigned to a different child, mid-window — could
+  // silently overwrite an already-good `ok` result with `no_data`. Combined with the computed_at-based
+  // finality check above, that bad no_data row would then freeze there forever once evidence went final.
+  t.after(() => {
+    // Restore the shared fixture camera other tests in this file depend on.
+    db.prepare(`INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path)
+                VALUES (?, 'Insight Cam', 'rtsp://example/stream', ?, 'insightcam')
+                ON CONFLICT(id) DO NOTHING`).run(CAM3, KID);
+  });
+  // An ordinary, fully-observed night — scores 'ok' on the very first pass, no departure confirmation
+  // needed (the point here is the provisional-refresh mechanism's safety, not #350's own scan).
+  layNight3([[at3(19, 0), at3(19, 10)], [at3(23, 0), at3(23, 6)], [at3(1, 0, 1), at3(1, 9, 1)]], at3(7, 0, 1));
+
+  t.mock.timers.enable({ apis: ['Date'], now: at3(7, 5, 1).getTime() });
+  runNightlySleepJob();
+  let row = db.prepare('SELECT status, asleep_minutes FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(KID, NIGHT_DATE);
+  assert.equal(row.status, 'ok', 'sanity: the first pass scores a real night normally');
+  const firstAsleep = row.asleep_minutes;
+
+  db.prepare('DELETE FROM cameras WHERE id = ?').run(CAM3); // e.g. a hardware swap mid-window
+
+  t.mock.timers.tick(60 * 60 * 1000); // 1h later, still well within the 3h provisional window
+  runNightlySleepJob();
+  row = db.prepare('SELECT status, asleep_minutes FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(KID, NIGHT_DATE);
+  assert.equal(row.status, 'ok', 'a real scored night must not downgrade to no_data just because a camera was later removed');
+  assert.equal(row.asleep_minutes, firstAsleep, 'the original good numbers must be preserved, not overwritten with no_data');
+});
+
 test('initial insufficient data recovers once real samples arrive, while still provisional', (t) => {
   // Nothing recorded yet (e.g. the sampler hasn't backfilled this stretch) — just after window close.
   t.mock.timers.enable({ apis: ['Date'], now: at3(7, 5, 1).getTime() });
@@ -366,11 +441,15 @@ test('initial insufficient data recovers once real samples arrive, while still p
 });
 
 test('no duplicate timelapse/notification pass while a night is still provisional', async (t) => {
-  // Notification and timelapse assembly fire ONCE, on first write (see the comment above that block in
-  // runNightlySleepJob) — a provisional refresh must not repeat either. assembleTimelapse is reached via
-  // a dynamic import, so it can be swapped out here without touching the module sleepAnalysis.js itself
-  // already resolved at file-load time (a static import of the same module could not be intercepted this
-  // late — see codex-as-second-reviewer memory on mock.module's timing requirements).
+  // Notification fires once on first write; timelapse assembly fires once on the first SCORED pass (see
+  // the comments above that block in runNightlySleepJob — a `no_data` pass defers it rather than firing
+  // wastefully, issue #351 adversarial review) — either way, a provisional refresh must not repeat it.
+  // assembleTimelapse is reached via a dynamic import, so it can be swapped out here without touching the
+  // module sleepAnalysis.js itself already resolved at file-load time (a static import of the same
+  // module could not be intercepted this late — see codex-as-second-reviewer memory on mock.module's
+  // timing requirements). A real occupied night (not the no-camera default) so the first pass is
+  // genuinely SCORED and actually reaches the timelapse decision at all.
+  layNight3([[at3(19, 0), at3(19, 10)], [at3(23, 0), at3(23, 6)], [at3(1, 0, 1), at3(1, 9, 1)]], at3(7, 0, 1));
   const assembleCalls = t.mock.fn();
   t.mock.module('../src/lib/timelapse.js', {
     namedExports: { assembleTimelapse: assembleCalls, discardTimelapseFrames: t.mock.fn() },
@@ -386,6 +465,44 @@ test('no duplicate timelapse/notification pass while a night is still provisiona
   runNightlySleepJob();
   await flush();
   assert.equal(assembleCalls.mock.callCount(), 1, 'a provisional refresh must not trigger a second pass');
+});
+
+test('★ a no_data first pass must not waste a timelapse assembly — it waits for the first SCORED pass (adversarial review finding)', async (t) => {
+  // Found by adversarial review, not by this suite. Before this fix, the timelapse/frame decision fired
+  // on the first pass EVER, regardless of status — so a night that was `no_data` on its first look (the
+  // sampler hasn't backfilled yet, exactly the scenario the "initial insufficient data recovers" test
+  // above exercises) would immediately call assembleTimelapse for a night with no real evidence yet, and
+  // — the more serious direction — a night that looked `empty` on an early pass would have its frames
+  // irreversibly destroyed by discardTimelapseFrames before a later pass could ever discover it was
+  // really occupied. Waiting for the first SCORED (ok/empty) pass fixes the demonstrated no_data case
+  // directly; see the comment above the gate in runNightlySleepJob for the narrower empty->ok case this
+  // does NOT cover (filed as a separate follow-up).
+  const assembleCalls = t.mock.fn();
+  const discardCalls = t.mock.fn();
+  t.mock.module('../src/lib/timelapse.js', {
+    namedExports: { assembleTimelapse: assembleCalls, discardTimelapseFrames: discardCalls },
+  });
+  const flush = () => new Promise((r) => setImmediate(r));
+
+  // Nothing recorded yet — the first pass is genuinely no_data.
+  t.mock.timers.enable({ apis: ['Date'], now: at3(7, 5, 1).getTime() });
+  runNightlySleepJob();
+  await flush();
+  assert.equal(assembleCalls.mock.callCount(), 0, 'a no_data first pass must not waste a timelapse assembly pass');
+  assert.equal(discardCalls.mock.callCount(), 0);
+
+  // The night's real samples arrive — an ordinary occupied night. Still well within the evidence horizon.
+  layNight3([[at3(19, 0), at3(19, 10)], [at3(23, 0), at3(23, 6)], [at3(1, 0, 1), at3(1, 9, 1)]], at3(7, 0, 1));
+  t.mock.timers.tick(30 * 60 * 1000);
+  runNightlySleepJob();
+  await flush();
+  assert.equal(assembleCalls.mock.callCount(), 1, 'the first SCORED pass must trigger exactly one timelapse pass');
+
+  // A further provisional refresh of an already-scored night must not repeat it.
+  t.mock.timers.tick(30 * 60 * 1000);
+  runNightlySleepJob();
+  await flush();
+  assert.equal(assembleCalls.mock.callCount(), 1, 'a provisional refresh of an already-scored night must not trigger a second pass');
 });
 
 test('a night stays exactly as finalized across repeated runs (e.g. a process restart)', (t) => {
