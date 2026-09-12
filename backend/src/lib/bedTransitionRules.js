@@ -33,6 +33,46 @@ export function oobLinkKind(sinceMs, outFraction) {
   return null;
 }
 
+// --- Believed occupancy, ROADMAP §1.2 item 1 ---
+//
+// Measured 2026-08-29: 147 of 238 stored transitions (62%) are the SAME type twice in a row for one
+// camera with nothing between — two `into_bed`, or two `out_of_bed`. You cannot get into a bed you
+// are already in, or leave one you are already out of, so at least one of every such pair is wrong.
+//
+// The obvious fix — refuse to RECORD a transition that contradicts believed occupancy — looked like
+// the cheapest win in the whole classifier, but a retrospective check against real owner-verdicted
+// transitions (2026-09-12, both environments) found it is NOT SAFE to actually gate on yet: a same-
+// direction repeat only proves at least one of the pair is wrong, never which one, and this rule
+// always kept whichever confirmed FIRST. When a false transition slips through — which the item 2
+// peak/verdict measurement the same day showed happens on the clear majority of out_of_bed events —
+// it poisons belief and silently drops every REAL same-direction event after it, until an opposite-
+// direction transition happens to reset it. Confirmed happening for real: on Renz's actual
+// 2026-09-11 night, a false 04:26 exit would have caused the genuine 06:34 wake to be the one
+// discarded, not the false one. 22 owner-verdicted-CORRECT transitions across both environments would
+// have been wrongly dropped by an unconditional version of this rule.
+//
+// So for now these two functions are used to FLAG a same-direction repeat in the live log trace, not
+// to suppress it — every transition is still recorded exactly as it was before item 1 existed. See
+// motionDetector.js's call sites. Revisit gating once item 2's evidence-based threshold reduces the
+// false-transition rate, or once a rule exists for which of a same-direction pair to trust (a "keep
+// the last, not the first" retrospective check fixed 19 of the 22 cases found above, but requires
+// either deleting an already-recorded — sometimes human-labelled — row, or not actually reducing the
+// impossible-pair count at all; not attempted here).
+//
+// `believed` is `true` (in bed) / `false` (out of bed) / `null` (not yet known — this detector
+// hasn't confirmed a transition since it started, so there is nothing yet to contradict). `null`
+// NEVER flags: it would be worse to invent a starting belief than to flag the first transition
+// unchecked, and — deliberately — this does NOT try to seed belief from the last row already stored
+// in `bed_transitions` at startup either. A detector restart happens far less often than a real
+// transition (deploys, per-camera settings changes), so the STORED occupancy is already what item 1
+// exists to be skeptical of — simpler and safer to start genuinely blank each run.
+export function intoBedRejected(believed) {
+  return believed === true;
+}
+export function outOfBedRejected(believed) {
+  return believed === false;
+}
+
 // --- Outside-channel EVIDENCE (peak + duration), ROADMAP §1.2 item 2 ---
 //
 // The fast link above accepts a single frame over threshold with no minimum magnitude at all
