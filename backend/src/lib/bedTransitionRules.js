@@ -63,14 +63,21 @@ export function accumulateOutEvidence(prev, fraction, active) {
   return { peak: Math.max(prev.peak, fraction), frames: prev.frames + (active ? 1 : 0) };
 }
 
-// Has the outside channel's live episode gone stale — quiet longer than `windowMs` — so it can be
-// forgotten? Deliberately a parameter, not a hard-coded constant: for the into_bed lead-up this is
-// IB_LINK_MS itself (the same window that decides whether a future candidate could even link to it,
-// so an episode is kept exactly as long as it remains relevant and no longer). Extracted as its own
-// rule rather than left as an inline comparison in the ffmpeg frame loop — that loop is exactly where
-// a wrong constant here would go unnoticed (a first draft of this used the WRONG window, 1.5s instead
-// of 8s, which would have cleared a real episode long before it could ever reach a candidate; caught
-// only because this is a named, testable rule and not an inline comparison).
-export function outEvidenceExpired(lastActiveMs, nowMs, windowMs) {
-  return lastActiveMs > 0 && nowMs - lastActiveMs > windowMs;
+// The into_bed lead-up evidence is a ROLLING WINDOW, not an accumulate-until-quiet episode — a first
+// draft tried the latter (reset only after a quiet gap longer than IB_LINK_MS) and adversarial review
+// (2026-09-12) found it unbounded in practice: ordinary pauses while someone moves around a room —
+// adjusting a blanket, stepping back and forward — are routinely UNDER an 8-second gap, so bursts
+// chain into one open-ended episode with no upper bound on how far back it reaches. The into_bed
+// candidate itself only ever cares whether the outside channel was active within IB_LINK_MS of now
+// (see its own open condition) — so the evidence should reflect exactly that same window, no more.
+//
+// `trimOutSamples` keeps only the samples still inside `windowMs` of `now`; `evidenceFromSamples`
+// reduces whatever remains with the same accumulator used everywhere else. At the fixed 5fps sampling
+// rate an 8-second window is at most ~40 samples — trivial to keep live per camera.
+export function trimOutSamples(samples, nowMs, windowMs) {
+  return samples.filter((s) => nowMs - s.t <= windowMs);
+}
+
+export function evidenceFromSamples(samples) {
+  return samples.reduce((e, s) => accumulateOutEvidence(e, s.fraction, s.active), EMPTY_EVIDENCE);
 }

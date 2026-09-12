@@ -9,7 +9,7 @@ import { recordMotion, recordMotionOut } from './activityTracker.js';
 import { recordBedTransition, TRANSITION } from './bedTransitions.js';
 import {
   oobLinkKind, OOB_LINK_MS, OOB_LINK_SLOW_MS, OOB_SLOW_OUT_MIN,
-  accumulateOutEvidence, outEvidenceExpired, EMPTY_EVIDENCE,
+  accumulateOutEvidence, trimOutSamples, evidenceFromSamples, EMPTY_EVIDENCE,
 } from './bedTransitionRules.js';
 import { childSamplingActiveNow } from './sleepAnalysis.js';
 import { killIfSpawned } from './processGuards.js';
@@ -281,18 +281,16 @@ export async function startMotionDetector(camera) {
     let ibPendingAt = 0; // when an outside->bed entry candidate opened (0 = none pending)
     let ibPeakCrib = 0; // peak bed-fraction seen during the pending candidate
     let ibLastLog = 0;
-    // Live outside-channel evidence, independent of ibPendingAt — the "lead-up" the flaw in
-    // bed-transition-classifier-flaws.md describes as "thrown away at capture time": by the time an
-    // into_bed candidate opens the outside channel is already quiet (that's the open condition), so
-    // its recent history has to be tracked continuously, not reconstructed afterward. Reset once the
-    // outside channel has been quiet longer than IB_LINK_MS — the same window that already decides
-    // whether a future candidate could even link to it, so an episode is kept exactly as long as it
-    // remains relevant and no longer. (ACTIVE_GRACE_MS, 1.5s, is the wrong constant here: it exists to
-    // bridge a brief flicker WITHIN one continuous motion run, and would clear this long before an
-    // 8-second-old episode could ever reach a candidate.) Snapshotted into the pending candidate the
-    // moment one opens (see below), then left alone until the next episode.
-    let outEvidence = EMPTY_EVIDENCE;
-    let ibLeadEvidence = EMPTY_EVIDENCE; // snapshot of outEvidence at the moment the current candidate opened
+    // Rolling buffer of recent outside-channel samples, for the into_bed lead-up evidence — the
+    // "thrown away at capture time" evidence bed-transition-classifier-flaws.md's flaw #2 describes:
+    // by the time an into_bed candidate opens the outside channel is already quiet (that's the open
+    // condition), so its recent history has to be tracked continuously, not reconstructed afterward.
+    // Trimmed to IB_LINK_MS every frame — the same window that already decides whether a candidate
+    // could even link to it — so the evidence can never reach further back than what's actually
+    // relevant. (A first draft used an accumulate-until-quiet "episode" instead; adversarial review
+    // found it unbounded — see trimOutSamples's comment.)
+    let outSamples = [];
+    let ibLeadEvidence = EMPTY_EVIDENCE; // snapshot taken from outSamples at the moment a candidate opened
 
     const outPixels = mask ? FRAME_BYTES - zonePixels : 0; // area outside the bed zone (0 = whole frame)
 
@@ -330,17 +328,11 @@ export async function startMotionDetector(camera) {
           const cribActive = fraction >= threshold;
           const outActive = outFraction >= threshold;
           if (cribActive) cribLastActive = now;
-          // Live outside-episode evidence for the into_bed lead-up (see outEvidence's declaration).
-          // ⚠️ Staleness MUST be checked against the PRIOR outLastActive, before it is overwritten
-          // below — checking it after would compare `now` against itself (gap always 0) on the very
-          // reactivating frame, so a long-quiet episode would never actually be cleared and its stale
-          // evidence would silently merge into a brand-new, unrelated one. Caught by a test
-          // simulating exactly this reactivation-after-a-gap sequence.
-          if (outEvidenceExpired(outLastActive, now, IB_LINK_MS)) outEvidence = EMPTY_EVIDENCE;
-          if (outActive) {
-            outLastActive = now;
-            outEvidence = accumulateOutEvidence(outEvidence, outFraction, true);
-          }
+          if (outActive) outLastActive = now;
+          // Rolling outside-channel buffer for the into_bed lead-up (see outSamples' declaration).
+          // Trim first, then append — so the buffer never holds more than IB_LINK_MS of history.
+          outSamples = trimOutSamples(outSamples, now, IB_LINK_MS);
+          outSamples.push({ t: now, fraction: outFraction, active: outActive });
           if (!oobPendingAt) {
             // Candidate: outside just moved, the bed moved recently but is quiet NOW → motion left the bed.
             if (outActive && !cribActive && cribLastActive > 0) {
@@ -388,7 +380,7 @@ export async function startMotionDetector(camera) {
             if (cribActive && !outActive && outLastActive > 0 && now - outLastActive <= IB_LINK_MS) {
               ibPendingAt = now;
               ibPeakCrib = fraction;
-              ibLeadEvidence = outEvidence; // freeze the lead-up episode's evidence for this candidate
+              ibLeadEvidence = evidenceFromSamples(outSamples); // freeze the lead-up window's evidence
               logger.info(
                 `[intobed] "${camera.name}" entry candidate — outside active ${now - outLastActive}ms ago, bed now ${(fraction * 100).toFixed(1)}%`
               );

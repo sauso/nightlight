@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  oobLinkKind, accumulateOutEvidence, outEvidenceExpired, EMPTY_EVIDENCE,
+  oobLinkKind, accumulateOutEvidence, trimOutSamples, evidenceFromSamples, EMPTY_EVIDENCE,
 } from '../src/lib/bedTransitionRules.js';
 
 test('an adult lifting a child out links instantly', () => {
@@ -83,28 +83,30 @@ test('a concrete multi-frame sequence lands on the exact expected tally', () => 
   assert.deepEqual(result, { peak: 0.11, frames: 3 });
 });
 
-// --- outEvidenceExpired ---------------------------------------------------------------------------
+// --- trimOutSamples / evidenceFromSamples ----------------------------------------------------------
 //
-// This is the piece motionDetector.js's into_bed lead-up evidence resets on. A first draft used
-// ACTIVE_GRACE_MS (1.5s — meant for bridging a brief flicker WITHIN one continuous run) here instead
-// of the link window itself, which would have cleared a real episode long before an 8-second-old one
-// could ever reach a candidate. Extracted as a named rule specifically so that mistake is a red test,
-// not a silent behavior change nobody notices for months (the exact failure mode this file's header
-// comment already names for oobLinkKind).
+// The into_bed lead-up evidence is a ROLLING WINDOW over IB_LINK_MS, not an accumulate-until-quiet
+// episode. A first draft tried the latter (reset only after a quiet gap longer than IB_LINK_MS) and
+// adversarial review (2026-09-12) found it unbounded: ordinary pauses while someone moves around a
+// room — adjusting a blanket, stepping back and forward — are routinely under an 8-second gap, so
+// bursts would chain into one open-ended episode with no upper bound on how far back it reaches, even
+// though the into_bed candidate itself only ever cares about the last IB_LINK_MS. These tests pin the
+// window itself, not just the accumulator.
 
-test('never active yet is not expired — nothing to expire', () => {
-  assert.equal(outEvidenceExpired(0, 100000, 8000), false);
+test('trimOutSamples keeps only samples within the window of now', () => {
+  const samples = [{ t: 0, fraction: 0.1, active: true }, { t: 5000, fraction: 0.2, active: true }];
+  assert.deepEqual(trimOutSamples(samples, 8000, 8000), samples, 'both still within 8s of now=8000');
+  assert.deepEqual(trimOutSamples(samples, 8001, 8000), [samples[1]], 'the older one just fell out');
 });
 
-test('the boundary is inclusive: exactly the window old is not yet expired, one ms past it is', () => {
-  assert.equal(outEvidenceExpired(1000, 1000 + 8000, 8000), false, 'exactly at the window');
-  assert.equal(outEvidenceExpired(1000, 1000 + 8001, 8000), true, 'one ms past it');
-});
-
-test('an episode this session nearly shipped wrong: a 3s-old episode must survive an 8s link window', () => {
-  // ACTIVE_GRACE_MS is 1500ms. If that were used here instead of the real link window, a 3-second-old
-  // episode would already read as expired — this is the exact regression a wrong constant would cause.
-  assert.equal(outEvidenceExpired(1000, 1000 + 3000, 8000), false);
+test('evidenceFromSamples reduces exactly like accumulateOutEvidence would, over whatever remains', () => {
+  const samples = [
+    { t: 0, fraction: 0.02, active: false },
+    { t: 100, fraction: 0.09, active: true },
+    { t: 200, fraction: 0.05, active: true },
+  ];
+  assert.deepEqual(evidenceFromSamples(samples), { peak: 0.09, frames: 2 });
+  assert.deepEqual(evidenceFromSamples([]), EMPTY_EVIDENCE, 'no samples is the inert starting point');
 });
 
 // --- end-to-end simulation: the exact sequence motionDetector.js drives these two functions through --
@@ -112,49 +114,56 @@ test('an episode this session nearly shipped wrong: a 3s-old episode must surviv
 // The frame loop itself is untestable directly (welded to a spawned ffmpeg process, same as every
 // other integration point in this file) — this simulates it faithfully using only the two exported
 // pure functions, the same way this file already treats oobLinkKind as the whole of what the live
-// loop decides.
-// Mirrors motionDetector.js's exact statement order: staleness is checked against the PRIOR
-// lastActive BEFORE it is overwritten. Checking it after (or accumulating first) compares `now`
-// against itself on the very reactivating frame — gap always 0 — so a long-stale episode would never
-// actually clear. This is a real bug the first draft of the production code had; see its comment.
+// loop decides: trim-then-append every frame, snapshot with evidenceFromSamples whenever a candidate
+// would open.
 function simulateOutEvidence(frames, windowMs) {
-  let evidence = EMPTY_EVIDENCE;
-  let lastActive = 0; // 0 = never active, matching motionDetector.js's own sentinel convention
+  let samples = [];
   const snapshots = [];
   for (const f of frames) {
-    if (outEvidenceExpired(lastActive, f.t, windowMs)) evidence = EMPTY_EVIDENCE;
-    if (f.active) {
-      lastActive = f.t;
-      evidence = accumulateOutEvidence(evidence, f.fraction, true);
-    }
-    if (f.snapshot) snapshots.push(evidence);
+    samples = trimOutSamples(samples, f.t, windowMs);
+    samples.push({ t: f.t, fraction: f.fraction, active: f.active });
+    if (f.snapshot) snapshots.push(evidenceFromSamples(samples));
   }
   return snapshots;
 }
 
-test('a stale episode does not contaminate a later, unrelated one', () => {
+// ★ THE REGRESSION TEST for the adversarial-review finding: a chain of bursts each under the link
+// window apart must NOT let evidence reach arbitrarily far back. Against the rejected "episode" design
+// this would have returned frames covering the ENTIRE 21-second chain; the rolling window must only
+// ever see the last 8 seconds of it.
+test('a chain of sub-window bursts does not let evidence reach arbitrarily far back', () => {
+  const IB_LINK_MS = 8000;
+  const frames = [];
+  for (let t = 0; t <= 21000; t += 3000) frames.push({ t, fraction: 0.2, active: true }); // every 3s
+  frames[frames.length - 1].snapshot = true; // t = 21000
+  const [result] = simulateOutEvidence(frames, IB_LINK_MS);
+  // Only samples from t=13001..21000 are within 8s of t=21000 — that's t=15000,18000,21000: 3 frames.
+  assert.equal(result.frames, 3, 'only the samples inside the last 8s count, not the whole 21s chain');
+});
+
+test('a stale burst does not contaminate a later, unrelated one', () => {
   const IB_LINK_MS = 8000;
   const [afterGap] = simulateOutEvidence(
     [
-      { t: 1000, fraction: 0.3, active: true }, // an early episode: a parent walks past
+      { t: 1000, fraction: 0.3, active: true }, // an early burst: a parent walks past
       { t: 1200, fraction: 0.25, active: true },
-      // 20 seconds of quiet — well past the 8s link window, so this episode is stale by the time...
+      // 20 seconds of quiet — well past the 8s link window, so this is out of the window by the time...
       { t: 21200, fraction: 0.04, active: true, snapshot: true }, // ...a small, unrelated blip occurs
     ],
     IB_LINK_MS
   );
-  assert.deepEqual(afterGap, { peak: 0.04, frames: 1 }, 'only the new blip counts, not the stale episode');
+  assert.deepEqual(afterGap, { peak: 0.04, frames: 1 }, 'only the new blip counts, not the stale burst');
 });
 
-test('a genuinely continuous lead-up (gaps under the link window) accumulates as one episode', () => {
+test('a genuinely continuous lead-up (gaps under the link window) accumulates within the window', () => {
   const IB_LINK_MS = 8000;
   const [combined] = simulateOutEvidence(
     [
       { t: 1000, fraction: 0.2, active: true },
       { t: 4000, fraction: 0.01, active: false }, // a brief lull, well under the 8s window
-      { t: 6000, fraction: 0.3, active: true, snapshot: true }, // resumes — same episode
+      { t: 6000, fraction: 0.3, active: true, snapshot: true }, // resumes — still inside the window
     ],
     IB_LINK_MS
   );
-  assert.deepEqual(combined, { peak: 0.3, frames: 2 }, 'the lull does not reset — both bursts count');
+  assert.deepEqual(combined, { peak: 0.3, frames: 2 }, 'both bursts are still inside the 8s window');
 });
