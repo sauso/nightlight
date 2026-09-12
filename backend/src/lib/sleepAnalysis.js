@@ -1307,11 +1307,13 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
 
     // The counted awakenings, with clock times + duration — powers the "where the wake-ups were" list.
     const wakes = [];
+    let lastRunStart = null, lastRunEnd = null;
     for (let i = onset; i < sleepEnd; ) {
       if (!inWake[i]) { i++; continue; }
       let k = i;
       while (k < sleepEnd && inWake[k]) k++;
       wakes.push({ start_at: minuteTime(i), end_at: minuteTime(k), minutes: k - i });
+      lastRunStart = i; lastRunEnd = k;
       i = k;
     }
     // ⚠️ THE MORNING WAKE ITSELF (roadmap §1.5 Gap A). `sleepEnd` is where `wake_at` starts — by
@@ -1321,21 +1323,52 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     // to attach to: reproduced on prod, ~7% of Raffa's alerts and ~7% of nights entirely (his waking is
     // a morning event; a mid-night sleeper like Renz barely notices the gap).
     //
-    // Bounded to the CLASSIC window end (`totalMin`), not the issue #352 lookahead extension
-    // (`totalMinExt`/a later `sleepEnd`) — deliberately. When a departure is confirmed past window
-    // close, the active run leading up to it is already inside `[onset, sleepEnd)` and gets its own row
-    // from the loop above (its `end_at` sits within ALERT_MARGIN_MS of the departure either way); this
-    // row exists only to cover the classic case where sleepEnd never moved and nothing above ever
-    // visits `[sleepEnd, totalMin)` at all. Only added when there's a real "after" to show — a night
-    // still asleep at window close (`wake_at === null`, `sleepEnd === totalMin`) has none.
+    // ⚠️⚠️ TWO THINGS AN ADVERSARIAL REVIEW FOUND WRONG IN THE FIRST VERSION OF THIS FIX:
+    //
+    // 1. Bounded to `Math.max(totalMin, sleepEnd)`, NOT the classic `totalMin` alone — the original
+    //    version assumed "the active run leading up to a post-window departure already gets its own row,
+    //    so this only needs the classic case." Demonstrated false: a departure confirmed after a quiet
+    //    buffer longer than ALERT_MARGIN_MS (3 min) but still within WAKE_SNAP_MS (5 min) of the last
+    //    activity leaves a real gap between that run's end and the departure that NO row covers, past
+    //    `totalMin`. `sleepEnd` already reflects wherever the departure was actually confirmed to land —
+    //    classic or issue #352-extended alike — so this is NOT `totalMinExt` (issue #350/#352's OWN
+    //    departure-SCAN horizon, deliberately as wide as 3h to search for a candidate): reusing that
+    //    would stretch an ordinary night's morning-wake row out to a full 3 hours past window close
+    //    whenever `computeNight` runs long after the night itself (the common case for a parent browsing
+    //    a past night), which is not what this row is for. `Math.max` collapses to the classic `totalMin`
+    //    whenever `sleepEnd` never moved past it.
+    // 2. MERGE into the last run when it lands exactly on `sleepEnd`, rather than pushing an adjacent row
+    //    — demonstrated to double-render a single alert (once in each of two rows sharing a boundary
+    //    instant, since `alertsInRange` applies its ±3-minute margin independently per row with no
+    //    cross-row dedup). Only push a NEW standalone row when there's a genuine gap between the last
+    //    counted run and the departure (the buffer case above) or no mid-night wakes at all.
+    //
+    // Only added/extended when there's a real "after" to show — a night still asleep at window close
+    // (`wake_at === null`, `sleepEnd === totalMin`) has none.
     //
     // Additive to the response shape (a running SPA is a client that cannot be updated) and to
     // `wakes.length` specifically: it can now exceed the stored `wake_count` by one, on any night with a
     // real wake_at. That is not a bug — `wake_count` is a scored, holdout-calibrated metric for
     // MID-NIGHT arousals and untouched here; this row makes the SAME "awake" span the to-scale timeline
     // bar already shows (see `label()` below) additionally appear in the list above it.
-    if (sleepEnd < totalMin) {
-      wakes.push({ start_at: minuteTime(sleepEnd), end_at: minuteTime(totalMin), minutes: totalMin - sleepEnd });
+    //
+    // Reused below for `alertsEndSql` too — the alerts/wake-clips queries need the identical widened
+    // bound, or an alert exactly at a post-window `wake_at` is excluded before a row ever gets the chance
+    // to claim it (the deeper half of the same adversarial-review finding). Computed unconditionally —
+    // it collapses to plain `totalMin` whenever there's no real wake_at or sleepEnd never moved past it.
+    const morningEnd = Math.max(totalMin, sleepEnd);
+    // ⚠️ Gated on `out.wake_at != null`, NOT on `morningEnd > sleepEnd` — a departure confirmed EXACTLY
+    // at the evidence horizon has `morningEnd === sleepEnd` (nothing left to extend TO), but the moment
+    // of departure itself still needs a row to attach an alert to. A same-instant row (`start_at ===
+    // end_at`) is still enough: alertsInRange's ±3-minute margin does the rest.
+    if (out.wake_at != null) {
+      if (lastRunEnd === sleepEnd) {
+        const last = wakes[wakes.length - 1];
+        last.end_at = minuteTime(morningEnd);
+        last.minutes = morningEnd - lastRunStart;
+      } else {
+        wakes.push({ start_at: minuteTime(sleepEnd), end_at: minuteTime(morningEnd), minutes: morningEnd - sleepEnd });
+      }
     }
     out.wakes = wakes;
 
@@ -1402,6 +1435,22 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     // Detection alerts (motion/sound) that fired anywhere in the window, so the detail view can line
     // each wake-up up with what the cameras actually flagged at that time. A windowed query (not the
     // recent-200 feed) so it works for any night in the date picker. Ascending by time.
+    //
+    // ⚠️ Bounded to `morningEnd` (`Math.max(totalMin, sleepEnd)`, computed above for the wakes[] morning
+    // row), NOT `endSql`/`totalMin` alone (found by adversarial review). A confirmed departure past
+    // `window_end` moves `wake_at` — and now the wake row covering it — out to `sleepEnd`, but this query
+    // stayed pinned to the classic window close, so an alert firing at exactly the moment being reported
+    // as `wake_at` was silently excluded from `out.alerts` altogether, regardless of whether any row
+    // existed to attach it to.
+    //
+    // ⚠️⚠️ +1 WHEN `morningEnd === sleepEnd` (the same-instant marker case, found while writing this
+    // fix's own test). `sleepEnd` is the index of the minute the departure happens DURING, not one past
+    // it — every other use of it in this file treats it as an EXCLUSIVE bound (e.g. `accumulateMetrics`'s
+    // `[onset, sleepEnd)`), so `minuteTime(sleepEnd)` is that minute's OWN START, and a query cut off
+    // exactly there would still exclude an alert fired seconds into it. In the classic case (`morningEnd
+    // === totalMin > sleepEnd`) minute `sleepEnd` already sits strictly inside `[start, morningEnd)`, so
+    // no adjustment is needed there — this only bites the boundary case.
+    const alertsEndSql = minuteTime(morningEnd > sleepEnd ? morningEnd : sleepEnd + 1);
     const aph = cams.map(() => '?').join(',');
     out.alerts = aph
       ? db
@@ -1412,14 +1461,14 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
                WHERE camera_id IN (${aph}) AND created_at >= ? AND created_at < ?
                ORDER BY created_at ASC`
           )
-          .all(...cams, startSql, endSql)
+          .all(...cams, startSql, alertsEndSql)
       : [];
 
     // Automatic wake clips (roadmap 2.4). These deliberately have no detection_events row — they are
     // recorded WITHOUT alerting — so they can't come from the query above. Returned alongside the
     // wakes so the detail view can put a clip against a wake that never produced an alert, which is
-    // more than half of them.
-    out.wakeClips = listChildWakeClips(childId, startSql, endSql);
+    // more than half of them. Same widened bound as the alerts query above, same reason.
+    out.wakeClips = listChildWakeClips(childId, startSql, alertsEndSql);
   }
   return out;
 }

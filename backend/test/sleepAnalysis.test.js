@@ -85,6 +85,7 @@ before(() => {
 beforeEach(() => {
   db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
   db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  db.prepare('DELETE FROM detection_events WHERE camera_id = ?').run(CAM);
 });
 
 after(() => {
@@ -991,19 +992,72 @@ function layTimelineNight({ out = [] } = {}) {
   insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(5, 9, 1)));
 }
 
-test('★ the morning wake gets its own row, so an alert at the moment of waking has something to attach to (roadmap §1.5 Gap A)', () => {
+test('★ the run leading straight into the departure is EXTENDED through to window close, not followed by a second row (roadmap §1.5 Gap A)', () => {
   // wake_at (05:09) is exactly where the wakes[] loop below stops, by definition — so the ONE span every
   // night with a real morning wake actually needs is the one that loop can never produce. The frontend
   // only renders an alert inside a wake row (WakeItem), so before this fix an alert firing at the exact
   // moment the child got up had nothing to attach to.
+  //
+  // layTimelineNight's last active block (05:00-05:09) runs straight into the departure with no gap, so
+  // the fix must EXTEND that existing row rather than push an adjacent one starting at the same instant
+  // — two rows sharing a boundary would let alertsInRange's independent ±3min margin match a single
+  // alert to BOTH (found by adversarial review; see the sibling test below for the direct proof).
   layTimelineNight();
 
   const night = computeNight(CHILD, DATE, { includeTimeline: true });
   assert.equal(hhmm(night.wake_at), '05:09');
+  assert.equal(night.wakes.length, 4, 'no extra row beyond the mid-night wakes — the last run itself was extended');
   const morning = night.wakes[night.wakes.length - 1];
-  assert.equal(hhmm(morning.start_at), '05:09', 'the row starts exactly where wake_at does');
+  assert.equal(hhmm(morning.start_at), '05:00', 'the ORIGINAL run start, not sleepEnd — this is an extension, not a new row');
   assert.equal(hhmm(morning.end_at), '07:00', 'and runs to the window close');
-  assert.equal(morning.minutes, 111);
+  assert.equal(morning.minutes, 120);
+});
+
+test('...but a departure after a real quiet gap gets its OWN row, not a merge', (t) => {
+  // Unlike the fixture above, real activity stops at 06:59 and the departure isn't corroborated until
+  // 07:04 — a 5-minute gap (within WAKE_SNAP_MS) that WAKE_GAP_MIN (3 min) does not bridge, so the run
+  // above ends at 06:59 while sleepEnd is 07:04. There is nothing to extend; a standalone row must cover
+  // the gap itself, or the moment of departure has no row at all (found by adversarial review — the
+  // original fix's "the run already covers it" reasoning silently assumed no such gap could exist).
+  //
+  // The departure (07:04) is already past window close (07:00), so sleepEnd only reaches it via issue
+  // #352's lookahead extension. `morningEnd` is `Math.max(totalMin, sleepEnd)` — NOT issue #350/#352's
+  // OWN much-wider departure-SCAN horizon (totalMinExt, up to a full 3h) — so this row is a same-instant
+  // marker exactly at the departure, not stretched out to however far the scan was merely PERMITTED to
+  // search. That marker is still enough: alertsInRange's ±3-minute margin does the matching.
+  laySamples(at(18, 20), at(7, 30, 1), [
+    [at(19, 30), at(19, 40)], [at(23, 0), at(23, 6)], [at(6, 45, 1), at(6, 59, 1)],
+  ]);
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 38)));
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(7, 4, 1)));
+  t.mock.timers.enable({ apis: ['Date'], now: at(7, 30, 1).getTime() });
+
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(hhmm(night.wake_at), '07:04', 'sanity: the departure is corroborated despite the gap');
+  const morning = night.wakes[night.wakes.length - 1];
+  assert.equal(hhmm(morning.start_at), '07:04', 'a standalone row starting at the departure itself');
+  assert.equal(hhmm(morning.end_at), '07:04', 'a same-instant marker, not stretched to the scan horizon');
+  assert.equal(morning.minutes, 0);
+});
+
+test('★ an alert fired at a POST-WINDOW departure is actually fetched, not silently excluded (adversarial review finding)', (t) => {
+  // The deeper half of the same finding: even with a wake row covering the departure, an alert firing
+  // after the classic window close was previously dropped by the SQL query itself
+  // (`WHERE created_at < endSql`, endSql = the classic window_end) before a row ever got the chance to
+  // claim it. Same fixture as the standalone-row test above.
+  laySamples(at(18, 20), at(7, 30, 1), [
+    [at(19, 30), at(19, 40)], [at(23, 0), at(23, 6)], [at(6, 45, 1), at(6, 59, 1)],
+  ]);
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 38)));
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(7, 4, 1)));
+  db.prepare(`INSERT INTO detection_events (camera_id, camera_name, type, detail, created_at)
+              VALUES (?, 'Test Cam', 'motion', '4.1%', ?)`).run(CAM, sqlTime(at(7, 4, 1)));
+  t.mock.timers.enable({ apis: ['Date'], now: at(7, 30, 1).getTime() });
+
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(hhmm(night.wake_at), '07:04');
+  assert.equal(night.alerts.length, 1, 'the alert at the post-window departure must be fetched');
+  assert.equal(hhmm(night.alerts[0].created_at), '07:04');
 });
 
 test('...but a night still asleep at window close gets no such row', () => {
