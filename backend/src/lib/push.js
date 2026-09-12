@@ -162,9 +162,27 @@ export function removeToken(token) {
 // so we stash the frame behind a short-lived unguessable URL built on each device's own reported
 // base (see pushSnapshots.js). A device that never reported a base, or the whole thing when no image
 // is given, simply gets the text-only alert.
+// Every push_tokens row still worth delivering to. Defense in depth against GHSA-q98f:
+// push_tokens.user_id has no FK/cascade, so a caller of DELETE /users/:id that ever misses the
+// explicit cleanup there (routes/auth.js) — now, or in a future edit — must not be able to deliver
+// to that device anyway. A NULL user_id also can't match this, which is correct: the only real
+// caller of registerToken (routes/push.js) always supplies req.user.id, so a NULL row is either
+// stale data or something that was never tied to a live, deletable account. Exported (rather than
+// left inline in sendToAll) so the filter itself is directly testable without needing a real
+// Firebase Admin SDK setup — `messaging` is module-level, non-exported state only initPush() can
+// set, which real credentials are needed for.
+export function activePushTokens() {
+  return db
+    .prepare(
+      `SELECT pt.token, pt.base_url FROM push_tokens pt
+        WHERE pt.user_id IN (SELECT id FROM users)`
+    )
+    .all();
+}
+
 export async function sendToAll(title, body, data = {}, imageBuffer = null) {
   if (!pushEnabled()) return;
-  const rows = db.prepare('SELECT token, base_url FROM push_tokens').all();
+  const rows = activePushTokens();
   if (rows.length === 0) return;
   // FCM data payload values must all be strings.
   const stringData = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)]));
