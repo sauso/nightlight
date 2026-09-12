@@ -122,7 +122,13 @@ describe('★ talk-back access is re-checked while the socket stays open (GHSA-6
     ws.emit('message', AUDIO, true);
     assert.equal(fakeSession.write.mock.callCount(), 1, 'precondition: audio forwards before deletion');
 
-    // The session row is untouched — only the user row goes. liveSession's JOIN must fail identically.
+    // db.js declares `sessions.user_id ... ON DELETE CASCADE` with `PRAGMA foreign_keys = ON` — so this
+    // actually removes the session row too, not just the user row (verified directly: a session
+    // present before this DELETE is gone after it). Still a distinct, worthwhile regression test: it's
+    // the advisory's own named scenario ("deleting the caregiver's account"), reached through the real
+    // delete path an admin actually uses, rather than deleting the session row directly as the test
+    // above does. The two tests would only diverge if the cascade were ever removed — at which point
+    // this one starts covering the surviving-orphaned-session case its name already promises.
     db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
 
     t.mock.timers.tick(TALK_REVALIDATE_MS);
