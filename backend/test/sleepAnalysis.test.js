@@ -1055,8 +1055,14 @@ describe('⚠️ seconds on a bed transition — the trap fixture, and the gap i
     // what a person reading a clock would call it. Regression: before the fix, onsetForPutDownAt(31)
     // reported '18:39' (18:38:31 rounded UP to the next minute) while onsetForPutDownAt(29) correctly
     // reported '18:38' — this failed until `Math.round` became `Math.floor` in txIdx.
+    //
+    // ⚠️ THE ABSOLUTE VALUE, NOT JUST SYMMETRY. An adversarial review caught that an earlier version of
+    // this test asserted only `onsetForPutDownAt(31) === onsetForPutDownAt(29)` — which a `Math.ceil`
+    // mutation also satisfies (both push to '18:39', equally wrong). Symmetry alone proves the two
+    // inputs are treated consistently, not that either is CORRECT; only a real clock reading does that.
+    assert.equal(onsetForPutDownAt(29), '18:38', 'the control: this half of the minute already read correctly');
     assert.equal(
-      onsetForPutDownAt(31), onsetForPutDownAt(29),
+      onsetForPutDownAt(31), '18:38',
       'the reported bedtime must not depend on which half of the minute the put-down fell in'
     );
   });
