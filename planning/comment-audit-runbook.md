@@ -205,7 +205,9 @@ by **lines** (2,507 / 2,408) rather than by candidate count is what made each ha
 from scratch. Nothing was recoverable from it. That is the argument for the per-agent ledger entry and
 for the incremental-write instruction: **assume any run can die and leave nothing behind.**
 | 8a | frontend — players, tile, native bridge, sleep views (13 files) | 43 | 1 | 37 | **1** | 4 | 240k | 14m30s | #322, #323 |
-| 8b | frontend — settings pages, contexts, infra (20 files) | 33 | | | | | | | |
+| 8b | frontend — settings pages, contexts, infra (20 files) | 33 | 0 | 29 | **0** | 4 | 177k | 9m50s | GHSA (2nd find) |
+| 9 | gap closure — `middleware/auth.js`, `routes/recordings.js` | 5 | 0 | 5 | **0** | 0 | 82k | 1m36s | 0 |
+| | **TOTAL** | **441** | **6** | **397** | **15** | **23** | **1.91M** | **1h38m** | 13 issues + 1 advisory |
 
 ★★ **The cross-repo hop found NOTHING, and that is a real result.** All 12 `nativeBridge.js` /
 `twoWayTalk.js` claims about the native Android side were checked against the actual Kotlin
@@ -219,7 +221,87 @@ candidates over ~5,600 lines; the candidate-bearing files actually total **6,083
 files** — 490k–760k tokens for one agent at the measured rate. **Measure the real line count before
 launching, every time.** The estimate in the partition table above was wrong for both agent 7 and
 agent 8.
-| V | verifier over all findings | — | | | | | | | |
+| V | verifier over all findings | — | — | — | — | — | — | — | not run — see below |
+
+---
+
+## 10. ✅ COMPLETE — 2026-09-09. What it found, and what to do differently.
+
+**441 of 441 candidates verdicted.** 1.91M tokens, 1h38m of agent time across 11 runs.
+
+### The results
+
+| | |
+|---|---|
+| TRUE | 397 |
+| **FALSE** | **15** → 13 issues + 1 advisory |
+| UNVERIFIABLE | 23 |
+| NOT-A-CLAIM | 6 |
+
+**★ The most serious finding is a credential disclosure**, `GHSA-wcgj-6p3c-vr9h` (high): the camera
+diagnostic report embeds the RTSP password, and **the app tells the user it does not — in four places,
+two of them user-facing**, including the GitHub issue body it pre-writes for them. Found twice
+independently, from opposite ends, by agents that could not see each other's work.
+
+⚠️ **The `NOT-A-CLAIM` prediction was wrong by an order of magnitude.** §2 warns to expect "a large
+fraction"; it was **6 of 441 — 1.4%**. The regex's false-positive rate on real code is far lower than a
+two-line sample suggested. Do not size the next run around fast disposal.
+
+### ★★★ Drift is not uniformly distributed — this is the finding to act on
+
+| area | candidates | findings |
+|---|---|---|
+| sleep + detection core (agents 1, 5) | 86 | **0** |
+| auth middleware (agent 9) | 5 | **0** |
+| native bridge, checked against the Kotlin (agent 8a) | 12 | **0** |
+| wiring, routes, clip pipeline, media (agents 2,3,4,6,7,8) | 338 | **15** |
+
+**The comments that name the measurement behind them do not rot.** `sleepAnalysis.js` and the detection
+layer — the files whose house style is to cite the night that set each number — came back clean across
+86 claims. Drift lives where a comment was written once while the feature around it kept moving: #308
+(correct in 0.17.0, invalidated by 0.25.0), #317 (a planned future that arrived), #322 (a correction
+documented in three places with the original claim left behind).
+
+### ★★ The completeness check caught a hole that no agent could have
+
+Agents verdicted 436; the repo had 441. **The five-candidate gap was a partitioning bug of mine** — work
+was assigned by *basename*, so `middleware/auth.js` was dropped because `routes/auth.js` was covered,
+and `routes/recordings.js` because `lib/recordings.js` was.
+
+Every agent correctly reported N-in / N-out. **Per-agent completeness and total completeness are
+different checks**, and only the second finds an assignment error. ⚠️ **Always diff the sum of the
+checklists against a fresh count from the source**, before declaring done. Agent 9 closed it.
+
+### What worked, and should be kept
+
+- ★ **The hop rule bought 14 of the 16 findings.** Introduced after agent 1 spent 15 tool calls on 47
+  candidates and settled almost everything from context. It costs ~14% more tokens. Never drop it.
+- ★ **Withheld controls beat announced ones.** Comments already verified elsewhere were left *unmarked*
+  in four briefs; agents cleared them independently every time — and agent 6 flagged three comments in
+  `mediamtxProcess.js` while leaving the two control comments alone, which is discrimination rather
+  than a clean sweep. Telling an agent what is known buys a confirmation worth nothing.
+- ★ **"Do not manufacture findings" produced real restraint.** Agent 7a suspected a comment was stale,
+  checked two other documents, found they corroborated it, and dropped it. Agent 8a hit a genuinely
+  ambiguous line, wrote up both readings and escalated instead of deciding — the reviewer disagreed and
+  filed it (#323), which is the right process on both sides.
+- ★ **Independent verification caught two errors before they reached an issue**: an agent's supporting
+  figure was checked against the repo in case it had been invented (it was real), and a reviewer
+  hypothesis about a first-launch log being silent was checked and found **wrong**.
+
+### What to do differently next time
+
+1. **Measure the real line count before launching.** The partition estimates were wrong for agents 7
+   *and* 8; both needed splitting mid-audit. Cost scales with **lines**, not candidate count.
+2. **Assign by path, never by basename.** See the gap above.
+3. **Give the frontend agent both repos.** The `nativeBridge.js` ↔ Kotlin seam is only checkable that
+   way, and it is the seam most likely to rot — it did not, and that is worth knowing.
+4. **A separate verifier pass was not needed.** Every finding was verified by the orchestrator as it
+   landed, one by reproduction in a running container. Running a twelfth agent over already-verified
+   findings would have re-derived work rather than attacking it.
+5. **The pattern is not the whole surface.** ★ The credential leak's user-facing half was found by a
+   *manual* check of a high-value area, **outside** the regex candidate set. An enumerated list makes
+   completeness provable **for the pattern** — it does not make the pattern complete. Keep naming
+   high-value areas for manual inspection alongside the checklist.
 
 **Cost model — settled by agent 2. Scope by LINES, not by candidate count.**
 
