@@ -19,6 +19,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - The detector now logs when the bed becomes active with no bed-entry link found (the same case the
   exit side has always logged for a bed becoming active with no exit link) — diagnostic only, no
   detection behavior changes.
+- Added a query to find a bed entry immediately followed by an exit on the same camera (a shape that
+  measurement points to being mostly a parent's presence, not a child getting straight back up) — not
+  called from anywhere yet; groundwork for reviewing or scoring against it later.
 
 ### Fixed
 - **Wake clips can be turned on without ever producing one.** "Record wake-ups without alerting" only
