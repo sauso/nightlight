@@ -69,6 +69,22 @@ test('peak is rounded to three decimals, and null stays null', () => {
   assert.equal(db.prepare('SELECT peak FROM bed_transitions WHERE id = ?').get(b).peak, null);
 });
 
+test('outPeak/outFrames (ROADMAP §1.2 item 2 evidence) round-trip, rounded the same way peak is', () => {
+  const id = bt.recordBedTransition('cam-a', bt.TRANSITION.OUT_OF_BED, 0.25, {
+    outPeak: 0.057123, outFrames: 4.6,
+  });
+  const row = db.prepare('SELECT out_peak, out_frames FROM bed_transitions WHERE id = ?').get(id);
+  assert.equal(row.out_peak, 0.057, 'rounded to three decimals like peak');
+  assert.equal(row.out_frames, 5, 'frame counts round to whole frames');
+});
+
+test('omitting the evidence options object stores NULL, same as before this column existed', () => {
+  const id = bt.recordBedTransition('cam-a', bt.TRANSITION.INTO_BED, 0.1);
+  const row = db.prepare('SELECT out_peak, out_frames FROM bed_transitions WHERE id = ?').get(id);
+  assert.equal(row.out_peak, null);
+  assert.equal(row.out_frames, null);
+});
+
 test('a failed insert returns null instead of throwing into the detector', () => {
   // recordBedTransition is called from the frame loop several times a second. Whatever goes wrong, it
   // must degrade to "no transition recorded" rather than take the detector down with it.
@@ -156,6 +172,14 @@ test('getBedTransitions is half-open [start, end) and ascending', () => {
   seed('cam-a', 'out_of_bed', '2026-03-01 12:00:00'); // == end, excluded
   const rows = bt.getBedTransitions(['cam-a'], '2026-03-01 10:00:00', '2026-03-01 12:00:00');
   assert.deepEqual(rows.map((r) => r.id), [atStart, mid]);
+});
+
+test('getBedTransitions surfaces the outside-evidence columns', () => {
+  const id = bt.recordBedTransition('cam-a', bt.TRANSITION.OUT_OF_BED, 0.2, { outPeak: 0.06, outFrames: 3 });
+  const [row] = bt.getBedTransitions(['cam-a'], '2000-01-01 00:00:00', '2100-01-01 00:00:00');
+  assert.equal(row.id, id);
+  assert.equal(row.out_peak, 0.06);
+  assert.equal(row.out_frames, 3);
 });
 
 test('getBedTransitions spans several cameras but not others', () => {

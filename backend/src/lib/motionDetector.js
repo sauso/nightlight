@@ -7,7 +7,10 @@ import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
 import { recordMotion, recordMotionOut } from './activityTracker.js';
 import { recordBedTransition, TRANSITION } from './bedTransitions.js';
-import { oobLinkKind, OOB_LINK_MS, OOB_LINK_SLOW_MS, OOB_SLOW_OUT_MIN } from './bedTransitionRules.js';
+import {
+  oobLinkKind, OOB_LINK_MS, OOB_LINK_SLOW_MS, OOB_SLOW_OUT_MIN,
+  accumulateOutEvidence, trimOutSamples, evidenceFromSamples, EMPTY_EVIDENCE,
+} from './bedTransitionRules.js';
 import { childSamplingActiveNow } from './sleepAnalysis.js';
 import { killIfSpawned } from './processGuards.js';
 
@@ -268,7 +271,9 @@ export async function startMotionDetector(camera) {
     // Out-of-bed prototype state (see OOB_* constants above).
     let cribLastActive = 0; // last frame the bed zone itself moved
     let oobPendingAt = 0; // when a bed->outside exit candidate opened (0 = none pending)
-    let oobPeakOut = 0; // peak outside-fraction seen during the pending candidate
+    // Outside-channel evidence (peak + duration) accumulated across the pending candidate's life —
+    // ROADMAP §1.2 item 2. Record-only for now; see accumulateOutEvidence's comment for why.
+    let oobEvidence = EMPTY_EVIDENCE;
     let oobLastLog = 0;
     let oobLastNearMiss = 0; // rate-limit for the rejected-link diagnostic
     // Into-bed twin state (see IB_* constants above) — mirror of OOB with the channels swapped.
@@ -276,6 +281,16 @@ export async function startMotionDetector(camera) {
     let ibPendingAt = 0; // when an outside->bed entry candidate opened (0 = none pending)
     let ibPeakCrib = 0; // peak bed-fraction seen during the pending candidate
     let ibLastLog = 0;
+    // Rolling buffer of recent outside-channel samples, for the into_bed lead-up evidence — the
+    // "thrown away at capture time" evidence bed-transition-classifier-flaws.md's flaw #2 describes:
+    // by the time an into_bed candidate opens the outside channel is already quiet (that's the open
+    // condition), so its recent history has to be tracked continuously, not reconstructed afterward.
+    // Trimmed to IB_LINK_MS every frame — the same window that already decides whether a candidate
+    // could even link to it — so the evidence can never reach further back than what's actually
+    // relevant. (A first draft used an accumulate-until-quiet "episode" instead; adversarial review
+    // found it unbounded — see trimOutSamples's comment.)
+    let outSamples = [];
+    let ibLeadEvidence = EMPTY_EVIDENCE; // snapshot taken from outSamples at the moment a candidate opened
 
     const outPixels = mask ? FRAME_BYTES - zonePixels : 0; // area outside the bed zone (0 = whole frame)
 
@@ -314,6 +329,10 @@ export async function startMotionDetector(camera) {
           const outActive = outFraction >= threshold;
           if (cribActive) cribLastActive = now;
           if (outActive) outLastActive = now;
+          // Rolling outside-channel buffer for the into_bed lead-up (see outSamples' declaration).
+          // Trim first, then append — so the buffer never holds more than IB_LINK_MS of history.
+          outSamples = trimOutSamples(outSamples, now, IB_LINK_MS);
+          outSamples.push({ t: now, fraction: outFraction, active: outActive });
           if (!oobPendingAt) {
             // Candidate: outside just moved, the bed moved recently but is quiet NOW → motion left the bed.
             if (outActive && !cribActive && cribLastActive > 0) {
@@ -321,7 +340,7 @@ export async function startMotionDetector(camera) {
               const link = oobLinkKind(since, outFraction);
               if (link) {
                 oobPendingAt = now;
-                oobPeakOut = outFraction;
+                oobEvidence = accumulateOutEvidence(EMPTY_EVIDENCE, outFraction, outActive);
                 logger.info(
                   `[oob] "${camera.name}" exit candidate (${link}) — bed active ${since}ms ago, outside now ${(outFraction * 100).toFixed(1)}%`
                 );
@@ -333,23 +352,26 @@ export async function startMotionDetector(camera) {
               }
             }
           } else {
-            if (outFraction > oobPeakOut) oobPeakOut = outFraction;
+            oobEvidence = accumulateOutEvidence(oobEvidence, outFraction, outActive);
             if (cribActive) {
               // Bed moved again inside the confirm window — child's still in it (or a parent reached in).
               logger.info(`[oob] "${camera.name}" candidate cancelled — bed re-active after ${now - oobPendingAt}ms`);
               oobPendingAt = 0;
-              oobPeakOut = 0;
+              oobEvidence = EMPTY_EVIDENCE;
             } else if (now - oobPendingAt >= OOB_CONFIRM_QUIET_MS) {
               // Bed stayed quiet after the motion left it → treat as the child having climbed out.
               if (now - oobLastLog >= OOB_COOLDOWN_MS) {
                 oobLastLog = now;
                 logger.info(
-                  `[oob] "${camera.name}" OUT OF BED — motion left the bed, quiet ${OOB_CONFIRM_QUIET_MS}ms since, outside peak ${(oobPeakOut * 100).toFixed(1)}%`
+                  `[oob] "${camera.name}" OUT OF BED — motion left the bed, quiet ${OOB_CONFIRM_QUIET_MS}ms since, outside peak ${(oobEvidence.peak * 100).toFixed(1)}%`
                 );
-                recordBedTransition(camera.id, TRANSITION.OUT_OF_BED, oobPeakOut);
+                recordBedTransition(camera.id, TRANSITION.OUT_OF_BED, oobEvidence.peak, {
+                  outPeak: oobEvidence.peak,
+                  outFrames: oobEvidence.frames,
+                });
               }
               oobPendingAt = 0;
-              oobPeakOut = 0;
+              oobEvidence = EMPTY_EVIDENCE;
             }
           }
           // --- "Into bed" twin: outside->bed entry (child placed into the bed). Mirror of OOB. ---
@@ -358,6 +380,7 @@ export async function startMotionDetector(camera) {
             if (cribActive && !outActive && outLastActive > 0 && now - outLastActive <= IB_LINK_MS) {
               ibPendingAt = now;
               ibPeakCrib = fraction;
+              ibLeadEvidence = evidenceFromSamples(outSamples); // freeze the lead-up window's evidence
               logger.info(
                 `[intobed] "${camera.name}" entry candidate — outside active ${now - outLastActive}ms ago, bed now ${(fraction * 100).toFixed(1)}%`
               );
@@ -369,6 +392,7 @@ export async function startMotionDetector(camera) {
               logger.info(`[intobed] "${camera.name}" candidate cancelled — outside re-active after ${now - ibPendingAt}ms`);
               ibPendingAt = 0;
               ibPeakCrib = 0;
+              ibLeadEvidence = EMPTY_EVIDENCE;
             } else if (now - ibPendingAt >= IB_CONFIRM_QUIET_MS) {
               // Outside stayed quiet after motion entered the bed → child placed in and the parent stepped back.
               if (now - ibLastLog >= IB_COOLDOWN_MS) {
@@ -376,10 +400,14 @@ export async function startMotionDetector(camera) {
                 logger.info(
                   `[intobed] "${camera.name}" INTO BED — motion entered the bed, outside quiet ${IB_CONFIRM_QUIET_MS}ms since, bed peak ${(ibPeakCrib * 100).toFixed(1)}%`
                 );
-                recordBedTransition(camera.id, TRANSITION.INTO_BED, ibPeakCrib);
+                recordBedTransition(camera.id, TRANSITION.INTO_BED, ibPeakCrib, {
+                  outPeak: ibLeadEvidence.peak,
+                  outFrames: ibLeadEvidence.frames,
+                });
               }
               ibPendingAt = 0;
               ibPeakCrib = 0;
+              ibLeadEvidence = EMPTY_EVIDENCE;
             }
           }
         }
