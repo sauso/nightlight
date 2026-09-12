@@ -266,20 +266,39 @@ counts as **historical**, not as the current state.
    `out_of_bed` on the same camera happens in ~8% of all recorded entries (86 of 1053 transitions,
    both cameras, ~3 weeks)** — and virtually none of these pairs have an owner verdict (1 of 86),
    because the morning review only surfaces events, it doesn't specifically ask about fast reversals.
-   Not yet actionable: no ground truth exists to say how many of the 86 are real (child put down, then
-   immediately picked back up) versus classifier noise (a hand withdrawing, fabric settling at the zone
-   edge). Left unbuilt rather than guessed at — same discipline as item 2's duration floor.
-   ★ **Owner's theory, 2026-09-13, for why these go unlabelled**: "there are so many of them", and the
-   leading candidate is a goodnight kiss — leaning over the bed (outside-zone motion right next to the
-   bed) immediately after placing the child, then stepping back and leaving the room. That is
-   `into_bed` followed by exactly the outside-then-quiet shape `out_of_bed` looks for, seconds later,
-   with no child movement involved at all. **This is item 3's exact gap** (telling a parent's motion
-   from a child's) approached from the entry side rather than the exit side it was originally framed
-   around — the same missing signal (sustained in-bed micro-motion, or its absence, after the "exit")
-   would resolve both. Not yet tested against data: would need the parent's own presence/absence in
-   frame at the moment of the trailing `out_of_bed`, which the saved snapshot (0.29.0) could very
-   plausibly answer without needing new instrumentation — a natural next step once someone reviews a
-   sample of the 86 snapshots against their own memory of those nights.
+   ★ **Owner's theory, unprompted, 2026-09-13**: "It seems to be when you go to kiss the child and
+   leave the room it thinks they got out of bed" — leaning over the bed right after placing the child,
+   then stepping back and leaving, is exactly the outside-then-quiet shape `out_of_bed` looks for, with
+   no child movement involved. **This is item 3's exact gap** (telling a parent's motion from a
+   child's), from the entry side rather than the exit side it was originally framed around.
+   ✅ **CHECKED AGAINST DATA THE SAME DAY, two independent ways, both pointing the same direction:**
+   - **Visual**: pulled the paired snapshots for a 9-case spread across both cameras and 3 weeks.
+     Every case with anyone visible at all showed a parent in frame leaving via the door (4/9); the
+     child was lying still in EVERY case, never once shown moving or sitting up. The exact pair this
+     whole gap was diagnosed from (Renz, 2026-09-12 19:51:00→19:51:14) is the clearest example: the
+     `into_bed` snapshot shows a parent leaning right over the bed; 14 seconds later the `out_of_bed`
+     snapshot shows the same parent mid-stride, walking out the door, child undisturbed in bed.
+   - **Independent, and scaling to the full 86**: the bed zone's own `motion_peak` in the hour AFTER
+     the trailing `out_of_bed` (>`MOTION_ACTIVE`, sleepAnalysis.js's own calibrated per-minute test) —
+     an empty bed should read close to silent, per the same assumption the empty-bed guard itself
+     already relies on. **60% (52/86) kept showing 4+ active minutes of completely normal stirring**
+     in that following hour — essentially impossible if the child had actually left. Only **9 of 86
+     (all Raffa, none Renz) went fully silent for the whole hour** — the one signature actually
+     consistent with a real departure.
+   **Conclusion: most of these 86 are very likely a parent's presence being misread as a child's exit,
+   not classifier noise with no physical cause and not a real child getting straight back up.**
+   ✅ **Tooling shipped 2026-09-13**: `getQuickReversals()` in `bedTransitions.js`, mirroring
+   `getImpossibleTransitions()`'s shape exactly (query-only, tested, same newest-first-across-cameras
+   discipline). Query only — nothing acts on this yet; it needs owner-verdict ground truth on THIS
+   specific pattern before anything downstream (surfacing in the morning review for labelling, or an
+   analysis-layer discount on `wake_count`/`awake_minutes`) can safely be built, and there is almost
+   none yet. This is what makes gathering that possible without guessing at a real-time gate.
+   ⚠️ **Still open, and the actual next decision**: whether to (a) surface these in the morning review
+   as their own question so verdicts accumulate before building anything further, or (b) go straight to
+   an analysis-layer discount using the bed-motion signal above as a proxy for "spurious" and score it
+   against the existing 44-night set — (b) is faster but touches `wake_count`, which item 1's own
+   history says to treat as fragile; (a) is slower but builds the same kind of ground truth item 1 and
+   2 both needed before they could ship anything real. Not decided.
 2. Record the outside channel's **peak and duration** alongside each transition — new columns on
    `bed_transitions` — and require substantial outside evidence for `into_bed`, symmetric for
    `out_of_bed`. — **RE-OPENED 2026-09-12, exit side only.** The earlier "lower priority, no longer
