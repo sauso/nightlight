@@ -10,7 +10,7 @@ import { recordBedTransition, TRANSITION } from './bedTransitions.js';
 import {
   oobLinkKind, OOB_LINK_MS, OOB_LINK_SLOW_MS, OOB_SLOW_OUT_MIN,
   accumulateOutEvidence, trimOutSamples, evidenceFromSamples, EMPTY_EVIDENCE,
-  intoBedRejected, outOfBedRejected,
+  intoBedRejected, outOfBedRejected, entryNearMissWorthLogging,
 } from './bedTransitionRules.js';
 import { childSamplingActiveNow } from './sleepAnalysis.js';
 import { killIfSpawned } from './processGuards.js';
@@ -95,6 +95,15 @@ const OOB_COOLDOWN_MS = 120000; // don't re-log an exit more than once per this
 const IB_LINK_MS = 8000; // outside must have been active within this long before the bed burst
 const IB_CONFIRM_QUIET_MS = 6000; // ...and the outside must stay quiet this long after, to count as "placed in"
 const IB_COOLDOWN_MS = 120000; // don't re-log an entry more than once per this
+
+// Unlike OOB, the bed going active with no valid link logged NOTHING at all until now — a missed entry
+// was completely silent, with no trace to diagnose it from (Renz's 2026-09-12 bedtime: staging never
+// recorded an into_bed for the whole ~50min settling window, and there was nothing in the logs to say
+// why). Gated on believedOccupied rather than a time bound like OOB_NEARMISS_MS: ordinary stirring by an
+// already-settled, believed-in-bed child would otherwise re-log every rate-limit interval all night for
+// no reason — the interesting case is specifically "the bed just moved and we don't think anyone's in
+// it", which believedOccupied already tracks (see ROADMAP §1.2 item 1's log-only occupancy check).
+const IB_NEARMISS_LOG_MS = 30000;
 
 // When (re)starting a detector, wait up to this long for the preferred sub-stream to start
 // publishing before settling for the heavier main stream, polling readiness this often. We
@@ -303,6 +312,7 @@ export async function startMotionDetector(camera) {
     // found it unbounded — see trimOutSamples's comment.)
     let outSamples = [];
     let ibLeadEvidence = EMPTY_EVIDENCE; // snapshot taken from outSamples at the moment a candidate opened
+    let ibLastNearMiss = 0; // rate-limit for the unexplained-bed-activity diagnostic below
 
     const outPixels = mask ? FRAME_BYTES - zonePixels : 0; // area outside the bed zone (0 = whole frame)
 
@@ -339,6 +349,12 @@ export async function startMotionDetector(camera) {
           // and is currently LOG-ONLY — no events, no push, no clips.
           const cribActive = fraction >= threshold;
           const outActive = outFraction >= threshold;
+          // Captured BEFORE cribLastActive updates below, for the unexplained-bed-activity diagnostic
+          // further down — it needs to know whether the bed was quiet a moment ago (a fresh episode
+          // starting) vs. already ongoing (the SAME episode's next frame), and reading cribLastActive
+          // after the update would compare "now" against itself. Same ACTIVE_GRACE_MS used to decide a
+          // sustained motion run hasn't ended (line ~466) — reused, not a new threshold.
+          const cribWasIdle = cribLastActive === 0 || now - cribLastActive > ACTIVE_GRACE_MS;
           if (cribActive) cribLastActive = now;
           if (outActive) outLastActive = now;
           // Rolling outside-channel buffer for the into_bed lead-up (see outSamples' declaration).
@@ -407,6 +423,24 @@ export async function startMotionDetector(camera) {
               ibLeadEvidence = evidenceFromSamples(outSamples); // freeze the lead-up window's evidence
               logger.info(
                 `[intobed] "${camera.name}" entry candidate — outside active ${now - outLastActive}ms ago, bed now ${(fraction * 100).toFixed(1)}%`
+              );
+            } else if (cribActive && !outActive && cribWasIdle && entryNearMissWorthLogging(believedOccupied) && now - ibLastNearMiss >= IB_NEARMISS_LOG_MS) {
+              // The bed just started moving after being quiet, we don't currently believe anyone's in
+              // it, and there's no valid outside-channel link to explain it as an entry — previously
+              // silent. See IB_NEARMISS_LOG_MS.
+              //
+              // cribWasIdle matters: without it, `believed !== true` alone stays true for the entire
+              // rest of a night after any restart (container recreate, settings change) that happens
+              // while the child is already asleep — belief starts at null and nothing here ever sets it
+              // true if no entry ever gets confirmed, so ordinary mid-sleep stirring would re-log every
+              // IB_NEARMISS_LOG_MS for hours (both real containers restarted mid-sleep on 2026-09-12,
+              // ~02:03 local — this is not a hypothetical). Requiring a fresh episode (bed was quiet,
+              // per the SAME grace period the confirm logic already uses) bounds this to "how often does
+              // the child change position", not a rigid clock.
+              ibLastNearMiss = now;
+              const since = outLastActive > 0 ? `${now - outLastActive}ms ago` : 'never (this run)';
+              logger.info(
+                `[intobed] "${camera.name}" bed active with no entry link — outside last active ${since} (need <=${IB_LINK_MS}ms), believed ${believedOccupied === false ? 'out of bed' : 'unknown'}`
               );
             }
           } else {

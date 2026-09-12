@@ -237,6 +237,38 @@ counts as **historical**, not as the current state.
    analysis layer instead of a real-time gate. Revisit once item 2's evidence-based threshold reduces
    the false-transition rate — some of item 1's failure cases are literally false transitions item 2
    will eventually stop from being recorded at all, fixing the upstream cause instead of the symptom.
+   ★ **Related finding, 2026-09-13: a missed ENTRY was completely silent, unlike a missed exit.** The
+   OOB side has always logged a "near miss" when the bed goes active with no linkable outside burst
+   (`OOB_NEARMISS_MS`); the IB side had no equivalent, so when a real bedtime fails to link, nothing
+   says why. Real case: Renz's 2026-09-12 bedtime — staging recorded ZERO `into_bed` for the whole
+   ~50-minute settling window (prod, an independent detector on the same camera, did eventually link
+   one at 19:51, immediately followed 14s later by a low-evidence `out_of_bed` that likely erased it
+   from the timeline anyway). **Fixed by adding the missing near-miss log**, mirroring exactly what the
+   OOB side already checks (bed active, nothing linkable on the outside channel) — it does **not** cover
+   every way an entry could go unrecorded: a placement where the bed and outside channels are active in
+   the SAME frame (found in adversarial review, 2026-09-13) still opens no candidate and logs nothing,
+   because neither this diagnostic nor the original candidate-open condition it mirrors handle
+   simultaneous activity — a pre-existing gap in the candidate condition itself, not something this log
+   line was ever positioned to catch. Left alone rather than expanding scope on a guess.
+   ⚠️ Gated on `believedOccupied` (from item 1, above) rather than a time bound, AND on the bed having
+   been quiet just before this frame (reusing `ACTIVE_GRACE_MS`, the same grace period the confirm logic
+   already uses to decide a motion run hasn't ended) — **both conditions are needed, not just the
+   first.** `believedOccupied` alone is not enough: it starts `null` after every restart and stays null
+   until a transition confirms one way or the other, so on a restart that happens mid-sleep (real case:
+   both containers restarted at 02:03 local on 2026-09-12) ordinary stirring by an already-sleeping,
+   never-yet-confirmed child would otherwise re-log every `IB_NEARMISS_LOG_MS` for the rest of the
+   night — caught in the same adversarial review, before it shipped. Requiring a fresh episode bounds
+   this to "how often the child changes position", not a clock. Does not touch `IB_LINK_MS` or open the
+   "slow window" question for entries — that stays deliberately unchanged pending real data on how often
+   a genuine, quiet placement fails to link (which this new log line now makes measurable for the first
+   time).
+   ⚠️ **Separately measured 2026-09-13: an `into_bed` immediately followed (within 60s) by an
+   `out_of_bed` on the same camera happens in ~8% of all recorded entries (86 of 1053 transitions,
+   both cameras, ~3 weeks)** — and virtually none of these pairs have an owner verdict (1 of 86),
+   because the morning review only surfaces events, it doesn't specifically ask about fast reversals.
+   Not yet actionable: no ground truth exists to say how many of the 86 are real (child put down, then
+   immediately picked back up) versus classifier noise (a hand withdrawing, fabric settling at the zone
+   edge). Left unbuilt rather than guessed at — same discipline as item 2's duration floor.
 2. Record the outside channel's **peak and duration** alongside each transition — new columns on
    `bed_transitions` — and require substantial outside evidence for `into_bed`, symmetric for
    `out_of_bed`. — **RE-OPENED 2026-09-12, exit side only.** The earlier "lower priority, no longer

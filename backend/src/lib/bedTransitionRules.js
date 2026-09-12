@@ -73,6 +73,24 @@ export function outOfBedRejected(believed) {
   return believed === false;
 }
 
+// --- Unexplained bed activity, found 2026-09-13 while reviewing a real night ---
+//
+// The exit side has always logged a "near miss" when the bed goes active but no outside burst links
+// closely enough to call it a departure (see OOB_NEARMISS_MS in motionDetector.js). The entry side had
+// no equivalent: when the bed goes active with nothing linkable on the outside channel, NOTHING is
+// logged at all. That is exactly what happened to Renz's real 2026-09-12 bedtime on staging — the
+// whole ~50-minute settling window produced zero `into_bed` and zero trace of why, because a missed
+// entry has always been completely silent.
+//
+// A time bound like OOB_NEARMISS_MS doesn't fit here: unlike an exit (a one-off event), a child who IS
+// believed to be in bed keeps moving in it all night, and that ordinary stirring would re-trigger this
+// diagnostic every rate-limit interval for hours for no reason. `believedOccupied` (item 1, above)
+// already distinguishes "we don't currently think anyone's in this bed" from "the child everyone
+// already knows is there just rolled over" — so gate on that instead of a clock.
+export function entryNearMissWorthLogging(believed) {
+  return believed !== true;
+}
+
 // --- Outside-channel EVIDENCE (peak + duration), ROADMAP §1.2 item 2 ---
 //
 // The fast link above accepts a single frame over threshold with no minimum magnitude at all

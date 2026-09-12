@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 
 import {
   oobLinkKind, accumulateOutEvidence, trimOutSamples, evidenceFromSamples, EMPTY_EVIDENCE,
-  intoBedRejected, outOfBedRejected,
+  intoBedRejected, outOfBedRejected, entryNearMissWorthLogging,
 } from '../src/lib/bedTransitionRules.js';
 
 test('an adult lifting a child out links instantly', () => {
@@ -230,6 +230,23 @@ test('alternating types are never flagged — this is the ordinary, healthy case
     simulateOccupancy(['into_bed', 'out_of_bed', 'into_bed', 'out_of_bed']),
     ['ok', 'ok', 'ok', 'ok']
   );
+});
+
+// --- entryNearMissWorthLogging (unexplained bed activity, found 2026-09-13) --------------------------
+//
+// Renz's real 2026-09-12 bedtime: staging never recorded a single into_bed for the whole ~50-minute
+// settling window, and there was nothing in the logs to say why — a missed entry has always been
+// completely silent. This predicate decides when "the bed moved with no valid link" is worth a log
+// line: NOT a time bound (like the exit side's OOB_NEARMISS_MS), because a child already believed to be
+// in bed keeps moving in it all night, and that ordinary stirring must not re-trigger this forever.
+
+test('worth logging when nobody is believed in bed — a real bedtime could be going unrecorded', () => {
+  assert.equal(entryNearMissWorthLogging(false), true, 'believed out — bed activity with no link is unexplained');
+  assert.equal(entryNearMissWorthLogging(null), true, 'not yet known — same reasoning as null never flagging a repeat');
+});
+
+test('NOT worth logging once the child is already believed in bed — ordinary stirring, not a missed entry', () => {
+  assert.equal(entryNearMissWorthLogging(true), false);
 });
 
 test('★ THE 62% CASE: consecutive same-direction transitions are flagged from the second one on', () => {
