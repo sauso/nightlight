@@ -62,6 +62,16 @@ beforeEach(() => {
 });
 
 describe('★ talk-back access is re-checked while the socket stays open (GHSA-6p7j)', () => {
+  // ★ THE CALIBRATED VALUE IS PINNED, NOT MERELY REFERENCED. Every other test below ticks by the
+  // imported TALK_REVALIDATE_MS constant rather than a literal 15000 — correct for testing the
+  // MECHANISM (it can't care what the number is), but it means changing the constant to, say,
+  // 300_000 would not fail a single test here, silently widening the exact security window the PR
+  // describes as "a bounded, human-noticeable window." Found by adversarial review. This is the one
+  // assertion that actually holds the number itself to account.
+  test('TALK_REVALIDATE_MS is 15 seconds', () => {
+    assert.equal(TALK_REVALIDATE_MS, 15_000);
+  });
+
   test('baseline: a still-authorized connection keeps forwarding audio across a revalidation tick', async (t) => {
     t.mock.timers.enable({ apis: ['setInterval'] });
     const user = makeUser(db, { id: 'u-1', username: 'admin' });
@@ -108,6 +118,42 @@ describe('★ talk-back access is re-checked while the socket stays open (GHSA-6
       1,
       'no audio may be forwarded after the session backing the socket was revoked'
     );
+  });
+
+  test('★ the revalidation timer is actually cleared on revocation, not just harmlessly idempotent', async (t) => {
+    // ⚠️ Found by adversarial review: deleting `clearInterval(revalidateTimer)` from cleanup() left
+    // every OTHER test in this file passing, because cleanup()'s own `closed` guard makes a SECOND,
+    // unstopped firing of the interval produce no NEW observable side effect (ws.close and
+    // fakeSession.write call-counts don't change on a firing that's already a no-op). That means an
+    // interval which keeps calling verifyToken -> liveSession against the DB every 15s, forever, after
+    // a connection has already ended is invisible to a test that only checks state once after one
+    // tick. This spies on clearInterval directly — the actual mechanism the safety property rests on —
+    // rather than inferring it from side effects that happen to look the same whether it fired or not.
+    t.mock.timers.enable({ apis: ['setInterval'] });
+    // Spied AFTER enabling, not before: mock.timers.enable() replaces globalThis.clearInterval with
+    // its own mock-aware version — spying first would wrap the native function that's no longer what
+    // gets called, and the spy would (falsely) never see a call at all.
+    const clearSpy = t.mock.method(globalThis, 'clearInterval');
+    const user = makeUser(db, { id: 'u-6', username: 'admin' });
+    const sid = makeSession(db, user.id, { id: 's-6' });
+    const token = signMedia(user.id, sid);
+    const ws = fakeWs();
+
+    handleTalkConnection(ws, camera(), { username: user.username }, token);
+    await Promise.resolve();
+    db.prepare('DELETE FROM sessions WHERE id = ?').run(sid);
+    t.mock.timers.tick(TALK_REVALIDATE_MS);
+    await Promise.resolve();
+
+    assert.equal(clearSpy.mock.callCount(), 1, 'cleanup() did not clear the revalidation timer');
+
+    // The direct proof the spy alone doesn't give: with the timer actually cleared, ticking well past
+    // several more intervals must produce NO further revocation log line — if it were still alive, it
+    // would fire again and again, forever, exactly like the mutation this test was written to catch.
+    ws.close.mock.resetCalls();
+    t.mock.timers.tick(TALK_REVALIDATE_MS * 5);
+    await Promise.resolve();
+    assert.equal(ws.close.mock.callCount(), 0, 'the timer fired again after cleanup — it was never really cleared');
   });
 
   test('deleting the account (not just the session row) has the same effect', async (t) => {

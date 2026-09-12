@@ -370,6 +370,15 @@ describe('every periodic job can be stopped (#286)', () => {
       // anything else. Structurally this is the processGuards.js case (a factory whose timer belongs
       // entirely to its own scope), not the #286 shape (a module-level job an importer must remember
       // to stop) — it just doesn't return the timer to an external owner because there isn't one.
+      //
+      // ⚠️ "Self-clearing" is ASSERTED here, not just assumed — same standard as the index.js exemption
+      // above. Proof lives in talk-socket.test.js's "★ the revalidation timer is actually cleared on
+      // revocation, not just harmlessly idempotent" test, which spies on clearInterval directly. It
+      // exists BECAUSE an earlier adversarial review found this exemption's own first draft had no such
+      // test: deleting the clearInterval call left every other test in that file passing, since
+      // cleanup()'s `closed` guard makes a leaked-but-never-firing-again-observably interval invisible
+      // to assertions that only check state once. An exemption whose justification nothing checks is
+      // exactly how a skip-list quietly becomes wrong — this one no longer is.
       'lib/talkSocket.js': 'setInterval is per-connection and self-clearing, not module-level state',
     };
 
