@@ -26,6 +26,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   settings change or a restart. Both the immediate case (unassigning/deleting) and the general safety net
   (the periodic check now stops a buffer that's no longer wanted, not just starts one that is) are fixed.
 
+### Security
+- **A talk-back call now ends promptly if your access is removed while it's open.** Two-way audio only
+  ever checked who you were at the moment the call connected — after that, an already-open call kept
+  forwarding your voice to the camera's room regardless of what happened to your account afterward. A
+  call now re-checks that access every 15 seconds for as long as it stays open, so signing someone out,
+  removing them as a caregiver, or a call simply running past its normal time limit now ends the call
+  itself, not just what a *new* call would be allowed to do.
+
 ## [0.30.1] - 2026-09-10
 
 ### Fixed
