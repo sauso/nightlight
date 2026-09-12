@@ -21,7 +21,8 @@ import notificationsRoutes from './routes/notifications.js';
 import timelapsesRoutes from './routes/timelapses.js';
 import recordingsRoutes from './routes/recordings.js';
 import { requireAuth, requireAuthQueryOrHeader, verifyToken } from './middleware/auth.js';
-import { startTalkSession, talkConfigured } from './lib/twoWayAudio.js';
+import { talkConfigured } from './lib/twoWayAudio.js';
+import { handleTalkConnection } from './lib/talkSocket.js';
 import { subConfigured, isSubRunning, startSubStream } from './lib/subStream.js';
 import db from './db.js';
 import { upsertPath, isPathConfiguredCorrectly, getPathStatus, subPathName } from './lib/mediamtx.js';
@@ -296,7 +297,10 @@ server.on('upgrade', (req, socket, head) => {
   if (url.pathname !== '/api/talk') { socket.destroy(); return; }
   // The token rides in the WS URL (browsers can't set headers on the handshake), so it must be a
   // media-scoped token, not the full session token - same reason as the HLS/query-token routes.
-  const user = verifyToken(url.searchParams.get('token'), { purpose: 'media' });
+  // Kept (not just the verified payload) so handleTalkConnection can re-check it for as long as the
+  // socket stays open — see talkSocket.js for why the handshake alone isn't enough.
+  const token = url.searchParams.get('token');
+  const user = verifyToken(token, { purpose: 'media' });
   if (!user) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
   const cameraId = url.searchParams.get('camera');
   const camera = cameraId ? db.prepare('SELECT * FROM cameras WHERE id = ?').get(cameraId) : null;
@@ -305,47 +309,8 @@ server.on('upgrade', (req, socket, head) => {
     socket.destroy();
     return;
   }
-  talkWss.handleUpgrade(req, socket, head, (ws) => handleTalkConnection(ws, camera, user));
+  talkWss.handleUpgrade(req, socket, head, (ws) => handleTalkConnection(ws, camera, user, token));
 });
-
-async function handleTalkConnection(ws, camera, user) {
-  let session = null;
-  let closed = false;
-  let bytes = 0;
-  const cleanup = () => {
-    if (closed) return;
-    closed = true;
-    logger.info(`[talk] session ended for "${camera.name}" (${bytes} audio bytes forwarded)`);
-    try { session?.close(); } catch { /* ignore */ }
-    try { ws.close(); } catch { /* ignore */ }
-  };
-  // Register the audio handler before the (async) session start so nothing races; audio arriving
-  // before the session is up is simply dropped (the client waits for our 'ready' before sending).
-  let sampled = false;
-  ws.on('message', (data, isBinary) => {
-    if (!isBinary) return;
-    if (!sampled) {
-      sampled = true;
-      const b = Buffer.from(data);
-      // mu-law silence is ~0xff/0x7f; varied bytes here mean real captured audio.
-      logger.info(`[talk] first audio bytes for "${camera.name}": ${b.slice(0, 12).toString('hex')}`);
-    }
-    bytes += data.length;
-    session?.write(data);
-  });
-  ws.on('close', cleanup);
-  ws.on('error', cleanup);
-  try {
-    session = await startTalkSession(camera);
-    if (closed) { session.close(); return; } // client hung up during startup
-    logger.info(`[talk] session started for "${camera.name}" by ${user.username || 'user'}`);
-    ws.send(JSON.stringify({ type: 'ready' }));
-  } catch (e) {
-    logger.error(`[talk] failed to start for "${camera.name}": ${e.message}`);
-    try { ws.send(JSON.stringify({ type: 'error', error: e.message })); } catch { /* ignore */ }
-    cleanup();
-  }
-}
 
 // Also re-check periodically (not just at startup) — if MediaMTX is ever restarted
 // on its own (e.g. after a config change, or a crash) without the app restarting too,
