@@ -358,12 +358,12 @@ is camera-agnostic and symmetric — there is no per-child logic anywhere in the
 plainly visible on the child page because **"Recent alerts" is a flat `/cameras/alerts` feed with no
 sleep logic in it at all**. The gap is only between the alert feed and the *Wake-ups* list.
 
-#### Gap A — the morning wake is not a row, so an alert at the moment of waking cannot render
+#### Gap A — the morning wake is not a row, so an alert at the moment of waking cannot render — `SHIPPED` (PR #420, `bfa1b92`, 2026-09-12)
 
-`sleepAnalysis.js` builds the list as `for (let i = onset; i < sleepEnd; )`. **`sleepEnd` is the start
-of the final wake**, so `wakes[]` holds *only mid-night awakenings*; the morning wake is reported as
+`sleepAnalysis.js` built the list as `for (let i = onset; i < sleepEnd; )`. **`sleepEnd` is the start
+of the final wake**, so `wakes[]` held *only mid-night awakenings*; the morning wake was reported as
 `wake_at` in the summary line instead. Alerts render only inside a wake row (`WakeItem`), so **an alert
-at the exact minute the child woke has nothing to attach to.**
+at the exact minute the child woke had nothing to attach to.**
 
 Measured over the last 14 nights on prod, using the UI's own ±3 min `ALERT_MARGIN_MS`:
 
@@ -372,14 +372,22 @@ Measured over the last 14 nights on prod, using the UI's own ±3 min `ALERT_MARG
 | Raffa | 12 | **9, on 7 of 14 nights** |
 | Renz | 286 | 19, on 8 of 14 nights |
 
-★ **One omission, wildly different cost per child**: the missing row is worth **+75%** on top of
-everything Raffa displays and **+6.6%** for Renz — not because the code treats them differently, but
+★ **One omission, wildly different cost per child**: the missing row was worth **+75%** on top of
+everything Raffa displayed and **+6.6%** for Renz — not because the code treats them differently, but
 because **Raffa's waking IS a morning event while Renz's is spread through the night.**
-★ **This is the cheap one and it is display-only** — it cannot move any number the holdout scored
-against, so it is safe to land before any detection change. Additive to the response shape
-(a running SPA is a client that cannot be updated).
-**Done when** the morning wake appears as a row carrying its alerts, and a test asserts an alert at
-exactly `wake_at` is attached to it — that test fails today.
+★ Display-only, as planned — it could not and did not move any number the holdout scores against.
+Additive to the response shape (a running SPA is a client that cannot be updated).
+
+**What shipped**: one more row, `[sleepEnd, morningEnd)` where `morningEnd = Math.max(totalMin,
+sleepEnd)`, appended to `wakes[]` whenever `wake_at` is non-null — merged into the last mid-night run
+when it leads straight into the departure (no gap), otherwise a standalone row. The alerts and wake-
+clips queries were widened to the same bound, or a post-window alert was excluded from the response
+before any row could claim it. Adversarial review (Codex + a parallel Claude subagent) caught two real
+defects in the first version before merge: a departure confirmed after a real quiet gap got no row at
+all, and two rows sharing an exact boundary instant could double-render one alert — both fixed and
+mutation-tested. `wakes.length` (the detail page's live count) can now exceed the stored `wake_count`
+by one on any night with a real wake_at — deliberate, they answer different questions; see the code
+comment in `sleepAnalysis.js` if this needs revisiting.
 
 #### Gap B — a real out-of-bed episode is invisible because the rule ignores `bed_transitions`
 
