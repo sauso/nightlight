@@ -380,6 +380,18 @@ test('limit has a floor of 1', () => {
   assert.equal(bt.getQuickReversals({ limit: 9999 }).length, 1, 'never asks for more than exist');
 });
 
+test('a deleted camera does not silently drop its historical reversals — found in adversarial review', () => {
+  makeCamera(db, { id: 'cam-gone', name: 'Gone Camera' });
+  seed('cam-gone', 'into_bed', '2026-03-01 10:00:00');
+  const oob = seed('cam-gone', 'out_of_bed', '2026-03-01 10:00:05');
+  db.prepare('DELETE FROM cameras WHERE id = ?').run('cam-gone');
+
+  const rows = bt.getQuickReversals();
+  assert.equal(rows.length, 1, 'the row must not vanish just because its camera was deleted');
+  assert.equal(rows[0].out_of_bed.id, oob);
+  assert.equal(rows[0].out_of_bed.camera_name, 'cam-gone', 'falls back to the raw id with no camera row to name it');
+});
+
 test('limit is capped at 500 however many reversals exist, and however large the ask', () => {
   // Same standard getImpossibleTransitions holds itself to (see its own cap test above): the fixture
   // must actually pass the cap, not just assert a number small enough that Math.min(500, …) was never

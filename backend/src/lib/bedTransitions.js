@@ -215,11 +215,14 @@ export function getImpossibleTransitions({ limit = 200 } = {}) {
 // that possible to build: surfacing these pairs for review, or scoring a discount rule against real
 // labels once they exist, rather than guessing.
 export function getQuickReversals({ maxGapMs = 60000, limit = 200 } = {}) {
+  // LEFT JOIN, deliberately unlike getImpossibleTransitions's inner join above: camera_id carries no
+  // foreign key (cameras can be deleted, e.g. hardware replacement), so an inner join would silently
+  // drop a deleted camera's historical rows from this report. Found in adversarial review, 2026-09-13.
   const rows = db
     .prepare(
-      `SELECT t.id, t.camera_id, c.name AS camera_name, t.type, t.created_at, t.peak,
-              t.out_peak, t.out_frames, t.snapshot, t.verdict
-         FROM bed_transitions t JOIN cameras c ON c.id = t.camera_id
+      `SELECT t.id, t.camera_id, COALESCE(c.name, t.camera_id) AS camera_name, t.type, t.created_at,
+              t.peak, t.out_peak, t.out_frames, t.snapshot, t.verdict
+         FROM bed_transitions t LEFT JOIN cameras c ON c.id = t.camera_id
         ORDER BY t.camera_id, t.created_at ASC`
     )
     .all();
