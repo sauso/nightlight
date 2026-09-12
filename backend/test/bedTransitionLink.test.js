@@ -63,6 +63,17 @@ test('peak takes the max across calls, whether or not the frame was active', () 
   assert.equal(e.peak, 0.09, 'the highest reading wins, from wherever it came');
 });
 
+test('peak is genuinely active-INDEPENDENT — an inactive reading can set it', () => {
+  // Every other peak test here has the active frames hold the highest reading, so a mutant that
+  // secretly gated peak on `active` (`active ? Math.max(...) : prev.peak`) would pass them all
+  // anyway — found by adversarial review (2026-09-12). This is the one fixture where the INACTIVE
+  // frame is the highest, so gating peak on active would visibly change the answer.
+  let e = accumulateOutEvidence(EMPTY_EVIDENCE, 0.9, false); // the highest reading, but not active
+  e = accumulateOutEvidence(e, 0.1, true);
+  assert.equal(e.peak, 0.9, 'the inactive reading still sets the peak');
+  assert.equal(e.frames, 1, 'but it does not count toward duration');
+});
+
 test('frames counts only the readings that crossed the active threshold', () => {
   let e = EMPTY_EVIDENCE;
   for (const active of [true, false, true, true, false]) {
