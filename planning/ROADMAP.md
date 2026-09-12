@@ -269,6 +269,17 @@ counts as **historical**, not as the current state.
    Not yet actionable: no ground truth exists to say how many of the 86 are real (child put down, then
    immediately picked back up) versus classifier noise (a hand withdrawing, fabric settling at the zone
    edge). Left unbuilt rather than guessed at — same discipline as item 2's duration floor.
+   ★ **Owner's theory, 2026-09-13, for why these go unlabelled**: "there are so many of them", and the
+   leading candidate is a goodnight kiss — leaning over the bed (outside-zone motion right next to the
+   bed) immediately after placing the child, then stepping back and leaving the room. That is
+   `into_bed` followed by exactly the outside-then-quiet shape `out_of_bed` looks for, seconds later,
+   with no child movement involved at all. **This is item 3's exact gap** (telling a parent's motion
+   from a child's) approached from the entry side rather than the exit side it was originally framed
+   around — the same missing signal (sustained in-bed micro-motion, or its absence, after the "exit")
+   would resolve both. Not yet tested against data: would need the parent's own presence/absence in
+   frame at the moment of the trailing `out_of_bed`, which the saved snapshot (0.29.0) could very
+   plausibly answer without needing new instrumentation — a natural next step once someone reviews a
+   sample of the 86 snapshots against their own memory of those nights.
 2. Record the outside channel's **peak and duration** alongside each transition — new columns on
    `bed_transitions` — and require substantial outside evidence for `into_bed`, symmetric for
    `out_of_bed`. — **RE-OPENED 2026-09-12, exit side only.** The earlier "lower priority, no longer
