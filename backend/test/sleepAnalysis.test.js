@@ -205,6 +205,25 @@ test('a corroborated departure becomes the authoritative wake time', () => {
   assert.equal(hhmm(night.wake_at_shadow), '05:09');
 });
 
+// ROADMAP §1.2 item 2 (2026-09-12): bed_transitions grew two new evidence columns, out_peak/out_frames.
+// They are recorded now but consulted by NOTHING yet — this is the direct test of that claim, not just
+// an assertion of it. If a future change makes computeNight read them, this test is the one that has
+// to change on purpose, not silently start failing.
+test('the new out_peak/out_frames evidence columns change nothing about computeNight yet', () => {
+  const insertTransitionWithEvidence = db.prepare(
+    `INSERT INTO bed_transitions (camera_id, type, peak, created_at, out_peak, out_frames) VALUES (?, ?, ?, ?, ?, ?)`
+  );
+  layDepartureNight({ withTransition: false });
+  insertTransitionWithEvidence.run(CAM, 'out_of_bed', 0.4, sqlTime(at(5, 9, 1)), 0.057, 4);
+  const withEvidence = computeNight(CHILD, DATE, { includeTimeline: true });
+
+  db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(5, 9, 1))); // same row, evidence columns NULL
+  const withoutEvidence = computeNight(CHILD, DATE, { includeTimeline: true });
+
+  assert.deepEqual(withEvidence, withoutEvidence, 'byte-identical output regardless of the new columns');
+});
+
 test('adopting the departure also shortens the recorded sleep', () => {
   // The point of computing the adoption BEFORE the metrics: promoting only the displayed time would
   // leave "asleep" still counting the 96 minutes after the child had already left the bed.

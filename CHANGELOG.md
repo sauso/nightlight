@@ -9,6 +9,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+- Bed transitions now record additional outside-motion evidence (peak and how long it lasted) alongside
+  each recorded exit or entry, for future tuning of the detector — nothing reads these values yet, and
+  no detection behavior changes.
+
 ### Fixed
 - **Wake clips can be turned on without ever producing one.** "Record wake-ups without alerting" only
   ever started buffering if detection clips or on-demand recording were also on for that camera — so a

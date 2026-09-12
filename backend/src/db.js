@@ -357,6 +357,24 @@ if (!bedTxColumns.includes('verdict')) {
   db.exec('ALTER TABLE bed_transitions ADD COLUMN verdict TEXT');
 }
 
+// Outside-channel evidence (ROADMAP §1.2 item 2). What it means depends on the transition's type:
+// for `out_of_bed`, the outside channel's peak/duration DURING the exit candidate (already partly
+// captured as the legacy `peak` column, which for this type IS the outside peak — these add the
+// duration half); for `into_bed`, the outside channel's peak/duration in the LEAD-UP before the bed
+// moved (previously thrown away entirely — the legacy `peak` column for this type is the BED
+// channel's peak instead). RECORD-ONLY: nothing reads these yet. A peak-only floor was measured
+// (2026-09-12) against 468 owner-reviewed verdicts and does NOT separate real transitions from false
+// ones on either direction (overlapping ranges, "wrong" has the higher ceiling on both) — duration is
+// the untested half, and it can't be evaluated until it's actually been recorded for a while. See
+// bed-transition-classifier-flaws.md and ROADMAP §1.2 item 2 before picking a threshold on these.
+// `out_frames` is a raw frame count at the fixed 5fps sampling rate (~200ms/frame), not milliseconds.
+if (!bedTxColumns.includes('out_peak')) {
+  db.exec('ALTER TABLE bed_transitions ADD COLUMN out_peak REAL');
+}
+if (!bedTxColumns.includes('out_frames')) {
+  db.exec('ALTER TABLE bed_transitions ADD COLUMN out_frames INTEGER');
+}
+
 // Which recorded transition the person named as the bedtime or the morning departure, when they chose
 // one instead of typing a time. Worth storing beyond the time it produced: a frame somebody has
 // identified as "this is the moment they got up" is a LABELLED EXAMPLE, and that pairing — picture to
