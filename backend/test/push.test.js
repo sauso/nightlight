@@ -8,14 +8,16 @@
 // is module-level state only initPush() sets, from a real service-account credential file), which
 // this environment doesn't have and shouldn't need for a pure recipient-selection question. Extracted
 // exactly so this could be tested without any of that — see the comment on activePushTokens itself.
-import { test, describe, beforeEach } from 'node:test';
+import { test, describe, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { useTempDataDir, makeUser } from './helpers/harness.js';
 
-useTempDataDir();
+const dataDir = useTempDataDir();
 
 const { default: db } = await import('../src/db.js');
-const { activePushTokens } = await import('../src/lib/push.js');
+const { activePushTokens, sendToAll, initPush } = await import('../src/lib/push.js');
 
 const addToken = (token, userId) =>
   db.prepare('INSERT INTO push_tokens (token, user_id, platform) VALUES (?, ?, ?)').run(token, userId, 'android');
@@ -53,5 +55,57 @@ describe('★ activePushTokens excludes anything not tied to a live user (GHSA-q
     addToken('tok-orphan', 'u-gone');
     const tokens = activePushTokens().map((r) => r.token).sort();
     assert.deepEqual(tokens, ['tok-1', 'tok-2'], 'a single orphan changed who else gets delivered to');
+  });
+});
+
+// ★ THE WIRING GAP an adversarial review found: activePushTokens() itself was thoroughly tested above,
+// but nothing proved sendToAll actually CALLS it rather than some other (e.g. the old, unfiltered)
+// query — reverting sendToAll's one-line call site back to a bare `SELECT * FROM push_tokens` survived
+// every test in this file untouched. Firebase Admin SDK is faked (mock.module on its two dynamic
+// imports, matching how initPush() actually loads them) so this can drive the REAL sendToAll end to
+// end without needing a live Firebase project — the fake records exactly which tokens it was asked to
+// message, which is the one thing a unit test of activePushTokens() alone cannot show.
+describe('★ sendToAll actually delivers through activePushTokens, not some other query (GHSA-q98f)', () => {
+  const sendEach = mock.fn(async (messages) => ({
+    responses: messages.map(() => ({ success: true })),
+    successCount: messages.length,
+  }));
+
+  mock.module('firebase-admin/app', {
+    namedExports: { initializeApp: () => {}, cert: () => ({}) },
+  });
+  mock.module('firebase-admin/messaging', {
+    namedExports: { getMessaging: () => ({ sendEach }) },
+  });
+
+  test('★ THE FIX: sendToAll never messages a token whose user has been deleted', async () => {
+    fs.writeFileSync(
+      path.join(dataDir, 'firebase-service-account.json'),
+      JSON.stringify({ project_id: 'test-project', private_key: 'x' })
+    );
+    fs.writeFileSync(
+      path.join(dataDir, 'google-services.json'),
+      JSON.stringify({
+        client: [{ client_info: { mobilesdk_app_id: 'app-1' }, api_key: [{ current_key: 'key-1' }] }],
+        project_info: { project_id: 'test-project', project_number: '123' },
+      })
+    );
+    assert.equal(await initPush(), true, 'precondition: fake Firebase setup must actually initialize');
+    db.prepare("UPDATE settings SET push_enabled = 1 WHERE id = 'app'").run();
+
+    makeUser(db, { id: 'u-1', username: 'alice' });
+    addToken('tok-live', 'u-1');
+    addToken('tok-orphan', 'u-gone'); // never cleaned up — the exact scenario this fix defends against
+
+    sendEach.mock.resetCalls();
+    await sendToAll('Wake', 'Renz is awake');
+
+    assert.equal(sendEach.mock.callCount(), 1, 'sendToAll did not attempt delivery at all');
+    const [messages] = sendEach.mock.calls[0].arguments;
+    assert.deepEqual(
+      messages.map((m) => m.token),
+      ['tok-live'],
+      'sendToAll messaged a token belonging to a deleted user — activePushTokens() is not actually wired in'
+    );
   });
 });

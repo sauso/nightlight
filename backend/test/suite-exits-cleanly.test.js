@@ -259,7 +259,11 @@ describe('the npm scripts do not paper over a leaked handle', () => {
   // Anti-vacuous: if the scripts were renamed or the file moved, the check above would pass by
   // reading nothing at all.
   test('the scripts really were read', () => {
-    assert.ok(scripts?.test?.includes('node --test'), `package.json scripts.test is not a node --test run: ${scripts?.test}`);
+    // Flags between `node` and `--test` (e.g. --experimental-test-module-mocks, needed once a test
+    // file uses mock.module) are legitimate — this only needs to confirm we're looking at a real
+    // `node ... --test ...` invocation, not the exact adjacency of those two words, or a new flag
+    // added for an unrelated reason breaks this vacuously.
+    assert.ok(/\bnode\b.*--test\b/.test(scripts?.test ?? ''), `package.json scripts.test is not a node --test run: ${scripts?.test}`);
     assert.ok(Object.keys(scripts).length >= 3, 'the scripts block looks empty — this file is reading the wrong package.json');
   });
 });
