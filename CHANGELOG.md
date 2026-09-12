@@ -25,6 +25,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   process quietly running (and its clip buffer quietly using disk) with no way back short of an unrelated
   settings change or a restart. Both the immediate case (unassigning/deleting) and the general safety net
   (the periodic check now stops a buffer that's no longer wanted, not just starts one that is) are fixed.
+- **Bedtime reported a minute late on roughly half of all nights.** A bed transition recorded at, say,
+  19:38:31 was rounded up to 19:39 instead of being read as the 19:38 event it actually was — every
+  *other* minute-index calculation in the app already floors a real-second timestamp; this one place
+  rounded instead. The error only ever pushed the time later, never earlier, so onset was late (and the
+  night's total sleep a minute short) on nights where the transition happened to land in the second half
+  of a minute — roughly half of them.
 
 ### Security
 - **A talk-back call now ends promptly if your access is removed while it's open.** Two-way audio only
