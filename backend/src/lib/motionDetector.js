@@ -225,6 +225,17 @@ export async function startMotionDetector(camera) {
   const confirmMs = Math.max(0, (camera.detect_confirm_s ?? 3) * 1000);
   const cooldownMs = Math.max(1, camera.detect_cooldown_s ?? 60) * 1000;
 
+  // Believed occupancy (ROADMAP §1.2 item 1) — true = in bed, false = out of bed, null = not yet
+  // known since this detector started. Deliberately declared OUTSIDE launch(), not inside it: an
+  // ffmpeg blip triggers an automatic reconnect via launch() again (see the exit handler below), and
+  // every OTHER piece of pending-candidate state already resets on that path — but a belief flag has
+  // no "in-flight" data to lose, so there's no reason to also lose it, and losing it would silently
+  // undercount exactly the same-direction repeats this diagnostic exists to surface (found by
+  // adversarial review, 2026-09-12: a real reconnect between two into_bed events would otherwise mean
+  // neither is ever flagged). Still resets to null on a genuinely fresh startMotionDetector call
+  // (settings change, camera reassignment, app restart) — see its own comment on why that's correct.
+  let believedOccupied = null;
+
   async function launch() {
     // Claim the slot before the async gap below, so a concurrent start/reconcile can't
     // double-run this camera's detector.
@@ -269,13 +280,6 @@ export async function startMotionDetector(camera) {
     let activeSince = 0; // start of the current sustained-motion run (0 = not currently active)
     let lastActive = 0; // last frame that was above the active threshold
     let lastAlert = 0;
-    // Believed occupancy (ROADMAP §1.2 item 1) — true = in bed, false = out of bed, null = not yet
-    // known since this detector started. Shared by BOTH state machines below. LOG-ONLY for now: a
-    // retrospective check against real owner-verdicted transitions (2026-09-12) found that actually
-    // SUPPRESSING a same-direction repeat is unsafe on this classifier's current false-positive rate
-    // — see intoBedRejected/outOfBedRejected's own comment. This just tracks belief and logs when a
-    // transition contradicts it; every transition is still recorded exactly as before.
-    let believedOccupied = null;
     // Out-of-bed prototype state (see OOB_* constants above).
     let cribLastActive = 0; // last frame the bed zone itself moved
     let oobPendingAt = 0; // when a bed->outside exit candidate opened (0 = none pending)
