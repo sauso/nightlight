@@ -39,6 +39,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   a few hours after the window closes and settle for good only once there has been enough real time to
   be certain; whether the bed was slept in at all is decided immediately and never changes retroactively
   — only the wake time and duration can still refine.
+- **A motion or sound alert at the exact moment your child woke up for the day had nowhere to appear.**
+  The Wake-ups list only ever held the awakenings that happened *during* the night — the final wake, the
+  one that ends it, was reported only as a time in the summary line above, with no row of its own for an
+  alert to attach to. For a child whose waking is itself a morning event rather than a mid-night stir,
+  this could mean the busiest, most alert-worthy moment of the night was the one thing missing from the
+  list. The morning wake now gets its own row alongside the others.
 
 ### Security
 - **A talk-back call now ends promptly if your access is removed while it's open.** Two-way audio only

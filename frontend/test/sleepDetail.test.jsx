@@ -465,6 +465,31 @@ describe('what a night lists', () => {
     expect(within(row).getByText(/Nursery/)).toBeTruthy();
   });
 
+  test('★ an alert AT THE MOMENT OF WAKING attaches to the morning wake (roadmap §1.5 Gap A)', async () => {
+    // Closes the client/server seam: the backend now emits one extra row spanning [wake_at, window_end)
+    // for the morning wake itself (sleepAnalysis.js), specifically so an alert firing at the exact
+    // instant the child got up has a wake to attach to — previously the wakes[] array only ever held
+    // mid-night awakenings, and a wake-up alert at wake_at rendered nowhere. This fixture is shaped
+    // exactly like what the fixed backend now sends, not a hand-picked shortcut.
+    mockSleep({
+      night: {
+        ...NIGHT,
+        wake_count: 0, // the STORED metric counts only mid-night arousals — deliberately untouched by
+        // this fix, and deliberately allowed to differ from the section title below by exactly one on a
+        // night with a real wake_at (see the comment above the morning-wake row in sleepAnalysis.js).
+        wakes: [{ start_at: '2026-08-30 20:15:00', end_at: '2026-08-30 21:00:00', minutes: 45 }],
+        alerts: [{ id: 'a1', type: 'motion', camera_name: 'Nursery', detail: '4.2%', created_at: '2026-08-30 20:15:00' }],
+      },
+    });
+    const { user } = mount('Australia/Melbourne');
+    const badge = await screen.findByText(/1 alert$/);
+    expect(badge).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { expanded: false }));
+    const row = (await screen.findByText(/4\.2%/)).closest('.sleep-wakes__alert');
+    expect(row, 'the wake-up alert sits inside the morning wake it belongs to').toBeTruthy();
+  });
+
   test('an alert outside every wake is not attached to one', async () => {
     // The other half of `alertsInRange`. A 6pm alert, hours before the first wake, must not be
     // pinned to it — that would invent a cause for a wake-up that had nothing to do with it.
