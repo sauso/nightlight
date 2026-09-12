@@ -10,7 +10,7 @@ import { recordBedTransition, TRANSITION } from './bedTransitions.js';
 import {
   oobLinkKind, OOB_LINK_MS, OOB_LINK_SLOW_MS, OOB_SLOW_OUT_MIN,
   accumulateOutEvidence, trimOutSamples, evidenceFromSamples, EMPTY_EVIDENCE,
-  intoBedRejected, outOfBedRejected,
+  intoBedRejected, outOfBedRejected, entryNearMissWorthLogging,
 } from './bedTransitionRules.js';
 import { childSamplingActiveNow } from './sleepAnalysis.js';
 import { killIfSpawned } from './processGuards.js';
@@ -95,6 +95,15 @@ const OOB_COOLDOWN_MS = 120000; // don't re-log an exit more than once per this
 const IB_LINK_MS = 8000; // outside must have been active within this long before the bed burst
 const IB_CONFIRM_QUIET_MS = 6000; // ...and the outside must stay quiet this long after, to count as "placed in"
 const IB_COOLDOWN_MS = 120000; // don't re-log an entry more than once per this
+
+// Unlike OOB, the bed going active with no valid link logged NOTHING at all until now — a missed entry
+// was completely silent, with no trace to diagnose it from (Renz's 2026-09-12 bedtime: staging never
+// recorded an into_bed for the whole ~50min settling window, and there was nothing in the logs to say
+// why). Gated on believedOccupied rather than a time bound like OOB_NEARMISS_MS: ordinary stirring by an
+// already-settled, believed-in-bed child would otherwise re-log every rate-limit interval all night for
+// no reason — the interesting case is specifically "the bed just moved and we don't think anyone's in
+// it", which believedOccupied already tracks (see ROADMAP §1.2 item 1's log-only occupancy check).
+const IB_NEARMISS_LOG_MS = 30000;
 
 // When (re)starting a detector, wait up to this long for the preferred sub-stream to start
 // publishing before settling for the heavier main stream, polling readiness this often. We
@@ -303,6 +312,7 @@ export async function startMotionDetector(camera) {
     // found it unbounded — see trimOutSamples's comment.)
     let outSamples = [];
     let ibLeadEvidence = EMPTY_EVIDENCE; // snapshot taken from outSamples at the moment a candidate opened
+    let ibLastNearMiss = 0; // rate-limit for the unexplained-bed-activity diagnostic below
 
     const outPixels = mask ? FRAME_BYTES - zonePixels : 0; // area outside the bed zone (0 = whole frame)
 
@@ -407,6 +417,14 @@ export async function startMotionDetector(camera) {
               ibLeadEvidence = evidenceFromSamples(outSamples); // freeze the lead-up window's evidence
               logger.info(
                 `[intobed] "${camera.name}" entry candidate — outside active ${now - outLastActive}ms ago, bed now ${(fraction * 100).toFixed(1)}%`
+              );
+            } else if (cribActive && !outActive && entryNearMissWorthLogging(believedOccupied) && now - ibLastNearMiss >= IB_NEARMISS_LOG_MS) {
+              // The bed just moved, we don't currently believe anyone's in it, and there's no valid
+              // outside-channel link to explain it as an entry — previously silent. See IB_NEARMISS_LOG_MS.
+              ibLastNearMiss = now;
+              const since = outLastActive > 0 ? `${now - outLastActive}ms ago` : 'never (this run)';
+              logger.info(
+                `[intobed] "${camera.name}" bed active with no entry link — outside last active ${since} (need <=${IB_LINK_MS}ms), believed ${believedOccupied === false ? 'out of bed' : 'unknown'}`
               );
             }
           } else {
