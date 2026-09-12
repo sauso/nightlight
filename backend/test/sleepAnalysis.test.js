@@ -991,6 +991,34 @@ function layTimelineNight({ out = [] } = {}) {
   insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(5, 9, 1)));
 }
 
+test('★ the morning wake gets its own row, so an alert at the moment of waking has something to attach to (roadmap §1.5 Gap A)', () => {
+  // wake_at (05:09) is exactly where the wakes[] loop below stops, by definition — so the ONE span every
+  // night with a real morning wake actually needs is the one that loop can never produce. The frontend
+  // only renders an alert inside a wake row (WakeItem), so before this fix an alert firing at the exact
+  // moment the child got up had nothing to attach to.
+  layTimelineNight();
+
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(hhmm(night.wake_at), '05:09');
+  const morning = night.wakes[night.wakes.length - 1];
+  assert.equal(hhmm(morning.start_at), '05:09', 'the row starts exactly where wake_at does');
+  assert.equal(hhmm(morning.end_at), '07:00', 'and runs to the window close');
+  assert.equal(morning.minutes, 111);
+});
+
+test('...but a night still asleep at window close gets no such row', () => {
+  // wake_at is null here — there is no "after the wake" to show, and no reason to invent an empty span.
+  layNight(at(18, 20), at(7, 0, 1), { move: [[at(19, 30), at(19, 40)], [at(23, 0), at(23, 6)]] });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 38)));
+
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(night.wake_at, null, 'sanity: still asleep at window close');
+  assert.ok(
+    night.wakes.every((w) => hhmm(w.end_at) !== '07:00'),
+    'no manufactured row reaching window close when there is nothing after the wake'
+  );
+});
+
 test('the timeline draws only the two transitions the analysis adopted', () => {
   // A child rolling over reads as an arrival to the frame-diff classifier, so a normal night produces a
   // stream of them: on 2026-08-26 Renz's timeline showed FOUR "got into bed" markers with no "got out of

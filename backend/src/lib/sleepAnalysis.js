@@ -1314,6 +1314,29 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       wakes.push({ start_at: minuteTime(i), end_at: minuteTime(k), minutes: k - i });
       i = k;
     }
+    // ⚠️ THE MORNING WAKE ITSELF (roadmap §1.5 Gap A). `sleepEnd` is where `wake_at` starts — by
+    // definition, since the loop above stops there — so the one span every night with a real wake_at
+    // actually cares about is the ONE span this loop can never produce. The frontend renders an alert
+    // only inside a wake row (`WakeItem`), so an alert at the exact minute the child got up had nothing
+    // to attach to: reproduced on prod, ~7% of Raffa's alerts and ~7% of nights entirely (his waking is
+    // a morning event; a mid-night sleeper like Renz barely notices the gap).
+    //
+    // Bounded to the CLASSIC window end (`totalMin`), not the issue #352 lookahead extension
+    // (`totalMinExt`/a later `sleepEnd`) — deliberately. When a departure is confirmed past window
+    // close, the active run leading up to it is already inside `[onset, sleepEnd)` and gets its own row
+    // from the loop above (its `end_at` sits within ALERT_MARGIN_MS of the departure either way); this
+    // row exists only to cover the classic case where sleepEnd never moved and nothing above ever
+    // visits `[sleepEnd, totalMin)` at all. Only added when there's a real "after" to show — a night
+    // still asleep at window close (`wake_at === null`, `sleepEnd === totalMin`) has none.
+    //
+    // Additive to the response shape (a running SPA is a client that cannot be updated) and to
+    // `wakes.length` specifically: it can now exceed the stored `wake_count` by one, on any night with a
+    // real wake_at. That is not a bug — `wake_count` is a scored, holdout-calibrated metric for
+    // MID-NIGHT arousals and untouched here; this row makes the SAME "awake" span the to-scale timeline
+    // bar already shows (see `label()` below) additionally appear in the list above it.
+    if (sleepEnd < totalMin) {
+      wakes.push({ start_at: minuteTime(sleepEnd), end_at: minuteTime(totalMin), minutes: totalMin - sleepEnd });
+    }
     out.wakes = wakes;
 
     // Outside-the-bed movement grouped into "room activity" events, bridging single-minute gaps. Each is
