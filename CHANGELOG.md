@@ -16,8 +16,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - The detector now logs when a recorded bed exit or entry contradicts what it already believed about
   occupancy (e.g. a second "out of bed" with no "into bed" in between) — diagnostic only, for future
   tuning; every transition is still recorded exactly as before.
-- The detector now logs when the bed becomes active but no bed-entry could be linked and confirmed (a
-  bedtime that goes unrecorded is no longer silent) — diagnostic only, no detection behavior changes.
+- The detector now logs when the bed becomes active with no bed-entry link found (the same case the
+  exit side has always logged for a bed becoming active with no exit link) — diagnostic only, no
+  detection behavior changes.
 
 ### Fixed
 - **Wake clips can be turned on without ever producing one.** "Record wake-ups without alerting" only
