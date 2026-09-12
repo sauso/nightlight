@@ -259,7 +259,10 @@ describe('the npm scripts do not paper over a leaked handle', () => {
   // Anti-vacuous: if the scripts were renamed or the file moved, the check above would pass by
   // reading nothing at all.
   test('the scripts really were read', () => {
-    assert.ok(scripts?.test?.includes('node --test'), `package.json scripts.test is not a node --test run: ${scripts?.test}`);
+    // Flags between `node` and `--test` (e.g. --experimental-test-module-mocks) are legitimate — this
+    // only needs to confirm we're looking at a real `node ... --test ...` invocation, not the exact
+    // adjacency of those two words, or a new flag added for an unrelated reason breaks this vacuously.
+    assert.ok(/\bnode\b.*--test\b/.test(scripts?.test ?? ''), `package.json scripts.test is not a node --test run: ${scripts?.test}`);
     assert.ok(Object.keys(scripts).length >= 3, 'the scripts block looks empty — this file is reading the wrong package.json');
   });
 });
@@ -358,6 +361,16 @@ describe('every periodic job can be stopped (#286)', () => {
       // ⚠️ The claim "no importer to leak into" is asserted, not assumed — see the test below. An
       // exemption whose justification nothing checks is how a skip-list quietly becomes wrong.
       'index.js': 'the process entry point: never imported, its timers end with the process',
+      // handleTalkConnection's setInterval is PER-CONNECTION, not module-level state: it lives in that
+      // one call's closure, is cleared by that SAME closure's own cleanup() (called from ws 'close',
+      // ws 'error', a failed session start, AND the interval's own revocation check — every path out),
+      // and nothing outside the closure ever holds a reference to it. There is no separate "stop the
+      // interval" step for a caller to forget, because there is no caller-visible lifecycle at all —
+      // the one caller (index.js's upgrade handler) calls this once per connection and never calls
+      // anything else. Structurally this is the processGuards.js case (a factory whose timer belongs
+      // entirely to its own scope), not the #286 shape (a module-level job an importer must remember
+      // to stop) — it just doesn't return the timer to an external owner because there isn't one.
+      'lib/talkSocket.js': 'setInterval is per-connection and self-clearing, not module-level state',
     };
 
     // ⚠️ THE SWEEP ITSELF IS A TESTED FUNCTION NOW, not a loop written here. Written here, it passed
