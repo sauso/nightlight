@@ -52,7 +52,8 @@ export function transitionSnapshotPath(id) {
 }
 
 const insertStmt = db.prepare(
-  `INSERT INTO bed_transitions (camera_id, type, peak) VALUES (@camera_id, @type, @peak)`
+  `INSERT INTO bed_transitions (camera_id, type, peak, out_peak, out_frames)
+   VALUES (@camera_id, @type, @peak, @out_peak, @out_frames)`
 );
 const markSnapshotStmt = db.prepare('UPDATE bed_transitions SET snapshot = 1 WHERE id = ?');
 const camForSnapshotStmt = db.prepare(
@@ -95,12 +96,19 @@ async function attachSnapshot(id, cameraId) {
 
 // Prune runs rarely (a transition is a once-per-couple-minutes-at-most event), so an age sweep on each
 // insert is negligible and keeps the table bounded without a separate scheduler.
-export function recordBedTransition(cameraId, type, peak = null) {
+//
+// `outPeak`/`outFrames` (ROADMAP §1.2 item 2): the outside channel's evidence for this specific
+// transition — see db.js's migration comment for what they mean per type. Optional and additive:
+// omitting them (any existing or future caller that doesn't pass evidence) stores NULL, unchanged
+// from before this column existed.
+export function recordBedTransition(cameraId, type, peak = null, { outPeak = null, outFrames = null } = {}) {
   try {
     const info = insertStmt.run({
       camera_id: cameraId,
       type,
       peak: peak == null ? null : Math.round(peak * 1000) / 1000,
+      out_peak: outPeak == null ? null : Math.round(outPeak * 1000) / 1000,
+      out_frames: outFrames == null ? null : Math.round(outFrames),
     });
     // Delete the images BEFORE the rows, or the ids that name them are gone and the files orphan.
     //
@@ -128,14 +136,15 @@ export function recordBedTransition(cameraId, type, peak = null) {
 }
 
 // All transitions for the given cameras within [startSql, endSql) (UTC 'YYYY-MM-DD HH:MM:SS' strings),
-// ascending by time. Returns [{ id, camera_id, type, created_at, peak, snapshot, verdict }]. Empty for no
-// cameras.
+// ascending by time. Returns [{ id, camera_id, type, created_at, peak, out_peak, out_frames, snapshot,
+// verdict }]. Empty for no cameras.
 export function getBedTransitions(cameraIds, startSql, endSql) {
   if (!cameraIds || cameraIds.length === 0) return [];
   const ph = cameraIds.map(() => '?').join(',');
   return db
     .prepare(
-      `SELECT id, camera_id, type, created_at, peak, snapshot, verdict FROM bed_transitions
+      `SELECT id, camera_id, type, created_at, peak, out_peak, out_frames, snapshot, verdict
+         FROM bed_transitions
          WHERE camera_id IN (${ph}) AND created_at >= ? AND created_at < ?
          ORDER BY created_at ASC`
     )
@@ -149,7 +158,8 @@ export function getBedTransitions(cameraIds, startSql, endSql) {
 export function getImpossibleTransitions({ limit = 200 } = {}) {
   const rows = db
     .prepare(
-      `SELECT t.id, t.camera_id, c.name AS camera_name, t.type, t.created_at, t.peak, t.snapshot
+      `SELECT t.id, t.camera_id, c.name AS camera_name, t.type, t.created_at, t.peak,
+              t.out_peak, t.out_frames, t.snapshot
          FROM bed_transitions t JOIN cameras c ON c.id = t.camera_id
         ORDER BY t.camera_id, t.created_at ASC`
     )

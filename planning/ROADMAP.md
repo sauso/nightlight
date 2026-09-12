@@ -240,6 +240,19 @@ counts as **historical**, not as the current state.
    ordered `into_bed` → `out_of_bed`, nothing repeats. Item 3's rule needs *continued in-bed
    micro-motion* after the exit to call it a parent; here the bed read genuinely, fully empty for
    2h08m — indistinguishable from a real departure by that rule. This gap is item 2's alone.
+   ✅ **RECORDING half SHIPPED 2026-09-12** — `bed_transitions.out_peak`/`out_frames` now capture the
+   outside channel's peak and duration on every future transition (both directions). Before writing
+   any code, a peak-only floor was checked against 468 owner-reviewed verdicts already on staging:
+   `out_of_bed` correct 1.3–16.4% vs wrong 1.2–31.1%, `into_bed` correct 1.4–17.5% vs wrong 1.2–33.4%
+   — **peak alone does not separate them on either direction**, "wrong" has the higher ceiling on
+   both, so no peak threshold would have helped. Recording is deliberately record-only, no gating:
+   duration is the untested half and can't be evaluated until it has actually accumulated.
+   ⚠️ **STILL OPEN: picking a duration threshold and gating confirmation on it.** Needs real
+   `out_frames` data to accumulate across enough nights on both cameras, then the same
+   two-populations-and-a-number-between-them argument as `OOB_SLOW_OUT_MIN`/`JITTER_REENTRY_MS`,
+   scored on the 44-child-night set before shipping — Renz's wake is currently the best number in the
+   system (median 1 min) and a naive fix risks regressing it. Do not close this item until that half
+   ships too.
 3. Separate "parent leaves" from "child exits". Retrospective is fine: the nightly job runs after the
    night, so an `out_of_bed` followed by continued in-bed micro-motion is a parent leaving. — **still
    open, and now the most valuable item.** Measured 2026-08-27: the real put-down at 19:14 was recorded
