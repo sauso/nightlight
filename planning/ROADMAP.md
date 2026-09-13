@@ -549,15 +549,21 @@ its own motivating incident. **Named, accepted limits, not fixed this round:**
   retries a failed candidate).
 - Excursions over 20 minutes and `in_progress` (live, tonight-so-far) nights are out of scope.
 
-**Still required before this item is considered closed**: replay all 44 scored child-nights on both
-environments (byte-identical onset/final-wake hard gate, unchanged); a bounded, non-zero set of nights
-should change, the named incident among them; inspect by eye every night whose `wake_count`,
-`awake_minutes`, **or** `longest_stretch_minutes` changes (not `wake_count` alone — an episode can
-extend an existing run without changing the count); any `wake_count` **decrease** blocks shipping until
-understood; query `bed_transitions.verdict` for every transition pair this mechanism would use as
-evidence — an already-verdicted `wrong` transition is a demonstrable false positive today; and verify
-the real prod `motion_peak` for camera `dce8157e`, local 2026-09-09 20:41, against the fixture the tests
-use (flagged in the plan as unqueried at the time of writing). None of this has been run yet.
+**✅ SHIPPED, dev `6be7c97` (PR #429) 2026-09-13, staging-verified.** Deployed to staging and replayed
+against all 56 nights currently stored there (both children) — same code, `USE_TRANSITION_WAKE_EPISODES`
+on vs off, isolating this change from every other sleep-analysis fix shipped since those nights were
+last stored (comparing against the *stale stored rows* directly, without that isolation, produced 15
+spurious "hard gate" failures — all accounted for by unrelated changes shipped in the intervening
+weeks, none by this one). Isolated result: **onset/final-wake byte-identical on all 56 — zero hard-gate
+failures.** Exactly 2 nights changed: Raffa 2026-09-09 (`wake_count 0→1`, `awake_minutes 0→3`) — **the
+named motivating incident itself**, confirmed fixed on real data — and Renz 2026-09-09 (`wake_count
+9→10`, `awake_minutes 146→151`, episode at 14:35-14:40 UTC). **Zero `wake_count` decreases.** Both
+changed nights' evidence transitions (Raffa #846/#847/#848; Renz #891/#892/#893) are unverdicted
+(`verdict IS NULL`) — no already-known-wrong transition was used as evidence for either.
+
+Real prod `motion_peak` for camera `dce8157e`, local 2026-09-09 20:41: **0.0563** — confirmed active
+(`> MOTION_ACTIVE`), settling the plan's flagged-unverified claim; both gap minutes (20:42, 20:43) read
+`motion_peak = 0`, confirmed quiet, matching the shipped code's exact expectation.
 
 #### Why the two children differ at all — measured, so it is not re-litigated
 
