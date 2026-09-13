@@ -196,6 +196,12 @@ const OCCUPANCY_MIN_MINUTES = 3;
 // the old behaviour. Both are stored either way (`*_algo` keeps the movement-only figures) so the two
 // methods stay comparable night by night. Flip this to false to revert to movement-only everywhere.
 const USE_TRANSITION_TIMES = true;
+// A corroborated, verified-empty out_of_bed -> into_bed gap of 1-20 minutes counts as an awakening
+// even when it never reaches WAKE_ACTIVE_MIN active minutes (see detectMidnightEpisodes) — the
+// wake-COUNT path otherwise reads only per-minute activity and ignores bed_transitions entirely,
+// unlike wake-TIME above. INDEPENDENT of USE_TRANSITION_TIMES: reverting that one alone does not
+// revert this — see planning/reviews/midnight-wake-plan-2026-09-13-v6.md §0.8.
+const USE_TRANSITION_WAKE_EPISODES = true;
 // When the empty-bed run starts near a recorded bed transition, snap the wake to that transition's clock
 // time (its TIMING is trustworthy even though its in/out LABEL isn't — see the destination-state note).
 const WAKE_SNAP_MS = 5 * 60 * 1000;
@@ -422,6 +428,84 @@ function nightClimate(cams, startSql, asOfSql, { includeSeries = false } = {}) {
       .map((b) => ({ t: b.t, temperature: r1(avg(b.ts)), humidity: r0(avg(b.hs)) }));
   }
   return climate;
+}
+
+// A completed night's corroborated exit/return episodes, from the ONE scoring camera's transitions.
+// Pure and standalone (issue #352's own reasoning: testable without a spawned process, and callable
+// once the departure scan and metrics extension below have both already run and settled onset/sleepEnd).
+// Adversarially reviewed across six rounds (planning/reviews/midnight-wake-plan-2026-09-13-v6.md) —
+// every guard below exists because an earlier draft, traced against real data, either missed the
+// motivating incident or manufactured a fake episode. See the plan's §0/§4 for the full history and
+// the named, accepted limitations this mechanism does NOT attempt to close.
+export function detectMidnightEpisodes(transitions, cribActExt, bedOccupiedFrom, txIdx, txMs, onset, sleepEnd) {
+  // getBedTransitions orders by created_at ASC with no id tie-break (bedTransitions.js), and
+  // created_at has one-second resolution — an explicit id tie-break makes "the next transition"
+  // deterministic across recomputes of the same night (plan §0.8).
+  const sorted = transitions
+    .slice()
+    .sort((a, b) => (a.created_at === b.created_at ? a.id - b.id : a.created_at < b.created_at ? -1 : 1));
+
+  const episodes = [];
+  for (let k = 0; k < sorted.length; k++) {
+    const exit = sorted[k];
+    if (exit.type !== TRANSITION.OUT_OF_BED) continue;
+    const exitIdx = txIdx(exit.created_at);
+    if (exitIdx < onset || exitIdx >= sleepEnd) continue; // stay inside the decided range (plan §0.6)
+
+    // BACKWARD settling-cluster guard, mirroring settlingTail's own logic below (not reused directly —
+    // that one runs inside the departure scan's own loop). The classifier emits out -> in -> out for a
+    // single climb-back-in; without this, the cluster's trailing marker looks like a fresh departure
+    // and can pair with an unrelated later return (plan §0.3-of-v4, found by adversarial review).
+    // Known limit: an unrelated spurious `into_bed` corroborated by LATER occupancy can suppress a
+    // genuine departure this way — a false negative, no fallback added (plan §0.5). Deliberately no
+    // early exit from this `.find` based on scan position — only the time-window predicate matters.
+    const exitMs = txMs(exit.created_at);
+    const settlingBack = sorted.find(
+      (back) =>
+        back.type === TRANSITION.INTO_BED &&
+        txMs(back.created_at) <= exitMs &&
+        exitMs - txMs(back.created_at) <= JITTER_REENTRY_MS &&
+        bedOccupiedFrom(txIdx(back.created_at))
+    );
+    if (settlingBack) continue;
+
+    // The LITERAL next transition only — never search past a candidate that fails a check below to
+    // find a later one instead. Two earlier drafts did exactly that and each manufactured a fake
+    // episode spanning real settling noise (plan §0's v2/v4 findings). The cost is a real known limit:
+    // a noisy intervening marker can shorten an episode or drop it entirely (plan §0.7).
+    const entry = sorted[k + 1];
+    if (!entry || entry.type !== TRANSITION.INTO_BED) continue;
+    const entryIdx = txIdx(entry.created_at);
+    if (entryIdx >= sleepEnd) continue; // stay inside the decided range
+
+    const gapMs = txMs(entry.created_at) - exitMs;
+    if (gapMs <= JITTER_REENTRY_MS) continue; // settled — the tail of the same movement, not a wake
+    if (gapMs > MORNING_ABSENCE_MIN * 60000) continue; // out of scope for this pass
+
+    // Corroboration, same primitive the departure scan already trusts for the identical question —
+    // but here to ADMIT an episode rather than reject a candidate, the first caller to do so. A false
+    // `true` (its 150-minute window reaching unrelated later occupancy) is now a false positive, not a
+    // safe false negative — named explicitly rather than left implicit (plan §0.4; see the comment on
+    // bedOccupiedFrom itself below).
+    if (!bedOccupiedFrom(entryIdx)) continue;
+
+    // BOTH endpoint minute buckets necessarily carry the transition that generated them (the exit's
+    // own departure movement; the entry's own return movement) — neither can answer "was the bed
+    // empty during the absence". Only the strictly interior buckets can, and at least one must exist:
+    // a real, quiet gap spanning fewer than two whole buckets is rejected for lack of evidence rather
+    // than falsely admitted (plan §0.1 — the third round in a row a range boundary, not the mechanism,
+    // was the actual defect; this one is adversarially re-verified by execution, not just reasoned).
+    if (entryIdx - exitIdx < 2) continue;
+    let quiet = true;
+    for (let i = exitIdx + 1; i < entryIdx; i++) {
+      // Strict `=== false`, matching this file's own hardened convention (see cribActExt above): an
+      // unobserved minute must never pass as evidence the bed was empty.
+      if (cribActExt[i] !== false) { quiet = false; break; }
+    }
+    if (quiet) episodes.push({ start: exitIdx, end: entryIdx }); // inclusive both ends — the child is
+    // "up" from the moment they leave to the moment they're back.
+  }
+  return episodes;
 }
 
 // --- the inference itself ---
@@ -780,6 +864,12 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // post-window wake can never be credited further than this, in either place. Defaults to `totalMin`
   // (no extension at all) for an in-progress night, where none of this ever runs.
   let totalMinExt = totalMin;
+  // Hoisted the same way, and for the same reason, as totalMinExt just above: detectMidnightEpisodes
+  // (called after this block closes, once onset/sleepEnd are final) needs both. `cribOccExt` does NOT
+  // need its own hoist — bedOccupiedFrom's closure keeps it alive for as long as anything still holds
+  // a reference to the function itself, the ordinary JS closure guarantee, not a special case.
+  let cribActExt = null;
+  let bedOccupiedFrom = null;
   if (!inProgress) {
     // Indices here share the timeline origin (analysisStartUtc) used by idxOf, so the lookbehind is
     // included at the front and the lookahead past the window end at the back.
@@ -804,7 +894,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     // Before issue #350's fix this was boolean-only, defaulting every index to `false` — an unobserved
     // minute was INDISTINGUISHABLE from one a real sample confirmed was quiet, so the absence scan
     // below could treat a dead camera (or simply the future) as proof the bed stayed empty.
-    const cribActExt = new Array(totalMinExt).fill(null);
+    cribActExt = new Array(totalMinExt).fill(null);
     // Occupancy-level micro-motion, from the SAME rows. Twenty times more sensitive than
     // MOTION_ACTIVE, and it answers a different question: not "did something happen in this bed" but
     // "is anyone in it at all". `null` = no sample, a gap that must not read as an empty bed.
@@ -833,13 +923,20 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       }
     }
 
-    // Is the bed demonstrably OCCUPIED from minute `from` onwards?
+    // Is the bed demonstrably OCCUPIED from minute `from` onwards? Requires OCCUPANCY_MIN_MINUTES of
+    // real micro-motion in the OCCUPANCY_WITNESS_MIN minutes that follow; a gap in the data supplies no
+    // witness either way (returns false, same as finding none).
     //
-    // Deliberately mirrors bedOccupiedAfter's contract INCLUDING its failure direction: its only
-    // caller uses a true result to REJECT something, so it returns FALSE when it cannot tell. An
-    // unreadable stretch then leaves the pre-existing behaviour untouched instead of inventing a
-    // reversal out of missing data.
-    const bedOccupiedFrom = (from) => {
+    // ⚠️ THREE call sites now, not one, and they do NOT all fail the same safe direction.
+    // `reversedBy` and `settlingTail` below use a true result to REJECT a candidate — a false `true`
+    // there is a safe false-negative, exactly `bedOccupiedAfter`'s own contract.
+    // `detectMidnightEpisodes` (above `computeNight`) uses a true result to ADMIT an episode — a false
+    // `true` there is a false POSITIVE: the 150-minute window can reach forward into an unrelated later
+    // event (a parent handling an already-empty bed, or a genuinely later real return) and corroborate
+    // a return that never happened, or wasn't this one. This is a named, accepted residual risk (plan
+    // §0.4), not a bug to fix here — the alternative is a genuinely new, asymmetric occupancy primitive,
+    // which is a redesign, not this function's job.
+    bedOccupiedFrom = (from) => {
       const to = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt);
       let moved = 0;
       for (let i = Math.max(from, 0); i < to; i++) {
@@ -1125,6 +1222,33 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     }
   }
 
+  // Bridge short quiet gaps (<= WAKE_GAP_MIN) directly between already-true stretches of inWakeArr,
+  // with NO activity-count threshold — unlike markWakeRuns, which bridges gaps only while growing a
+  // candidate run it will then gate on WAKE_ACTIVE_MIN. Needed because detectMidnightEpisodes ORs an
+  // episode's minutes into inWake directly (deliberately bypassing markWakeRuns and its threshold —
+  // the whole point of an episode is to count regardless of WAKE_ACTIVE_MIN), so accumulateMetrics
+  // sees a hand-edited array markWakeRuns never bridged. Found by adversarial review: an episode
+  // 1-3 minutes from an adjacent activity-based wake was counted as a SECOND wake instead of extending
+  // the first, contradicting this file's own WAKE_GAP_MIN convention (a short gap is one wake, not two).
+  function bridgeWakeGaps(inWakeArr, from, to) {
+    for (let i = from; i < to; ) {
+      if (!inWakeArr[i]) { i++; continue; }
+      let k = i;
+      while (k < to) {
+        if (inWakeArr[k]) { k++; continue; }
+        let g = k;
+        while (g < to && !inWakeArr[g]) g++;
+        if (g < to && g - k <= WAKE_GAP_MIN) {
+          for (let j = k; j < g; j++) inWakeArr[j] = true;
+          k = g;
+          continue;
+        }
+        break;
+      }
+      i = k;
+    }
+  }
+
   let inWake = new Array(totalMin).fill(false);
   markWakeRuns(activeForWake, onset, totalMin, inWake);
 
@@ -1223,6 +1347,26 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       markWakeRuns(activeMetrics, onset, metricsEnd, inWake);
       ({ asleep, awake, wakeCount, longest } = accumulateMetrics(inWake, onset, metricsEnd));
       sleepEnd = metricsEnd;
+    }
+  }
+
+  // Combine only here — after algoSleepEnd (captured above, issue #352 style), status (the `empty`
+  // return above this point, deliberately not re-run against episode evidence — see the plan's §4 on
+  // why that ordering is left alone), and the metrics extension just above have all already settled.
+  // `inWake` is replaced IN PLACE (not a parallel array) so the timeline/wakes[]/label() below, which
+  // all read `inWake` directly, actually reflect it — see planning/reviews/midnight-wake-plan-2026-09-13-v6.md.
+  if (!inProgress && USE_TRANSITION_WAKE_EPISODES) {
+    const episodes = detectMidnightEpisodes(transitions, cribActExt, bedOccupiedFrom, txIdx, txMs, onset, sleepEnd);
+    if (episodes.length) {
+      for (const { start, end } of episodes) {
+        for (let i = start; i <= end; i++) inWake[i] = true;
+      }
+      // Re-establish markWakeRuns' own bridging guarantee for the minutes just OR'd in directly —
+      // see bridgeWakeGaps' comment above for why accumulateMetrics cannot be trusted to do this itself.
+      bridgeWakeGaps(inWake, onset, sleepEnd);
+      // wakeCount can DECREASE here (an episode bridging two previously-separate activity runs merges
+      // them into one) even as awake_minutes increases — expected to be rare; scored explicitly (plan §7).
+      ({ asleep, awake, wakeCount, longest } = accumulateMetrics(inWake, onset, sleepEnd));
     }
   }
 

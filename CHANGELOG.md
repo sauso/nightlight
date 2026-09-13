@@ -30,6 +30,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   called from anywhere yet; groundwork for reviewing or scoring against it later.
 
 ### Fixed
+- **A real out-of-bed episode could report zero wake-ups.** Wake-count only ever read per-minute
+  activity, so a child who climbed out, was put back, and lay still afterward was structurally
+  incapable of reaching the five-active-minute threshold — a real, alerted departure and return
+  reported "0 wakes, 0 awake minutes." A short exit-and-return (1-20 minutes) now counts as an
+  awakening when the recorded transitions corroborate it and the bed is confirmed quiet in between,
+  independent of the activity threshold. This can extend or merge existing wake runs (awake time can
+  increase while the wake count doesn't, or two runs can merge into one). Known limits: it cannot
+  tell an adult's visit to the bed from the child's own trip out of it, and a spurious reading can
+  still suppress or shorten a real episode — both are the same kind of limit this classifier already
+  has elsewhere. `USE_TRANSITION_WAKE_EPISODES` in `sleepAnalysis.js` reverts it independently of
+  `USE_TRANSITION_TIMES`.
 - **Wake clips can be turned on without ever producing one.** "Record wake-ups without alerting" only
   ever started buffering if detection clips or on-demand recording were also on for that camera — so a
   household that wanted silent wake clips *and nothing else* got a setting that looked accepted and

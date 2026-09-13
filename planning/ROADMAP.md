@@ -346,9 +346,12 @@ counts as **historical**, not as the current state.
    as an `out_of_bed` (the parent's hands leaving the bed), so that night had no bedtime `into_bed` at
    all and the drawn marker was 40 minutes adrift. The reported bedtime survived it, but only because
    the sleep analysis no longer depends on the label being right.
-   ★ **Build this together with §1.5 Gap B** — both read a corroborated `out_of_bed`/`into_bed` pair as
-   one event and are scored by the same 44-child-night harness, so doing them separately means writing
-   the same evidence walk twice.
+   ★ **Gap B below shipped WITHOUT this** — the two were meant to be built together, but the mechanism
+   that survived six review rounds only ever answers "was the bed empty during the gap", never "who
+   caused the transitions". A quiet gap bracketed by two adult visits (a parent leaning in, leaving,
+   returning, leaving again) still reads as a child's episode — named explicitly in Gap B's own known
+   limits. This item is what would close that gap; it remains open and is now that mechanism's single
+   biggest known blind spot, not merely an adjacent nice-to-have.
 4. **New: log-driven tuning is now possible.** The exit rule logs rejected links (`[oob] … link
    rejected`) with the actual gap and outside magnitude, so the real distribution can be read off a
    week of logs rather than guessed. Read it before moving `OOB_LINK_SLOW_MS` or `OOB_SLOW_OUT_MIN`.
@@ -507,23 +510,54 @@ mutation-tested. `wakes.length` (the detail page's live count) can now exceed th
 by one on any night with a real wake_at — deliberate, they answer different questions; see the code
 comment in `sleepAnalysis.js` if this needs revisiting.
 
-#### Gap B — a real out-of-bed episode is invisible because the rule ignores `bed_transitions`
+#### Gap B — ✅ SHIPPED (code); production replay + verdict audit still pending before this closes
 
 Raffa 2026-09-09: `846 20:41:30 out · 847 20:43:57 in · 848 20:44:36 out` — an unambiguous out/in pair.
-Fresh compute on 0.30.1 reports `wake_count 0, awake_minutes 0`. Why: the only active minutes are
-20:41, 20:44 and 20:45 (20:42–43 are dead); the run walk bridges the 2-minute gap (`WAKE_GAP_MIN` 3)
-into **one run of 3 active minutes**, against **`WAKE_ACTIVE_MIN = 5`**. Three is not five, so it is
-classified a brief stir.
+Fresh compute on 0.30.1 reported `wake_count 0, awake_minutes 0`. Why: the only active minutes were
+20:41, 20:44 and 20:45 (20:42–43 dead); the run walk bridged the 2-minute gap (`WAKE_GAP_MIN` 3) into
+**one run of 3 active minutes**, against **`WAKE_ACTIVE_MIN = 5`**. Three is not five, so it was
+classified a brief stir — despite real motion+sound alerts firing on both flanks.
 
-★★★ **The wake-COUNT path reads only per-minute activity and ignores `bed_transitions` entirely**,
-while the wake-TIME path (`USE_TRANSITION_TIMES`) treats them as authoritative. A child who climbs out,
-is put back, and lies still is *structurally* incapable of reaching five active minutes.
+★★★ **The wake-COUNT path read only per-minute activity and ignored `bed_transitions` entirely**, while
+the wake-TIME path (`USE_TRANSITION_TIMES`) already treated them as authoritative. A child who climbs
+out, is put back, and lies still was *structurally* incapable of reaching five active minutes.
 
-⚠️ **Do NOT fix this by lowering `WAKE_ACTIVE_MIN`.** It exists to stop brief stirs counting, it was
-tuned, and 5 → 3 changes every night in the corpus. The candidate is *"a corroborated `out_of_bed` →
-`into_bed` pair after onset counts as an awakening"*, which costs nothing on nights with no transitions.
-**Score it on the 44 child-nights (both environments) before believing it** — same scorer as #342.
-★ Shares its evidence source with §1.2 item 3 (parent-leaves vs child-exits); build them together.
+**Fixed, not by lowering `WAKE_ACTIVE_MIN`** (it stops brief stirs counting, and 5→3 would have changed
+every night in the corpus) — `detectMidnightEpisodes` in `sleepAnalysis.js` adds a standalone,
+adversarially-reviewed pass: a corroborated `out_of_bed`→`into_bed` pair, 1–20 minutes apart, with the
+bed confirmed quiet in every whole minute strictly between the two transitions, counts as an awakening
+independent of the activity threshold. Marks both endpoint minutes plus everything between; unions with
+the existing activity-based wake runs (can extend one, or merge two into one — `wake_count` can
+therefore *decrease* even as `awake_minutes` increases). Runs once, after the departure scan, the
+`empty`-night decision, and the post-window metrics extension have all already settled — an episode can
+never move onset, the final wake time, or a night's `status`. `USE_TRANSITION_WAKE_EPISODES` reverts it
+independently of `USE_TRANSITION_TIMES`.
+
+Six rounds of adversarial review (Codex + an independent subagent each round — see
+[the plan](reviews/midnight-wake-plan-2026-09-13-v6.md)) found real, code-verified defects in every
+round through v4, including two that would have shipped the mechanism producing **zero** episodes for
+its own motivating incident. **Named, accepted limits, not fixed this round:**
+- Cannot tell an adult's bed visit from the child's own trip — a quiet gap bracketed by two adult
+  transitions still counts (§1.2 item 3's job, still open, now the mechanism's single biggest blind
+  spot — see item 3 above).
+- The occupancy corroboration's 150-minute window can borrow unrelated later motion, inventing an
+  episode or truncating a real one at a spurious earlier return.
+- A spurious `into_bed` within 60 seconds before a real departure can suppress that episode outright
+  (a false negative, the safe direction); a false settling tail past 60 seconds can still manufacture
+  one — the same already-measured, admittedly-unseparable overlap `JITTER_REENTRY_MS` documents.
+- A noisy intervening transition can shorten or entirely drop a real episode (positional pairing never
+  retries a failed candidate).
+- Excursions over 20 minutes and `in_progress` (live, tonight-so-far) nights are out of scope.
+
+**Still required before this item is considered closed**: replay all 44 scored child-nights on both
+environments (byte-identical onset/final-wake hard gate, unchanged); a bounded, non-zero set of nights
+should change, the named incident among them; inspect by eye every night whose `wake_count`,
+`awake_minutes`, **or** `longest_stretch_minutes` changes (not `wake_count` alone — an episode can
+extend an existing run without changing the count); any `wake_count` **decrease** blocks shipping until
+understood; query `bed_transitions.verdict` for every transition pair this mechanism would use as
+evidence — an already-verdicted `wrong` transition is a demonstrable false positive today; and verify
+the real prod `motion_peak` for camera `dce8157e`, local 2026-09-09 20:41, against the fixture the tests
+use (flagged in the plan as unqueried at the time of writing). None of this has been run yet.
 
 #### Why the two children differ at all — measured, so it is not re-litigated
 
