@@ -317,6 +317,27 @@ describe('the review screen', () => {
       at();
       expect(await screen.findByRole('button', { name: /Save just the event answers/ })).toBeInTheDocument();
     });
+
+    test('two reversals in one night each get their own prompt, answered independently', async () => {
+      api.get.mockResolvedValue({
+        ...NIGHT,
+        transitions: [
+          ...QUICK_NIGHT.transitions,
+          { id: 31, type: 'into_bed', created_at: '2026-08-29 19:00:00', snapshot: 0, verdict: null, camera_name: 'Raffa Room', quick_reversal_of: null, quick_reversal_gap_s: null },
+          { id: 32, type: 'out_of_bed', created_at: '2026-08-29 19:00:20', snapshot: 0, verdict: null, camera_name: 'Raffa Room', quick_reversal_of: 31, quick_reversal_gap_s: 20 },
+        ],
+      });
+      const { user } = at();
+      expect(await screen.findAllByText('Quick check-in?')).toHaveLength(2);
+
+      // Answer only the second one — the first must stay untouched.
+      await user.click(screen.getAllByRole('button', { name: /They got up/ })[1]);
+      await user.click(screen.getByRole('button', { name: /Save just the event answers/ }));
+
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(api.put.mock.calls[0][1].verdicts).toMatchObject({ 32: 'correct' });
+      expect(api.put.mock.calls[0][1].verdicts[22]).toBeUndefined();
+    });
   });
 
   test('typing survives the timezone arriving — the form must not reset under you', async () => {
