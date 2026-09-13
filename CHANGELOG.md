@@ -9,6 +9,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- The morning review now asks about a bed entry immediately followed by an exit ("Got into bed at
+  7:51pm, then got out of bed again 14s later — what actually happened?"), separately from the
+  collapsed full event list — measurement points to this being mostly a parent's presence read as a
+  child's exit, and the question was previously easy to miss inside a long list of events.
+
 ### Changed
 - Bed transitions now record additional outside-motion evidence (peak and how long it lasted) alongside
   each recorded exit or entry, for future tuning of the detector — nothing reads these values yet, and

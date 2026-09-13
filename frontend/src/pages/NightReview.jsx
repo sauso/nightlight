@@ -163,6 +163,18 @@ export default function NightReview() {
   const shownWake = toLocalHhmm(data.computed?.wake_at, tz);
   const hasOpinion = Boolean(shownOnset || shownWake);
 
+  // An out_of_bed the server flagged as immediately following an into_bed (quick_reversal_of names
+  // that into_bed's id) — measured 2026-09-13 to be mostly a parent's presence read as a child's exit,
+  // not classifier noise or a real return trip. Surfaced on its own, NOT behind "Check the recorded
+  // events" below: that section is deliberately collapsed by default (the owner's own words: "it's
+  // also flooded with in and out of bed"), so relying on it here would mean this specific, high-value
+  // question is the one thing MOST likely to go unnoticed and unanswered — the exact problem this
+  // exists to fix (1 of 86 such pairs had ever been verdicted before this).
+  const quickReversals = transitions
+    .filter((t) => t.quick_reversal_of != null)
+    .map((oob) => ({ oob, ib: transitions.find((t) => t.id === oob.quick_reversal_of) }))
+    .filter((p) => p.ib);
+
   return (
     <>
       <AppHeader title="Was this right?" back={back} />
@@ -233,6 +245,55 @@ export default function NightReview() {
             </>
           )}
         </div>
+
+        {/* NOT collapsed, deliberately unlike the full event list below — see quickReversals' own
+            comment for why relying on that collapse here would defeat the point. Kept neutral rather
+            than suggesting "this was probably you": the whole reason this exists is to collect an
+            honest label, and leading the answer would poison exactly the ground truth it's after. */}
+        {quickReversals.map(({ oob, ib }) => (
+          <div className="card" key={oob.id}>
+            <div className="card-title">Quick check-in?</div>
+            <div className="review-event">
+              {oob.snapshot ? (
+                <img
+                  className="review-event__frame"
+                  src={api.url(`/cameras/bed-transitions/${oob.id}/snapshot`)}
+                  alt=""
+                  loading="lazy"
+                />
+              ) : (
+                <div className="review-event__frame review-event__frame--none">No frame</div>
+              )}
+              <div className="review-event__body">
+                <div className="review-event__when">
+                  Got into bed at {fmtEvent(ib)}, then got out of bed again {oob.quick_reversal_gap_s}s
+                  later — what actually happened?
+                </div>
+                {oob.camera_name && <div className="camera-tile__sub">{oob.camera_name}</div>}
+                <div className="review-event__verdicts">
+                  {[
+                    { key: 'wrong', label: 'That was me', Icon: X },
+                    { key: 'correct', label: 'They got up', Icon: Check },
+                    { key: 'unclear', label: 'Not sure', Icon: HelpCircle },
+                  ].map(({ key, label, Icon }) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className={`review-chip${verdicts[oob.id] === key ? ' review-chip--on' : ''}`}
+                      aria-pressed={verdicts[oob.id] === key}
+                      onClick={() => {
+                        setTouched(true);
+                        setVerdicts((v) => ({ ...v, [oob.id]: v[oob.id] === key ? null : key }));
+                      }}
+                    >
+                      <Icon size={16} /> {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
 
         {/* Collapsed by default, and that is the point. A night carries 20-35 recorded transitions —
             Raffa's 2026-08-29 had 31 — and opening the screen straight into a wall of frames buries
@@ -339,7 +400,7 @@ export default function NightReview() {
           <button type="button" className="btn btn-primary btn-block" disabled={busy} onClick={() => save(true)}>
             {busy ? 'Saving…' : 'Save review'}
           </button>
-        ) : showEvents && transitions.length > 0 && (
+        ) : (showEvents || quickReversals.length > 0) && transitions.length > 0 && (
           <button type="button" className="btn btn-secondary btn-block" disabled={busy} onClick={() => save(false)}>
             {busy ? 'Saving…' : 'Save just the event answers'}
           </button>

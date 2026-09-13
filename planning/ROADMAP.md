@@ -293,12 +293,18 @@ counts as **historical**, not as the current state.
    specific pattern before anything downstream (surfacing in the morning review for labelling, or an
    analysis-layer discount on `wake_count`/`awake_minutes`) can safely be built, and there is almost
    none yet. This is what makes gathering that possible without guessing at a real-time gate.
-   ⚠️ **Still open, and the actual next decision**: whether to (a) surface these in the morning review
-   as their own question so verdicts accumulate before building anything further, or (b) go straight to
-   an analysis-layer discount using the bed-motion signal above as a proxy for "spurious" and score it
-   against the existing 44-night set — (b) is faster but touches `wake_count`, which item 1's own
-   history says to treat as fragile; (a) is slower but builds the same kind of ground truth item 1 and
-   2 both needed before they could ship anything real. Not decided.
+   ✅ **DECIDED and SHIPPED 2026-09-13, option (a).** Owner chose to surface these for owner-verdict
+   labelling rather than go straight to an analysis-layer discount on `wake_count` — same reasoning as
+   items 1 and 2's own history: build the ground truth before building the rule. `NightReview.jsx` now
+   shows a small, NOT-collapsed "Quick check-in?" prompt for any `into_bed`/`out_of_bed` pair the
+   server flags via `quick_reversal_of` (deliberately separate from the full event list, which stays
+   collapsed by default — the owner's own past words, "it's also flooded with in and out of bed", are
+   exactly why relying on that list here would have buried the one question actually worth asking).
+   Reuses the existing verdict mechanism unchanged (no new schema): "That was me" → `wrong`, "They got
+   up" → `correct`, "Not sure" → `unclear`, stored on the `out_of_bed` row. Copy is deliberately
+   neutral rather than suggesting "this was probably you" — leading the answer would poison the exact
+   ground truth this exists to collect. Option (b) (the analysis-layer discount) is not built; revisit
+   once verdicts actually accumulate on this pattern.
 2. Record the outside channel's **peak and duration** alongside each transition — new columns on
    `bed_transitions` — and require substantial outside evidence for `into_bed`, symmetric for
    `out_of_bed`. — **RE-OPENED 2026-09-12, exit side only.** The earlier "lower priority, no longer
