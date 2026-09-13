@@ -11,7 +11,7 @@
 //      card it was correcting — silently, in the data everything else is scored against.
 
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
 import { renderAsAdmin, renderAsCaregiver, forEachRole, renderAs } from './helpers/render.jsx';
 import MorningReviewCard from '../src/components/MorningReviewCard.jsx';
@@ -159,6 +159,52 @@ describe('the review screen', () => {
     const img = document.querySelector('.review-event__frame:not(.review-event__frame--none)');
     expect(img).toHaveAttribute('src', '/api/cameras/bed-transitions/11/snapshot?token=t');
     expect(screen.getByText('No frame')).toBeInTheDocument();
+  });
+
+  describe('enlarging a snapshot', () => {
+    // Clicking a thumbnail opens the same photo full-size in a modal, for frames that are too small
+    // or too dim to judge at 160x120 — the owner's own words: some are "hard to confirm".
+    test('clicking a thumbnail in the event list opens it enlarged, and it can be closed', async () => {
+      const { user } = at();
+      await openEvents(user);
+      await screen.findByText(/got out of bed/);
+
+      await user.click(screen.getByRole('button', { name: /Enlarge photo/ }));
+
+      const big = await screen.findByRole('dialog');
+      const bigImg = big.querySelector('.image-preview');
+      expect(bigImg).toHaveAttribute('src', '/api/cameras/bed-transitions/11/snapshot?token=t');
+      expect(within(big).getByText('Raffa Room')).toBeInTheDocument();
+
+      await user.click(within(big).getByRole('button', { name: /close/i }));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    // A transition with no snapshot renders the "No frame" placeholder, not an image — there is
+    // nothing to enlarge, so it must not be wrapped in a button either.
+    test('a transition with no frame is not clickable', async () => {
+      const { user } = at();
+      await openEvents(user);
+      await screen.findByText('No frame');
+      expect(screen.queryAllByRole('button', { name: /Enlarge photo/ })).toHaveLength(1);
+    });
+
+    test('the quick check-in thumbnail enlarges too', async () => {
+      api.get.mockResolvedValue({
+        ...NIGHT,
+        transitions: [
+          { id: 21, type: 'into_bed', created_at: '2026-08-29 09:51:00', snapshot: 1, verdict: null, camera_name: 'Raffa Room', quick_reversal_of: null, quick_reversal_gap_s: null },
+          { id: 22, type: 'out_of_bed', created_at: '2026-08-29 09:51:14', snapshot: 1, verdict: null, camera_name: 'Raffa Room', quick_reversal_of: 21, quick_reversal_gap_s: 14 },
+        ],
+      });
+      const { user } = at();
+      await screen.findByText('Quick check-in?');
+
+      await user.click(screen.getByRole('button', { name: /Enlarge photo/ }));
+
+      const big = await screen.findByRole('dialog');
+      expect(big.querySelector('.image-preview')).toHaveAttribute('src', '/api/cameras/bed-transitions/22/snapshot?token=t');
+    });
   });
 
   test('saving sends what was typed, as wall-clock, for the server to resolve', async () => {

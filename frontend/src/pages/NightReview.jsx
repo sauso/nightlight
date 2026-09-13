@@ -5,6 +5,7 @@ import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
+import ImagePreviewModal from '../components/ImagePreviewModal.jsx';
 
 // Recording what actually happened last night, from the person who was there.
 //
@@ -82,6 +83,10 @@ export default function NightReview() {
   const [verdictsTouched, setVerdictsTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  // The transition whose snapshot is currently open full-size, or null. A transition row (id, type,
+  // created_at, camera_name) carries everything ImagePreviewModal's title/meta need — no reason to
+  // shadow those fields into a separate shape.
+  const [preview, setPreview] = useState(null);
 
   // ⚠️ FETCH ON [id, date] ONLY. `tz` must NOT be in here.
   //
@@ -119,6 +124,12 @@ export default function NightReview() {
   }, [data, tz, touched, verdictsTouched]);
 
   const fmtEvent = useMemo(() => (t) => toLocalHhmm(t.created_at, tz), [tz]);
+
+  // The enlarged view's title/meta. A plain camera name as the title (Modal always shows one), the
+  // time + which kind of event as the meta line underneath the photo — the same two facts the
+  // thumbnail's own row already states, just readable at a glance once the image itself is legible.
+  const previewTitle = (t) => t?.camera_name || 'Snapshot';
+  const previewMeta = (t) => (t ? `${fmtEvent(t)} — ${t.type === 'into_bed' ? 'got into bed' : 'got out of bed'}` : '');
 
   // `withTimes` false saves only the verdicts and leaves any recorded times alone.
   const save = async (withTimes, onsetHm = onset, wakeHm = wake) => {
@@ -268,12 +279,19 @@ export default function NightReview() {
             <div className="card-title">Quick check-in?</div>
             <div className="review-event">
               {oob.snapshot ? (
-                <img
-                  className="review-event__frame"
-                  src={api.url(`/cameras/bed-transitions/${oob.id}/snapshot`)}
-                  alt=""
-                  loading="lazy"
-                />
+                <button
+                  type="button"
+                  className="review-event__frame-btn"
+                  aria-label="Enlarge photo"
+                  onClick={() => setPreview(oob)}
+                >
+                  <img
+                    className="review-event__frame"
+                    src={api.url(`/cameras/bed-transitions/${oob.id}/snapshot`)}
+                    alt=""
+                    loading="lazy"
+                  />
+                </button>
               ) : (
                 <div className="review-event__frame review-event__frame--none">No frame</div>
               )}
@@ -342,12 +360,19 @@ export default function NightReview() {
           {showEvents && transitions.map((t) => (
             <div key={t.id} className="review-event">
               {t.snapshot ? (
-                <img
-                  className="review-event__frame"
-                  src={api.url(`/cameras/bed-transitions/${t.id}/snapshot`)}
-                  alt=""
-                  loading="lazy"
-                />
+                <button
+                  type="button"
+                  className="review-event__frame-btn"
+                  aria-label="Enlarge photo"
+                  onClick={() => setPreview(t)}
+                >
+                  <img
+                    className="review-event__frame"
+                    src={api.url(`/cameras/bed-transitions/${t.id}/snapshot`)}
+                    alt=""
+                    loading="lazy"
+                  />
+                </button>
               ) : (
                 <div className="review-event__frame review-event__frame--none">No frame</div>
               )}
@@ -419,6 +444,14 @@ export default function NightReview() {
           </button>
         )}
       </main>
+      {preview && (
+        <ImagePreviewModal
+          title={previewTitle(preview)}
+          imagePath={`/cameras/bed-transitions/${preview.id}/snapshot`}
+          meta={previewMeta(preview)}
+          onClose={() => setPreview(null)}
+        />
+      )}
     </>
   );
 }
