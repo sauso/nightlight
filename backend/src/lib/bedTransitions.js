@@ -3,6 +3,7 @@ import path from 'path';
 import db from '../db.js';
 import { logger } from './logger.js';
 import { captureSnapshot, fetchHttpSnapshot } from './snapshot.js';
+import { findQuickReversals } from './bedTransitionRules.js';
 
 // Persisted bed-boundary transitions from the frame-diff detector — a child leaving the bed
 // ('out_of_bed') or being placed into it ('into_bed'). These are the durable form of the [oob]/[intobed]
@@ -226,16 +227,7 @@ export function getQuickReversals({ maxGapMs = 60000, limit = 200 } = {}) {
         ORDER BY t.camera_id, t.created_at ASC`
     )
     .all();
-  const out = [];
-  for (let i = 0; i < rows.length - 1; i++) {
-    const a = rows[i];
-    const b = rows[i + 1];
-    if (a.camera_id !== b.camera_id) continue;
-    if (a.type !== TRANSITION.INTO_BED || b.type !== TRANSITION.OUT_OF_BED) continue;
-    const gapMs = Date.parse(`${b.created_at.replace(' ', 'T')}Z`) - Date.parse(`${a.created_at.replace(' ', 'T')}Z`);
-    if (gapMs > maxGapMs) continue;
-    out.push({ into_bed: a, out_of_bed: b, gap_ms: gapMs });
-  }
+  const out = findQuickReversals(rows, { maxGapMs });
   // Same lesson as getImpossibleTransitions: sort on the actual timestamp AFTER building the list,
   // rather than trusting the camera-grouped scan order — a naive slice on that order can silently drop
   // an entire camera's pairs once the limit is reached.

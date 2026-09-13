@@ -257,6 +257,35 @@ test('the review lists the night’s transitions, each with its verdict and came
   assert.equal(r.transitions[0].camera_name, 'Bed cam');
 });
 
+// --- quick reversals surfaced for the owner to label (ROADMAP §1.2 item 3) ------------------------
+
+test('an out_of_bed 14s after an into_bed is flagged with the into_bed it followed', () => {
+  const ibId = recordBedTransition(CAM, TRANSITION.INTO_BED, 0.09);
+  const oobId = recordBedTransition(CAM, TRANSITION.OUT_OF_BED, 0.025);
+  const ibAt = at(19, 51, 0);
+  db.prepare('UPDATE bed_transitions SET created_at = ? WHERE id = ?').run(exactSql(ibAt), ibId);
+  db.prepare('UPDATE bed_transitions SET created_at = ? WHERE id = ?')
+    .run(exactSql(new Date(ibAt.getTime() + 14000)), oobId);
+
+  const r = getNightReview(CHILD, DATE);
+  const ib = r.transitions.find((t) => t.id === ibId);
+  const oob = r.transitions.find((t) => t.id === oobId);
+  assert.equal(oob.quick_reversal_of, ibId, 'the exit names the entry it undid');
+  assert.equal(oob.quick_reversal_gap_s, 14);
+  assert.equal(ib.quick_reversal_of, null, 'only the trailing half is flagged, not the entry itself');
+  assert.equal(ib.quick_reversal_gap_s, null);
+});
+
+test('a normal, well-separated into_bed/out_of_bed pair is not flagged', () => {
+  const ibId = recordBedTransition(CAM, TRANSITION.INTO_BED, 0.3);
+  const oobId = recordBedTransition(CAM, TRANSITION.OUT_OF_BED, 0.2);
+  db.prepare('UPDATE bed_transitions SET created_at = ? WHERE id = ?').run(exactSql(at(19, 40)), ibId);
+  db.prepare('UPDATE bed_transitions SET created_at = ? WHERE id = ?').run(exactSql(at(6, 0, 1)), oobId);
+
+  const r = getNightReview(CHILD, DATE);
+  assert.equal(r.transitions.find((t) => t.id === oobId).quick_reversal_of, null);
+});
+
 // --- over HTTP ------------------------------------------------------------------------------------
 
 test('PUT stores the times and applies the verdicts together', async () => {

@@ -91,6 +91,46 @@ export function entryNearMissWorthLogging(believed) {
   return believed !== true;
 }
 
+// --- Quick reversals (into_bed immediately undone by out_of_bed), ROADMAP §1.2 item 3 -------------
+//
+// Measured 2026-09-13: 86 of 1053 stored transitions (~8%) are an into_bed immediately followed (same
+// camera) by an out_of_bed. Checked against real data two independent ways before this was built: a
+// visual snapshot sample (parent visible leaving via the door in every case anyone was visible at all,
+// child lying still in every case) and the bed zone's own subsequent motion (60% of all 86 kept
+// showing normal stirring in the following hour — essentially impossible if the child had left).
+// Matches the owner's own theory: a goodnight kiss reads as bed-active-then-outside-quiet, exactly
+// this shape, with no child movement involved. See bedTransitions.js's getQuickReversals and
+// bed-transition-classifier-flaws.md for the full evidence.
+//
+// Shared by two callers with different needs — getQuickReversals (the whole-table diagnostic, wants a
+// cross-camera newest-first order and a limit) and the morning review (wants only "does THIS night
+// have one, and which transitions", no ordering opinion) — so the pairing rule itself lives here,
+// pure and tested, and each caller does its own presentation on top.
+//
+// Takes rows in ANY order (not necessarily pre-sorted or single-camera) since a night's transitions
+// come back ordered by time across ALL of a child's cameras, not grouped by camera first — grouping
+// and sorting within each camera happens here, not at each call site.
+export function findQuickReversals(transitions, { maxGapMs = 60000 } = {}) {
+  const byCamera = new Map();
+  for (const t of transitions) {
+    if (!byCamera.has(t.camera_id)) byCamera.set(t.camera_id, []);
+    byCamera.get(t.camera_id).push(t);
+  }
+  const out = [];
+  for (const rows of byCamera.values()) {
+    rows.sort((x, y) => (x.created_at === y.created_at ? x.id - y.id : x.created_at < y.created_at ? -1 : 1));
+    for (let i = 0; i < rows.length - 1; i++) {
+      const a = rows[i];
+      const b = rows[i + 1];
+      if (a.type !== 'into_bed' || b.type !== 'out_of_bed') continue;
+      const gapMs = Date.parse(`${b.created_at.replace(' ', 'T')}Z`) - Date.parse(`${a.created_at.replace(' ', 'T')}Z`);
+      if (gapMs > maxGapMs) continue;
+      out.push({ into_bed: a, out_of_bed: b, gap_ms: gapMs });
+    }
+  }
+  return out;
+}
+
 // --- Outside-channel EVIDENCE (peak + duration), ROADMAP §1.2 item 2 ---
 //
 // The fast link above accepts a single frame over threshold with no minimum magnitude at all
