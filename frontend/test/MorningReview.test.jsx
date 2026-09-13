@@ -260,6 +260,114 @@ describe('the review screen', () => {
     expect(await screen.findByText(/got out of bed/)).toBeInTheDocument();
   });
 
+  describe('quick check-in (an entry immediately undone by an exit)', () => {
+    const QUICK_NIGHT = {
+      ...NIGHT,
+      // created_at is UTC; the app's timezone in these tests is Melbourne (+10, see NIGHT's own
+      // 09:33 UTC -> 19:33 local assertion above) — 09:51 UTC is 19:51 local, not 19:51 UTC itself.
+      transitions: [
+        { id: 21, type: 'into_bed', created_at: '2026-08-29 09:51:00', snapshot: 1, verdict: null, camera_name: 'Raffa Room', quick_reversal_of: null, quick_reversal_gap_s: null },
+        { id: 22, type: 'out_of_bed', created_at: '2026-08-29 09:51:14', snapshot: 1, verdict: null, camera_name: 'Raffa Room', quick_reversal_of: 21, quick_reversal_gap_s: 14 },
+      ],
+    };
+
+    test('an ordinary night with no quick reversal shows no prompt, and no save-just-answers button', async () => {
+      // NIGHT's fixture has no quick_reversal_of on either transition — the prompt must not appear
+      // just because SOME transitions exist, and the save button gained a second way to appear
+      // (quickReversals.length > 0) that must not fire when there's nothing to answer.
+      at();
+      await screen.findByRole('button', { name: /That.s right/ });
+      expect(screen.queryByText(/Quick check-in/)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Save just the event answers/ })).not.toBeInTheDocument();
+    });
+
+    test('a quick reversal shows the check-in prompt WITHOUT opening the collapsed event list', async () => {
+      api.get.mockResolvedValue(QUICK_NIGHT);
+      at();
+      expect(await screen.findByText('Quick check-in?')).toBeInTheDocument();
+      expect(screen.getByText(/Got into bed at 19:51, then got out of bed again 14s later/)).toBeInTheDocument();
+      // The full list stays collapsed — this is a SEPARATE, always-visible prompt, not a reason to
+      // flood the screen the way the owner already complained about once.
+      expect(screen.getByRole('button', { name: /Check the 2 recorded events/ })).toBeInTheDocument();
+    });
+
+    test('answering "That was me" saves it as the out_of_bed being wrong, not the into_bed', async () => {
+      api.get.mockResolvedValue(QUICK_NIGHT);
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: /That was me/ }));
+      await user.click(screen.getByRole('button', { name: /Save just the event answers/ }));
+
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(api.put.mock.calls[0][1].verdicts).toMatchObject({ 22: 'wrong' });
+      expect(api.put.mock.calls[0][1].verdicts[21]).toBeUndefined();
+    });
+
+    test('answering "They got up" saves it as correct', async () => {
+      api.get.mockResolvedValue(QUICK_NIGHT);
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: /They got up/ }));
+      await user.click(screen.getByRole('button', { name: /Save just the event answers/ }));
+
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(api.put.mock.calls[0][1].verdicts).toMatchObject({ 22: 'correct' });
+    });
+
+    test('the save button for it appears even with the full event list still collapsed', async () => {
+      // Before this, "Save just the event answers" only appeared once showEvents was toggled — which
+      // this prompt deliberately never does. Without this fix, an answer here would have no save path.
+      api.get.mockResolvedValue(QUICK_NIGHT);
+      at();
+      expect(await screen.findByRole('button', { name: /Save just the event answers/ })).toBeInTheDocument();
+    });
+
+    test('two reversals in one night each get their own prompt, answered independently', async () => {
+      api.get.mockResolvedValue({
+        ...NIGHT,
+        transitions: [
+          ...QUICK_NIGHT.transitions,
+          { id: 31, type: 'into_bed', created_at: '2026-08-29 19:00:00', snapshot: 0, verdict: null, camera_name: 'Raffa Room', quick_reversal_of: null, quick_reversal_gap_s: null },
+          { id: 32, type: 'out_of_bed', created_at: '2026-08-29 19:00:20', snapshot: 0, verdict: null, camera_name: 'Raffa Room', quick_reversal_of: 31, quick_reversal_gap_s: 20 },
+        ],
+      });
+      const { user } = at();
+      expect(await screen.findAllByText('Quick check-in?')).toHaveLength(2);
+
+      // Answer only the second one — the first must stay untouched.
+      await user.click(screen.getAllByRole('button', { name: /They got up/ })[1]);
+      await user.click(screen.getByRole('button', { name: /Save just the event answers/ }));
+
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(api.put.mock.calls[0][1].verdicts).toMatchObject({ 32: 'correct' });
+      expect(api.put.mock.calls[0][1].verdicts[22]).toBeUndefined();
+    });
+
+    test('answering it first does not freeze onset/wake at the wrong timezone', async () => {
+      // Found in adversarial review, 2026-09-13: the verdict buttons set the SAME `touched` flag a
+      // time edit does, and unlike the old opt-in collapsed list, this prompt is often the very FIRST
+      // tap on the page — so answering it before /settings resolves (it starts at UTC, see the fetch
+      // effect's own comment) would have permanently frozen onset/wake in the wrong zone. Mirrors the
+      // existing "typing survives the timezone arriving" test, substituting a verdict tap for typing.
+      api.get.mockResolvedValue(QUICK_NIGHT);
+      const { user, rerenderWith } = renderAsAdmin(routed, {
+        route: '/children/c-1/review/2026-08-29',
+        kids: [{ id: 'c-1', name: 'Raffa' }],
+        settings: { timezone: 'UTC' }, // as it is for the first moments after a reload
+      });
+
+      await user.click(await screen.findByRole('button', { name: /They got up/ }));
+
+      // /settings resolves and the real zone replaces the placeholder, AFTER the verdict tap.
+      rerenderWith({ settings: { timezone: 'Australia/Melbourne' } });
+      await waitFor(() => expect(screen.getByText('19:33')).toBeInTheDocument());
+      expect(screen.getByText('05:48')).toBeInTheDocument();
+
+      // And the verdict answered before the zone resolved must have survived the reseed too.
+      await user.click(screen.getByRole('button', { name: /That.s right/ }));
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(api.put.mock.calls[0][1].verdicts).toMatchObject({ 22: 'correct' });
+    });
+  });
+
   test('typing survives the timezone arriving — the form must not reset under you', async () => {
     // THE regression test for a real data loss. SettingsContext starts at its defaults (timezone
     // 'UTC') and replaces them when /settings resolves, so `tz` changes a moment after boot. With `tz`

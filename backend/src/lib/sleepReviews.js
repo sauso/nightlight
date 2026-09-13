@@ -3,6 +3,7 @@ import {
   computeNight, lastCompletedNightDate, childTracksSleep, zonedToUtc, toSqlUtc,
 } from './sleepAnalysis.js';
 import { getBedTransitions, setTransitionVerdict, VERDICTS } from './bedTransitions.js';
+import { findQuickReversals } from './bedTransitionRules.js';
 
 // What actually happened last night, as told by the person who was there.
 //
@@ -116,9 +117,20 @@ function transitionsFor(childId, nightDate) {
   const cams = camsForChild.all(childId);
   const byId = new Map(cams.map((c) => [c.id, c.name]));
   const { startSql, endSql } = nightBounds(nightDate);
-  return getBedTransitions(cams.map((c) => c.id), startSql, endSql).map((t) => ({
+  const rows = getBedTransitions(cams.map((c) => c.id), startSql, endSql);
+  // A goodnight kiss (or similar) can read as `out_of_bed` seconds after a genuine `into_bed` — see
+  // findQuickReversals's own comment in bedTransitionRules.js for the evidence this is real and common.
+  // Flagged here, rather than left for the owner to spot in a list of up to 30 events, because that is
+  // what actually gets it labelled: only 1 of 86 such pairs carried a verdict before this (measured
+  // 2026-09-13), since nothing had ever drawn attention to the pattern specifically.
+  const reversalByOobId = new Map(
+    findQuickReversals(rows).map((r) => [r.out_of_bed.id, { into_bed_id: r.into_bed.id, gap_s: Math.round(r.gap_ms / 1000) }])
+  );
+  return rows.map((t) => ({
     ...t,
     camera_name: byId.get(t.camera_id) || null,
+    quick_reversal_of: reversalByOobId.get(t.id)?.into_bed_id ?? null,
+    quick_reversal_gap_s: reversalByOobId.get(t.id)?.gap_s ?? null,
   }));
 }
 

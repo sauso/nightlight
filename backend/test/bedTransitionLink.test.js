@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 
 import {
   oobLinkKind, accumulateOutEvidence, trimOutSamples, evidenceFromSamples, EMPTY_EVIDENCE,
-  intoBedRejected, outOfBedRejected, entryNearMissWorthLogging,
+  intoBedRejected, outOfBedRejected, entryNearMissWorthLogging, findQuickReversals,
 } from '../src/lib/bedTransitionRules.js';
 
 test('an adult lifting a child out links instantly', () => {
@@ -273,4 +273,60 @@ test('a real pair either side of a flagged repeat is itself unflagged', () => {
 test('a false transition would poison a naive gate into dropping the REAL one after it', () => {
   const flags = simulateOccupancy(['into_bed', 'out_of_bed', /* false exit */ 'out_of_bed' /* the real wake */]);
   assert.deepEqual(flags, ['ok', 'ok', 'flagged'], 'the REAL wake is flagged too — a gate would drop it');
+});
+
+// --- findQuickReversals (ROADMAP §1.2 item 3: goodnight-kiss / parent-handling gap) -----------------
+//
+// getQuickReversals (bedTransitions.js) already covers the pairing/boundary/type rules in depth against
+// a real DB. What's specific to this pure function, and worth testing here, is the property it exists
+// FOR: the morning review hands it a night's transitions ordered by TIME ACROSS ALL CAMERAS (not
+// grouped by camera first, unlike getQuickReversals' own SQL query) — so it must group and sort
+// per-camera internally, correctly, given input that arrives in an arbitrary order.
+const row = (id, camera_id, type, created_at) => ({ id, camera_id, type, created_at });
+
+test('a genuine adjacent pair is found from already-sorted, single-camera input', () => {
+  const rows = [
+    row(1, 'cam-a', 'into_bed', '2026-03-01 19:51:00'),
+    row(2, 'cam-a', 'out_of_bed', '2026-03-01 19:51:14'),
+  ];
+  const found = findQuickReversals(rows);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].into_bed.id, 1);
+  assert.equal(found[0].out_of_bed.id, 2);
+  assert.equal(found[0].gap_ms, 14000);
+});
+
+test('input interleaved across cameras and out of time order is still paired correctly', () => {
+  // The exact shape transitionsFor() hands this: one query's worth of rows for a child's cameras,
+  // ordered by created_at across ALL of them — so camera A and B's events can interleave, and (since
+  // nothing guarantees insertion order) are not assumed sorted either. Deliberately fed here in an
+  // order that is neither camera-grouped nor time-sorted.
+  const rows = [
+    row(3, 'cam-b', 'out_of_bed', '2026-03-01 10:00:05'), // cam-b's reversal, second half, listed FIRST
+    row(1, 'cam-a', 'into_bed', '2026-03-01 19:51:00'), // cam-a's reversal, first half, listed SECOND
+    row(2, 'cam-a', 'out_of_bed', '2026-03-01 19:51:14'),
+    row(4, 'cam-b', 'into_bed', '2026-03-01 10:00:00'), // cam-b's reversal, first half, listed LAST
+  ];
+  const found = findQuickReversals(rows);
+  assert.equal(found.length, 2, 'both cameras\' genuine reversals must be found despite the scramble');
+  const byCam = Object.fromEntries(found.map((f) => [f.into_bed.camera_id, f]));
+  assert.equal(byCam['cam-a'].out_of_bed.id, 2);
+  assert.equal(byCam['cam-b'].into_bed.id, 4);
+  assert.equal(byCam['cam-b'].out_of_bed.id, 3);
+});
+
+test('maxGapMs is honoured and the default is 60s', () => {
+  const near = [row(1, 'cam-a', 'into_bed', '2026-03-01 10:00:00'), row(2, 'cam-a', 'out_of_bed', '2026-03-01 10:01:00')];
+  const far = [row(1, 'cam-a', 'into_bed', '2026-03-01 10:00:00'), row(2, 'cam-a', 'out_of_bed', '2026-03-01 10:01:01')];
+  assert.equal(findQuickReversals(near).length, 1, '60000ms is inclusive');
+  assert.equal(findQuickReversals(far).length, 0, '60001ms is not');
+  assert.equal(findQuickReversals(far, { maxGapMs: 120000 }).length, 1, 'a wider window catches it');
+});
+
+test('no reversal, no false positive: alternating types with nothing quick between them', () => {
+  const rows = [
+    row(1, 'cam-a', 'into_bed', '2026-03-01 19:00:00'),
+    row(2, 'cam-a', 'out_of_bed', '2026-03-01 19:05:00'), // 5 minutes later, not a "quick" reversal
+  ];
+  assert.deepEqual(findQuickReversals(rows, { maxGapMs: 60000 }), []);
 });
