@@ -14,8 +14,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   7:51pm, then got out of bed again 14s later — what actually happened?"), separately from the
   collapsed full event list — measurement points to this being mostly a parent's presence read as a
   child's exit, and the question was previously easy to miss inside a long list of events.
+- A bed-transition snapshot in the morning review ("Quick check-in?" and "Check the recorded events")
+  can now be tapped to open it full-size in a pop-up, the same way a recorded clip opens — some frames
+  are too small or too dim to judge at thumbnail size, and the verdicts recorded there are only as
+  good as whether the photo could actually be read.
 
 ### Changed
+- The still frame shown for each recorded bed-transition event (in "Quick check-in?" and "Check the
+  recorded events") is bigger — 160×120 (120×90 on narrow phones), up from 96×72 — easier to actually
+  make out what's in it.
 - Bed transitions now record additional outside-motion evidence (peak and how long it lasted) alongside
   each recorded exit or entry, for future tuning of the detector — nothing reads these values yet, and
   no detection behavior changes.
