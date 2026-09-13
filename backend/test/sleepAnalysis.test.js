@@ -18,7 +18,7 @@ import path from 'node:path';
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-test-'));
 process.env.DATA_DIR = TMP;
 
-const { computeNight } = await import('../src/lib/sleepAnalysis.js');
+const { computeNight, detectMidnightEpisodes } = await import('../src/lib/sleepAnalysis.js');
 const { default: db } = await import('../src/db.js');
 
 const CHILD = 'test-child';
@@ -1410,4 +1410,254 @@ describe('⚠️ seconds on a bed transition — the trap fixture, and the gap i
       'the reported bedtime must not depend on which half of the minute the put-down fell in'
     );
   });
+});
+
+describe('corroborated midnight episodes: pairing and evidence boundaries', () => {
+  // Synthetic evidence, in seconds from a fixed origin; this is not a production replay.
+  function detect(events, { quiet = new Array(200).fill(false), occupied = [20, 21, 22],
+    onset = 0, end = 30 } = {}) {
+    const origin = at(3, 0, 1).getTime();
+    const ms = (value) => utcMs(value);
+    const idx = (value) => Math.floor((ms(value) - origin) / 60000);
+    const transitions = events.map(([type, seconds, id], i) => ({
+      type, id: id ?? i + 1, created_at: sqlTime(new Date(origin + seconds * 1000)),
+    }));
+    const before = structuredClone(transitions);
+    const witness = (from) => occupied.filter((i) =>
+      i >= Math.max(0, from) && i < Math.min(from + 150, quiet.length)).length >= 3;
+    const result = detectMidnightEpisodes(transitions, quiet, witness, idx, ms, onset, end);
+    assert.deepEqual(transitions, before, 'sorting must not mutate the input');
+    return result;
+  }
+  const out = 'out_of_bed', into = 'into_bed';
+
+  test('both endpoints may move; only strictly interior buckets must be quiet', () => {
+    const quiet = new Array(200).fill(false);
+    quiet[0] = true;
+    quiet[8] = true;
+    assert.deepEqual(detect([[out, 10], [into, 500]], { quiet }), [{ start: 0, end: 8 }]);
+    for (const state of [true, null, undefined]) {
+      const broken = quiet.slice();
+      broken[4] = state;
+      assert.deepEqual(detect([[out, 10], [into, 500]], { quiet: broken }), []);
+    }
+  });
+
+  test('elapsed-time limits and the nonempty interior are independent', () => {
+    assert.deepEqual(detect([[out, 59], [into, 119]]), []); // exactly 60 seconds
+    assert.deepEqual(detect([[out, 59], [into, 120]]), [{ start: 0, end: 2 }]); // 61s
+    assert.deepEqual(detect([[out, 10], [into, 75]]), []); // 65s, adjacent buckets
+    assert.deepEqual(detect([[out, 10], [into, 1210]]), [{ start: 0, end: 20 }]);
+    assert.deepEqual(detect([[out, 10], [into, 1211]]), []);
+  });
+
+  test('requires observed return occupancy and bounds both ends to the sleep span', () => {
+    const pair = [[out, 10], [into, 500]];
+    assert.deepEqual(detect(pair, { occupied: [] }), []);
+    assert.deepEqual(detect(pair, { occupied: [8, 9] }), []);
+    assert.deepEqual(detect(pair, { occupied: [8, 9, 10] }), [{ start: 0, end: 8 }]);
+    assert.deepEqual(detect(pair, { onset: 1 }), []);
+    assert.deepEqual(detect(pair, { end: 8 }), []);
+    assert.deepEqual(detect(pair, { end: 9 }), [{ start: 0, end: 8 }]);
+    assert.deepEqual(detect([[out, 1800], [into, 1920]]), []);
+    assert.deepEqual(detect([[out, 10]]), []);
+  });
+
+  test('sorts by timestamp then ascending id and uses the literal next transition', () => {
+    assert.deepEqual(detect([[into, 500, 3], [out, 10, 2], [out, 10, 1]]),
+      [{ start: 0, end: 8 }]);
+    assert.deepEqual(detect([[out, 0], [into, 35], [out, 50], [into, 480]]), []);
+    assert.deepEqual(detect([[out, 0], [into, 120], [into, 600]], {
+      occupied: [151, 152, 153],
+    }), [], 'failed immediate return must not be skipped in search of a later one');
+  });
+
+  test('backward settling guard includes exactly 60 seconds and identical timestamps', () => {
+    assert.deepEqual(detect([[into, 0], [out, 60], [into, 540]]), []);
+    assert.deepEqual(detect([[into, 0], [out, 61], [into, 540]]),
+      [{ start: 1, end: 9 }]);
+    assert.deepEqual(detect([[out, 0, 1], [out, 0, 2], [into, 0, 3], [into, 480, 4]]), []);
+    assert.deepEqual(detect([[into, 0], [out, 30], [into, 480]], {
+      occupied: [150, 151, 152],
+    }), [{ start: 0, end: 8 }], 'an uncorroborated prior entry must not suppress the exit');
+  });
+
+  test('known limit: two 90-second adult visits manufacture a six-minute episode', () => {
+    // The child can remain in bed throughout; this mechanism cannot identify the adult.
+    assert.deepEqual(detect([[into, 0], [out, 90], [into, 390], [out, 480]]),
+      [{ start: 1, end: 6 }]);
+  });
+
+  test('known limit: unrelated later motion can corroborate a false return', () => {
+    assert.deepEqual(detect([[out, 0], [into, 120]], { occupied: [100, 101, 102] }),
+      [{ start: 0, end: 2 }]);
+    // A real return at minute 10 lends its witness to the spurious minute-2 entry.
+    assert.deepEqual(detect([[out, 0], [into, 120], [out, 150], [into, 600]], {
+      occupied: [10, 11, 12],
+    }), [{ start: 0, end: 2 }]);
+  });
+
+  test('known limits: a stray prior entry suppresses a real exit; a 70s tail escapes', () => {
+    assert.deepEqual(detect([[into, 0], [out, 30], [into, 510]]), []);
+    assert.deepEqual(detect([[out, 0], [into, 20], [out, 90], [into, 480]]),
+      [{ start: 1, end: 8 }]);
+  });
+
+  test('known limit: a repeated exit can shorten an episode or remove it entirely', () => {
+    assert.deepEqual(detect([[out, 0], [out, 240], [into, 480]]),
+      [{ start: 4, end: 8 }]);
+    assert.deepEqual(detect([[out, 0], [out, 240], [into, 270]]), []);
+  });
+});
+
+describe('midnight episode integration', () => {
+  function addPair(exit, entry) {
+    insertTransition.run(CAM, 'out_of_bed', 0.5, sqlTime(exit));
+    insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(entry));
+  }
+  function invariantTimes(before, after) {
+    for (const key of ['status', 'onset_at', 'wake_at', 'onset_at_algo', 'wake_at_algo',
+      'onset_at_shadow', 'wake_at_shadow']) assert.equal(after[key], before[key], key);
+  }
+  function layNight(wake, extra = []) {
+    laySamples(at(19, 30), wake, [
+      [at(19, 30), at(19, 40)],
+      ...extra,
+      [new Date(wake.getTime() - 60000), wake],
+    ], STILL_OCCUPIED);
+    laySamples(wake, at(10, 0, 1));
+    insertTransition.run(CAM, 'out_of_bed', 0.5, sqlTime(wake));
+  }
+
+  for (const exitMoves of [false, true]) {
+    test(`sparse 20:41:30/20:43:57 episode, synthetic exit motion=${exitMoves}`, (t) => {
+      // These timestamps reproduce the motivating shape, not an unqueried production peak.
+      // Unlike the existing five-active-minute fixture, neither variant qualifies as a wake alone.
+      t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+      layNight(at(5, 49, 1), [
+        ...(exitMoves ? [[at(20, 41), at(20, 42)]] : []),
+        [at(20, 44), at(20, 46)],
+      ]);
+      const before = computeNight(CHILD, DATE, { includeTimeline: true });
+      assert.equal(before.status, 'ok');
+      assert.equal(before.asleep_minutes, 609);
+      assert.equal(before.longest_stretch_minutes, 609);
+      assert.equal(before.wake_count, 0);
+      addPair(at(20, 41, 0, 30), at(20, 43, 0, 57));
+      insertTransition.run(CAM, 'out_of_bed', 0.5, sqlTime(at(20, 44, 0, 36)));
+      const night = computeNight(CHILD, DATE, { includeTimeline: true });
+      invariantTimes(before, night);
+      assert.equal(night.asleep_minutes, 606);
+      assert.equal(night.awake_minutes, 3);
+      assert.equal(night.wake_count, 1);
+      assert.equal(night.longest_stretch_minutes, 545);
+      assert.deepEqual(night.wakes[0], {
+        start_at: sqlTime(at(20, 41)), end_at: sqlTime(at(20, 44)), minutes: 3,
+      });
+      assert.equal(night.timeline.find((m) => m.t === sqlTime(at(20, 42))).inWake, true);
+      assert.equal(computeNight(CHILD, DATE).wake_count, 1, 'summary and detail must agree');
+    });
+  }
+
+  test('does not add episodes during an open night', (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: at(23, 0).getTime() });
+    layNight(at(5, 49, 1));
+    const before = computeNight(CHILD, DATE);
+    addPair(at(20, 41, 0, 30), at(20, 43, 0, 57));
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.in_progress, true);
+    invariantTimes(before, night);
+    assert.equal(night.awake_minutes, before.awake_minutes);
+    assert.equal(night.wake_count, before.wake_count);
+  });
+
+  test('a new episode cannot promote an empty night to ok', (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+    laySamples(at(19, 30), at(10, 0, 1), [], STILL_OCCUPIED);
+    addPair(at(23, 0), at(23, 8));
+    assert.equal(computeNight(CHILD, DATE).status, 'empty');
+  });
+
+  test('post-window episodes survive the extended metrics pass', (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+    layNight(at(7, 40, 1));
+    const before = computeNight(CHILD, DATE);
+    addPair(at(7, 5, 1, 10), at(7, 13, 1, 20));
+    const night = computeNight(CHILD, DATE, { includeTimeline: true });
+    invariantTimes(before, night);
+    assert.equal(hhmm(night.wake_at), '07:40');
+    assert.equal(night.awake_minutes, 9);
+    assert.equal(night.asleep_minutes, before.asleep_minutes - 9);
+    assert.equal(night.wake_count, 1);
+    assert.deepEqual(night.wakes[0], {
+      start_at: sqlTime(at(7, 5, 1)), end_at: sqlTime(at(7, 14, 1)), minutes: 9,
+    });
+  });
+
+  test('last-minute return preserves the movement-only final wake', (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+    laySamples(at(19, 30), at(10, 0, 1), [[at(19, 30), at(19, 40)]], STILL_OCCUPIED);
+    const before = computeNight(CHILD, DATE);
+    addPair(at(6, 57, 1, 10), at(6, 59, 1, 20));
+    const night = computeNight(CHILD, DATE, { includeTimeline: true });
+    invariantTimes(before, night);
+    assert.equal(night.wake_at_algo, null);
+    assert.equal(night.wake_at, null);
+    assert.deepEqual(night.wakes, [{
+      start_at: sqlTime(at(6, 57, 1)), end_at: sqlTime(at(7, 0, 1)), minutes: 3,
+    }]);
+  });
+
+  test('a last-minute episode merges with the morning row without moving departure', (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+    layNight(at(5, 49, 1));
+    for (const m of [49, 50]) {
+      db.prepare('UPDATE activity_samples SET motion_peak = ? WHERE camera_id = ? AND bucket_start = ?')
+        .run(STILL_OCCUPIED, CAM, sqlTime(at(5, m, 1)));
+    }
+    const before = computeNight(CHILD, DATE);
+    addPair(at(5, 46, 1, 10), at(5, 48, 1, 20));
+    const night = computeNight(CHILD, DATE, { includeTimeline: true });
+    invariantTimes(before, night);
+    assert.equal(night.awake_minutes, 3);
+    assert.equal(night.wake_count, 1);
+    assert.deepEqual(night.wakes, [{
+      start_at: sqlTime(at(5, 46, 1)), end_at: sqlTime(at(7, 0, 1)), minutes: 74,
+    }]);
+  });
+
+  test('a sound-only interior sample is not observed bed quiet', (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+    layNight(at(5, 49, 1));
+    addPair(at(20, 41, 0, 30), at(20, 43, 0, 57));
+    db.prepare('UPDATE activity_samples SET motion_peak = NULL, sound_peak = 0 WHERE camera_id = ? AND bucket_start = ?')
+      .run(CAM, sqlTime(at(20, 42)));
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(night.wake_count, 0);
+    assert.equal(night.awake_minutes, 0);
+  });
+
+  for (const twoRuns of [false, true]) {
+    test(`episode union ${twoRuns ? 'merges two wakes' : 'extends one wake without changing count'}`, (t) => {
+      t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+      layNight(at(5, 49, 1));
+      // Sound-only activity keeps the bed-quiet interior genuinely distinct from wake evidence.
+      for (const [from, to] of twoRuns ? [[2, 7], [11, 16]] : [[5, 10]]) {
+        for (let m = from; m < to; m++) {
+          db.prepare('UPDATE activity_samples SET sound_peak = 10 WHERE camera_id = ? AND bucket_start = ?')
+            .run(CAM, sqlTime(at(23, m)));
+        }
+      }
+      const before = computeNight(CHILD, DATE);
+      assert.equal(before.wake_count, twoRuns ? 2 : 1);
+      addPair(at(23, 0), at(23, 18));
+      const night = computeNight(CHILD, DATE);
+      invariantTimes(before, night);
+      assert.equal(night.wake_count, 1);
+      assert.equal(night.awake_minutes, 19);
+      assert.equal(night.asleep_minutes, before.asleep_minutes - (19 - before.awake_minutes));
+      assert.ok(night.longest_stretch_minutes <= before.longest_stretch_minutes);
+    });
+  }
 });

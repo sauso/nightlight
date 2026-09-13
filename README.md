@@ -277,7 +277,13 @@ measurement**, and (like everything here) never a safety device — see the warn
   those are averaged rather than combined.
 - **How it estimates.** Across the night it builds a per-minute movement + sound timeline from
   the child's main camera: falling still for a sustained stretch reads as falling asleep,
-  sustained movement or noise reads as an awakening (brief stirs don't count). If you've painted
+  sustained movement or noise reads as an awakening (brief stirs don't count). On a completed
+  night, a short recorded exit-and-return can also count as an awakening even when it's too brief
+  to show up as sustained movement on its own — as long as the bed is confirmed quiet in between
+  and later bed movement supports the return. This only applies to trips of one to twenty minutes,
+  with at least a minute of quiet bed time in between; it updates wake-ups, awake time, and the
+  longest sleep stretch, but live figures and wake-clip recording still use the plain movement rule
+  above. If you've painted
   a **bed zone** on the camera — the same area that scopes motion alerts — it also tracks
   movement **outside** the bed and lists it separately, which catches a morning wake where the
   child has already left the bed. Draw the zone so it comfortably contains the child **including
@@ -297,6 +303,9 @@ measurement**, and (like everything here) never a safety device — see the warn
   it again inside a minute is one movement being read twice, not two trips. This matters most for a
   very still sleeper: once they settle, their bed can look identical to an empty one for hours, so a
   false exit shortly after bedtime would otherwise be reported as the end of the night.
+  A qualifying short trip can still be counted as a wake-up within that same continuing night — see
+  "How it estimates" above. It can miss a trip that's interrupted by a data gap or a stray reading,
+  and it cannot tell an adult's visit to the bed from the child's own trip out of it.
   **Known limit:** a genuine departure less than a minute after getting into bed is read the same way,
   because the two are not distinguishable from what the cameras record. Where that is the only *got
   out of bed* of the night it is still used, so the night is never left with no wake time at all; where
