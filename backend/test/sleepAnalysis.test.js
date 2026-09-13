@@ -1660,4 +1660,29 @@ describe('midnight episode integration', () => {
       assert.ok(night.longest_stretch_minutes <= before.longest_stretch_minutes);
     });
   }
+
+  test('an episode bridges a short quiet gap to an adjacent activity wake, like markWakeRuns does', (t) => {
+    // Adversarial review finding: detectMidnightEpisodes ORs its span directly into inWake and skips
+    // straight to accumulateMetrics, which (unlike markWakeRuns) does no gap-bridging of its own — so
+    // an episode 1-3 minutes from a separate qualifying activity run was counted as a SECOND wake
+    // instead of extending the first, contradicting this file's own WAKE_GAP_MIN convention. Traced
+    // through real computeNight before the fix: wake_count came back 2, not 1.
+    t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+    layNight(at(5, 49, 1));
+    // A real, independent 5-minute activity wake, 2 quiet minutes after the episode's own span ends.
+    for (let m = 6; m < 11; m++) {
+      db.prepare('UPDATE activity_samples SET sound_peak = 10 WHERE camera_id = ? AND bucket_start = ?')
+        .run(CAM, sqlTime(at(23, m)));
+    }
+    const before = computeNight(CHILD, DATE);
+    assert.equal(before.wake_count, 1, 'the activity run alone is already a qualifying wake');
+    addPair(at(23, 0), at(23, 3)); // episode spans 23:00-23:03 inclusive; 23:04-23:05 stay quiet
+    const night = computeNight(CHILD, DATE, { includeTimeline: true });
+    invariantTimes(before, night);
+    assert.equal(night.wake_count, 1, 'a 2-minute gap is within WAKE_GAP_MIN and must bridge, not split');
+    assert.equal(night.awake_minutes, 11);
+    assert.deepEqual(night.wakes[0], {
+      start_at: sqlTime(at(23, 0)), end_at: sqlTime(at(23, 11)), minutes: 11,
+    });
+  });
 });

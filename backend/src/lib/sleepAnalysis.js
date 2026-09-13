@@ -1222,6 +1222,33 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     }
   }
 
+  // Bridge short quiet gaps (<= WAKE_GAP_MIN) directly between already-true stretches of inWakeArr,
+  // with NO activity-count threshold — unlike markWakeRuns, which bridges gaps only while growing a
+  // candidate run it will then gate on WAKE_ACTIVE_MIN. Needed because detectMidnightEpisodes ORs an
+  // episode's minutes into inWake directly (deliberately bypassing markWakeRuns and its threshold —
+  // the whole point of an episode is to count regardless of WAKE_ACTIVE_MIN), so accumulateMetrics
+  // sees a hand-edited array markWakeRuns never bridged. Found by adversarial review: an episode
+  // 1-3 minutes from an adjacent activity-based wake was counted as a SECOND wake instead of extending
+  // the first, contradicting this file's own WAKE_GAP_MIN convention (a short gap is one wake, not two).
+  function bridgeWakeGaps(inWakeArr, from, to) {
+    for (let i = from; i < to; ) {
+      if (!inWakeArr[i]) { i++; continue; }
+      let k = i;
+      while (k < to) {
+        if (inWakeArr[k]) { k++; continue; }
+        let g = k;
+        while (g < to && !inWakeArr[g]) g++;
+        if (g < to && g - k <= WAKE_GAP_MIN) {
+          for (let j = k; j < g; j++) inWakeArr[j] = true;
+          k = g;
+          continue;
+        }
+        break;
+      }
+      i = k;
+    }
+  }
+
   let inWake = new Array(totalMin).fill(false);
   markWakeRuns(activeForWake, onset, totalMin, inWake);
 
@@ -1330,12 +1357,17 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // all read `inWake` directly, actually reflect it — see planning/reviews/midnight-wake-plan-2026-09-13-v6.md.
   if (!inProgress && USE_TRANSITION_WAKE_EPISODES) {
     const episodes = detectMidnightEpisodes(transitions, cribActExt, bedOccupiedFrom, txIdx, txMs, onset, sleepEnd);
-    for (const { start, end } of episodes) {
-      for (let i = start; i <= end; i++) inWake[i] = true;
+    if (episodes.length) {
+      for (const { start, end } of episodes) {
+        for (let i = start; i <= end; i++) inWake[i] = true;
+      }
+      // Re-establish markWakeRuns' own bridging guarantee for the minutes just OR'd in directly —
+      // see bridgeWakeGaps' comment above for why accumulateMetrics cannot be trusted to do this itself.
+      bridgeWakeGaps(inWake, onset, sleepEnd);
+      // wakeCount can DECREASE here (an episode bridging two previously-separate activity runs merges
+      // them into one) even as awake_minutes increases — expected to be rare; scored explicitly (plan §7).
+      ({ asleep, awake, wakeCount, longest } = accumulateMetrics(inWake, onset, sleepEnd));
     }
-    // wakeCount can DECREASE here (an episode bridging two previously-separate activity runs merges
-    // them into one) even as awake_minutes increases — expected to be rare; scored explicitly (plan §7).
-    ({ asleep, awake, wakeCount, longest } = accumulateMetrics(inWake, onset, sleepEnd));
   }
 
   // A movement-only wake of null means "still asleep when the window closed". A transition-derived
