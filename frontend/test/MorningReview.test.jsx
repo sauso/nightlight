@@ -271,12 +271,14 @@ describe('the review screen', () => {
       ],
     };
 
-    test('an ordinary night with no quick reversal shows no prompt', async () => {
+    test('an ordinary night with no quick reversal shows no prompt, and no save-just-answers button', async () => {
       // NIGHT's fixture has no quick_reversal_of on either transition — the prompt must not appear
-      // just because SOME transitions exist.
+      // just because SOME transitions exist, and the save button gained a second way to appear
+      // (quickReversals.length > 0) that must not fire when there's nothing to answer.
       at();
       await screen.findByRole('button', { name: /That.s right/ });
       expect(screen.queryByText(/Quick check-in/)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Save just the event answers/ })).not.toBeInTheDocument();
     });
 
     test('a quick reversal shows the check-in prompt WITHOUT opening the collapsed event list', async () => {
