@@ -338,6 +338,32 @@ describe('the review screen', () => {
       expect(api.put.mock.calls[0][1].verdicts).toMatchObject({ 32: 'correct' });
       expect(api.put.mock.calls[0][1].verdicts[22]).toBeUndefined();
     });
+
+    test('answering it first does not freeze onset/wake at the wrong timezone', async () => {
+      // Found in adversarial review, 2026-09-13: the verdict buttons set the SAME `touched` flag a
+      // time edit does, and unlike the old opt-in collapsed list, this prompt is often the very FIRST
+      // tap on the page — so answering it before /settings resolves (it starts at UTC, see the fetch
+      // effect's own comment) would have permanently frozen onset/wake in the wrong zone. Mirrors the
+      // existing "typing survives the timezone arriving" test, substituting a verdict tap for typing.
+      api.get.mockResolvedValue(QUICK_NIGHT);
+      const { user, rerenderWith } = renderAsAdmin(routed, {
+        route: '/children/c-1/review/2026-08-29',
+        kids: [{ id: 'c-1', name: 'Raffa' }],
+        settings: { timezone: 'UTC' }, // as it is for the first moments after a reload
+      });
+
+      await user.click(await screen.findByRole('button', { name: /They got up/ }));
+
+      // /settings resolves and the real zone replaces the placeholder, AFTER the verdict tap.
+      rerenderWith({ settings: { timezone: 'Australia/Melbourne' } });
+      await waitFor(() => expect(screen.getByText('19:33')).toBeInTheDocument());
+      expect(screen.getByText('05:48')).toBeInTheDocument();
+
+      // And the verdict answered before the zone resolved must have survived the reseed too.
+      await user.click(screen.getByRole('button', { name: /That.s right/ }));
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(api.put.mock.calls[0][1].verdicts).toMatchObject({ 22: 'correct' });
+    });
   });
 
   test('typing survives the timezone arriving — the form must not reset under you', async () => {

@@ -71,6 +71,15 @@ export default function NightReview() {
   const [wakeFrame, setWakeFrame] = useState(null);
   // Has the person actually touched the form? Nothing may overwrite their typing once they have.
   const [touched, setTouched] = useState(false);
+  // Separate from `touched`, deliberately: a verdict tap and an onset/wake edit are unrelated, but a
+  // shared flag would make them fate-share. Found in adversarial review, 2026-09-13: the new "Quick
+  // check-in?" prompt is often the very FIRST tap on this page — far more likely than the old, opt-in
+  // collapsed event list — and if that tap were the thing that set `touched`, a `/settings` timezone
+  // resolving a moment later (SettingsContext starts at UTC, see the fetch effect's own comment) would
+  // never re-seed `onset`/`wake` into the RIGHT zone; the exact bug that comment already describes,
+  // just reached from a new direction. Verdicts still need their OWN protection from the same race
+  // (the seeding effect below also resets `verdicts`), which is what this flag is for.
+  const [verdictsTouched, setVerdictsTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -93,17 +102,21 @@ export default function NightReview() {
   // It still depends on `tz` because the times have to be shown in the app's zone, not the browser's —
   // which is exactly why re-running it had to stop clobbering their input rather than simply not run.
   useEffect(() => {
-    if (!data || touched) return;
-    setOnset(toLocalHhmm(data.review?.true_onset_at || data.computed?.onset_at, tz));
-    setWake(toLocalHhmm(data.review?.true_wake_at || data.computed?.wake_at, tz));
-    setNote(data.review?.note || '');
-    setVerdicts(Object.fromEntries((data.transitions || []).filter((t) => t.verdict).map((t) => [t.id, t.verdict])));
-    // A night already answered opens straight into its recorded values, so coming back to change
-    // something does not make you confirm from scratch.
-    setOnsetFrame(data.review?.true_onset_transition_id ?? null);
-    setWakeFrame(data.review?.true_wake_transition_id ?? null);
-    setEditing(Boolean(data.review?.true_onset_at || data.review?.true_wake_at));
-  }, [data, tz, touched]);
+    if (!data) return;
+    if (!touched) {
+      setOnset(toLocalHhmm(data.review?.true_onset_at || data.computed?.onset_at, tz));
+      setWake(toLocalHhmm(data.review?.true_wake_at || data.computed?.wake_at, tz));
+      setNote(data.review?.note || '');
+      // A night already answered opens straight into its recorded values, so coming back to change
+      // something does not make you confirm from scratch.
+      setOnsetFrame(data.review?.true_onset_transition_id ?? null);
+      setWakeFrame(data.review?.true_wake_transition_id ?? null);
+      setEditing(Boolean(data.review?.true_onset_at || data.review?.true_wake_at));
+    }
+    if (!verdictsTouched) {
+      setVerdicts(Object.fromEntries((data.transitions || []).filter((t) => t.verdict).map((t) => [t.id, t.verdict])));
+    }
+  }, [data, tz, touched, verdictsTouched]);
 
   const fmtEvent = useMemo(() => (t) => toLocalHhmm(t.created_at, tz), [tz]);
 
@@ -282,7 +295,7 @@ export default function NightReview() {
                       className={`review-chip${verdicts[oob.id] === key ? ' review-chip--on' : ''}`}
                       aria-pressed={verdicts[oob.id] === key}
                       onClick={() => {
-                        setTouched(true);
+                        setVerdictsTouched(true);
                         setVerdicts((v) => ({ ...v, [oob.id]: v[oob.id] === key ? null : key }));
                       }}
                     >
@@ -384,7 +397,7 @@ export default function NightReview() {
                       aria-pressed={verdicts[t.id] === key}
                       // Tapping the chosen verdict again clears it: a mis-tap must be undoable, because
                       // a wrong label is worse than a missing one — everything else gets scored on it.
-                      onClick={() => { setTouched(true); setVerdicts((v) => ({ ...v, [t.id]: v[t.id] === key ? null : key })); }}
+                      onClick={() => { setVerdictsTouched(true); setVerdicts((v) => ({ ...v, [t.id]: v[t.id] === key ? null : key })); }}
                     >
                       <Icon size={16} /> {label}
                     </button>
