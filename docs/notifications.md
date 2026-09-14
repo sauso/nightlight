@@ -2,7 +2,8 @@
 
 Nightlight can send a **push notification to your phone** when a camera with motion detection sees
 movement — so you're alerted even when the app is closed. This is **optional** and **off by
-default**. Everything else (including the in-app **Settings → Recent alerts** list) works without it.
+default**. Everything else (including the in-app **Recent alerts** list — on each child's page, or
+the combined view under **Settings → Logs** for admins) works without it.
 
 There are **several providers** — set up one or more; an alert is sent to **every** provider you
 enable, all managed under **Settings → Push notifications** (a row per provider):
@@ -121,8 +122,8 @@ server expects it.
 
 ### 7. Enable motion detection on a camera
 - **Cameras → edit** a camera → **Motion detection** → **Enable**. Tune sensitivity/cooldown to taste.
-- Move in front of that camera — you should get a notification, and it also appears under
-  **Settings → Recent alerts**.
+- Move in front of that camera — you should get a notification, and it also appears in that
+  child's **Recent alerts** card (or the combined view under **Settings → Logs** for admins).
 
 ## Option C: ntfy
 
