@@ -208,7 +208,9 @@ Video is larger and burstier than the database, so on Unraid you may prefer to k
 2. Set the environment variable **`CLIPS_DIR=/recordings`**.
 
 Both are exposed as optional fields in the Unraid template (**Recordings Directory** and **CLIPS_DIR**,
-under *Advanced view*).
+under *Advanced view*). With Docker Compose, uncomment the commented `recordings` volume line in
+`docker-compose.yml` and set `CLIPS_DIR` in your `.env` — see the comments in `.env.example`. With a
+plain `docker run`, add `-v /path/to/recordings:/recordings -e CLIPS_DIR=/recordings`.
 
 **Safety guard:** at startup Nightlight checks `CLIPS_DIR` is writable and backed by a real mounted
 volume. If it resolves to an unmapped path (the container's ephemeral layer), recording is **disabled**
