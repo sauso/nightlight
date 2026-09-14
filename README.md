@@ -418,6 +418,10 @@ they’re signed in on. Demoting an admin to caregiver does *not* sign them out:
 a caregiver and simply lose the admin-only screens. Deleting an account, by contrast, ends its
 sessions at once and signs that person out everywhere.
 
+Any account can also turn on **two-factor authentication** for its own login — see
+**[docs/mfa.md](docs/mfa.md)** for enrolling, one-time backup codes, and how to recover if an
+admin loses their authenticator.
+
 ## Running behind a reverse proxy (e.g. SWAG on Unraid)
 
 A ready-to-use config is in `reverse-proxy/nightlight.subdomain.conf`. Copy it to
@@ -495,16 +499,29 @@ needs nothing further, since it's already proxied through the app's normal port.
 
 ## Installing to your home screen
 
-The app has a web app manifest and icons, so on both Android (Chrome) and iOS (Safari) you
-can add it to your home screen and it'll open full-screen like a native app, with its own
-icon — no browser address bar. On Android, use the browser menu → "Add to Home screen" /
-"Install app". On iOS, use the Share button → "Add to Home Screen".
+The app has a web app manifest and icons for a full-screen, native-app-like home-screen
+experience — no browser address bar. **It has no service worker**, so this is an install
+shortcut, not an offline mode: the app still needs to reach your server over the network every
+time, same as opening it in a tab.
 
-Note: for Chrome's automatic install prompt/banner (and the cleanest install experience)
-the site generally needs to be served over HTTPS — accessing it as a plain `http://` LAN
-address still lets you add it manually from the menu, but you may not get the automatic
-install banner. This is one more reason the reverse-proxy/HTTPS setup above is worth doing
-if you want the full native-app-like install experience.
+What you actually get depends on the platform and whether the site is served over **HTTPS**
+(via the reverse-proxy setup above) or plain `http://` on your LAN:
+
+| Platform | Over HTTPS | Over plain `http://` |
+|---|---|---|
+| Android — Chrome / Samsung Internet | Installable PWA (full-screen, own icon, install prompt) | Usually a browser-badged **shortcut** that still opens inside the browser, not a true standalone install — Chromium's installability criteria require HTTPS (or `localhost`) |
+| iOS — Safari | Add to Home Screen (full-screen, own icon) | Add to Home Screen works the same over plain HTTP — iOS doesn't gate it on HTTPS the way Chromium does |
+| Desktop browser | Installable as a windowed app (Chrome/Edge) | Same shortcut limitation as Android Chrome |
+
+- **Android, HTTPS**: browser menu → "Add to Home screen" / "Install app" (or the automatic
+  install banner).
+- **Android, plain HTTP**: same menu item still adds something to your home screen, but expect
+  a shortcut that opens in the browser rather than a standalone window.
+- **iOS**: Share button → "Add to Home Screen" — works the same either way.
+
+If you want the full installed experience on Android specifically, the reverse-proxy/HTTPS
+setup above is worth doing; otherwise the **native Android app** (below) gives you a true
+standalone app without needing HTTPS at all.
 
 ## Mobile apps (Android & iOS)
 
