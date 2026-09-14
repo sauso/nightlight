@@ -1,7 +1,26 @@
-# Nightlight — visual walkthrough
+# Nightlight documentation
 
-A quick tour of the app's main screens. For installation, configuration, and the full
-feature reference, see the [main README](../README.md).
+## Guides
+
+- **[Push notifications](notifications.md)** — providers, one-time setup, what each event sends.
+- **[Recording](recording.md)** — automatic clips, wake clips, manual recordings, retention.
+- **[Camera controls](camera-controls.md)** — the global PTZ step and offline-alert settings.
+- **[MQTT](mqtt.md)** — broker connection, temperature/humidity payloads, camera-native motion.
+- **[Operations](operations.md)** — backup, restore, upgrade, rollback.
+- **[Multi-factor authentication](mfa.md)** — enrolling, one-time backup codes, admin/console
+  recovery if you lose your authenticator.
+- **[Design language](design-language.md)** — contributor reference: colors, type, icons.
+
+## Elsewhere in the repo
+
+- **[Main README](../README.md)** — install, configure, add cameras/children, all features.
+- **[KNOWN-ISSUES.md](../KNOWN-ISSUES.md)** — confirmed limitations and workarounds.
+- **[SECURITY.md](../SECURITY.md)** — supported versions and how to report a vulnerability
+  privately.
+
+## Visual walkthrough
+
+A quick tour of the app's main screens.
 
 > The screenshots below are **captured** by the end-to-end test suite
 > (`e2e/playwright/tests/05-screenshots.spec.js`) on every e2e run, but publishing them is a
