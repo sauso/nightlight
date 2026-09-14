@@ -100,7 +100,8 @@ sat eight minutes clear of that boundary, so an implementation violating the inv
 
 There is no root-level build — `backend/` and `frontend/` are independent npm projects. No linter is
 configured in either. `backend/` has a unit test suite (Node's built-in runner, no dependencies);
-`frontend/` has none. End-to-end coverage lives separately in `e2e/` (Playwright, needs Docker).
+`frontend/` has its own (Vitest + Testing Library, 850+ tests, coverage-gated in CI). End-to-end
+coverage lives separately in `e2e/` (Playwright, needs Docker).
 
 ```bash
 # Backend (Node/Express, ESM, port 4000)
@@ -140,6 +141,8 @@ npm start                    # node src/index.js — expects MediaMTX/ffmpeg bin
 # Frontend (React + Vite, port 5173, proxies /api to :4000)
 cd frontend && npm install
 npm run dev
+npm test                     # vitest run — component tests, coverage-gated in CI (see CI/CD below)
+npm run test:coverage        # same suite, with the coverage report printed
 npm run build                # outputs to frontend/dist, copied into the image as ./public
 
 # Full stack, matching production.
@@ -261,7 +264,10 @@ from the MediaMTX + per-camera-FFmpeg child process tree and forward signals cor
 React + react-router, no Redux/state library — three context providers (`AuthContext`,
 `SettingsContext`, `CamerasContext` in `lib/`) cover global state. `LiveMonitor.jsx` is the
 main dashboard; `pages/` holds the four management screens (Children, Cameras, Account,
-Settings — the latter is admin-only). `lib/api.js` is a thin fetch wrapper that attaches the
+Settings). The Settings **hub itself is reachable by caregivers** — its route carries no admin
+guard (`App.jsx`) — but it's role-aware internally: admin-only rows are hidden for a caregiver,
+and every Settings *sub*-route (general, camera, recording, mqtt, push providers, users, logs,
+clips) is individually `AdminProtected`. `lib/api.js` is a thin fetch wrapper that attaches the
 JWT and redirects to `#/login` on a 401.
 
 ### CSP is enforced — keep it that way
@@ -277,9 +283,13 @@ uses CSSOM `setProperty`, which CSP doesn't police. Violations are logged to the
 
 ### CI/CD
 
-`.github/workflows/docker-publish.yml` builds and pushes a multi-arch (amd64/arm64) image to
-Docker Hub (`sauso/nightlight`) — no test job exists in CI. Which tag it publishes depends on
-the ref:
+`.github/workflows/test.yml` runs on every push/PR: `unit` (backend), `core-coverage` (the
+>=95% core-logic gate), `frontend` (component tests + coverage gate), `changelog` (structure
+check), and `definition-of-done` (a warning-only docs/tests reminder, not a hard gate).
+
+`.github/workflows/docker-publish.yml` is separate — it builds and pushes a multi-arch
+(amd64/arm64) image to Docker Hub (`sauso/nightlight`) and runs no tests itself. Which tag it
+publishes depends on the ref:
 - push to **`dev`** → `:dev` (staging). Does NOT touch `:latest`.
 - push to **`main`** or a **`v*` tag** → `:latest` (+ semver tags). This is production.
 
