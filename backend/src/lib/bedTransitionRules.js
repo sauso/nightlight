@@ -131,6 +131,142 @@ export function findQuickReversals(transitions, { maxGapMs = 60000 } = {}) {
   return out;
 }
 
+// --- Lingering bed motion after ANY out_of_bed, generalized from findQuickReversals above ----------
+//
+// findQuickReversals' own comment documents the SECOND, independent check that validated it (measured
+// 2026-09-13): the bed zone's own motion_peak in activity_samples in the hour AFTER a quick reversal's
+// trailing out_of_bed kept showing normal stirring (motion_peak > MOTION_ACTIVE, sleepAnalysis.js's own
+// calibrated per-minute test) in 60% of all 86 cases — essentially impossible if the bed were actually
+// empty. Only 9/86 went fully silent, the one signature consistent with a real departure (the exact
+// figures live in planning/ROADMAP.md's item-3 history, not repeated in bedTransitions.js's own code
+// comment — cite the ROADMAP, not this file, if re-checking them). That check never actually depended
+// on the quick-reversal SHAPE (an into_bed right before the out_of_bed) — it only used the out_of_bed's
+// own trailing hour — so it generalizes MECHANICALLY to every out_of_bed on record, not just the ~8%
+// that happen to be quick reversals. Whether it generalizes STATISTICALLY (the quick-reversal work also
+// leaned on an independent visual sample this broader population doesn't have) is exactly what this is
+// Phase 1 to find out — see getLingeringBedMotion's own comment and the mandatory measurement step in
+// the plan this shipped from before trusting any flag-rate claim about the general population.
+//
+// Duplicated from sleepAnalysis.js's MOTION_ACTIVE (0.01) rather than imported: this file takes no
+// imports, deliberately (see the top of file), and importing sleepAnalysis.js here would also create an
+// import cycle — sleepAnalysis.js already imports bedTransitions.js, which imports this file. (The
+// REVERSE direction — moving MOTION_ACTIVE's definition into this file and having sleepAnalysis.js
+// import it from here — would be cycle-free and would remove the duplication, but that touches
+// sleepAnalysis.js, out of scope for a diagnostic-only change; considered and deliberately deferred.)
+// A test asserts these two stay equal, so a future re-measurement of one without the other is caught
+// rather than silently drifting.
+export const LINGERING_MOTION_ACTIVE = 0.01;
+
+// The "hour after" from the 2026-09-13 measurement above, not a new guess — named the same way maxGapMs
+// is above, so a future re-measurement moves one constant instead of a scattered literal.
+export const LINGERING_WINDOW_MS = 60 * 60 * 1000;
+
+// planning/ROADMAP.md reports "4+ active minutes" (60% of 86) and "fully silent" (9/86) — it does NOT
+// report a distribution across 1/2/3/4+, so 4 is the bucket that measurement happened to report, not a
+// threshold independently shown to separate two populations the way OOB_SLOW_OUT_MIN was. Reusing it
+// anyway because it's the only real number on record, and because a single-minute threshold is worse
+// for a documented, independent reason: activityTracker.js's minute flush is not phase-aligned to
+// wall-clock minutes (a plain 60s setInterval from process start), so a departure's own motion lands in
+// the bucket immediately AFTER the exit's own minute for roughly HALF of all exits — near-deterministic
+// on the flush phase, not occasional — which would defeat the "exclude the exit's own minute" guard
+// below by itself. Requiring 4+ DISTINCT minutes (see findLingeringBedMotion's own de-duplication
+// comment — activity_samples has no uniqueness constraint on camera_id+bucket_start, so "distinct"
+// matters, not just "4+ rows") means neither one stray flush-lagged bucket, nor several duplicate rows
+// for it, can ever trigger a flag alone. If this number is ever re-measured (e.g. via the yield/false-
+// positive measurement this ships needing — see bedTransitions.js), move it here, not a new literal.
+export const LINGERING_MIN_ACTIVE_MINUTES = 4;
+
+// activity_samples.bucket_start is always the exact minute (activityTracker.js's minuteBucketUtc), but
+// bed_transitions.created_at carries the real second. Floor a transition's timestamp to its own minute
+// before comparing it to a bucket, or a same-minute bucket can misread relative to the transition
+// depending on the transition's own seconds — see findLingeringBedMotion's own comment for exactly where
+// this matters and where it doesn't.
+function minuteFloor(sqlDateTime) {
+  return sqlDateTime.slice(0, 17) + '00';
+}
+
+// Is there SUSTAINED bed-zone motion, after ONE out_of_bed transition, that the classifier itself still
+// believes happened in an EMPTY bed? "Still believes empty" means: no into_bed recorded on the same
+// camera between the exit and the qualifying minutes — an ordinary, already-corroborated return (exactly
+// what detectMidnightEpisodes treats as a real short awakening) is never flagged, no matter how much
+// motion follows it. "Sustained" means LINGERING_MIN_ACTIVE_MINUTES or more qualifying minutes, not one
+// — see this file's own comment on that constant for why one is not enough.
+//
+// `exit` — one out_of_bed transition, at least { type, created_at }.
+// `nextIntoBed` — the next into_bed transition ON THE SAME CAMERA after `exit`, or null/undefined if
+//   none is recorded (yet). Resolved ONCE PER CAMERA by the caller (getLingeringBedMotion) — this
+//   function does not search for it and does not re-check camera_id, the same trust-the-caller contract
+//   as oobLinkKind/intoBedRejected above.
+// `samples` — that camera's activity_samples rows, PRE-SORTED ASCENDING by bucket_start (the caller's
+//   responsibility — getLingeringBedMotion's own SQL already selects in this order), each at least
+//   { bucket_start, motion_peak }. Duplicate rows for the same bucket_start ARE expected (no uniqueness
+//   constraint on camera_id+bucket_start — see the de-duplication comment in the loop below) and are
+//   handled there, not rejected. NOT defensively re-sorted here, unlike findQuickReversals above: that
+//   function sorts once per whole table; this one is called once per candidate in a loop, so a per-call
+//   sort would be real, avoidable, repeated cost at this table's realistic size — trusting the caller's
+//   already-correct order avoids that (a linear scan still costs something, just far less than a sort).
+// `windowMs` — how far past `exit` to look; defaults to LINGERING_WINDOW_MS, the measured "hour after".
+// `minActiveMinutes` — how many DISTINCT qualifying minutes are required; defaults to
+//   LINGERING_MIN_ACTIVE_MINUTES.
+//
+// Returns null when fewer than minActiveMinutes DISTINCT minutes qualify — no samples, nothing exceeds
+// the threshold enough times, or a real into_bed already closes the gap before enough accumulate —
+// deliberately failing toward NOT flagging: this is a diagnostic surfacing suspicion, not a safety
+// guard, so missing data must never manufacture one. Otherwise returns { out_of_bed: exit,
+// active_minutes, bucket_start, motion_peak, gap_ms } — the count, and the FIRST qualifying minute's own
+// detail as the earliest evidence the gap didn't close when the classifier believed it did.
+export function findLingeringBedMotion(
+  exit,
+  nextIntoBed,
+  samples,
+  { windowMs = LINGERING_WINDOW_MS, minActiveMinutes = LINGERING_MIN_ACTIVE_MINUTES } = {}
+) {
+  if (!exit || exit.type !== 'out_of_bed') return null;
+  const exitMs = Date.parse(`${exit.created_at.replace(' ', 'T')}Z`);
+  // Floored: see the file-level comment on minuteFloor. NOT needed on the exit side below — a bucket in
+  // exit's own minute always has bucket_start <= exit.created_at as a plain string compare, since its
+  // seconds are forced to ':00'.
+  const boundary = nextIntoBed ? minuteFloor(nextIntoBed.created_at) : null;
+
+  let count = 0;
+  let first = null;
+  // Collapse consecutive same-bucket_start rows into ONE minute, OR-merged (qualifies if ANY row for
+  // that minute does) — the same convention sleepAnalysis.js itself already uses for duplicate buckets
+  // (state[i] = state[i] === null ? active : state[i] || active), not a new rule invented here. Without
+  // this, several duplicate rows for a single flush-lagged minute would satisfy the 4-minute threshold
+  // alone — silently defeating the exact guarantee that threshold exists to provide (found in review,
+  // 2026-09-14, citing sleepAnalysis.test.js's own "a duplicate activity_samples row for the same
+  // minute must not erase real movement" fixture as proof duplicates are real, not hypothetical).
+  let curBucket = null;
+  let curQualifies = false;
+  let curFirst = null;
+  const closeBucket = () => {
+    if (curBucket !== null && curQualifies) {
+      count++;
+      if (!first) first = curFirst;
+    }
+  };
+  for (const s of samples || []) {
+    if (s.bucket_start <= exit.created_at) continue; // the exit's own minute — its own departure movement
+    if (boundary !== null && s.bucket_start >= boundary) break; // a real return is already recorded
+    const bucketMs = Date.parse(`${s.bucket_start.replace(' ', 'T')}Z`);
+    if (bucketMs - exitMs > windowMs) break; // past the fixed lookahead; samples ascend, nothing later qualifies
+    if (s.bucket_start !== curBucket) {
+      closeBucket();
+      curBucket = s.bucket_start;
+      curQualifies = false;
+      curFirst = null;
+    }
+    if (!curQualifies && s.motion_peak != null && s.motion_peak > LINGERING_MOTION_ACTIVE) {
+      curQualifies = true;
+      curFirst = { bucket_start: s.bucket_start, motion_peak: s.motion_peak, gap_ms: bucketMs - exitMs };
+    }
+  }
+  closeBucket(); // the last minute in range never got a chance to close inside the loop
+  if (count < minActiveMinutes) return null;
+  return { out_of_bed: exit, active_minutes: count, ...first };
+}
+
 // --- Outside-channel EVIDENCE (peak + duration), ROADMAP §1.2 item 2 ---
 //
 // The fast link above accepts a single frame over threshold with no minimum magnitude at all

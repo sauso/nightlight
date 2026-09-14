@@ -35,6 +35,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - Added a query to find a bed entry immediately followed by an exit on the same camera (a shape that
   measurement points to being mostly a parent's presence, not a child getting straight back up) — not
   called from anywhere yet; groundwork for reviewing or scoring against it later.
+- Added a query to find sustained (4+ distinct minutes) bed-zone motion after an out_of_bed while the
+  classifier still believes the bed is empty (no bed entry recorded on the same camera before the
+  motion starts) — generalizes the bed-entry-immediately-followed-by-an-exit check above from that
+  one narrow shape to every recorded bed exit still within activity_samples' retention window. Not
+  called from anywhere yet; same groundwork purpose as the query above, now applied to the full
+  population instead of just quick reversals.
 
 ### Fixed
 - **A real out-of-bed episode could report zero wake-ups.** Wake-count only ever read per-minute

@@ -1175,5 +1175,81 @@
       "sleepAnalysis.test.js"
     ],
     "note": "This SURVIVED when a review tried it — the source comment claimed the convention and nothing checked it. txIdx currently rounds, so a return at :29 and one at :31 land on different minutes. When #260 flips it to floor, the wake path must not move silently."
+  },
+  {
+    "label": "lingering motion: the next into_bed boundary is ignored",
+    "file": "backend/src/lib/bedTransitionRules.js",
+    "find": "if (boundary !== null && s.bucket_start >= boundary) break;",
+    "replace": "if (false) break;",
+    "expect": "killed",
+    "tests": [
+      "bedTransitionLink.test.js",
+      "bedTransitions.test.js"
+    ]
+  },
+  {
+    "label": "lingering motion: the next into_bed timestamp is not floored",
+    "file": "backend/src/lib/bedTransitionRules.js",
+    "find": "const boundary = nextIntoBed ? minuteFloor(nextIntoBed.created_at) : null;",
+    "replace": "const boundary = nextIntoBed ? nextIntoBed.created_at : null;",
+    "expect": "killed",
+    "tests": [
+      "bedTransitionLink.test.js",
+      "bedTransitions.test.js"
+    ]
+  },
+  {
+    "label": "lingering motion: one active minute is enough",
+    "file": "backend/src/lib/bedTransitionRules.js",
+    "find": "if (count < minActiveMinutes) return null;",
+    "replace": "if (count < 1) return null;",
+    "expect": "killed",
+    "tests": [
+      "bedTransitionLink.test.js",
+      "bedTransitions.test.js"
+    ]
+  },
+  {
+    "label": "lingering motion: duplicate rows count as distinct minutes",
+    "file": "backend/src/lib/bedTransitionRules.js",
+    "find": "if (s.bucket_start !== curBucket) {",
+    "replace": "if (true) {",
+    "expect": "killed",
+    "tests": [
+      "bedTransitionLink.test.js",
+      "bedTransitions.test.js"
+    ]
+  },
+  {
+    "label": "lingering motion: every repeated out_of_bed is reported",
+    "file": "backend/src/lib/bedTransitions.js",
+    "find": "if (isRunStart) {",
+    "replace": "if (true) {",
+    "expect": "killed",
+    "tests": [
+      "bedTransitions.test.js"
+    ]
+  },
+  {
+    "label": "lingering motion: anchoring at the newest (not oldest) exit loses a run's earlier evidence",
+    "file": "backend/src/lib/bedTransitions.js",
+    "find": "const isRunStart = i === 0 || sorted[i - 1].type !== 'out_of_bed';",
+    "replace": "const isRunStart = isRunEnd;",
+    "expect": "killed",
+    "tests": [
+      "bedTransitions.test.js"
+    ],
+    "note": "Reverts to the original, buggy anchor point (the run's newest member). Found by an adversarial pre-merge review, 2026-09-14 (Codex + a parallel Claude subagent, both independently reproduced it): motion between an earlier run member and the next repeated exit was silently LOST, not deduplicated, because the newest exit's own window never looked far enough back."
+  },
+  {
+    "label": "lingering motion: the exit's own :00-second minute is not excluded",
+    "file": "backend/src/lib/bedTransitionRules.js",
+    "find": "if (s.bucket_start <= exit.created_at) continue;",
+    "replace": "if (s.bucket_start < exit.created_at) continue;",
+    "expect": "killed",
+    "tests": [
+      "bedTransitionLink.test.js"
+    ],
+    "note": "Survived the original 5 mutants above — every existing exit fixture used nonzero seconds, so a bucket_start (always :00) could never land exactly on exit.created_at. Found by an adversarial pre-merge review (a Claude subagent), 2026-09-14."
   }
 ]
