@@ -1311,5 +1311,38 @@
     "tests": [
       "MorningReview.test.jsx"
     ]
+  },
+  {
+    "label": "lingering motion: a transition exactly at the fetch boundary counts as its own prior",
+    "file": "backend/src/lib/bedTransitions.js",
+    "find": "WHERE camera_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT 1",
+    "replace": "WHERE camera_id = ? AND created_at <= ? ORDER BY created_at DESC LIMIT 1",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ],
+    "note": "Survived every other lingering-motion test — none placed a transition exactly on wideStart. Found by an adversarial pre-merge review (a Claude subagent), 2026-09-14."
+  },
+  {
+    "label": "lingering motion: the trailing widen is not the full hour",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "const wideEnd = toSqlUtc(new Date(Date.parse(`${endSql.replace(' ', 'T')}Z`) + LINGERING_WINDOW_MS));",
+    "replace": "const wideEnd = toSqlUtc(new Date(Date.parse(`${endSql.replace(' ', 'T')}Z`) + LINGERING_WINDOW_MS / 2));",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ],
+    "note": "Survived every other lingering-motion test — the existing trailing-lookahead test only placed evidence ~5 minutes past the boundary, not near the full 60-minute edge. Found by an adversarial pre-merge review (a Claude subagent), 2026-09-14."
+  },
+  {
+    "label": "lingering motion: the leading widen is not the full hour",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "const wideStart = toSqlUtc(new Date(Date.parse(`${startSql.replace(' ', 'T')}Z`) - LINGERING_WINDOW_MS));",
+    "replace": "const wideStart = toSqlUtc(new Date(Date.parse(`${startSql.replace(' ', 'T')}Z`) - LINGERING_WINDOW_MS / 2));",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ],
+    "note": "Symmetric case to the trailing widen above, flagged as likely but not separately verified by the same review. Found by an adversarial pre-merge review (a Claude subagent), 2026-09-14."
   }
 ]

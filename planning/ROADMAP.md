@@ -395,7 +395,12 @@ counts as **historical**, not as the current state.
    real staging data at ship time, 2026-09-14** (773 total `out_of_bed` transitions): 97 quick-reversal
    flagged (12.6%), 63 lingering-motion flagged (8.2%), only **3 flagged by both** (4.8% of lingering
    flags) — consistent with the Phase 1 measurement a few hours earlier, confirming the overlap is real
-   but small. This is still **Phase 2, ground-truth collection** — no gating attempted, no
+   but small. ⚠️ **Known, accepted gap found in adversarial pre-merge review** (a Claude subagent,
+   verified with a standalone reproduction): a run whose oldest and newest members straddle a review
+   night's boundary by more than an hour can go unreported on BOTH adjacent nights — never a fabricated
+   flag, only a real one the whole-table diagnostic would find but neither morning review shows. Not
+   fixed this round; see the code comment in `sleepReviews.js` for why. This is still **Phase 2,
+   ground-truth collection** — no gating attempted, no
    `wake_count`/`awake_minutes` or
    `detectMidnightEpisodes` change. Item 3 remains open pending real owner labels.
 4. **New: log-driven tuning is now possible.** The exit rule logs rejected links (`[oob] … link

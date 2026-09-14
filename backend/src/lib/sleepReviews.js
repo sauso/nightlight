@@ -131,6 +131,20 @@ function transitionsFor(childId, nightDate) {
   // Widen BOTH edges to retain pre-noon anchors and post-noon evidence/returns without
   // scanning the full tables on every review. A prior-type lookup suppresses any leading
   // run whose true anchor is still outside this bounded fetch (plan review, 2026-09-14).
+  // ⚠️ KNOWN, ACCEPTED LIMITATION (found in adversarial pre-merge review, a Claude subagent,
+  // 2026-09-14, verified with a standalone reproduction): a same-direction run whose OLDEST
+  // member sits more than an hour before this boundary while its NEWEST member falls after
+  // it can go unreported on BOTH adjacent nights — the earlier night can correctly evaluate
+  // it but the reported (newest) id isn't part of that night's own `rows`, and the later
+  // night correctly refuses to evaluate it (its own boundary check can't see far enough back
+  // to confirm the true anchor, exactly the fabrication guard doing its job). This never
+  // fabricates or leaks a flag onto the wrong night — it only means a flag the whole-table
+  // `getLingeringBedMotion()` would find can be silently absent from both morning reviews.
+  // Same-direction runs are 62% of stored transitions and can plausibly span many hours (see
+  // ROADMAP §1.2 item 3), so this is a real if narrow gap, not a contrived one. Not fixed
+  // here: correctly attaching the flag to whichever night's page a human would expect it on
+  // needs cross-night awareness this function doesn't have, and is out of scope for a
+  // diagnostic whose whole posture is "fail toward not flagging" rather than "never miss one".
   const wideStart = toSqlUtc(new Date(Date.parse(`${startSql.replace(' ', 'T')}Z`) - LINGERING_WINDOW_MS));
   const wideEnd = toSqlUtc(new Date(Date.parse(`${endSql.replace(' ', 'T')}Z`) + LINGERING_WINDOW_MS));
   const wideRows = getBedTransitions(camIds, wideStart, wideEnd);

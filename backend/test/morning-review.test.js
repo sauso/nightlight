@@ -310,6 +310,40 @@ test('lingering motion: leading lookback retains a pre-noon run anchor and its e
   assert.equal(rows[0].lingering_motion_gap_s, 60);
 });
 
+test('lingering motion: getPriorTransitionType excludes a transition exactly AT the fetch boundary', () => {
+  // Found by adversarial pre-merge review (a Claude subagent), 2026-09-14: `<` weakened to `<=`
+  // survived every other test here because none placed a transition exactly on wideStart. A
+  // genuine fresh run starting exactly there must not match itself as its own "prior" transition.
+  layTransition(TRANSITION.OUT_OF_BED, exactSql(at(11, 0))); // exactly wideStart (startSql - 1h)
+  layActiveMinutes([at(11, 1), at(11, 2), at(11, 3), at(11, 4)]);
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(12, 10))); // same-direction repeat, within the night
+  const rows = getNightReview(CHILD, DATE).transitions;
+  assert.deepEqual(rows.map((t) => t.id), [id]);
+  assert.equal(rows[0].lingering_motion_minutes, 4, 'the 11:00 anchor must not be mistaken for its own prior transition');
+});
+
+test('lingering motion: the trailing lookahead is exactly one hour, not merely "some" lookahead', () => {
+  // Found by adversarial pre-merge review (a Claude subagent), 2026-09-14: shrinking the widening
+  // by 30 minutes survived every other test here, because the existing trailing-lookahead test only
+  // placed evidence ~5 minutes past the boundary. Evidence near the full 60-minute edge discriminates.
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(11, 59, 1))); // one minute before next-day noon
+  layActiveMinutes([at(12, 50, 1), at(12, 53, 1), at(12, 56, 1), at(12, 58, 1)]); // 51-59 min after the exit
+  const rows = getNightReview(CHILD, DATE).transitions;
+  assert.equal(rows.find((t) => t.id === id).lingering_motion_minutes, 4);
+});
+
+test('lingering motion: the leading lookback is exactly one hour too, not merely "some" lookback', () => {
+  // Symmetric case the subagent flagged as likely but didn't separately verify. A run anchor 59
+  // minutes before noon (just inside a full 1h widen) must still be found and evaluated; a shrunk
+  // widen would exclude it from wideRows and, via getPriorTransitionType, wrongly suppress the
+  // newer repeat that reports it as a boundary continuation.
+  layTransition(TRANSITION.OUT_OF_BED, exactSql(at(11, 1))); // 59 minutes before noon
+  layActiveMinutes([at(11, 2), at(11, 3), at(11, 4), at(11, 5)]);
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(12, 10))); // same-direction repeat, within the night
+  const rows = getNightReview(CHILD, DATE).transitions;
+  assert.equal(rows.find((t) => t.id === id).lingering_motion_minutes, 4);
+});
+
 test('lingering motion: a run continuing across the fetch boundary cannot fabricate a fresh flag', () => {
   // The plan-review counterexample: the true anchor is 10:00, outside the 11:00 fetch.
   // Its hour is quiet. Treating 18:00 as a new anchor would manufacture a false positive.
