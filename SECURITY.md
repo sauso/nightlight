@@ -8,9 +8,8 @@ security issues privately, not as a public GitHub issue.
 
 Nightlight is pre-1.0 and released continuously. Only the **most recently released version**
 (the `:latest` Docker tag / the newest `vX.Y.Z` GitHub release) receives security fixes — older
-tags are not backported to. If you're on an older version, the fix is to upgrade: pull the new
-image (`docker compose pull && docker compose up -d`, or the Unraid "Check for Updates") and
-restart the container.
+tags are not backported to. If you're on an older version, the fix is to upgrade — see
+[docs/operations.md](docs/operations.md) for the procedure.
 
 ## Reporting a vulnerability
 
