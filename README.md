@@ -164,6 +164,13 @@ that IP to browsers. There are two supported ways to provide one:
     kernel limitation) — which matters if your reverse proxy (e.g. SWAG) runs on that same host. Use
     **`ipvlan`** (or add a macvlan shim interface) so the host can reach it.
 
+| | Host networking | ipvlan | macvlan |
+|---|---|---|---|
+| Setup | None — the default | Custom Docker network + fixed IP | Custom Docker network + fixed IP |
+| Port collisions with other containers | Possible — shares the host's ports | None — has its own IP | None — has its own IP |
+| Host itself can reach the container | Yes (it *is* the host) | Yes | **No** (Linux kernel limitation) — use ipvlan instead if a reverse proxy runs on the host |
+| Multiple instances on one host | Awkward — only one can hold port 4000 | Easy — each gets its own IP | Easy — each gets its own IP |
+
 Either way, the app is still served on port **4000** (change it with the `PORT` env var if you need to).
 For **remote / internet** access, see "Remote / internet access" below — that part is the same in both
 modes.
@@ -388,9 +395,23 @@ measurement**, and (like everything here) never a safety device — see the warn
 
 ## Adding caregivers
 
-Once signed in as admin, go to **Account → Add caregiver** to create additional logins (e.g.
-for a partner or babysitter). Caregivers can view cameras and manage children/cameras but
-can't manage other user accounts or change app-wide settings.
+Once signed in as admin, go to **Settings → Caregivers** to create additional logins (e.g. for a
+partner or babysitter).
+
+| Capability | Caregiver | Admin |
+|---|:---:|:---:|
+| View live cameras and media | Yes | Yes |
+| Reorder / assign cameras to a child | Yes | Yes |
+| Restart, reboot, or snooze camera alerts | Yes | Yes |
+| Add / edit / enable / delete a camera | No | Yes |
+| Add / edit a child and review sleep | Yes | Yes |
+| Delete a child and its media | No | Yes |
+| Change global settings (detection, notifications, providers) | No | Yes |
+| Manage caregiver/admin accounts and sessions | No | Yes |
+
+The **Settings** hub itself is visible to caregivers too — its admin-only pages (general,
+camera controls, recording, MQTT, push providers, users, logs, clip storage) are simply hidden
+for them rather than the whole screen being off-limits.
 
 **Changing someone’s role takes effect immediately** — on their very next action, on every device
 they’re signed in on. Demoting an admin to caregiver does *not* sign them out: they keep browsing as
@@ -515,9 +536,9 @@ What the native apps add over the browser/PWA:
 ### Push notifications (motion alerts)
 
 Get a **phone notification** when a camera with motion detection sees movement — even when the app is
-closed. It's off by default, and the in-app **Settings → Recent alerts** list works with or without
-it. There are two ways to set it up (pick one), both configured under **Settings → Push
-notifications**:
+closed. It's off by default, and the in-app **Recent alerts** list — on each child's page, or the
+combined view under **Settings → Logs** (admin only) — works with or without it. There are two
+ways to set it up (pick one), both configured under **Settings → Push notifications**:
 
 **Pushover (recommended — simplest, and works on iOS).** A small notification service (the same one
 Sonarr/Radarr use). No Firebase project, no Apple Developer account.
