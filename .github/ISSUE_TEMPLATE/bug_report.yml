@@ -1,0 +1,64 @@
+name: Bug report
+description: Something isn't working as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Found a security issue instead (a credential, secret, or private data exposed)? Please
+        **don't** file it here — see [SECURITY.md](https://github.com/sauso/nightlight/blob/main/SECURITY.md)
+        for how to report it privately.
+  - type: input
+    id: version
+    attributes:
+      label: Nightlight version
+      description: Settings → About, or the image tag/SHA you're running.
+      placeholder: e.g. 0.30.1, or sauso/nightlight:dev @ 66e183d
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment mode
+      options:
+        - Unraid (Community Applications template)
+        - Docker Compose
+        - Plain docker run
+        - Other / not sure
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Browser / app
+      description: Where you saw the problem — browser + version, or the Android/iOS app version.
+      placeholder: e.g. Chrome 118 on Android, or the Nightlight Android app 0.12.0
+    validations:
+      required: true
+  - type: input
+    id: camera
+    attributes:
+      label: Camera make / model / firmware (if camera-related)
+      placeholder: e.g. Thingino, firmware 2026-08-19
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+  - type: markdown
+    attributes:
+      value: |
+        If this is easier to diagnose with logs, please attach a **diagnostics bundle**
+        (Settings → Logs → Download diagnostics) or, for a camera that won't connect, the
+        **camera report** (Add camera screen). Both are redacted and stay on your device until
+        you attach them here — please open and check the file first; the redaction covers
+        passwords, not everything a camera's firmware might put in a log line.

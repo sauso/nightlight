@@ -10,6 +10,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Added
+- A `SECURITY.md` security policy (supported versions, private reporting via GitHub Security
+  Advisories, safe diagnostic-bundle handling, and credential-rotation steps), a bug-report issue
+  template, and a link to report privately from the diagnostics bundle and camera report screens
+  when a redacted file still contains something sensitive.
 - The morning review now asks about a bed entry immediately followed by an exit ("Got into bed at
   7:51pm, then got out of bed again 14s later — what actually happened?"), separately from the
   collapsed full event list — measurement points to this being mostly a parent's presence read as a
