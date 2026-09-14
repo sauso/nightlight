@@ -356,7 +356,7 @@ export default function NightReview() {
               )}
               <div className="review-event__body">
                 <div className="review-event__when">
-                  Recorded as out of bed at {fmtEvent(t)} — the bed then showed movement in{' '}
+                  Recorded as out of bed at {fmtEvent(t)} — the bed also showed movement in{' '}
                   {t.lingering_motion_minutes} separate minutes with no return logged in between. What actually
                   happened?
                 </div>

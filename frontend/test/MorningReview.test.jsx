@@ -322,9 +322,15 @@ describe('the review screen', () => {
       at();
       const card = (await screen.findByText('Still moving?')).closest('.card');
       expect(within(card).getByText(/Recorded as out of bed at 20:06/)).toHaveTextContent(
-        'Recorded as out of bed at 20:06 — the bed then showed movement in 4 separate minutes with no return logged in between. What actually happened?'
+        'Recorded as out of bed at 20:06 — the bed also showed movement in 4 separate minutes with no return logged in between. What actually happened?'
       );
-      expect(card.textContent).not.toMatch(/\bafter\b|kept moving|more minutes|continuously|ongoing/i);
+      // "then"/"since"/"later" all imply the movement followed the displayed exit chronologically —
+      // which is exactly the claim that can be false for a same-direction run's reported (newest)
+      // member, whose evidence is anchored at the run's OLDEST member instead. Found by an adversarial
+      // pre-merge review (Codex, gpt-6-astra), 2026-09-14: the first fix removed "after"/"kept moving"
+      // but left "then" carrying the identical implication, and this forbidden-word list didn't catch
+      // it either.
+      expect(card.textContent).not.toMatch(/\bafter\b|\bthen\b|\bsince\b|\blater\b|kept moving|more minutes|continuously|ongoing/i);
       expect(screen.getByRole('button', { name: /Check the 2 recorded events/ })).toBeInTheDocument();
     });
 
