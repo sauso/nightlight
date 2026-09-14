@@ -41,6 +41,14 @@ function seed(cameraId, type, createdAt, { peak = null, verdict = null, snapshot
     .run(cameraId, type, createdAt, peak, verdict, snapshot).lastInsertRowid;
 }
 
+const insertActivity = db.prepare(
+  `INSERT INTO activity_samples (camera_id, bucket_start, motion_level, motion_peak, sound_level,
+     sound_peak, motion_frames, sound_windows) VALUES (?, ?, ?, ?, 0, 0, 1, 0)`
+);
+function seedActivity(cameraId, bucketStart, motionPeak = 0.02) {
+  insertActivity.run(cameraId, bucketStart, motionPeak, motionPeak);
+}
+
 const daysAgo = (n) =>
   new Date(Date.now() - n * 86400e3).toISOString().slice(0, 19).replace('T', ' ');
 
@@ -49,7 +57,10 @@ before(() => {
   makeCamera(db, { id: 'cam-b', name: 'Camera B' });
 });
 after(() => { db.close(); cleanupTempDataDirs(); });
-beforeEach(() => { db.prepare('DELETE FROM bed_transitions').run(); });
+beforeEach(() => {
+  db.prepare('DELETE FROM bed_transitions').run();
+  db.prepare('DELETE FROM activity_samples').run();
+});
 
 // --- recording --------------------------------------------------------------------------------
 
@@ -425,6 +436,219 @@ test('limit is capped at 500 however many reversals exist, and however large the
   })();
   assert.equal(bt.getQuickReversals({ limit: 9999 }).length, 500, 'the ask is capped at 500');
   assert.equal(bt.getQuickReversals({ limit: 400 }).length, 400, 'a smaller ask is honoured');
+});
+
+// --- lingering bed motion after out_of_bed -------------------------------------------------------
+
+const seedActiveMinutes = (cameraId, ...bucketStarts) => {
+  for (const bucketStart of bucketStarts) seedActivity(cameraId, bucketStart);
+};
+
+test('four distinct active minutes after an exit with no recorded return are reported', () => {
+  const exit = seed('cam-a', 'out_of_bed', '2026-03-01 10:00:30');
+  seedActiveMinutes('cam-a',
+    '2026-03-01 10:01:00', '2026-03-01 10:02:00',
+    '2026-03-01 10:03:00', '2026-03-01 10:04:00');
+  const rows = bt.getLingeringBedMotion();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].out_of_bed.id, exit);
+  assert.equal(rows[0].active_minutes, 4);
+});
+
+test('fewer than four active minutes are never reported', () => {
+  seed('cam-a', 'out_of_bed', '2026-03-01 10:00:30');
+  seedActiveMinutes('cam-a', '2026-03-01 10:01:00', '2026-03-01 10:02:00', '2026-03-01 10:03:00');
+  assert.deepEqual(bt.getLingeringBedMotion(), []);
+});
+
+test('four duplicate activity rows for one minute do not produce a report', () => {
+  seed('cam-a', 'out_of_bed', '2026-03-01 10:00:30');
+  for (let i = 0; i < 4; i++) seedActivity('cam-a', '2026-03-01 10:01:00');
+  assert.deepEqual(bt.getLingeringBedMotion(), [], 'four rows still describe only one active minute');
+});
+
+test('a real into_bed before enough active minutes accumulate suppresses the report', () => {
+  seed('cam-a', 'out_of_bed', '2026-03-01 10:00:30');
+  seed('cam-a', 'into_bed', '2026-03-01 10:04:30');
+  seedActiveMinutes('cam-a',
+    '2026-03-01 10:01:00', '2026-03-01 10:02:00', '2026-03-01 10:03:00',
+    '2026-03-01 10:04:00', '2026-03-01 10:05:00', '2026-03-01 10:06:00');
+  assert.deepEqual(bt.getLingeringBedMotion(), []);
+});
+
+test('quiet activity samples never trigger a lingering-motion report', () => {
+  seed('cam-a', 'out_of_bed', '2026-03-01 10:00:30');
+  for (let minute = 1; minute <= 6; minute++) {
+    seedActivity('cam-a', `2026-03-01 10:0${minute}:00`, minute === 3 ? 0.01 : 0.001);
+  }
+  assert.deepEqual(bt.getLingeringBedMotion(), []);
+});
+
+test('the default sixty-minute window includes its boundary and excludes the minute after', () => {
+  seed('cam-a', 'out_of_bed', '2026-03-01 10:00:00');
+  seedActiveMinutes('cam-a',
+    '2026-03-01 10:57:00', '2026-03-01 10:58:00', '2026-03-01 10:59:00',
+    '2026-03-01 11:00:00', '2026-03-01 11:01:00');
+  const [row] = bt.getLingeringBedMotion();
+  assert.equal(row.active_minutes, 4, 'the exact boundary counts, while one minute past it does not');
+});
+
+test('windowMs is configurable through the database wrapper', () => {
+  seed('cam-a', 'out_of_bed', '2026-03-01 10:00:00');
+  seedActiveMinutes('cam-a',
+    '2026-03-01 10:01:00', '2026-03-01 10:02:00',
+    '2026-03-01 10:03:00', '2026-03-01 10:04:00');
+  assert.deepEqual(bt.getLingeringBedMotion({ windowMs: 3 * 60000 }), []);
+  assert.equal(bt.getLingeringBedMotion({ windowMs: 4 * 60000 }).length, 1);
+});
+
+test('minActiveMinutes is configurable through the database wrapper', () => {
+  seed('cam-a', 'out_of_bed', '2026-03-01 10:00:30');
+  seedActiveMinutes('cam-a', '2026-03-01 10:01:00', '2026-03-01 10:02:00', '2026-03-01 10:03:00');
+  assert.deepEqual(bt.getLingeringBedMotion(), [], 'the default requires four distinct minutes');
+  assert.equal(bt.getLingeringBedMotion({ minActiveMinutes: 3 })[0].active_minutes, 3);
+});
+
+test('a camera with no activity samples is simply not reported', () => {
+  seed('cam-a', 'out_of_bed', '2026-03-01 10:00:30');
+  assert.deepEqual(bt.getLingeringBedMotion(), []);
+});
+
+test("a deleted camera's exit is still checked and reported", () => {
+  makeCamera(db, { id: 'cam-lingering-gone', name: 'Lingering Gone' });
+  const exit = seed('cam-lingering-gone', 'out_of_bed', '2026-03-01 10:00:30');
+  seedActiveMinutes('cam-lingering-gone',
+    '2026-03-01 10:01:00', '2026-03-01 10:02:00',
+    '2026-03-01 10:03:00', '2026-03-01 10:04:00');
+  db.prepare('DELETE FROM cameras WHERE id = ?').run('cam-lingering-gone');
+  const [row] = bt.getLingeringBedMotion();
+  assert.equal(row.out_of_bed.id, exit);
+  assert.equal(row.out_of_bed.camera_name, 'cam-lingering-gone', 'the LEFT JOIN falls back to the historical camera id');
+});
+
+test("one camera's into_bed never closes another camera's exit", () => {
+  const exit = seed('cam-a', 'out_of_bed', '2026-03-01 10:00:30');
+  seed('cam-b', 'into_bed', '2026-03-01 10:02:30');
+  seedActiveMinutes('cam-a',
+    '2026-03-01 10:01:00', '2026-03-01 10:02:00',
+    '2026-03-01 10:03:00', '2026-03-01 10:04:00');
+  assert.deepEqual(bt.getLingeringBedMotion().map((r) => r.out_of_bed.id), [exit]);
+});
+
+test('same-direction exits share the real next into_bed as their occupancy boundary', () => {
+  seed('cam-a', 'out_of_bed', '2026-03-01 10:00:30');
+  const repeated = seed('cam-a', 'out_of_bed', '2026-03-01 10:02:30');
+  seed('cam-a', 'into_bed', '2026-03-01 10:08:45');
+  seedActiveMinutes('cam-a',
+    '2026-03-01 10:03:00', '2026-03-01 10:04:00',
+    '2026-03-01 10:05:00', '2026-03-01 10:06:00');
+  const rows = bt.getLingeringBedMotion();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].out_of_bed.id, repeated, 'the run representative sees activity before the shared real return');
+
+  db.prepare('DELETE FROM bed_transitions').run();
+  db.prepare('DELETE FROM activity_samples').run();
+  seed('cam-a', 'out_of_bed', '2026-03-01 11:00:30');
+  seed('cam-a', 'out_of_bed', '2026-03-01 11:02:30');
+  seed('cam-a', 'into_bed', '2026-03-01 11:06:45');
+  seedActiveMinutes('cam-a',
+    '2026-03-01 11:03:00', '2026-03-01 11:04:00', '2026-03-01 11:05:00',
+    '2026-03-01 11:07:00');
+  assert.deepEqual(
+    bt.getLingeringBedMotion(),
+    [],
+    'three minutes before the shared return plus one after it cannot be combined into a flag'
+  );
+});
+
+test('a run of repeated out_of_bed rows is reported once, for the newest exit', () => {
+  seed('cam-a', 'out_of_bed', '2026-03-01 10:00:30');
+  seed('cam-a', 'out_of_bed', '2026-03-01 10:01:30');
+  const newest = seed('cam-a', 'out_of_bed', '2026-03-01 10:02:30');
+  seedActiveMinutes('cam-a',
+    '2026-03-01 10:03:00', '2026-03-01 10:04:00',
+    '2026-03-01 10:05:00', '2026-03-01 10:06:00');
+  const rows = bt.getLingeringBedMotion();
+  assert.equal(rows.length, 1, 'one physical unoccupied stretch produces one row, not three');
+  assert.equal(rows[0].out_of_bed.id, newest);
+});
+
+test('a same-minute into_bed with nonzero seconds closes the database-backed window', () => {
+  seed('cam-a', 'out_of_bed', '2026-03-01 10:00:30');
+  seed('cam-a', 'into_bed', '2026-03-01 10:01:45');
+  seedActiveMinutes('cam-a',
+    '2026-03-01 10:01:00', '2026-03-01 10:02:00',
+    '2026-03-01 10:03:00', '2026-03-01 10:04:00');
+  assert.deepEqual(
+    bt.getLingeringBedMotion({ minActiveMinutes: 1 }),
+    [],
+    'the 10:01 bucket is already the return minute'
+  );
+});
+
+test('lingering reports are newest-first across cameras and the limit never drops a camera', () => {
+  const exits = [];
+  for (const [time, minutes] of [
+    ['09:00:30', ['09:01:00', '09:02:00', '09:03:00', '09:04:00']],
+    ['09:20:30', ['09:21:00', '09:22:00', '09:23:00', '09:24:00']],
+    ['09:40:30', ['09:41:00', '09:42:00', '09:43:00', '09:44:00']],
+  ]) {
+    exits.push(seed('cam-a', 'out_of_bed', `2026-03-01 ${time}`));
+    seedActiveMinutes('cam-a', ...minutes.map((t) => `2026-03-01 ${t}`));
+    seed('cam-a', 'into_bed', `2026-03-01 09:${String(Number(time.slice(3, 5)) + 10).padStart(2, '0')}:30`);
+  }
+  const bNewest = seed('cam-b', 'out_of_bed', '2026-03-01 11:00:30');
+  seedActiveMinutes('cam-b',
+    '2026-03-01 11:01:00', '2026-03-01 11:02:00',
+    '2026-03-01 11:03:00', '2026-03-01 11:04:00');
+
+  const limited = bt.getLingeringBedMotion({ limit: 2 });
+  assert.equal(limited[0].out_of_bed.id, bNewest);
+  assert.ok(limited.some((r) => r.out_of_bed.camera_id === 'cam-b'), 'the newest camera is not dropped by camera-grouped scan order');
+  assert.deepEqual(bt.getLingeringBedMotion().map((r) => r.out_of_bed.id), [bNewest, ...exits.reverse()]);
+});
+
+test('lingering reports sharing a timestamp are ordered by id, newest first', () => {
+  const a = seed('cam-a', 'out_of_bed', '2026-03-01 10:00:30');
+  const b = seed('cam-b', 'out_of_bed', '2026-03-01 10:00:30');
+  for (const cameraId of ['cam-a', 'cam-b']) {
+    seedActiveMinutes(cameraId,
+      '2026-03-01 10:01:00', '2026-03-01 10:02:00',
+      '2026-03-01 10:03:00', '2026-03-01 10:04:00');
+  }
+  assert.ok(b > a);
+  assert.deepEqual(bt.getLingeringBedMotion().map((r) => r.out_of_bed.id), [b, a]);
+});
+
+test('lingering-report limit has a floor of one and is capped at five hundred', () => {
+  const base = Date.parse('2026-01-01T00:00:00Z');
+  const sql = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+  db.transaction(() => {
+    for (let i = 0; i < 520; i++) {
+      const start = base + i * 2 * 60 * 60 * 1000;
+      seed('cam-a', 'out_of_bed', sql(start));
+      for (let minute = 1; minute <= 4; minute++) seedActivity('cam-a', sql(start + minute * 60000));
+      seed('cam-a', 'into_bed', sql(start + 10 * 60000));
+    }
+  })();
+  assert.equal(bt.getLingeringBedMotion({ limit: 0 }).length, 1, 'zero is floored to one');
+  assert.equal(bt.getLingeringBedMotion({ limit: -5 }).length, 1, 'negative limits are also floored');
+  assert.equal(bt.getLingeringBedMotion({ limit: 9999 }).length, 500, 'the ask is capped at 500');
+  assert.equal(bt.getLingeringBedMotion({ limit: 400 }).length, 400, 'a smaller ask is honoured');
+});
+
+test('the lingering-motion threshold stays equal to sleep analysis MOTION_ACTIVE', async () => {
+  // A real, unmocked import — this file already runs against a real (temp) DATA_DIR via
+  // useTempDataDir(), so sleepAnalysis.js's own db-backed collaborators open safely here. Deliberately
+  // NOT done in bedTransitionLink.test.js (the pure-function file): node:test's mock.module(), when
+  // used there to stand in for db.js/bedTransitions.js so THIS constant could be read without opening
+  // sleepAnalysis's real collaborators, was found to corrupt those modules' --experimental-test-
+  // coverage attribution for the WHOLE suite (not just that one process) even after immediately
+  // restoring the mocks — a real node:test mock+coverage interaction bug, found while verifying this
+  // plan's own implementation, 2026-09-14. This file needs no mock at all to reach the constant safely.
+  const { SLEEP_THRESHOLDS } = await import('../src/lib/sleepAnalysis.js');
+  const { LINGERING_MOTION_ACTIVE } = await import('../src/lib/bedTransitionRules.js');
+  assert.equal(SLEEP_THRESHOLDS.MOTION_ACTIVE, LINGERING_MOTION_ACTIVE);
 });
 
 // --- verdicts ---------------------------------------------------------------------------------

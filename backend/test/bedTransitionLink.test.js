@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import {
   oobLinkKind, accumulateOutEvidence, trimOutSamples, evidenceFromSamples, EMPTY_EVIDENCE,
   intoBedRejected, outOfBedRejected, entryNearMissWorthLogging, findQuickReversals,
+  findLingeringBedMotion, LINGERING_MOTION_ACTIVE, LINGERING_WINDOW_MS, LINGERING_MIN_ACTIVE_MINUTES,
 } from '../src/lib/bedTransitionRules.js';
 
 test('an adult lifting a child out links instantly', () => {
@@ -329,4 +330,119 @@ test('no reversal, no false positive: alternating types with nothing quick betwe
     row(2, 'cam-a', 'out_of_bed', '2026-03-01 19:05:00'), // 5 minutes later, not a "quick" reversal
   ];
   assert.deepEqual(findQuickReversals(rows, { maxGapMs: 60000 }), []);
+});
+
+// --- findLingeringBedMotion (ROADMAP §1.2 item 3 Phase 1) -----------------------------------------
+
+const lingeringExit = (created_at = '2026-03-01 10:00:30', type = 'out_of_bed') =>
+  row(90, 'cam-a', type, created_at);
+const activity = (bucket_start, motion_peak = LINGERING_MOTION_ACTIVE + 0.01) =>
+  ({ bucket_start, motion_peak });
+const activeMinutes = (...minutes) => minutes.map((minute) => activity(`2026-03-01 10:${minute}:00`));
+
+test('four qualifying distinct minutes with no recorded return are flagged', () => {
+  const found = findLingeringBedMotion(lingeringExit(), null, activeMinutes('01', '02', '03', '04'));
+  assert.equal(found.active_minutes, LINGERING_MIN_ACTIVE_MINUTES);
+  assert.equal(found.out_of_bed.id, 90);
+  assert.equal(found.bucket_start, '2026-03-01 10:01:00', 'the first qualifying minute is the evidence returned');
+});
+
+test('fewer than four qualifying minutes never flag even when real activity is present', () => {
+  assert.equal(
+    findLingeringBedMotion(lingeringExit(), null, activeMinutes('01', '02', '03')),
+    null
+  );
+});
+
+test('four duplicate rows for one minute count as one distinct active minute, not four', () => {
+  const duplicateMinute = Array.from({ length: 4 }, () => activity('2026-03-01 10:01:00'));
+  assert.equal(findLingeringBedMotion(lingeringExit(), null, duplicateMinute), null, 'one minute is below the default four');
+  const counted = findLingeringBedMotion(lingeringExit(), null, duplicateMinute, { minActiveMinutes: 1 });
+  assert.equal(counted.active_minutes, 1, 'duplicate rows are OR-merged into one physical minute');
+
+  const mixedDuplicates = [
+    activity('2026-03-01 10:01:00', LINGERING_MOTION_ACTIVE + 0.01),
+    activity('2026-03-01 10:01:00', LINGERING_MOTION_ACTIVE - 0.001),
+  ];
+  assert.equal(
+    findLingeringBedMotion(lingeringExit(), null, mixedDuplicates, { minActiveMinutes: 1 }).active_minutes,
+    1,
+    'a later quiet duplicate cannot erase an active row from the same minute'
+  );
+});
+
+test('a real into_bed before enough active minutes accumulate suppresses the flag', () => {
+  const returned = row(91, 'cam-a', 'into_bed', '2026-03-01 10:04:30');
+  assert.equal(
+    findLingeringBedMotion(lingeringExit(), returned, activeMinutes('01', '02', '03', '04', '05', '06')),
+    null,
+    'only three qualifying minutes precede the return minute'
+  );
+});
+
+test('motion at or below the active threshold never flags however many minutes are present', () => {
+  const quiet = [
+    activity('2026-03-01 10:01:00', LINGERING_MOTION_ACTIVE),
+    activity('2026-03-01 10:02:00', LINGERING_MOTION_ACTIVE),
+    activity('2026-03-01 10:03:00', LINGERING_MOTION_ACTIVE),
+    activity('2026-03-01 10:04:00', LINGERING_MOTION_ACTIVE),
+    activity('2026-03-01 10:05:00', LINGERING_MOTION_ACTIVE - 0.001),
+    activity('2026-03-01 10:06:00', null),
+  ];
+  assert.equal(findLingeringBedMotion(lingeringExit(), null, quiet), null);
+});
+
+test('the fixed window is inclusive at exactly sixty minutes and excludes one minute past it', () => {
+  const onTheMinute = lingeringExit('2026-03-01 10:00:00');
+  const found = findLingeringBedMotion(onTheMinute, null, [
+    activity('2026-03-01 10:57:00'),
+    activity('2026-03-01 10:58:00'),
+    activity('2026-03-01 10:59:00'),
+    activity('2026-03-01 11:00:00'), // exactly exit + LINGERING_WINDOW_MS
+    activity('2026-03-01 11:01:00'), // one minute beyond the inclusive cap
+  ]);
+  assert.equal(found.active_minutes, 4, 'the exact boundary counts but the minute beyond it does not');
+  assert.equal(Date.parse(`${found.bucket_start.replace(' ', 'T')}Z`) - Date.parse('2026-03-01T10:00:00Z') <= LINGERING_WINDOW_MS, true);
+});
+
+test('zero activity samples do not flag and do not throw', () => {
+  assert.equal(findLingeringBedMotion(lingeringExit(), null, []), null);
+});
+
+test("the exit's own minute is never counted as lingering evidence", () => {
+  const samples = [activity('2026-03-01 10:00:00'), ...activeMinutes('01', '02', '03')];
+  assert.equal(findLingeringBedMotion(lingeringExit(), null, samples), null, 'excluding departure motion leaves only three minutes');
+});
+
+test('a same-minute return with nonzero seconds closes the window at that minute', () => {
+  const returned = row(91, 'cam-a', 'into_bed', '2026-03-01 10:01:45');
+  assert.equal(
+    findLingeringBedMotion(lingeringExit(), returned, activeMinutes('01', '02', '03', '04'), { minActiveMinutes: 1 }),
+    null,
+    'the 10:01 bucket belongs to the return minute and is not lingering motion'
+  );
+});
+
+test('a non-out_of_bed exit is rejected defensively', () => {
+  assert.equal(findLingeringBedMotion(lingeringExit(undefined, 'into_bed'), null, activeMinutes('01', '02', '03', '04')), null);
+});
+
+test("gap_ms is measured from the exit's real timestamp, not its floored minute", () => {
+  const found = findLingeringBedMotion(lingeringExit('2026-03-01 10:00:30'), null, activeMinutes('01', '02', '03', '04'));
+  assert.equal(found.gap_ms, 30000, '10:01:00 is thirty seconds after the real 10:00:30 exit');
+});
+
+test('windowMs is configurable', () => {
+  const samples = activeMinutes('01', '02', '03', '04');
+  assert.equal(findLingeringBedMotion(lingeringExit('2026-03-01 10:00:00'), null, samples, { windowMs: 3 * 60000 }), null);
+  assert.equal(
+    findLingeringBedMotion(lingeringExit('2026-03-01 10:00:00'), null, samples, { windowMs: 4 * 60000 }).active_minutes,
+    4
+  );
+});
+
+test('minActiveMinutes is configurable independently of the four-minute default', () => {
+  const threeMinutes = activeMinutes('01', '02', '03');
+  assert.equal(findLingeringBedMotion(lingeringExit(), null, threeMinutes), null, 'the default still requires four');
+  assert.equal(findLingeringBedMotion(lingeringExit(), null, threeMinutes, { minActiveMinutes: 3 }).active_minutes, 3);
 });

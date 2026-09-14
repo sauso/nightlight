@@ -352,6 +352,32 @@ counts as **historical**, not as the current state.
    returning, leaving again) still reads as a child's episode — named explicitly in Gap B's own known
    limits. This item is what would close that gap; it remains open and is now that mechanism's single
    biggest known blind spot, not merely an adjacent nice-to-have.
+   ✅ **Tooling shipped 2026-09-14**: `getLingeringBedMotion()` in `bedTransitions.js` generalizes
+   `getQuickReversals()`'s own second, data-driven check — the bed zone's own `motion_peak` showing
+   4+ DISTINCT active minutes in the hour after a trailing `out_of_bed` — from quick-reversal pairs
+   only to EVERY `out_of_bed` still within `activity_samples`' retention window, conditional on there
+   being no `into_bed` recorded on the same camera before the qualifying minutes (an ordinary,
+   already-corroborated return, exactly what `detectMidnightEpisodes` already treats as a real short
+   awakening, is never flagged; same-direction repeats are reported once, not once per repeat).
+   Requiring 4+ DISTINCT minutes (not 1, not 1 row) matters beyond matching the figure
+   `planning/ROADMAP.md` itself reports: `activityTracker.js`'s minute flush is not phase-aligned to
+   wall-clock minutes, so a single-minute threshold would flag an exit's OWN departure motion,
+   mis-timed into the following bucket by flush lag, for roughly HALF of all exits — found reviewing
+   this plan before it shipped, along with a second finding that `activity_samples` carries no
+   uniqueness constraint on (camera_id, bucket_start), so counting ROWS instead of distinct minutes
+   would have reopened the same hole via duplicate rows.
+   ⚠️ **Generalizing the check MECHANICALLY is not the same claim as generalizing it
+   STATISTICALLY** — the quick-reversal validation also leaned on an independent visual sample this
+   broader population doesn't have, and its dominant case (a terminal/morning exit, with no `into_bed`
+   until the next bedtime) is exactly where ordinary daytime room use could flag at a rate nobody had
+   measured before shipping. Measured against real staging data + the owner-verdicted rows before
+   writing this paragraph: [FILL IN — flag count, flag rate against verdict='correct' out_of_bed rows
+   as an approximate false-positive proxy, and the flag rate split by hour-of-day]. Query only, same
+   posture as `getImpossibleTransitions` and `getQuickReversals`: nothing acts on this yet — no
+   gating, no `wake_count` change, no UI. **Item 3 remains open**: this is Phase 1 (surfacing the
+   pattern, now measured); it still needs owner-verdict ground truth specifically on this broader
+   population before any rule can be built on it, exactly as items 1-3's own history has required
+   every time so far.
 4. **New: log-driven tuning is now possible.** The exit rule logs rejected links (`[oob] … link
    rejected`) with the actual gap and outside magnitude, so the real distribution can be read off a
    week of logs rather than guessed. Read it before moving `OOB_LINK_SLOW_MS` or `OOB_SLOW_OUT_MIN`.
