@@ -370,14 +370,15 @@ counts as **historical**, not as the current state.
    STATISTICALLY** — the quick-reversal validation also leaned on an independent visual sample this
    broader population doesn't have, and its dominant case (a terminal/morning exit, with no `into_bed`
    until the next bedtime) is exactly where ordinary daytime room use could flag at a rate nobody had
-   measured before shipping. Measured against real staging data + the owner-verdicted rows before
-   writing this paragraph: [FILL IN — flag count, flag rate against verdict='correct' out_of_bed rows
-   as an approximate false-positive proxy, and the flag rate split by hour-of-day]. Query only, same
-   posture as `getImpossibleTransitions` and `getQuickReversals`: nothing acts on this yet — no
-   gating, no `wake_count` change, no UI. **Item 3 remains open**: this is Phase 1 (surfacing the
-   pattern, now measured); it still needs owner-verdict ground truth specifically on this broader
-   population before any rule can be built on it, exactly as items 1-3's own history has required
-   every time so far.
+   measured before shipping. **The real-data measurement against staging + the owner-verdicted rows
+   has NOT been run yet** — it needs a staging deploy first, and is deliberately left for after this
+   Phase 1 tooling ships (flag count, flag rate against `verdict='correct'` out_of_bed rows as an
+   approximate false-positive proxy, and the flag rate split by hour-of-day — see this function's own
+   shipping plan for the exact steps). Query only, same posture as `getImpossibleTransitions` and
+   `getQuickReversals`: nothing acts on this yet — no gating, no `wake_count` change, no UI. **Item 3
+   remains open**: this is Phase 1 (surfacing the pattern; NOT yet measured against real data); it
+   still needs owner-verdict ground truth specifically on this broader population before any rule can
+   be built on it, exactly as items 1-3's own history has required every time so far.
 4. **New: log-driven tuning is now possible.** The exit rule logs rejected links (`[oob] … link
    rejected`) with the actual gap and outside magnitude, so the real distribution can be read off a
    week of logs rather than guessed. Read it before moving `OOB_LINK_SLOW_MS` or `OOB_SLOW_OUT_MIN`.

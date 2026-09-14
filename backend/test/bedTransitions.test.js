@@ -573,6 +573,27 @@ test('a run of repeated out_of_bed rows is reported once, for the newest exit', 
   assert.equal(rows[0].out_of_bed.id, newest);
 });
 
+test('a run of repeated out_of_bed rows is not silently emptied when only the OLDEST member has qualifying motion', () => {
+  // Regression test for a real bug an adversarial pre-merge review found (Codex AND a parallel Claude
+  // subagent both independently reproduced it), 2026-09-14: the original run-collapsing logic only ever
+  // evaluated the NEWEST exit's own post-exit window, so motion between an earlier run member and the
+  // next repeated exit was never in range of any evaluated call — silently LOST, not deduplicated. Same-
+  // direction repeats are 62% of stored transitions (item 1's own measurement), so this affected the
+  // majority shape of the population this diagnostic exists to characterize. Fixed by anchoring the
+  // exclusion/window start at the run's OLDEST member while still reporting under the newest one.
+  seed('cam-a', 'out_of_bed', '2026-03-01 10:00:30');
+  seedActiveMinutes('cam-a',
+    '2026-03-01 10:01:00', '2026-03-01 10:02:00',
+    '2026-03-01 10:03:00', '2026-03-01 10:04:00');
+  // The repeated exit itself has NOTHING qualifying after it — under the buggy version, evaluating only
+  // this row would find zero minutes and report nothing at all.
+  const newest = seed('cam-a', 'out_of_bed', '2026-03-01 10:06:00');
+  const rows = bt.getLingeringBedMotion();
+  assert.equal(rows.length, 1, "the run is still reported once, not silently dropped");
+  assert.equal(rows[0].out_of_bed.id, newest, 'reported under the newest exit, matching the existing "reported once" convention');
+  assert.equal(rows[0].active_minutes, 4, "evidence from the run's oldest member is not lost");
+});
+
 test('a same-minute into_bed with nonzero seconds closes the database-backed window', () => {
   seed('cam-a', 'out_of_bed', '2026-03-01 10:00:30');
   seed('cam-a', 'into_bed', '2026-03-01 10:01:45');

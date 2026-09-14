@@ -414,6 +414,18 @@ test("the exit's own minute is never counted as lingering evidence", () => {
   assert.equal(findLingeringBedMotion(lingeringExit(), null, samples), null, 'excluding departure motion leaves only three minutes');
 });
 
+test("an exit at exactly :00 seconds still excludes its own minute's sample", () => {
+  // Same shape as the test above, but with a :00-second exit specifically. Every other fixture in this
+  // file uses lingeringExit()'s default nonzero-second timestamp, so a bucket_start (always :00 seconds)
+  // can never land exactly ON the exit's own created_at — meaning `s.bucket_start <= exit.created_at`
+  // weakened to `<` would silently survive every other test here. Found missing by an adversarial
+  // pre-merge review (a Claude subagent), 2026-09-14: that exact mutation passed the full suite before
+  // this test existed.
+  const exit = lingeringExit('2026-03-01 10:00:00');
+  const samples = [activity('2026-03-01 10:00:00'), ...activeMinutes('01', '02', '03')];
+  assert.equal(findLingeringBedMotion(exit, null, samples), null, "excluding the exit's own :00 minute leaves only three qualifying minutes");
+});
+
 test('a same-minute return with nonzero seconds closes the window at that minute', () => {
   const returned = row(91, 'cam-a', 'into_bed', '2026-03-01 10:01:45');
   assert.equal(

@@ -263,7 +263,12 @@ export function getQuickReversals({ maxGapMs = 60000, limit = 200 } = {}) {
 //
 // Same-direction repeats (62% of stored transitions, item 1's own measurement) are deliberately
 // evaluated only once — see the "SEPARATE dedup" note in this function's design — so one unoccupied
-// stretch bracketed by several repeated out_of_bed markers produces one row, not several.
+// stretch bracketed by several repeated out_of_bed markers produces one row, not several. ⚠️ The
+// evaluation is anchored at the run's OLDEST member, not its newest — see the loop comment below for
+// why: anchoring at the newest member (the first-shipped version of this code, fixed 2026-09-14 after
+// an adversarial pre-merge review caught it independently via Codex AND a parallel Claude subagent)
+// silently LOST real evidence rather than merely deduplicating it, whenever the run's earlier member(s)
+// had qualifying motion that the newest member's own post-exit window could never see.
 //
 // Query only, same posture as getImpossibleTransitions and getQuickReversals above: nothing today ACTS
 // on this (no gating, no wake_count change, no UI). It needs owner-verdict ground truth on THIS pattern
@@ -308,17 +313,31 @@ export function getLingeringBedMotion({
     const camSamples = samplesByCamera.get(cameraId) || [];
 
     let nextIntoBed = null;
+    // The NEWEST out_of_bed seen so far in the run we're currently scanning backward through — this is
+    // what gets REPORTED (the transition id a human/UI would actually look up), even though evaluation
+    // below is anchored at the run's OLDEST member. Reset to null on every into_bed and after every
+    // evaluated run.
+    let newestInRun = null;
     for (let i = sorted.length - 1; i >= 0; i--) {
       const row = sorted[i];
-      if (row.type === 'into_bed') { nextIntoBed = row; continue; }
+      if (row.type === 'into_bed') { nextIntoBed = row; newestInRun = null; continue; }
       if (row.type === 'out_of_bed') {
-        // Only the newest out_of_bed of a same-direction run represents that run's unoccupied stretch
-        // — see the "SEPARATE dedup" note above. nextIntoBed resolution above is unaffected: it still
-        // sees every row, repeats included, which is what makes it correct for the whole run.
         const isRunEnd = i === sorted.length - 1 || sorted[i + 1].type !== 'out_of_bed';
-        if (isRunEnd) {
+        if (isRunEnd) newestInRun = row;
+        // Evaluate once we reach the run's OLDEST member, not its newest. A same-direction repeat
+        // doesn't represent a new departure (see nextIntoBed's own reasoning above) — the bed has been
+        // believed-unoccupied since the OLDEST exit in the run, so that is the real "own minute" to
+        // exclude and the real point the lookahead window should start from. Anchoring at the newest
+        // member instead (the original version of this code) made findLingeringBedMotion's window start
+        // AFTER the newest exit's own timestamp, so any qualifying motion between an earlier run member
+        // and the next one was never in range of ANY evaluated call — not deduplicated, silently LOST.
+        // Found by an adversarial pre-merge review (Codex + a parallel Claude subagent, both
+        // independently reproduced it), 2026-09-14, before this PR merged.
+        const isRunStart = i === 0 || sorted[i - 1].type !== 'out_of_bed';
+        if (isRunStart) {
           const flagged = findLingeringBedMotion(row, nextIntoBed, camSamples, { windowMs, minActiveMinutes });
-          if (flagged) out.push(flagged);
+          if (flagged) out.push({ ...flagged, out_of_bed: newestInRun });
+          newestInRun = null;
         }
       }
     }
