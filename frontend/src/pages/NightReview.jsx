@@ -198,6 +198,11 @@ export default function NightReview() {
     .filter((t) => t.quick_reversal_of != null)
     .map((oob) => ({ oob, ib: transitions.find((t) => t.id === oob.quick_reversal_of) }))
     .filter((p) => p.ib);
+  // Quick reversals have the better-evidenced, sharper question. Keep both backend facts,
+  // but ask only once per event; both cards write into the same shared verdict.
+  const lingeringOnly = transitions.filter(
+    (t) => t.lingering_motion_minutes != null && t.quick_reversal_of == null
+  );
 
   return (
     <>
@@ -326,6 +331,61 @@ export default function NightReview() {
           </div>
         ))}
 
+        {/* Evidence can precede this run's newest (displayed) exit. State a separate-minute
+            count, never a continuous duration or a gap measured from the displayed timestamp. */}
+        {lingeringOnly.map((t) => (
+          <div className="card" key={t.id}>
+            <div className="card-title">Still moving?</div>
+            <div className="review-event">
+              {t.snapshot ? (
+                <button
+                  type="button"
+                  className="review-event__frame-btn"
+                  aria-label="Enlarge photo"
+                  onClick={() => setPreview(t)}
+                >
+                  <img
+                    className="review-event__frame"
+                    src={api.url(`/cameras/bed-transitions/${t.id}/snapshot`)}
+                    alt=""
+                    loading="lazy"
+                  />
+                </button>
+              ) : (
+                <div className="review-event__frame review-event__frame--none">No frame</div>
+              )}
+              <div className="review-event__body">
+                <div className="review-event__when">
+                  Recorded as out of bed at {fmtEvent(t)} — the bed also showed movement in{' '}
+                  {t.lingering_motion_minutes} separate minutes with no return logged in between. What actually
+                  happened?
+                </div>
+                {t.camera_name && <div className="camera-tile__sub">{t.camera_name}</div>}
+                <div className="review-event__verdicts">
+                  {[
+                    { key: 'wrong', label: 'No, still in bed', Icon: X },
+                    { key: 'correct', label: 'Yes, they got up', Icon: Check },
+                    { key: 'unclear', label: 'Not sure', Icon: HelpCircle },
+                  ].map(({ key, label, Icon }) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className={`review-chip${verdicts[t.id] === key ? ' review-chip--on' : ''}`}
+                      aria-pressed={verdicts[t.id] === key}
+                      onClick={() => {
+                        setVerdictsTouched(true);
+                        setVerdicts((v) => ({ ...v, [t.id]: v[t.id] === key ? null : key }));
+                      }}
+                    >
+                      <Icon size={16} /> {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+
         {/* Collapsed by default, and that is the point. A night carries 20-35 recorded transitions —
             Raffa's 2026-08-29 had 31 — and opening the screen straight into a wall of frames buries
             the two times that actually matter. The owner's words on first use: "it's also flooded with
@@ -438,7 +498,7 @@ export default function NightReview() {
           <button type="button" className="btn btn-primary btn-block" disabled={busy} onClick={() => save(true)}>
             {busy ? 'Saving…' : 'Save review'}
           </button>
-        ) : (showEvents || quickReversals.length > 0) && transitions.length > 0 && (
+        ) : (showEvents || quickReversals.length > 0 || lingeringOnly.length > 0) && transitions.length > 0 && (
           <button type="button" className="btn btn-secondary btn-block" disabled={busy} onClick={() => save(false)}>
             {busy ? 'Saving…' : 'Save just the event answers'}
           </button>

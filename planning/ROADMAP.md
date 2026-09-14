@@ -384,6 +384,25 @@ counts as **historical**, not as the current state.
    1 (surfacing the pattern, now measured on one house's two cameras); it still needs owner-verdict
    ground truth specifically on this broader population, and more nights of data, before any rule can
    be built on it, exactly as items 1-3's own history has required every time so far.
+   **Phase 2 implemented 2026-09-14**: the morning review now surfaces "Still moving?" for
+   lingering-motion exits, ahead of the collapsed event list, and records answers through the existing
+   transition verdict. Quick check-in wins when both flags apply, so one event never gets two prompt
+   cards. Queries cover this child's night plus one hour at both edges; a leading run that continues
+   from before that fetch is suppressed because its true oldest anchor is unknown — found in adversarial
+   plan review (Codex, gpt-6-astra): the naive bounded query could FABRICATE a flag the full-table rule
+   never would (a same-direction run truncated at the fetch edge gets mis-anchored at its visible-but-
+   not-true oldest member), not just miss one as first assumed. **Double-flag rate re-measured against
+   real staging data at ship time, 2026-09-14** (773 total `out_of_bed` transitions): 97 quick-reversal
+   flagged (12.6%), 63 lingering-motion flagged (8.2%), only **3 flagged by both** (4.8% of lingering
+   flags) — consistent with the Phase 1 measurement a few hours earlier, confirming the overlap is real
+   but small. ⚠️ **Known, accepted gap found in adversarial pre-merge review** (a Claude subagent,
+   verified with a standalone reproduction): a run whose oldest and newest members straddle a review
+   night's boundary by more than an hour can go unreported on BOTH adjacent nights — never a fabricated
+   flag, only a real one the whole-table diagnostic would find but neither morning review shows. Not
+   fixed this round; see the code comment in `sleepReviews.js` for why. This is still **Phase 2,
+   ground-truth collection** — no gating attempted, no
+   `wake_count`/`awake_minutes` or
+   `detectMidnightEpisodes` change. Item 3 remains open pending real owner labels.
 4. **New: log-driven tuning is now possible.** The exit rule logs rejected links (`[oob] … link
    rejected`) with the actual gap and outside magnitude, so the real distribution can be read off a
    week of logs rather than guessed. Read it before moving `OOB_LINK_SLOW_MS` or `OOB_SLOW_OUT_MIN`.

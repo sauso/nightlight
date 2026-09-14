@@ -21,7 +21,7 @@ const { default: db } = await import('../src/db.js');
 const { computeAndStoreNight } = await import('../src/lib/sleepAnalysis.js');
 const { pendingReview, getNightReview, saveNightReview, localHmToUtcSql, applyCorrection,
   reviewCardState, transitionInstant } = await import('../src/lib/sleepReviews.js');
-const { recordBedTransition, setTransitionVerdict, TRANSITION } = await import('../src/lib/bedTransitions.js');
+const { recordBedTransition, setTransitionVerdict, getLingeringBedMotion, TRANSITION } = await import('../src/lib/bedTransitions.js');
 const { lastCompletedNightDate } = await import('../src/lib/sleepAnalysis.js');
 const { default: childrenRouter } = await import('../src/routes/children.js');
 
@@ -255,6 +255,138 @@ test('the review lists the night’s transitions, each with its verdict and came
   assert.equal(r.transitions.length, 1);
   assert.equal(r.transitions[0].verdict, 'wrong');
   assert.equal(r.transitions[0].camera_name, 'Bed cam');
+});
+
+
+// --- lingering bed motion surfaced for owner verdicts (ROADMAP §1.2 item 3, Phase 2) ---------------
+
+function layActiveMinutes(times, cameraId = CAM) {
+  for (const time of times) insertSample.run(cameraId, exactSql(time), 0.4, 0.4);
+}
+
+test('lingering motion: four distinct active minutes with no return flag the exit', () => {
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(18, 0)));
+  layActiveMinutes([at(18, 1), at(18, 4), at(18, 15), at(18, 59)]);
+  const row = getNightReview(CHILD, DATE).transitions.find((t) => t.id === id);
+  assert.equal(row.lingering_motion_minutes, 4);
+  assert.equal(row.lingering_motion_gap_s, 60);
+  assert.equal(row.quick_reversal_of, null);
+});
+
+test('lingering motion: a real return closes the evidence before four minutes accumulate', () => {
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(18, 0)));
+  layTransition(TRANSITION.INTO_BED, exactSql(at(18, 4)));
+  layActiveMinutes([at(18, 1), at(18, 2), at(18, 3), at(18, 4), at(18, 5)]);
+  const rows = getNightReview(CHILD, DATE).transitions;
+  assert.equal(rows.find((t) => t.id === id).lingering_motion_minutes, null);
+  assert.ok(rows.every((t) => t.lingering_motion_gap_s === null));
+});
+
+test('lingering motion: fewer than four distinct active minutes do not flag', () => {
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(18, 0)));
+  layActiveMinutes([at(18, 1), at(18, 2), at(18, 3), at(18, 3)]);
+  const row = getNightReview(CHILD, DATE).transitions.find((t) => t.id === id);
+  assert.equal(row.lingering_motion_minutes, null);
+  assert.equal(row.lingering_motion_gap_s, null);
+});
+
+test('lingering motion: trailing lookahead includes evidence and a closing return after review noon', () => {
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(11, 58, 1)));
+  layActiveMinutes([at(11, 59, 1), at(12, 0, 1), at(12, 1, 1), at(12, 2, 1), at(12, 4, 1)]);
+  layTransition(TRANSITION.INTO_BED, exactSql(at(12, 3, 1)));
+  const rows = getNightReview(CHILD, DATE).transitions;
+  assert.deepEqual(rows.map((t) => t.id), [id], 'lookahead transitions are evidence, not review rows');
+  assert.equal(rows[0].lingering_motion_minutes, 4, 'post-return motion is excluded');
+  assert.equal(rows[0].lingering_motion_gap_s, 60);
+});
+
+test('lingering motion: leading lookback retains a pre-noon run anchor and its earlier evidence', () => {
+  layTransition(TRANSITION.OUT_OF_BED, exactSql(at(11, 50)));
+  layActiveMinutes([at(11, 51), at(11, 53), at(11, 55), at(11, 57)]);
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(12, 6)));
+  const rows = getNightReview(CHILD, DATE).transitions;
+  assert.deepEqual(rows.map((t) => t.id), [id]);
+  assert.equal(rows[0].lingering_motion_minutes, 4);
+  assert.equal(rows[0].lingering_motion_gap_s, 60);
+});
+
+test('lingering motion: getPriorTransitionType excludes a transition exactly AT the fetch boundary', () => {
+  // Found by adversarial pre-merge review (a Claude subagent), 2026-09-14: `<` weakened to `<=`
+  // survived every other test here because none placed a transition exactly on wideStart. A
+  // genuine fresh run starting exactly there must not match itself as its own "prior" transition.
+  layTransition(TRANSITION.OUT_OF_BED, exactSql(at(11, 0))); // exactly wideStart (startSql - 1h)
+  layActiveMinutes([at(11, 1), at(11, 2), at(11, 3), at(11, 4)]);
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(12, 10))); // same-direction repeat, within the night
+  const rows = getNightReview(CHILD, DATE).transitions;
+  assert.deepEqual(rows.map((t) => t.id), [id]);
+  assert.equal(rows[0].lingering_motion_minutes, 4, 'the 11:00 anchor must not be mistaken for its own prior transition');
+});
+
+test('lingering motion: the trailing lookahead is exactly one hour, not merely "some" lookahead', () => {
+  // Found by adversarial pre-merge review (a Claude subagent), 2026-09-14: shrinking the widening
+  // by 30 minutes survived every other test here, because the existing trailing-lookahead test only
+  // placed evidence ~5 minutes past the boundary. Evidence near the full 60-minute edge discriminates.
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(11, 59, 1))); // one minute before next-day noon
+  layActiveMinutes([at(12, 50, 1), at(12, 53, 1), at(12, 56, 1), at(12, 58, 1)]); // 51-59 min after the exit
+  const rows = getNightReview(CHILD, DATE).transitions;
+  assert.equal(rows.find((t) => t.id === id).lingering_motion_minutes, 4);
+});
+
+test('lingering motion: the leading lookback is exactly one hour too, not merely "some" lookback', () => {
+  // Symmetric case the subagent flagged as likely but didn't separately verify. A run anchor 59
+  // minutes before noon (just inside a full 1h widen) must still be found and evaluated; a shrunk
+  // widen would exclude it from wideRows and, via getPriorTransitionType, wrongly suppress the
+  // newer repeat that reports it as a boundary continuation.
+  layTransition(TRANSITION.OUT_OF_BED, exactSql(at(11, 1))); // 59 minutes before noon
+  layActiveMinutes([at(11, 2), at(11, 3), at(11, 4), at(11, 5)]);
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(12, 10))); // same-direction repeat, within the night
+  const rows = getNightReview(CHILD, DATE).transitions;
+  assert.equal(rows.find((t) => t.id === id).lingering_motion_minutes, 4);
+});
+
+test('lingering motion: a run continuing across the fetch boundary cannot fabricate a fresh flag', () => {
+  // The plan-review counterexample: the true anchor is 10:00, outside the 11:00 fetch.
+  // Its hour is quiet. Treating 18:00 as a new anchor would manufacture a false positive.
+  layTransition(TRANSITION.OUT_OF_BED, exactSql(at(10, 0)));
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(18, 0)));
+  layActiveMinutes([at(18, 1), at(18, 2), at(18, 3), at(18, 4)]);
+  const row = getNightReview(CHILD, DATE).transitions.find((t) => t.id === id);
+  assert.equal(row.lingering_motion_minutes, null);
+  assert.equal(row.lingering_motion_gap_s, null);
+  assert.deepEqual(getLingeringBedMotion(), [], 'the unbounded diagnostic agrees');
+});
+
+test('lingering motion: evidence before the displayed newest exit still populates that exit', () => {
+  const oldest = layTransition(TRANSITION.OUT_OF_BED, exactSql(new Date(at(20, 0).getTime() + 30000)));
+  layActiveMinutes([at(20, 1), at(20, 2), at(20, 3), at(20, 4)]);
+  const newest = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(20, 6)));
+  const rows = getNightReview(CHILD, DATE).transitions;
+  assert.equal(rows.find((t) => t.id === oldest).lingering_motion_minutes, null);
+  const flagged = rows.find((t) => t.id === newest);
+  assert.equal(flagged.lingering_motion_minutes, 4);
+  assert.equal(flagged.lingering_motion_gap_s, 30, 'gap starts at the oldest exit, not the displayed exit');
+});
+
+test('lingering motion: quick reversal and lingering flags coexist independently on one exit', () => {
+  const ib = layTransition(TRANSITION.INTO_BED, exactSql(at(18, 0)));
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(new Date(at(18, 0).getTime() + 14000)));
+  layActiveMinutes([at(18, 1), at(18, 2), at(18, 3), at(18, 4)]);
+  const row = getNightReview(CHILD, DATE).transitions.find((t) => t.id === id);
+  assert.equal(row.quick_reversal_of, ib);
+  assert.equal(row.quick_reversal_gap_s, 14);
+  assert.equal(row.lingering_motion_minutes, 4);
+  assert.equal(row.lingering_motion_gap_s, 46);
+});
+
+test('lingering motion: PUT saves a flagged transition verdict through the existing scoped write path', async () => {
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(18, 0)));
+  layActiveMinutes([at(18, 1), at(18, 2), at(18, 3), at(18, 4)]);
+  const url = `${server.url}/api/children/${CHILD}/review/${DATE}`;
+  const shown = await call(url, { token });
+  assert.equal(shown.body.transitions.find((t) => t.id === id).lingering_motion_minutes, 4);
+  const saved = await call(url, { method: 'PUT', token, body: { verdicts: { [id]: 'wrong' } } });
+  assert.equal(saved.status, 200);
+  assert.equal(db.prepare('SELECT verdict FROM bed_transitions WHERE id = ?').get(id).verdict, 'wrong');
 });
 
 // --- quick reversals surfaced for the owner to label (ROADMAP §1.2 item 3) ------------------------

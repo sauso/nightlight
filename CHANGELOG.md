@@ -10,6 +10,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Added
+- The morning review now also asks about an out-of-bed event where the bed also showed movement in
+  several separate minutes with no return logged ("Still moving?"), separately from the collapsed full
+  list — never duplicating the existing quick check-in prompt when both apply to the same event.
 - A `SECURITY.md` security policy (supported versions, private reporting via GitHub Security
   Advisories, safe diagnostic-bundle handling, and credential-rotation steps), a bug-report issue
   template, and a link to report privately from the diagnostics bundle and camera report screens
