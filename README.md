@@ -208,7 +208,8 @@ camera** screen can generate a redacted **camera report** to help add support fo
 a JSON file that stays on your device — it holds the camera's address, username, ONVIF result and
 stream codecs, with any password replaced by `***`. It is meant to be attached to a GitHub issue, so
 it is worth opening and reading before you post it: the redaction covers passwords, not everything a
-particular camera's firmware might put in an error message.
+particular camera's firmware might put in an error message. If you find something sensitive that
+shouldn't be there, see [SECURITY.md](SECURITY.md) for how to report it privately instead.
 
 **Adding a camera**
 

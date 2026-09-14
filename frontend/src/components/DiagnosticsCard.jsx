@@ -85,7 +85,11 @@ export default function DiagnosticsCard({ title }) {
         version and build, host/runtime info, camera &amp; detection settings, live stream status,
         and recent logs into one file to help pin down the problem.{' '}
         <strong>No passwords or tokens are included</strong>, so you can open the file and review it
-        before sharing.
+        before sharing. Found something sensitive in it anyway, or have a security concern?{' '}
+        <a href="https://github.com/sauso/nightlight/blob/main/SECURITY.md" target="_blank" rel="noreferrer">
+          Report it privately
+        </a>{' '}
+        instead of a public issue.
       </div>
       {error && <div className="error-banner" style={{ marginBottom: 12 }}>{error}</div>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
