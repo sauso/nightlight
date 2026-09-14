@@ -2,8 +2,8 @@ import db from '../db.js';
 import {
   computeNight, lastCompletedNightDate, childTracksSleep, zonedToUtc, toSqlUtc,
 } from './sleepAnalysis.js';
-import { getBedTransitions, setTransitionVerdict, VERDICTS } from './bedTransitions.js';
-import { findQuickReversals } from './bedTransitionRules.js';
+import { getBedTransitions, getActivitySamples, getPriorTransitionType, setTransitionVerdict, VERDICTS } from './bedTransitions.js';
+import { findQuickReversals, findAllLingeringBedMotion, LINGERING_WINDOW_MS } from './bedTransitionRules.js';
 
 // What actually happened last night, as told by the person who was there.
 //
@@ -117,7 +117,8 @@ function transitionsFor(childId, nightDate) {
   const cams = camsForChild.all(childId);
   const byId = new Map(cams.map((c) => [c.id, c.name]));
   const { startSql, endSql } = nightBounds(nightDate);
-  const rows = getBedTransitions(cams.map((c) => c.id), startSql, endSql);
+  const camIds = cams.map((c) => c.id);
+  const rows = getBedTransitions(camIds, startSql, endSql);
   // A goodnight kiss (or similar) can read as `out_of_bed` seconds after a genuine `into_bed` — see
   // findQuickReversals's own comment in bedTransitionRules.js for the evidence this is real and common.
   // Flagged here, rather than left for the owner to spot in a list of up to 30 events, because that is
@@ -126,11 +127,31 @@ function transitionsFor(childId, nightDate) {
   const reversalByOobId = new Map(
     findQuickReversals(rows).map((r) => [r.out_of_bed.id, { into_bed_id: r.into_bed.id, gap_s: Math.round(r.gap_ms / 1000) }])
   );
+  // The run's oldest exit supplies the evidence window, while its newest gets the flag.
+  // Widen BOTH edges to retain pre-noon anchors and post-noon evidence/returns without
+  // scanning the full tables on every review. A prior-type lookup suppresses any leading
+  // run whose true anchor is still outside this bounded fetch (plan review, 2026-09-14).
+  const wideStart = toSqlUtc(new Date(Date.parse(`${startSql.replace(' ', 'T')}Z`) - LINGERING_WINDOW_MS));
+  const wideEnd = toSqlUtc(new Date(Date.parse(`${endSql.replace(' ', 'T')}Z`) + LINGERING_WINDOW_MS));
+  const wideRows = getBedTransitions(camIds, wideStart, wideEnd);
+  const wideSamples = getActivitySamples(camIds, wideStart, wideEnd);
+  const samplesByCamera = new Map();
+  for (const s of wideSamples) {
+    if (!samplesByCamera.has(s.camera_id)) samplesByCamera.set(s.camera_id, []);
+    samplesByCamera.get(s.camera_id).push(s);
+  }
+  const boundaryTypeByCamera = new Map(camIds.map((id) => [id, getPriorTransitionType(id, wideStart)]));
+  const lingeringByOobId = new Map(
+    findAllLingeringBedMotion(wideRows, samplesByCamera, { boundaryTypeByCamera }).map((r) => [r.out_of_bed.id, r])
+  );
   return rows.map((t) => ({
     ...t,
     camera_name: byId.get(t.camera_id) || null,
     quick_reversal_of: reversalByOobId.get(t.id)?.into_bed_id ?? null,
     quick_reversal_gap_s: reversalByOobId.get(t.id)?.gap_s ?? null,
+    lingering_motion_minutes: lingeringByOobId.get(t.id)?.active_minutes ?? null,
+    // Measured from the evaluated (oldest) exit, which can precede this reported transition.
+    lingering_motion_gap_s: lingeringByOobId.has(t.id) ? Math.round(lingeringByOobId.get(t.id).gap_ms / 1000) : null,
   }));
 }
 

@@ -306,6 +306,117 @@ describe('the review screen', () => {
     expect(await screen.findByText(/got out of bed/)).toBeInTheDocument();
   });
 
+  describe('lingering motion prompts', () => {
+    // Same shape as the backend evidence-precedes-display regression: oldest exit at
+    // 20:00:30 local, motion at 20:01-20:04, newest exit at 20:06 with no later movement.
+    const LINGERING_NIGHT = {
+      ...NIGHT,
+      transitions: [
+        { id: 41, type: 'out_of_bed', created_at: '2026-08-29 10:00:30', snapshot: 0, verdict: null, camera_name: 'Raffa Room', quick_reversal_of: null, lingering_motion_minutes: null, lingering_motion_gap_s: null },
+        { id: 42, type: 'out_of_bed', created_at: '2026-08-29 10:06:00', snapshot: 1, verdict: null, camera_name: 'Raffa Room', quick_reversal_of: null, lingering_motion_minutes: 4, lingering_motion_gap_s: 30 },
+      ],
+    };
+
+    test('shows separate-minute evidence without claiming it followed the displayed exit or was continuous', async () => {
+      api.get.mockResolvedValue(LINGERING_NIGHT);
+      at();
+      const card = (await screen.findByText('Still moving?')).closest('.card');
+      expect(within(card).getByText(/Recorded as out of bed at 20:06/)).toHaveTextContent(
+        'Recorded as out of bed at 20:06 — the bed then showed movement in 4 separate minutes with no return logged in between. What actually happened?'
+      );
+      expect(card.textContent).not.toMatch(/\bafter\b|kept moving|more minutes|continuously|ongoing/i);
+      expect(screen.getByRole('button', { name: /Check the 2 recorded events/ })).toBeInTheDocument();
+    });
+
+    test('an ordinary night has no lingering prompt', async () => {
+      at();
+      await screen.findByRole('button', { name: /That.s right/ });
+      expect(screen.queryByText('Still moving?')).not.toBeInTheDocument();
+    });
+
+    test.each([
+      ['No, still in bed', 'wrong'],
+      ['Yes, they got up', 'correct'],
+      ['Not sure', 'unclear'],
+    ])('answering "%s" saves %s on the displayed exit', async (label, verdict) => {
+      api.get.mockResolvedValue(LINGERING_NIGHT);
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: label, exact: true }));
+      await user.click(screen.getByRole('button', { name: /Save just the event answers/ }));
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(api.put.mock.calls[0][1].verdicts).toMatchObject({ 42: verdict });
+      expect(api.put.mock.calls[0][1].verdicts[41]).toBeUndefined();
+    });
+
+    test('save is available while the full event list stays collapsed', async () => {
+      api.get.mockResolvedValue(LINGERING_NIGHT);
+      at();
+      expect(await screen.findByRole('button', { name: /Save just the event answers/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Check the 2 recorded events/ })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Up for the day here/ })).not.toBeInTheDocument();
+    });
+
+    test('a double-flagged exit renders exactly one quick check-in card and one verdict set', async () => {
+      api.get.mockResolvedValue({
+        ...NIGHT,
+        transitions: [
+          { id: 21, type: 'into_bed', created_at: '2026-08-29 09:51:00', snapshot: 0, verdict: null },
+          { id: 22, type: 'out_of_bed', created_at: '2026-08-29 09:51:14', snapshot: 0, verdict: null, quick_reversal_of: 21, quick_reversal_gap_s: 14, lingering_motion_minutes: 4, lingering_motion_gap_s: 46 },
+        ],
+      });
+      at();
+      expect(await screen.findAllByText('Quick check-in?')).toHaveLength(1);
+      expect(screen.queryByText('Still moving?')).not.toBeInTheDocument();
+      expect(document.querySelectorAll('.review-event__verdicts')).toHaveLength(1);
+      expect(screen.getAllByRole('button', { name: 'Not sure', exact: true })).toHaveLength(1);
+    });
+
+    test('different quick and lingering exits each get an independently answerable card', async () => {
+      api.get.mockResolvedValue({
+        ...LINGERING_NIGHT,
+        transitions: [
+          { id: 21, type: 'into_bed', created_at: '2026-08-29 09:51:00', snapshot: 0, verdict: null },
+          { id: 22, type: 'out_of_bed', created_at: '2026-08-29 09:51:14', snapshot: 0, verdict: null, quick_reversal_of: 21, quick_reversal_gap_s: 14 },
+          ...LINGERING_NIGHT.transitions,
+        ],
+      });
+      const { user } = at();
+      const quick = (await screen.findByText('Quick check-in?')).closest('.card');
+      const lingering = screen.getByText('Still moving?').closest('.card');
+      await user.click(within(quick).getByRole('button', { name: 'They got up', exact: true }));
+      expect(within(lingering).getByRole('button', { name: 'No, still in bed' })).toHaveAttribute('aria-pressed', 'false');
+      await user.click(within(lingering).getByRole('button', { name: 'No, still in bed' }));
+      expect(within(quick).getByRole('button', { name: 'They got up', exact: true })).toHaveAttribute('aria-pressed', 'true');
+      await user.click(screen.getByRole('button', { name: /Save just the event answers/ }));
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(api.put.mock.calls[0][1].verdicts).toMatchObject({ 22: 'correct', 42: 'wrong' });
+    });
+
+    test('answering before the timezone arrives preserves the verdict while reseeding onset and wake', async () => {
+      api.get.mockResolvedValue(LINGERING_NIGHT);
+      const { user, rerenderWith } = renderAsAdmin(routed, {
+        route: '/children/c-1/review/2026-08-29',
+        kids: [{ id: 'c-1', name: 'Raffa' }],
+        settings: { timezone: 'UTC' },
+      });
+      await user.click(await screen.findByRole('button', { name: 'No, still in bed' }));
+      rerenderWith({ settings: { timezone: 'Australia/Melbourne' } });
+      await waitFor(() => expect(screen.getByText('19:33')).toBeInTheDocument());
+      expect(screen.getByText('05:48')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /That.s right/ }));
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(api.put.mock.calls[0][1].verdicts).toMatchObject({ 42: 'wrong' });
+    });
+
+    test('the lingering snapshot opens the existing full-size preview', async () => {
+      api.get.mockResolvedValue(LINGERING_NIGHT);
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: 'Enlarge photo' }));
+      const dialog = await screen.findByRole('dialog');
+      expect(dialog.querySelector('.image-preview')).toHaveAttribute('src', '/api/cameras/bed-transitions/42/snapshot?token=t');
+    });
+  });
+
   describe('quick check-in (an entry immediately undone by an exit)', () => {
     const QUICK_NIGHT = {
       ...NIGHT,
