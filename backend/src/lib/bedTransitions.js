@@ -5,7 +5,7 @@ import { logger } from './logger.js';
 import { captureSnapshot, fetchHttpSnapshot } from './snapshot.js';
 import {
   findQuickReversals,
-  findLingeringBedMotion,
+  findAllLingeringBedMotion,
   LINGERING_WINDOW_MS,
   LINGERING_MIN_ACTIVE_MINUTES,
 } from './bedTransitionRules.js';
@@ -157,6 +157,26 @@ export function getBedTransitions(cameraIds, startSql, endSql) {
     .all(...cameraIds, startSql, endSql);
 }
 
+// Activity for the given cameras within [startSql, endSqlExclusive), in the order the pure
+// lingering-motion rule expects. Keep morning-review work bounded to this night's evidence.
+export function getActivitySamples(cameraIds, startSql, endSqlExclusive) {
+  if (!cameraIds || cameraIds.length === 0) return [];
+  const ph = cameraIds.map(() => '?').join(',');
+  return db.prepare(
+    `SELECT camera_id, bucket_start, motion_peak FROM activity_samples
+       WHERE camera_id IN (${ph}) AND bucket_start >= ? AND bucket_start < ?
+       ORDER BY camera_id, bucket_start ASC`
+  ).all(...cameraIds, startSql, endSqlExclusive);
+}
+
+// One boundary lookup per camera detects a same-direction run truncated by a bounded fetch.
+export function getPriorTransitionType(cameraId, beforeSql) {
+  const row = db.prepare(
+    `SELECT type FROM bed_transitions WHERE camera_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT 1`
+  ).get(cameraId, beforeSql);
+  return row ? row.type : null;
+}
+
 // Transitions that are provably wrong: the same type twice in a row for one camera, with nothing
 // between. You cannot get into a bed you are already in. Returns the SECOND of each such pair along
 // with the one it contradicts, newest first — the working set for diagnosing the classifier, and the
@@ -264,17 +284,15 @@ export function getQuickReversals({ maxGapMs = 60000, limit = 200 } = {}) {
 // Same-direction repeats (62% of stored transitions, item 1's own measurement) are deliberately
 // evaluated only once — see the "SEPARATE dedup" note in this function's design — so one unoccupied
 // stretch bracketed by several repeated out_of_bed markers produces one row, not several. ⚠️ The
-// evaluation is anchored at the run's OLDEST member, not its newest — see the loop comment below for
+// evaluation is anchored at the run's OLDEST member, not its newest — see findAllLingeringBedMotion for
 // why: anchoring at the newest member (the first-shipped version of this code, fixed 2026-09-14 after
 // an adversarial pre-merge review caught it independently via Codex AND a parallel Claude subagent)
 // silently LOST real evidence rather than merely deduplicating it, whenever the run's earlier member(s)
 // had qualifying motion that the newest member's own post-exit window could never see.
 //
-// Query only, same posture as getImpossibleTransitions and getQuickReversals above: nothing today ACTS
-// on this (no gating, no wake_count change, no UI). It needs owner-verdict ground truth on THIS pattern
-// — applied to the full out_of_bed population, not just quick-reversal pairs — before anything
-// downstream can safely use it. NOT built here: any route, any UI surfacing, any change to
-// sleepAnalysis.js/detectMidnightEpisodes or wake_count. See ROADMAP §1.2 item 3, still open.
+// Diagnostic only: the morning review uses the same pure scan on bounded rows to collect owner
+// verdicts on THIS broader population. Nothing gates sleepAnalysis.js/detectMidnightEpisodes or
+// wake_count on it. See ROADMAP §1.2 item 3, still open pending ground truth.
 export function getLingeringBedMotion({
   windowMs = LINGERING_WINDOW_MS,
   minActiveMinutes = LINGERING_MIN_ACTIVE_MINUTES,
@@ -298,50 +316,7 @@ export function getLingeringBedMotion({
     if (!samplesByCamera.has(s.camera_id)) samplesByCamera.set(s.camera_id, []);
     samplesByCamera.get(s.camera_id).push(s);
   }
-  const transitionsByCamera = new Map();
-  for (const t of transitions) {
-    if (!transitionsByCamera.has(t.camera_id)) transitionsByCamera.set(t.camera_id, []);
-    transitionsByCamera.get(t.camera_id).push(t);
-  }
-
-  const out = [];
-  for (const [cameraId, rows] of transitionsByCamera) {
-    const sorted = rows.slice().sort((a, b) => (a.created_at === b.created_at ? a.id - b.id : a.created_at < b.created_at ? -1 : 1));
-    // Already ascending by bucket_start from the SQL above — findLingeringBedMotion trusts this and
-    // does not re-sort per call (plan-review finding 3: a per-call sort measured ~1.35s at realistic
-    // data volumes since this runs once per out_of_bed candidate, not once per table).
-    const camSamples = samplesByCamera.get(cameraId) || [];
-
-    let nextIntoBed = null;
-    // The NEWEST out_of_bed seen so far in the run we're currently scanning backward through — this is
-    // what gets REPORTED (the transition id a human/UI would actually look up), even though evaluation
-    // below is anchored at the run's OLDEST member. Reset to null on every into_bed and after every
-    // evaluated run.
-    let newestInRun = null;
-    for (let i = sorted.length - 1; i >= 0; i--) {
-      const row = sorted[i];
-      if (row.type === 'into_bed') { nextIntoBed = row; newestInRun = null; continue; }
-      if (row.type === 'out_of_bed') {
-        const isRunEnd = i === sorted.length - 1 || sorted[i + 1].type !== 'out_of_bed';
-        if (isRunEnd) newestInRun = row;
-        // Evaluate once we reach the run's OLDEST member, not its newest. A same-direction repeat
-        // doesn't represent a new departure (see nextIntoBed's own reasoning above) — the bed has been
-        // believed-unoccupied since the OLDEST exit in the run, so that is the real "own minute" to
-        // exclude and the real point the lookahead window should start from. Anchoring at the newest
-        // member instead (the original version of this code) made findLingeringBedMotion's window start
-        // AFTER the newest exit's own timestamp, so any qualifying motion between an earlier run member
-        // and the next one was never in range of ANY evaluated call — not deduplicated, silently LOST.
-        // Found by an adversarial pre-merge review (Codex + a parallel Claude subagent, both
-        // independently reproduced it), 2026-09-14, before this PR merged.
-        const isRunStart = i === 0 || sorted[i - 1].type !== 'out_of_bed';
-        if (isRunStart) {
-          const flagged = findLingeringBedMotion(row, nextIntoBed, camSamples, { windowMs, minActiveMinutes });
-          if (flagged) out.push({ ...flagged, out_of_bed: newestInRun });
-          newestInRun = null;
-        }
-      }
-    }
-  }
+  const out = findAllLingeringBedMotion(transitions, samplesByCamera, { windowMs, minActiveMinutes });
 
   out.sort((a, b) => {
     const xt = a.out_of_bed.created_at;

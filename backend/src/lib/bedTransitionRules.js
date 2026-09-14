@@ -267,6 +267,70 @@ export function findLingeringBedMotion(
   return { out_of_bed: exit, active_minutes: count, ...first };
 }
 
+// Shared by the full-table diagnostic and the morning review's bounded per-night query.
+// Samples must already ascend by bucket_start within each camera. Return unsorted flags;
+// ordering and limits belong to the caller, just as they do for findQuickReversals.
+// boundaryTypeByCamera is optional: a bounded caller supplies the last type before its fetch
+// boundary so an incomplete leading run cannot be evaluated against the wrong oldest exit.
+export function findAllLingeringBedMotion(
+  transitions,
+  samplesByCamera,
+  { windowMs, minActiveMinutes, boundaryTypeByCamera } = {}
+) {
+  const transitionsByCamera = new Map();
+  for (const t of transitions) {
+    if (!transitionsByCamera.has(t.camera_id)) transitionsByCamera.set(t.camera_id, []);
+    transitionsByCamera.get(t.camera_id).push(t);
+  }
+
+  const out = [];
+  for (const [cameraId, rows] of transitionsByCamera) {
+    const sorted = rows.slice().sort((a, b) => (a.created_at === b.created_at ? a.id - b.id : a.created_at < b.created_at ? -1 : 1));
+    // Already ascending by bucket_start from the caller — findLingeringBedMotion trusts this and
+    // does not re-sort per call (plan-review finding 3: a per-call sort measured ~1.35s at realistic
+    // data volumes since this runs once per out_of_bed candidate, not once per table).
+    const camSamples = samplesByCamera.get(cameraId) || [];
+
+    let nextIntoBed = null;
+    // The NEWEST out_of_bed seen so far in the run we're currently scanning backward through — this is
+    // what gets REPORTED (the transition id a human/UI would actually look up), even though evaluation
+    // below is anchored at the run's OLDEST member. Reset to null on every into_bed and after every
+    // evaluated run.
+    let newestInRun = null;
+    for (let i = sorted.length - 1; i >= 0; i--) {
+      const row = sorted[i];
+      if (row.type === 'into_bed') { nextIntoBed = row; newestInRun = null; continue; }
+      if (row.type === 'out_of_bed') {
+        const isRunEnd = i === sorted.length - 1 || sorted[i + 1].type !== 'out_of_bed';
+        if (isRunEnd) newestInRun = row;
+        // Evaluate once we reach the run's OLDEST member, not its newest. A same-direction repeat
+        // doesn't represent a new departure (see nextIntoBed's own reasoning above) — the bed has been
+        // believed-unoccupied since the OLDEST exit in the run, so that is the real "own minute" to
+        // exclude and the real point the lookahead window should start from. Anchoring at the newest
+        // member instead (the original version of this code) made findLingeringBedMotion's window start
+        // AFTER the newest exit's own timestamp, so any qualifying motion between an earlier run member
+        // and the next one was never in range of ANY evaluated call — not deduplicated, silently LOST.
+        // Found by an adversarial pre-merge review (Codex + a parallel Claude subagent, both
+        // independently reproduced it), 2026-09-14, before this PR merged.
+        const isRunStart = i === 0 || sorted[i - 1].type !== 'out_of_bed';
+        // A bounded fetch can cut through a run whose true oldest exit is unknown. Treating
+        // its first visible exit as a fresh anchor can FABRICATE a flag (10:00 exit, 18:00
+        // repeat, motion only at 18:01-18:04). Suppress that leading run; the whole-table
+        // caller omits this map and keeps its original behavior. Plan review, 2026-09-14.
+        const continuesBoundaryRun = i === 0 && boundaryTypeByCamera?.get(cameraId) === 'out_of_bed';
+        if (continuesBoundaryRun) continue;
+        if (isRunStart) {
+          const flagged = findLingeringBedMotion(row, nextIntoBed, camSamples, { windowMs, minActiveMinutes });
+          if (flagged) out.push({ ...flagged, out_of_bed: newestInRun });
+          newestInRun = null;
+        }
+      }
+    }
+  }
+
+  return out;
+}
+
 // --- Outside-channel EVIDENCE (peak + duration), ROADMAP §1.2 item 2 ---
 //
 // The fast link above accepts a single frame over threshold with no minimum magnitude at all

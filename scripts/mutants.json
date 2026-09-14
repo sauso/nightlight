@@ -1222,7 +1222,7 @@
   },
   {
     "label": "lingering motion: every repeated out_of_bed is reported",
-    "file": "backend/src/lib/bedTransitions.js",
+    "file": "backend/src/lib/bedTransitionRules.js",
     "find": "if (isRunStart) {",
     "replace": "if (true) {",
     "expect": "killed",
@@ -1232,7 +1232,7 @@
   },
   {
     "label": "lingering motion: anchoring at the newest (not oldest) exit loses a run's earlier evidence",
-    "file": "backend/src/lib/bedTransitions.js",
+    "file": "backend/src/lib/bedTransitionRules.js",
     "find": "const isRunStart = i === 0 || sorted[i - 1].type !== 'out_of_bed';",
     "replace": "const isRunStart = isRunEnd;",
     "expect": "killed",
@@ -1251,5 +1251,98 @@
       "bedTransitionLink.test.js"
     ],
     "note": "Survived the original 5 mutants above — every existing exit fixture used nonzero seconds, so a bucket_start (always :00) could never land exactly on exit.created_at. Found by an adversarial pre-merge review (a Claude subagent), 2026-09-14."
+  },
+  {
+    "label": "lingering motion: overlapping flags render two prompts",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "(t) => t.lingering_motion_minutes != null && t.quick_reversal_of == null",
+    "replace": "(t) => t.lingering_motion_minutes != null",
+    "expect": "killed",
+    "tests": [
+      "MorningReview.test.jsx"
+    ]
+  },
+  {
+    "label": "lingering motion: leading lookback is dropped",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "Date.parse(`${startSql.replace(' ', 'T')}Z`) - LINGERING_WINDOW_MS",
+    "replace": "Date.parse(`${startSql.replace(' ', 'T')}Z`)",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ]
+  },
+  {
+    "label": "lingering motion: trailing lookahead is dropped",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "Date.parse(`${endSql.replace(' ', 'T')}Z`) + LINGERING_WINDOW_MS",
+    "replace": "Date.parse(`${endSql.replace(' ', 'T')}Z`)",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ]
+  },
+  {
+    "label": "lingering motion: collapsed-list save gate ignores the new prompt",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "(showEvents || quickReversals.length > 0 || lingeringOnly.length > 0)",
+    "replace": "(showEvents || quickReversals.length > 0)",
+    "expect": "killed",
+    "tests": [
+      "MorningReview.test.jsx"
+    ]
+  },
+  {
+    "label": "lingering motion: boundary continuation is treated as a fresh run",
+    "file": "backend/src/lib/bedTransitionRules.js",
+    "find": "boundaryTypeByCamera?.get(cameraId) === 'out_of_bed'",
+    "replace": "false",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ]
+  },
+  {
+    "label": "lingering motion: frontend runner control (comment only)",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "// but ask only once per event; both cards write into the same shared verdict.",
+    "replace": "// but ask only once per event; both cards use the shared verdict state.",
+    "expect": "survives",
+    "tests": [
+      "MorningReview.test.jsx"
+    ]
+  },
+  {
+    "label": "lingering motion: a transition exactly at the fetch boundary counts as its own prior",
+    "file": "backend/src/lib/bedTransitions.js",
+    "find": "WHERE camera_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT 1",
+    "replace": "WHERE camera_id = ? AND created_at <= ? ORDER BY created_at DESC LIMIT 1",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ],
+    "note": "Survived every other lingering-motion test — none placed a transition exactly on wideStart. Found by an adversarial pre-merge review (a Claude subagent), 2026-09-14."
+  },
+  {
+    "label": "lingering motion: the trailing widen is not the full hour",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "const wideEnd = toSqlUtc(new Date(Date.parse(`${endSql.replace(' ', 'T')}Z`) + LINGERING_WINDOW_MS));",
+    "replace": "const wideEnd = toSqlUtc(new Date(Date.parse(`${endSql.replace(' ', 'T')}Z`) + LINGERING_WINDOW_MS / 2));",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ],
+    "note": "Survived every other lingering-motion test — the existing trailing-lookahead test only placed evidence ~5 minutes past the boundary, not near the full 60-minute edge. Found by an adversarial pre-merge review (a Claude subagent), 2026-09-14."
+  },
+  {
+    "label": "lingering motion: the leading widen is not the full hour",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "const wideStart = toSqlUtc(new Date(Date.parse(`${startSql.replace(' ', 'T')}Z`) - LINGERING_WINDOW_MS));",
+    "replace": "const wideStart = toSqlUtc(new Date(Date.parse(`${startSql.replace(' ', 'T')}Z`) - LINGERING_WINDOW_MS / 2));",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ],
+    "note": "Symmetric case to the trailing widen above, flagged as likely but not separately verified by the same review. Found by an adversarial pre-merge review (a Claude subagent), 2026-09-14."
   }
 ]
