@@ -115,8 +115,9 @@ about how OFTEN it moves, never how hard.**
 
 ⚠️ **The remaining failure mode is the one no amount of threshold work fixes:** the detector cannot
 tell a parent's hands leaving the bed from a child climbing out, because motion in two zones is all it
-has. That is item 3, and it is the same gap §2.5 (camera occupancy) exists to close from the other
-side.
+has. That is item 3. A camera-vision approach to closing it from the occupancy side was tried and
+abandoned (§4, "Bed occupancy via camera vision") — item 3's retrospective-rule work below is now the
+only active path, with a physical occupancy sensor as a possible future independent source.
 
 ★ **Item 1 (no occupancy state) is still open, but the wake path no longer depends on it.** 0.30.1
 (#327 + #342) defends against the `out → in → out` cluster *inside the morning-departure scan* rather
@@ -168,7 +169,8 @@ it is re-runnable, and item 1 is scored against whatever it returns after the ho
 + `transition-snapshots/`, 45-day retention in lockstep). Until now the detector recorded *when* it
 thought the bed changed with no way to see what it was looking at when it decided. Combined with the
 query above, the wrong events now collect themselves with a picture attached — which is both the way to
-diagnose item 3 and the only honest test set for §2.5.
+diagnose item 3 and, combined with owner verdicts, the ground truth a future occupancy sensor (§4) would
+need to be scored against.
 
 ⚠️ These bad transitions do **not** currently corrupt reported sleep — the analysis uses episode grouping
 and the occupancy guard rather than trusting raw event labels. They are why per-event markers still
@@ -216,8 +218,9 @@ counts as **historical**, not as the current state.
    out. (Alone this collapses the four arrivals to one.)
    ★ Target: whatever `getImpossibleTransitions()` returns when it is re-run after the holdout. It
    returned 147 pairs against the OLD zones — historical, see the warning at the top of this section.
-   ★ This is *inferred* occupancy and needs no model — do it regardless of §2.5, which would supply the
-   same fact as independent evidence from the camera. They are complementary; neither waits on the other.
+   ★ This is *inferred* occupancy and needs no model — a camera-vision approach to the same fact was
+   tried and abandoned (§4); a future physical occupancy sensor could supply it independently, but this
+   item never depended on either.
    ✅ **LOG-ONLY IMPLEMENTATION SHIPPED 2026-09-12** — turned out NOT to be the "cheapest win" it
    looked like. A retrospective check against real owner-verdicted transitions (both environments)
    found that actually SUPPRESSING a same-direction repeat is unsafe on this classifier's current
@@ -807,109 +810,6 @@ synthetic source a second path and assert the toggle swaps the stream.
 
 ---
 
-### 2.5 Bed occupancy from the camera — `SPECCED` · *do not build yet, see the gate*
-
-**Why.** Every open item in §1.2 is downstream of one missing fact: **is there actually a child in the
-bed?** The detector infers it from motion in two zones, which is why a parent's hands leaving the bed
-reads as an exit, a stir reads as an arrival, and an empty bed once reported a flawless 11h06m sleep.
-Motion cannot answer the question; a picture can. A generic person-detector cannot either — Raffa
-sleeps under a blanket and Renz in a sleep suit, so frequently **only a head is visible**.
-
-**Approach: distil, don't run a VLM.** A vision-language model (Qwen2.5-VL via Ollama) labels frames
-**offline, on the owner's desktop**, and is then thrown away. What ships is a MobileNetV3-Small
-classifier, **~6 MB ONNX**, ~10 ms per frame, ~2.5 CPU-seconds/day at the rate transitions actually
-occur — against the existing detector's ~13,000. The VLM never runs in the container and never could:
-`/var/lib/docker` has **6.8 GB free of a fixed 40 GB vdisk** and a 3B model is ~3.5 GB. The Coral is
-not a way around this either (int8-only, **8 MB on-chip**).
-
-**Status: the owner is running the labelling lab himself, no deadline.** Full instructions live outside
-this repo (Claude artifact, "Bed Occupancy Lab", 6 stages). Nothing here is committed until the gate
-below passes.
-
-#### 2.5a The gate — one experiment, before any of this is built
-
-A model trained on Renz and Raffa learns *this* cot, *this* angle, *this* IR illuminator. It would fail
-on someone else's camera **confidently**, silently corrupting their sleep data. So the design below
-assumes per-install calibration — and that assumption must be tested first:
-
-> Train on Renz + Raffa, then fit a head on the **staging Hikvision** (a third camera, different make,
-> different angle, same house). Fit it at 10 / 20 / 40 / 80 labelled frames and plot where accuracy
-> stops improving.
-
-That single experiment answers both open questions at once: whether per-install calibration is needed
-at all, and **how many frames the wizard should ask for**. The "~20 frames" figure used below is an
-estimate, not a measurement — expectation is 40–60, constrained by the empty class. **Do not build the
-wizard around a guessed number.**
-
-**Also settled, so it isn't re-proposed:** collecting frames from *other people's* beds is the wrong
-move. A handful of extra scenes lands in the dead zone — too varied to master the two cameras we can
-actually verify against, and nowhere near the hundreds of distinct scenes real cross-home
-generalisation needs. The generalising is already done by MobileNet's ImageNet pretraining (1.2M
-photographs); four bedrooms adds nothing on top of that. The variety **worth** having is *within* an
-install: both lighting regimes (IR and daylight), a deliberate camera reposition, blanket and
-sleep-suit variation, seasons. All of it accumulates for free as nights pass.
-
-#### 2.5b How it works for someone else installing Nightlight
-
-**Split the model in two.** The backbone (MobileNetV3 minus its final layer) ships once, frozen,
-identical for everyone; it turns a frame into 576 numbers. The head is a single 576→2 layer — **1,154
-numbers, ~5 KB of JSON** — and is the only per-install part.
-
-That split is what makes this shippable: fitting a 1,154-parameter logistic regression on a few dozen
-examples is a few hundred gradient steps of plain arithmetic, **well under a second in Node with no new
-dependency**. `onnxruntime` is needed for inference anyway, and feature extraction is the same forward
-pass. **No Python, no PyTorch, nothing new in the image beyond the backbone.**
-
-**⚠️ Prerequisite: Nightlight stores no images today.** Motion and sound are sampled 24/7 (~1,437
-rows/camera/day) but the only JPEGs on disk are alert snapshots — a fresh install has none, and they
-would be biased toward "occupied and moving" anyway. Calibration therefore needs its own capture mode:
-one snapshot every ~10 min for 2–3 nights, ~250 frames, ~20 MB, using the existing per-camera
-`snapshot_url`. Useful asymmetry: **empty frames are trivial** (daytime, before bedtime, after the
-morning wake); only the occupied class needs a night.
-
-**The flow:**
-1. *"Improve bed detection"* in camera settings — **off by default, clearly optional**.
-2. Capture runs 2–3 nights, with a quiet progress banner.
-3. **Labelling screen.** Frames are chosen deliberately, not at random: spread across the clock so both
-   IR and daylight appear, and roughly balanced between likely-empty and likely-occupied times. Large
-   image, two buttons, ~40 taps, about two minutes.
-   ★ **The wording is load-bearing: "Is the child in the bed *right now*?"** — not "is a child
-   visible?". A parent holding a child beside the bed is `empty`. The owner hit exactly this trap in
-   his own labelling; every user will.
-4. **Fit, then report honestly.** Hold back a quarter of the labels as an exam the head never sees, and
-   show **both error types separately** — a head that always answers "occupied" scores well on an
-   imbalanced set and is worthless, since catching the empty case is the entire point.
-5. **Shadow for a week.** Log the verdict beside each bed transition, change no reported number, then
-   show "agreed with the detector on 94 of 97 transitions" and let the user decide. Same discipline that
-   caught the dead sound rule in 0.26.0.
-
-**Guardrails, in from the start:**
-- **Veto-only.** Occupancy never *creates* a transition, only suppresses one it disbelieves. A broken
-  classifier then costs missed vetoes, never fabricated bedtimes.
-- **Fails off.** No calibration, a poor exam score, or a load error → the feature is simply absent and
-  behaviour is exactly as today.
-- **Recalibration triggers.** A moved camera, a new bed, a cot→bed transition, or a child who has grown
-  all invalidate the head. Needs an explicit "recalibrate" action; possibly a drift signal when
-  disagreement with confirmed transitions rises.
-- **Frames never leave the box**, and say so in the UI. These are pictures of sleeping children.
-- **Keep the labelled frames.** Forty JPEGs is nothing, and they make re-fitting after a camera move a
-  five-second job instead of another two-night wait.
-
-**⚠️ The data trap, already measured — it would have poisoned the first model.** The 503 stored alert
-snapshots are two populations: **362 at 1920×1080 and 141 at 640×360** (the small ones are sub-stream
-grabs from when the snapshot URL was broken), while every empty frame grabbed today is a sharp
-1920×1080. So **"blurry" predicts "occupied"** with no child involved, and a network always takes the
-easy rule. Every image must be forced through a common small size (320×180) before training. Any future
-capture path has the same exposure.
-
-**Relationship to §1.2.** Complementary, not a replacement. §1.2 item 1 (believed-occupancy state
-machine) is the cheap win and stays worth doing on its own — it needs no model and collapses impossible
-sequences immediately. This section is the *independent evidence* that would also close item 3 (parent
-leaving vs child climbing out), which motion alone cannot separate.
-
-**Done when** the gate experiment has a number, the shadow week shows agreement on a real corpus, and a
-second install can calibrate without help.
-
 ### 2.6 Mark the main camera in the camera list — `IDEA` · *small*
 
 All that is left of the old 2.6. **Single-camera sleep analysis shipped in 0.28.0**: sleep is scored
@@ -1013,6 +913,34 @@ pick from when there is a gap**, which is why it is one list rather than four no
 
 Recorded so they don't get re-litigated. Each was considered and consciously parked.
 
+- **Bed occupancy via camera vision** — `ABANDONED 2026-09-10` (owner's call). Was §2.5: a frozen
+  MobileNetV3 backbone shipped once, plus a ~1,154-parameter per-install head fitted on ~20-60 frames
+  the owner labels himself, vetoing bed-transition calls the motion detector gets wrong (Raffa sleeps
+  under a blanket, Renz in a sleep suit — often only a head is visible, which motion-only detection
+  can't resolve). Real, extensive work happened before it was parked: a VLM auto-labelling attempt
+  (Qwen2.5-VL) failed outright (a leading prompt pre-authorised "occupied", scoring ~5% on known-empty
+  frames); 867 frames across 28 nights were then hand-labelled instead, training a MobileNetV3 head.
+  **Why it died, in order of weight:**
+  1. **The measurement itself couldn't distinguish configurations.** An ablation meant to rank a few
+     candidate training changes instead found ~30 points of run-to-run spread on an *identical* config
+     (54.5%–93.9% worst-class accuracy across seeds) — every headline number this effort ever produced
+     (59% → 62% → 66% → 58% → 91%) was drawn from that same noise, not a real trend.
+  2. **The bar moved out from under it.** #327 + #342 (shipped in 0.30.1) made the wake-time detector
+     near-exact on measured nights by working around the occupancy gap in the departure scan itself —
+     so a vision veto now has to *beat* an already-good detector rather than replace a clearly-broken
+     one, while its own reliability was simultaneously in question per point 1.
+  3. **The product shape doesn't fit this project's own standing rule.** A per-install head needs the
+     installer to hand-label dozens of frames of their own sleeping child with no designed labelling
+     flow; shipping one head trained on Renz and Raffa "as-is" would be exactly the "built only for this
+     house" failure `CLAUDE.md` forbids.
+  **What survives, and is being reused rather than wasted:** the 867 hand-labelled frames (grabber kept
+  running, 5×/day) and the 465 owner-verdicted `bed_transitions` snapshots both become ground truth to
+  score whatever replaces this, vision or otherwise. **Decision: pursue a physical occupancy sensor
+  instead** (a bed-presence mat or mmWave/radar module) over the MQTT motion source already in this
+  codebase — optional hardware, a reliable signal instead of a probabilistic one, and it degrades
+  honestly (simply absent) when nobody adds it, which fits an app other people install far better than a
+  model fitted to two specific children. Not scoped as its own roadmap item yet — raise it again once
+  there's hardware to design against.
 - **Chromecast** — `HELD`. Requires `window.isSecureContext`, so it works only over the HTTPS domain,
   not LAN http; HLS-mode only. The web Cast SDK is **Chrome-browser-only** — it does not work in the
   app's WebView. Undecided: target the browser, or adopt the native Android Cast SDK. Ask before building.
