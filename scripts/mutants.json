@@ -1,5 +1,69 @@
 [
   {
+    "label": "sound percentile: nearest-rank index off by one",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "Math.ceil(p * n) - 1",
+    "replace": "Math.ceil(p * n)",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "sound percentile burst boundary"
+  },
+  {
+    "label": "sound percentile: p75 moved to p74",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "soundPercentile(sortedSound, 0.75)",
+    "replace": "soundPercentile(sortedSound, 0.74)",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "sound percentile burst boundary"
+  },
+  {
+    "label": "sound percentile: p90 moved to p91",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "soundPercentile(sortedSound, 0.90)",
+    "replace": "soundPercentile(sortedSound, 0.91)",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "sound percentile burst boundary"
+  },
+  {
+    "label": "sound percentile: sd omits centering by the squared mean",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "s.soundSumSq / s.soundWindows - soundMean * soundMean",
+    "replace": "s.soundSumSq / s.soundWindows",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "sound percentile burst boundary"
+  },
+  {
+    "label": "sound percentile: sd records variance without its square root",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "Math.sqrt(Math.max(0, s.soundSumSq / s.soundWindows - soundMean * soundMean))",
+    "replace": "Math.max(0, s.soundSumSq / s.soundWindows - soundMean * soundMean)",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "sound percentile burst boundary"
+  },
+  {
+    "label": "sound percentile: remove defensive upper clamp (equivalent for p <= 1)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "Math.min(n - 1, Math.ceil(p * n) - 1)",
+    "replace": "Math.ceil(p * n) - 1",
+    "expect": "equivalent",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "sound percentile burst boundary",
+    "note": "For nonempty n and p in {0.75, 0.90}, ceil(p*n) <= n; the clamp cannot bind. Empty buckets never call this helper."
+  },
+  {
+    "label": "sound percentile: sd loses its negative-round-off variance guard",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "Math.max(0, s.soundSumSq / s.soundWindows - soundMean * soundMean)",
+    "replace": "(s.soundSumSq / s.soundWindows - soundMean * soundMean)",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "sound percentile and population sd: round-off"
+  },
+  {
     "label": "control: a comment edit must change nothing",
     "file": "backend/src/lib/detectionEvents.js",
     "find": "// Resolve+delete a clip MP4",

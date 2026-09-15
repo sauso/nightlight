@@ -63,6 +63,55 @@ const columnsOf = (dir, table) => {
   }
 };
 
+describe('sound percentile diagnostic migration', () => {
+  test('upgrades an old activity table, leaves historical values NULL, and is idempotent', () => {
+    const dir = freshDir();
+    assert.equal(bootDbJs(dir).status, 0);
+    const full = columnsOf(dir, 'activity_samples');
+    const diagnostics = ['sound_p75', 'sound_p90', 'sound_sd'];
+    {
+      const db = new Database(join(dir, 'babymonitor.db'));
+      try {
+        // Rewind the actual table, rather than booting today's schema twice and calling it an upgrade.
+        // Remove the older motion group's last-added sentinel AND its companion so it can rerun too.
+        for (const col of [...diagnostics, 'motion_out_peak', 'motion_out_level']) {
+          db.exec(`ALTER TABLE activity_samples DROP COLUMN ${col}`);
+        }
+        db.exec("INSERT INTO cameras (id, name, rtsp_url, mediamtx_path) VALUES ('old-cam', 'Old', 'rtsp://example/stream', 'old')");
+        db.exec(`INSERT INTO activity_samples (camera_id, bucket_start, sound_level, sound_peak, sound_windows)
+                 VALUES ('old-cam', '2026-09-01 00:00:00', 3, 8, 300)`);
+      } finally {
+        db.close();
+      }
+    }
+    const old = columnsOf(dir, 'activity_samples');
+    for (const col of [...diagnostics, 'motion_out_peak']) assert.ok(!old.includes(col));
+
+    for (let bootNumber = 1; bootNumber <= 2; bootNumber++) {
+      const boot = bootDbJs(dir);
+      assert.equal(boot.status, 0, `upgrade/reboot ${bootNumber}: ${boot.stderr}`);
+      assert.deepEqual(columnsOf(dir, 'activity_samples').sort(), [...full].sort());
+      const db = new Database(join(dir, 'babymonitor.db'));
+      try {
+        const info = db.prepare('PRAGMA table_info(activity_samples)').all();
+        for (const col of diagnostics) {
+          const definition = info.find((c) => c.name === col);
+          assert.equal(definition.type, 'REAL');
+          assert.equal(definition.notnull, 0);
+          assert.equal(definition.dflt_value, null);
+        }
+        assert.deepEqual(db.prepare(`SELECT sound_level, sound_peak, sound_windows, sound_p75, sound_p90, sound_sd
+                                    FROM activity_samples WHERE camera_id = 'old-cam'`).get(), {
+          sound_level: 3, sound_peak: 8, sound_windows: 300,
+          sound_p75: null, sound_p90: null, sound_sd: null,
+        });
+      } finally {
+        db.close();
+      }
+    }
+  });
+});
+
 describe('a migration group that fails partway', () => {
   test('leaves none of its columns behind', () => {
     const dir = freshDir();

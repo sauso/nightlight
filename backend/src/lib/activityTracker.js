@@ -12,7 +12,7 @@ const FLUSH_INTERVAL_MS = 60 * 1000;
 const PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const RETENTION_DAYS = 30;
 
-// camera_id -> { motionSum, motionPeak, motionFrames, soundSum, soundPeak, soundWindows }
+// camera_id -> per-minute sums/peaks/counts plus sound readings and their sum of squares.
 const buckets = new Map();
 
 // Listeners called once per camera per flushed minute, with the same peaks that were just written.
@@ -31,6 +31,7 @@ function slot(cameraId) {
   let s = buckets.get(cameraId);
   if (!s) {
     s = { motionSum: 0, motionPeak: 0, motionFrames: 0, soundSum: 0, soundPeak: 0, soundWindows: 0,
+      soundValues: [], soundSumSq: 0,
       motionOutSum: 0, motionOutPeak: 0, motionOutFrames: 0 };
     buckets.set(cameraId, s);
   }
@@ -63,6 +64,8 @@ export function recordSound(cameraId, overDb) {
   if (!(overDb >= 0)) return;
   const s = slot(cameraId);
   s.soundSum += overDb;
+  s.soundSumSq += overDb * overDb;
+  s.soundValues.push(overDb);
   if (overDb > s.soundPeak) s.soundPeak = overDb;
   s.soundWindows++;
 }
@@ -76,9 +79,16 @@ function minuteBucketUtc(d = new Date()) {
 const insertSample = db.prepare(
   `INSERT INTO activity_samples
      (camera_id, bucket_start, motion_level, motion_peak, sound_level, sound_peak, motion_frames,
-      sound_windows, motion_out_level, motion_out_peak)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      sound_windows, motion_out_level, motion_out_peak, sound_p75, sound_p90, sound_sd)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
+
+// Nearest rank uses the actual accepted count, including short minutes and buffered catch-up bursts.
+// The clamp is defensive for a future p > 1 caller; it cannot bind for today's p75/p90 (p <= 1).
+function soundPercentile(sorted, p) {
+  const n = sorted.length;
+  return sorted[Math.min(n - 1, Math.ceil(p * n) - 1)];
+}
 
 // Write one row per camera that saw any signal in the last minute, then reset. Exported for tests /
 // forced flushes; normally driven by the interval below.
@@ -93,17 +103,31 @@ export function flushActivity() {
   for (const [cameraId, s] of snapshot) {
     if (s.motionFrames === 0 && s.soundWindows === 0) continue;
     try {
+      // ROADMAP §1.4 Phase 1: record diagnostics from the same rectified excursion stream.
+      // About 300 readings per camera/minute, discarded with the bucket. Sort one copy for both
+      // candidates: p75 needs a longer burst (76/300) than p90 (31/300). No live threshold changes.
+      const sortedSound = [...s.soundValues].sort((a, b) => a - b);
+      const soundMean = s.soundWindows ? s.soundSum / s.soundWindows : null;
+      // Empty sound buckets MUST bind NULL: an undefined percentile can cost the entire motion row.
+      const soundP75 = s.soundWindows ? soundPercentile(sortedSound, 0.75) : null;
+      const soundP90 = s.soundWindows ? soundPercentile(sortedSound, 0.90) : null;
+      // Population sd measures this minute's spread; clamp tiny negative variance from round-off.
+      const soundSd = s.soundWindows
+        ? Math.sqrt(Math.max(0, s.soundSumSq / s.soundWindows - soundMean * soundMean)) : null;
       insertSample.run(
         cameraId,
         bucket,
         s.motionFrames ? s.motionSum / s.motionFrames : null,
         s.motionFrames ? s.motionPeak : null,
-        s.soundWindows ? s.soundSum / s.soundWindows : null,
+        soundMean,
         s.soundWindows ? s.soundPeak : null,
         s.motionFrames,
         s.soundWindows,
         s.motionOutFrames ? s.motionOutSum / s.motionOutFrames : null,
-        s.motionOutFrames ? s.motionOutPeak : null
+        s.motionOutFrames ? s.motionOutPeak : null,
+        soundP75,
+        soundP90,
+        soundSd
       );
       written++;
     } catch {
