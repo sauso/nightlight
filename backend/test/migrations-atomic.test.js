@@ -93,8 +93,14 @@ describe('sound percentile diagnostic migration', () => {
       assert.deepEqual(columnsOf(dir, 'activity_samples').sort(), [...full].sort());
       const db = new Database(join(dir, 'babymonitor.db'));
       try {
+        // Derived from the schema diff, not the hand-typed `diagnostics` list above — a future
+        // column added to this same migration group is checked automatically, the PRAGMA tripwire
+        // this repo's own CLAUDE.md asks for (a hand-written list can't catch what it never named).
         const info = db.prepare('PRAGMA table_info(activity_samples)').all();
-        for (const col of diagnostics) {
+        const companionGroup = ['motion_out_level', 'motion_out_peak'];
+        const thisGroupsColumns = full.filter((c) => !old.includes(c) && !companionGroup.includes(c));
+        assert.deepEqual([...thisGroupsColumns].sort(), [...diagnostics].sort());
+        for (const col of thisGroupsColumns) {
           const definition = info.find((c) => c.name === col);
           assert.equal(definition.type, 'REAL');
           assert.equal(definition.notnull, 0);
