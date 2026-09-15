@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Maintainer>
+  <Icon>https://raw.githubusercontent.com/sauso/nightlight/main/frontend/public/icons/icon-512.png</Icon>
+  <Profile>
+    Nightlight is a self-hosted baby monitor: low-latency multi-camera streaming from RTSP cameras, sleep and motion/sound detection, and an installable PWA - no cloud, no subscription, no account anywhere but your own network. This repository publishes the Community Applications template for it.
+  </Profile>
+  <DonateLink>https://www.paypal.com/donate/?hosted_button_id=VGCB7WFYPJQ3G</DonateLink>
+  <DonateText>Nightlight is free and open source. If it helps you keep watch over your little ones, consider supporting its development.</DonateText>
+</Maintainer>
