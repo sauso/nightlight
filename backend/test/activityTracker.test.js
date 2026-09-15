@@ -74,6 +74,126 @@ test('sound is accumulated as dB over ambient', () => {
   assert.equal(r.sound_windows, 3);
 });
 
+// ROADMAP §1.4 Phase 1: aggregate the already-rectified recordDb stream. These diagnostics do
+// not choose a future sleep threshold or exercise the separately-tested soundBaseline EMA.
+for (const { label, values, p75, p90, sd } of [
+  { label: 'even count, unsorted and spanning two digits', values: [12, 0, 4, 2], p75: 4, p90: 12, sd: Math.sqrt(20.75) },
+  { label: 'odd count', values: [12, 0, 4, 2, 7], p75: 7, p90: 12, sd: Math.sqrt(17.6) },
+  { label: 'all equal', values: [3, 3, 3, 3], p75: 3, p90: 3, sd: 0 },
+  { label: 'single reading', values: [7], p75: 7, p90: 7, sd: 0 },
+  { label: 'round-off below zero variance', values: [0.1, 0.1, 0.1], p75: 0.1, p90: 0.1, sd: 0 },
+]) {
+  test(`sound percentile and population sd: ${label}`, () => {
+    for (const value of values) at.recordSound('cam-1', value);
+    assert.equal(at.flushActivity(), 1);
+    const r = rowFor('cam-1');
+    assert.equal(r.sound_windows, values.length);
+    assert.equal(r.sound_p75, p75);
+    assert.equal(r.sound_p90, p90);
+    assert.equal(typeof r.sound_sd, 'number', 'NaN can reach SQLite as NULL; do not coerce it to zero');
+    assert.ok(Math.abs(r.sound_sd - sd) < 1e-9, `sd ${r.sound_sd}, expected ${sd}`);
+  });
+}
+
+test('sound percentile diagnostics stay below the active boundary for a fixed rectified quiet minute', () => {
+  // A coarse, fixed aggregation analogue, not a random draw or a replay of the EMA pipeline.
+  // For X ~ N(0, 2²), P(max(0, X) <= v) = Phi(v/2), v >= 0: p75 ≈ 1.35, p90 ≈ 2.56.
+  // Half the readings are exactly zero; rank 225 is 1.35 and rank 270 is 2.56. One tail reading
+  // crosses today's 6 dB SOUND_ACTIVE boundary. Hand totals: sum=244.31, sum of squares=608.5161.
+  const values = [
+    ...Array(150).fill(0), ...Array(74).fill(0.6), 1.35,
+    ...Array(44).fill(2), 2.56, ...Array(29).fill(3.5), 6.5,
+  ];
+  for (const value of values.reverse()) at.recordSound('cam-1', value);
+  assert.equal(at.flushActivity(), 1);
+  const r = rowFor('cam-1');
+  assert.equal(r.sound_windows, 300);
+  assert.equal(r.sound_p75, 1.35);
+  assert.equal(r.sound_p90, 2.56);
+  assert.ok(Math.abs(r.sound_sd - Math.sqrt(608.5161 / 300 - (244.31 / 300) ** 2)) < 1e-9);
+  assert.equal(r.sound_peak, 6.5);
+  assert.ok(r.sound_peak >= 6);
+  for (const value of [r.sound_p75, r.sound_p90, r.sound_sd]) assert.ok(value < 3, 'well below 6 dB');
+});
+
+for (const { elevated, p75, p90 } of [
+  { elevated: 30, p75: 2, p90: 2 },
+  { elevated: 31, p75: 2, p90: 12 },
+  { elevated: 75, p75: 2, p90: 12 },
+  { elevated: 76, p75: 12, p90: 12 },
+]) {
+  test(`sound percentile burst boundary: ${elevated} of 300 elevated readings`, () => {
+    // Lower p75 needs a LONGER burst: 76 windows (~15.2s), versus p90's 31 (~6.2s).
+    for (let i = 0; i < 300; i++) at.recordSound('cam-1', i < elevated ? 12 : 2);
+    assert.equal(at.flushActivity(), 1);
+    const r = rowFor('cam-1');
+    assert.equal(r.sound_p75, p75);
+    assert.equal(r.sound_p90, p90);
+    assert.equal(r.sound_peak, 12);
+    // Two-point population variance: (12-2)² * k * (n-k) / n².
+    const sd = 10 * Math.sqrt(elevated * (300 - elevated)) / 300;
+    assert.ok(Math.abs(r.sound_sd - sd) < 1e-9);
+  });
+}
+
+test('sound percentile uses the accepted count even for a catch-up burst above 300 windows', () => {
+  for (let i = 0; i < 600; i++) at.recordSound('cam-1', i < 61 ? 12 : 2);
+  assert.equal(at.flushActivity(), 1);
+  const r = rowFor('cam-1');
+  assert.equal(r.sound_windows, 600);
+  assert.equal(r.sound_p75, 2);
+  assert.equal(r.sound_p90, 12);
+  assert.ok(Math.abs(r.sound_sd - 10 * Math.sqrt(61 * 539) / 600) < 1e-9);
+});
+
+test('sound percentile and sd stay isolated between cameras and reset after flushing', () => {
+  for (const value of [12, 0, 4, 2]) at.recordSound('cam-1', value);
+  for (const value of [1, 3, 5, 7, 9]) at.recordSound('cam-2', value);
+  assert.equal(at.flushActivity(), 2);
+  const first = rowFor('cam-1');
+  const second = rowFor('cam-2');
+  assert.equal(first.sound_p75, 4);
+  assert.equal(first.sound_p90, 12);
+  assert.ok(Math.abs(first.sound_sd - Math.sqrt(20.75)) < 1e-9);
+  assert.equal(second.sound_p75, 7);
+  assert.equal(second.sound_p90, 9);
+  assert.ok(Math.abs(second.sound_sd - Math.sqrt(8)) < 1e-9);
+
+  db.prepare('DELETE FROM activity_samples').run();
+  at.recordSound('cam-1', 6);
+  assert.equal(at.flushActivity(), 1);
+  const next = rowFor('cam-1');
+  assert.equal(next.sound_windows, 1);
+  assert.equal(next.sound_p75, 6);
+  assert.equal(next.sound_p90, 6);
+  assert.equal(next.sound_sd, 0);
+  assert.equal(rowFor('cam-2'), undefined);
+});
+
+test('sound percentile bindings preserve all five distinct sound and outside-motion diagnostics', () => {
+  // All five are nullable REALs: SQLite cannot detect an INSERT column/argument-order swap.
+  for (const value of [0.2, 0.6]) at.recordMotionOut('cam-1', value);
+  for (const value of [12, 0, 4, 2]) at.recordSound('cam-1', value);
+  assert.equal(at.flushActivity(), 1);
+  const r = rowFor('cam-1');
+  assert.equal(r.motion_out_level, 0.4);
+  assert.equal(r.motion_out_peak, 0.6);
+  assert.equal(r.sound_p75, 4);
+  assert.equal(r.sound_p90, 12);
+  assert.ok(Math.abs(r.sound_sd - Math.sqrt(20.75)) < 1e-9);
+});
+
+test('sound percentile and sd are NULL with no sound windows and the motion row survives', () => {
+  at.recordMotion('cam-1', 0.3);
+  assert.equal(at.flushActivity(), 1, 'undefined sound bindings would silently drop this whole row');
+  const r = rowFor('cam-1');
+  assert.equal(r.motion_peak, 0.3);
+  assert.equal(r.sound_windows, 0);
+  assert.equal(r.sound_p75, null);
+  assert.equal(r.sound_p90, null);
+  assert.equal(r.sound_sd, null);
+});
+
 test('negative and clearly non-numeric samples are rejected', () => {
   // `!(v >= 0)` rejects NaN, which is the one that matters most: a NaN reaching motionSum would make
   // the whole minute's level NaN, and nothing downstream would notice.
