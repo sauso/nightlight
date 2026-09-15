@@ -510,10 +510,20 @@ threshold is still really a statement about the room's variance. The measurement
 stands: the affected room would still read ~41% of minutes active against 19% for the other, even with
 a perfectly healthy baseline.
 
-**Held until the monitor phase ends (~2026-09-09).** Not because it is hard, but because it changes the
-input to the frozen sleep algorithm, and a mid-holdout change to `activityTracker` would perturb the
-very measurement the phase exists to take. Documented as a known limitation in `docs/notifications.md`
-meanwhile.
+**Phase 1 instrumentation shipped:** `activityTracker.js:109` records `sound_p75`, `sound_p90` and
+`sound_sd` from each minute's actual accepted, zero-clamped sound excursions, alongside the existing
+mean and max. Nearest-rank p75 needs 76 elevated readings out of 300 (~15.2s); p90 needs 31 (~6.2s),
+so p75 is more robust and p90 more sensitive to shorter bursts. Population sd records the spread for
+checking the variance premise against real rooms; the zero-clamped stream is not a raw Gaussian.
+The nullable migration is inside the schema transaction (`db.js:732`); historical rows stay NULL.
+The monitor holdout closed 2026-09-09. This is instrumentation only: baseline tracking, motion,
+`onMinuteFlushed`'s payload, all three `SOUND_ACTIVE` comparisons and reported sleep numbers are unchanged.
+
+**Phase 2 remains open, gated on real accumulated data:** choose the statistic and threshold, then
+cut over `SOUND_ACTIVE` in a separate change. Analysis will query SQLite directly against a DB snapshot;
+the fixed `/activity-history` SELECT does not expose these diagnostics. Only the existing mean and
+the recorded p75/p90/sd will be available for that comparison. A different, unrecorded percentile cannot
+be recovered from these summaries and would require a fresh collection window.
 
 **Prerequisite, and it is now DONE**: `soundDetector.js` was untestable (`handleReading` was a closure
 inside `launch()` inside `startSoundDetector`). The reading pipeline was extracted behind an injectable

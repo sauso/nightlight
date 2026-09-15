@@ -27,6 +27,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   good as whether the photo could actually be read.
 
 ### Changed
+- Three diagnostic sound statistics (p75, p90 and standard deviation) are now recorded per minute — instrumentation only, with no change to any reported sleep number.
 - The still frame shown for each recorded bed-transition event (in "Quick check-in?" and "Check the
   recorded events") is bigger — 160×120 (120×90 on narrow phones), up from 96×72 — easier to actually
   make out what's in it.

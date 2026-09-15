@@ -726,6 +726,15 @@ if (!activitySamplesColumns.includes('motion_out_peak')) {
   db.exec('ALTER TABLE activity_samples ADD COLUMN motion_out_peak REAL');
 }
 
+// ROADMAP §1.4 Phase 1: diagnostic percentiles and population sd of each minute's sound excursion.
+// Historical rows stay NULL; no backfill or live gating. Keep this last-sentinel group inside the
+// schema transaction so a failed boot cannot leave only some of the three columns committed.
+if (!activitySamplesColumns.includes('sound_sd')) {
+  db.exec('ALTER TABLE activity_samples ADD COLUMN sound_p75 REAL');
+  db.exec('ALTER TABLE activity_samples ADD COLUMN sound_p90 REAL');
+  db.exec('ALTER TABLE activity_samples ADD COLUMN sound_sd REAL');
+}
+
 // Sleep Stage 2 phase 5 (temp/humidity correlation): store each computed night's average room
 // temperature (Celsius) and humidity (%), derived from the child's cameras' sensor_readings over the
 // window. Kept on the night row so the insights correlation reads them without re-scanning sensor
