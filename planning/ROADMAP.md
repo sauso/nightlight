@@ -406,6 +406,28 @@ counts as **historical**, not as the current state.
    ground-truth collection** — no gating attempted, no
    `wake_count`/`awake_minutes` or
    `detectMidnightEpisodes` change. Item 3 remains open pending real owner labels.
+   ★★★ **A REAL, RECORDED INSTANCE OF THE SIMULTANEOUS-ACTIVITY GAP — 2026-09-16, Raffa, night_date
+   `2026-09-15`, and a concrete regression-test candidate for whenever this item is next worked (owner:
+   next week).** Owner-corrected `true_wake_at` = **06:15:00 local** (`sleep_reviews`, typed by hand —
+   no transition to link to, `true_wake_transition_id IS NULL`). What the classifier actually recorded
+   around it, **on two independent detectors** (prod camera `dce8157e…`, staging camera `96f35fdc…`,
+   same child, same night): a confirmed `into_bed` at 06:10:02, then **nothing** until an `out_of_bed`
+   at **07:11:09** — which the owner had already separately marked `verdict='wrong'` as a transition,
+   independent of and before this being folded in here. Prod additionally shows the resulting impossible
+   pair this gap produces: a stray `into_bed` at 06:44:10 with no `out_of_bed` before it, since believed
+   occupancy never flipped.
+   Raw `activity_samples` for the missed window (UTC `2026-09-15 20:15:00`–`20:18:00`, i.e. 06:15–06:18
+   local): bed-zone `motion_peak` **0.157–0.203** for four straight minutes, simultaneously with
+   outside-zone `motion_out_peak` **0.035–0.069** in the SAME minutes — then the bed reads exactly
+   **0** from 06:19 through 06:27, the real departure's quiet signature. This is the exit-side mirror of
+   the entry-side gap named above (2026-09-13 review): the candidate-open condition (`outActive &&
+   !cribActive`, `motionDetector.js`) never fires when both channels are active in the same frame, so a
+   climb-out that isn't cleanly sequenced — legs already over the rail while the torso is still moving in
+   the bed zone — opens no candidate and logs nothing, not even a near-miss. **Test-case pointers for the
+   fix**: child `c75ed329-de89-42ca-83aa-edaf692295b6` (Raffa), camera `96f35fdc-f12f-4a6b-9c82-
+   887be7e95108` (staging) / `dce8157e-e80f-4eb1-919f-8aca00d10444` (prod), `night_date '2026-09-15'`,
+   missed-exit window UTC `20:15:00`–`20:18:00`. Whatever fixes the simultaneous-activity gap should be
+   checked against this exact incident before it's called done.
 4. **New: log-driven tuning is now possible.** The exit rule logs rejected links (`[oob] … link
    rejected`) with the actual gap and outside magnitude, so the real distribution can be read off a
    week of logs rather than guessed. Read it before moving `OOB_LINK_SLOW_MS` or `OOB_SLOW_OUT_MIN`.
@@ -832,6 +854,41 @@ the choice lives silently in the drag order. Naming it on the detail view covers
 (tracing a wrong night to the camera that produced it), which is why this is an idea and not a defect.
 ⚠️ Only bites a household with two cameras on one child — nobody here has that, so it cannot be
 observed locally.
+
+### 2.7 Opt-in anonymized sleep-data sharing, to improve the algorithm — `SPECCED`, HELD (not scheduled)
+
+Raised by the owner 2026-09-16: could households voluntarily anonymize and send their sleep-tracking
+data so the maintainer can use it to improve the detection algorithm? Fully planned, two research passes
+plus an adversarial design-review pass, **owner-approved 2026-09-16 — but deliberately not scheduled to
+be built.** Full plan: [`reviews/sleep-data-sharing-plan-2026-09-16.md`](reviews/sleep-data-sharing-plan-2026-09-16.md).
+
+The central tension: every existing outbound call (ntfy/Pushover/Gotify/Firebase) goes to a service the
+household configures and owns, and the docs say so explicitly in three places ("no cloud... nothing is
+shared through a Nightlight cloud" — `README.md:9`, `docker-hub-overview.md:3-5`, `docs/README.md:77-78`).
+A feature sending data to a maintainer-run server is categorically new and would make those claims false
+if shipped without qualifying them — the plan treats that as the central constraint, not an afterthought.
+
+**Design, in brief** (full reasoning and file:line citations in the plan doc): export only data tied to
+an explicit human label — a verdicted `bed_transitions` row or a `sleep_reviews` correction — never raw
+`activity_samples` for its own sake; all timestamps become minutes-relative-to-window_start, never
+absolute; real child/camera ids become a per-install HMAC pseudonym, salted by a locally-generated,
+never-transmitted secret (mirrors `.jwt_secret`'s persistence pattern); direct PII (`children.name`/
+`birthday`/`photo`, `cameras.name`, `sleep_reviews.note` free text, every credential field, every
+snapshot/clip file) is hard-excluded with no toggle. Differential privacy and k-anonymity were
+considered and explicitly rejected as the wrong tool for a single opt-in batch upload from a
+self-selecting population — reasoning is in the plan, not left implicit.
+
+**Phased**: 1a (local preview/download only, no network code, clones `DiagnosticsCard.jsx`'s "nothing
+uploaded, stays on your device" pattern) → 1b (bounded numeric context window around each label) →
+Phase 2 (the actual opt-in periodic upload, off by default, to an env-var-configured endpoint with no
+baked-in default — inert until the maintainer provisions real infrastructure and sets it). **Where the
+data would actually go is real infrastructure outside this repo** — recommended option is a small
+Cloudflare Worker + R2 bucket, but that's a maintainer infra decision, not something this plan builds.
+
+**HELD, not NEXT**: the owner approved the design but does not want it built now. Do not start any phase
+without a fresh explicit go-ahead — re-read the plan doc first, since it also names a real pre-existing
+bug found along the way (`routes/diagnostics.js` leaks `children.name`/`birthday` into the "redacted"
+diagnostics bundle — not part of this item's scope, worth its own fix separately).
 
 ## 3. Idea backlog
 
