@@ -428,6 +428,42 @@ counts as **historical**, not as the current state.
    887be7e95108` (staging) / `dce8157e-e80f-4eb1-919f-8aca00d10444` (prod), `night_date '2026-09-15'`,
    missed-exit window UTC `20:15:00`–`20:18:00`. Whatever fixes the simultaneous-activity gap should be
    checked against this exact incident before it's called done.
+   ★★★ **2026-09-18 — owner reviewed two more nights (both kids) and it recurred a THIRD time, plus one
+   genuinely new-shaped failure.** Cross-checked staging `sleep_reviews` (owner-entered true onset/wake)
+   against `sleep_nights`/`bed_transitions`/`activity_samples` for night_date `2026-09-16` and
+   `2026-09-17`, both children:
+   - **Raffa 09-16→17: the identical 06:15 miss, third night running.** True wake 06:15, computed 06:46
+     (31 min late). `activity_samples` is nearly a carbon copy of the 09-15 incident: bed-zone
+     `motion_peak` 0.167–0.175 for four minutes (06:15–06:18) with `motion_out_peak` simultaneously at
+     0.040–0.055 (same channel-linking gap), then a hard **0** from 06:19–06:27 (the real departure,
+     unlinked), two more parent-check bursts with the same simultaneous signature (06:28, 06:41), and
+     finally an unambiguous spike (`motion_peak`=1.0 at 06:43) that DOES trigger two `out_of_bed` events
+     — both owner-marked `wrong`, since believed occupancy is thoroughly confused by then.
+   - **Raffa 09-17→18: item 3's OTHER half — a correctly-caught wake, delayed by 73 minutes anyway.**
+     True wake 06:04:07 matched an owner-`correct` transition exactly. But computed wake drifted to
+     07:17 because a parent visited afterward (06:16 `into_bed`, 06:41 `out_of_bed`, 06:43 `into_bed` —
+     mostly `wrong`) and the algorithm didn't declare "awake for good" until that noise stopped. Same
+     root cause as the missed-exit half, just the delayed-settling symptom instead of the invisible one.
+   - **Renz 09-16→17: `wake_at` NULL entirely** against a true wake of 07:10 — no transition anywhere
+     near it, `wake_count=6`/`awake_minutes=83` from motion-based runs alone with nothing to anchor a
+     final departure. Same family as the two above.
+   - ★★★ **Renz 09-17→18: a 3.5-HOUR onset miss that does NOT match items 1/2/3 as currently written —
+     a related but distinct symptom, worth its own line.** True onset 23:33:44 (owner-confirmed, matches
+     a real `into_bed`); computed onset **20:04** — off by hours, not minutes. Traced in
+     `activity_samples`: an active, loud bedtime routine 18:58–19:23 (`motion_peak`/`motion_out_peak`
+     both hitting 0.3–1.0 together — lights on, parent in room) produced only three false `out_of_bed`
+     events (all owner-marked `wrong`), because the SAME simultaneous-both-channel gap meant no
+     `into_bed` could ever open during it. After 19:23 the room goes essentially silent for **four
+     hours** — he was quiet but not yet actually in bed — until the real placement at 23:33. With no
+     transition to anchor onset, the motion-only fallback grabbed the first sufficiently-long quiet run
+     (20:04) and called it sleep onset, conflating **quiet** with **asleep** over an unusually long
+     pre-bedtime wakeful stretch. Same upstream cause as item 3, but the failure shape — a multi-hour
+     quiet-but-awake window read as onset — isn't described by items 1, 2, or 3's own wording; whoever
+     fixes the simultaneous-activity gap should check whether closing it also closes this, or whether
+     this needs its own onset-side guard (e.g. requiring SOME corroborating transition, even a rejected
+     candidate's timestamp, before trusting a motion-only quiet run as onset on a night this late).
+   **Test-case pointers for both new nights**: `night_date '2026-09-16'` and `'2026-09-17'`, same
+   child/camera ids as the 09-15 entry above. Owner picking this up when their usage limit resets.
 4. **New: log-driven tuning is now possible.** The exit rule logs rejected links (`[oob] … link
    rejected`) with the actual gap and outside magnitude, so the real distribution can be read off a
    week of logs rather than guessed. Read it before moving `OOB_LINK_SLOW_MS` or `OOB_SLOW_OUT_MIN`.
@@ -680,6 +716,55 @@ who sleeps through and wakes in the morning is the *common* case, not this house
 such install and costs nothing where it doesn't apply. ⚠️ The per-camera settings above are this
 installation's, quoted only to explain the observed rates — **no threshold in either gap's fix may be
 derived from them.**
+
+### 1.6 Sleep report notification is a fixed-clock snapshot, not evidence-based — `NEXT`
+
+Raised by the owner 2026-09-18, prompted by Renz's night of 2026-09-16→17 (§1.2 item 3's evidence
+above): "he slept until 7:10 yesterday which was unusual" — and the report/notification mechanism has no
+way to represent that, structurally, not as a bug in the wake-time computation itself.
+
+**How it actually works today** (`lib/sleepAnalysis.js`): `startSleepJob()` (`:1888-1893`) runs
+`runNightlySleepJob()` immediately at boot and every 30 minutes after, phase-aligned to container start
+time, not wall-clock. Each tick, per child, `lastCompletedNightDate()` (`:369-379`) checks only whether
+that child's `sleep_window_end` (07:00 for both kids) has passed `now` — nothing about whether the child
+has actually woken checks in at all. **The notification fires exactly once: on whichever tick first
+creates that night's `sleep_nights` row** (`:1847-1851`, gated by `REPORT_FRESH_MS` = 2h, `:9`, only to
+stop a restart re-notifying about an old night). The job keeps *recomputing* an existing row every 30
+min until `isEvidenceFinal()` (`:328-330`, `window_end + WAKE_LOOKAHEAD_MS` = 3h, so ~10:00 for a 07:00
+window) — but that later refinement **never re-notifies**. The notification is locked to the first,
+often-provisional pass.
+
+★★★ **Exactly this happened on Renz's 09-16→17 night, already on record in §1.2 item 3 above.** Window
+closes 07:00; true wake was 07:10 — ten minutes past close, and the confirming quiet run
+(`MORNING_ABSENCE_MIN` = 20 min) couldn't even complete until ~07:30 at the earliest. The
+notification-eligible first pass ran within 30 minutes of 07:00, before any of that was observable. Worse:
+because the underlying departure was never linked at all (the simultaneous-activity gap), `wake_at`
+stayed **NULL even after three more hours of retrying** — so whatever report went out was not just early,
+it was permanently wrong for that night, with no mechanism to ever say otherwise.
+
+**Three options discussed, not yet built, roughly cheapest-to-biggest:**
+1. **Re-notify (or send a follow-up) when a later recompute meaningfully changes the picture** — e.g.
+   `wake_at` flips from null to a real time, or moves by more than a few minutes from what was already
+   reported. Doesn't require predicting anything; directly fixes "a report can lock in a wrong answer
+   forever," which is the sharper problem here than mere lateness.
+2. **Delay the first notification** until either a confirmed final wake exists or a capped fallback delay
+   passes (e.g. 60-90 min past window_end) — trades promptness for accuracy, and still doesn't help the
+   case where evidence never resolves (option 1 is still needed for that).
+3. **Derive a rolling expected-wake-time per child from history** (`sleep_nights` already has weeks of
+   it) and hold the report until around that time rather than a fixed `window_end` — the most genuinely
+   "dynamic" option, but real design work: what counts as enough history, how it handles an already-
+   unusual night (the exact case that motivated this), and how it degrades for a new install with no
+   history yet.
+
+**Owner's call, 2026-09-18: start with option 1.** It's the cheapest, it's correct regardless of which
+of the other two (if any) get built later, and it's the one that would have actually helped on the
+09-16 night — a corrected/follow-up notification once evidence resolved, instead of silence.
+
+⚠️ **Related to, but independently workable from, §1.2 item 3.** The Renz incident's ROOT cause (why
+`wake_at` never resolved) is item 3's simultaneous-activity gap; THIS item is about what the app tells a
+parent while that's true (or unresolved), which is a real gap even on a night the classifier gets right
+but merely finishes late. Fixing item 3 would reduce how often option 1 has anything to report, not
+replace the need for it.
 
 ## 2. Specced, not built
 
