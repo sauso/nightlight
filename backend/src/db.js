@@ -775,6 +775,20 @@ if (!sleepNightsColumns.includes('onset_at_algo')) {
   db.exec('ALTER TABLE sleep_nights ADD COLUMN wake_at_algo TEXT');
 }
 
+// Sleep report notification history (ROADMAP 1.6): what the parent was actually TOLD about this
+// night's wake time. Deliberately excluded from upsertNight's own column list — an ordinary recompute
+// (including the admin "Recompute this night" route) must never touch these; only the notify path in
+// runNightlySleepJob writes them. notified_at is written once (the first notification) and never
+// overwritten — its only job is telling "never notified" apart from "notified, wake was unknown"
+// (notified_wake_at still null). notified_wake_at doubles as the one-shot follow-up cap: once a
+// follow-up sets it to a real value, nothing can make it null again (see sleepAnalysis.js's
+// `would_blank_notified_wake` refusal), so the condition that gates a follow-up can never be true twice
+// for the same night.
+if (!sleepNightsColumns.includes('notified_at')) {
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN notified_at TEXT');
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN notified_wake_at TEXT');
+}
+
 // Quick-silence: a per-camera temporary mute of ALL alerts (motion/sound/ONVIF/MQTT), for when you're
 // still up as the alert schedule kicks in. Epoch millis; NULL/past = not muted. inActiveWindow() reads
 // it fresh each check so a snooze set from the UI takes effect without restarting the detector leg.

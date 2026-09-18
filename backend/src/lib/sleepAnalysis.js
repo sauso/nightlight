@@ -1,6 +1,6 @@
 import db from '../db.js';
 import { logger } from './logger.js';
-import { notifySleepReports } from './sleepReportAlert.js';
+import { notifySleepReports, notifySleepReportUpdates, sleepAlertChannelsConfigured } from './sleepReportAlert.js';
 import { getBedTransitions, TRANSITION } from './bedTransitions.js';
 import { listChildWakeClips } from './recordings.js';
 
@@ -1646,6 +1646,17 @@ const upsertNight = db.prepare(
      computed_at=excluded.computed_at`
 );
 
+// ROADMAP §1.6: what the parent was actually TOLD about a night's wake time, so a later recompute can
+// tell "never notified" from "notified, wake was unknown" apart — see runNightlySleepJob. Deliberately
+// separate from upsertNight (never in its column list) — an ordinary recompute, including the admin
+// "Recompute this night" route, must never touch these; only the notify path below writes them.
+const recordFirstNotified = db.prepare(
+  'UPDATE sleep_nights SET notified_at = ?, notified_wake_at = ? WHERE child_id = ? AND night_date = ?'
+);
+const recordFollowupNotified = db.prepare(
+  'UPDATE sleep_nights SET notified_wake_at = ? WHERE child_id = ? AND night_date = ?'
+);
+
 // A night that was actually scored. Anything else is an absence of data, not a measurement.
 const SCORED = new Set(['ok', 'empty']);
 
@@ -1674,12 +1685,25 @@ const SCORED = new Set(['ok', 'empty']);
 // separate job passes at all.
 export function computeAndStoreNight(childId, nightDate, { allowDowngrade = true } = {}) {
   const summary = computeNight(childId, nightDate);
-  if (!allowDowngrade && !SCORED.has(summary.status)) {
+  if (!allowDowngrade) {
     const existing = db
-      .prepare('SELECT status FROM sleep_nights WHERE child_id = ? AND night_date = ?')
+      .prepare('SELECT status, notified_wake_at FROM sleep_nights WHERE child_id = ? AND night_date = ?')
       .get(childId, nightDate);
-    if (existing && SCORED.has(existing.status)) {
-      return { ...summary, stored: false, refused: 'would_downgrade', stored_status: existing.status };
+    if (existing) {
+      if (!SCORED.has(summary.status) && SCORED.has(existing.status)) {
+        return { ...summary, stored: false, refused: 'would_downgrade', stored_status: existing.status };
+      }
+      // ROADMAP §1.6: once a parent has been TOLD a specific wake time (a follow-up notification
+      // fired, see notifySleepReportUpdates/runNightlySleepJob), never let a later, weaker pass
+      // quietly take it back. The departure scan can lose a previously-qualifying exit candidate as
+      // accumulated daytime activity grows (activeSuffix, this file's !inProgress block) and fall back
+      // to wake_at: null while status stays 'ok' — the allowDowngrade guard above does not catch this,
+      // it only protects `status`. Without this second guard, the notification tray could say "up
+      // 06:50" while the stored card silently went back to "still asleep" minutes later — a
+      // self-contradiction this feature would introduce, not one that exists today.
+      if (existing.notified_wake_at != null && summary.wake_at == null) {
+        return { ...summary, stored: false, refused: 'would_blank_notified_wake' };
+      }
     }
   }
   upsertNight.run({
@@ -1797,77 +1821,135 @@ export function runNightlySleepJob() {
   try {
     const kids = db.prepare('SELECT id, name FROM children').all();
     let computed = 0;
-    const fresh = []; // freshly-closed nights to notify about ({ name, summary })
+    const fresh = []; // freshly-closed nights to notify about ({ name, summary, childId, nightDate })
+    const followups = []; // ROADMAP §1.6: nights whose wake time just resolved null -> real, same shape
     const toTimelapse = []; // freshly-closed nights to assemble a memories timelapse for
     const emptyNights = []; // ...and those with nobody in the bed, whose frames get thrown away
     const now = Date.now();
     const notifyOn = db.prepare('SELECT sleep_report_alert_enabled FROM settings WHERE id = ?').get('app')?.sleep_report_alert_enabled;
+    // ROADMAP §1.6: `notifyOn` alone doesn't mean a notification can actually go out — it defaults ON
+    // even on a fresh install with no push credential and every other provider off. Without this second
+    // check, a night computed before push was ever configured would get stamped "notified" for nothing,
+    // and the first real notification the owner ever saw once they DID configure push would be
+    // mislabelled "updated". Computed once (global settings, not per-child).
+    const canNotify = notifyOn && sleepAlertChannelsConfigured();
     for (const kid of kids) {
       if (!childTracksSleep(kid.id)) continue; // sleep tracking off for this child
-      const nightDate = lastCompletedNightDate(kid.id); // each child on their own window
-      const existing = db
-        .prepare('SELECT status, window_end, computed_at FROM sleep_nights WHERE child_id = ? AND night_date = ?')
-        .get(kid.id, nightDate);
-      // ⚠️ KEEP RECOMPUTING UNTIL THE EVIDENCE IS ACTUALLY FINAL (issue #351). This used to be a bare
-      // `if (existing) continue` — a row was written once, on whichever 30-minute tick first saw the
-      // night, and never touched again, even though the departure scan (computeNight's !inProgress
-      // block) can still change its answer for up to WAKE_LOOKAHEAD_MS after window_end. A night could
-      // get "finalized" with wake_at=null minutes after its window closed and never correct itself even
-      // once the real morning wake became observable.
-      //
-      // ⚠️⚠️ THE GATE CHECKS THE EXISTING ROW'S OWN `computed_at`, NOT THE CURRENT `now` (found by
-      // adversarial review). Checking `isEvidenceFinal(existing.window_end, now)` looks right but is
-      // not: the job runs on a 30-minute timer, and the FIRST tick where `now` crosses the horizon is
-      // ALSO the only tick that could ever see the full evidence window (computeNight bounds its own
-      // lookahead by `min(now, horizon)`) — skipping that exact tick, as the naive check does, means
-      // computeNight is NEVER called with enough evidence to see a departure whose confirming quiet
-      // run only completes in the final ~30-minute tick interval before the horizon. Demonstrated: an
-      // exit at window_end+2h55m needing 20 minutes of confirming quiet resolves at window_end+3h15m —
-      // past the horizon — so the tick AT the horizon is the only one that could ever have captured
-      // it, and the naive check skips precisely that tick, freezing `wake_at` at null FOREVER. Checking
-      // the PREVIOUS write's own `computed_at` instead means: if that write happened before evidence
-      // was final, one more recompute is still owed (this one, using the CURRENT `now`, capped at the
-      // horizon like every other pass) — and only once a write has itself already happened at or after
-      // the horizon does every future tick skip for good.
-      if (existing && isEvidenceFinal(existing.window_end, new Date(existing.computed_at.replace(' ', 'T') + 'Z').getTime())) continue;
-      // ⚠️ `allowDowngrade: false` (found by adversarial review). Before issue #351, a row was only ever
-      // written ONCE, so this call could never see an `existing` scored row and the downgrade guard was
-      // moot here. Now that a provisional row can be recomputed several times over its 3h window, a
-      // camera being unassigned/deleted, or a child's window/settings changing mid-window, can make THIS
-      // pass see less data than an earlier one — silently turning an already-good `ok`/`empty` result
-      // into `no_data`, which (combined with the computed_at-based finality check above) would then
-      // freeze there forever once evidence goes final. `allowDowngrade: false` refuses exactly that
-      // downgrade and leaves the existing good row alone; it never blocks the FIRST write (there is no
-      // `existing` scored row to protect yet) or an UPGRADE across passes (no_data -> empty/ok is not a
-      // downgrade), so provisional refinement keeps working exactly as before.
-      const summary = computeAndStoreNight(kid.id, nightDate, { allowDowngrade: false });
-      computed++;
-      // Notification fires ONCE, at first creation — not on every provisional refresh, which would
-      // otherwise re-alert every 30 minutes until the night finalizes.
-      if (!existing) {
-        // Only notify if the window closed recently (guards against a mid-day restart re-notifying).
-        const endMs = summary.window_end ? new Date(summary.window_end.replace(' ', 'T') + 'Z').getTime() : 0;
-        if (endMs && now - endMs <= REPORT_FRESH_MS) fresh.push({ name: kid.name, summary });
-      }
-      // ⚠️ Timelapse/frame decisions wait for the FIRST *scored* pass, not merely the first pass ever
-      // (found by adversarial review). Both actions are DESTRUCTIVE and irreversible — assembleTimelapse
-      // deletes the raw frame directory on success (or on a hard "too few frames" skip of its own), and
-      // discardTimelapseFrames does the same by design — so firing on a `no_data` first pass, before this
-      // PR's own provisional-refresh mechanism (issue #351) has had a chance to see the night's real
-      // classification, could destroy a real night's frames on the strength of a look that was always
-      // going to be superseded 30 minutes later. `SCORED` (ok/empty) is the same set `allowDowngrade`
-      // already treats as trustworthy elsewhere in this file. One narrower case is NOT covered here and
-      // is a deliberately separate follow-up (issue #419): a night scored `empty` on one pass that a
-      // LATER pass upgrades to `ok` still has its frames destroyed by the FIRST pass's
-      // discardTimelapseFrames call, with nothing to rebuild them from — reconciling that needs deleting
-      // an already-assembled timelapse mid-flight, a materially bigger change than this fix.
-      if (!existing || !SCORED.has(existing.status)) {
-        if (summary.status === 'empty') emptyNights.push({ childId: kid.id, nightDate });
-        else if (SCORED.has(summary.status)) toTimelapse.push({ childId: kid.id, nightDate });
+      // ROADMAP §1.6, found by adversarial review: this per-child body used to have no isolation of its
+      // own — a throw on any LATER child was caught only by the whole-function try/catch below, which
+      // aborts EVERY remaining child for this tick and skips the batched sends/timelapse code after the
+      // loop entirely. That silently dropped whatever an EARLIER child had already collected into
+      // `fresh`/`followups` — and worse, an earlier child's `notified_at` may already be committed
+      // (`recordFirstNotified` runs synchronously, per-child, above), so that child's real notification
+      // would never actually go out this tick, yet the NEXT tick would see it as already-notified and
+      // could only ever reach the follow-up branch — mislabeling its real first message as "updated".
+      // Isolating each child's failure here means the rest of the batch, and whatever was already
+      // collected, still goes out.
+      try {
+        const nightDate = lastCompletedNightDate(kid.id); // each child on their own window
+        const existing = db
+          .prepare(`SELECT status, window_end, computed_at, notified_at, notified_wake_at
+                      FROM sleep_nights WHERE child_id = ? AND night_date = ?`)
+          .get(kid.id, nightDate);
+        // ⚠️ KEEP RECOMPUTING UNTIL THE EVIDENCE IS ACTUALLY FINAL (issue #351). This used to be a bare
+        // `if (existing) continue` — a row was written once, on whichever 30-minute tick first saw the
+        // night, and never touched again, even though the departure scan (computeNight's !inProgress
+        // block) can still change its answer for up to WAKE_LOOKAHEAD_MS after window_end. A night could
+        // get "finalized" with wake_at=null minutes after its window closed and never correct itself even
+        // once the real morning wake became observable.
+        //
+        // ⚠️⚠️ THE GATE CHECKS THE EXISTING ROW'S OWN `computed_at`, NOT THE CURRENT `now` (found by
+        // adversarial review). Checking `isEvidenceFinal(existing.window_end, now)` looks right but is
+        // not: the job runs on a 30-minute timer, and the FIRST tick where `now` crosses the horizon is
+        // ALSO the only tick that could ever see the full evidence window (computeNight bounds its own
+        // lookahead by `min(now, horizon)`) — skipping that exact tick, as the naive check does, means
+        // computeNight is NEVER called with enough evidence to see a departure whose confirming quiet
+        // run only completes in the final ~30-minute tick interval before the horizon. Demonstrated: an
+        // exit at window_end+2h55m needing 20 minutes of confirming quiet resolves at window_end+3h15m —
+        // past the horizon — so the tick AT the horizon is the only one that could ever have captured
+        // it, and the naive check skips precisely that tick, freezing `wake_at` at null FOREVER. Checking
+        // the PREVIOUS write's own `computed_at` instead means: if that write happened before evidence
+        // was final, one more recompute is still owed (this one, using the CURRENT `now`, capped at the
+        // horizon like every other pass) — and only once a write has itself already happened at or after
+        // the horizon does every future tick skip for good.
+        if (existing && isEvidenceFinal(existing.window_end, new Date(existing.computed_at.replace(' ', 'T') + 'Z').getTime())) continue;
+        // ⚠️ `allowDowngrade: false` (found by adversarial review). Before issue #351, a row was only ever
+        // written ONCE, so this call could never see an `existing` scored row and the downgrade guard was
+        // moot here. Now that a provisional row can be recomputed several times over its 3h window, a
+        // camera being unassigned/deleted, or a child's window/settings changing mid-window, can make THIS
+        // pass see less data than an earlier one — silently turning an already-good `ok`/`empty` result
+        // into `no_data`, which (combined with the computed_at-based finality check above) would then
+        // freeze there forever once evidence goes final. `allowDowngrade: false` refuses exactly that
+        // downgrade and leaves the existing good row alone; it never blocks the FIRST write (there is no
+        // `existing` scored row to protect yet) or an UPGRADE across passes (no_data -> empty/ok is not a
+        // downgrade), so provisional refinement keeps working exactly as before.
+        const summary = computeAndStoreNight(kid.id, nightDate, { allowDowngrade: false });
+        computed++;
+        // The FIRST notification fires once, at first creation, matching the original behavior exactly —
+        // it must never become conditional on the new bookkeeping below succeeding (a write failure here
+        // is harmless: computeAndStoreNight already wrote the row, so `!existing` is false next tick
+        // regardless, and nothing depends on notified_at/notified_wake_at being set for the ORIGINAL
+        // report to have gone out).
+        if (!existing) {
+          // Only notify if the window closed recently (guards against a mid-day restart re-notifying).
+          const endMs = summary.window_end ? new Date(summary.window_end.replace(' ', 'T') + 'Z').getTime() : 0;
+          if (endMs && now - endMs <= REPORT_FRESH_MS) {
+            fresh.push({ name: kid.name, summary, childId: kid.id, nightDate });
+            if (canNotify) {
+              try { recordFirstNotified.run(toSqlUtc(new Date()), summary.wake_at, kid.id, nightDate); }
+              catch (e) { logger.error(`[sleep] failed to record notify state for ${kid.name}: ${e.message}`); }
+            }
+          }
+        } else if (
+          // ROADMAP §1.6: a follow-up when a wake time that was UNKNOWN when first reported has now
+          // resolved. Never on real->real drift (a later recompute is not always more accurate — see the
+          // comment on computeAndStoreNight's `would_blank_notified_wake` refusal for the mechanism that
+          // makes this unsafe) and never for a night whose original report was never actually sent
+          // (`notified_at` stays null in that case — no baseline to correct).
+          canNotify &&
+          existing.notified_at != null &&
+          existing.notified_wake_at == null &&
+          summary.wake_at != null
+        ) {
+          // Push into `followups` is CONDITIONAL on the write succeeding — the opposite of the
+          // first-notify path above, which pushes into `fresh` unconditionally. (Both sends actually
+          // happen after the whole loop either way — `notifySleepReports`/`notifySleepReportUpdates`
+          // below — so this is a conditionality difference, not a literal ordering one.)
+          // `notified_wake_at` becoming non-null is the ONLY thing that stops this branch re-firing every
+          // subsequent tick, so if the write fails, the follow-up must NOT be queued this tick either —
+          // it will be retried, safely, on the next tick the condition is still true. Doing this the
+          // other way (as the first-notify path does, deliberately) would let a single transient DB
+          // failure send the follow-up while leaving the one-shot guard unset, re-firing it every 30 min.
+          try {
+            recordFollowupNotified.run(summary.wake_at, kid.id, nightDate);
+            followups.push({ name: kid.name, summary, childId: kid.id, nightDate });
+          } catch (e) {
+            logger.error(`[sleep] failed to record follow-up state for ${kid.name}: ${e.message}`);
+          }
+        }
+        // ⚠️ Timelapse/frame decisions wait for the FIRST *scored* pass, not merely the first pass ever
+        // (found by adversarial review). Both actions are DESTRUCTIVE and irreversible — assembleTimelapse
+        // deletes the raw frame directory on success (or on a hard "too few frames" skip of its own), and
+        // discardTimelapseFrames does the same by design — so firing on a `no_data` first pass, before this
+        // PR's own provisional-refresh mechanism (issue #351) has had a chance to see the night's real
+        // classification, could destroy a real night's frames on the strength of a look that was always
+        // going to be superseded 30 minutes later. `SCORED` (ok/empty) is the same set `allowDowngrade`
+        // already treats as trustworthy elsewhere in this file. One narrower case is NOT covered here and
+        // is a deliberately separate follow-up (issue #419): a night scored `empty` on one pass that a
+        // LATER pass upgrades to `ok` still has its frames destroyed by the FIRST pass's
+        // discardTimelapseFrames call, with nothing to rebuild them from — reconciling that needs deleting
+        // an already-assembled timelapse mid-flight, a materially bigger change than this fix.
+        if (!existing || !SCORED.has(existing.status)) {
+          if (summary.status === 'empty') emptyNights.push({ childId: kid.id, nightDate });
+          else if (SCORED.has(summary.status)) toTimelapse.push({ childId: kid.id, nightDate });
+        }
+      } catch (e) {
+        logger.error(`[sleep] failed to process ${kid.name}: ${e.message}`);
       }
     }
     if (computed > 0) logger.info(`[sleep] Computed ${computed} sleep summary(ies).`);
     if (notifyOn && fresh.length > 0) notifySleepReports(fresh);
+    if (notifyOn && followups.length > 0) notifySleepReportUpdates(followups);
     // Assemble each freshly-closed night's memories timelapse from the frames the sampler collected
     // overnight. Fire-and-forget (one FFmpeg pass each) and dynamically imported to avoid a static
     // import cycle (timelapse.js imports the window helpers from this module). Runs once per night —

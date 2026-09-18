@@ -274,12 +274,23 @@ a one-line summary ("asleep 8h12, 2 wakes, up 06:47") is sent through every prov
 using the same 10-second-timeout fan-out. There is currently no setting to turn this off on its own —
 it follows whichever providers are configured for motion alerts.
 
-**The report can arrive before the night's full story is known, and is not resent once it is.**
-Working out exactly when a child got up can take up to a few hours of real, quiet time to confirm — the
-notification fires as soon as the window closes, using whatever is known at that moment, and is not
-re-sent later even if the wake time it reported turns out to have been provisional. The *stored* report
-(the child's sleep card and detail page) keeps itself up to date as more evidence comes in over the
-next few hours and settles once it's certain — only the one-time notification can be a little behind.
+**The report can arrive before the night's full story is known — and if the wake time was unknown at
+that point, you get one follow-up.** Working out exactly when a child got up can take up to a few hours
+of real, quiet time to confirm. If a later recompute — within about 3 hours of the window closing — works
+out a wake time that was unknown when the report first went out, a second notification arrives, titled
+"Sleep report updated," with the corrected line. When the original report was for a single child, this
+**replaces** it in the notification tray (Android and iOS both) rather than sitting alongside it as a
+second, contradictory message. **Tracking more than one child, whose windows happen to close in the same
+~30-minute tick, is the one case this doesn't reach**: the original arrives as one combined "Sleep
+reports ready" message covering all of them, which has nothing for a later single-child follow-up to
+replace — so on a night that plays out that way, the correction lands as an additional message rather
+than a replacement. This only ever fills in a
+wake time that was missing; it does not re-send if a wake time that was already reported later shifts by
+some amount — the original stands, since a later recompute is not always a more accurate one. **At most
+one follow-up per child per night** — if the wake time still hasn't settled after that, only the *stored*
+report (the child's sleep card and detail page) keeps catching up, not another push. And if the wake time
+never resolves at all within that window, there is no follow-up to send — the original
+report, with no wake time listed, is what you get.
 
 ## Troubleshooting
 

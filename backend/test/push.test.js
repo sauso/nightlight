@@ -108,4 +108,30 @@ describe('★ sendToAll actually delivers through activePushTokens, not some oth
       'sendToAll messaged a token belonging to a deleted user — activePushTokens() is not actually wired in'
     );
   });
+
+  // ROADMAP §1.6 added an optional 5th `{ tag }` parameter to sendToAll for the sleep-report follow-up
+  // notification. Every OTHER caller (detectionAlert.js, cameraStatusAlert.js, notifySleepReports when
+  // batching multiple children) omits it — this pins that omitting it still produces today's exact
+  // shape, with no `tag` key and no `apns` key at all, not an `undefined` one.
+  test('a caller with no 5th argument gets a message with no tag/apns key at all', async () => {
+    db.prepare("UPDATE settings SET push_enabled = 1 WHERE id = 'app'").run();
+    makeUser(db, { id: 'u-1', username: 'alice' });
+    addToken('tok-1', 'u-1');
+    sendEach.mock.resetCalls();
+    await sendToAll('Motion', 'Camera detected motion');
+    const [messages] = sendEach.mock.calls[0].arguments;
+    assert.ok(!('tag' in messages[0].android.notification), 'an omitted tag must not appear as a key, not even as undefined');
+    assert.ok(!('apns' in messages[0]), 'an omitted tag must not add an apns block at all');
+  });
+
+  test('a tag is set on BOTH Android notification.tag and the APNs collapse-id header', async () => {
+    db.prepare("UPDATE settings SET push_enabled = 1 WHERE id = 'app'").run();
+    makeUser(db, { id: 'u-1', username: 'alice' });
+    addToken('tok-1', 'u-1');
+    sendEach.mock.resetCalls();
+    await sendToAll('Sleep report updated', 'Renz: up 07:15', {}, null, { tag: 'sleep_report_renz_2026-07-01' });
+    const [messages] = sendEach.mock.calls[0].arguments;
+    assert.equal(messages[0].android.notification.tag, 'sleep_report_renz_2026-07-01');
+    assert.equal(messages[0].apns.headers['apns-collapse-id'], 'sleep_report_renz_2026-07-01');
+  });
 });

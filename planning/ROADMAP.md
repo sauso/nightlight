@@ -782,7 +782,7 @@ such install and costs nothing where it doesn't apply. ⚠️ The per-camera set
 installation's, quoted only to explain the observed rates — **no threshold in either gap's fix may be
 derived from them.**
 
-### 1.6 Sleep report notification is a fixed-clock snapshot, not evidence-based — `NEXT`
+### 1.6 Sleep report notification is a fixed-clock snapshot, not evidence-based — option 1 `SHIPPED` (dev), narrowed scope
 
 Raised by the owner 2026-09-18, prompted by Renz's night of 2026-09-16→17 (§1.2 item 3's evidence
 above): "he slept until 7:10 yesterday which was unusual" — and the report/notification mechanism has no
@@ -830,6 +830,32 @@ of the other two (if any) get built later, and it's the one that would have actu
 parent while that's true (or unresolved), which is a real gap even on a night the classifier gets right
 but merely finishes late. Fixing item 3 would reduce how often option 1 has anything to report, not
 replace the need for it.
+
+✅ **SHIPPED 2026-09-19, dev, NARROWED from the owner's original wording.** Two rounds of adversarial
+design review (Opus, standing in for a rate-limited Codex) found the literal "wake_at changes
+meaningfully" trigger unsafe: a *measured* real incident (`morning-wake-parent-handles-bed.md`, Renz
+2026-08-29, `05:51`→`08:31` between two recomputes of the SAME night) proves a later recompute is not
+always more accurate, so a bidirectional trigger could send a wrong correction and burn the one-shot
+follow-up budget doing it. **Shipped scope: notify a follow-up ONLY on null→real** (a wake time that was
+unknown becomes known) — never on real→real drift in either direction. This still directly fixes "a
+report can lock in a wrong answer forever" for the common shape (the Raffa-09-16-style night, where
+`wake_at` eventually resolves) but, stated plainly, **does NOT correct the exact Renz 09-16 incident that
+prompted this ticket** — its `wake_at` stayed null the whole 3-hour window, so there was never a
+null→real transition to notify on. Closing that needs §1.2 item 3 (so a departure links more often) or a
+distinct "still unclear" notification (closer to option 2/3's spirit) — not built here.
+
+Also shipped: a notification tag (`android.notification.tag` + `apns-collapse-id`) so the follow-up
+**replaces** the original in the tray rather than arriving as a second, contradictory message — except
+when two tracked children's windows close in the same ~30-minute tick, in which case the original is one
+combined, untagged message and the tag has nothing to collapse onto (named limit, stated in
+`docs/notifications.md`, not silently accepted). A pre-existing bug found along the way: the admin
+"Recompute this night" control could report success while saving nothing when the new guard refused a
+write — fixed with a proper 409, same pattern as the existing "data aged out" refusal.
+
+Full design-review history (why the literal wording was rejected, both rounds' findings) was not saved
+as a separate durable doc this time — the plan file itself (now implemented) covered it; see the git
+history on `backend/src/lib/sleepAnalysis.js`'s `runNightlySleepJob`/`computeAndStoreNight` and
+`backend/src/lib/sleepReportAlert.js` for the shipped shape. **Options 2 and 3 remain not built.**
 
 ## 2. Specced, not built
 

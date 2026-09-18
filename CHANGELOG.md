@@ -30,6 +30,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   can't classify at all (see `planning/reviews/simultaneous-activity-gap-plan-2026-09-18.md`). Never
   writes to `bed_transitions` and never changes any reported sleep number — exists only to gather real
   data for a future fix.
+- A sleep report notification is now followed up once, and only once, if the wake time was unknown
+  when the report first went out and a later recompute (within about 3 hours of the window closing)
+  works it out — the correction replaces the original in the notification tray rather than arriving as
+  a second, contradictory message. Does not re-notify for a wake time that shifts after already being
+  reported, and does not follow up at all if the wake time never resolves in that window.
 
 ### Changed
 - Three diagnostic sound statistics (p75, p90 and standard deviation) are now recorded per minute — instrumentation only, with no change to any reported sleep number.
@@ -56,6 +61,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   population instead of just quick reversals.
 
 ### Fixed
+- **The admin "Recompute this night" control could report success while saving nothing.** If a night
+  already had a wake time a parent was notified about, and the recompute would have cleared it back to
+  unknown, the write was correctly refused — but the API still returned success, so the dialog closed
+  and the sleep detail page repainted with numbers that were never actually stored. Now returns the same
+  kind of readable error the existing "data has aged out" refusal already uses, and nothing changes on
+  screen until something actually changed in the database.
 - **A real out-of-bed episode could report zero wake-ups.** Wake-count only ever read per-minute
   activity, so a child who climbed out, was put back, and lay still afterward was structurally
   incapable of reaching the five-active-minute threshold — a real, alerted departure and return

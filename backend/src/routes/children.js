@@ -184,6 +184,17 @@ router.get('/:id/sleep/:date', (req, res) => {
         + 'The saved summary has been left as it is.',
     });
   }
+  // ROADMAP §1.6: a follow-up notification already told the parent a specific wake time — refusing to
+  // store a recompute that blanks it back to unknown (see computeAndStoreNight's own comment). Found by
+  // adversarial review: this refusal used to fall through to a 200 here, so the modal would close and
+  // SleepDetail would repaint with numbers that were never actually saved — "a claim that state changed
+  // is verified by reading the state back, never by a UI report."
+  if (summary.refused === 'would_blank_notified_wake') {
+    return res.status(409).json({
+      error: 'This night already has a wake time a parent was notified about. Recomputing would have '
+        + 'cleared it back to unknown, so nothing was saved — the existing wake time has been left as it is.',
+    });
+  }
   res.json(summary);
 });
 
