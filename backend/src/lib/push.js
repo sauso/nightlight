@@ -180,7 +180,13 @@ export function activePushTokens() {
     .all();
 }
 
-export async function sendToAll(title, body, data = {}, imageBuffer = null) {
+// `tag` (ROADMAP §1.6) is a notification-tray dedup key: posting a later message with the SAME tag
+// replaces the earlier one instead of sitting alongside it. Set on BOTH platforms' own mechanism —
+// Android's `notification.tag` and APNs' `apns-collapse-id` header (64-byte limit; the caller's tag
+// format, `sleep_report_<childId>_<nightDate>`, comfortably fits a UUID childId). Optional and backward
+// compatible — every existing caller omits it and gets today's exact behavior (no `tag`/`apns` key at
+// all).
+export async function sendToAll(title, body, data = {}, imageBuffer = null, { tag } = {}) {
   if (!pushEnabled()) return;
   const rows = activePushTokens();
   if (rows.length === 0) return;
@@ -196,7 +202,8 @@ export async function sendToAll(title, body, data = {}, imageBuffer = null) {
       token,
       notification: { title, body },
       data,
-      android: { priority: 'high', notification: { channelId: ANDROID_CHANNEL } },
+      android: { priority: 'high', notification: { channelId: ANDROID_CHANNEL, ...(tag ? { tag } : {}) } },
+      ...(tag ? { apns: { headers: { 'apns-collapse-id': tag } } } : {}),
     };
     if (snapshotId && base_url) {
       const url = `${base_url.replace(/\/+$/, '')}/api/push/snapshot/${snapshotId}`;
