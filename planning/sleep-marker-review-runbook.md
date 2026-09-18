@@ -93,10 +93,20 @@ transition did or didn't fire) is log-only:
 ssh -i ~/.ssh/unraid_nightlight root@192.168.1.100 \
   "docker logs --since 20h nightlight-dev 2>&1 | grep -E 'OUT OF BED|INTO BED' | grep -i renz"
 # add \[oob\]|\[intobed\] to the grep for the candidate/cancelled detail
+# add \[coactive\] for the ROADMAP §1.2 item 3 diagnostic below
 ```
 
 Log lines are **AEST**. A confirmed line looks like:
 `[oob] "Renz Cam" OUT OF BED — motion left the bed, quiet 6000ms since, outside peak 6.3%`
+
+**`[coactive]` (added 2026-09-18) is a separate, purely diagnostic line** — it fires when the bed-zone
+and outside-zone channels are BOTH active in the same frame (a real `out_of_bed`/`into_bed` candidate
+can never open on such a frame today, which is ROADMAP §1.2 item 3's known gap). It never affects
+`bed_transitions` and never appears alongside a confirmed/candidate line for the same event. Example:
+`[coactive] "Raffa Room" bed+outside both active 4000ms, then both quiet — bed peak 20.3%, outside peak 6.9%`.
+Rate-limited to one line per ~10s per camera. Exists to accumulate a real duration/quiet-side
+distribution before any fix to the gap is attempted again — see
+`planning/reviews/simultaneous-activity-gap-plan-2026-09-18.md`.
 
 ## 5. Reading it
 

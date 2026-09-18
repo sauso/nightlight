@@ -464,6 +464,71 @@ counts as **historical**, not as the current state.
      candidate's timestamp, before trusting a motion-only quiet run as onset on a night this late).
    **Test-case pointers for both new nights**: `night_date '2026-09-16'` and `'2026-09-17'`, same
    child/camera ids as the 09-15 entry above. Owner picking this up when their usage limit resets.
+   ★★★ **2026-09-18 — two rounds of adversarial design review (Opus, standing in for a
+   rate-limited Codex) both REJECTED a live-code fix before anything was built.** Full detail,
+   including every verification query and its result, in
+   `reviews/simultaneous-activity-gap-plan-2026-09-18.md`. Round 1 (relax both candidate-open conditions,
+   tolerate-then-confirm): found the design **actively harmful** — a real exit could also fabricate
+   a spurious `into_bed` minutes later, which trips the existing `reversedBy` guard
+   (`sleepAnalysis.js:1074-1085`, no fallback) and vetoes the real exit, reproducing the exact
+   `wake_at = null` symptom the fix was meant to cure; the proposed abandon-timeout was a no-op
+   (reset every frame); the tolerance window admitted the exact 100-700ms jitter population item 2's
+   Renz 2026-09-11 analysis says today's code correctly rejects; and the proposed validation gate
+   (the three existing diagnostics) would have IMPROVED while the classifier got worse, since the
+   fabricated transition happens to remove an "impossible pair" and blind the lingering-motion check.
+   Round 2 (belief-gated arbitration — only one side may open on a co-active frame, chosen by
+   `believedOccupied`, plus a re-arm latch): found the fabrication still happens, one frame later,
+   through the OPPOSITE side's ordinary clean path (never made mutually exclusive with the new
+   co-active path); found the arbitration signal is itself flipped by the fix's own confirms, so a
+   confirmed exit *arms* the opposite side a few minutes later (traced against real 09-16 data — a
+   parent-check burst 9 minutes after the exit — to reproduce the same wrong wake); and found the
+   abandon latch is dead on the exact negative case (Renz 09-17) it exists to protect, since that
+   window's own recorded symptom (three false `out_of_bed` events, each needing 6+ continuous seconds
+   of bed-quiet under today's rules) proves it already contains multiple genuine quiet moments that
+   clear the latch immediately.
+   ★★★ **Verification queries run 2026-09-18, both prod AND staging (independent detectors,
+   confirms this isn't one camera's artifact) — the diagnosis itself holds up.** Round 2's central
+   open question was whether `motion_out_peak` stays active when the bed goes quiet in the 09-15
+   incident (which would mean today's existing clean path should already have fired, and the whole
+   theory is aimed at the wrong cause). Checked directly: at 20:19 UTC (06:19 local, when
+   `motion_peak` drops to exactly 0), `motion_out_peak` ALSO drops to baseline (~0.0003-0.0009,
+   identical to the pre-activity 20:14 baseline) on BOTH prod and staging — bed and outside quiet
+   together, not outside-stays-active-while-bed-quiets. The theory is not falsified by this check.
+   The Renz 09-17→18 onset-regression risk (a belief-gated design could fabricate an early
+   `into_bed` during the 18:58-19:23 routine, which `bedOccupiedAfter`'s 3-minute/150-minute witness
+   would then validate, moving onset from the already-wrong 20:04 to an even-more-wrong ~19:23) is
+   CONFIRMED live, not just plausible: 26 (prod) / 28 (staging) minutes with `motion_peak >= 0.0005`
+   in the 150-minute witness window — far past the 3-minute bar. New finding from this pass: on the
+   09-16→17 night, the last transition recorded before the whole overnight gap (bedtime `into_bed`
+   at 19:13:52 local) is on staging already owner-verdicted `wrong` — so even "last recorded
+   transition" as an occupancy prior would anchor on a transition already known to be false, a
+   further caution for any belief-gated design attempt.
+   **Recommended next steps, in order**: (1) extract `motionDetector.js`'s OOB/IB state machine into
+   a testable module (`bedTransitionTracker.js`, mirroring `soundBaseline.js`'s injectable-clock
+   shape) — zero test coverage exists on this code today, and no mechanism design can be verified
+   without it; (2) live diagnostic logging of time-from-co-active-open-to-first-quiet (not episode
+   duration — round 2 corrected the statistic), to gather real calibration data before any constant
+   is chosen; (3) only then attempt a third mechanism design, starting from round 2's fix list: break
+   the double-pending-open hole, break the belief→eligibility feedback loop, and decide what
+   `out_frames`/`peak` mean for a co-active-opened row before writing one. Neither rejected design's
+   shape should be the starting point.
+   ✅ **Recommended step (1) SHIPPED 2026-09-18** — `motionDetector.js`'s OOB/IB state machine extracted
+   verbatim into `bedTransitionTracker.js` (mirroring `soundBaseline.js`'s injectable-clock shape),
+   confirmed behavior-identical to the pre-extraction code via a 400k-synthetic-frame differential fuzz
+   in adversarial review (zero divergence in logs, `recordBedTransition` calls, or `believedOccupied`).
+   Now in `test:core` at 100% lines / 98.21% branches / 100% functions, with 30 tests — the first test
+   coverage this state machine has ever had. First review pass found the test suite itself under-
+   discriminated (47% mutation score, including a surviving `peak`/`outPeak` swap on the `into_bed`
+   confirm payload — exactly the asymmetric-field corruption this file's own DB comment warns a refactor
+   can introduce); fixed and reverified by hand-applying that exact mutant plus a `cribWasIdle`-guard
+   deletion and confirming both now fail exactly one test each. **Recommended step (2) SHIPPED
+   alongside it**: a rate-limited `[coactive]` diagnostic log line (see `planning/sleep-marker-review-
+   runbook.md` §4), purely observational — logs time-to-first-quiet and which channel resolved first
+   whenever both channels are active in the same frame, never touches `bed_transitions`. **Not yet
+   committed or deployed** — code + tests + adversarial review complete, awaiting the owner's go-ahead
+   to commit; once on staging, burn-in is still needed before its `CO_ACTIVE_LOG_COOLDOWN_MS`-censored
+   duration data is enough to calibrate a real overlap-tolerance constant. Step (3), a third mechanism
+   design, remains not started.
 4. **New: log-driven tuning is now possible.** The exit rule logs rejected links (`[oob] … link
    rejected`) with the actual gap and outside magnitude, so the real distribution can be read off a
    week of logs rather than guessed. Read it before moving `OOB_LINK_SLOW_MS` or `OOB_SLOW_OUT_MIN`.
