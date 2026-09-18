@@ -25,6 +25,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   can now be tapped to open it full-size in a pop-up, the same way a recorded clip opens — some frames
   are too small or too dim to judge at thumbnail size, and the verdicts recorded there are only as
   good as whether the photo could actually be read.
+- A diagnostic `[coactive]` log line, purely observational: fires when a camera's bed-zone and
+  outside-zone motion channels are both active in the same frame, a shape today's exit/entry detector
+  can't classify at all (see `planning/reviews/simultaneous-activity-gap-plan-2026-09-18.md`). Never
+  writes to `bed_transitions` and never changes any reported sleep number — exists only to gather real
+  data for a future fix.
 
 ### Changed
 - Three diagnostic sound statistics (p75, p90 and standard deviation) are now recorded per minute — instrumentation only, with no change to any reported sleep number.
