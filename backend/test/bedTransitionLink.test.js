@@ -5,7 +5,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { oobLinkKind } from '../src/lib/bedTransitionRules.js';
+import {
+  oobLinkKind, accumulateOutEvidence, trimOutSamples, evidenceFromSamples, EMPTY_EVIDENCE,
+  intoBedRejected, outOfBedRejected, entryNearMissWorthLogging, findQuickReversals,
+  findLingeringBedMotion, LINGERING_MOTION_ACTIVE, LINGERING_WINDOW_MS, LINGERING_MIN_ACTIVE_MINUTES,
+} from '../src/lib/bedTransitionRules.js';
 
 test('an adult lifting a child out links instantly', () => {
   // One continuous movement: the bed and the outside area are active within a few hundred ms of each
@@ -39,4 +43,418 @@ test('the boundaries are inclusive on both windows', () => {
   assert.equal(oobLinkKind(8000, 0.001), 'fast', 'exactly at the fast window');
   assert.equal(oobLinkKind(8001, 0.001), null, 'one ms past it, with nothing to justify the slow one');
   assert.equal(oobLinkKind(60000, 0.05), 'slow', 'exactly at the slow window and exactly at the floor');
+});
+
+// --- accumulateOutEvidence (ROADMAP §1.2 item 2: outside-channel peak + duration) ----------------
+//
+// Record-only for now — see its own comment in bedTransitionRules.js for why a peak-only floor was
+// measured (2026-09-12, 468 owner-reviewed verdicts) and found NOT to separate real transitions from
+// false ones on either direction. These tests pin the one thing this primitive has to get right:
+// peak tracks the max regardless of `active`, frames counts only active ones.
+
+test('EMPTY_EVIDENCE is the inert starting point', () => {
+  assert.deepEqual(EMPTY_EVIDENCE, { peak: 0, frames: 0 });
+});
+
+test('peak takes the max across calls, whether or not the frame was active', () => {
+  // Mirrors the existing oobPeakOut behavior, which already updates on every pending frame regardless
+  // of threshold — a candidate's peak has never been active-gated, only its duration should be.
+  let e = accumulateOutEvidence(EMPTY_EVIDENCE, 0.02, false);
+  e = accumulateOutEvidence(e, 0.09, true);
+  e = accumulateOutEvidence(e, 0.05, true);
+  assert.equal(e.peak, 0.09, 'the highest reading wins, from wherever it came');
+});
+
+test('peak is genuinely active-INDEPENDENT — an inactive reading can set it', () => {
+  // Every other peak test here has the active frames hold the highest reading, so a mutant that
+  // secretly gated peak on `active` (`active ? Math.max(...) : prev.peak`) would pass them all
+  // anyway — found by adversarial review (2026-09-12). This is the one fixture where the INACTIVE
+  // frame is the highest, so gating peak on active would visibly change the answer.
+  let e = accumulateOutEvidence(EMPTY_EVIDENCE, 0.9, false); // the highest reading, but not active
+  e = accumulateOutEvidence(e, 0.1, true);
+  assert.equal(e.peak, 0.9, 'the inactive reading still sets the peak');
+  assert.equal(e.frames, 1, 'but it does not count toward duration');
+});
+
+test('frames counts only the readings that crossed the active threshold', () => {
+  let e = EMPTY_EVIDENCE;
+  for (const active of [true, false, true, true, false]) {
+    e = accumulateOutEvidence(e, active ? 0.5 : 0.001, active);
+  }
+  assert.equal(e.frames, 3, 'exactly the active ones, not all five calls');
+});
+
+test('a concrete multi-frame sequence lands on the exact expected tally', () => {
+  const frames = [
+    { fraction: 0.01, active: false },
+    { fraction: 0.06, active: true },
+    { fraction: 0.08, active: true },
+    { fraction: 0.03, active: false },
+    { fraction: 0.11, active: true },
+  ];
+  const result = frames.reduce((e, f) => accumulateOutEvidence(e, f.fraction, f.active), EMPTY_EVIDENCE);
+  assert.deepEqual(result, { peak: 0.11, frames: 3 });
+});
+
+// --- trimOutSamples / evidenceFromSamples ----------------------------------------------------------
+//
+// The into_bed lead-up evidence is a ROLLING WINDOW over IB_LINK_MS, not an accumulate-until-quiet
+// episode. A first draft tried the latter (reset only after a quiet gap longer than IB_LINK_MS) and
+// adversarial review (2026-09-12) found it unbounded: ordinary pauses while someone moves around a
+// room — adjusting a blanket, stepping back and forward — are routinely under an 8-second gap, so
+// bursts would chain into one open-ended episode with no upper bound on how far back it reaches, even
+// though the into_bed candidate itself only ever cares about the last IB_LINK_MS. These tests pin the
+// window itself, not just the accumulator.
+
+test('trimOutSamples keeps only samples within the window of now', () => {
+  const samples = [{ t: 0, fraction: 0.1, active: true }, { t: 5000, fraction: 0.2, active: true }];
+  assert.deepEqual(trimOutSamples(samples, 8000, 8000), samples, 'both still within 8s of now=8000');
+  assert.deepEqual(trimOutSamples(samples, 8001, 8000), [samples[1]], 'the older one just fell out');
+});
+
+test('evidenceFromSamples reduces exactly like accumulateOutEvidence would, over whatever remains', () => {
+  const samples = [
+    { t: 0, fraction: 0.02, active: false },
+    { t: 100, fraction: 0.09, active: true },
+    { t: 200, fraction: 0.05, active: true },
+  ];
+  assert.deepEqual(evidenceFromSamples(samples), { peak: 0.09, frames: 2 });
+  assert.deepEqual(evidenceFromSamples([]), EMPTY_EVIDENCE, 'no samples is the inert starting point');
+});
+
+// --- end-to-end simulation: the exact sequence motionDetector.js drives these two functions through --
+//
+// The frame loop itself is untestable directly (welded to a spawned ffmpeg process, same as every
+// other integration point in this file) — this simulates it faithfully using only the two exported
+// pure functions, the same way this file already treats oobLinkKind as the whole of what the live
+// loop decides: trim-then-append every frame, snapshot with evidenceFromSamples whenever a candidate
+// would open.
+function simulateOutEvidence(frames, windowMs) {
+  let samples = [];
+  const snapshots = [];
+  for (const f of frames) {
+    samples = trimOutSamples(samples, f.t, windowMs);
+    samples.push({ t: f.t, fraction: f.fraction, active: f.active });
+    if (f.snapshot) snapshots.push(evidenceFromSamples(samples));
+  }
+  return snapshots;
+}
+
+// ★ THE REGRESSION TEST for the adversarial-review finding: a chain of bursts each under the link
+// window apart must NOT let evidence reach arbitrarily far back. Against the rejected "episode" design
+// this would have returned frames covering the ENTIRE 21-second chain; the rolling window must only
+// ever see the last 8 seconds of it.
+test('a chain of sub-window bursts does not let evidence reach arbitrarily far back', () => {
+  const IB_LINK_MS = 8000;
+  const frames = [];
+  for (let t = 0; t <= 21000; t += 3000) frames.push({ t, fraction: 0.2, active: true }); // every 3s
+  frames[frames.length - 1].snapshot = true; // t = 21000
+  const [result] = simulateOutEvidence(frames, IB_LINK_MS);
+  // Only samples from t=13001..21000 are within 8s of t=21000 — that's t=15000,18000,21000: 3 frames.
+  assert.equal(result.frames, 3, 'only the samples inside the last 8s count, not the whole 21s chain');
+});
+
+test('a stale burst does not contaminate a later, unrelated one', () => {
+  const IB_LINK_MS = 8000;
+  const [afterGap] = simulateOutEvidence(
+    [
+      { t: 1000, fraction: 0.3, active: true }, // an early burst: a parent walks past
+      { t: 1200, fraction: 0.25, active: true },
+      // 20 seconds of quiet — well past the 8s link window, so this is out of the window by the time...
+      { t: 21200, fraction: 0.04, active: true, snapshot: true }, // ...a small, unrelated blip occurs
+    ],
+    IB_LINK_MS
+  );
+  assert.deepEqual(afterGap, { peak: 0.04, frames: 1 }, 'only the new blip counts, not the stale burst');
+});
+
+test('a genuinely continuous lead-up (gaps under the link window) accumulates within the window', () => {
+  const IB_LINK_MS = 8000;
+  const [combined] = simulateOutEvidence(
+    [
+      { t: 1000, fraction: 0.2, active: true },
+      { t: 4000, fraction: 0.01, active: false }, // a brief lull, well under the 8s window
+      { t: 6000, fraction: 0.3, active: true, snapshot: true }, // resumes — still inside the window
+    ],
+    IB_LINK_MS
+  );
+  assert.deepEqual(combined, { peak: 0.3, frames: 2 }, 'both bursts are still inside the 8s window');
+});
+
+// --- intoBedRejected / outOfBedRejected (ROADMAP §1.2 item 1: believed occupancy) ------------------
+//
+// Measured 2026-08-29: 147 of 238 stored transitions (62%) are the SAME type twice in a row with
+// nothing between — physically impossible (you cannot get into a bed you are already in, or leave one
+// you are already out of). `believed` tracks what the data itself already implies.
+//
+// ⚠️ LOG-ONLY, deliberately (see the big comment on these functions in bedTransitionRules.js): a
+// retrospective check against real owner-verdicted transitions found that actually SUPPRESSING a
+// same-direction repeat drops real transitions too, because a false one slipping through poisons
+// belief until an opposite-direction event resets it. So these two functions are used ONLY to flag a
+// repeat in the log — motionDetector.js still records every transition unconditionally, and `believed`
+// updates on every recorded transition regardless of whether it was flagged.
+
+test('null (not yet known) never flags either direction', () => {
+  // There is nothing yet to contradict — the first transition since this detector started must be
+  // allowed through unflagged, whichever direction it is.
+  assert.equal(intoBedRejected(null), false);
+  assert.equal(outOfBedRejected(null), false);
+});
+
+test('an into_bed while already believed in bed is flagged; while out, it is not', () => {
+  assert.equal(intoBedRejected(true), true, 'already in bed — a second arrival is impossible');
+  assert.equal(intoBedRejected(false), false, 'out of bed — an arrival is exactly what is expected');
+});
+
+test('an out_of_bed while already believed out of bed is flagged; while in, it is not', () => {
+  assert.equal(outOfBedRejected(false), true, 'already out — a second departure is impossible');
+  assert.equal(outOfBedRejected(true), false, 'in bed — a departure is exactly what is expected');
+});
+
+// --- end-to-end simulation: the exact sequence motionDetector.js drives believedOccupied through ----
+//
+// Mirrors the real wiring exactly: EVERY transition is recorded, `believed` updates unconditionally
+// after each one, and the flag is purely informational — never gates storage.
+function simulateOccupancy(transitions) {
+  let believed = null;
+  const flags = [];
+  for (const type of transitions) {
+    const flagged = type === 'into_bed' ? intoBedRejected(believed) : outOfBedRejected(believed);
+    flags.push(flagged ? 'flagged' : 'ok');
+    believed = type === 'into_bed';
+  }
+  return flags;
+}
+
+test('alternating types are never flagged — this is the ordinary, healthy case', () => {
+  assert.deepEqual(
+    simulateOccupancy(['into_bed', 'out_of_bed', 'into_bed', 'out_of_bed']),
+    ['ok', 'ok', 'ok', 'ok']
+  );
+});
+
+// --- entryNearMissWorthLogging (unexplained bed activity, found 2026-09-13) --------------------------
+//
+// Renz's real 2026-09-12 bedtime: staging never recorded a single into_bed for the whole ~50-minute
+// settling window, and there was nothing in the logs to say why — a missed entry has always been
+// completely silent. This predicate decides when "the bed moved with no valid link" is worth a log
+// line: NOT a time bound (like the exit side's OOB_NEARMISS_MS), because a child already believed to be
+// in bed keeps moving in it all night, and that ordinary stirring must not re-trigger this forever.
+
+test('worth logging when nobody is believed in bed — a real bedtime could be going unrecorded', () => {
+  assert.equal(entryNearMissWorthLogging(false), true, 'believed out — bed activity with no link is unexplained');
+  assert.equal(entryNearMissWorthLogging(null), true, 'not yet known — same reasoning as null never flagging a repeat');
+});
+
+test('NOT worth logging once the child is already believed in bed — ordinary stirring, not a missed entry', () => {
+  assert.equal(entryNearMissWorthLogging(true), false);
+});
+
+test('★ THE 62% CASE: consecutive same-direction transitions are flagged from the second one on', () => {
+  // Renz, measured 2026-08-29: 4 consecutive into_bed with NO out_of_bed between them
+  // (bed-transition-classifier-flaws.md). This is exactly the pattern item 1 exists to surface.
+  assert.deepEqual(
+    simulateOccupancy(['into_bed', 'into_bed', 'into_bed', 'into_bed']),
+    ['ok', 'flagged', 'flagged', 'flagged']
+  );
+});
+
+test('a real pair either side of a flagged repeat is itself unflagged', () => {
+  assert.deepEqual(
+    simulateOccupancy(['into_bed', 'into_bed', 'out_of_bed']),
+    ['ok', 'flagged', 'ok'],
+    'the spurious middle event is flagged; the real departure after it is not'
+  );
+});
+
+// ★ THE REGRESSION THIS PHASE EXISTS TO AVOID — proof that gating on this flag would be unsafe today.
+// Reproduces the exact real 2026-09-11 Renz mechanism (see bedTransitionRules.js's comment): a false
+// out_of_bed slips through, and the REAL wake after it would read as an impossible repeat of the false
+// one, not of the real departure it actually is.
+test('a false transition would poison a naive gate into dropping the REAL one after it', () => {
+  const flags = simulateOccupancy(['into_bed', 'out_of_bed', /* false exit */ 'out_of_bed' /* the real wake */]);
+  assert.deepEqual(flags, ['ok', 'ok', 'flagged'], 'the REAL wake is flagged too — a gate would drop it');
+});
+
+// --- findQuickReversals (ROADMAP §1.2 item 3: goodnight-kiss / parent-handling gap) -----------------
+//
+// getQuickReversals (bedTransitions.js) already covers the pairing/boundary/type rules in depth against
+// a real DB. What's specific to this pure function, and worth testing here, is the property it exists
+// FOR: the morning review hands it a night's transitions ordered by TIME ACROSS ALL CAMERAS (not
+// grouped by camera first, unlike getQuickReversals' own SQL query) — so it must group and sort
+// per-camera internally, correctly, given input that arrives in an arbitrary order.
+const row = (id, camera_id, type, created_at) => ({ id, camera_id, type, created_at });
+
+test('a genuine adjacent pair is found from already-sorted, single-camera input', () => {
+  const rows = [
+    row(1, 'cam-a', 'into_bed', '2026-03-01 19:51:00'),
+    row(2, 'cam-a', 'out_of_bed', '2026-03-01 19:51:14'),
+  ];
+  const found = findQuickReversals(rows);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].into_bed.id, 1);
+  assert.equal(found[0].out_of_bed.id, 2);
+  assert.equal(found[0].gap_ms, 14000);
+});
+
+test('input interleaved across cameras and out of time order is still paired correctly', () => {
+  // The exact shape transitionsFor() hands this: one query's worth of rows for a child's cameras,
+  // ordered by created_at across ALL of them — so camera A and B's events can interleave, and (since
+  // nothing guarantees insertion order) are not assumed sorted either. Deliberately fed here in an
+  // order that is neither camera-grouped nor time-sorted.
+  const rows = [
+    row(3, 'cam-b', 'out_of_bed', '2026-03-01 10:00:05'), // cam-b's reversal, second half, listed FIRST
+    row(1, 'cam-a', 'into_bed', '2026-03-01 19:51:00'), // cam-a's reversal, first half, listed SECOND
+    row(2, 'cam-a', 'out_of_bed', '2026-03-01 19:51:14'),
+    row(4, 'cam-b', 'into_bed', '2026-03-01 10:00:00'), // cam-b's reversal, first half, listed LAST
+  ];
+  const found = findQuickReversals(rows);
+  assert.equal(found.length, 2, 'both cameras\' genuine reversals must be found despite the scramble');
+  const byCam = Object.fromEntries(found.map((f) => [f.into_bed.camera_id, f]));
+  assert.equal(byCam['cam-a'].out_of_bed.id, 2);
+  assert.equal(byCam['cam-b'].into_bed.id, 4);
+  assert.equal(byCam['cam-b'].out_of_bed.id, 3);
+});
+
+test('maxGapMs is honoured and the default is 60s', () => {
+  const near = [row(1, 'cam-a', 'into_bed', '2026-03-01 10:00:00'), row(2, 'cam-a', 'out_of_bed', '2026-03-01 10:01:00')];
+  const far = [row(1, 'cam-a', 'into_bed', '2026-03-01 10:00:00'), row(2, 'cam-a', 'out_of_bed', '2026-03-01 10:01:01')];
+  assert.equal(findQuickReversals(near).length, 1, '60000ms is inclusive');
+  assert.equal(findQuickReversals(far).length, 0, '60001ms is not');
+  assert.equal(findQuickReversals(far, { maxGapMs: 120000 }).length, 1, 'a wider window catches it');
+});
+
+test('no reversal, no false positive: alternating types with nothing quick between them', () => {
+  const rows = [
+    row(1, 'cam-a', 'into_bed', '2026-03-01 19:00:00'),
+    row(2, 'cam-a', 'out_of_bed', '2026-03-01 19:05:00'), // 5 minutes later, not a "quick" reversal
+  ];
+  assert.deepEqual(findQuickReversals(rows, { maxGapMs: 60000 }), []);
+});
+
+// --- findLingeringBedMotion (ROADMAP §1.2 item 3 Phase 1) -----------------------------------------
+
+const lingeringExit = (created_at = '2026-03-01 10:00:30', type = 'out_of_bed') =>
+  row(90, 'cam-a', type, created_at);
+const activity = (bucket_start, motion_peak = LINGERING_MOTION_ACTIVE + 0.01) =>
+  ({ bucket_start, motion_peak });
+const activeMinutes = (...minutes) => minutes.map((minute) => activity(`2026-03-01 10:${minute}:00`));
+
+test('four qualifying distinct minutes with no recorded return are flagged', () => {
+  const found = findLingeringBedMotion(lingeringExit(), null, activeMinutes('01', '02', '03', '04'));
+  assert.equal(found.active_minutes, LINGERING_MIN_ACTIVE_MINUTES);
+  assert.equal(found.out_of_bed.id, 90);
+  assert.equal(found.bucket_start, '2026-03-01 10:01:00', 'the first qualifying minute is the evidence returned');
+});
+
+test('fewer than four qualifying minutes never flag even when real activity is present', () => {
+  assert.equal(
+    findLingeringBedMotion(lingeringExit(), null, activeMinutes('01', '02', '03')),
+    null
+  );
+});
+
+test('four duplicate rows for one minute count as one distinct active minute, not four', () => {
+  const duplicateMinute = Array.from({ length: 4 }, () => activity('2026-03-01 10:01:00'));
+  assert.equal(findLingeringBedMotion(lingeringExit(), null, duplicateMinute), null, 'one minute is below the default four');
+  const counted = findLingeringBedMotion(lingeringExit(), null, duplicateMinute, { minActiveMinutes: 1 });
+  assert.equal(counted.active_minutes, 1, 'duplicate rows are OR-merged into one physical minute');
+
+  const mixedDuplicates = [
+    activity('2026-03-01 10:01:00', LINGERING_MOTION_ACTIVE + 0.01),
+    activity('2026-03-01 10:01:00', LINGERING_MOTION_ACTIVE - 0.001),
+  ];
+  assert.equal(
+    findLingeringBedMotion(lingeringExit(), null, mixedDuplicates, { minActiveMinutes: 1 }).active_minutes,
+    1,
+    'a later quiet duplicate cannot erase an active row from the same minute'
+  );
+});
+
+test('a real into_bed before enough active minutes accumulate suppresses the flag', () => {
+  const returned = row(91, 'cam-a', 'into_bed', '2026-03-01 10:04:30');
+  assert.equal(
+    findLingeringBedMotion(lingeringExit(), returned, activeMinutes('01', '02', '03', '04', '05', '06')),
+    null,
+    'only three qualifying minutes precede the return minute'
+  );
+});
+
+test('motion at or below the active threshold never flags however many minutes are present', () => {
+  const quiet = [
+    activity('2026-03-01 10:01:00', LINGERING_MOTION_ACTIVE),
+    activity('2026-03-01 10:02:00', LINGERING_MOTION_ACTIVE),
+    activity('2026-03-01 10:03:00', LINGERING_MOTION_ACTIVE),
+    activity('2026-03-01 10:04:00', LINGERING_MOTION_ACTIVE),
+    activity('2026-03-01 10:05:00', LINGERING_MOTION_ACTIVE - 0.001),
+    activity('2026-03-01 10:06:00', null),
+  ];
+  assert.equal(findLingeringBedMotion(lingeringExit(), null, quiet), null);
+});
+
+test('the fixed window is inclusive at exactly sixty minutes and excludes one minute past it', () => {
+  const onTheMinute = lingeringExit('2026-03-01 10:00:00');
+  const found = findLingeringBedMotion(onTheMinute, null, [
+    activity('2026-03-01 10:57:00'),
+    activity('2026-03-01 10:58:00'),
+    activity('2026-03-01 10:59:00'),
+    activity('2026-03-01 11:00:00'), // exactly exit + LINGERING_WINDOW_MS
+    activity('2026-03-01 11:01:00'), // one minute beyond the inclusive cap
+  ]);
+  assert.equal(found.active_minutes, 4, 'the exact boundary counts but the minute beyond it does not');
+  assert.equal(Date.parse(`${found.bucket_start.replace(' ', 'T')}Z`) - Date.parse('2026-03-01T10:00:00Z') <= LINGERING_WINDOW_MS, true);
+});
+
+test('zero activity samples do not flag and do not throw', () => {
+  assert.equal(findLingeringBedMotion(lingeringExit(), null, []), null);
+});
+
+test("the exit's own minute is never counted as lingering evidence", () => {
+  const samples = [activity('2026-03-01 10:00:00'), ...activeMinutes('01', '02', '03')];
+  assert.equal(findLingeringBedMotion(lingeringExit(), null, samples), null, 'excluding departure motion leaves only three minutes');
+});
+
+test("an exit at exactly :00 seconds still excludes its own minute's sample", () => {
+  // Same shape as the test above, but with a :00-second exit specifically. Every other fixture in this
+  // file uses lingeringExit()'s default nonzero-second timestamp, so a bucket_start (always :00 seconds)
+  // can never land exactly ON the exit's own created_at — meaning `s.bucket_start <= exit.created_at`
+  // weakened to `<` would silently survive every other test here. Found missing by an adversarial
+  // pre-merge review (a Claude subagent), 2026-09-14: that exact mutation passed the full suite before
+  // this test existed.
+  const exit = lingeringExit('2026-03-01 10:00:00');
+  const samples = [activity('2026-03-01 10:00:00'), ...activeMinutes('01', '02', '03')];
+  assert.equal(findLingeringBedMotion(exit, null, samples), null, "excluding the exit's own :00 minute leaves only three qualifying minutes");
+});
+
+test('a same-minute return with nonzero seconds closes the window at that minute', () => {
+  const returned = row(91, 'cam-a', 'into_bed', '2026-03-01 10:01:45');
+  assert.equal(
+    findLingeringBedMotion(lingeringExit(), returned, activeMinutes('01', '02', '03', '04'), { minActiveMinutes: 1 }),
+    null,
+    'the 10:01 bucket belongs to the return minute and is not lingering motion'
+  );
+});
+
+test('a non-out_of_bed exit is rejected defensively', () => {
+  assert.equal(findLingeringBedMotion(lingeringExit(undefined, 'into_bed'), null, activeMinutes('01', '02', '03', '04')), null);
+});
+
+test("gap_ms is measured from the exit's real timestamp, not its floored minute", () => {
+  const found = findLingeringBedMotion(lingeringExit('2026-03-01 10:00:30'), null, activeMinutes('01', '02', '03', '04'));
+  assert.equal(found.gap_ms, 30000, '10:01:00 is thirty seconds after the real 10:00:30 exit');
+});
+
+test('windowMs is configurable', () => {
+  const samples = activeMinutes('01', '02', '03', '04');
+  assert.equal(findLingeringBedMotion(lingeringExit('2026-03-01 10:00:00'), null, samples, { windowMs: 3 * 60000 }), null);
+  assert.equal(
+    findLingeringBedMotion(lingeringExit('2026-03-01 10:00:00'), null, samples, { windowMs: 4 * 60000 }).active_minutes,
+    4
+  );
+});
+
+test('minActiveMinutes is configurable independently of the four-minute default', () => {
+  const threeMinutes = activeMinutes('01', '02', '03');
+  assert.equal(findLingeringBedMotion(lingeringExit(), null, threeMinutes), null, 'the default still requires four');
+  assert.equal(findLingeringBedMotion(lingeringExit(), null, threeMinutes, { minActiveMinutes: 3 }).active_minutes, 3);
 });

@@ -5,6 +5,7 @@ import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
+import ImagePreviewModal from '../components/ImagePreviewModal.jsx';
 
 // Recording what actually happened last night, from the person who was there.
 //
@@ -71,8 +72,21 @@ export default function NightReview() {
   const [wakeFrame, setWakeFrame] = useState(null);
   // Has the person actually touched the form? Nothing may overwrite their typing once they have.
   const [touched, setTouched] = useState(false);
+  // Separate from `touched`, deliberately: a verdict tap and an onset/wake edit are unrelated, but a
+  // shared flag would make them fate-share. Found in adversarial review, 2026-09-13: the new "Quick
+  // check-in?" prompt is often the very FIRST tap on this page — far more likely than the old, opt-in
+  // collapsed event list — and if that tap were the thing that set `touched`, a `/settings` timezone
+  // resolving a moment later (SettingsContext starts at UTC, see the fetch effect's own comment) would
+  // never re-seed `onset`/`wake` into the RIGHT zone; the exact bug that comment already describes,
+  // just reached from a new direction. Verdicts still need their OWN protection from the same race
+  // (the seeding effect below also resets `verdicts`), which is what this flag is for.
+  const [verdictsTouched, setVerdictsTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  // The transition whose snapshot is currently open full-size, or null. A transition row (id, type,
+  // created_at, camera_name) carries everything ImagePreviewModal's title/meta need — no reason to
+  // shadow those fields into a separate shape.
+  const [preview, setPreview] = useState(null);
 
   // ⚠️ FETCH ON [id, date] ONLY. `tz` must NOT be in here.
   //
@@ -93,19 +107,29 @@ export default function NightReview() {
   // It still depends on `tz` because the times have to be shown in the app's zone, not the browser's —
   // which is exactly why re-running it had to stop clobbering their input rather than simply not run.
   useEffect(() => {
-    if (!data || touched) return;
-    setOnset(toLocalHhmm(data.review?.true_onset_at || data.computed?.onset_at, tz));
-    setWake(toLocalHhmm(data.review?.true_wake_at || data.computed?.wake_at, tz));
-    setNote(data.review?.note || '');
-    setVerdicts(Object.fromEntries((data.transitions || []).filter((t) => t.verdict).map((t) => [t.id, t.verdict])));
-    // A night already answered opens straight into its recorded values, so coming back to change
-    // something does not make you confirm from scratch.
-    setOnsetFrame(data.review?.true_onset_transition_id ?? null);
-    setWakeFrame(data.review?.true_wake_transition_id ?? null);
-    setEditing(Boolean(data.review?.true_onset_at || data.review?.true_wake_at));
-  }, [data, tz, touched]);
+    if (!data) return;
+    if (!touched) {
+      setOnset(toLocalHhmm(data.review?.true_onset_at || data.computed?.onset_at, tz));
+      setWake(toLocalHhmm(data.review?.true_wake_at || data.computed?.wake_at, tz));
+      setNote(data.review?.note || '');
+      // A night already answered opens straight into its recorded values, so coming back to change
+      // something does not make you confirm from scratch.
+      setOnsetFrame(data.review?.true_onset_transition_id ?? null);
+      setWakeFrame(data.review?.true_wake_transition_id ?? null);
+      setEditing(Boolean(data.review?.true_onset_at || data.review?.true_wake_at));
+    }
+    if (!verdictsTouched) {
+      setVerdicts(Object.fromEntries((data.transitions || []).filter((t) => t.verdict).map((t) => [t.id, t.verdict])));
+    }
+  }, [data, tz, touched, verdictsTouched]);
 
   const fmtEvent = useMemo(() => (t) => toLocalHhmm(t.created_at, tz), [tz]);
+
+  // The enlarged view's title/meta. A plain camera name as the title (Modal always shows one), the
+  // time + which kind of event as the meta line underneath the photo — the same two facts the
+  // thumbnail's own row already states, just readable at a glance once the image itself is legible.
+  const previewTitle = (t) => t?.camera_name || 'Snapshot';
+  const previewMeta = (t) => (t ? `${fmtEvent(t)} — ${t.type === 'into_bed' ? 'got into bed' : 'got out of bed'}` : '');
 
   // `withTimes` false saves only the verdicts and leaves any recorded times alone.
   const save = async (withTimes, onsetHm = onset, wakeHm = wake) => {
@@ -162,6 +186,23 @@ export default function NightReview() {
   const shownOnset = toLocalHhmm(data.computed?.onset_at, tz);
   const shownWake = toLocalHhmm(data.computed?.wake_at, tz);
   const hasOpinion = Boolean(shownOnset || shownWake);
+
+  // An out_of_bed the server flagged as immediately following an into_bed (quick_reversal_of names
+  // that into_bed's id) — measured 2026-09-13 to be mostly a parent's presence read as a child's exit,
+  // not classifier noise or a real return trip. Surfaced on its own, NOT behind "Check the recorded
+  // events" below: that section is deliberately collapsed by default (the owner's own words: "it's
+  // also flooded with in and out of bed"), so relying on it here would mean this specific, high-value
+  // question is the one thing MOST likely to go unnoticed and unanswered — the exact problem this
+  // exists to fix (1 of 86 such pairs had ever been verdicted before this).
+  const quickReversals = transitions
+    .filter((t) => t.quick_reversal_of != null)
+    .map((oob) => ({ oob, ib: transitions.find((t) => t.id === oob.quick_reversal_of) }))
+    .filter((p) => p.ib);
+  // Quick reversals have the better-evidenced, sharper question. Keep both backend facts,
+  // but ask only once per event; both cards write into the same shared verdict.
+  const lingeringOnly = transitions.filter(
+    (t) => t.lingering_motion_minutes != null && t.quick_reversal_of == null
+  );
 
   return (
     <>
@@ -234,6 +275,117 @@ export default function NightReview() {
           )}
         </div>
 
+        {/* NOT collapsed, deliberately unlike the full event list below — see quickReversals' own
+            comment for why relying on that collapse here would defeat the point. Kept neutral rather
+            than suggesting "this was probably you": the whole reason this exists is to collect an
+            honest label, and leading the answer would poison exactly the ground truth it's after. */}
+        {quickReversals.map(({ oob, ib }) => (
+          <div className="card" key={oob.id}>
+            <div className="card-title">Quick check-in?</div>
+            <div className="review-event">
+              {oob.snapshot ? (
+                <button
+                  type="button"
+                  className="review-event__frame-btn"
+                  aria-label="Enlarge photo"
+                  onClick={() => setPreview(oob)}
+                >
+                  <img
+                    className="review-event__frame"
+                    src={api.url(`/cameras/bed-transitions/${oob.id}/snapshot`)}
+                    alt=""
+                    loading="lazy"
+                  />
+                </button>
+              ) : (
+                <div className="review-event__frame review-event__frame--none">No frame</div>
+              )}
+              <div className="review-event__body">
+                <div className="review-event__when">
+                  Got into bed at {fmtEvent(ib)}, then got out of bed again {oob.quick_reversal_gap_s}s
+                  later — what actually happened?
+                </div>
+                {oob.camera_name && <div className="camera-tile__sub">{oob.camera_name}</div>}
+                <div className="review-event__verdicts">
+                  {[
+                    { key: 'wrong', label: 'That was me', Icon: X },
+                    { key: 'correct', label: 'They got up', Icon: Check },
+                    { key: 'unclear', label: 'Not sure', Icon: HelpCircle },
+                  ].map(({ key, label, Icon }) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className={`review-chip${verdicts[oob.id] === key ? ' review-chip--on' : ''}`}
+                      aria-pressed={verdicts[oob.id] === key}
+                      onClick={() => {
+                        setVerdictsTouched(true);
+                        setVerdicts((v) => ({ ...v, [oob.id]: v[oob.id] === key ? null : key }));
+                      }}
+                    >
+                      <Icon size={16} /> {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+
+        {/* Evidence can precede this run's newest (displayed) exit. State a separate-minute
+            count, never a continuous duration or a gap measured from the displayed timestamp. */}
+        {lingeringOnly.map((t) => (
+          <div className="card" key={t.id}>
+            <div className="card-title">Still moving?</div>
+            <div className="review-event">
+              {t.snapshot ? (
+                <button
+                  type="button"
+                  className="review-event__frame-btn"
+                  aria-label="Enlarge photo"
+                  onClick={() => setPreview(t)}
+                >
+                  <img
+                    className="review-event__frame"
+                    src={api.url(`/cameras/bed-transitions/${t.id}/snapshot`)}
+                    alt=""
+                    loading="lazy"
+                  />
+                </button>
+              ) : (
+                <div className="review-event__frame review-event__frame--none">No frame</div>
+              )}
+              <div className="review-event__body">
+                <div className="review-event__when">
+                  Recorded as out of bed at {fmtEvent(t)} — the bed also showed movement in{' '}
+                  {t.lingering_motion_minutes} separate minutes with no return logged in between. What actually
+                  happened?
+                </div>
+                {t.camera_name && <div className="camera-tile__sub">{t.camera_name}</div>}
+                <div className="review-event__verdicts">
+                  {[
+                    { key: 'wrong', label: 'No, still in bed', Icon: X },
+                    { key: 'correct', label: 'Yes, they got up', Icon: Check },
+                    { key: 'unclear', label: 'Not sure', Icon: HelpCircle },
+                  ].map(({ key, label, Icon }) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className={`review-chip${verdicts[t.id] === key ? ' review-chip--on' : ''}`}
+                      aria-pressed={verdicts[t.id] === key}
+                      onClick={() => {
+                        setVerdictsTouched(true);
+                        setVerdicts((v) => ({ ...v, [t.id]: v[t.id] === key ? null : key }));
+                      }}
+                    >
+                      <Icon size={16} /> {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+
         {/* Collapsed by default, and that is the point. A night carries 20-35 recorded transitions —
             Raffa's 2026-08-29 had 31 — and opening the screen straight into a wall of frames buries
             the two times that actually matter. The owner's words on first use: "it's also flooded with
@@ -268,12 +420,19 @@ export default function NightReview() {
           {showEvents && transitions.map((t) => (
             <div key={t.id} className="review-event">
               {t.snapshot ? (
-                <img
-                  className="review-event__frame"
-                  src={api.url(`/cameras/bed-transitions/${t.id}/snapshot`)}
-                  alt=""
-                  loading="lazy"
-                />
+                <button
+                  type="button"
+                  className="review-event__frame-btn"
+                  aria-label="Enlarge photo"
+                  onClick={() => setPreview(t)}
+                >
+                  <img
+                    className="review-event__frame"
+                    src={api.url(`/cameras/bed-transitions/${t.id}/snapshot`)}
+                    alt=""
+                    loading="lazy"
+                  />
+                </button>
               ) : (
                 <div className="review-event__frame review-event__frame--none">No frame</div>
               )}
@@ -323,7 +482,7 @@ export default function NightReview() {
                       aria-pressed={verdicts[t.id] === key}
                       // Tapping the chosen verdict again clears it: a mis-tap must be undoable, because
                       // a wrong label is worse than a missing one — everything else gets scored on it.
-                      onClick={() => { setTouched(true); setVerdicts((v) => ({ ...v, [t.id]: v[t.id] === key ? null : key })); }}
+                      onClick={() => { setVerdictsTouched(true); setVerdicts((v) => ({ ...v, [t.id]: v[t.id] === key ? null : key })); }}
                     >
                       <Icon size={16} /> {label}
                     </button>
@@ -339,12 +498,20 @@ export default function NightReview() {
           <button type="button" className="btn btn-primary btn-block" disabled={busy} onClick={() => save(true)}>
             {busy ? 'Saving…' : 'Save review'}
           </button>
-        ) : showEvents && transitions.length > 0 && (
+        ) : (showEvents || quickReversals.length > 0 || lingeringOnly.length > 0) && transitions.length > 0 && (
           <button type="button" className="btn btn-secondary btn-block" disabled={busy} onClick={() => save(false)}>
             {busy ? 'Saving…' : 'Save just the event answers'}
           </button>
         )}
       </main>
+      {preview && (
+        <ImagePreviewModal
+          title={previewTitle(preview)}
+          imagePath={`/cameras/bed-transitions/${preview.id}/snapshot`}
+          meta={previewMeta(preview)}
+          onClose={() => setPreview(null)}
+        />
+      )}
     </>
   );
 }

@@ -20,8 +20,11 @@ docker run -d \
     sauso/nightlight
 ```
 
-**Host networking is required** - WebRTC (the low-latency viewing mode) needs it to
-work correctly on your LAN.
+Nightlight needs a routable LAN address so WebRTC (the low-latency viewing mode) works
+correctly. **Host networking (shown above) is the simplest default** and needs no extra setup; a
+dedicated `ipvlan`/`macvlan` address is also supported if you'd rather avoid host-mode port
+conflicts — see [Networking modes](https://github.com/sauso/nightlight#networking-modes) in the
+main README for both options and their trade-offs.
 
 ### Example
 

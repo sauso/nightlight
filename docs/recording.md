@@ -82,6 +82,13 @@ chip; expand it and press play.
 night. The average wake-up runs ~19 minutes, so recording wake-ups *end to end* would be ~1.1 GiB a
 night — which is why the clip is deliberately bounded to its opening rather than the whole wake-up.
 
+**A note on buffering.** Capturing a wake-up's *opening* means Nightlight has to already be holding a
+few seconds of recent video before the wake-up is even confirmed — the same rolling buffer that powers
+on-demand recording and detection clips. Turning "Record wake-ups without alerting" on keeps that
+buffer running on each of the child's assigned cameras, the same as switching on-demand recording on
+would, even if both of the other two recording features are off. Turning it off drops that buffering
+immediately, unless something else on the same camera still needs it.
+
 ---
 
 ## Bed-transition frames (diagnostic, not shown anywhere)
@@ -201,7 +208,9 @@ Video is larger and burstier than the database, so on Unraid you may prefer to k
 2. Set the environment variable **`CLIPS_DIR=/recordings`**.
 
 Both are exposed as optional fields in the Unraid template (**Recordings Directory** and **CLIPS_DIR**,
-under *Advanced view*).
+under *Advanced view*). With Docker Compose, uncomment the commented `recordings` volume line in
+`docker-compose.yml` and set `CLIPS_DIR` in your `.env` — see the comments in `.env.example`. With a
+plain `docker run`, add `-v /path/to/recordings:/recordings -e CLIPS_DIR=/recordings`.
 
 **Safety guard:** at startup Nightlight checks `CLIPS_DIR` is writable and backed by a real mounted
 volume. If it resolves to an unmapped path (the container's ephemeral layer), recording is **disabled**

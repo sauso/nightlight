@@ -1,6 +1,7 @@
 import db from '../db.js';
 import { logger } from './logger.js';
-import { getOndemandSettings } from './recordings.js';
+import { getOndemandSettings, getWakeClipSettings } from './recordings.js';
+import { childTracksSleep } from './sleepAnalysis.js';
 import {
   startSegmenter,
   stopSegmenter,
@@ -13,11 +14,13 @@ import { clipStorageReady, hasMinFreeSpace } from './clipStorage.js';
 
 // Stage 1 recording — the glue between the capture core (clipRecorder.js) and the app:
 //   * lifecycle: start/stop a camera's segmenter to match whether anything wants a ring
-//     (clipRingWanted — the per-camera `detect_record_clips` opt-in OR global on-demand recording),
-//     driven from the same places the motion/sound detectors are (routes + reconcile + startup).
+//     (clipRingWanted — the per-camera `detect_record_clips` opt-in, global on-demand recording, or
+//     wake clips for a sleep-tracked child), driven from the same places the motion/sound detectors
+//     are (routes + reconcile + startup).
 //   * job queue: when a detection fires on a recording-enabled camera, fireDetectionAlert calls
 //     enqueueClip(), which cuts the [pre, post] clip and writes clip_* onto the event row.
-// Shipped in 0.17.0.
+// Shipped in 0.17.0. Wake-clip eligibility added later (issue #387) — see the comment on
+// clipRingWanted below for why it was missing.
 
 // Small in-process queue so a burst of triggers across cameras can't spawn unbounded ffmpeg. Each job
 // occupies a worker for roughly the post-roll (extractClip waits it out) plus a quick concat.
@@ -52,11 +55,13 @@ function pump() {
   }
 }
 
-// Should this camera be buffering at all? The ring feeds TWO features and either one is reason enough
-// to run it: detection clips reach back over the pre-roll when something fires, and on-demand
-// recording reaches back when someone presses Record. On-demand's pre-roll is the whole point of that
-// feature, so `ondemand_enabled` is what turns its buffering off — exactly as docs/recording.md says
-// ("Switching this off also stops the per-camera buffering").
+// Should this camera be buffering at all? The ring feeds THREE features and any one of them is reason
+// enough to run it: detection clips reach back over the pre-roll when something fires, on-demand
+// recording reaches back when someone presses Record, and a wake clip reaches back over
+// WAKE_CLIP_LEAD_SEC when the sleep tracker's wake watcher calls captureWakeClip (recordings.js). On-
+// demand's pre-roll is the whole point of that feature, so `ondemand_enabled` is what turns its
+// buffering off — exactly as docs/recording.md says ("Switching this off also stops the per-camera
+// buffering").
 //
 // ⚠️ CALL THIS AT EVERY CALL SITE — never re-derive the condition. It exists because the condition WAS
 // duplicated, and the copies drifted: startClipCapture had the rule right, but reconcile
@@ -70,9 +75,31 @@ function pump() {
 // detection clips switched on, which armed the ring for the other reason.
 // This is the same class of defect as an early-bedtime path that shipped inert: a correct no-op and a
 // dead branch look identical from outside.
+//
+// ⚠️ THE SAME BUG RECURRED FOR WAKE CLIPS (issue #387, flagged by the 2026-09-11 Codex review). Wake
+// clips shipped as a third consumer of the ring but were never added to this predicate, so a household
+// that turned OFF detection clips and on-demand recording while leaving "Record wake-ups" on got a
+// silent no-op: `captureWakeClipInner` (recordings.js) requires `isSegmenterRunning`, found nothing,
+// logged, and returned null every single night. The Recording page's three sections read as
+// independent choices, so nothing in the UI hinted that the third one depended on the other two ever
+// having been on.
+//
+// ⚠️ `!!camera.child_id &&` is a fast-path, not a correctness requirement — a Claude adversarial review
+// confirmed `childTracksSleep(null|undefined|'')` already returns false on its own, so the guard changes
+// no observable output. It stays because it skips a DB query for every unassigned camera on every
+// reconcile pass, which is most cameras in most reconcile ticks. Do not "simplify" it away expecting a
+// behavior change — there isn't one, and mutation-testing this line will correctly find it equivalent.
+//
+// ⚠️ THIS PREDICATE NOW DEPENDS ON child_id, WHICH CHANGES AT RUNTIME (assign/unassign, child delete) —
+// unlike detect_record_clips and ondemand_enabled, which only change via a settings save. The same
+// review found the two places that change it had NOT been updated to re-evaluate the ring:
+// routes/cameras.js's PUT /:id/assign and routes/children.js's DELETE /:id (see their comments) — both
+// fixed alongside this one. index.js's periodic reconcile also gained the STOP half it was missing, as
+// the backstop for the next caller that forgets.
 export function clipRingWanted(camera) {
   if (!camera || camera.disabled) return false;
-  return !!camera.detect_record_clips || getOndemandSettings().enabled;
+  if (camera.detect_record_clips || getOndemandSettings().enabled) return true;
+  return !!camera.child_id && childTracksSleep(camera.child_id) && getWakeClipSettings().enabled;
 }
 
 // Start (idempotently) a camera's segmenter if either feature wants the ring. No-op if already running
@@ -106,6 +133,27 @@ export const isClipCapturing = isSegmenterRunning;
 
 export function stopAllClipCapture() {
   stopAllSegmenters();
+}
+
+// Reconcile one camera's ring against clipRingWanted: start if wanted and not running, stop if running
+// and no longer wanted. Used by index.js's periodic reconcileCameraPaths, which previously had only the
+// start half (issue #387 adversarial review) — every OTHER leg reconciled there (motion, ONVIF motion)
+// already had both directions, so a missed call site anywhere else self-healed within 5 minutes; the
+// ring's missing stop half meant a camera that stopped wanting it kept its segmenter (and so its ffmpeg
+// process) running forever. Exported here, not left inline in index.js, because index.js has import-time
+// side effects (it spawns MediaMTX/transcoders) that every existing test deliberately avoids triggering
+// — this lets the stop half be tested directly instead.
+export function reconcileClipRing(camera) {
+  // Evaluated once, not per branch — clipRingWanted can run 1-3 DB queries and this runs over every
+  // camera on every 5-minute reconcile tick. (startClipCapture still re-checks it internally on the
+  // start path; that copy stays, per "CALL THIS AT EVERY CALL SITE" above — it's what makes
+  // startClipCapture itself safe to call from anywhere, not just from here.)
+  const wanted = clipRingWanted(camera);
+  if (wanted && !isSegmenterRunning(camera.id)) {
+    startClipCapture(camera);
+  } else if (!wanted && isSegmenterRunning(camera.id)) {
+    stopClipCapture(camera.id);
+  }
 }
 
 // Enqueue a clip for a just-fired detection event. Best-effort and fully guarded — a recording failure

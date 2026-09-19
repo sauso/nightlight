@@ -357,6 +357,24 @@ if (!bedTxColumns.includes('verdict')) {
   db.exec('ALTER TABLE bed_transitions ADD COLUMN verdict TEXT');
 }
 
+// Outside-channel evidence (ROADMAP §1.2 item 2). What it means depends on the transition's type:
+// for `out_of_bed`, the outside channel's peak/duration DURING the exit candidate (already partly
+// captured as the legacy `peak` column, which for this type IS the outside peak — these add the
+// duration half); for `into_bed`, the outside channel's peak/duration in the LEAD-UP before the bed
+// moved (previously thrown away entirely — the legacy `peak` column for this type is the BED
+// channel's peak instead). RECORD-ONLY: nothing reads these yet. A peak-only floor was measured
+// (2026-09-12) against 468 owner-reviewed verdicts and does NOT separate real transitions from false
+// ones on either direction (overlapping ranges, "wrong" has the higher ceiling on both) — duration is
+// the untested half, and it can't be evaluated until it's actually been recorded for a while. See
+// bed-transition-classifier-flaws.md and ROADMAP §1.2 item 2 before picking a threshold on these.
+// `out_frames` is a raw frame count at the fixed 5fps sampling rate (~200ms/frame), not milliseconds.
+if (!bedTxColumns.includes('out_peak')) {
+  db.exec('ALTER TABLE bed_transitions ADD COLUMN out_peak REAL');
+}
+if (!bedTxColumns.includes('out_frames')) {
+  db.exec('ALTER TABLE bed_transitions ADD COLUMN out_frames INTEGER');
+}
+
 // Which recorded transition the person named as the bedtime or the morning departure, when they chose
 // one instead of typing a time. Worth storing beyond the time it produced: a frame somebody has
 // identified as "this is the moment they got up" is a LABELLED EXAMPLE, and that pairing — picture to
@@ -664,6 +682,13 @@ if (!pushTokenColumns.includes('base_url')) {
   db.exec('ALTER TABLE push_tokens ADD COLUMN base_url TEXT');
 }
 
+// GHSA-q98f: push_tokens.user_id was never cleaned up when its owning user was deleted (no FK/cascade
+// — unlike sessions.user_id, which does have one). routes/auth.js's DELETE /users/:id now deletes the
+// matching rows going forward; this is the one-time sweep for accounts removed BEFORE that fix existed,
+// so an already-orphaned row doesn't sit there until the next unrelated schema migration happens to run
+// this file at all. Runs every boot, but is a no-op after the first once there's nothing left to match.
+db.exec('DELETE FROM push_tokens WHERE user_id IS NOT NULL AND user_id NOT IN (SELECT id FROM users)');
+
 // Event-recording opt-in, per camera (separate from alerts — every detection still logs an event +
 // snapshot; a video clip is only captured when this is on). Turning it on starts that camera's
 // segmenter (lib/clipCapture.js). Off by default so a camera costs no disk unless asked. See
@@ -699,6 +724,15 @@ const activitySamplesColumns = db.prepare('PRAGMA table_info(activity_samples)')
 if (!activitySamplesColumns.includes('motion_out_peak')) {
   db.exec('ALTER TABLE activity_samples ADD COLUMN motion_out_level REAL');
   db.exec('ALTER TABLE activity_samples ADD COLUMN motion_out_peak REAL');
+}
+
+// ROADMAP §1.4 Phase 1: diagnostic percentiles and population sd of each minute's sound excursion.
+// Historical rows stay NULL; no backfill or live gating. Keep this last-sentinel group inside the
+// schema transaction so a failed boot cannot leave only some of the three columns committed.
+if (!activitySamplesColumns.includes('sound_sd')) {
+  db.exec('ALTER TABLE activity_samples ADD COLUMN sound_p75 REAL');
+  db.exec('ALTER TABLE activity_samples ADD COLUMN sound_p90 REAL');
+  db.exec('ALTER TABLE activity_samples ADD COLUMN sound_sd REAL');
 }
 
 // Sleep Stage 2 phase 5 (temp/humidity correlation): store each computed night's average room
@@ -739,6 +773,20 @@ if (!sleepNightsColumns.includes('onset_at_shadow')) {
 if (!sleepNightsColumns.includes('onset_at_algo')) {
   db.exec('ALTER TABLE sleep_nights ADD COLUMN onset_at_algo TEXT');
   db.exec('ALTER TABLE sleep_nights ADD COLUMN wake_at_algo TEXT');
+}
+
+// Sleep report notification history (ROADMAP 1.6): what the parent was actually TOLD about this
+// night's wake time. Deliberately excluded from upsertNight's own column list — an ordinary recompute
+// (including the admin "Recompute this night" route) must never touch these; only the notify path in
+// runNightlySleepJob writes them. notified_at is written once (the first notification) and never
+// overwritten — its only job is telling "never notified" apart from "notified, wake was unknown"
+// (notified_wake_at still null). notified_wake_at doubles as the one-shot follow-up cap: once a
+// follow-up sets it to a real value, nothing can make it null again (see sleepAnalysis.js's
+// `would_blank_notified_wake` refusal), so the condition that gates a follow-up can never be true twice
+// for the same night.
+if (!sleepNightsColumns.includes('notified_at')) {
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN notified_at TEXT');
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN notified_wake_at TEXT');
 }
 
 // Quick-silence: a per-camera temporary mute of ALL alerts (motion/sound/ONVIF/MQTT), for when you're

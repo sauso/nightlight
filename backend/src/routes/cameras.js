@@ -10,7 +10,7 @@ import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.j
 import { startMotionDetector, stopMotionDetector, motionLegWanted } from '../lib/motionDetector.js';
 import { startOnvifMotion, stopOnvifMotion, onvifMotionWanted } from '../lib/onvifMotion.js';
 import { startSoundDetector, stopSoundDetector } from '../lib/soundDetector.js';
-import { startClipCapture, stopClipCapture, clipRingWanted, isClipCapturing } from '../lib/clipCapture.js';
+import { startClipCapture, stopClipCapture, isClipCapturing, reconcileClipRing } from '../lib/clipCapture.js';
 import { transitionSnapshotPath } from '../lib/bedTransitions.js';
 import {
   getRecentDetectionEvents,
@@ -1071,10 +1071,11 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
     } else {
       await stopSoundDetector(updated.id).catch(() => {});
     }
-    // The ring follows BOTH the per-camera clip opt-in just saved and the global on-demand setting —
-    // turning detection clips off must not take the Record button away with them.
-    if (clipRingWanted(updated)) startClipCapture(updated);
-    else stopClipCapture(updated.id);
+    // The ring follows all three reasons a camera can want it (clipRingWanted) — turning detection
+    // clips off must not take the Record button away with them, and now a wake-only camera's edit
+    // must not drop its buffer either. reconcileClipRing (issue #387) so this stays one implementation
+    // with index.js/cameras.js's /assign/children.js instead of a fifth copy free to drift from them.
+    reconcileClipRing(updated);
   }
   // Re-subscribe MQTT so a new/changed/removed motion topic takes effect immediately.
   refreshMqttConnection();
@@ -1094,9 +1095,17 @@ router.put('/:id/assign', async (req, res) => {
   const updated = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   // Child assignment drives the activity-only sleep-motion leg (motionLegWanted keys off child_id), so
   // (un)assigning may start or stop it. No-op for a camera already covered by the frame-diff alert leg.
+  //
+  // clipRingWanted keys off child_id too, now that wake clips are a reason to buffer (issue #387) — this
+  // route was the gap an adversarial review found: assigning a camera to a sleep-tracked child left the
+  // wake-only ring unarmed until the next periodic reconcile (up to 5 min, and this is the path someone
+  // actually takes to reach wake-clip eligibility — create child, assign camera, THEN toggle tracking).
+  // Unassigning was worse: with no periodic stop path at the time (see index.js), the ring never stopped
+  // at all. That half is fixed too, but reconciling here still matters so it's immediate, not eventual.
   if (!updated.disabled) {
     if (motionLegWanted(updated)) await startMotionDetector(updated).catch(() => {});
     else await stopMotionDetector(updated.id).catch(() => {});
+    reconcileClipRing(updated);
   }
   // Through publicCamera like every other camera response. This route is deliberately open to
   // caregivers (assignment is day-to-day caregiving, not administration), and it was the ONLY site in

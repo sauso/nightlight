@@ -11,7 +11,7 @@
 //      card it was correcting — silently, in the data everything else is scored against.
 
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
 import { renderAsAdmin, renderAsCaregiver, forEachRole, renderAs } from './helpers/render.jsx';
 import MorningReviewCard from '../src/components/MorningReviewCard.jsx';
@@ -161,6 +161,52 @@ describe('the review screen', () => {
     expect(screen.getByText('No frame')).toBeInTheDocument();
   });
 
+  describe('enlarging a snapshot', () => {
+    // Clicking a thumbnail opens the same photo full-size in a modal, for frames that are too small
+    // or too dim to judge at 160x120 — the owner's own words: some are "hard to confirm".
+    test('clicking a thumbnail in the event list opens it enlarged, and it can be closed', async () => {
+      const { user } = at();
+      await openEvents(user);
+      await screen.findByText(/got out of bed/);
+
+      await user.click(screen.getByRole('button', { name: /Enlarge photo/ }));
+
+      const big = await screen.findByRole('dialog');
+      const bigImg = big.querySelector('.image-preview');
+      expect(bigImg).toHaveAttribute('src', '/api/cameras/bed-transitions/11/snapshot?token=t');
+      expect(within(big).getByText('Raffa Room')).toBeInTheDocument();
+
+      await user.click(within(big).getByRole('button', { name: /close/i }));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    // A transition with no snapshot renders the "No frame" placeholder, not an image — there is
+    // nothing to enlarge, so it must not be wrapped in a button either.
+    test('a transition with no frame is not clickable', async () => {
+      const { user } = at();
+      await openEvents(user);
+      await screen.findByText('No frame');
+      expect(screen.queryAllByRole('button', { name: /Enlarge photo/ })).toHaveLength(1);
+    });
+
+    test('the quick check-in thumbnail enlarges too', async () => {
+      api.get.mockResolvedValue({
+        ...NIGHT,
+        transitions: [
+          { id: 21, type: 'into_bed', created_at: '2026-08-29 09:51:00', snapshot: 1, verdict: null, camera_name: 'Raffa Room', quick_reversal_of: null, quick_reversal_gap_s: null },
+          { id: 22, type: 'out_of_bed', created_at: '2026-08-29 09:51:14', snapshot: 1, verdict: null, camera_name: 'Raffa Room', quick_reversal_of: 21, quick_reversal_gap_s: 14 },
+        ],
+      });
+      const { user } = at();
+      await screen.findByText('Quick check-in?');
+
+      await user.click(screen.getByRole('button', { name: /Enlarge photo/ }));
+
+      const big = await screen.findByRole('dialog');
+      expect(big.querySelector('.image-preview')).toHaveAttribute('src', '/api/cameras/bed-transitions/22/snapshot?token=t');
+    });
+  });
+
   test('saving sends what was typed, as wall-clock, for the server to resolve', async () => {
     // The browser deliberately does NOT convert. The night spans midnight and the app has its own
     // configured timezone, so resolving 19:33 and 05:48 to instants is the server's job — doing it
@@ -258,6 +304,231 @@ describe('the review screen', () => {
 
     await openEvents(user);
     expect(await screen.findByText(/got out of bed/)).toBeInTheDocument();
+  });
+
+  describe('lingering motion prompts', () => {
+    // Same shape as the backend evidence-precedes-display regression: oldest exit at
+    // 20:00:30 local, motion at 20:01-20:04, newest exit at 20:06 with no later movement.
+    const LINGERING_NIGHT = {
+      ...NIGHT,
+      transitions: [
+        { id: 41, type: 'out_of_bed', created_at: '2026-08-29 10:00:30', snapshot: 0, verdict: null, camera_name: 'Raffa Room', quick_reversal_of: null, lingering_motion_minutes: null, lingering_motion_gap_s: null },
+        { id: 42, type: 'out_of_bed', created_at: '2026-08-29 10:06:00', snapshot: 1, verdict: null, camera_name: 'Raffa Room', quick_reversal_of: null, lingering_motion_minutes: 4, lingering_motion_gap_s: 30 },
+      ],
+    };
+
+    test('shows separate-minute evidence without claiming it followed the displayed exit or was continuous', async () => {
+      api.get.mockResolvedValue(LINGERING_NIGHT);
+      at();
+      const card = (await screen.findByText('Still moving?')).closest('.card');
+      expect(within(card).getByText(/Recorded as out of bed at 20:06/)).toHaveTextContent(
+        'Recorded as out of bed at 20:06 — the bed also showed movement in 4 separate minutes with no return logged in between. What actually happened?'
+      );
+      // "then"/"since"/"later" all imply the movement followed the displayed exit chronologically —
+      // which is exactly the claim that can be false for a same-direction run's reported (newest)
+      // member, whose evidence is anchored at the run's OLDEST member instead. Found by an adversarial
+      // pre-merge review (Codex, gpt-6-astra), 2026-09-14: the first fix removed "after"/"kept moving"
+      // but left "then" carrying the identical implication, and this forbidden-word list didn't catch
+      // it either.
+      expect(card.textContent).not.toMatch(/\bafter\b|\bthen\b|\bsince\b|\blater\b|kept moving|more minutes|continuously|ongoing/i);
+      expect(screen.getByRole('button', { name: /Check the 2 recorded events/ })).toBeInTheDocument();
+    });
+
+    test('an ordinary night has no lingering prompt', async () => {
+      at();
+      await screen.findByRole('button', { name: /That.s right/ });
+      expect(screen.queryByText('Still moving?')).not.toBeInTheDocument();
+    });
+
+    test.each([
+      ['No, still in bed', 'wrong'],
+      ['Yes, they got up', 'correct'],
+      ['Not sure', 'unclear'],
+    ])('answering "%s" saves %s on the displayed exit', async (label, verdict) => {
+      api.get.mockResolvedValue(LINGERING_NIGHT);
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: label, exact: true }));
+      await user.click(screen.getByRole('button', { name: /Save just the event answers/ }));
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(api.put.mock.calls[0][1].verdicts).toMatchObject({ 42: verdict });
+      expect(api.put.mock.calls[0][1].verdicts[41]).toBeUndefined();
+    });
+
+    test('save is available while the full event list stays collapsed', async () => {
+      api.get.mockResolvedValue(LINGERING_NIGHT);
+      at();
+      expect(await screen.findByRole('button', { name: /Save just the event answers/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Check the 2 recorded events/ })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Up for the day here/ })).not.toBeInTheDocument();
+    });
+
+    test('a double-flagged exit renders exactly one quick check-in card and one verdict set', async () => {
+      api.get.mockResolvedValue({
+        ...NIGHT,
+        transitions: [
+          { id: 21, type: 'into_bed', created_at: '2026-08-29 09:51:00', snapshot: 0, verdict: null },
+          { id: 22, type: 'out_of_bed', created_at: '2026-08-29 09:51:14', snapshot: 0, verdict: null, quick_reversal_of: 21, quick_reversal_gap_s: 14, lingering_motion_minutes: 4, lingering_motion_gap_s: 46 },
+        ],
+      });
+      at();
+      expect(await screen.findAllByText('Quick check-in?')).toHaveLength(1);
+      expect(screen.queryByText('Still moving?')).not.toBeInTheDocument();
+      expect(document.querySelectorAll('.review-event__verdicts')).toHaveLength(1);
+      expect(screen.getAllByRole('button', { name: 'Not sure', exact: true })).toHaveLength(1);
+    });
+
+    test('different quick and lingering exits each get an independently answerable card', async () => {
+      api.get.mockResolvedValue({
+        ...LINGERING_NIGHT,
+        transitions: [
+          { id: 21, type: 'into_bed', created_at: '2026-08-29 09:51:00', snapshot: 0, verdict: null },
+          { id: 22, type: 'out_of_bed', created_at: '2026-08-29 09:51:14', snapshot: 0, verdict: null, quick_reversal_of: 21, quick_reversal_gap_s: 14 },
+          ...LINGERING_NIGHT.transitions,
+        ],
+      });
+      const { user } = at();
+      const quick = (await screen.findByText('Quick check-in?')).closest('.card');
+      const lingering = screen.getByText('Still moving?').closest('.card');
+      await user.click(within(quick).getByRole('button', { name: 'They got up', exact: true }));
+      expect(within(lingering).getByRole('button', { name: 'No, still in bed' })).toHaveAttribute('aria-pressed', 'false');
+      await user.click(within(lingering).getByRole('button', { name: 'No, still in bed' }));
+      expect(within(quick).getByRole('button', { name: 'They got up', exact: true })).toHaveAttribute('aria-pressed', 'true');
+      await user.click(screen.getByRole('button', { name: /Save just the event answers/ }));
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(api.put.mock.calls[0][1].verdicts).toMatchObject({ 22: 'correct', 42: 'wrong' });
+    });
+
+    test('answering before the timezone arrives preserves the verdict while reseeding onset and wake', async () => {
+      api.get.mockResolvedValue(LINGERING_NIGHT);
+      const { user, rerenderWith } = renderAsAdmin(routed, {
+        route: '/children/c-1/review/2026-08-29',
+        kids: [{ id: 'c-1', name: 'Raffa' }],
+        settings: { timezone: 'UTC' },
+      });
+      await user.click(await screen.findByRole('button', { name: 'No, still in bed' }));
+      rerenderWith({ settings: { timezone: 'Australia/Melbourne' } });
+      await waitFor(() => expect(screen.getByText('19:33')).toBeInTheDocument());
+      expect(screen.getByText('05:48')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /That.s right/ }));
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(api.put.mock.calls[0][1].verdicts).toMatchObject({ 42: 'wrong' });
+    });
+
+    test('the lingering snapshot opens the existing full-size preview', async () => {
+      api.get.mockResolvedValue(LINGERING_NIGHT);
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: 'Enlarge photo' }));
+      const dialog = await screen.findByRole('dialog');
+      expect(dialog.querySelector('.image-preview')).toHaveAttribute('src', '/api/cameras/bed-transitions/42/snapshot?token=t');
+    });
+  });
+
+  describe('quick check-in (an entry immediately undone by an exit)', () => {
+    const QUICK_NIGHT = {
+      ...NIGHT,
+      // created_at is UTC; the app's timezone in these tests is Melbourne (+10, see NIGHT's own
+      // 09:33 UTC -> 19:33 local assertion above) — 09:51 UTC is 19:51 local, not 19:51 UTC itself.
+      transitions: [
+        { id: 21, type: 'into_bed', created_at: '2026-08-29 09:51:00', snapshot: 1, verdict: null, camera_name: 'Raffa Room', quick_reversal_of: null, quick_reversal_gap_s: null },
+        { id: 22, type: 'out_of_bed', created_at: '2026-08-29 09:51:14', snapshot: 1, verdict: null, camera_name: 'Raffa Room', quick_reversal_of: 21, quick_reversal_gap_s: 14 },
+      ],
+    };
+
+    test('an ordinary night with no quick reversal shows no prompt, and no save-just-answers button', async () => {
+      // NIGHT's fixture has no quick_reversal_of on either transition — the prompt must not appear
+      // just because SOME transitions exist, and the save button gained a second way to appear
+      // (quickReversals.length > 0) that must not fire when there's nothing to answer.
+      at();
+      await screen.findByRole('button', { name: /That.s right/ });
+      expect(screen.queryByText(/Quick check-in/)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Save just the event answers/ })).not.toBeInTheDocument();
+    });
+
+    test('a quick reversal shows the check-in prompt WITHOUT opening the collapsed event list', async () => {
+      api.get.mockResolvedValue(QUICK_NIGHT);
+      at();
+      expect(await screen.findByText('Quick check-in?')).toBeInTheDocument();
+      expect(screen.getByText(/Got into bed at 19:51, then got out of bed again 14s later/)).toBeInTheDocument();
+      // The full list stays collapsed — this is a SEPARATE, always-visible prompt, not a reason to
+      // flood the screen the way the owner already complained about once.
+      expect(screen.getByRole('button', { name: /Check the 2 recorded events/ })).toBeInTheDocument();
+    });
+
+    test('answering "That was me" saves it as the out_of_bed being wrong, not the into_bed', async () => {
+      api.get.mockResolvedValue(QUICK_NIGHT);
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: /That was me/ }));
+      await user.click(screen.getByRole('button', { name: /Save just the event answers/ }));
+
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(api.put.mock.calls[0][1].verdicts).toMatchObject({ 22: 'wrong' });
+      expect(api.put.mock.calls[0][1].verdicts[21]).toBeUndefined();
+    });
+
+    test('answering "They got up" saves it as correct', async () => {
+      api.get.mockResolvedValue(QUICK_NIGHT);
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: /They got up/ }));
+      await user.click(screen.getByRole('button', { name: /Save just the event answers/ }));
+
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(api.put.mock.calls[0][1].verdicts).toMatchObject({ 22: 'correct' });
+    });
+
+    test('the save button for it appears even with the full event list still collapsed', async () => {
+      // Before this, "Save just the event answers" only appeared once showEvents was toggled — which
+      // this prompt deliberately never does. Without this fix, an answer here would have no save path.
+      api.get.mockResolvedValue(QUICK_NIGHT);
+      at();
+      expect(await screen.findByRole('button', { name: /Save just the event answers/ })).toBeInTheDocument();
+    });
+
+    test('two reversals in one night each get their own prompt, answered independently', async () => {
+      api.get.mockResolvedValue({
+        ...NIGHT,
+        transitions: [
+          ...QUICK_NIGHT.transitions,
+          { id: 31, type: 'into_bed', created_at: '2026-08-29 19:00:00', snapshot: 0, verdict: null, camera_name: 'Raffa Room', quick_reversal_of: null, quick_reversal_gap_s: null },
+          { id: 32, type: 'out_of_bed', created_at: '2026-08-29 19:00:20', snapshot: 0, verdict: null, camera_name: 'Raffa Room', quick_reversal_of: 31, quick_reversal_gap_s: 20 },
+        ],
+      });
+      const { user } = at();
+      expect(await screen.findAllByText('Quick check-in?')).toHaveLength(2);
+
+      // Answer only the second one — the first must stay untouched.
+      await user.click(screen.getAllByRole('button', { name: /They got up/ })[1]);
+      await user.click(screen.getByRole('button', { name: /Save just the event answers/ }));
+
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(api.put.mock.calls[0][1].verdicts).toMatchObject({ 32: 'correct' });
+      expect(api.put.mock.calls[0][1].verdicts[22]).toBeUndefined();
+    });
+
+    test('answering it first does not freeze onset/wake at the wrong timezone', async () => {
+      // Found in adversarial review, 2026-09-13: the verdict buttons set the SAME `touched` flag a
+      // time edit does, and unlike the old opt-in collapsed list, this prompt is often the very FIRST
+      // tap on the page — so answering it before /settings resolves (it starts at UTC, see the fetch
+      // effect's own comment) would have permanently frozen onset/wake in the wrong zone. Mirrors the
+      // existing "typing survives the timezone arriving" test, substituting a verdict tap for typing.
+      api.get.mockResolvedValue(QUICK_NIGHT);
+      const { user, rerenderWith } = renderAsAdmin(routed, {
+        route: '/children/c-1/review/2026-08-29',
+        kids: [{ id: 'c-1', name: 'Raffa' }],
+        settings: { timezone: 'UTC' }, // as it is for the first moments after a reload
+      });
+
+      await user.click(await screen.findByRole('button', { name: /They got up/ }));
+
+      // /settings resolves and the real zone replaces the placeholder, AFTER the verdict tap.
+      rerenderWith({ settings: { timezone: 'Australia/Melbourne' } });
+      await waitFor(() => expect(screen.getByText('19:33')).toBeInTheDocument());
+      expect(screen.getByText('05:48')).toBeInTheDocument();
+
+      // And the verdict answered before the zone resolved must have survived the reseed too.
+      await user.click(screen.getByRole('button', { name: /That.s right/ }));
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(api.put.mock.calls[0][1].verdicts).toMatchObject({ 22: 'correct' });
+    });
   });
 
   test('typing survives the timezone arriving — the form must not reset under you', async () => {

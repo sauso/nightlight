@@ -78,7 +78,11 @@ export default function CameraReportButton({ payload }) {
         Generate a diagnostic report and attach it to a GitHub issue so support can be added for this
         camera. It captures the stream's codecs and any ONVIF details, with{' '}
         <strong>passwords redacted</strong> — the file stays on your device, so open and check it
-        before you post it anywhere.
+        before you post it anywhere. If it still contains something sensitive,{' '}
+        <a href="https://github.com/sauso/nightlight/blob/main/SECURITY.md" target="_blank" rel="noreferrer">
+          report it privately
+        </a>{' '}
+        instead.
       </p>
       {error && <div className="onvif-box__err">{error}</div>}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>

@@ -115,8 +115,9 @@ about how OFTEN it moves, never how hard.**
 
 ⚠️ **The remaining failure mode is the one no amount of threshold work fixes:** the detector cannot
 tell a parent's hands leaving the bed from a child climbing out, because motion in two zones is all it
-has. That is item 3, and it is the same gap §2.5 (camera occupancy) exists to close from the other
-side.
+has. That is item 3. A camera-vision approach to closing it from the occupancy side was tried and
+abandoned (§4, "Bed occupancy via camera vision") — item 3's retrospective-rule work below is now the
+only active path, with a physical occupancy sensor as a possible future independent source.
 
 ★ **Item 1 (no occupancy state) is still open, but the wake path no longer depends on it.** 0.30.1
 (#327 + #342) defends against the `out → in → out` cluster *inside the morning-departure scan* rather
@@ -168,7 +169,8 @@ it is re-runnable, and item 1 is scored against whatever it returns after the ho
 + `transition-snapshots/`, 45-day retention in lockstep). Until now the detector recorded *when* it
 thought the bed changed with no way to see what it was looking at when it decided. Combined with the
 query above, the wrong events now collect themselves with a picture attached — which is both the way to
-diagnose item 3 and the only honest test set for §2.5.
+diagnose item 3 and, combined with owner verdicts, the ground truth a future occupancy sensor (§4) would
+need to be scored against.
 
 ⚠️ These bad transitions do **not** currently corrupt reported sleep — the analysis uses episode grouping
 and the occupancy guard rather than trusting raw event labels. They are why per-event markers still
@@ -213,21 +215,320 @@ counts as **historical**, not as the current state.
 
 **Work:**
 1. Track believed occupancy; ignore an `into_bed` while already in bed and an `out_of_bed` while already
-   out. (Alone this collapses the four arrivals to one.) — **still open**, and still the cheapest win.
+   out. (Alone this collapses the four arrivals to one.)
    ★ Target: whatever `getImpossibleTransitions()` returns when it is re-run after the holdout. It
    returned 147 pairs against the OLD zones — historical, see the warning at the top of this section.
-   ★ This is *inferred* occupancy and needs no model — do it regardless of §2.5, which would supply the
-   same fact as independent evidence from the camera. They are complementary; neither waits on the other.
+   ★ This is *inferred* occupancy and needs no model — a camera-vision approach to the same fact was
+   tried and abandoned (§4); a future physical occupancy sensor could supply it independently, but this
+   item never depended on either.
+   ✅ **LOG-ONLY IMPLEMENTATION SHIPPED 2026-09-12** — turned out NOT to be the "cheapest win" it
+   looked like. A retrospective check against real owner-verdicted transitions (both environments)
+   found that actually SUPPRESSING a same-direction repeat is unsafe on this classifier's current
+   false-positive rate: a repeat only proves at least one of the pair is wrong, never which, and the
+   naive rule always kept whichever confirmed FIRST. When a false transition slips through — the
+   clear majority of `out_of_bed` events, per item 2's same-day peak/verdict measurement — it poisons
+   belief and silently drops the REAL transition after it, until an opposite-direction event resets
+   belief. Confirmed on Renz's actual 2026-09-11 night: a false 04:26 exit would have caused the real
+   06:34 wake to be the one discarded. 22 owner-verdicted-CORRECT transitions across both environments
+   would have been wrongly dropped. **So this ships log-only**: `believedOccupied` is tracked and a
+   contradiction is logged, but every transition is still recorded exactly as before — zero data or
+   detection-behavior change. See `bed-transition-classifier-flaws.md` for the full analysis.
+   ⚠️ **STILL OPEN: an actual gate.** A "keep the last of a repeat, not the first" retrospective check
+   fixed 19 of the 22 cases found above, but isn't a small tweak: the earlier transition is already a
+   committed (sometimes human-labelled) row by the time the later one arrives, so this needs either a
+   safe retroactive-invalidation rule (never touch a verdicted row) or a downstream preference at the
+   analysis layer instead of a real-time gate. Revisit once item 2's evidence-based threshold reduces
+   the false-transition rate — some of item 1's failure cases are literally false transitions item 2
+   will eventually stop from being recorded at all, fixing the upstream cause instead of the symptom.
+   ★ **Related finding, 2026-09-13: a missed ENTRY was completely silent, unlike a missed exit.** The
+   OOB side has always logged a "near miss" when the bed goes active with no linkable outside burst
+   (`OOB_NEARMISS_MS`); the IB side had no equivalent, so when a real bedtime fails to link, nothing
+   says why. Real case: Renz's 2026-09-12 bedtime — staging recorded ZERO `into_bed` for the whole
+   ~50-minute settling window (prod, an independent detector on the same camera, did eventually link
+   one at 19:51, immediately followed 14s later by a low-evidence `out_of_bed` that likely erased it
+   from the timeline anyway). **Fixed by adding the missing near-miss log**, mirroring exactly what the
+   OOB side already checks (bed active, nothing linkable on the outside channel) — it does **not** cover
+   every way an entry could go unrecorded: a placement where the bed and outside channels are active in
+   the SAME frame (found in adversarial review, 2026-09-13) still opens no candidate and logs nothing,
+   because neither this diagnostic nor the original candidate-open condition it mirrors handle
+   simultaneous activity — a pre-existing gap in the candidate condition itself, not something this log
+   line was ever positioned to catch. Left alone rather than expanding scope on a guess.
+   ⚠️ Gated on `believedOccupied` (from item 1, above) rather than a time bound, AND on the bed having
+   been quiet just before this frame (reusing `ACTIVE_GRACE_MS`, the same grace period the confirm logic
+   already uses to decide a motion run hasn't ended) — **both conditions are needed, not just the
+   first.** `believedOccupied` alone is not enough: it starts `null` after every restart and stays null
+   until a transition confirms one way or the other, so on a restart that happens mid-sleep (real case:
+   both containers restarted at 02:03 local on 2026-09-12) ordinary stirring by an already-sleeping,
+   never-yet-confirmed child would otherwise re-log every `IB_NEARMISS_LOG_MS` for the rest of the
+   night — caught in the same adversarial review, before it shipped. Requiring a fresh episode bounds
+   this to "how often the child changes position", not a clock. Does not touch `IB_LINK_MS` or open the
+   "slow window" question for entries — that stays deliberately unchanged pending real data on how often
+   a genuine, quiet placement fails to link (which this new log line now makes measurable for the first
+   time).
+   ⚠️ **Separately measured 2026-09-13: an `into_bed` immediately followed (within 60s) by an
+   `out_of_bed` on the same camera happens in ~8% of all recorded entries (86 of 1053 transitions,
+   both cameras, ~3 weeks)** — and virtually none of these pairs have an owner verdict (1 of 86),
+   because the morning review only surfaces events, it doesn't specifically ask about fast reversals.
+   ★ **Owner's theory, unprompted, 2026-09-13**: "It seems to be when you go to kiss the child and
+   leave the room it thinks they got out of bed" — leaning over the bed right after placing the child,
+   then stepping back and leaving, is exactly the outside-then-quiet shape `out_of_bed` looks for, with
+   no child movement involved. **This is item 3's exact gap** (telling a parent's motion from a
+   child's), from the entry side rather than the exit side it was originally framed around.
+   ✅ **CHECKED AGAINST DATA THE SAME DAY, two independent ways, both pointing the same direction:**
+   - **Visual**: pulled the paired snapshots for a 9-case spread across both cameras and 3 weeks.
+     Every case with anyone visible at all showed a parent in frame leaving via the door (4/9); the
+     child was lying still in EVERY case, never once shown moving or sitting up. The exact pair this
+     whole gap was diagnosed from (Renz, 2026-09-12 19:51:00→19:51:14) is the clearest example: the
+     `into_bed` snapshot shows a parent leaning right over the bed; 14 seconds later the `out_of_bed`
+     snapshot shows the same parent mid-stride, walking out the door, child undisturbed in bed.
+   - **Independent, and scaling to the full 86**: the bed zone's own `motion_peak` in the hour AFTER
+     the trailing `out_of_bed` (>`MOTION_ACTIVE`, sleepAnalysis.js's own calibrated per-minute test) —
+     an empty bed should read close to silent, per the same assumption the empty-bed guard itself
+     already relies on. **60% (52/86) kept showing 4+ active minutes of completely normal stirring**
+     in that following hour — essentially impossible if the child had actually left. Only **9 of 86
+     (all Raffa, none Renz) went fully silent for the whole hour** — the one signature actually
+     consistent with a real departure.
+   **Conclusion: most of these 86 are very likely a parent's presence being misread as a child's exit,
+   not classifier noise with no physical cause and not a real child getting straight back up.**
+   ✅ **Tooling shipped 2026-09-13**: `getQuickReversals()` in `bedTransitions.js`, mirroring
+   `getImpossibleTransitions()`'s shape exactly (query-only, tested, same newest-first-across-cameras
+   discipline). Query only — nothing acts on this yet; it needs owner-verdict ground truth on THIS
+   specific pattern before anything downstream (surfacing in the morning review for labelling, or an
+   analysis-layer discount on `wake_count`/`awake_minutes`) can safely be built, and there is almost
+   none yet. This is what makes gathering that possible without guessing at a real-time gate.
+   ✅ **DECIDED and SHIPPED 2026-09-13, option (a).** Owner chose to surface these for owner-verdict
+   labelling rather than go straight to an analysis-layer discount on `wake_count` — same reasoning as
+   items 1 and 2's own history: build the ground truth before building the rule. `NightReview.jsx` now
+   shows a small, NOT-collapsed "Quick check-in?" prompt for any `into_bed`/`out_of_bed` pair the
+   server flags via `quick_reversal_of` (deliberately separate from the full event list, which stays
+   collapsed by default — the owner's own past words, "it's also flooded with in and out of bed", are
+   exactly why relying on that list here would have buried the one question actually worth asking).
+   Reuses the existing verdict mechanism unchanged (no new schema): "That was me" → `wrong`, "They got
+   up" → `correct`, "Not sure" → `unclear`, stored on the `out_of_bed` row. Copy is deliberately
+   neutral rather than suggesting "this was probably you" — leading the answer would poison the exact
+   ground truth this exists to collect. Option (b) (the analysis-layer discount) is not built; revisit
+   once verdicts actually accumulate on this pattern.
 2. Record the outside channel's **peak and duration** alongside each transition — new columns on
    `bed_transitions` — and require substantial outside evidence for `into_bed`, symmetric for
-   `out_of_bed`. — **lower priority now**: the zone fix removed the false arrivals this was aimed at,
-   and the evidence columns are still worth having, but no longer urgent.
+   `out_of_bed`. — **RE-OPENED 2026-09-12, exit side only.** The earlier "lower priority, no longer
+   urgent" call was right about `into_bed` and wrong to generalise to `out_of_bed` — nobody re-checked
+   the exit side separately, and it is not fixed.
+   ★★★ **Renz 2026-09-11: a confirmed `OUT OF BED` at 04:26 from a single frame of outside motion,
+   owner-corrected same morning** (marked "wrong"; real wake 06:34, over 2h later). He had genuinely
+   stirred and returned at 04:15–04:16 (both correct), then kept settling near the zone edge for ~10
+   more minutes — ordinary jitter, logged as repeated candidates opening and cancelling within
+   100–700ms. One of those bursts measured 5.7% outside motion, the bed then stayed quiet the
+   required 6s, and the detector logged a real exit. Nothing contradicted it for 2h08m (true silence,
+   verified in `activity_samples`), so the departure scan — correctly, by its own rules — trusted it.
+   The real 06:34 wake measured ~20x the motion amplitude (peak 100%, outside 99%) of the false one.
+   ⚠️ **Read from the code, not assumed: `OOB_SLOW_OUT_MIN` (5%) only gates the SLOW link (8–60s since
+   last bed motion) — the FAST link (`OOB_LINK_MS`, ≤8s) that fired this exit has NO minimum
+   outside-magnitude requirement at all**, only recency. For a marginal sleeper the fast path is the
+   one actually exercised, and it currently has zero floor, not a low one.
+   ⚠️ Neither item 1 nor item 3 would have caught this — checked against both before re-opening this
+   one. Item 1 only suppresses a *repeated same-direction* transition; this was a single, correctly-
+   ordered `into_bed` → `out_of_bed`, nothing repeats. Item 3's rule needs *continued in-bed
+   micro-motion* after the exit to call it a parent; here the bed read genuinely, fully empty for
+   2h08m — indistinguishable from a real departure by that rule. This gap is item 2's alone.
+   ✅ **RECORDING half SHIPPED 2026-09-12** — `bed_transitions.out_peak`/`out_frames` now capture the
+   outside channel's peak and duration on every future transition (both directions). Before writing
+   any code, a peak-only floor was checked against 468 owner-reviewed verdicts already on staging:
+   `out_of_bed` correct 1.3–16.4% vs wrong 1.2–31.1%, `into_bed` correct 1.4–17.5% vs wrong 1.2–33.4%
+   — **peak alone does not separate them on either direction**, "wrong" has the higher ceiling on
+   both, so no peak threshold would have helped. Recording is deliberately record-only, no gating:
+   duration is the untested half and can't be evaluated until it has actually accumulated.
+   ⚠️ **STILL OPEN: picking a duration threshold and gating confirmation on it.** Needs real
+   `out_frames` data to accumulate across enough nights on both cameras, then the same
+   two-populations-and-a-number-between-them argument as `OOB_SLOW_OUT_MIN`/`JITTER_REENTRY_MS`,
+   scored on the 44-child-night set before shipping — Renz's wake is currently the best number in the
+   system (median 1 min) and a naive fix risks regressing it. Do not close this item until that half
+   ships too.
 3. Separate "parent leaves" from "child exits". Retrospective is fine: the nightly job runs after the
    night, so an `out_of_bed` followed by continued in-bed micro-motion is a parent leaving. — **still
    open, and now the most valuable item.** Measured 2026-08-27: the real put-down at 19:14 was recorded
    as an `out_of_bed` (the parent's hands leaving the bed), so that night had no bedtime `into_bed` at
    all and the drawn marker was 40 minutes adrift. The reported bedtime survived it, but only because
    the sleep analysis no longer depends on the label being right.
+   ★ **Gap B below shipped WITHOUT this** — the two were meant to be built together, but the mechanism
+   that survived six review rounds only ever answers "was the bed empty during the gap", never "who
+   caused the transitions". A quiet gap bracketed by two adult visits (a parent leaning in, leaving,
+   returning, leaving again) still reads as a child's episode — named explicitly in Gap B's own known
+   limits. This item is what would close that gap; it remains open and is now that mechanism's single
+   biggest known blind spot, not merely an adjacent nice-to-have.
+   ✅ **Tooling shipped 2026-09-14**: `getLingeringBedMotion()` in `bedTransitions.js` generalizes
+   `getQuickReversals()`'s own second, data-driven check — the bed zone's own `motion_peak` showing
+   4+ DISTINCT active minutes in the hour after a trailing `out_of_bed` — from quick-reversal pairs
+   only to EVERY `out_of_bed` still within `activity_samples`' retention window, conditional on there
+   being no `into_bed` recorded on the same camera before the qualifying minutes (an ordinary,
+   already-corroborated return, exactly what `detectMidnightEpisodes` already treats as a real short
+   awakening, is never flagged; same-direction repeats are reported once, not once per repeat).
+   Requiring 4+ DISTINCT minutes (not 1, not 1 row) matters beyond matching the figure
+   `planning/ROADMAP.md` itself reports: `activityTracker.js`'s minute flush is not phase-aligned to
+   wall-clock minutes, so a single-minute threshold would flag an exit's OWN departure motion,
+   mis-timed into the following bucket by flush lag, for roughly HALF of all exits — found reviewing
+   this plan before it shipped, along with a second finding that `activity_samples` carries no
+   uniqueness constraint on (camera_id, bucket_start), so counting ROWS instead of distinct minutes
+   would have reopened the same hole via duplicate rows.
+   ⚠️ **Generalizing the check MECHANICALLY is not the same claim as generalizing it
+   STATISTICALLY** — the quick-reversal validation also leaned on an independent visual sample this
+   broader population doesn't have, and its dominant case (a terminal/morning exit, with no `into_bed`
+   until the next bedtime) is exactly where ordinary daytime room use could flag at a rate nobody had
+   measured before shipping. **Measured against real staging data, 2026-09-14** (758 total
+   `out_of_bed` transitions): **62 flagged, an 8.2% overall flag rate.** Against the 37 `out_of_bed`
+   transitions the owner has verdicted `correct`, only **2 flagged — a 5.4% false-positive proxy**
+   (small sample, 37 rows — a rough early signal, not a settled number). **Hour-of-day is
+   reassuring**: 45% of all flags fall in the 18:00-19:59 local hour (evening bedtime routine) and
+   another ~19% in 06:00-08:59 (morning wake) — the two sleep-transition-boundary windows this
+   diagnostic actually targets — while 09:00-12:59 and 14:00 produced **zero** flags, so the
+   ordinary-daytime-room-use flooding concern raised above did not materialize in this sample. A few
+   flagged transitions already coincide with rows the owner independently marked `wrong` on
+   2026-09-13. Query only, same posture as `getImpossibleTransitions` and `getQuickReversals`: nothing
+   acts on this yet — no gating, no `wake_count` change, no UI. **Item 3 remains open**: this is Phase
+   1 (surfacing the pattern, now measured on one house's two cameras); it still needs owner-verdict
+   ground truth specifically on this broader population, and more nights of data, before any rule can
+   be built on it, exactly as items 1-3's own history has required every time so far.
+   **Phase 2 implemented 2026-09-14**: the morning review now surfaces "Still moving?" for
+   lingering-motion exits, ahead of the collapsed event list, and records answers through the existing
+   transition verdict. Quick check-in wins when both flags apply, so one event never gets two prompt
+   cards. Queries cover this child's night plus one hour at both edges; a leading run that continues
+   from before that fetch is suppressed because its true oldest anchor is unknown — found in adversarial
+   plan review (Codex, gpt-6-astra): the naive bounded query could FABRICATE a flag the full-table rule
+   never would (a same-direction run truncated at the fetch edge gets mis-anchored at its visible-but-
+   not-true oldest member), not just miss one as first assumed. **Double-flag rate re-measured against
+   real staging data at ship time, 2026-09-14** (773 total `out_of_bed` transitions): 97 quick-reversal
+   flagged (12.6%), 63 lingering-motion flagged (8.2%), only **3 flagged by both** (4.8% of lingering
+   flags) — consistent with the Phase 1 measurement a few hours earlier, confirming the overlap is real
+   but small. ⚠️ **Known, accepted gap found in adversarial pre-merge review** (a Claude subagent,
+   verified with a standalone reproduction): a run whose oldest and newest members straddle a review
+   night's boundary by more than an hour can go unreported on BOTH adjacent nights — never a fabricated
+   flag, only a real one the whole-table diagnostic would find but neither morning review shows. Not
+   fixed this round; see the code comment in `sleepReviews.js` for why. This is still **Phase 2,
+   ground-truth collection** — no gating attempted, no
+   `wake_count`/`awake_minutes` or
+   `detectMidnightEpisodes` change. Item 3 remains open pending real owner labels.
+   ★★★ **A REAL, RECORDED INSTANCE OF THE SIMULTANEOUS-ACTIVITY GAP — 2026-09-16, Raffa, night_date
+   `2026-09-15`, and a concrete regression-test candidate for whenever this item is next worked (owner:
+   next week).** Owner-corrected `true_wake_at` = **06:15:00 local** (`sleep_reviews`, typed by hand —
+   no transition to link to, `true_wake_transition_id IS NULL`). What the classifier actually recorded
+   around it, **on two independent detectors** (prod camera `dce8157e…`, staging camera `96f35fdc…`,
+   same child, same night): a confirmed `into_bed` at 06:10:02, then **nothing** until an `out_of_bed`
+   at **07:11:09** — which the owner had already separately marked `verdict='wrong'` as a transition,
+   independent of and before this being folded in here. Prod additionally shows the resulting impossible
+   pair this gap produces: a stray `into_bed` at 06:44:10 with no `out_of_bed` before it, since believed
+   occupancy never flipped.
+   Raw `activity_samples` for the missed window (UTC `2026-09-15 20:15:00`–`20:18:00`, i.e. 06:15–06:18
+   local): bed-zone `motion_peak` **0.157–0.203** for four straight minutes, simultaneously with
+   outside-zone `motion_out_peak` **0.035–0.069** in the SAME minutes — then the bed reads exactly
+   **0** from 06:19 through 06:27, the real departure's quiet signature. This is the exit-side mirror of
+   the entry-side gap named above (2026-09-13 review): the candidate-open condition (`outActive &&
+   !cribActive`, `motionDetector.js`) never fires when both channels are active in the same frame, so a
+   climb-out that isn't cleanly sequenced — legs already over the rail while the torso is still moving in
+   the bed zone — opens no candidate and logs nothing, not even a near-miss. **Test-case pointers for the
+   fix**: child `c75ed329-de89-42ca-83aa-edaf692295b6` (Raffa), camera `96f35fdc-f12f-4a6b-9c82-
+   887be7e95108` (staging) / `dce8157e-e80f-4eb1-919f-8aca00d10444` (prod), `night_date '2026-09-15'`,
+   missed-exit window UTC `20:15:00`–`20:18:00`. Whatever fixes the simultaneous-activity gap should be
+   checked against this exact incident before it's called done.
+   ★★★ **2026-09-18 — owner reviewed two more nights (both kids) and it recurred a THIRD time, plus one
+   genuinely new-shaped failure.** Cross-checked staging `sleep_reviews` (owner-entered true onset/wake)
+   against `sleep_nights`/`bed_transitions`/`activity_samples` for night_date `2026-09-16` and
+   `2026-09-17`, both children:
+   - **Raffa 09-16→17: the identical 06:15 miss, third night running.** True wake 06:15, computed 06:46
+     (31 min late). `activity_samples` is nearly a carbon copy of the 09-15 incident: bed-zone
+     `motion_peak` 0.167–0.175 for four minutes (06:15–06:18) with `motion_out_peak` simultaneously at
+     0.040–0.055 (same channel-linking gap), then a hard **0** from 06:19–06:27 (the real departure,
+     unlinked), two more parent-check bursts with the same simultaneous signature (06:28, 06:41), and
+     finally an unambiguous spike (`motion_peak`=1.0 at 06:43) that DOES trigger two `out_of_bed` events
+     — both owner-marked `wrong`, since believed occupancy is thoroughly confused by then.
+   - **Raffa 09-17→18: item 3's OTHER half — a correctly-caught wake, delayed by 73 minutes anyway.**
+     True wake 06:04:07 matched an owner-`correct` transition exactly. But computed wake drifted to
+     07:17 because a parent visited afterward (06:16 `into_bed`, 06:41 `out_of_bed`, 06:43 `into_bed` —
+     mostly `wrong`) and the algorithm didn't declare "awake for good" until that noise stopped. Same
+     root cause as the missed-exit half, just the delayed-settling symptom instead of the invisible one.
+   - **Renz 09-16→17: `wake_at` NULL entirely** against a true wake of 07:10 — no transition anywhere
+     near it, `wake_count=6`/`awake_minutes=83` from motion-based runs alone with nothing to anchor a
+     final departure. Same family as the two above.
+   - ★★★ **Renz 09-17→18: a 3.5-HOUR onset miss that does NOT match items 1/2/3 as currently written —
+     a related but distinct symptom, worth its own line.** True onset 23:33:44 (owner-confirmed, matches
+     a real `into_bed`); computed onset **20:04** — off by hours, not minutes. Traced in
+     `activity_samples`: an active, loud bedtime routine 18:58–19:23 (`motion_peak`/`motion_out_peak`
+     both hitting 0.3–1.0 together — lights on, parent in room) produced only three false `out_of_bed`
+     events (all owner-marked `wrong`), because the SAME simultaneous-both-channel gap meant no
+     `into_bed` could ever open during it. After 19:23 the room goes essentially silent for **four
+     hours** — he was quiet but not yet actually in bed — until the real placement at 23:33. With no
+     transition to anchor onset, the motion-only fallback grabbed the first sufficiently-long quiet run
+     (20:04) and called it sleep onset, conflating **quiet** with **asleep** over an unusually long
+     pre-bedtime wakeful stretch. Same upstream cause as item 3, but the failure shape — a multi-hour
+     quiet-but-awake window read as onset — isn't described by items 1, 2, or 3's own wording; whoever
+     fixes the simultaneous-activity gap should check whether closing it also closes this, or whether
+     this needs its own onset-side guard (e.g. requiring SOME corroborating transition, even a rejected
+     candidate's timestamp, before trusting a motion-only quiet run as onset on a night this late).
+   **Test-case pointers for both new nights**: `night_date '2026-09-16'` and `'2026-09-17'`, same
+   child/camera ids as the 09-15 entry above. Owner picking this up when their usage limit resets.
+   ★★★ **2026-09-18 — two rounds of adversarial design review (Opus, standing in for a
+   rate-limited Codex) both REJECTED a live-code fix before anything was built.** Full detail,
+   including every verification query and its result, in
+   `reviews/simultaneous-activity-gap-plan-2026-09-18.md`. Round 1 (relax both candidate-open conditions,
+   tolerate-then-confirm): found the design **actively harmful** — a real exit could also fabricate
+   a spurious `into_bed` minutes later, which trips the existing `reversedBy` guard
+   (`sleepAnalysis.js:1074-1085`, no fallback) and vetoes the real exit, reproducing the exact
+   `wake_at = null` symptom the fix was meant to cure; the proposed abandon-timeout was a no-op
+   (reset every frame); the tolerance window admitted the exact 100-700ms jitter population item 2's
+   Renz 2026-09-11 analysis says today's code correctly rejects; and the proposed validation gate
+   (the three existing diagnostics) would have IMPROVED while the classifier got worse, since the
+   fabricated transition happens to remove an "impossible pair" and blind the lingering-motion check.
+   Round 2 (belief-gated arbitration — only one side may open on a co-active frame, chosen by
+   `believedOccupied`, plus a re-arm latch): found the fabrication still happens, one frame later,
+   through the OPPOSITE side's ordinary clean path (never made mutually exclusive with the new
+   co-active path); found the arbitration signal is itself flipped by the fix's own confirms, so a
+   confirmed exit *arms* the opposite side a few minutes later (traced against real 09-16 data — a
+   parent-check burst 9 minutes after the exit — to reproduce the same wrong wake); and found the
+   abandon latch is dead on the exact negative case (Renz 09-17) it exists to protect, since that
+   window's own recorded symptom (three false `out_of_bed` events, each needing 6+ continuous seconds
+   of bed-quiet under today's rules) proves it already contains multiple genuine quiet moments that
+   clear the latch immediately.
+   ★★★ **Verification queries run 2026-09-18, both prod AND staging (independent detectors,
+   confirms this isn't one camera's artifact) — the diagnosis itself holds up.** Round 2's central
+   open question was whether `motion_out_peak` stays active when the bed goes quiet in the 09-15
+   incident (which would mean today's existing clean path should already have fired, and the whole
+   theory is aimed at the wrong cause). Checked directly: at 20:19 UTC (06:19 local, when
+   `motion_peak` drops to exactly 0), `motion_out_peak` ALSO drops to baseline (~0.0003-0.0009,
+   identical to the pre-activity 20:14 baseline) on BOTH prod and staging — bed and outside quiet
+   together, not outside-stays-active-while-bed-quiets. The theory is not falsified by this check.
+   The Renz 09-17→18 onset-regression risk (a belief-gated design could fabricate an early
+   `into_bed` during the 18:58-19:23 routine, which `bedOccupiedAfter`'s 3-minute/150-minute witness
+   would then validate, moving onset from the already-wrong 20:04 to an even-more-wrong ~19:23) is
+   CONFIRMED live, not just plausible: 26 (prod) / 28 (staging) minutes with `motion_peak >= 0.0005`
+   in the 150-minute witness window — far past the 3-minute bar. New finding from this pass: on the
+   09-16→17 night, the last transition recorded before the whole overnight gap (bedtime `into_bed`
+   at 19:13:52 local) is on staging already owner-verdicted `wrong` — so even "last recorded
+   transition" as an occupancy prior would anchor on a transition already known to be false, a
+   further caution for any belief-gated design attempt.
+   **Recommended next steps, in order**: (1) extract `motionDetector.js`'s OOB/IB state machine into
+   a testable module (`bedTransitionTracker.js`, mirroring `soundBaseline.js`'s injectable-clock
+   shape) — zero test coverage exists on this code today, and no mechanism design can be verified
+   without it; (2) live diagnostic logging of time-from-co-active-open-to-first-quiet (not episode
+   duration — round 2 corrected the statistic), to gather real calibration data before any constant
+   is chosen; (3) only then attempt a third mechanism design, starting from round 2's fix list: break
+   the double-pending-open hole, break the belief→eligibility feedback loop, and decide what
+   `out_frames`/`peak` mean for a co-active-opened row before writing one. Neither rejected design's
+   shape should be the starting point.
+   ✅ **Recommended step (1) SHIPPED 2026-09-18** — `motionDetector.js`'s OOB/IB state machine extracted
+   verbatim into `bedTransitionTracker.js` (mirroring `soundBaseline.js`'s injectable-clock shape),
+   confirmed behavior-identical to the pre-extraction code via a 400k-synthetic-frame differential fuzz
+   in adversarial review (zero divergence in logs, `recordBedTransition` calls, or `believedOccupied`).
+   Now in `test:core` at 100% lines / 98.21% branches / 100% functions, with 30 tests — the first test
+   coverage this state machine has ever had. First review pass found the test suite itself under-
+   discriminated (47% mutation score, including a surviving `peak`/`outPeak` swap on the `into_bed`
+   confirm payload — exactly the asymmetric-field corruption this file's own DB comment warns a refactor
+   can introduce); fixed and reverified by hand-applying that exact mutant plus a `cribWasIdle`-guard
+   deletion and confirming both now fail exactly one test each. **Recommended step (2) SHIPPED
+   alongside it**: a rate-limited `[coactive]` diagnostic log line (see `planning/sleep-marker-review-
+   runbook.md` §4), purely observational — logs time-to-first-quiet and which channel resolved first
+   whenever both channels are active in the same frame, never touches `bed_transitions`. **Shipped to
+   prod in 0.31.0 (2026-09-19)** — burn-in is still needed before its `CO_ACTIVE_LOG_COOLDOWN_MS`-censored
+   duration data is enough to calibrate a real overlap-tolerance constant; nothing acts on the logged
+   data yet. Step (3), a third mechanism design, remains not started — the whole point of steps (1)/(2)
+   was to have real data before attempting it again.
 4. **New: log-driven tuning is now possible.** The exit rule logs rejected links (`[oob] … link
    rejected`) with the actual gap and outside magnitude, so the real distribution can be read off a
    week of logs rather than guessed. Read it before moving `OOB_LINK_SLOW_MS` or `OOB_SLOW_OUT_MIN`.
@@ -332,16 +633,230 @@ threshold is still really a statement about the room's variance. The measurement
 stands: the affected room would still read ~41% of minutes active against 19% for the other, even with
 a perfectly healthy baseline.
 
-**Held until the monitor phase ends (~2026-09-09).** Not because it is hard, but because it changes the
-input to the frozen sleep algorithm, and a mid-holdout change to `activityTracker` would perturb the
-very measurement the phase exists to take. Documented as a known limitation in `docs/notifications.md`
-meanwhile.
+**Phase 1 instrumentation shipped:** `activityTracker.js:109` records `sound_p75`, `sound_p90` and
+`sound_sd` from each minute's actual accepted, zero-clamped sound excursions, alongside the existing
+mean and max. Nearest-rank p75 needs 76 elevated readings out of 300 (~15.2s); p90 needs 31 (~6.2s),
+so p75 is more robust and p90 more sensitive to shorter bursts. Population sd records the spread for
+checking the variance premise against real rooms; the zero-clamped stream is not a raw Gaussian.
+The nullable migration is inside the schema transaction (`db.js:732`); historical rows stay NULL.
+The monitor holdout closed 2026-09-09. This is instrumentation only: baseline tracking, motion,
+`onMinuteFlushed`'s payload, all three `SOUND_ACTIVE` comparisons and reported sleep numbers are unchanged.
+
+**Phase 2 remains open, gated on real accumulated data:** choose the statistic and threshold, then
+cut over `SOUND_ACTIVE` in a separate change. Analysis will query SQLite directly against a DB snapshot;
+the fixed `/activity-history` SELECT does not expose these diagnostics. Only the existing mean and
+the recorded p75/p90/sd will be available for that comparison. A different, unrecorded percentile cannot
+be recovered from these summaries and would require a fresh collection window.
 
 **Prerequisite, and it is now DONE**: `soundDetector.js` was untestable (`handleReading` was a closure
 inside `launch()` inside `startSoundDetector`). The reading pipeline was extracted behind an injectable
 clock as `lib/soundBaseline.js`, which is in the `test:core` include list at 100% lines. The
 discriminating test named above — *"a 6-minute continuous cry must stay above `SOUND_ACTIVE`"* — is in
 `soundBaseline.test.js`.
+
+### 1.5 A wake-up the parent can actually see — `NEXT`
+
+Raised by the owner 2026-09-10: *"Renz's alerts appear in the wake-ups section but they don't for
+Raffa"*, and separately *"he got up at 20:41 and was put back at 20:43 — why no wake-up and no alert?"*
+Both reproduce on prod **and** staging. Neither is a detection failure: **the alerts fired, the
+transitions were recorded, and the display has nowhere to put either.** Two independent gaps.
+
+⚠️ **First, what is NOT wrong, so it does not get re-investigated.** `alertsInRange` (`SleepDetail.jsx`)
+is camera-agnostic and symmetric — there is no per-child logic anywhere in the path. The alerts are
+plainly visible on the child page because **"Recent alerts" is a flat `/cameras/alerts` feed with no
+sleep logic in it at all**. The gap is only between the alert feed and the *Wake-ups* list.
+
+#### Gap A — the morning wake is not a row, so an alert at the moment of waking cannot render — `SHIPPED` (PR #420, `bfa1b92`, 2026-09-12)
+
+`sleepAnalysis.js` built the list as `for (let i = onset; i < sleepEnd; )`. **`sleepEnd` is the start
+of the final wake**, so `wakes[]` held *only mid-night awakenings*; the morning wake was reported as
+`wake_at` in the summary line instead. Alerts render only inside a wake row (`WakeItem`), so **an alert
+at the exact minute the child woke had nothing to attach to.**
+
+Measured over the last 14 nights on prod, using the UI's own ±3 min `ALERT_MARGIN_MS`:
+
+| | renders (inside a mid-night wake) | at the morning wake, **cannot** render |
+|---|---|---|
+| Raffa | 12 | **9, on 7 of 14 nights** |
+| Renz | 286 | 19, on 8 of 14 nights |
+
+★ **One omission, wildly different cost per child**: the missing row was worth **+75%** on top of
+everything Raffa displayed and **+6.6%** for Renz — not because the code treats them differently, but
+because **Raffa's waking IS a morning event while Renz's is spread through the night.**
+★ Display-only, as planned — it could not and did not move any number the holdout scores against.
+Additive to the response shape (a running SPA is a client that cannot be updated).
+
+**What shipped**: one more row, `[sleepEnd, morningEnd)` where `morningEnd = Math.max(totalMin,
+sleepEnd)`, appended to `wakes[]` whenever `wake_at` is non-null — merged into the last mid-night run
+when it leads straight into the departure (no gap), otherwise a standalone row. The alerts and wake-
+clips queries were widened to the same bound, or a post-window alert was excluded from the response
+before any row could claim it. Adversarial review (Codex + a parallel Claude subagent) caught two real
+defects in the first version before merge: a departure confirmed after a real quiet gap got no row at
+all, and two rows sharing an exact boundary instant could double-render one alert — both fixed and
+mutation-tested. `wakes.length` (the detail page's live count) can now exceed the stored `wake_count`
+by one on any night with a real wake_at — deliberate, they answer different questions; see the code
+comment in `sleepAnalysis.js` if this needs revisiting.
+
+#### Gap B — ✅ SHIPPED (code); production replay + verdict audit still pending before this closes
+
+Raffa 2026-09-09: `846 20:41:30 out · 847 20:43:57 in · 848 20:44:36 out` — an unambiguous out/in pair.
+Fresh compute on 0.30.1 reported `wake_count 0, awake_minutes 0`. Why: the only active minutes were
+20:41, 20:44 and 20:45 (20:42–43 dead); the run walk bridged the 2-minute gap (`WAKE_GAP_MIN` 3) into
+**one run of 3 active minutes**, against **`WAKE_ACTIVE_MIN = 5`**. Three is not five, so it was
+classified a brief stir — despite real motion+sound alerts firing on both flanks.
+
+★★★ **The wake-COUNT path read only per-minute activity and ignored `bed_transitions` entirely**, while
+the wake-TIME path (`USE_TRANSITION_TIMES`) already treated them as authoritative. A child who climbs
+out, is put back, and lies still was *structurally* incapable of reaching five active minutes.
+
+**Fixed, not by lowering `WAKE_ACTIVE_MIN`** (it stops brief stirs counting, and 5→3 would have changed
+every night in the corpus) — `detectMidnightEpisodes` in `sleepAnalysis.js` adds a standalone,
+adversarially-reviewed pass: a corroborated `out_of_bed`→`into_bed` pair, 1–20 minutes apart, with the
+bed confirmed quiet in every whole minute strictly between the two transitions, counts as an awakening
+independent of the activity threshold. Marks both endpoint minutes plus everything between; unions with
+the existing activity-based wake runs (can extend one, or merge two into one — `wake_count` can
+therefore *decrease* even as `awake_minutes` increases). Runs once, after the departure scan, the
+`empty`-night decision, and the post-window metrics extension have all already settled — an episode can
+never move onset, the final wake time, or a night's `status`. `USE_TRANSITION_WAKE_EPISODES` reverts it
+independently of `USE_TRANSITION_TIMES`.
+
+Six rounds of adversarial review (Codex + an independent subagent each round — see
+[the plan](reviews/midnight-wake-plan-2026-09-13-v6.md)) found real, code-verified defects in every
+round through v4, including two that would have shipped the mechanism producing **zero** episodes for
+its own motivating incident. **Named, accepted limits, not fixed this round:**
+- Cannot tell an adult's bed visit from the child's own trip — a quiet gap bracketed by two adult
+  transitions still counts (§1.2 item 3's job, still open, now the mechanism's single biggest blind
+  spot — see item 3 above).
+- The occupancy corroboration's 150-minute window can borrow unrelated later motion, inventing an
+  episode or truncating a real one at a spurious earlier return.
+- A spurious `into_bed` within 60 seconds before a real departure can suppress that episode outright
+  (a false negative, the safe direction); a false settling tail past 60 seconds can still manufacture
+  one — the same already-measured, admittedly-unseparable overlap `JITTER_REENTRY_MS` documents.
+- A noisy intervening transition can shorten or entirely drop a real episode (positional pairing never
+  retries a failed candidate).
+- Excursions over 20 minutes and `in_progress` (live, tonight-so-far) nights are out of scope.
+
+**✅ SHIPPED, dev `6be7c97` (PR #429) 2026-09-13, staging-verified — reached prod in 0.31.0
+(2026-09-19).** Deployed to staging and replayed
+against all 56 nights currently stored there (both children) — same code, `USE_TRANSITION_WAKE_EPISODES`
+on vs off, isolating this change from every other sleep-analysis fix shipped since those nights were
+last stored (comparing against the *stale stored rows* directly, without that isolation, produced 15
+spurious "hard gate" failures — all accounted for by unrelated changes shipped in the intervening
+weeks, none by this one). Isolated result: **onset/final-wake byte-identical on all 56 — zero hard-gate
+failures.** Exactly 2 nights changed: Raffa 2026-09-09 (`wake_count 0→1`, `awake_minutes 0→3`) — **the
+named motivating incident itself**, confirmed fixed on real data — and Renz 2026-09-09 (`wake_count
+9→10`, `awake_minutes 146→151`, episode at 14:35-14:40 UTC). **Zero `wake_count` decreases.** Both
+changed nights' evidence transitions (Raffa #846/#847/#848; Renz #891/#892/#893) are unverdicted
+(`verdict IS NULL`) — no already-known-wrong transition was used as evidence for either.
+
+Real prod `motion_peak` for camera `dce8157e`, local 2026-09-09 20:41: **0.0563** — confirmed active
+(`> MOTION_ACTIVE`), settling the plan's flagged-unverified claim; both gap minutes (20:42, 20:43) read
+`motion_peak = 0`, confirmed quiet, matching the shipped code's exact expectation.
+
+#### Why the two children differ at all — measured, so it is not re-litigated
+
+Classifying every in-window alert by the timeline segment it lands in, last 14 nights:
+
+| segment | Raffa | Renz |
+|---|---|---|
+| settling (pre-onset) | 29.2% | 5.3% |
+| asleep | 1.3% | 11.2% |
+| stir (<5 active min) | 5.2% | 19.9% |
+| **wake (the only one that renders)** | **6.5%** | **56.6%** |
+| awake (after the final wake) | 57.8% | 7.0% |
+
+Raffa: 18 wakes over 14 nights, **6 nights with an entirely empty Wake-ups section**; Renz: 94 wakes,
+**0** empty nights. Underneath it he is simply the stiller sleeper (3–7% active minutes vs 21–24%,
+corroborated independently by the zone baseline 15.6% vs 25.2%).
+
+⚠️ The two cameras are also **configured differently, all four in the direction of Renz alerting more**:
+`sound_sensitivity` 49 vs 70 (**+11.2 dB vs +8.2 dB** via `marginDb()` = `4 + 14*((100-s)/99)`;
+~3 dB is a doubling of sound power), `detect_confirm_s` 3 s vs 2 s, `detect_start` 19:00 vs 19:30,
+`detect_zone` 13.0% vs 22.7% of frame. **Raising Raffa's sensitivity to match is the wrong fix** —
+Renz is at ~34 alerts/night, which is the alert-fatigue tradeoff, on a baby monitor, at 3 am.
+
+#### What this assumes about someone else's house
+
+Nothing child-specific: both gaps are about **where a child's waking falls in the night**, and a child
+who sleeps through and wakes in the morning is the *common* case, not this house's. Gap A helps every
+such install and costs nothing where it doesn't apply. ⚠️ The per-camera settings above are this
+installation's, quoted only to explain the observed rates — **no threshold in either gap's fix may be
+derived from them.**
+
+### 1.6 Sleep report notification is a fixed-clock snapshot, not evidence-based — option 1 `SHIPPED` (0.31.0), narrowed scope
+
+Raised by the owner 2026-09-18, prompted by Renz's night of 2026-09-16→17 (§1.2 item 3's evidence
+above): "he slept until 7:10 yesterday which was unusual" — and the report/notification mechanism has no
+way to represent that, structurally, not as a bug in the wake-time computation itself.
+
+**How it actually works today** (`lib/sleepAnalysis.js`): `startSleepJob()` (`:1888-1893`) runs
+`runNightlySleepJob()` immediately at boot and every 30 minutes after, phase-aligned to container start
+time, not wall-clock. Each tick, per child, `lastCompletedNightDate()` (`:369-379`) checks only whether
+that child's `sleep_window_end` (07:00 for both kids) has passed `now` — nothing about whether the child
+has actually woken checks in at all. **The notification fires exactly once: on whichever tick first
+creates that night's `sleep_nights` row** (`:1847-1851`, gated by `REPORT_FRESH_MS` = 2h, `:9`, only to
+stop a restart re-notifying about an old night). The job keeps *recomputing* an existing row every 30
+min until `isEvidenceFinal()` (`:328-330`, `window_end + WAKE_LOOKAHEAD_MS` = 3h, so ~10:00 for a 07:00
+window) — but that later refinement **never re-notifies**. The notification is locked to the first,
+often-provisional pass.
+
+★★★ **Exactly this happened on Renz's 09-16→17 night, already on record in §1.2 item 3 above.** Window
+closes 07:00; true wake was 07:10 — ten minutes past close, and the confirming quiet run
+(`MORNING_ABSENCE_MIN` = 20 min) couldn't even complete until ~07:30 at the earliest. The
+notification-eligible first pass ran within 30 minutes of 07:00, before any of that was observable. Worse:
+because the underlying departure was never linked at all (the simultaneous-activity gap), `wake_at`
+stayed **NULL even after three more hours of retrying** — so whatever report went out was not just early,
+it was permanently wrong for that night, with no mechanism to ever say otherwise.
+
+**Three options discussed, not yet built, roughly cheapest-to-biggest:**
+1. **Re-notify (or send a follow-up) when a later recompute meaningfully changes the picture** — e.g.
+   `wake_at` flips from null to a real time, or moves by more than a few minutes from what was already
+   reported. Doesn't require predicting anything; directly fixes "a report can lock in a wrong answer
+   forever," which is the sharper problem here than mere lateness.
+2. **Delay the first notification** until either a confirmed final wake exists or a capped fallback delay
+   passes (e.g. 60-90 min past window_end) — trades promptness for accuracy, and still doesn't help the
+   case where evidence never resolves (option 1 is still needed for that).
+3. **Derive a rolling expected-wake-time per child from history** (`sleep_nights` already has weeks of
+   it) and hold the report until around that time rather than a fixed `window_end` — the most genuinely
+   "dynamic" option, but real design work: what counts as enough history, how it handles an already-
+   unusual night (the exact case that motivated this), and how it degrades for a new install with no
+   history yet.
+
+**Owner's call, 2026-09-18: start with option 1.** It's the cheapest, it's correct regardless of which
+of the other two (if any) get built later, and it's the one that would have actually helped on the
+09-16 night — a corrected/follow-up notification once evidence resolved, instead of silence.
+
+⚠️ **Related to, but independently workable from, §1.2 item 3.** The Renz incident's ROOT cause (why
+`wake_at` never resolved) is item 3's simultaneous-activity gap; THIS item is about what the app tells a
+parent while that's true (or unresolved), which is a real gap even on a night the classifier gets right
+but merely finishes late. Fixing item 3 would reduce how often option 1 has anything to report, not
+replace the need for it.
+
+✅ **SHIPPED to prod in 0.31.0 (2026-09-19), NARROWED from the owner's original wording.** Two rounds of adversarial
+design review (Opus, standing in for a rate-limited Codex) found the literal "wake_at changes
+meaningfully" trigger unsafe: a *measured* real incident (`morning-wake-parent-handles-bed.md`, Renz
+2026-08-29, `05:51`→`08:31` between two recomputes of the SAME night) proves a later recompute is not
+always more accurate, so a bidirectional trigger could send a wrong correction and burn the one-shot
+follow-up budget doing it. **Shipped scope: notify a follow-up ONLY on null→real** (a wake time that was
+unknown becomes known) — never on real→real drift in either direction. This still directly fixes "a
+report can lock in a wrong answer forever" for the common shape (the Raffa-09-16-style night, where
+`wake_at` eventually resolves) but, stated plainly, **does NOT correct the exact Renz 09-16 incident that
+prompted this ticket** — its `wake_at` stayed null the whole 3-hour window, so there was never a
+null→real transition to notify on. Closing that needs §1.2 item 3 (so a departure links more often) or a
+distinct "still unclear" notification (closer to option 2/3's spirit) — not built here.
+
+Also shipped: a notification tag (`android.notification.tag` + `apns-collapse-id`) so the follow-up
+**replaces** the original in the tray rather than arriving as a second, contradictory message — except
+when two tracked children's windows close in the same ~30-minute tick, in which case the original is one
+combined, untagged message and the tag has nothing to collapse onto (named limit, stated in
+`docs/notifications.md`, not silently accepted). A pre-existing bug found along the way: the admin
+"Recompute this night" control could report success while saving nothing when the new guard refused a
+write — fixed with a proper 409, same pattern as the existing "data aged out" refusal.
+
+Full design-review history (why the literal wording was rejected, both rounds' findings) was not saved
+as a separate durable doc this time — the plan file itself (now implemented) covered it; see the git
+history on `backend/src/lib/sleepAnalysis.js`'s `runNightlySleepJob`/`computeAndStoreNight` and
+`backend/src/lib/sleepReportAlert.js` for the shipped shape. **Options 2 and 3 remain not built.**
 
 ## 2. Specced, not built
 
@@ -504,109 +1019,6 @@ synthetic source a second path and assert the toggle swaps the stream.
 
 ---
 
-### 2.5 Bed occupancy from the camera — `SPECCED` · *do not build yet, see the gate*
-
-**Why.** Every open item in §1.2 is downstream of one missing fact: **is there actually a child in the
-bed?** The detector infers it from motion in two zones, which is why a parent's hands leaving the bed
-reads as an exit, a stir reads as an arrival, and an empty bed once reported a flawless 11h06m sleep.
-Motion cannot answer the question; a picture can. A generic person-detector cannot either — Raffa
-sleeps under a blanket and Renz in a sleep suit, so frequently **only a head is visible**.
-
-**Approach: distil, don't run a VLM.** A vision-language model (Qwen2.5-VL via Ollama) labels frames
-**offline, on the owner's desktop**, and is then thrown away. What ships is a MobileNetV3-Small
-classifier, **~6 MB ONNX**, ~10 ms per frame, ~2.5 CPU-seconds/day at the rate transitions actually
-occur — against the existing detector's ~13,000. The VLM never runs in the container and never could:
-`/var/lib/docker` has **6.8 GB free of a fixed 40 GB vdisk** and a 3B model is ~3.5 GB. The Coral is
-not a way around this either (int8-only, **8 MB on-chip**).
-
-**Status: the owner is running the labelling lab himself, no deadline.** Full instructions live outside
-this repo (Claude artifact, "Bed Occupancy Lab", 6 stages). Nothing here is committed until the gate
-below passes.
-
-#### 2.5a The gate — one experiment, before any of this is built
-
-A model trained on Renz and Raffa learns *this* cot, *this* angle, *this* IR illuminator. It would fail
-on someone else's camera **confidently**, silently corrupting their sleep data. So the design below
-assumes per-install calibration — and that assumption must be tested first:
-
-> Train on Renz + Raffa, then fit a head on the **staging Hikvision** (a third camera, different make,
-> different angle, same house). Fit it at 10 / 20 / 40 / 80 labelled frames and plot where accuracy
-> stops improving.
-
-That single experiment answers both open questions at once: whether per-install calibration is needed
-at all, and **how many frames the wizard should ask for**. The "~20 frames" figure used below is an
-estimate, not a measurement — expectation is 40–60, constrained by the empty class. **Do not build the
-wizard around a guessed number.**
-
-**Also settled, so it isn't re-proposed:** collecting frames from *other people's* beds is the wrong
-move. A handful of extra scenes lands in the dead zone — too varied to master the two cameras we can
-actually verify against, and nowhere near the hundreds of distinct scenes real cross-home
-generalisation needs. The generalising is already done by MobileNet's ImageNet pretraining (1.2M
-photographs); four bedrooms adds nothing on top of that. The variety **worth** having is *within* an
-install: both lighting regimes (IR and daylight), a deliberate camera reposition, blanket and
-sleep-suit variation, seasons. All of it accumulates for free as nights pass.
-
-#### 2.5b How it works for someone else installing Nightlight
-
-**Split the model in two.** The backbone (MobileNetV3 minus its final layer) ships once, frozen,
-identical for everyone; it turns a frame into 576 numbers. The head is a single 576→2 layer — **1,154
-numbers, ~5 KB of JSON** — and is the only per-install part.
-
-That split is what makes this shippable: fitting a 1,154-parameter logistic regression on a few dozen
-examples is a few hundred gradient steps of plain arithmetic, **well under a second in Node with no new
-dependency**. `onnxruntime` is needed for inference anyway, and feature extraction is the same forward
-pass. **No Python, no PyTorch, nothing new in the image beyond the backbone.**
-
-**⚠️ Prerequisite: Nightlight stores no images today.** Motion and sound are sampled 24/7 (~1,437
-rows/camera/day) but the only JPEGs on disk are alert snapshots — a fresh install has none, and they
-would be biased toward "occupied and moving" anyway. Calibration therefore needs its own capture mode:
-one snapshot every ~10 min for 2–3 nights, ~250 frames, ~20 MB, using the existing per-camera
-`snapshot_url`. Useful asymmetry: **empty frames are trivial** (daytime, before bedtime, after the
-morning wake); only the occupied class needs a night.
-
-**The flow:**
-1. *"Improve bed detection"* in camera settings — **off by default, clearly optional**.
-2. Capture runs 2–3 nights, with a quiet progress banner.
-3. **Labelling screen.** Frames are chosen deliberately, not at random: spread across the clock so both
-   IR and daylight appear, and roughly balanced between likely-empty and likely-occupied times. Large
-   image, two buttons, ~40 taps, about two minutes.
-   ★ **The wording is load-bearing: "Is the child in the bed *right now*?"** — not "is a child
-   visible?". A parent holding a child beside the bed is `empty`. The owner hit exactly this trap in
-   his own labelling; every user will.
-4. **Fit, then report honestly.** Hold back a quarter of the labels as an exam the head never sees, and
-   show **both error types separately** — a head that always answers "occupied" scores well on an
-   imbalanced set and is worthless, since catching the empty case is the entire point.
-5. **Shadow for a week.** Log the verdict beside each bed transition, change no reported number, then
-   show "agreed with the detector on 94 of 97 transitions" and let the user decide. Same discipline that
-   caught the dead sound rule in 0.26.0.
-
-**Guardrails, in from the start:**
-- **Veto-only.** Occupancy never *creates* a transition, only suppresses one it disbelieves. A broken
-  classifier then costs missed vetoes, never fabricated bedtimes.
-- **Fails off.** No calibration, a poor exam score, or a load error → the feature is simply absent and
-  behaviour is exactly as today.
-- **Recalibration triggers.** A moved camera, a new bed, a cot→bed transition, or a child who has grown
-  all invalidate the head. Needs an explicit "recalibrate" action; possibly a drift signal when
-  disagreement with confirmed transitions rises.
-- **Frames never leave the box**, and say so in the UI. These are pictures of sleeping children.
-- **Keep the labelled frames.** Forty JPEGs is nothing, and they make re-fitting after a camera move a
-  five-second job instead of another two-night wait.
-
-**⚠️ The data trap, already measured — it would have poisoned the first model.** The 503 stored alert
-snapshots are two populations: **362 at 1920×1080 and 141 at 640×360** (the small ones are sub-stream
-grabs from when the snapshot URL was broken), while every empty frame grabbed today is a sharp
-1920×1080. So **"blurry" predicts "occupied"** with no child involved, and a network always takes the
-easy rule. Every image must be forced through a common small size (320×180) before training. Any future
-capture path has the same exposure.
-
-**Relationship to §1.2.** Complementary, not a replacement. §1.2 item 1 (believed-occupancy state
-machine) is the cheap win and stays worth doing on its own — it needs no model and collapses impossible
-sequences immediately. This section is the *independent evidence* that would also close item 3 (parent
-leaving vs child climbing out), which motion alone cannot separate.
-
-**Done when** the gate experiment has a number, the shadow week shows agreement on a real corpus, and a
-second install can calibrate without help.
-
 ### 2.6 Mark the main camera in the camera list — `IDEA` · *small*
 
 All that is left of the old 2.6. **Single-camera sleep analysis shipped in 0.28.0**: sleep is scored
@@ -619,6 +1031,41 @@ the choice lives silently in the drag order. Naming it on the detail view covers
 (tracing a wrong night to the camera that produced it), which is why this is an idea and not a defect.
 ⚠️ Only bites a household with two cameras on one child — nobody here has that, so it cannot be
 observed locally.
+
+### 2.7 Opt-in anonymized sleep-data sharing, to improve the algorithm — `SPECCED`, HELD (not scheduled)
+
+Raised by the owner 2026-09-16: could households voluntarily anonymize and send their sleep-tracking
+data so the maintainer can use it to improve the detection algorithm? Fully planned, two research passes
+plus an adversarial design-review pass, **owner-approved 2026-09-16 — but deliberately not scheduled to
+be built.** Full plan: [`reviews/sleep-data-sharing-plan-2026-09-16.md`](reviews/sleep-data-sharing-plan-2026-09-16.md).
+
+The central tension: every existing outbound call (ntfy/Pushover/Gotify/Firebase) goes to a service the
+household configures and owns, and the docs say so explicitly in three places ("no cloud... nothing is
+shared through a Nightlight cloud" — `README.md:9`, `docker-hub-overview.md:3-5`, `docs/README.md:77-78`).
+A feature sending data to a maintainer-run server is categorically new and would make those claims false
+if shipped without qualifying them — the plan treats that as the central constraint, not an afterthought.
+
+**Design, in brief** (full reasoning and file:line citations in the plan doc): export only data tied to
+an explicit human label — a verdicted `bed_transitions` row or a `sleep_reviews` correction — never raw
+`activity_samples` for its own sake; all timestamps become minutes-relative-to-window_start, never
+absolute; real child/camera ids become a per-install HMAC pseudonym, salted by a locally-generated,
+never-transmitted secret (mirrors `.jwt_secret`'s persistence pattern); direct PII (`children.name`/
+`birthday`/`photo`, `cameras.name`, `sleep_reviews.note` free text, every credential field, every
+snapshot/clip file) is hard-excluded with no toggle. Differential privacy and k-anonymity were
+considered and explicitly rejected as the wrong tool for a single opt-in batch upload from a
+self-selecting population — reasoning is in the plan, not left implicit.
+
+**Phased**: 1a (local preview/download only, no network code, clones `DiagnosticsCard.jsx`'s "nothing
+uploaded, stays on your device" pattern) → 1b (bounded numeric context window around each label) →
+Phase 2 (the actual opt-in periodic upload, off by default, to an env-var-configured endpoint with no
+baked-in default — inert until the maintainer provisions real infrastructure and sets it). **Where the
+data would actually go is real infrastructure outside this repo** — recommended option is a small
+Cloudflare Worker + R2 bucket, but that's a maintainer infra decision, not something this plan builds.
+
+**HELD, not NEXT**: the owner approved the design but does not want it built now. Do not start any phase
+without a fresh explicit go-ahead — re-read the plan doc first, since it also names a real pre-existing
+bug found along the way (`routes/diagnostics.js` leaks `children.name`/`birthday` into the "redacted"
+diagnostics bundle — not part of this item's scope, worth its own fix separately).
 
 ## 3. Idea backlog
 
@@ -710,6 +1157,34 @@ pick from when there is a gap**, which is why it is one list rather than four no
 
 Recorded so they don't get re-litigated. Each was considered and consciously parked.
 
+- **Bed occupancy via camera vision** — `ABANDONED 2026-09-10` (owner's call). Was §2.5: a frozen
+  MobileNetV3 backbone shipped once, plus a ~1,154-parameter per-install head fitted on ~20-60 frames
+  the owner labels himself, vetoing bed-transition calls the motion detector gets wrong (Raffa sleeps
+  under a blanket, Renz in a sleep suit — often only a head is visible, which motion-only detection
+  can't resolve). Real, extensive work happened before it was parked: a VLM auto-labelling attempt
+  (Qwen2.5-VL) failed outright (a leading prompt pre-authorised "occupied", scoring ~5% on known-empty
+  frames); 867 frames across 28 nights were then hand-labelled instead, training a MobileNetV3 head.
+  **Why it died, in order of weight:**
+  1. **The measurement itself couldn't distinguish configurations.** An ablation meant to rank a few
+     candidate training changes instead found ~30 points of run-to-run spread on an *identical* config
+     (54.5%–93.9% worst-class accuracy across seeds) — every headline number this effort ever produced
+     (59% → 62% → 66% → 58% → 91%) was drawn from that same noise, not a real trend.
+  2. **The bar moved out from under it.** #327 + #342 (shipped in 0.30.1) made the wake-time detector
+     near-exact on measured nights by working around the occupancy gap in the departure scan itself —
+     so a vision veto now has to *beat* an already-good detector rather than replace a clearly-broken
+     one, while its own reliability was simultaneously in question per point 1.
+  3. **The product shape doesn't fit this project's own standing rule.** A per-install head needs the
+     installer to hand-label dozens of frames of their own sleeping child with no designed labelling
+     flow; shipping one head trained on Renz and Raffa "as-is" would be exactly the "built only for this
+     house" failure `CLAUDE.md` forbids.
+  **What survives, and is being reused rather than wasted:** the 867 hand-labelled frames (grabber kept
+  running, 5×/day) and the 465 owner-verdicted `bed_transitions` snapshots both become ground truth to
+  score whatever replaces this, vision or otherwise. **Decision: pursue a physical occupancy sensor
+  instead** (a bed-presence mat or mmWave/radar module) over the MQTT motion source already in this
+  codebase — optional hardware, a reliable signal instead of a probabilistic one, and it degrades
+  honestly (simply absent) when nobody adds it, which fits an app other people install far better than a
+  model fitted to two specific children. Not scoped as its own roadmap item yet — raise it again once
+  there's hardware to design against.
 - **Chromecast** — `HELD`. Requires `window.isSecureContext`, so it works only over the HTTPS domain,
   not LAN http; HLS-mode only. The web Cast SDK is **Chrome-browser-only** — it does not work in the
   app's WebView. Undecided: target the browser, or adopt the native Android Cast SDK. Ask before building.

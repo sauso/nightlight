@@ -21,7 +21,7 @@
 // record without anyone editing it first — and which fails against the code as it was.
 import { test, after, beforeEach, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { useTempDataDir, cleanupTempDataDirs, makeCamera } from './helpers/harness.js';
+import { useTempDataDir, cleanupTempDataDirs, makeCamera, makeChild } from './helpers/harness.js';
 
 useTempDataDir();
 
@@ -33,10 +33,15 @@ const { clipRingWanted } = await import('../src/lib/clipCapture.js');
 // fallback, which only covers a settings row that doesn't exist at all. Reset to the schema default
 // between tests rather than to NULL, which the column rejects.
 const setOndemand = (v) => db.prepare('UPDATE settings SET ondemand_enabled = ? WHERE id = ?').run(v, 'app');
+// wake_clips_enabled ships `NOT NULL DEFAULT 1` (db.js) — same reasoning as setOndemand above: reset to
+// the schema default between tests, not to NULL, which the column rejects.
+const setWakeClips = (v) => db.prepare('UPDATE settings SET wake_clips_enabled = ? WHERE id = ?').run(v, 'app');
 
 beforeEach(() => {
   db.prepare('DELETE FROM cameras').run();
+  db.prepare('DELETE FROM children').run();
   setOndemand(1);
+  setWakeClips(1);
 });
 
 after(() => {
@@ -90,5 +95,60 @@ describe('clipRingWanted', () => {
     // a predicate that throws there would take down the reconcile loop for every OTHER camera too.
     assert.equal(clipRingWanted(null), false);
     assert.equal(clipRingWanted(undefined), false);
+  });
+});
+
+// ★★★ Issue #387 (the 2026-09-11 Codex review, F/R3): wake clips are a THIRD consumer of the ring, and
+// clipRingWanted never checked for it — a camera with detection clips AND on-demand both off, serving a
+// sleep-tracked child with wake clips on, silently never buffered. captureWakeClipInner (recordings.js)
+// requires a running segmenter and just logs + returns null when there isn't one, so this failed
+// completely silently: no error, no alert, just an empty morning.
+describe('clipRingWanted — wake clips (issue #387)', () => {
+  const camFor = (childId, extra = {}) => {
+    db.prepare('DELETE FROM cameras').run(); // a fixed id, so a test calling this twice needs a clean slate
+    return db.prepare('SELECT * FROM cameras WHERE id = ?').get(
+      makeCamera(db, { id: 'cam-wake', childId, extra }).id
+    );
+  };
+
+  test('★ THE REGRESSION: a wake-only camera — detection clips and on-demand both off — now wants the ring', () => {
+    setOndemand(0);
+    makeChild(db, { id: 'kid-1', track: 1 });
+    assert.equal(clipRingWanted(camFor('kid-1', { detect_record_clips: 0 })), true);
+  });
+
+  test('a camera with no child assigned cannot want the ring for wake clips', () => {
+    setOndemand(0);
+    // No makeChild call at all — child_id stays null on the camera (makeCamera's default).
+    assert.equal(clipRingWanted(camFor(null, { detect_record_clips: 0 })), false);
+  });
+
+  test('a child with sleep tracking OFF does not arm the ring for wake clips', () => {
+    setOndemand(0);
+    makeChild(db, { id: 'kid-1', track: 0 });
+    assert.equal(clipRingWanted(camFor('kid-1', { detect_record_clips: 0 })), false);
+  });
+
+  test('wake clips disabled globally does not arm the ring, even for a tracked child', () => {
+    setOndemand(0);
+    setWakeClips(0);
+    makeChild(db, { id: 'kid-1', track: 1 });
+    assert.equal(clipRingWanted(camFor('kid-1', { detect_record_clips: 0 })), false);
+  });
+
+  test('a disabled camera stays false even when every other wake-clip condition is met', () => {
+    setOndemand(0);
+    makeChild(db, { id: 'kid-1', track: 1 });
+    assert.equal(clipRingWanted(camFor('kid-1', { detect_record_clips: 0, disabled: 1 })), false);
+  });
+
+  test('detection clips or on-demand are still each independently sufficient, wake clips aside', () => {
+    // The control: wake-clip eligibility is a THIRD reason, not a replacement for the first two — a
+    // camera with no child at all must still want the ring for either of the original reasons.
+    setWakeClips(0);
+    setOndemand(0);
+    assert.equal(clipRingWanted(camFor(null, { detect_record_clips: 1 })), true);
+    setOndemand(1);
+    assert.equal(clipRingWanted(camFor(null, { detect_record_clips: 0 })), true);
   });
 });

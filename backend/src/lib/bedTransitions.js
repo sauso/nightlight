@@ -3,6 +3,12 @@ import path from 'path';
 import db from '../db.js';
 import { logger } from './logger.js';
 import { captureSnapshot, fetchHttpSnapshot } from './snapshot.js';
+import {
+  findQuickReversals,
+  findAllLingeringBedMotion,
+  LINGERING_WINDOW_MS,
+  LINGERING_MIN_ACTIVE_MINUTES,
+} from './bedTransitionRules.js';
 
 // Persisted bed-boundary transitions from the frame-diff detector — a child leaving the bed
 // ('out_of_bed') or being placed into it ('into_bed'). These are the durable form of the [oob]/[intobed]
@@ -52,7 +58,8 @@ export function transitionSnapshotPath(id) {
 }
 
 const insertStmt = db.prepare(
-  `INSERT INTO bed_transitions (camera_id, type, peak) VALUES (@camera_id, @type, @peak)`
+  `INSERT INTO bed_transitions (camera_id, type, peak, out_peak, out_frames)
+   VALUES (@camera_id, @type, @peak, @out_peak, @out_frames)`
 );
 const markSnapshotStmt = db.prepare('UPDATE bed_transitions SET snapshot = 1 WHERE id = ?');
 const camForSnapshotStmt = db.prepare(
@@ -95,12 +102,19 @@ async function attachSnapshot(id, cameraId) {
 
 // Prune runs rarely (a transition is a once-per-couple-minutes-at-most event), so an age sweep on each
 // insert is negligible and keeps the table bounded without a separate scheduler.
-export function recordBedTransition(cameraId, type, peak = null) {
+//
+// `outPeak`/`outFrames` (ROADMAP §1.2 item 2): the outside channel's evidence for this specific
+// transition — see db.js's migration comment for what they mean per type. Optional and additive:
+// omitting them (any existing or future caller that doesn't pass evidence) stores NULL, unchanged
+// from before this column existed.
+export function recordBedTransition(cameraId, type, peak = null, { outPeak = null, outFrames = null } = {}) {
   try {
     const info = insertStmt.run({
       camera_id: cameraId,
       type,
       peak: peak == null ? null : Math.round(peak * 1000) / 1000,
+      out_peak: outPeak == null ? null : Math.round(outPeak * 1000) / 1000,
+      out_frames: outFrames == null ? null : Math.round(outFrames),
     });
     // Delete the images BEFORE the rows, or the ids that name them are gone and the files orphan.
     //
@@ -128,18 +142,39 @@ export function recordBedTransition(cameraId, type, peak = null) {
 }
 
 // All transitions for the given cameras within [startSql, endSql) (UTC 'YYYY-MM-DD HH:MM:SS' strings),
-// ascending by time. Returns [{ id, camera_id, type, created_at, peak, snapshot, verdict }]. Empty for no
-// cameras.
+// ascending by time. Returns [{ id, camera_id, type, created_at, peak, out_peak, out_frames, snapshot,
+// verdict }]. Empty for no cameras.
 export function getBedTransitions(cameraIds, startSql, endSql) {
   if (!cameraIds || cameraIds.length === 0) return [];
   const ph = cameraIds.map(() => '?').join(',');
   return db
     .prepare(
-      `SELECT id, camera_id, type, created_at, peak, snapshot, verdict FROM bed_transitions
+      `SELECT id, camera_id, type, created_at, peak, out_peak, out_frames, snapshot, verdict
+         FROM bed_transitions
          WHERE camera_id IN (${ph}) AND created_at >= ? AND created_at < ?
          ORDER BY created_at ASC`
     )
     .all(...cameraIds, startSql, endSql);
+}
+
+// Activity for the given cameras within [startSql, endSqlExclusive), in the order the pure
+// lingering-motion rule expects. Keep morning-review work bounded to this night's evidence.
+export function getActivitySamples(cameraIds, startSql, endSqlExclusive) {
+  if (!cameraIds || cameraIds.length === 0) return [];
+  const ph = cameraIds.map(() => '?').join(',');
+  return db.prepare(
+    `SELECT camera_id, bucket_start, motion_peak FROM activity_samples
+       WHERE camera_id IN (${ph}) AND bucket_start >= ? AND bucket_start < ?
+       ORDER BY camera_id, bucket_start ASC`
+  ).all(...cameraIds, startSql, endSqlExclusive);
+}
+
+// One boundary lookup per camera detects a same-direction run truncated by a bounded fetch.
+export function getPriorTransitionType(cameraId, beforeSql) {
+  const row = db.prepare(
+    `SELECT type FROM bed_transitions WHERE camera_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT 1`
+  ).get(cameraId, beforeSql);
+  return row ? row.type : null;
 }
 
 // Transitions that are provably wrong: the same type twice in a row for one camera, with nothing
@@ -149,7 +184,8 @@ export function getBedTransitions(cameraIds, startSql, endSql) {
 export function getImpossibleTransitions({ limit = 200 } = {}) {
   const rows = db
     .prepare(
-      `SELECT t.id, t.camera_id, c.name AS camera_name, t.type, t.created_at, t.peak, t.snapshot
+      `SELECT t.id, t.camera_id, c.name AS camera_name, t.type, t.created_at, t.peak,
+              t.out_peak, t.out_frames, t.snapshot
          FROM bed_transitions t JOIN cameras c ON c.id = t.camera_id
         ORDER BY t.camera_id, t.created_at ASC`
     )
@@ -178,6 +214,115 @@ export function getImpossibleTransitions({ limit = 200 } = {}) {
   // Sort on the timestamp itself, tie-broken by id so the order is total and a page is stable when
   // two cameras fire inside the same second.
   out.sort((a, b) => (a.created_at === b.created_at ? b.id - a.id : a.created_at < b.created_at ? 1 : -1));
+  return out.slice(0, Math.min(500, Math.max(1, limit)));
+}
+
+// `into_bed` immediately followed (same camera) by `out_of_bed` within `maxGapMs`. Measured 2026-09-13:
+// 86 of 1053 stored transitions (~8%) match this shape, and it is NOT the classifier picking up a real
+// child getting straight back up:
+//   - A 9-case visual sample of the paired snapshots showed a parent in frame leaving via the door in
+//     every case where anyone was visible at all, and the child lying still in every single case — never
+//     the reverse.
+//   - Independently, the bed zone's own motion in the hour AFTER the `out_of_bed` (motion_peak >
+//     MOTION_ACTIVE, sleepAnalysis.js's own calibrated per-minute test) kept showing normal stirring in
+//     60% of all 86 cases — essentially impossible if the bed were actually empty, per the same
+//     assumption the empty-bed guard itself already relies on ("a sleeping room reads ~0, so does an
+//     empty one" — MOTION_ACTIVE's own comment). Only 9 of 86 (all Raffa, none Renz) showed a fully
+//     silent hour after — the one signature actually consistent with a real departure.
+// Leading theory (the owner's, unprompted, matching the visual sample exactly): a goodnight kiss —
+// leaning over the bed right after placing the child (bed active), then leaving (outside active, then
+// quiet) is precisely the shape `out_of_bed` looks for, with no child movement involved at all. This is
+// ROADMAP §1.2 item 3's exact gap (telling a parent's motion from a child's), approached from the entry
+// side rather than the exit side it was originally framed around.
+//
+// Query only, same reasoning as getImpossibleTransitions above: nothing today ACTS on this (no gating,
+// no wake_count change) — it needs owner-verdict ground truth on this specific pattern before anything
+// downstream can safely use it, and there is almost none yet (1 of 86 verdicted). This is what makes
+// that possible to build: surfacing these pairs for review, or scoring a discount rule against real
+// labels once they exist, rather than guessing.
+export function getQuickReversals({ maxGapMs = 60000, limit = 200 } = {}) {
+  // LEFT JOIN, deliberately unlike getImpossibleTransitions's inner join above: camera_id carries no
+  // foreign key (cameras can be deleted, e.g. hardware replacement), so an inner join would silently
+  // drop a deleted camera's historical rows from this report. Found in adversarial review, 2026-09-13.
+  const rows = db
+    .prepare(
+      `SELECT t.id, t.camera_id, COALESCE(c.name, t.camera_id) AS camera_name, t.type, t.created_at,
+              t.peak, t.out_peak, t.out_frames, t.snapshot, t.verdict
+         FROM bed_transitions t LEFT JOIN cameras c ON c.id = t.camera_id
+        ORDER BY t.camera_id, t.created_at ASC`
+    )
+    .all();
+  const out = findQuickReversals(rows, { maxGapMs });
+  // Same lesson as getImpossibleTransitions: sort on the actual timestamp AFTER building the list,
+  // rather than trusting the camera-grouped scan order — a naive slice on that order can silently drop
+  // an entire camera's pairs once the limit is reached.
+  out.sort((x, y) => {
+    const xt = x.out_of_bed.created_at;
+    const yt = y.out_of_bed.created_at;
+    return xt === yt ? y.out_of_bed.id - x.out_of_bed.id : xt < yt ? 1 : -1;
+  });
+  return out.slice(0, Math.min(500, Math.max(1, limit)));
+}
+
+// Continued bed-zone motion after ANY out_of_bed, in a stretch the classifier itself still believes is
+// UNOCCUPIED (no into_bed recorded on the same camera between the exit and the motion). Generalizes
+// findQuickReversals/getQuickReversals's own SECOND, data-driven check above — the bed zone's own
+// motion_peak in the hour after a quick reversal's trailing out_of_bed — from "only quick-reversal
+// pairs" (~8% of transitions) to every out_of_bed still within activity_samples' retention window
+// (NOT literally "every out_of_bed on record" — bed_transitions outlives activity_samples by 15 days
+// and exempts verdicted rows from pruning forever, so the oldest verdicted rows specifically can have
+// no samples left to check; "not flagged" here can mean either "checked, found quiet" or "nothing left
+// to check" — same outcome, different meaning, found in second review). Generalizing MECHANICALLY is
+// not the same claim as generalizing STATISTICALLY — the quick-reversal work also leaned on an
+// independent visual sample this broader population doesn't have, and its dominant case (a terminal/
+// morning exit with no into_bed until the next bedtime) is exactly where ordinary daytime room use
+// would flag at a rate nobody has measured yet. See findLingeringBedMotion in bedTransitionRules.js
+// for the exact per-transition rule, and DO NOT trust any flag-rate claim about this query until the
+// mandatory post-implementation measurement (against the verdict column already selected below) has
+// actually run — see this function's shipping plan for that step.
+//
+// Same-direction repeats (62% of stored transitions, item 1's own measurement) are deliberately
+// evaluated only once — see the "SEPARATE dedup" note in this function's design — so one unoccupied
+// stretch bracketed by several repeated out_of_bed markers produces one row, not several. ⚠️ The
+// evaluation is anchored at the run's OLDEST member, not its newest — see findAllLingeringBedMotion for
+// why: anchoring at the newest member (the first-shipped version of this code, fixed 2026-09-14 after
+// an adversarial pre-merge review caught it independently via Codex AND a parallel Claude subagent)
+// silently LOST real evidence rather than merely deduplicating it, whenever the run's earlier member(s)
+// had qualifying motion that the newest member's own post-exit window could never see.
+//
+// Diagnostic only: the morning review uses the same pure scan on bounded rows to collect owner
+// verdicts on THIS broader population. Nothing gates sleepAnalysis.js/detectMidnightEpisodes or
+// wake_count on it. See ROADMAP §1.2 item 3, still open pending ground truth.
+export function getLingeringBedMotion({
+  windowMs = LINGERING_WINDOW_MS,
+  minActiveMinutes = LINGERING_MIN_ACTIVE_MINUTES,
+  limit = 200,
+} = {}) {
+  const transitions = db
+    .prepare(
+      `SELECT t.id, t.camera_id, COALESCE(c.name, t.camera_id) AS camera_name, t.type, t.created_at,
+              t.peak, t.out_peak, t.out_frames, t.snapshot, t.verdict
+         FROM bed_transitions t LEFT JOIN cameras c ON c.id = t.camera_id
+        ORDER BY t.camera_id, t.created_at ASC`
+    )
+    .all();
+
+  const samples = db
+    .prepare(`SELECT camera_id, bucket_start, motion_peak FROM activity_samples ORDER BY camera_id, bucket_start ASC`)
+    .all();
+
+  const samplesByCamera = new Map();
+  for (const s of samples) {
+    if (!samplesByCamera.has(s.camera_id)) samplesByCamera.set(s.camera_id, []);
+    samplesByCamera.get(s.camera_id).push(s);
+  }
+  const out = findAllLingeringBedMotion(transitions, samplesByCamera, { windowMs, minActiveMinutes });
+
+  out.sort((a, b) => {
+    const xt = a.out_of_bed.created_at;
+    const yt = b.out_of_bed.created_at;
+    return xt === yt ? b.out_of_bed.id - a.out_of_bed.id : xt < yt ? 1 : -1;
+  });
   return out.slice(0, Math.min(500, Math.max(1, limit)));
 }
 
