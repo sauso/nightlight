@@ -9,6 +9,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+- Nightlight is now on the Unraid Community Applications store — the README's "Running on Unraid"
+  section leads with searching the Apps tab instead of the manual template-install steps, which are
+  now offered as an alternative rather than the only path.
+
 ## [0.31.0] - 2026-09-19
 
 ### Added
