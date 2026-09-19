@@ -524,11 +524,11 @@ counts as **historical**, not as the current state.
    deletion and confirming both now fail exactly one test each. **Recommended step (2) SHIPPED
    alongside it**: a rate-limited `[coactive]` diagnostic log line (see `planning/sleep-marker-review-
    runbook.md` §4), purely observational — logs time-to-first-quiet and which channel resolved first
-   whenever both channels are active in the same frame, never touches `bed_transitions`. **Not yet
-   committed or deployed** — code + tests + adversarial review complete, awaiting the owner's go-ahead
-   to commit; once on staging, burn-in is still needed before its `CO_ACTIVE_LOG_COOLDOWN_MS`-censored
-   duration data is enough to calibrate a real overlap-tolerance constant. Step (3), a third mechanism
-   design, remains not started.
+   whenever both channels are active in the same frame, never touches `bed_transitions`. **Shipped to
+   prod in 0.31.0 (2026-09-19)** — burn-in is still needed before its `CO_ACTIVE_LOG_COOLDOWN_MS`-censored
+   duration data is enough to calibrate a real overlap-tolerance constant; nothing acts on the logged
+   data yet. Step (3), a third mechanism design, remains not started — the whole point of steps (1)/(2)
+   was to have real data before attempting it again.
 4. **New: log-driven tuning is now possible.** The exit rule logs rejected links (`[oob] … link
    rejected`) with the actual gap and outside magnitude, so the real distribution can be read off a
    week of logs rather than guessed. Read it before moving `OOB_LINK_SLOW_MS` or `OOB_SLOW_OUT_MIN`.
@@ -736,7 +736,8 @@ its own motivating incident. **Named, accepted limits, not fixed this round:**
   retries a failed candidate).
 - Excursions over 20 minutes and `in_progress` (live, tonight-so-far) nights are out of scope.
 
-**✅ SHIPPED, dev `6be7c97` (PR #429) 2026-09-13, staging-verified.** Deployed to staging and replayed
+**✅ SHIPPED, dev `6be7c97` (PR #429) 2026-09-13, staging-verified — reached prod in 0.31.0
+(2026-09-19).** Deployed to staging and replayed
 against all 56 nights currently stored there (both children) — same code, `USE_TRANSITION_WAKE_EPISODES`
 on vs off, isolating this change from every other sleep-analysis fix shipped since those nights were
 last stored (comparing against the *stale stored rows* directly, without that isolation, produced 15
@@ -782,7 +783,7 @@ such install and costs nothing where it doesn't apply. ⚠️ The per-camera set
 installation's, quoted only to explain the observed rates — **no threshold in either gap's fix may be
 derived from them.**
 
-### 1.6 Sleep report notification is a fixed-clock snapshot, not evidence-based — option 1 `SHIPPED` (dev), narrowed scope
+### 1.6 Sleep report notification is a fixed-clock snapshot, not evidence-based — option 1 `SHIPPED` (0.31.0), narrowed scope
 
 Raised by the owner 2026-09-18, prompted by Renz's night of 2026-09-16→17 (§1.2 item 3's evidence
 above): "he slept until 7:10 yesterday which was unusual" — and the report/notification mechanism has no
@@ -831,7 +832,7 @@ parent while that's true (or unresolved), which is a real gap even on a night th
 but merely finishes late. Fixing item 3 would reduce how often option 1 has anything to report, not
 replace the need for it.
 
-✅ **SHIPPED 2026-09-19, dev, NARROWED from the owner's original wording.** Two rounds of adversarial
+✅ **SHIPPED to prod in 0.31.0 (2026-09-19), NARROWED from the owner's original wording.** Two rounds of adversarial
 design review (Opus, standing in for a rate-limited Codex) found the literal "wake_at changes
 meaningfully" trigger unsafe: a *measured* real incident (`morning-wake-parent-handles-bed.md`, Renz
 2026-08-29, `05:51`→`08:31` between two recomputes of the SAME night) proves a later recompute is not
