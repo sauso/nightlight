@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-09-19
+
 ### Added
 - The morning review now also asks about an out-of-bed event where the bed also showed movement in
   several separate minutes with no return logged ("Still moving?"), separately from the collapsed full
