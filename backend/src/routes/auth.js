@@ -512,6 +512,13 @@ router.delete('/users/:id', requireAuth, requireAdmin, (req, res) => {
   if (req.params.id === req.user.id) {
     return res.status(400).json({ error: "You can't remove your own account" });
   }
+  // push_tokens.user_id has no FK/cascade (GHSA-q98f) — a removed caregiver's device otherwise kept
+  // receiving alerts, including camera-snapshot image links, indefinitely. sendToAll (lib/push.js)
+  // also filters its recipient query against live users as defense in depth, so a row missed here (or
+  // by a future caller of this route's logic) still can't be delivered to — but the row should still
+  // be deleted, not just excluded, since a stale row otherwise makes push.js's recipient count read
+  // wrong forever.
+  db.prepare('DELETE FROM push_tokens WHERE user_id = ?').run(req.params.id);
   db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
   res.status(204).end();
 });

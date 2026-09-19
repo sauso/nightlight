@@ -18,7 +18,7 @@ import path from 'node:path';
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-test-'));
 process.env.DATA_DIR = TMP;
 
-const { computeNight } = await import('../src/lib/sleepAnalysis.js');
+const { computeNight, detectMidnightEpisodes } = await import('../src/lib/sleepAnalysis.js');
 const { default: db } = await import('../src/db.js');
 
 const CHILD = 'test-child';
@@ -85,6 +85,7 @@ before(() => {
 beforeEach(() => {
   db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
   db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  db.prepare('DELETE FROM detection_events WHERE camera_id = ?').run(CAM);
 });
 
 after(() => {
@@ -204,6 +205,25 @@ test('a corroborated departure becomes the authoritative wake time', () => {
   assert.equal(hhmm(night.wake_at_shadow), '05:09');
 });
 
+// ROADMAP §1.2 item 2 (2026-09-12): bed_transitions grew two new evidence columns, out_peak/out_frames.
+// They are recorded now but consulted by NOTHING yet — this is the direct test of that claim, not just
+// an assertion of it. If a future change makes computeNight read them, this test is the one that has
+// to change on purpose, not silently start failing.
+test('the new out_peak/out_frames evidence columns change nothing about computeNight yet', () => {
+  const insertTransitionWithEvidence = db.prepare(
+    `INSERT INTO bed_transitions (camera_id, type, peak, created_at, out_peak, out_frames) VALUES (?, ?, ?, ?, ?, ?)`
+  );
+  layDepartureNight({ withTransition: false });
+  insertTransitionWithEvidence.run(CAM, 'out_of_bed', 0.4, sqlTime(at(5, 9, 1)), 0.057, 4);
+  const withEvidence = computeNight(CHILD, DATE, { includeTimeline: true });
+
+  db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(5, 9, 1))); // same row, evidence columns NULL
+  const withoutEvidence = computeNight(CHILD, DATE, { includeTimeline: true });
+
+  assert.deepEqual(withEvidence, withoutEvidence, 'byte-identical output regardless of the new columns');
+});
+
 test('adopting the departure also shortens the recorded sleep', () => {
   // The point of computing the adoption BEFORE the metrics: promoting only the displayed time would
   // leave "asleep" still counting the 96 minutes after the child had already left the bed.
@@ -231,6 +251,249 @@ test('with nothing corroborating it, the wake falls back to the movement-only va
   const night = computeNight(CHILD, DATE);
   assert.equal(hhmm(night.wake_at), '06:45');
   assert.equal(night.wake_at, night.wake_at_algo, 'must be identical to the movement-only figure');
+});
+
+// --- The departure scan waits for real elapsed time, not just calendar time (issue #350) -----------
+//
+// Same shape as layDepartureNight: real awakenings peppered through the night so the absence-scan's
+// candidate genuinely STARTS at the final activity block, not at onset — a fixture that's simply quiet
+// from onset onward would have the scan find one giant candidate absence starting at onset, which
+// nothing corroborates, and prove nothing about the exit itself. Samples are laid through 07:30
+// (30 min past the 07:00 window end) regardless of which test uses this — the frozen clock in each
+// test is what actually determines how much of that data the departure scan can see: extRows is
+// always fetched for the full 3h calendar lookahead, but cribActExt/cribOccExt are only ever SIZED to
+// `evidenceCutoffMs`, so anything past the frozen "now" is fetched and then discarded as
+// out-of-bounds — exactly like it would be if it hadn't happened yet.
+function layLateExitNight() {
+  laySamples(at(19, 30), at(7, 30, 1), [
+    [at(19, 30), at(19, 40)], // settling
+    [at(23, 0), at(23, 6)], // a real awakening
+    [at(6, 49, 1), at(6, 59, 1)], // stirs, then gets out right at window end
+  ]);
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(6, 59, 1, 30)));
+}
+
+describe('★ departure confirmation waits for real elapsed time, not just calendar time (issue #350)', () => {
+  test('★ THE FIX: a departure is NOT confirmed moments after it happens, before real time proves it', (t) => {
+    layLateExitNight();
+    // "Now" is only ~2 real minutes after the 06:59:30 exit — nowhere near the 20 (MORNING_ABSENCE_MIN)
+    // minutes of real silence the departure scan requires to confirm it.
+    t.mock.timers.enable({ apis: ['Date'], now: at(7, 1, 1).getTime() });
+    const night = computeNight(CHILD, DATE);
+    assert.notEqual(
+      hhmm(night.wake_at), '06:59',
+      'confirmed a departure before enough real time had elapsed to actually prove it'
+    );
+  });
+
+  test('the SAME departure IS confirmed once enough real time has actually elapsed', (t) => {
+    layLateExitNight();
+    t.mock.timers.enable({ apis: ['Date'], now: at(7, 30, 1).getTime() }); // 31 real minutes later
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.wake_at), '06:59');
+  });
+
+  test('19 real elapsed minutes still is not enough; 20 is — the boundary, both sides', (t) => {
+    layLateExitNight();
+    // Offset from the exit's OWN floored minute (06:59:00, what txIdx actually resolves it to — see
+    // issue #260), not its exact instant (06:59:30): the array bound rounds `now` to the nearest
+    // minute, so anchoring 19 minutes past the exact instant lands on a whole-minute boundary that
+    // rounds up, silently granting a free extra minute of confirmed-quiet runway. Anchoring on the
+    // same floored minute the gap itself starts from is the only way to land exactly on 19 vs 20.
+    t.mock.timers.enable({ apis: ['Date'], now: at(6, 59, 1).getTime() + 19 * 60000 });
+    assert.notEqual(hhmm(computeNight(CHILD, DATE).wake_at), '06:59', '19 elapsed minutes confirmed it early');
+  });
+
+  test('...20 real elapsed minutes does', (t) => {
+    layLateExitNight();
+    t.mock.timers.enable({ apis: ['Date'], now: at(6, 59, 1).getTime() + 20 * 60000 });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:59');
+  });
+
+  test('a camera outage right after the exit is not silently read as confirming quiet', (t) => {
+    // Same shape, but nothing is ever recorded after the exit — a dead camera, not an observed empty
+    // bed. Clock frozen well past the full horizon: if a real absence were what's missing here, more
+    // time waiting would not help, which is exactly what distinguishes this from the tests above.
+    laySamples(at(19, 30), at(6, 59, 1), [
+      [at(19, 30), at(19, 40)],
+      [at(23, 0), at(23, 6)],
+      [at(6, 49, 1), at(6, 59, 1)],
+    ]);
+    insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(6, 59, 1, 30)));
+    t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+    assert.notEqual(
+      hhmm(computeNight(CHILD, DATE).wake_at), '06:59',
+      'an unobserved gap (offline camera) must not count as confirming silence'
+    );
+  });
+
+  test('a fully observed departure, clock frozen well past the horizon — unchanged control', (t) => {
+    layDepartureNight({ withTransition: true }); // fixture already fully observed, well inside the window
+    t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '05:09');
+  });
+
+  test('a duplicate activity_samples row for the same minute must not erase real movement (adversarial review finding)', (t) => {
+    laySamples(at(19, 30), at(7, 10, 1), [
+      [at(19, 30), at(19, 40)],
+      [at(23, 0), at(23, 6)],
+      [at(6, 49, 1), at(6, 59, 1)], // stirs, then gets out right at window end
+    ]);
+    // Two consecutive minutes of REAL movement, each recorded as TWO rows for the same bucket — a
+    // forced flush catching real motion mid-minute, then the regular interval flush writing a
+    // near-zero remainder once the accumulator was already cleared (activityTracker.flushActivity is
+    // "exported for tests / forced flushes"; activity_samples has no uniqueness constraint on
+    // (camera_id, bucket_start) — see db.js). The active row is chronologically first (lower rowid),
+    // the quiet row second — exactly the ordering that would let a last-write-wins implementation
+    // silently erase the real movement this test plants, which is what happened before this fix
+    // (found by adversarial review, not by this suite).
+    insertSample.run(CAM, sqlTime(at(7, 10, 1)), 0.4, 0.6);
+    insertSample.run(CAM, sqlTime(at(7, 10, 1)), 0.0002, 0.0002);
+    insertSample.run(CAM, sqlTime(at(7, 11, 1)), 0.4, 0.6);
+    insertSample.run(CAM, sqlTime(at(7, 11, 1)), 0.0002, 0.0002);
+    laySamples(at(7, 12, 1), at(7, 30, 1), []);
+    insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(6, 59, 1, 30)));
+
+    t.mock.timers.enable({ apis: ['Date'], now: at(7, 30, 1).getTime() });
+    assert.notEqual(
+      hhmm(computeNight(CHILD, DATE).wake_at), '06:59',
+      'the two real active minutes (each masked by a duplicate quiet row) must still break the confirming quiet run'
+    );
+  });
+
+  test('a lone active blip next to an UNOBSERVED gap must not be bridged (adversarial review finding)', (t) => {
+    // Found by adversarial review, not by this suite: a targeted mutation reverting ONLY bridged()'s
+    // right-hand neighbor check from `=== false` to truthy/falsy survived every existing test, because
+    // none of them puts a genuine data gap (null) immediately next to an isolated active blip — the one
+    // case where the two versions disagree (`!(x || null)` is `true` since `null` is falsy, exactly the
+    // "unobserved counts as quiet enough to bridge" bug issue #350 exists to fix). The left neighbor can
+    // never discriminate this (see bridged()'s own comment for why); only the right one can.
+    //
+    // 19 real minutes of confirmed quiet after the exit, then a lone active blip, then a genuine outage
+    // (no sample at all — not a quiet reading) immediately after it, then quiet resumes. Strict bridged()
+    // must refuse to bridge the blip (its right neighbor is unobserved, not confirmed-quiet), so the run
+    // stops one minute short of MORNING_ABSENCE_MIN (19, not 20) — and the second run that starts once
+    // quiet resumes starts too far from the transition to be corroborated. Loose bridged() incorrectly
+    // treats the null neighbor as "quiet enough", stitching the run to exactly 20 minutes and confirming
+    // the departure a mutation-tester should have caught.
+    laySamples(at(19, 30), at(6, 59, 1), [
+      [at(19, 30), at(19, 40)],
+      [at(23, 0), at(23, 6)],
+      [at(6, 49, 1), at(6, 59, 1)], // stirs, then gets out
+    ]);
+    laySamples(at(6, 59, 1), at(7, 18, 1), []); // 19 min confirmed quiet after the exit
+    insertSample.run(CAM, sqlTime(at(7, 18, 1)), 0.4, 0.6); // a lone active blip
+    // (deliberately NO sample at 07:19 — a genuine outage, not confirmed quiet)
+    laySamples(at(7, 20, 1), at(7, 40, 1), []); // quiet resumes after the gap
+    insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(6, 59, 1, 30)));
+
+    t.mock.timers.enable({ apis: ['Date'], now: at(7, 40, 1).getTime() });
+    assert.notEqual(
+      hhmm(computeNight(CHILD, DATE).wake_at), '06:59',
+      'a blip next to an UNOBSERVED (not confirmed-quiet) neighbor must not be bridged into a qualifying absence'
+    );
+  });
+});
+
+// --- The metrics span extends to match a confirmed post-window departure (issue #352) --------------
+//
+// Same shape as layLateExitNight, but the exit itself falls PAST window_end (07:00), not right at it —
+// this is what actually exercises the metrics extension. Issue #350's totalMinExt only stops the
+// departure SCAN from reading time that hasn't happened yet; it does nothing for the totals unless the
+// metrics span itself is widened to match, which is this issue's own fix. Quiet from the exit through
+// 07:40 gives 20+ real minutes to corroborate it, comfortably past MORNING_ABSENCE_MIN.
+function layPostWindowExitNight() {
+  laySamples(at(19, 30), at(7, 40, 1), [
+    [at(19, 30), at(19, 40)], // settling
+    [at(23, 0), at(23, 6)], // a real awakening
+    [at(6, 50, 1), at(7, 15, 1)], // active right through window close and past it, then gets out
+  ]);
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(7, 15, 1, 30)));
+}
+
+describe('★ the metrics span extends to match a confirmed post-window departure (issue #352)', () => {
+  test('late exit with quiet data: totals span onset→the real wake, not onset→window end', (t) => {
+    layPostWindowExitNight();
+    t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() }); // well past the evidence horizon
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(hhmm(night.wake_at), '07:15', 'the post-window departure must be adopted');
+    const span = Math.round((utcMs(night.wake_at) - utcMs(night.onset_at)) / 60000);
+    assert.equal(
+      night.asleep_minutes + night.awake_minutes, span,
+      'totals must cover the full onset-to-wake span, not stop at window end (07:00)'
+    );
+  });
+
+  test('★ wake_at_algo is unaffected by a post-window transition adoption', (t) => {
+    layPostWindowExitNight();
+    t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.wake_at), '07:15', 'sanity: the departure IS adopted for the displayed wake');
+    assert.equal(
+      hhmm(night.wake_at_algo), '06:50',
+      'the movement-only shadow figure must reflect only what movement showed by window close, unmoved by the later transition adoption'
+    );
+  });
+
+  test('late exit with intervening active minutes: counted as awake, not folded into asleep', (t) => {
+    laySamples(at(19, 30), at(8, 20, 1), [
+      [at(19, 30), at(19, 40)],
+      [at(23, 0), at(23, 6)],
+      [at(7, 5, 1), at(7, 12, 1)], // an intervening wake, well after window end
+      [at(7, 40, 1), at(7, 50, 1)], // stirs, then actually gets out
+    ]);
+    insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(7, 50, 1, 30)));
+    t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(hhmm(night.wake_at), '07:50');
+    assert.equal(night.wake_count, 3, 'the intervening post-window wake must be counted separately, not merged into sleep');
+    const span = Math.round((utcMs(night.wake_at) - utcMs(night.onset_at)) / 60000);
+    assert.equal(night.asleep_minutes + night.awake_minutes, span);
+  });
+
+  test('late exit after a camera outage: the unobserved gap defaults to asleep, no crash or mis-total', (t) => {
+    laySamples(at(19, 30), at(7, 5, 1), [
+      [at(19, 30), at(19, 40)],
+      [at(23, 0), at(23, 6)],
+    ]);
+    // A genuine outage — no rows at all for 15 minutes, not just quiet ones — sitting INSIDE the
+    // extension's span. If the extension defaulted a missing minute to "still awake" (carried state
+    // forward) instead of this file's existing gap convention (unsampled = quiet), it would wrongly
+    // inflate awake_minutes and could bridge two unrelated wake runs into one.
+    laySamples(at(7, 20, 1), at(7, 50, 1), [
+      [at(7, 40, 1), at(7, 50, 1)], // stirs, then gets out
+    ]);
+    insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(7, 50, 1, 30)));
+    laySamples(at(7, 50, 1), at(8, 20, 1), []); // confirmed quiet after the departure
+    t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(hhmm(night.wake_at), '07:50');
+    const span = Math.round((utcMs(night.wake_at) - utcMs(night.onset_at)) / 60000);
+    assert.equal(night.asleep_minutes + night.awake_minutes, span, 'no crash / mis-total across the outage');
+    assert.equal(night.awake_minutes, 16, 'the 15 unsampled minutes must default to asleep, not be counted as awake');
+  });
+
+  test('★ an empty night does not retroactively flip once post-window data is examined', (t) => {
+    laySamples(at(19, 30), at(7, 0, 1), []); // nobody in the bed all night — the window alone reads empty
+    // Real activity AFTER the window closes, shaped exactly like a genuine departure — this is what the
+    // metrics extension would otherwise pull in. The point of this test is that it must never get the
+    // chance to: status is decided from window-bounded data alone, before this block is ever reached
+    // (issue #352's ordering guarantee — see the comment above the empty-bed check in sleepAnalysis.js).
+    laySamples(at(7, 0, 1), at(7, 40, 1), [[at(7, 5, 1), at(7, 15, 1)]]);
+    insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(7, 15, 1, 30)));
+    t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'empty', 'an empty night must not flip to ok once the post-window data is looked at');
+    assert.equal(night.asleep_minutes, null);
+    assert.equal(night.onset_at, null);
+    assert.equal(night.wake_at, null);
+  });
 });
 
 // --- A parent's arm in an empty bed must not hide the departure ------------------------------------
@@ -520,16 +783,20 @@ test('★★ an into_bed at the IDENTICAL second still cancels the exit', () => 
   assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '05:49');
 });
 
-test('★★ the return is indexed with txIdx, not a hand-rolled floor (#260 lives on this seam)', () => {
+test('★★ the return is indexed with txIdx, consistently, on both sides of the second (#260 fixed)', () => {
   // ⚠️ A review mutated `txIdx(back.created_at)` into an inline `Math.floor(...)` and it SURVIVED the
-  // whole suite — the source comment claimed the convention and nothing checked it. It is not cosmetic:
-  // `txIdx` currently ROUNDS, so a return at :29 and one at :31 land on different minutes, and with the
-  // only corroborating minutes sitting on that boundary the two give different nights.
+  // whole suite — the source comment claimed the convention and nothing checked it. Before #260 was
+  // fixed, that mutation was actually DETECTABLE here: `txIdx` rounded, so a return at :29 and one at
+  // :31 landed on different minutes, and with the only corroborating minutes sitting on that boundary
+  // the two gave different nights (see git history for that version of this test).
   //
-  // Occupancy exists in exactly OCCUPANCY_MIN_MINUTES minutes, 05:49-05:51. A return at 05:49:31 rounds
-  // UP to 05:50, leaving only 2 witnessed minutes — one short — so the guard stays silent.
-  // ★ When #260 flips txIdx from round to floor, THIS TEST WILL FAIL. That is the point: the wake path
-  // sits on the same seam as onset, and it must not move silently.
+  // Now that txIdx floors — matching the file's own stated rule for a real-second timestamp — :29 and
+  // :31 both resolve to the SAME minute, so they must produce the SAME result. That symmetry is itself
+  // the regression test for #260 on this call site: the wake path sits on the same txIdx seam as onset,
+  // and this proves it moved when #260 did rather than quietly keeping its own rounding.
+  //
+  // Occupancy exists in exactly OCCUPANCY_MIN_MINUTES minutes, 05:49-05:51. Both :29 and :31 now floor
+  // into 05:49, so both see all 3 minutes witnessed and the guard fires in both cases.
   // A LATER real exit is what makes the seam observable at all: without one the fallback below hands
   // the skipped exit straight back and both cases agree, which is how the first version of this test
   // passed for the wrong reason (both `null`).
@@ -544,18 +811,18 @@ test('★★ the return is indexed with txIdx, not a hand-rolled floor (#260 liv
     insertTransition.run(CAM, 'out_of_bed', 0.04, sqlTime(at(8, 30, 1, 5))); // the later, real departure
   };
 
-  layWitnessOnTheBoundary(29); // rounds DOWN to 05:49 -> all 3 minutes witnessed -> guard fires
-  const rounded = computeNight(CHILD, DATE);
+  layWitnessOnTheBoundary(29); // floors to 05:49 -> all 3 minutes witnessed -> guard fires
+  const early = computeNight(CHILD, DATE);
   db.prepare('DELETE FROM bed_transitions').run();
   db.prepare('DELETE FROM activity_samples').run();
-  layWitnessOnTheBoundary(31); // rounds UP to 05:50 -> only 2 witnessed -> guard silent
-  const notRounded = computeNight(CHILD, DATE);
+  layWitnessOnTheBoundary(31); // ALSO floors to 05:49 now -> all 3 minutes witnessed -> guard fires too
+  const late = computeNight(CHILD, DATE);
 
-  assert.equal(hhmm(rounded.wake_at), '08:30', 'the :29 return is witnessed, so the tail is skipped');
-  assert.equal(hhmm(notRounded.wake_at), '05:49', 'the :31 return is one witness minute short, so the exit stands');
-  assert.notEqual(
-    hhmm(rounded.wake_at), hhmm(notRounded.wake_at),
-    'two seconds apart must straddle the minute boundary — if these match, txIdx no longer rounds'
+  assert.equal(hhmm(early.wake_at), '08:30', 'the :29 return is witnessed, so the tail is skipped');
+  assert.equal(
+    hhmm(late.wake_at), hhmm(early.wake_at),
+    ':29 and :31 are the same minute under floor — a return at :31 must be witnessed exactly like :29, ' +
+      'not treated as one minute later'
   );
 });
 
@@ -743,6 +1010,87 @@ function layTimelineNight({ out = [] } = {}) {
   insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 38)));
   insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(5, 9, 1)));
 }
+
+test('★ the run leading straight into the departure is EXTENDED through to window close, not followed by a second row (roadmap §1.5 Gap A)', () => {
+  // wake_at (05:09) is exactly where the wakes[] loop below stops, by definition — so the ONE span every
+  // night with a real morning wake actually needs is the one that loop can never produce. The frontend
+  // only renders an alert inside a wake row (WakeItem), so before this fix an alert firing at the exact
+  // moment the child got up had nothing to attach to.
+  //
+  // layTimelineNight's last active block (05:00-05:09) runs straight into the departure with no gap, so
+  // the fix must EXTEND that existing row rather than push an adjacent one starting at the same instant
+  // — two rows sharing a boundary would let alertsInRange's independent ±3min margin match a single
+  // alert to BOTH (found by adversarial review; see the sibling test below for the direct proof).
+  layTimelineNight();
+
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(hhmm(night.wake_at), '05:09');
+  assert.equal(night.wakes.length, 4, 'no extra row beyond the mid-night wakes — the last run itself was extended');
+  const morning = night.wakes[night.wakes.length - 1];
+  assert.equal(hhmm(morning.start_at), '05:00', 'the ORIGINAL run start, not sleepEnd — this is an extension, not a new row');
+  assert.equal(hhmm(morning.end_at), '07:00', 'and runs to the window close');
+  assert.equal(morning.minutes, 120);
+});
+
+test('...but a departure after a real quiet gap gets its OWN row, not a merge', (t) => {
+  // Unlike the fixture above, real activity stops at 06:59 and the departure isn't corroborated until
+  // 07:04 — a 5-minute gap (within WAKE_SNAP_MS) that WAKE_GAP_MIN (3 min) does not bridge, so the run
+  // above ends at 06:59 while sleepEnd is 07:04. There is nothing to extend; a standalone row must cover
+  // the gap itself, or the moment of departure has no row at all (found by adversarial review — the
+  // original fix's "the run already covers it" reasoning silently assumed no such gap could exist).
+  //
+  // The departure (07:04) is already past window close (07:00), so sleepEnd only reaches it via issue
+  // #352's lookahead extension. `morningEnd` is `Math.max(totalMin, sleepEnd)` — NOT issue #350/#352's
+  // OWN much-wider departure-SCAN horizon (totalMinExt, up to a full 3h) — so this row is a same-instant
+  // marker exactly at the departure, not stretched out to however far the scan was merely PERMITTED to
+  // search. That marker is still enough: alertsInRange's ±3-minute margin does the matching.
+  laySamples(at(18, 20), at(7, 30, 1), [
+    [at(19, 30), at(19, 40)], [at(23, 0), at(23, 6)], [at(6, 45, 1), at(6, 59, 1)],
+  ]);
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 38)));
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(7, 4, 1)));
+  t.mock.timers.enable({ apis: ['Date'], now: at(7, 30, 1).getTime() });
+
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(hhmm(night.wake_at), '07:04', 'sanity: the departure is corroborated despite the gap');
+  const morning = night.wakes[night.wakes.length - 1];
+  assert.equal(hhmm(morning.start_at), '07:04', 'a standalone row starting at the departure itself');
+  assert.equal(hhmm(morning.end_at), '07:04', 'a same-instant marker, not stretched to the scan horizon');
+  assert.equal(morning.minutes, 0);
+});
+
+test('★ an alert fired at a POST-WINDOW departure is actually fetched, not silently excluded (adversarial review finding)', (t) => {
+  // The deeper half of the same finding: even with a wake row covering the departure, an alert firing
+  // after the classic window close was previously dropped by the SQL query itself
+  // (`WHERE created_at < endSql`, endSql = the classic window_end) before a row ever got the chance to
+  // claim it. Same fixture as the standalone-row test above.
+  laySamples(at(18, 20), at(7, 30, 1), [
+    [at(19, 30), at(19, 40)], [at(23, 0), at(23, 6)], [at(6, 45, 1), at(6, 59, 1)],
+  ]);
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 38)));
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(7, 4, 1)));
+  db.prepare(`INSERT INTO detection_events (camera_id, camera_name, type, detail, created_at)
+              VALUES (?, 'Test Cam', 'motion', '4.1%', ?)`).run(CAM, sqlTime(at(7, 4, 1)));
+  t.mock.timers.enable({ apis: ['Date'], now: at(7, 30, 1).getTime() });
+
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(hhmm(night.wake_at), '07:04');
+  assert.equal(night.alerts.length, 1, 'the alert at the post-window departure must be fetched');
+  assert.equal(hhmm(night.alerts[0].created_at), '07:04');
+});
+
+test('...but a night still asleep at window close gets no such row', () => {
+  // wake_at is null here — there is no "after the wake" to show, and no reason to invent an empty span.
+  layNight(at(18, 20), at(7, 0, 1), { move: [[at(19, 30), at(19, 40)], [at(23, 0), at(23, 6)]] });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 38)));
+
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(night.wake_at, null, 'sanity: still asleep at window close');
+  assert.ok(
+    night.wakes.every((w) => hhmm(w.end_at) !== '07:00'),
+    'no manufactured row reaching window close when there is nothing after the wake'
+  );
+});
 
 test('the timeline draws only the two transitions the analysis adopted', () => {
   // A child rolling over reads as an arrival to the frame-diff classifier, so a normal night produces a
@@ -1046,20 +1394,295 @@ describe('⚠️ seconds on a bed transition — the trap fixture, and the gap i
     assert.equal(sqlTime(at(18, 38, 0, 29)).slice(0, 16), sqlTime(at(18, 38, 0, 31)).slice(0, 16));
   });
 
-  test('★ STILL NOT FIXED (#260): the second half of a minute reports a minute late', () => {
-    // ⚠️ WHEN #260 IS FIXED THIS TEST FAILS, AND THAT IS ITS JOB. Replace it with:
+  test('★ FIXED (#260): the second half of a minute no longer reports a minute late', () => {
+    // txIdx floors, not rounds — a put-down at :31 lands in the same minute as one at :29, matching
+    // what a person reading a clock would call it. Regression: before the fix, onsetForPutDownAt(31)
+    // reported '18:39' (18:38:31 rounded UP to the next minute) while onsetForPutDownAt(29) correctly
+    // reported '18:38' — this failed until `Math.round` became `Math.floor` in txIdx.
     //
-    //     assert.equal(onsetForPutDownAt(31), onsetForPutDownAt(29),
-    //       'the reported bedtime must not depend on which half of the minute the put-down fell in');
-    //
-    // ...and delete this comment. The error is one-directional — rounding only ever pushes up — so
-    // bedtime is late, never early, on roughly half of all nights, and asleep_minutes is short by one.
-    assert.equal(onsetForPutDownAt(29), '18:38', 'the first half of the minute already reports late');
+    // ⚠️ THE ABSOLUTE VALUE, NOT JUST SYMMETRY. An adversarial review caught that an earlier version of
+    // this test asserted only `onsetForPutDownAt(31) === onsetForPutDownAt(29)` — which a `Math.ceil`
+    // mutation also satisfies (both push to '18:39', equally wrong). Symmetry alone proves the two
+    // inputs are treated consistently, not that either is CORRECT; only a real clock reading does that.
+    assert.equal(onsetForPutDownAt(29), '18:38', 'the control: this half of the minute already read correctly');
     assert.equal(
-      onsetForPutDownAt(31),
-      '18:39',
-      'a put-down at :31 no longer reports a minute late — #260 appears to be FIXED. ' +
-        'Swap this test for the equality assertion in the comment above and close the issue.'
+      onsetForPutDownAt(31), '18:38',
+      'the reported bedtime must not depend on which half of the minute the put-down fell in'
     );
+  });
+});
+
+describe('corroborated midnight episodes: pairing and evidence boundaries', () => {
+  // Synthetic evidence, in seconds from a fixed origin; this is not a production replay.
+  function detect(events, { quiet = new Array(200).fill(false), occupied = [20, 21, 22],
+    onset = 0, end = 30 } = {}) {
+    const origin = at(3, 0, 1).getTime();
+    const ms = (value) => utcMs(value);
+    const idx = (value) => Math.floor((ms(value) - origin) / 60000);
+    const transitions = events.map(([type, seconds, id], i) => ({
+      type, id: id ?? i + 1, created_at: sqlTime(new Date(origin + seconds * 1000)),
+    }));
+    const before = structuredClone(transitions);
+    const witness = (from) => occupied.filter((i) =>
+      i >= Math.max(0, from) && i < Math.min(from + 150, quiet.length)).length >= 3;
+    const result = detectMidnightEpisodes(transitions, quiet, witness, idx, ms, onset, end);
+    assert.deepEqual(transitions, before, 'sorting must not mutate the input');
+    return result;
+  }
+  const out = 'out_of_bed', into = 'into_bed';
+
+  test('both endpoints may move; only strictly interior buckets must be quiet', () => {
+    const quiet = new Array(200).fill(false);
+    quiet[0] = true;
+    quiet[8] = true;
+    assert.deepEqual(detect([[out, 10], [into, 500]], { quiet }), [{ start: 0, end: 8 }]);
+    for (const state of [true, null, undefined]) {
+      const broken = quiet.slice();
+      broken[4] = state;
+      assert.deepEqual(detect([[out, 10], [into, 500]], { quiet: broken }), []);
+    }
+  });
+
+  test('elapsed-time limits and the nonempty interior are independent', () => {
+    assert.deepEqual(detect([[out, 59], [into, 119]]), []); // exactly 60 seconds
+    assert.deepEqual(detect([[out, 59], [into, 120]]), [{ start: 0, end: 2 }]); // 61s
+    assert.deepEqual(detect([[out, 10], [into, 75]]), []); // 65s, adjacent buckets
+    assert.deepEqual(detect([[out, 10], [into, 1210]]), [{ start: 0, end: 20 }]);
+    assert.deepEqual(detect([[out, 10], [into, 1211]]), []);
+  });
+
+  test('requires observed return occupancy and bounds both ends to the sleep span', () => {
+    const pair = [[out, 10], [into, 500]];
+    assert.deepEqual(detect(pair, { occupied: [] }), []);
+    assert.deepEqual(detect(pair, { occupied: [8, 9] }), []);
+    assert.deepEqual(detect(pair, { occupied: [8, 9, 10] }), [{ start: 0, end: 8 }]);
+    assert.deepEqual(detect(pair, { onset: 1 }), []);
+    assert.deepEqual(detect(pair, { end: 8 }), []);
+    assert.deepEqual(detect(pair, { end: 9 }), [{ start: 0, end: 8 }]);
+    assert.deepEqual(detect([[out, 1800], [into, 1920]]), []);
+    assert.deepEqual(detect([[out, 10]]), []);
+  });
+
+  test('sorts by timestamp then ascending id and uses the literal next transition', () => {
+    assert.deepEqual(detect([[into, 500, 3], [out, 10, 2], [out, 10, 1]]),
+      [{ start: 0, end: 8 }]);
+    assert.deepEqual(detect([[out, 0], [into, 35], [out, 50], [into, 480]]), []);
+    assert.deepEqual(detect([[out, 0], [into, 120], [into, 600]], {
+      occupied: [151, 152, 153],
+    }), [], 'failed immediate return must not be skipped in search of a later one');
+  });
+
+  test('backward settling guard includes exactly 60 seconds and identical timestamps', () => {
+    assert.deepEqual(detect([[into, 0], [out, 60], [into, 540]]), []);
+    assert.deepEqual(detect([[into, 0], [out, 61], [into, 540]]),
+      [{ start: 1, end: 9 }]);
+    assert.deepEqual(detect([[out, 0, 1], [out, 0, 2], [into, 0, 3], [into, 480, 4]]), []);
+    assert.deepEqual(detect([[into, 0], [out, 30], [into, 480]], {
+      occupied: [150, 151, 152],
+    }), [{ start: 0, end: 8 }], 'an uncorroborated prior entry must not suppress the exit');
+  });
+
+  test('known limit: two 90-second adult visits manufacture a six-minute episode', () => {
+    // The child can remain in bed throughout; this mechanism cannot identify the adult.
+    assert.deepEqual(detect([[into, 0], [out, 90], [into, 390], [out, 480]]),
+      [{ start: 1, end: 6 }]);
+  });
+
+  test('known limit: unrelated later motion can corroborate a false return', () => {
+    assert.deepEqual(detect([[out, 0], [into, 120]], { occupied: [100, 101, 102] }),
+      [{ start: 0, end: 2 }]);
+    // A real return at minute 10 lends its witness to the spurious minute-2 entry.
+    assert.deepEqual(detect([[out, 0], [into, 120], [out, 150], [into, 600]], {
+      occupied: [10, 11, 12],
+    }), [{ start: 0, end: 2 }]);
+  });
+
+  test('known limits: a stray prior entry suppresses a real exit; a 70s tail escapes', () => {
+    assert.deepEqual(detect([[into, 0], [out, 30], [into, 510]]), []);
+    assert.deepEqual(detect([[out, 0], [into, 20], [out, 90], [into, 480]]),
+      [{ start: 1, end: 8 }]);
+  });
+
+  test('known limit: a repeated exit can shorten an episode or remove it entirely', () => {
+    assert.deepEqual(detect([[out, 0], [out, 240], [into, 480]]),
+      [{ start: 4, end: 8 }]);
+    assert.deepEqual(detect([[out, 0], [out, 240], [into, 270]]), []);
+  });
+});
+
+describe('midnight episode integration', () => {
+  function addPair(exit, entry) {
+    insertTransition.run(CAM, 'out_of_bed', 0.5, sqlTime(exit));
+    insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(entry));
+  }
+  function invariantTimes(before, after) {
+    for (const key of ['status', 'onset_at', 'wake_at', 'onset_at_algo', 'wake_at_algo',
+      'onset_at_shadow', 'wake_at_shadow']) assert.equal(after[key], before[key], key);
+  }
+  function layNight(wake, extra = []) {
+    laySamples(at(19, 30), wake, [
+      [at(19, 30), at(19, 40)],
+      ...extra,
+      [new Date(wake.getTime() - 60000), wake],
+    ], STILL_OCCUPIED);
+    laySamples(wake, at(10, 0, 1));
+    insertTransition.run(CAM, 'out_of_bed', 0.5, sqlTime(wake));
+  }
+
+  for (const exitMoves of [false, true]) {
+    test(`sparse 20:41:30/20:43:57 episode, synthetic exit motion=${exitMoves}`, (t) => {
+      // These timestamps reproduce the motivating shape, not an unqueried production peak.
+      // Unlike the existing five-active-minute fixture, neither variant qualifies as a wake alone.
+      t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+      layNight(at(5, 49, 1), [
+        ...(exitMoves ? [[at(20, 41), at(20, 42)]] : []),
+        [at(20, 44), at(20, 46)],
+      ]);
+      const before = computeNight(CHILD, DATE, { includeTimeline: true });
+      assert.equal(before.status, 'ok');
+      assert.equal(before.asleep_minutes, 609);
+      assert.equal(before.longest_stretch_minutes, 609);
+      assert.equal(before.wake_count, 0);
+      addPair(at(20, 41, 0, 30), at(20, 43, 0, 57));
+      insertTransition.run(CAM, 'out_of_bed', 0.5, sqlTime(at(20, 44, 0, 36)));
+      const night = computeNight(CHILD, DATE, { includeTimeline: true });
+      invariantTimes(before, night);
+      assert.equal(night.asleep_minutes, 606);
+      assert.equal(night.awake_minutes, 3);
+      assert.equal(night.wake_count, 1);
+      assert.equal(night.longest_stretch_minutes, 545);
+      assert.deepEqual(night.wakes[0], {
+        start_at: sqlTime(at(20, 41)), end_at: sqlTime(at(20, 44)), minutes: 3,
+      });
+      assert.equal(night.timeline.find((m) => m.t === sqlTime(at(20, 42))).inWake, true);
+      assert.equal(computeNight(CHILD, DATE).wake_count, 1, 'summary and detail must agree');
+    });
+  }
+
+  test('does not add episodes during an open night', (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: at(23, 0).getTime() });
+    layNight(at(5, 49, 1));
+    const before = computeNight(CHILD, DATE);
+    addPair(at(20, 41, 0, 30), at(20, 43, 0, 57));
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.in_progress, true);
+    invariantTimes(before, night);
+    assert.equal(night.awake_minutes, before.awake_minutes);
+    assert.equal(night.wake_count, before.wake_count);
+  });
+
+  test('a new episode cannot promote an empty night to ok', (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+    laySamples(at(19, 30), at(10, 0, 1), [], STILL_OCCUPIED);
+    addPair(at(23, 0), at(23, 8));
+    assert.equal(computeNight(CHILD, DATE).status, 'empty');
+  });
+
+  test('post-window episodes survive the extended metrics pass', (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+    layNight(at(7, 40, 1));
+    const before = computeNight(CHILD, DATE);
+    addPair(at(7, 5, 1, 10), at(7, 13, 1, 20));
+    const night = computeNight(CHILD, DATE, { includeTimeline: true });
+    invariantTimes(before, night);
+    assert.equal(hhmm(night.wake_at), '07:40');
+    assert.equal(night.awake_minutes, 9);
+    assert.equal(night.asleep_minutes, before.asleep_minutes - 9);
+    assert.equal(night.wake_count, 1);
+    assert.deepEqual(night.wakes[0], {
+      start_at: sqlTime(at(7, 5, 1)), end_at: sqlTime(at(7, 14, 1)), minutes: 9,
+    });
+  });
+
+  test('last-minute return preserves the movement-only final wake', (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+    laySamples(at(19, 30), at(10, 0, 1), [[at(19, 30), at(19, 40)]], STILL_OCCUPIED);
+    const before = computeNight(CHILD, DATE);
+    addPair(at(6, 57, 1, 10), at(6, 59, 1, 20));
+    const night = computeNight(CHILD, DATE, { includeTimeline: true });
+    invariantTimes(before, night);
+    assert.equal(night.wake_at_algo, null);
+    assert.equal(night.wake_at, null);
+    assert.deepEqual(night.wakes, [{
+      start_at: sqlTime(at(6, 57, 1)), end_at: sqlTime(at(7, 0, 1)), minutes: 3,
+    }]);
+  });
+
+  test('a last-minute episode merges with the morning row without moving departure', (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+    layNight(at(5, 49, 1));
+    for (const m of [49, 50]) {
+      db.prepare('UPDATE activity_samples SET motion_peak = ? WHERE camera_id = ? AND bucket_start = ?')
+        .run(STILL_OCCUPIED, CAM, sqlTime(at(5, m, 1)));
+    }
+    const before = computeNight(CHILD, DATE);
+    addPair(at(5, 46, 1, 10), at(5, 48, 1, 20));
+    const night = computeNight(CHILD, DATE, { includeTimeline: true });
+    invariantTimes(before, night);
+    assert.equal(night.awake_minutes, 3);
+    assert.equal(night.wake_count, 1);
+    assert.deepEqual(night.wakes, [{
+      start_at: sqlTime(at(5, 46, 1)), end_at: sqlTime(at(7, 0, 1)), minutes: 74,
+    }]);
+  });
+
+  test('a sound-only interior sample is not observed bed quiet', (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+    layNight(at(5, 49, 1));
+    addPair(at(20, 41, 0, 30), at(20, 43, 0, 57));
+    db.prepare('UPDATE activity_samples SET motion_peak = NULL, sound_peak = 0 WHERE camera_id = ? AND bucket_start = ?')
+      .run(CAM, sqlTime(at(20, 42)));
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(night.wake_count, 0);
+    assert.equal(night.awake_minutes, 0);
+  });
+
+  for (const twoRuns of [false, true]) {
+    test(`episode union ${twoRuns ? 'merges two wakes' : 'extends one wake without changing count'}`, (t) => {
+      t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+      layNight(at(5, 49, 1));
+      // Sound-only activity keeps the bed-quiet interior genuinely distinct from wake evidence.
+      for (const [from, to] of twoRuns ? [[2, 7], [11, 16]] : [[5, 10]]) {
+        for (let m = from; m < to; m++) {
+          db.prepare('UPDATE activity_samples SET sound_peak = 10 WHERE camera_id = ? AND bucket_start = ?')
+            .run(CAM, sqlTime(at(23, m)));
+        }
+      }
+      const before = computeNight(CHILD, DATE);
+      assert.equal(before.wake_count, twoRuns ? 2 : 1);
+      addPair(at(23, 0), at(23, 18));
+      const night = computeNight(CHILD, DATE);
+      invariantTimes(before, night);
+      assert.equal(night.wake_count, 1);
+      assert.equal(night.awake_minutes, 19);
+      assert.equal(night.asleep_minutes, before.asleep_minutes - (19 - before.awake_minutes));
+      assert.ok(night.longest_stretch_minutes <= before.longest_stretch_minutes);
+    });
+  }
+
+  test('an episode bridges a short quiet gap to an adjacent activity wake, like markWakeRuns does', (t) => {
+    // Adversarial review finding: detectMidnightEpisodes ORs its span directly into inWake and skips
+    // straight to accumulateMetrics, which (unlike markWakeRuns) does no gap-bridging of its own — so
+    // an episode 1-3 minutes from a separate qualifying activity run was counted as a SECOND wake
+    // instead of extending the first, contradicting this file's own WAKE_GAP_MIN convention. Traced
+    // through real computeNight before the fix: wake_count came back 2, not 1.
+    t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+    layNight(at(5, 49, 1));
+    // A real, independent 5-minute activity wake, 2 quiet minutes after the episode's own span ends.
+    for (let m = 6; m < 11; m++) {
+      db.prepare('UPDATE activity_samples SET sound_peak = 10 WHERE camera_id = ? AND bucket_start = ?')
+        .run(CAM, sqlTime(at(23, m)));
+    }
+    const before = computeNight(CHILD, DATE);
+    assert.equal(before.wake_count, 1, 'the activity run alone is already a qualifying wake');
+    addPair(at(23, 0), at(23, 3)); // episode spans 23:00-23:03 inclusive; 23:04-23:05 stay quiet
+    const night = computeNight(CHILD, DATE, { includeTimeline: true });
+    invariantTimes(before, night);
+    assert.equal(night.wake_count, 1, 'a 2-minute gap is within WAKE_GAP_MIN and must bridge, not split');
+    assert.equal(night.awake_minutes, 11);
+    assert.deepEqual(night.wakes[0], {
+      start_at: sqlTime(at(23, 0)), end_at: sqlTime(at(23, 11)), minutes: 11,
+    });
   });
 });

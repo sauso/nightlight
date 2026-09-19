@@ -164,6 +164,13 @@ that IP to browsers. There are two supported ways to provide one:
     kernel limitation) — which matters if your reverse proxy (e.g. SWAG) runs on that same host. Use
     **`ipvlan`** (or add a macvlan shim interface) so the host can reach it.
 
+| | Host networking | ipvlan | macvlan |
+|---|---|---|---|
+| Setup | None — the default | Custom Docker network + fixed IP | Custom Docker network + fixed IP |
+| Port collisions with other containers | Possible — shares the host's ports | None — has its own IP | None — has its own IP |
+| Host itself can reach the container | Yes (it *is* the host) | Yes | **No** (Linux kernel limitation) — use ipvlan instead if a reverse proxy runs on the host |
+| Multiple instances on one host | Awkward — only one can hold port 4000 | Easy — each gets its own IP | Easy — each gets its own IP |
+
 Either way, the app is still served on port **4000** (change it with the `PORT` env var if you need to).
 For **remote / internet** access, see "Remote / internet access" below — that part is the same in both
 modes.
@@ -208,7 +215,8 @@ camera** screen can generate a redacted **camera report** to help add support fo
 a JSON file that stays on your device — it holds the camera's address, username, ONVIF result and
 stream codecs, with any password replaced by `***`. It is meant to be attached to a GitHub issue, so
 it is worth opening and reading before you post it: the redaction covers passwords, not everything a
-particular camera's firmware might put in an error message.
+particular camera's firmware might put in an error message. If you find something sensitive that
+shouldn't be there, see [SECURITY.md](SECURITY.md) for how to report it privately instead.
 
 **Adding a camera**
 
@@ -277,7 +285,13 @@ measurement**, and (like everything here) never a safety device — see the warn
   those are averaged rather than combined.
 - **How it estimates.** Across the night it builds a per-minute movement + sound timeline from
   the child's main camera: falling still for a sustained stretch reads as falling asleep,
-  sustained movement or noise reads as an awakening (brief stirs don't count). If you've painted
+  sustained movement or noise reads as an awakening (brief stirs don't count). On a completed
+  night, a short recorded exit-and-return can also count as an awakening even when it's too brief
+  to show up as sustained movement on its own — as long as the bed is confirmed quiet in between
+  and later bed movement supports the return. This only applies to trips of one to twenty minutes,
+  with at least a minute of quiet bed time in between; it updates wake-ups, awake time, and the
+  longest sleep stretch, but live figures and wake-clip recording still use the plain movement rule
+  above. If you've painted
   a **bed zone** on the camera — the same area that scopes motion alerts — it also tracks
   movement **outside** the bed and lists it separately, which catches a morning wake where the
   child has already left the bed. Draw the zone so it comfortably contains the child **including
@@ -297,6 +311,9 @@ measurement**, and (like everything here) never a safety device — see the warn
   it again inside a minute is one movement being read twice, not two trips. This matters most for a
   very still sleeper: once they settle, their bed can look identical to an empty one for hours, so a
   false exit shortly after bedtime would otherwise be reported as the end of the night.
+  A qualifying short trip can still be counted as a wake-up within that same continuing night — see
+  "How it estimates" above. It can miss a trip that's interrupted by a data gap or a stray reading,
+  and it cannot tell an adult's visit to the bed from the child's own trip out of it.
   **Known limit:** a genuine departure less than a minute after getting into bed is read the same way,
   because the two are not distinguishable from what the cameras record. Where that is the only *got
   out of bed* of the night it is still used, so the night is never left with no wake time at all; where
@@ -378,14 +395,32 @@ measurement**, and (like everything here) never a safety device — see the warn
 
 ## Adding caregivers
 
-Once signed in as admin, go to **Account → Add caregiver** to create additional logins (e.g.
-for a partner or babysitter). Caregivers can view cameras and manage children/cameras but
-can't manage other user accounts or change app-wide settings.
+Once signed in as admin, go to **Settings → Caregivers** to create additional logins (e.g. for a
+partner or babysitter).
+
+| Capability | Caregiver | Admin |
+|---|:---:|:---:|
+| View live cameras and media | Yes | Yes |
+| Reorder / assign cameras to a child | Yes | Yes |
+| Restart, reboot, or snooze camera alerts | Yes | Yes |
+| Add / edit / enable / delete a camera | No | Yes |
+| Add / edit a child and review sleep | Yes | Yes |
+| Delete a child and its media | No | Yes |
+| Change global settings (detection, notifications, providers) | No | Yes |
+| Manage caregiver/admin accounts and sessions | No | Yes |
+
+The **Settings** hub itself is visible to caregivers too — its admin-only pages (general,
+camera controls, recording, MQTT, push providers, users, logs, clip storage) are simply hidden
+for them rather than the whole screen being off-limits.
 
 **Changing someone’s role takes effect immediately** — on their very next action, on every device
 they’re signed in on. Demoting an admin to caregiver does *not* sign them out: they keep browsing as
 a caregiver and simply lose the admin-only screens. Deleting an account, by contrast, ends its
 sessions at once and signs that person out everywhere.
+
+Any account can also turn on **two-factor authentication** for its own login — see
+**[docs/mfa.md](docs/mfa.md)** for enrolling, one-time backup codes, and how to recover if an
+admin loses their authenticator.
 
 ## Running behind a reverse proxy (e.g. SWAG on Unraid)
 
@@ -464,16 +499,29 @@ needs nothing further, since it's already proxied through the app's normal port.
 
 ## Installing to your home screen
 
-The app has a web app manifest and icons, so on both Android (Chrome) and iOS (Safari) you
-can add it to your home screen and it'll open full-screen like a native app, with its own
-icon — no browser address bar. On Android, use the browser menu → "Add to Home screen" /
-"Install app". On iOS, use the Share button → "Add to Home Screen".
+The app has a web app manifest and icons for a full-screen, native-app-like home-screen
+experience — no browser address bar. **It has no service worker**, so this is an install
+shortcut, not an offline mode: the app still needs to reach your server over the network every
+time, same as opening it in a tab.
 
-Note: for Chrome's automatic install prompt/banner (and the cleanest install experience)
-the site generally needs to be served over HTTPS — accessing it as a plain `http://` LAN
-address still lets you add it manually from the menu, but you may not get the automatic
-install banner. This is one more reason the reverse-proxy/HTTPS setup above is worth doing
-if you want the full native-app-like install experience.
+What you actually get depends on the platform and whether the site is served over **HTTPS**
+(via the reverse-proxy setup above) or plain `http://` on your LAN:
+
+| Platform | Over HTTPS | Over plain `http://` |
+|---|---|---|
+| Android — Chrome / Samsung Internet | Installable PWA (full-screen, own icon, install prompt) | Usually a browser-badged **shortcut** that still opens inside the browser, not a true standalone install — Chromium's installability criteria require HTTPS (or `localhost`) |
+| iOS — Safari | Add to Home Screen (full-screen, own icon) | Add to Home Screen works the same over plain HTTP — iOS doesn't gate it on HTTPS the way Chromium does |
+| Desktop browser | Installable as a windowed app (Chrome/Edge) | Same shortcut limitation as Android Chrome |
+
+- **Android, HTTPS**: browser menu → "Add to Home screen" / "Install app" (or the automatic
+  install banner).
+- **Android, plain HTTP**: same menu item still adds something to your home screen, but expect
+  a shortcut that opens in the browser rather than a standalone window.
+- **iOS**: Share button → "Add to Home Screen" — works the same either way.
+
+If you want the full installed experience on Android specifically, the reverse-proxy/HTTPS
+setup above is worth doing; otherwise the **native Android app** (below) gives you a true
+standalone app without needing HTTPS at all.
 
 ## Mobile apps (Android & iOS)
 
@@ -505,9 +553,9 @@ What the native apps add over the browser/PWA:
 ### Push notifications (motion alerts)
 
 Get a **phone notification** when a camera with motion detection sees movement — even when the app is
-closed. It's off by default, and the in-app **Settings → Recent alerts** list works with or without
-it. There are two ways to set it up (pick one), both configured under **Settings → Push
-notifications**:
+closed. It's off by default, and the in-app **Recent alerts** list — on each child's page, or the
+combined view under **Settings → Logs** (admin only) — works with or without it. There are two
+ways to set it up (pick one), both configured under **Settings → Push notifications**:
 
 **Pushover (recommended — simplest, and works on iOS).** A small notification service (the same one
 Sonarr/Radarr use). No Firebase project, no Apple Developer account.

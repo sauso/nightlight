@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Mutation testing for the backend suite.
+// Mutation testing for the backend and frontend suites.
 //
 // WHY THIS EXISTS (issue #263, item 5). An adversarial audit found 48 of 54 clip mutants and 8 auth
 // mutants surviving a green 389-test suite at ~99% line coverage. None of that was visible from
@@ -45,6 +45,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
 const BACKEND = path.join(REPO, 'backend');
+const FRONTEND = path.join(REPO, 'frontend');
 
 const args = process.argv.slice(2);
 const flag = (name) => args.some((a) => a === `--${name}`);
@@ -74,16 +75,30 @@ if (!mutants.length) {
 // honesty problem: a test that pins a constant against its literal value kills EVERY mutation of that
 // constant on its own, which hides whether the behavioural tests around it discriminate at all. Naming
 // the pattern lets a mutant be scored against the behaviour alone.
-function runTests(testFiles, namePattern) {
+function runTests(testFiles, namePattern, frontend = false) {
   const target = testFiles?.length ? testFiles.map((f) => path.join('test', f)) : ['test/*.test.js'];
-  const nameArgs = namePattern ? ['--test-name-pattern', JSON.stringify(namePattern)] : [];
-  const res = spawnSync('node', ['--test', ...nameArgs, ...target], {
-    cwd: BACKEND,
+  const nameArgs = namePattern ? [frontend ? '--testNamePattern' : '--test-name-pattern', namePattern] : [];
+  const command = frontend
+    ? [path.join(FRONTEND, 'node_modules/vitest/vitest.mjs'), 'run', '--reporter=json', ...nameArgs, ...(testFiles?.length ? target : [])]
+    : ['--experimental-test-module-mocks', '--test', '--test-reporter=spec', ...nameArgs, ...target];
+  const res = spawnSync(process.execPath, command, {
+    cwd: frontend ? FRONTEND : BACKEND,
     encoding: 'utf8',
-    shell: true, // the glob in the full-suite case needs one
     env: { ...process.env, NODE_OPTIONS: '' },
   });
   const out = `${res.stdout || ''}${res.stderr || ''}`;
+  if (frontend) {
+    // Vitest's JSON counts completed assertions. Startup failures or missing reports must be
+    // ERROR, not a spurious kill; use the same no-tests-ran guard as the backend runner.
+    let report;
+    try { report = JSON.parse(res.stdout); } catch { return { failed: true, cancelled: 0, ran: 0, out }; }
+    return {
+      failed: res.status !== 0 || !report.success,
+      cancelled: 0,
+      ran: report.numPassedTests + report.numFailedTests,
+      out,
+    };
+  }
   const num = (label) => Number(new RegExp(`^ℹ ${label} (\\d+)$`, 'm').exec(out)?.[1] ?? 0);
   // ⚠️ A `--test-name-pattern` that matches nothing SKIPS every test and exits 0, which would be
   // recorded as "the mutant survived" — the same lie as a mutant that never applied, arriving from the
@@ -120,7 +135,7 @@ for (const m of mutants) {
     // Re-read from disk rather than trusting the write: this is the "the mutant never applied" guard,
     // and the whole point is not to trust that a step did what it said.
     if (!readFileSync(abs).equals(mutated)) throw new Error('the mutated file on disk does not match what was written');
-    const { failed, cancelled, ran } = runTests(m.tests && !flag('full') ? m.tests : null, flag('full') ? null : m.namePattern);
+    const { failed, cancelled, ran } = runTests(m.tests && !flag('full') ? m.tests : null, flag('full') ? null : m.namePattern, m.file.startsWith('frontend/'));
     verdict = cancelled > 0 || ran === 0 ? 'ERROR' : failed ? 'KILLED' : 'SURVIVED';
     if (ran === 0) console.error(`        (no tests ran — check \`tests\`/\`namePattern\` for "${m.label}")`);
   } finally {
@@ -159,7 +174,7 @@ const errored = results.filter((r) => r.verdict === 'ERROR');
 console.log(`${results.length} mutants, ${results.filter((r) => r.verdict === 'KILLED').length} killed, ` +
   `${survivors.length} survived unexpectedly, ${errored.length} errored, ` +
   `${results.filter((r) => r.expect === 'equivalent').length} known-equivalent, ` +
-  `${results.filter((r) => r.expect === 'survives').length} control(s) correctly survived.`);
+  `${results.filter((r) => r.expect === 'survives' && r.verdict === 'SURVIVED').length} control(s) correctly survived.`);
 for (const s of survivors) console.log(`  SURVIVED: ${s.label}${s.note ? ` — ${s.note}` : ''}`);
 for (const e of errored) console.log(`  ERRORED (cancelled test files, result unusable): ${e.label}`);
 process.exit(survivors.length || errored.length ? 1 : 0);

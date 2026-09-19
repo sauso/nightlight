@@ -54,16 +54,32 @@ function link() {
   return server ? `nightlight://sleep?server=${encodeURIComponent(server)}` : 'nightlight://sleep';
 }
 
-// reports: [{ name, summary }] — one entry per freshly-computed child this run.
-export function notifySleepReports(reports) {
-  if (!reports || reports.length === 0) return;
-  const tz = appTz();
-  const title = reports.length === 1 ? `Sleep report — ${reports[0].name}` : 'Sleep reports ready';
-  const body = reports.map((r) => lineFor(r.name, r.summary, tz)).join('\n');
-  logger.info(`[sleep-alert] ${title}: ${body.replace(/\n/g, ' | ')}`);
+// ROADMAP §1.6: `settings.sleep_report_alert_enabled` defaults ON even when nothing is actually
+// configured to deliver it (push needs a mounted FCM credential; Pushover/ntfy/Gotify default off) — a
+// caller that only checks the toggle would treat "nothing was sent" the same as "a report went out",
+// which matters once a night's notify-history is tracked. Checked here, next to the *Enabled() checks
+// it mirrors, rather than reimplemented at each call site.
+export function sleepAlertChannelsConfigured() {
+  return pushEnabled() || pushoverEnabled() || ntfyEnabled() || gotifyEnabled();
+}
+
+// A tag lets a LATER notification (e.g. a §1.6 follow-up) replace an earlier one in the tray instead of
+// sitting alongside it as a second, contradictory message — push.js threads this into BOTH Android's
+// notification.tag and APNs' apns-collapse-id. Only meaningful for a single child's report — there's no
+// coherent way to tag one combined multi-child message — and both childId and nightDate must be
+// present: a missing field would otherwise produce a literal `sleep_report_undefined_undefined` tag,
+// which is worse than no tag (it would collapse UNRELATED children/nights onto each other). Pushover/
+// ntfy/Gotify have no equivalent parameter to receive this.
+function reportTag(reports) {
+  if (reports.length !== 1) return null;
+  const { childId, nightDate } = reports[0];
+  return childId != null && nightDate ? `sleep_report_${childId}_${nightDate}` : null;
+}
+
+function fanOut(title, body, type, tag) {
   const url = link();
   if (pushEnabled()) {
-    sendToAll(title, body, { type: 'sleep_report' }).catch(() => {});
+    sendToAll(title, body, { type }, null, tag ? { tag } : undefined).catch(() => {});
   }
   if (pushoverEnabled()) {
     sendPushover({ title, message: body, url, urlTitle: 'Open in Nightlight' })
@@ -77,4 +93,28 @@ export function notifySleepReports(reports) {
     sendGotify({ title, message: body, click: url })
       .catch((e) => logger.error(`[gotify] sleep report alert failed: ${e.message}`));
   }
+}
+
+// reports: [{ name, summary, childId, nightDate }] — one entry per freshly-computed child this run.
+export function notifySleepReports(reports) {
+  if (!reports || reports.length === 0) return;
+  const tz = appTz();
+  const title = reports.length === 1 ? `Sleep report — ${reports[0].name}` : 'Sleep reports ready';
+  const body = reports.map((r) => lineFor(r.name, r.summary, tz)).join('\n');
+  logger.info(`[sleep-alert] ${title}: ${body.replace(/\n/g, ' | ')}`);
+  fanOut(title, body, 'sleep_report', reportTag(reports));
+}
+
+// ROADMAP §1.6: a LATER recompute resolved a wake time that was still unknown when the parent was first
+// told. Capped by the caller (runNightlySleepJob — notified_wake_at's own nullness is the one-shot cap,
+// no separate counter); this function fires unconditionally for whatever it's given, same fire-and-forget
+// contract as notifySleepReports. Reuses lineFor() as-is: the null->real transition already changes the
+// rendered string shape correctly (the "up HH:MM" clause appears), which is exactly what needs conveying.
+export function notifySleepReportUpdates(reports) {
+  if (!reports || reports.length === 0) return;
+  const tz = appTz();
+  const title = reports.length === 1 ? `Sleep report updated — ${reports[0].name}` : 'Sleep reports updated';
+  const body = reports.map((r) => lineFor(r.name, r.summary, tz)).join('\n');
+  logger.info(`[sleep-alert] ${title}: ${body.replace(/\n/g, ' | ')}`);
+  fanOut(title, body, 'sleep_report_update', reportTag(reports));
 }

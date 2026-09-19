@@ -2653,6 +2653,14 @@ input[type='range'] {
   /* The sheet caps the video at 60vh so it can't push the controls off a phone screen; centred in a
      desktop dialog there's room to let it use the height it's given. */
   .modal-overlay--wide .clip-player { max-height: 74vh; }
+  .modal-overlay--wide .image-preview { max-height: 78vh; }
+}
+
+/* The enlarged snapshot in ImagePreviewModal. object-fit:contain (not cover, unlike the thumbnail) —
+   this view exists to see the whole frame clearly, so nothing should be cropped off it. */
+.image-preview {
+  display: block; width: 100%; max-height: 60vh; object-fit: contain;
+  border-radius: 10px; background: var(--bg-elevated); margin: 0 auto;
 }
 
 /* Morning review — the "was last night right?" card and the screen behind it.
@@ -2687,13 +2695,30 @@ input[type='range'] {
 .review-event:first-of-type { border-top: 0; }
 
 .review-event__frame {
-  width: 96px; height: 72px; flex-shrink: 0;
+  width: 160px; height: 120px; flex-shrink: 0;
   object-fit: cover; border-radius: 8px; background: var(--bg-elevated);
 }
 .review-event__frame--none {
   display: flex; align-items: center; justify-content: center;
   font-size: 11px; color: var(--text-secondary); border: 1px dashed var(--border);
 }
+/* Frames were 96x72 — clear enough to tell a still frame is there, too small to actually make out
+   what's in it (the whole point of showing one at all). Bumped ~1.7x; still fits two-up on a 400px
+   phone with the review-event__body text beside it. */
+@media (max-width: 420px) {
+  .review-event__frame { width: 120px; height: 90px; }
+}
+
+/* The thumbnail itself is still capped at 160x120 above — even bumped once already, some snapshots
+   (dim rooms, night IR grain) stay hard to read at that size. This wraps it in a plain, unstyled
+   button so a tap opens ImagePreviewModal's full-size view instead of raising the size further and
+   crowding review-event__body off a phone screen. line-height:0 kills the inline-image descender
+   gap a <button><img></button> otherwise leaves under the frame. */
+.review-event__frame-btn {
+  flex-shrink: 0; padding: 0; border: 0; background: none; cursor: zoom-in;
+  border-radius: 8px; line-height: 0;
+}
+.review-event__frame-btn:focus-visible { outline: 2px solid var(--peri); outline-offset: 2px; }
 
 .review-event__body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .review-event__when { font-size: 13.5px; color: var(--text-primary); }

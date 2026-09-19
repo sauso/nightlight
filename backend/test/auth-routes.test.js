@@ -452,6 +452,35 @@ describe('user management is admin-only', () => {
   });
 });
 
+describe('★ DELETE /users/:id removes push subscriptions too (GHSA-q98f)', () => {
+  test('★ THE FIX: a deleted caregiver\'s push token is gone, not just their account', async () => {
+    const token = await loginAs('alice');
+    db.prepare(
+      `INSERT INTO push_tokens (token, user_id, platform) VALUES ('tok-bob', 'u-mfa', 'android')`
+    ).run();
+    assert.equal(db.prepare('SELECT COUNT(*) c FROM push_tokens WHERE token = ?').get('tok-bob').c, 1);
+
+    const res = await call(`${server.url}/api/auth/users/u-mfa`, { method: 'DELETE', token });
+    assert.equal(res.status, 204);
+
+    assert.equal(
+      db.prepare('SELECT COUNT(*) c FROM push_tokens WHERE token = ?').get('tok-bob').c,
+      0,
+      'deleting the caregiver left their push subscription behind'
+    );
+  });
+
+  test('an unrelated user\'s push token survives — this deletes one caregiver\'s subscriptions, not all', async () => {
+    const token = await loginAs('alice');
+    db.prepare(`INSERT INTO push_tokens (token, user_id, platform) VALUES ('tok-bob', 'u-mfa', 'android')`).run();
+    db.prepare(`INSERT INTO push_tokens (token, user_id, platform) VALUES ('tok-alice', 'u-admin', 'android')`).run();
+
+    await call(`${server.url}/api/auth/users/u-mfa`, { method: 'DELETE', token });
+
+    assert.equal(db.prepare('SELECT COUNT(*) c FROM push_tokens WHERE token = ?').get('tok-alice').c, 1);
+  });
+});
+
 describe('media tokens are scoped, not full sessions', () => {
   test('★ the issued media token carries purpose=media and the same session', async () => {
     // The whole point: a leaked HLS URL must be a video capability, never account access. The

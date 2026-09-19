@@ -1,12 +1,35 @@
-# Nightlight — visual walkthrough
+# Nightlight documentation
 
-A quick tour of the app's main screens. For installation, configuration, and the full
-feature reference, see the [main README](../README.md).
+## Guides
 
-> The screenshots below are **generated automatically** by the end-to-end test suite
-> (`e2e/playwright/tests/05-screenshots.spec.js`), so they stay in sync with the real UI
-> rather than drifting. See [e2e/README.md](../e2e/README.md#refreshing-the-documentation-screenshots)
-> for how to refresh them.
+- **[Push notifications](notifications.md)** — providers, one-time setup, what each event sends.
+- **[Recording](recording.md)** — automatic clips, wake clips, manual recordings, retention.
+- **[Camera controls](camera-controls.md)** — the global PTZ step and offline-alert settings.
+- **[MQTT](mqtt.md)** — broker connection, temperature/humidity payloads, camera-native motion.
+- **[Operations](operations.md)** — backup, restore, upgrade, rollback.
+- **[Multi-factor authentication](mfa.md)** — enrolling, one-time backup codes, admin/console
+  recovery if you lose your authenticator.
+- **[Design language](design-language.md)** — contributor reference: colors, type, icons.
+
+## Elsewhere in the repo
+
+- **[Main README](../README.md)** — install, configure, add cameras/children, all features.
+- **[KNOWN-ISSUES.md](../KNOWN-ISSUES.md)** — confirmed limitations and workarounds.
+- **[SECURITY.md](../SECURITY.md)** — supported versions and how to report a vulnerability
+  privately.
+
+## Visual walkthrough
+
+A quick tour of the app's main screens.
+
+> The screenshots below are **captured** by the end-to-end test suite
+> (`e2e/playwright/tests/05-screenshots.spec.js`) on every e2e run, but publishing them is a
+> **manual step**: CI uploads the captures as a `docs-screenshots` workflow artifact, and a
+> maintainer downloads it and commits the images under `docs/screenshots/` — nothing here
+> updates itself. So these can drift from the real UI between refreshes; if a screen has
+> changed recently and looks off, that's why. See
+> [e2e/README.md](../e2e/README.md#refreshing-the-documentation-screenshots) for how to refresh
+> them.
 >
 > Each screen is shown at **both form factors**, because the layout genuinely changes: below
 > 1200px wide the navigation is a bottom tab bar, and at 1200px and up the same component

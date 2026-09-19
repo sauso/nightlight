@@ -2,7 +2,8 @@
 
 Nightlight can send a **push notification to your phone** when a camera with motion detection sees
 movement — so you're alerted even when the app is closed. This is **optional** and **off by
-default**. Everything else (including the in-app **Settings → Recent alerts** list) works without it.
+default**. Everything else (including the in-app **Recent alerts** list — on each child's page, or
+the combined view under **Settings → Logs** for admins) works without it.
 
 There are **several providers** — set up one or more; an alert is sent to **every** provider you
 enable, all managed under **Settings → Push notifications** (a row per provider):
@@ -121,8 +122,8 @@ server expects it.
 
 ### 7. Enable motion detection on a camera
 - **Cameras → edit** a camera → **Motion detection** → **Enable**. Tune sensitivity/cooldown to taste.
-- Move in front of that camera — you should get a notification, and it also appears under
-  **Settings → Recent alerts**.
+- Move in front of that camera — you should get a notification, and it also appears in that
+  child's **Recent alerts** card (or the combined view under **Settings → Logs** for admins).
 
 ## Option C: ntfy
 
@@ -265,6 +266,31 @@ window, so a room with a lot of variation — a white-noise machine close to the
 cause — reads as noisier than its average suggests, and can still overstate awake time even with a
 perfectly tracking ambient level. Moving the camera further from the noise source is the reliable
 remedy.
+
+## Sleep report notifications
+
+Separate from the motion/sound alerts above: once a tracked child's sleep window closes for the night,
+a one-line summary ("asleep 8h12, 2 wakes, up 06:47") is sent through every provider enabled above,
+using the same 10-second-timeout fan-out. There is currently no setting to turn this off on its own —
+it follows whichever providers are configured for motion alerts.
+
+**The report can arrive before the night's full story is known — and if the wake time was unknown at
+that point, you get one follow-up.** Working out exactly when a child got up can take up to a few hours
+of real, quiet time to confirm. If a later recompute — within about 3 hours of the window closing — works
+out a wake time that was unknown when the report first went out, a second notification arrives, titled
+"Sleep report updated," with the corrected line. When the original report was for a single child, this
+**replaces** it in the notification tray (Android and iOS both) rather than sitting alongside it as a
+second, contradictory message. **Tracking more than one child, whose windows happen to close in the same
+~30-minute tick, is the one case this doesn't reach**: the original arrives as one combined "Sleep
+reports ready" message covering all of them, which has nothing for a later single-child follow-up to
+replace — so on a night that plays out that way, the correction lands as an additional message rather
+than a replacement. This only ever fills in a
+wake time that was missing; it does not re-send if a wake time that was already reported later shifts by
+some amount — the original stands, since a later recompute is not always a more accurate one. **At most
+one follow-up per child per night** — if the wake time still hasn't settled after that, only the *stored*
+report (the child's sleep card and detail page) keeps catching up, not another push. And if the wake time
+never resolves at all within that window, there is no follow-up to send — the original
+report, with no wake time listed, is what you get.
 
 ## Troubleshooting
 

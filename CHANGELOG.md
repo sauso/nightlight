@@ -9,6 +9,127 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-09-19
+
+### Added
+- The morning review now also asks about an out-of-bed event where the bed also showed movement in
+  several separate minutes with no return logged ("Still moving?"), separately from the collapsed full
+  list — never duplicating the existing quick check-in prompt when both apply to the same event.
+- A `SECURITY.md` security policy (supported versions, private reporting via GitHub Security
+  Advisories, safe diagnostic-bundle handling, and credential-rotation steps), a bug-report issue
+  template, and a link to report privately from the diagnostics bundle and camera report screens
+  when a redacted file still contains something sensitive.
+- The morning review now asks about a bed entry immediately followed by an exit ("Got into bed at
+  7:51pm, then got out of bed again 14s later — what actually happened?"), separately from the
+  collapsed full event list — measurement points to this being mostly a parent's presence read as a
+  child's exit, and the question was previously easy to miss inside a long list of events.
+- A bed-transition snapshot in the morning review ("Quick check-in?" and "Check the recorded events")
+  can now be tapped to open it full-size in a pop-up, the same way a recorded clip opens — some frames
+  are too small or too dim to judge at thumbnail size, and the verdicts recorded there are only as
+  good as whether the photo could actually be read.
+- A diagnostic `[coactive]` log line, purely observational: fires when a camera's bed-zone and
+  outside-zone motion channels are both active in the same frame, a shape today's exit/entry detector
+  can't classify at all (see `planning/reviews/simultaneous-activity-gap-plan-2026-09-18.md`). Never
+  writes to `bed_transitions` and never changes any reported sleep number — exists only to gather real
+  data for a future fix.
+- A sleep report notification is now followed up once, and only once, if the wake time was unknown
+  when the report first went out and a later recompute (within about 3 hours of the window closing)
+  works it out — the correction replaces the original in the notification tray rather than arriving as
+  a second, contradictory message. Does not re-notify for a wake time that shifts after already being
+  reported, and does not follow up at all if the wake time never resolves in that window.
+
+### Changed
+- Three diagnostic sound statistics (p75, p90 and standard deviation) are now recorded per minute — instrumentation only, with no change to any reported sleep number.
+- The still frame shown for each recorded bed-transition event (in "Quick check-in?" and "Check the
+  recorded events") is bigger — 160×120 (120×90 on narrow phones), up from 96×72 — easier to actually
+  make out what's in it.
+- Bed transitions now record additional outside-motion evidence (peak and how long it lasted) alongside
+  each recorded exit or entry, for future tuning of the detector — nothing reads these values yet, and
+  no detection behavior changes.
+- The detector now logs when a recorded bed exit or entry contradicts what it already believed about
+  occupancy (e.g. a second "out of bed" with no "into bed" in between) — diagnostic only, for future
+  tuning; every transition is still recorded exactly as before.
+- The detector now logs when the bed becomes active with no bed-entry link found (the same case the
+  exit side has always logged for a bed becoming active with no exit link) — diagnostic only, no
+  detection behavior changes.
+- Added a query to find a bed entry immediately followed by an exit on the same camera (a shape that
+  measurement points to being mostly a parent's presence, not a child getting straight back up) — not
+  called from anywhere yet; groundwork for reviewing or scoring against it later.
+- Added a query to find sustained (4+ distinct minutes) bed-zone motion after an out_of_bed while the
+  classifier still believes the bed is empty (no bed entry recorded on the same camera before the
+  motion starts) — generalizes the bed-entry-immediately-followed-by-an-exit check above from that
+  one narrow shape to every recorded bed exit still within activity_samples' retention window. Not
+  called from anywhere yet; same groundwork purpose as the query above, now applied to the full
+  population instead of just quick reversals.
+
+### Fixed
+- **The admin "Recompute this night" control could report success while saving nothing.** If a night
+  already had a wake time a parent was notified about, and the recompute would have cleared it back to
+  unknown, the write was correctly refused — but the API still returned success, so the dialog closed
+  and the sleep detail page repainted with numbers that were never actually stored. Now returns the same
+  kind of readable error the existing "data has aged out" refusal already uses, and nothing changes on
+  screen until something actually changed in the database.
+- **A real out-of-bed episode could report zero wake-ups.** Wake-count only ever read per-minute
+  activity, so a child who climbed out, was put back, and lay still afterward was structurally
+  incapable of reaching the five-active-minute threshold — a real, alerted departure and return
+  reported "0 wakes, 0 awake minutes." A short exit-and-return (1-20 minutes) now counts as an
+  awakening when the recorded transitions corroborate it and the bed is confirmed quiet in between,
+  independent of the activity threshold. This can extend or merge existing wake runs (awake time can
+  increase while the wake count doesn't, or two runs can merge into one). Known limits: it cannot
+  tell an adult's visit to the bed from the child's own trip out of it, and a spurious reading can
+  still suppress or shorten a real episode — both are the same kind of limit this classifier already
+  has elsewhere. `USE_TRANSITION_WAKE_EPISODES` in `sleepAnalysis.js` reverts it independently of
+  `USE_TRANSITION_TIMES`.
+- **Wake clips can be turned on without ever producing one.** "Record wake-ups without alerting" only
+  ever started buffering if detection clips or on-demand recording were also on for that camera — so a
+  household that wanted silent wake clips *and nothing else* got a setting that looked accepted and
+  produced nothing, every night, with no error anywhere. The recording page's three sections are
+  presented as independent choices; now they are. Turning wake clips on or off — per child's sleep
+  tracking, the global switch in Settings → Recording, or assigning/unassigning a camera to a child —
+  arms or disarms the buffer immediately.
+- **A camera unassigned from a child, or a child deleted, could leave its recording buffer running
+  forever.** The periodic reconciliation that keeps every camera's buffer in sync only ever started one
+  that should be running; nothing had ever told it to stop one that shouldn't be. Wake clips made this
+  reachable for the first time — a camera's buffer can now stop being wanted at a moment nothing else
+  catches — so unassigning a camera, or deleting the child it was assigned to, could leave an ffmpeg
+  process quietly running (and its clip buffer quietly using disk) with no way back short of an unrelated
+  settings change or a restart. Both the immediate case (unassigning/deleting) and the general safety net
+  (the periodic check now stops a buffer that's no longer wanted, not just starts one that is) are fixed.
+- **Bedtime reported a minute late on roughly half of all nights.** A bed transition recorded at, say,
+  19:38:31 was rounded up to 19:39 instead of being read as the 19:38 event it actually was — every
+  *other* minute-index calculation in the app already floors a real-second timestamp; this one place
+  rounded instead. The error only ever pushed the time later, never earlier, so onset was late (and the
+  night's total sleep a minute short) on nights where the transition happened to land in the second half
+  of a minute — roughly half of them.
+- **A morning sleep report could stay wrong forever if it was generated too soon.** The report is
+  written as soon as a child's tracking window closes, but confirming exactly when they got up can take
+  a couple of hours of real, quiet time to be sure of — and the very first report used to freeze
+  permanently at whatever partial answer was available in that first minute, even once the true
+  wake-up time became obvious from later, quieter data. Wake time and total sleep now keep updating for
+  a few hours after the window closes and settle for good only once there has been enough real time to
+  be certain; whether the bed was slept in at all is decided immediately and never changes retroactively
+  — only the wake time and duration can still refine.
+- **A motion or sound alert at the exact moment your child woke up for the day had nowhere to appear.**
+  The Wake-ups list only ever held the awakenings that happened *during* the night — the final wake, the
+  one that ends it, was reported only as a time in the summary line above, with no row of its own for an
+  alert to attach to. For a child whose waking is itself a morning event rather than a mid-night stir,
+  this could mean the busiest, most alert-worthy moment of the night was the one thing missing from the
+  list. The morning wake now gets its own row alongside the others.
+
+### Security
+- **A talk-back call now ends promptly if your access is removed while it's open.** Two-way audio only
+  ever checked who you were at the moment the call connected — after that, an already-open call kept
+  forwarding your voice to the camera's room regardless of what happened to your account afterward. A
+  call now re-checks that access every 15 seconds for as long as it stays open, so signing someone out,
+  removing them as a caregiver, or a call simply running past its normal time limit now ends the call
+  itself, not just what a *new* call would be allowed to do.
+- **Removing a caregiver now also removes their push notifications.** Deleting an account only ever
+  removed the account itself — the device's notification subscription kept receiving alerts
+  indefinitely, including the camera-snapshot images sent with image notifications. Deleting a
+  caregiver now removes their subscription too, notifications are filtered against active accounts as
+  a second layer of protection, and any subscription orphaned by this before today is cleaned up
+  automatically on the next update.
+
 ## [0.30.1] - 2026-09-10
 
 ### Fixed

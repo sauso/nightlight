@@ -7,7 +7,10 @@ import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
 import { recordMotion, recordMotionOut } from './activityTracker.js';
 import { recordBedTransition, TRANSITION } from './bedTransitions.js';
-import { oobLinkKind, OOB_LINK_MS, OOB_LINK_SLOW_MS, OOB_SLOW_OUT_MIN } from './bedTransitionRules.js';
+import { OOB_LINK_MS, OOB_LINK_SLOW_MS, OOB_SLOW_OUT_MIN } from './bedTransitionRules.js';
+import {
+  createBedTransitionTracker, OOB_CONFIRM_QUIET_MS, IB_CONFIRM_QUIET_MS, IB_LINK_MS,
+} from './bedTransitionTracker.js';
 import { childSamplingActiveNow } from './sleepAnalysis.js';
 import { killIfSpawned } from './processGuards.js';
 
@@ -61,36 +64,19 @@ const PIXEL_DELTA = 24;
 // flickers frame to frame); only a gap longer than this ends the run.
 const ACTIVE_GRACE_MS = 1500;
 
-// --- "Out of bed" (bed -> outside transition) ---
+// --- "Out of bed" / "into bed" — bed <-> outside transition classification. ---
 // A child climbing out reads as motion in the bed FIRST, then motion OUTSIDE the bed while the bed
 // goes and STAYS quiet (the child has left it). A parent entering is the reverse (outside first) or
 // leaves the child still stirring in the bed. Confirmed transitions are persisted to `bed_transitions`
 // and are AUTHORITATIVE for the reported wake time (see USE_TRANSITION_TIMES in sleepAnalysis.js), so a
 // missed exit here is a wrong wake time on the child's night, not just a missing marker.
 //
-// The link windows themselves live in `bedTransitionRules.js` — pure, importable, and therefore
-// testable without ffmpeg or a stream. See there for why there are two of them.
-//
-// A rejected link is logged (rate-limited) up to this far back, so the real gap distribution stays
-// measurable from the logs rather than being invisible the way the 05:52 miss was.
-const OOB_NEARMISS_MS = 180000;
-const OOB_NEARMISS_LOG_MS = 30000;
-const OOB_CONFIRM_QUIET_MS = 6000; // ...and the bed must stay quiet this long after, to count as "left"
-const OOB_COOLDOWN_MS = 120000; // don't re-log an exit more than once per this
-
-// --- "Into bed" twin (outside -> bed transition) ---
-// The mirror of out-of-bed: a child being placed INTO the bed reads as motion OUTSIDE first (parent
-// carrying/leaning in), then motion in the BED while the outside goes and STAYS quiet (the parent stepped
-// back, leaving the child settling in the bed alone). Same state machine as OOB with the two channels
-// swapped. Confirmed transitions are persisted to `bed_transitions` (see lib/bedTransitions.js).
-//
-// NOT given the slow window its twin has. The asymmetry is the point: the slow link exists for a child
-// climbing out unaided, and there is no matching event on the way in — a child cannot put himself to
-// bed, so an entry is always someone carrying him, which is continuous motion. Widening this side would
-// only admit more of the false arrivals this detector is already prone to (see ROADMAP §1.2).
-const IB_LINK_MS = 8000; // outside must have been active within this long before the bed burst
-const IB_CONFIRM_QUIET_MS = 6000; // ...and the outside must stay quiet this long after, to count as "placed in"
-const IB_COOLDOWN_MS = 120000; // don't re-log an entry more than once per this
+// The candidate-open/cancel/confirm state machine (both directions, all their timing constants) lives
+// in `bedTransitionTracker.js` — extracted 2026-09-18 so it can be tested at all; see that file's
+// header for why. This file owns only: computing cribActive/outActive per frame, feeding them to the
+// tracker, and turning its returned events into the exact log lines and `recordBedTransition` calls
+// this used to do inline. `OOB_CONFIRM_QUIET_MS`/`IB_CONFIRM_QUIET_MS` are imported back in below only
+// because the confirm log line states the literal constant, not a computed elapsed time.
 
 // When (re)starting a detector, wait up to this long for the preferred sub-stream to start
 // publishing before settling for the heavier main stream, polling readiness this often. We
@@ -221,6 +207,17 @@ export async function startMotionDetector(camera) {
   const confirmMs = Math.max(0, (camera.detect_confirm_s ?? 3) * 1000);
   const cooldownMs = Math.max(1, camera.detect_cooldown_s ?? 60) * 1000;
 
+  // Believed occupancy (ROADMAP §1.2 item 1) — true = in bed, false = out of bed, null = not yet
+  // known since this detector started. Deliberately declared OUTSIDE launch(), not inside it: an
+  // ffmpeg blip triggers an automatic reconnect via launch() again (see the exit handler below), and
+  // every OTHER piece of pending-candidate state already resets on that path — but a belief flag has
+  // no "in-flight" data to lose, so there's no reason to also lose it, and losing it would silently
+  // undercount exactly the same-direction repeats this diagnostic exists to surface (found by
+  // adversarial review, 2026-09-12: a real reconnect between two into_bed events would otherwise mean
+  // neither is ever flagged). Still resets to null on a genuinely fresh startMotionDetector call
+  // (settings change, camera reassignment, app restart) — see its own comment on why that's correct.
+  let believedOccupied = null;
+
   async function launch() {
     // Claim the slot before the async gap below, so a concurrent start/reconcile can't
     // double-run this camera's detector.
@@ -265,17 +262,11 @@ export async function startMotionDetector(camera) {
     let activeSince = 0; // start of the current sustained-motion run (0 = not currently active)
     let lastActive = 0; // last frame that was above the active threshold
     let lastAlert = 0;
-    // Out-of-bed prototype state (see OOB_* constants above).
-    let cribLastActive = 0; // last frame the bed zone itself moved
-    let oobPendingAt = 0; // when a bed->outside exit candidate opened (0 = none pending)
-    let oobPeakOut = 0; // peak outside-fraction seen during the pending candidate
-    let oobLastLog = 0;
-    let oobLastNearMiss = 0; // rate-limit for the rejected-link diagnostic
-    // Into-bed twin state (see IB_* constants above) — mirror of OOB with the channels swapped.
-    let outLastActive = 0; // last frame the outside-bed area moved
-    let ibPendingAt = 0; // when an outside->bed entry candidate opened (0 = none pending)
-    let ibPeakCrib = 0; // peak bed-fraction seen during the pending candidate
-    let ibLastLog = 0;
+    // Out-of-bed / into-bed candidate state machine — see bedTransitionTracker.js. One instance per
+    // launch() (i.e. per ffmpeg connection), matching where this state used to be declared; unlike
+    // believedOccupied (declared above, outside launch()) this has nothing "in flight" worth keeping
+    // across a reconnect.
+    const bedTransitionTracker = createBedTransitionTracker({ activeGraceMs: ACTIVE_GRACE_MS });
 
     const outPixels = mask ? FRAME_BYTES - zonePixels : 0; // area outside the bed zone (0 = whole frame)
 
@@ -307,79 +298,95 @@ export async function startMotionDetector(camera) {
         if (outPixels > 0) {
           const outFraction = changedOut / outPixels;
           recordMotionOut(camera.id, outFraction);
-          // --- "Out of bed" / "into bed" prototypes: classify motion by the SEQUENCE of the two channels. ---
-          // Runs whether the leg is alerting or activity-only (a distinct, low-rate signal, not raw motion)
-          // and is currently LOG-ONLY — no events, no push, no clips.
+          // --- "Out of bed" / "into bed" classification. Runs whether the leg is alerting or
+          // activity-only (a distinct, low-rate signal, not raw motion). The candidate state machine
+          // itself lives in bedTransitionTracker.js (extracted 2026-09-18, see its header); this block
+          // just feeds it per frame and turns its returned events into the exact log lines / DB writes
+          // this used to produce inline — the extraction changed WHERE this logic lives, not WHAT it
+          // does (see planning/reviews/simultaneous-activity-gap-plan-2026-09-18.md for why a live
+          // behavior change wasn't safe to bundle with it).
           const cribActive = fraction >= threshold;
           const outActive = outFraction >= threshold;
-          if (cribActive) cribLastActive = now;
-          if (outActive) outLastActive = now;
-          if (!oobPendingAt) {
-            // Candidate: outside just moved, the bed moved recently but is quiet NOW → motion left the bed.
-            if (outActive && !cribActive && cribLastActive > 0) {
-              const since = now - cribLastActive;
-              const link = oobLinkKind(since, outFraction);
-              if (link) {
-                oobPendingAt = now;
-                oobPeakOut = outFraction;
+          const { events, believedOccupied: nextBelievedOccupied } = bedTransitionTracker.pushFrame(
+            { cribActive, outActive, fraction, outFraction },
+            now,
+            believedOccupied
+          );
+          believedOccupied = nextBelievedOccupied;
+          for (const ev of events) {
+            switch (ev.type) {
+              case 'oob-candidate-open':
                 logger.info(
-                  `[oob] "${camera.name}" exit candidate (${link}) — bed active ${since}ms ago, outside now ${(outFraction * 100).toFixed(1)}%`
+                  `[oob] "${camera.name}" exit candidate (${ev.link}) — bed active ${ev.sinceMs}ms ago, outside now ${(ev.outFraction * 100).toFixed(1)}%`
                 );
-              } else if (since <= OOB_NEARMISS_MS && now - oobLastNearMiss >= OOB_NEARMISS_LOG_MS) {
-                oobLastNearMiss = now;
+                break;
+              case 'oob-near-miss':
                 logger.info(
-                  `[oob] "${camera.name}" link rejected — bed active ${since}ms ago, outside ${(outFraction * 100).toFixed(1)}% (need <=${OOB_LINK_MS}ms, or <=${OOB_LINK_SLOW_MS}ms at >=${(OOB_SLOW_OUT_MIN * 100).toFixed(0)}%)`
+                  `[oob] "${camera.name}" link rejected — bed active ${ev.sinceMs}ms ago, outside ${(ev.outFraction * 100).toFixed(1)}% (need <=${OOB_LINK_MS}ms, or <=${OOB_LINK_SLOW_MS}ms at >=${(OOB_SLOW_OUT_MIN * 100).toFixed(0)}%)`
                 );
+                break;
+              case 'oob-cancelled':
+                logger.info(`[oob] "${camera.name}" candidate cancelled — bed re-active after ${ev.pendingForMs}ms`);
+                break;
+              case 'oob-impossible-flag':
+                // ROADMAP §1.2 item 1, LOG-ONLY (2026-09-12: a retrospective check against real
+                // owner-verdicted transitions found that unconditionally SUPPRESSING a repeat is
+                // unsafe — see outOfBedRejected's comment in bedTransitionRules.js).
+                logger.info(
+                  `[oob] "${camera.name}" OUT OF BED would be flagged impossible — already believed out of bed (§1.2 item 1, log-only)`
+                );
+                break;
+              case 'oob-confirmed':
+                logger.info(
+                  `[oob] "${camera.name}" OUT OF BED — motion left the bed, quiet ${OOB_CONFIRM_QUIET_MS}ms since, outside peak ${(ev.peak * 100).toFixed(1)}%`
+                );
+                recordBedTransition(camera.id, TRANSITION.OUT_OF_BED, ev.peak, {
+                  outPeak: ev.outPeak,
+                  outFrames: ev.outFrames,
+                });
+                break;
+              case 'ib-candidate-open':
+                logger.info(
+                  `[intobed] "${camera.name}" entry candidate — outside active ${ev.sinceMs}ms ago, bed now ${(ev.fraction * 100).toFixed(1)}%`
+                );
+                break;
+              case 'ib-near-miss': {
+                const since = ev.sinceMs != null ? `${ev.sinceMs}ms ago` : 'never (this run)';
+                logger.info(
+                  `[intobed] "${camera.name}" bed active with no entry link — outside last active ${since} (need <=${IB_LINK_MS}ms), believed ${ev.believedOccupied === false ? 'out of bed' : 'unknown'}`
+                );
+                break;
               }
-            }
-          } else {
-            if (outFraction > oobPeakOut) oobPeakOut = outFraction;
-            if (cribActive) {
-              // Bed moved again inside the confirm window — child's still in it (or a parent reached in).
-              logger.info(`[oob] "${camera.name}" candidate cancelled — bed re-active after ${now - oobPendingAt}ms`);
-              oobPendingAt = 0;
-              oobPeakOut = 0;
-            } else if (now - oobPendingAt >= OOB_CONFIRM_QUIET_MS) {
-              // Bed stayed quiet after the motion left it → treat as the child having climbed out.
-              if (now - oobLastLog >= OOB_COOLDOWN_MS) {
-                oobLastLog = now;
+              case 'ib-cancelled':
+                logger.info(`[intobed] "${camera.name}" candidate cancelled — outside re-active after ${ev.pendingForMs}ms`);
+                break;
+              case 'ib-impossible-flag':
+                // ROADMAP §1.2 item 1, LOG-ONLY — see the OOB side's comment for why this flags rather
+                // than suppresses.
                 logger.info(
-                  `[oob] "${camera.name}" OUT OF BED — motion left the bed, quiet ${OOB_CONFIRM_QUIET_MS}ms since, outside peak ${(oobPeakOut * 100).toFixed(1)}%`
+                  `[intobed] "${camera.name}" INTO BED would be flagged impossible — already believed in bed (§1.2 item 1, log-only)`
                 );
-                recordBedTransition(camera.id, TRANSITION.OUT_OF_BED, oobPeakOut);
-              }
-              oobPendingAt = 0;
-              oobPeakOut = 0;
-            }
-          }
-          // --- "Into bed" twin: outside->bed entry (child placed into the bed). Mirror of OOB. ---
-          if (!ibPendingAt) {
-            // Candidate: bed just moved, the outside moved recently but is quiet NOW → motion entered the bed.
-            if (cribActive && !outActive && outLastActive > 0 && now - outLastActive <= IB_LINK_MS) {
-              ibPendingAt = now;
-              ibPeakCrib = fraction;
-              logger.info(
-                `[intobed] "${camera.name}" entry candidate — outside active ${now - outLastActive}ms ago, bed now ${(fraction * 100).toFixed(1)}%`
-              );
-            }
-          } else {
-            if (fraction > ibPeakCrib) ibPeakCrib = fraction;
-            if (outActive) {
-              // Outside moved again inside the confirm window — parent still at the bed / child not settled alone.
-              logger.info(`[intobed] "${camera.name}" candidate cancelled — outside re-active after ${now - ibPendingAt}ms`);
-              ibPendingAt = 0;
-              ibPeakCrib = 0;
-            } else if (now - ibPendingAt >= IB_CONFIRM_QUIET_MS) {
-              // Outside stayed quiet after motion entered the bed → child placed in and the parent stepped back.
-              if (now - ibLastLog >= IB_COOLDOWN_MS) {
-                ibLastLog = now;
+                break;
+              case 'ib-confirmed':
                 logger.info(
-                  `[intobed] "${camera.name}" INTO BED — motion entered the bed, outside quiet ${IB_CONFIRM_QUIET_MS}ms since, bed peak ${(ibPeakCrib * 100).toFixed(1)}%`
+                  `[intobed] "${camera.name}" INTO BED — motion entered the bed, outside quiet ${IB_CONFIRM_QUIET_MS}ms since, bed peak ${(ev.peak * 100).toFixed(1)}%`
                 );
-                recordBedTransition(camera.id, TRANSITION.INTO_BED, ibPeakCrib);
-              }
-              ibPendingAt = 0;
-              ibPeakCrib = 0;
+                recordBedTransition(camera.id, TRANSITION.INTO_BED, ev.peak, {
+                  outPeak: ev.outPeak,
+                  outFrames: ev.outFrames,
+                });
+                break;
+              case 'co-active-episode':
+                // ROADMAP §1.2 item 3, purely observational (see bedTransitionTracker.js's header and
+                // planning/reviews/simultaneous-activity-gap-plan-2026-09-18.md) — gathers real
+                // duration/quiet-side data for a future candidate-open design; never influences
+                // detection, never touches bed_transitions.
+                logger.info(
+                  `[coactive] "${camera.name}" bed+outside both active ${ev.durationMs}ms, then ${ev.quietSide} quiet — bed peak ${(ev.cribPeak * 100).toFixed(1)}%, outside peak ${(ev.outPeak * 100).toFixed(1)}%`
+                );
+                break;
+              default:
+                break;
             }
           }
         }
