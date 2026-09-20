@@ -35,6 +35,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - **Revoking a session — signing a device out remotely, or removing a caregiver's account — now
   also closes any camera view that device already had open**, within a few seconds. Previously an
   already-open view kept playing until the tab or app was closed by hand.
+- **A child's nightly timelapse could still include images from a camera you'd disabled.** Camera
+  selection for the nightly timelapse now only considers cameras that are actually enabled, and
+  re-checks that right before saving each image — disabling a camera, reassigning it to a
+  different child, or deleting it mid-capture can no longer produce a stray frame.
 
 ## [0.31.0] - 2026-09-19
 

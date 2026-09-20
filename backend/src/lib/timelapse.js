@@ -35,7 +35,9 @@ function safeSeg(value) {
   if (s === '.' || s === '..' || !/^[A-Za-z0-9._-]+$/.test(s)) throw new Error(`unsafe path segment: ${JSON.stringify(s)}`);
   return s;
 }
-function frameDir(childId, nightDate) {
+// Exported so a test can locate a child-night's scratch frame dir without reimplementing/hardcoding
+// FRAMES_ROOT's layout.
+export function frameDir(childId, nightDate) {
   return path.join(FRAMES_ROOT, safeSeg(childId), safeSeg(nightDate));
 }
 function safeReaddir(dir) {
@@ -100,15 +102,29 @@ export function getTimelapseThumbFile(id) {
 
 // --- frame sampling ---
 
-async function captureChildFrame(childId, nightDate) {
-  const cam = db
-    .prepare('SELECT id, mediamtx_path, snapshot_url FROM cameras WHERE child_id = ? ORDER BY sort_order ASC, rowid ASC LIMIT 1')
-    .get(childId);
+// disabled = 0: a disabled camera's streaming/detection legs are off, and its RTSP source may be
+// stale or gone entirely — it must not be selected just because it happens to sort first, and must
+// not be picked ahead of a working enabled sibling. Same eligibility filter sleepAnalysis.js and
+// sleepReviews.js already use for "the primary camera for a child".
+const selectEligibleCameraStmt = db.prepare(
+  'SELECT id, mediamtx_path, snapshot_url FROM cameras WHERE child_id = ? AND disabled = 0 ORDER BY sort_order ASC, rowid ASC LIMIT 1'
+);
+// Re-checked right before a frame is written (see captureChildFrame) — a camera can be disabled,
+// reassigned to a different child, or deleted entirely while its snapshot fetch was in flight.
+const isStillEligibleStmt = db.prepare('SELECT 1 FROM cameras WHERE id = ? AND child_id = ? AND disabled = 0');
+
+export async function captureChildFrame(childId, nightDate) {
+  const cam = selectEligibleCameraStmt.get(childId);
   if (!cam) return;
   let buf = null;
   if (cam.snapshot_url) buf = await fetchHttpSnapshot(cam.snapshot_url).catch(() => null);
   if (!buf) buf = await captureSnapshot(cam.mediamtx_path).catch(() => null);
   if (!buf || !buf.length) return;
+  // The fetch above is async and can take real time (an HTTP request, or an ffmpeg grab up to its
+  // own 8s timeout) — re-validate eligibility now rather than trusting the read from before it
+  // started, so disabling/reassigning/deleting the camera mid-capture can't produce a late frame
+  // from a camera the timelapse is no longer supposed to include.
+  if (!isStillEligibleStmt.get(cam.id, childId)) return;
   const dir = frameDir(childId, nightDate);
   fs.mkdirSync(dir, { recursive: true });
   // Fixed-width epoch names sort lexically = chronologically, so assembly just sorts the dir.
