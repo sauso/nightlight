@@ -20,6 +20,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   section leads with searching the Apps tab instead of the manual template-install steps, which are
   now offered as an alternative rather than the only path.
 
+### Security
+- **Camera viewing access can no longer be used to take over another camera's live feed.** The
+  endpoint a signed-in caregiver's browser uses to watch a camera accepted a wider range of
+  requests than viewing actually needs — including ones that could interrupt or replace the video
+  another caregiver was already watching. It's now restricted to exactly the requests real
+  viewing requires; nothing else gets through.
+
 ## [0.31.0] - 2026-09-19
 
 ### Added

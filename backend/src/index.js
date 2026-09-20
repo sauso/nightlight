@@ -22,6 +22,7 @@ import timelapsesRoutes from './routes/timelapses.js';
 import recordingsRoutes from './routes/recordings.js';
 import { requireAuth, requireAuthQueryOrHeader, verifyToken } from './middleware/auth.js';
 import { demoGuard, isDemoModeActive } from './middleware/demoMode.js';
+import { whepOnlyGuard } from './middleware/whepOnlyGuard.js';
 import { talkConfigured } from './lib/twoWayAudio.js';
 import { handleTalkConnection } from './lib/talkSocket.js';
 import { subConfigured, isSubRunning, startSubStream } from './lib/subStream.js';
@@ -157,15 +158,19 @@ function keepUnderPrefix(proxyRes, prefix) {
   }
 }
 
-// Proxy WHEP (live video signaling) straight through to MediaMTX on the same
-// origin/port as everything else. This must be mounted before express.json()
-// so the SDP request body is streamed through untouched. requireAuth here means
-// only logged-in caregivers can start a stream — MediaMTX itself has no auth of
-// its own, so this is the only gate in front of it now that it's not directly
-// reachable on the network (see mediamtx.yml).
+// Proxy WHEP (live video signaling) straight through to MediaMTX on the same origin/port as
+// everything else. Two gates, not one. requireAuth confirms the caller is a signed-in
+// caregiver — but MediaMTX itself has no authorization model of its own, and a valid session
+// used to be enough to reach its WHIP (publish) surface through this same mount, not just its
+// WHEP (view) one: any caregiver could hijack another camera's live feed by sending a WHIP
+// request through here (GHSA-3h8x-wr97-gv22). whepOnlyGuard is the second gate: it rejects
+// anything that isn't one of the two exact WHEP-viewing request shapes the frontend ever sends
+// (see WhepPlayer.jsx), before the request ever reaches MediaMTX. This must still be mounted
+// before express.json() so the SDP offer body streams through untouched.
 app.use(
   '/live',
   requireAuth,
+  whepOnlyGuard,
   createProxyMiddleware({
     target: process.env.MEDIAMTX_WEBRTC_URL || 'http://127.0.0.1:8889',
     changeOrigin: true,
