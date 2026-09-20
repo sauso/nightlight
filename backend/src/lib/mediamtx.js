@@ -2,7 +2,9 @@
 // a global, same as console or setTimeout.
 
 // Host networking means MediaMTX's API is reachable on localhost from the backend container.
-const MEDIAMTX_API = process.env.MEDIAMTX_API || 'http://127.0.0.1:9997';
+// Exported so lib/webrtcSessions.js can talk to the same API without a second, independent
+// process.env.MEDIAMTX_API read that could silently drift from this one.
+export const MEDIAMTX_API = process.env.MEDIAMTX_API || 'http://127.0.0.1:9997';
 
 // Turn a camera ID into a safe MediaMTX path name (alphanumeric, dashes, underscores).
 //
