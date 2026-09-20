@@ -1,7 +1,6 @@
-// whepOnlyGuard is the fix for GHSA-3h8x-wr97-gv22: /live used to forward every method/sub-path to
-// MediaMTX's WebRTC server verbatim, letting any signed-in caregiver send a WHIP publish request
-// and hijack another camera's live feed. This guard is a strict ALLOWLIST — only the two exact
-// request shapes the real frontend ever sends may pass.
+// whepOnlyGuard closes a real, previously-shipped gap in /live (see this repo's Security
+// Advisories for the full writeup) — it's a strict ALLOWLIST, only the two exact request shapes
+// the real frontend ever sends may pass.
 //
 // Mounting note: in production this guard lives INSIDE the /live-prefixed chain
 // (app.use('/live', requireAuth, whepOnlyGuard, ...)), so Express strips the /live prefix before
