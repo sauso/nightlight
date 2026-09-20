@@ -338,6 +338,15 @@ safeInterval('reconcile', 5 * 60 * 1000, reconcileCameraPaths);
 // 30-day lifetime (see routes/auth.js) can never authenticate again regardless, so
 // deleting it changes nothing except table size.
 function purgeExpiredSessions() {
+  // push_tokens has no FK to sessions (deliberate — same reasoning as its user_id column, see
+  // lib/push.js), so a row bound to one of these about to go stale first, matching every other
+  // session-revocation path in routes/auth.js — not strictly required (activePushTokens() already
+  // excludes it either way) but keeps push_tokens from accumulating rows nothing will ever clean up.
+  db.prepare(
+    `DELETE FROM push_tokens WHERE session_id IN (
+       SELECT id FROM sessions WHERE last_seen_at < datetime('now', '-31 days')
+     )`
+  ).run();
   const { changes } = db.prepare("DELETE FROM sessions WHERE last_seen_at < datetime('now', '-31 days')").run();
   if (changes > 0) logger.info(`Purged ${changes} expired session(s).`);
 }

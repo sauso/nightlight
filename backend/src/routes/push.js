@@ -28,7 +28,7 @@ router.get('/snapshot/:id', (req, res) => {
 router.post('/register', requireAuth, (req, res) => {
   const { token, platform, baseUrl } = req.body || {};
   if (!token || typeof token !== 'string') return res.status(400).json({ error: 'token is required' });
-  registerToken(token, platform, req.user.id, typeof baseUrl === 'string' ? baseUrl : null);
+  registerToken(token, platform, req.user.id, typeof baseUrl === 'string' ? baseUrl : null, req.user.sid);
   res.json({ ok: true, push_enabled: pushEnabled() });
 });
 

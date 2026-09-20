@@ -15,7 +15,7 @@ import { test, before, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { useTempDataDir, makeUser } from './helpers/harness.js';
+import { useTempDataDir, makeUser, makeSession } from './helpers/harness.js';
 
 const dataDir = useTempDataDir();
 
@@ -77,7 +77,8 @@ before(async () => {
   );
   assert.equal(await initPush(), true, 'precondition: fake Firebase setup must actually initialize');
   makeUser(db, { id: 'u-1', username: 'alice' });
-  db.prepare('INSERT INTO push_tokens (token, user_id, platform) VALUES (?, ?, ?)').run('tok-1', 'u-1', 'android');
+  const sid = makeSession(db, 'u-1');
+  db.prepare('INSERT INTO push_tokens (token, user_id, session_id, platform) VALUES (?, ?, ?, ?)').run('tok-1', 'u-1', sid, 'android');
 });
 
 beforeEach(() => {

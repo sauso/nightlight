@@ -7,6 +7,15 @@ import db from '../db.js';
 const DATA_DIR = process.env.DATA_DIR || '/app/data';
 const SECRET_FILE = path.join(DATA_DIR, '.jwt_secret');
 
+// The session token's absolute lifetime (routes/auth.js's sign()). Exported here, not there, so
+// anything needing to reason about a session's absolute age - not just whether its `sessions` row
+// still exists, which a session can outlive by up to purgeExpiredSessions's own inactivity window -
+// can import one number rather than a second hardcoded copy silently drifting from it. `sessions`
+// rows are only ever pruned by INACTIVITY (31 days since last_seen_at), so a session can exist in
+// the DB well past this TTL if something keeps touching it; code that means "is this session's own
+// token still within its cryptographic lifetime" must check this, not just row existence.
+export const SESSION_TOKEN_TTL_DAYS = 30;
+
 // If JWT_SECRET isn't explicitly set, generate a random one and persist it in the
 // data volume so it survives restarts (sessions would otherwise invalidate every
 // time the container restarts). This also removes what would otherwise be a real
