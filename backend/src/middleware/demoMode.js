@@ -1,3 +1,5 @@
+import { normalizeRequestPath } from '../lib/httpPath.js';
+
 // DEMO_MODE — makes the running app read-only except for logging in and out, for the public
 // read-only demo instance (a separate, isolated deployment; not this module's concern beyond this
 // flag). A complete no-op unless DEMO_MODE is exactly the string 'true' — every real self-hosted
@@ -49,28 +51,11 @@ const RECOMPUTE_STORE_PATH = /^\/api\/children\/[^/]+\/sleep\/[^/]+$/;
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
-// For comparison only — never mutates req.path. Lower-cases and collapses EVERY run of repeated
-// slashes ANYWHERE in the path (not just a trailing one) down to a single slash, matching
-// Express's OWN default (non-strict, case-insensitive) routing here (confirmed: neither
-// `case sensitive routing` nor `strict routing` is set anywhere in this app).
-//
-// ⚠️ Found by adversarial review, reproduced against a real router: an EARLIER version of this
-// function only stripped a TRAILING slash. Express's router still dispatches an internal double
-// slash (e.g. `GET /api/children//c1/sleep/2026-01-01?store=1`, `GET /api/auth//sessions`) to the
-// real handler underneath, but that earlier regex left the internal `//` untouched, so it never
-// matched either blocklist — a demo visitor could write to the database and read another
-// visitor's session data with nothing but an extra `/` in the URL. Collapsing every run of slashes
-// (not just a trailing one) closes this for both the GET_BLOCKLIST/RECOMPUTE_STORE_PATH checks and
-// the mutation allowlist alike, via the same one normalization rule.
-function normalize(p) {
-  return p.toLowerCase().replace(/\/+/g, '/').replace(/(.)\/$/, '$1');
-}
-
 export function demoGuard(req, res, next) {
   if (!isDemoModeActive()) return next();
 
   const method = req.method.toUpperCase();
-  const path = normalize(req.path);
+  const path = normalizeRequestPath(req.path);
 
   // HEAD is covered alongside GET: Express serves HEAD via the GET handler when no explicit HEAD
   // route exists, so without this a HEAD request would still run the full (expensive, internals-
