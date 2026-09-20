@@ -160,13 +160,11 @@ function keepUnderPrefix(proxyRes, prefix) {
 
 // Proxy WHEP (live video signaling) straight through to MediaMTX on the same origin/port as
 // everything else. Two gates, not one. requireAuth confirms the caller is a signed-in
-// caregiver — but MediaMTX itself has no authorization model of its own, and a valid session
-// used to be enough to reach its WHIP (publish) surface through this same mount, not just its
-// WHEP (view) one: any caregiver could hijack another camera's live feed by sending a WHIP
-// request through here (GHSA-3h8x-wr97-gv22). whepOnlyGuard is the second gate: it rejects
-// anything that isn't one of the two exact WHEP-viewing request shapes the frontend ever sends
-// (see WhepPlayer.jsx), before the request ever reaches MediaMTX. This must still be mounted
-// before express.json() so the SDP offer body streams through untouched.
+// caregiver — but MediaMTX itself has no authorization model of its own, so whepOnlyGuard is a
+// second, necessary gate (see its own comment, and this repo's Security Advisories, for why):
+// it rejects anything that isn't one of the two exact WHEP-viewing request shapes the frontend
+// ever sends (see WhepPlayer.jsx), before the request ever reaches MediaMTX. This must still be
+// mounted before express.json() so the SDP offer body streams through untouched.
 app.use(
   '/live',
   requireAuth,
