@@ -21,6 +21,7 @@ import notificationsRoutes from './routes/notifications.js';
 import timelapsesRoutes from './routes/timelapses.js';
 import recordingsRoutes from './routes/recordings.js';
 import { requireAuth, requireAuthQueryOrHeader, verifyToken } from './middleware/auth.js';
+import { demoGuard, isDemoModeActive } from './middleware/demoMode.js';
 import { talkConfigured } from './lib/twoWayAudio.js';
 import { handleTalkConnection } from './lib/talkSocket.js';
 import { subConfigured, isSubRunning, startSubStream } from './lib/subStream.js';
@@ -197,6 +198,13 @@ app.use(
 
 app.use(express.json());
 
+// Demo-mode guard: when DEMO_MODE=true, blocks every write except log in/out (see
+// middleware/demoMode.js for the full policy and why it's positioned here — after
+// express.json(), before every API router, and deliberately not in front of /live or /hls,
+// which are mounted above and never reach this line). A complete no-op for every real
+// install, where DEMO_MODE is unset.
+app.use(demoGuard);
+
 app.use('/api/auth', authRoutes);
 app.use('/api/children', childrenRoutes);
 app.use('/api/cameras', camerasRoutes);
@@ -295,6 +303,11 @@ server.on('upgrade', (req, socket, head) => {
   let url;
   try { url = new URL(req.url, 'http://localhost'); } catch { socket.destroy(); return; }
   if (url.pathname !== '/api/talk') { socket.destroy(); return; }
+  // WebSocket upgrades never pass through Express's middleware chain, so demoGuard (mounted as
+  // app.use() above) structurally cannot see this request no matter where it's positioned — this
+  // check is the only enforcement point for the demo on this path. Placed before the token/camera
+  // lookups so no unnecessary DB read happens first.
+  if (isDemoModeActive()) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
   // The token rides in the WS URL (browsers can't set headers on the handshake), so it must be a
   // media-scoped token, not the full session token - same reason as the HLS/query-token routes.
   // Kept (not just the verified payload) so handleTalkConnection can re-check it for as long as the
