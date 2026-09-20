@@ -99,10 +99,11 @@ export async function mountRouterTrustingProxy(mountPath, router) {
   return { url: `http://127.0.0.1:${port}`, close: () => new Promise((r) => server.close(r)) };
 }
 
-export async function mountRouter(mountPath, router) {
+export async function mountRouter(mountPath, router, { middleware = [] } = {}) {
   const { default: express } = await import('express');
   const app = express();
   app.use(express.json());
+  for (const mw of middleware) app.use(mw);
   app.use(mountPath, router);
   // Mirror the app's own JSON error shape so tests assert against what clients really see.
   app.use((err, _req, res, _next) => res.status(err.status || 500).json({ error: err.message }));

@@ -9,6 +9,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- A `DEMO_MODE` environment flag for the backend: when set, every write action except logging
+  in and out is blocked (including one GET-triggered write and the talk-back WebSocket), and
+  the raw log viewer, diagnostics bundle, and session lists are hidden — the backend half of
+  the public read-only demo instance.
+
 ### Changed
 - Nightlight is now on the Unraid Community Applications store — the README's "Running on Unraid"
   section leads with searching the Apps tab instead of the manual template-install steps, which are
