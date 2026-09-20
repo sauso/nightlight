@@ -26,6 +26,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   requests than viewing actually needs — including ones that could interrupt or replace the video
   another caregiver was already watching. It's now restricted to exactly the requests real
   viewing requires; nothing else gets through.
+- **Signing a device out, an admin ending a specific device's session remotely, or resetting a
+  password now also stops that device from receiving further push notifications and snapshot
+  links** — previously a revoked device could keep receiving them until its session naturally
+  expired. (Removing a caregiver's account entirely already stopped this, since 0.31.0.) Devices
+  already registered before this update will receive push notifications again automatically the
+  next time their app is opened while signed in.
 
 ## [0.31.0] - 2026-09-19
 

@@ -3,6 +3,7 @@ import path from 'path';
 import { logger } from './logger.js';
 import db from '../db.js';
 import { storeSnapshot } from './pushSnapshots.js';
+import { SESSION_TOKEN_TTL_DAYS } from '../middleware/auth.js';
 
 // Push notifications via Firebase Cloud Messaging. The service-account credential is a secret,
 // so it is NEVER baked into the (public) image — it's mounted as a file into the data dir. If
@@ -109,17 +110,23 @@ export function getClientConfig() {
   }
 }
 
-export function registerToken(token, platform, userId, baseUrl) {
+// sessionId: the login session that made this registration call (req.user.sid — always a live
+// session, requireAuth guarantees it). NOT coalesced like base_url — unlike a missing base_url
+// (which just means an older app didn't send one), a re-register always carries a real, current
+// session, and the whole point is to always rebind to whichever session registered most recently
+// (e.g. a fresh sign-in after logging out), never to keep pointing at a now-stale one.
+export function registerToken(token, platform, userId, baseUrl, sessionId) {
   if (!token) return;
   // COALESCE on base_url so a re-register from an older app that doesn't send it keeps the last
   // known good value rather than nulling out the device's snapshot-fetch base.
   db.prepare(
-    `INSERT INTO push_tokens (token, user_id, platform, base_url, updated_at)
-       VALUES (?, ?, ?, ?, datetime('now'))
+    `INSERT INTO push_tokens (token, user_id, platform, base_url, session_id, updated_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(token) DO UPDATE SET
        user_id = excluded.user_id, platform = excluded.platform,
-       base_url = COALESCE(excluded.base_url, push_tokens.base_url), updated_at = datetime('now')`
-  ).run(token, userId || null, platform || null, baseUrl || null);
+       base_url = COALESCE(excluded.base_url, push_tokens.base_url),
+       session_id = excluded.session_id, updated_at = datetime('now')`
+  ).run(token, userId || null, platform || null, baseUrl || null, sessionId || null);
   // Zero-config learning of THIS server's own public URL: the origin the app reaches us through is,
   // by definition, an address that opens us in that app. Stash it so deep links can carry it and a
   // tap always lands on the sending server (see getPublicBaseUrl / detectionAlert.js).
@@ -171,13 +178,29 @@ export function removeToken(token) {
 // left inline in sendToAll) so the filter itself is directly testable without needing a real
 // Firebase Admin SDK setup — `messaging` is module-level, non-exported state only initPush() can
 // set, which real credentials are needed for.
+// Same defense-in-depth reasoning as the user_id filter above, now for the session that registered
+// each device: a row whose session has been revoked (signed out, an admin ending a device, a
+// password reset) must not be delivered to even if some caller never explicitly cleaned it up. A
+// row from before this filter existed (session_id NULL) is excluded too — NULL never satisfies IN
+// (...) — until that device re-registers under a live session (see this repo's Security Advisories
+// for the full writeup).
+//
+// The session subquery ALSO checks absolute age, not just row existence: `sessions` rows are only
+// ever pruned by 31 days of INACTIVITY (db's purgeExpiredSessions, keyed on last_seen_at), so a
+// session that's genuinely outlived its own JWT's SESSION_TOKEN_TTL_DAYS lifetime can still sit in
+// the table — kept "alive" by unrelated activity from the same device — well past when its holder's
+// API access has already, correctly, stopped working. Checking created_at here closes that gap
+// directly rather than silently trusting row presence alone.
 export function activePushTokens() {
   return db
     .prepare(
       `SELECT pt.token, pt.base_url FROM push_tokens pt
-        WHERE pt.user_id IN (SELECT id FROM users)`
+        WHERE pt.user_id IN (SELECT id FROM users)
+          AND pt.session_id IN (
+            SELECT id FROM sessions WHERE created_at > datetime('now', ?)
+          )`
     )
-    .all();
+    .all(`-${SESSION_TOKEN_TTL_DAYS} days`);
 }
 
 // `tag` (ROADMAP §1.6) is a notification-tray dedup key: posting a later message with the SAME tag

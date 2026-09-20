@@ -5,7 +5,7 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { createHash } from 'node:crypto';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
-import { requireAuth, requireAdmin, JWT_SECRET } from '../middleware/auth.js';
+import { requireAuth, requireAdmin, JWT_SECRET, SESSION_TOKEN_TTL_DAYS } from '../middleware/auth.js';
 import {
   generateSecret, keyUri, verifyToken, qrDataUrl, isLegacySecret,
   generateBackupCodes, verifyAndConsumeBackupCode, backupCodesRemaining,
@@ -195,7 +195,7 @@ function createSession(userId, userAgent) {
 function sign(user, sessionId) {
   return jwt.sign({ id: user.id, username: user.username, role: user.role, sid: sessionId }, JWT_SECRET, {
     algorithm: 'HS256',
-    expiresIn: '30d',
+    expiresIn: `${SESSION_TOKEN_TTL_DAYS}d`,
   });
 }
 
@@ -290,7 +290,13 @@ router.post('/login/mfa', loginLimiter, (req, res) => {
 
 // Ends just the current session - the token stops working on its very next use,
 // rather than remaining valid (just unused) until it naturally expires.
+//
+// Also stops this device's push registration, if it has one - a signed-out device must not keep
+// receiving alerts. Run before the session delete so a caller reading this in order sees cause
+// before effect (activePushTokens() filters live regardless of ordering, but the explicit delete
+// here matches the same order used at every other revocation site below).
 router.post('/logout', requireAuth, (req, res) => {
+  db.prepare('DELETE FROM push_tokens WHERE session_id = ?').run(req.user.sid);
   db.prepare('DELETE FROM sessions WHERE id = ?').run(req.user.sid);
   res.status(204).end();
 });
@@ -334,6 +340,9 @@ router.delete('/sessions/:id', requireAuth, (req, res) => {
   if (session.user_id !== req.user.id && req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Not allowed' });
   }
+  // Same reasoning as /logout above - ending a session (here, possibly someone ELSE'S device)
+  // must also stop that device's push registration.
+  db.prepare('DELETE FROM push_tokens WHERE session_id = ?').run(req.params.id);
   db.prepare('DELETE FROM sessions WHERE id = ?').run(req.params.id);
   res.status(204).end();
 });
@@ -392,7 +401,14 @@ router.put('/users/:id', requireAuth, requireAdmin, (req, res) => {
   // A password reset means the old credential can no longer be trusted - any session
   // opened under it shouldn't outlive it. Spares only the requesting admin's own
   // current session, for the case where they're resetting their own password.
+  //
+  // The push_tokens cleanup runs FIRST, as a subquery over the sessions about to be deleted - it
+  // has to see them before the next statement removes them. Same reasoning as /logout: an ended
+  // session must also stop that device's push registration, not just its API access.
   if (password) {
+    db.prepare(
+      'DELETE FROM push_tokens WHERE session_id IN (SELECT id FROM sessions WHERE user_id = ? AND id != ?)'
+    ).run(req.params.id, req.user.sid);
     db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.params.id, req.user.sid);
   }
 
@@ -443,6 +459,11 @@ router.put('/me/password', requireAuth, loginLimiter, (req, res) => {
   // Sign every other device out. Changing your password is exactly the move someone
   // makes when a logged-in device is lost or no longer trusted - leaving those
   // sessions valid for the rest of their 30 days would defeat the point.
+  //
+  // Same push_tokens cleanup, same reasoning and ordering, as the admin reset path above.
+  db.prepare(
+    'DELETE FROM push_tokens WHERE session_id IN (SELECT id FROM sessions WHERE user_id = ? AND id != ?)'
+  ).run(req.user.id, req.user.sid);
   db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.user.id, req.user.sid);
   res.json({ ok: true });
 });
