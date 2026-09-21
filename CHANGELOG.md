@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-09-21
+
 ### Added
 - A `DEMO_MODE` environment flag for the backend: when set, every write action except logging
   in and out is blocked (including one GET-triggered write and the talk-back WebSocket), and
