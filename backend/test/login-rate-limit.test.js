@@ -18,13 +18,15 @@
 import { test, describe, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  useTempDataDir, cleanupTempDataDirs, makeUser, mountRouter, mountRouterTrustingProxy, call,
+  useTempDataDir, cleanupTempDataDirs, makeUser, makeSession, mountRouter, mountRouterTrustingProxy,
+  signToken, call,
 } from './helpers/harness.js';
 
 useTempDataDir();
 
 const { default: db } = await import('../src/db.js');
 const { default: authRouter } = await import('../src/routes/auth.js');
+const { generateSecret, verifyToken } = await import('../src/lib/mfa.js');
 
 let server;
 
@@ -148,11 +150,12 @@ describe('the key really is IP + account, not one or the other', () => {
 
 describe('a blocked account stops consuming the shared client budget', () => {
   // ⚠️ THE ORDER OF THE TWO LIMITERS IS BEHAVIOUR, NOT STYLE, and nothing asserted it. `loginLimiter`
-  // is `[perAccount, perClient]`: once perAccount rejects, express-rate-limit ends the request and
-  // perClient never runs, so one account's flood costs the shared budget only its own 20. Swap them
-  // and every one of those attempts is charged to the client bucket too — so a single account hammered
-  // hard drains the household's 100 and locks everyone else out, which is most of issue #248 back
-  // again. Mutation testing showed the swap passed every other case in this file.
+  // is `[loginAccountLimiter, perClientLimiter]`: once the account limiter rejects, express-rate-limit
+  // ends the request and the client limiter never runs, so one account's flood costs the shared budget
+  // only its own 20. Swap them and every one of those attempts is charged to the client bucket too —
+  // so a single account hammered hard drains the household's 100 and locks everyone else out, which is
+  // most of issue #248 back again. Mutation testing showed the swap passed every other case in this
+  // file.
   let proxied;
   before(async () => { proxied = await mountRouterTrustingProxy('/api/auth', authRouter); });
   after(async () => { await proxied?.close(); });
@@ -222,5 +225,209 @@ describe('the MFA second step is limited per account too', () => {
 
     const bob = await mfaFrom(ip, { mfaToken: tokenFor('u-b'), code: '000000' });
     assert.notEqual(bob.status, 429, "alice's MFA attempts locked bob out of his own second factor");
+  });
+});
+
+describe('an extraneous identity field cannot open a fresh bucket (S06)', () => {
+  // Every case gets a unique source IP because all limiter stores live for the lifetime of this
+  // module. The two authenticated-action cases also use different users: those routes deliberately
+  // share one limiter, keyed by the verified session identity.
+  let proxied;
+  before(async () => { proxied = await mountRouterTrustingProxy('/api/auth', authRouter); });
+  after(async () => { await proxied?.close(); });
+
+  const from = (ip, path, body, token) =>
+    call(`${proxied.url}/api/auth${path}`, {
+      method: path === '/me/password' ? 'PUT' : 'POST',
+      body,
+      token,
+      headers: { 'x-forwarded-for': ip },
+    });
+
+  const enableMfa = (userId) => {
+    const secret = generateSecret();
+    db.prepare('UPDATE users SET mfa_enabled = 1, mfa_secret = ? WHERE id = ?').run(secret, userId);
+    let wrongCodeNumber = 0;
+    while (verifyToken(secret, String(wrongCodeNumber).padStart(6, '0'))) wrongCodeNumber += 1;
+    return { wrongCode: String(wrongCodeNumber).padStart(6, '0') };
+  };
+
+  const mfaTokenFor = (userId, extra = {}) =>
+    signToken({ id: userId, purpose: 'mfa', ...extra }, { expiresIn: '5m' });
+
+  const sessionTokenFor = (user) => {
+    const sid = makeSession(db, user.id);
+    return signToken({ id: user.id, username: user.username, role: user.role, sid });
+  };
+
+  test('★ THE FIX: /login/mfa — a fixed extraneous username cannot reopen an exhausted account\'s bucket', async () => {
+    const ip = '203.0.113.20';
+    const { wrongCode } = enableMfa('u-a');
+    const mfaToken = mfaTokenFor('u-a');
+
+    for (let i = 0; i < 20; i++) {
+      const attempt = await from(ip, '/login/mfa', { mfaToken, code: wrongCode });
+      assert.equal(attempt.status, 401, `attempt ${i + 1} should reach code verification`);
+      assert.equal(attempt.body?.error, 'Incorrect code');
+    }
+    const blocked = await from(ip, '/login/mfa', { mfaToken, code: wrongCode });
+    assert.equal(blocked.status, 429, 'the account bucket was not exhausted on attempt 21');
+
+    const spoofed = await from(ip, '/login/mfa', {
+      mfaToken,
+      code: wrongCode,
+      username: 'someone-else',
+    });
+    assert.equal(spoofed.status, 429, 'an extraneous username opened a fresh MFA budget');
+  });
+
+  test('★ THE FIX: /login/mfa — a DIFFERENT extraneous username on every attempt is still ignored', async () => {
+    const ip = '203.0.113.21';
+    const { wrongCode } = enableMfa('u-a');
+    const mfaToken = mfaTokenFor('u-a');
+
+    for (let i = 0; i < 20; i++) {
+      const attempt = await from(ip, '/login/mfa', {
+        mfaToken,
+        code: wrongCode,
+        username: `spoof-${i}`,
+      });
+      assert.equal(attempt.status, 401, `attempt ${i + 1} should reach code verification`);
+      assert.equal(attempt.body?.error, 'Incorrect code');
+    }
+    const blocked = await from(ip, '/login/mfa', {
+      mfaToken,
+      code: wrongCode,
+      username: 'spoof-20',
+    });
+    assert.equal(blocked.status, 429, 'varying the extraneous username created fresh MFA budgets');
+  });
+
+  test('/login/mfa — a genuinely different signed token for the same user still shares one bucket', async () => {
+    const ip = '203.0.113.22';
+    const { wrongCode } = enableMfa('u-a');
+
+    for (let i = 0; i < 20; i++) {
+      const attempt = await from(ip, '/login/mfa', {
+        mfaToken: mfaTokenFor('u-a', { nonce: i }),
+        code: wrongCode,
+      });
+      assert.equal(attempt.status, 401, `attempt ${i + 1} should reach code verification`);
+      assert.equal(attempt.body?.error, 'Incorrect code');
+    }
+    const blocked = await from(ip, '/login/mfa', {
+      mfaToken: mfaTokenFor('u-a', { nonce: 20 }),
+      code: wrongCode,
+    });
+    assert.equal(blocked.status, 429, 'fresh signed tokens for one user did not share an account bucket');
+  });
+
+  test('★ THE FIX: PUT /me/password — an authenticated caller cannot dodge their own limit with an extraneous username', async () => {
+    const ip = '203.0.113.23';
+    const user = { id: 'u-a', username: 'alice', role: 'admin' };
+    const token = sessionTokenFor(user);
+
+    for (let i = 0; i < 20; i++) {
+      const attempt = await from(ip, '/me/password', {
+        current_password: 'wrong-password',
+        new_password: 'new-password-123',
+        username: `spoof-${i}`,
+      }, token);
+      assert.equal(attempt.status, 401, `attempt ${i + 1} should reach current-password verification`);
+      assert.equal(attempt.body?.error, 'Current password is incorrect');
+    }
+    const blocked = await from(ip, '/me/password', {
+      current_password: 'wrong-password',
+      new_password: 'new-password-123',
+      username: 'spoof-20',
+    }, token);
+    assert.equal(blocked.status, 429, 'varying the extraneous username created fresh password-change budgets');
+  });
+
+  test('★ THE FIX: POST /me/mfa/disable — same, with the wrong-password field this route actually reads', async () => {
+    const ip = '203.0.113.24';
+    const user = { id: 'u-b', username: 'bob', role: 'caregiver' };
+    const token = sessionTokenFor(user);
+
+    for (let i = 0; i < 20; i++) {
+      const attempt = await from(ip, '/me/mfa/disable', {
+        password: 'wrong-password',
+        username: `spoof-${i}`,
+      }, token);
+      assert.equal(attempt.status, 401, `attempt ${i + 1} should reach password verification`);
+      assert.equal(attempt.body?.error, 'Password is incorrect');
+    }
+    const blocked = await from(ip, '/me/mfa/disable', {
+      password: 'wrong-password',
+      username: 'spoof-20',
+    }, token);
+    assert.equal(blocked.status, 429, 'varying the extraneous username created fresh MFA-disable budgets');
+  });
+
+  // ★ THE FIX (found by adversarial review of this fix): the two tests above prove an extraneous
+  // `username` field is ignored, but both vary source IP AND account together between cases — so
+  // neither dimension is pinned on its own. A mutant that makes `sessionKey` return a CONSTANT
+  // (dropping the session identity entirely) or one that mounts the account limiter BEFORE
+  // `requireAuth` (so `req.user` is unset when the key is computed) still passes both of them: each
+  // test's 20 attempts still land in one bucket per IP either way. These two tests pin the actual
+  // property — that the bucket key genuinely comes from the AUTHENTICATED caller — the same way the
+  // existing MFA-bucket test above proves it for `mfaTokenKey` (two different users sharing ONE IP).
+  test('★ THE FIX: PUT /me/password — two different accounts sharing one source IP do not share a bucket', async () => {
+    const ip = '203.0.113.26';
+    const alice = sessionTokenFor({ id: 'u-a', username: 'alice', role: 'admin' });
+    const bob = sessionTokenFor({ id: 'u-b', username: 'bob', role: 'caregiver' });
+    const attempt = (token) =>
+      from(ip, '/me/password', { current_password: 'wrong-password', new_password: 'new-password-123' }, token);
+
+    let last;
+    for (let i = 0; i < 20; i++) {
+      last = await attempt(alice);
+      assert.equal(last.status, 401, `alice's attempt ${i + 1} should reach current-password verification`);
+    }
+    const aliceBlocked = await attempt(alice);
+    assert.equal(aliceBlocked.status, 429, "alice's own budget never ran out");
+
+    const bobsTurn = await attempt(bob);
+    assert.notEqual(bobsTurn.status, 429, "alice's exhausted budget blocked bob from his own account, sharing one IP");
+    assert.equal(bobsTurn.status, 401, `expected bob's own current-password check to run, got ${bobsTurn.status}`);
+  });
+
+  test('★ THE FIX: POST /me/mfa/disable — two different accounts sharing one source IP do not share a bucket', async () => {
+    const ip = '203.0.113.27';
+    const alice = sessionTokenFor({ id: 'u-a', username: 'alice', role: 'admin' });
+    const bob = sessionTokenFor({ id: 'u-b', username: 'bob', role: 'caregiver' });
+    const attempt = (token) => from(ip, '/me/mfa/disable', { password: 'wrong-password' }, token);
+
+    let last;
+    for (let i = 0; i < 20; i++) {
+      last = await attempt(alice);
+      assert.equal(last.status, 401, `alice's attempt ${i + 1} should reach password verification`);
+    }
+    const aliceBlocked = await attempt(alice);
+    assert.equal(aliceBlocked.status, 429, "alice's own budget never ran out");
+
+    const bobsTurn = await attempt(bob);
+    assert.notEqual(bobsTurn.status, 429, "alice's exhausted budget blocked bob from his own account, sharing one IP");
+    assert.equal(bobsTurn.status, 401, `expected bob's own password check to run, got ${bobsTurn.status}`);
+  });
+
+  test('/login itself is not newly exposed to a forged mfaToken', async () => {
+    const ip = '203.0.113.25';
+
+    for (let i = 0; i < 20; i++) {
+      const attempt = await from(ip, '/login', {
+        username: 'alice',
+        password: 'wrong-password',
+        mfaToken: `junk-${i}`,
+      });
+      assert.equal(attempt.status, 401, `attempt ${i + 1} should reach password verification`);
+      assert.equal(attempt.body?.error, 'Incorrect username or password');
+    }
+    const blocked = await from(ip, '/login', {
+      username: 'alice',
+      password: 'wrong-password',
+      mfaToken: 'junk-20',
+    });
+    assert.equal(blocked.status, 429, 'varying a forged MFA token created fresh login budgets');
   });
 });

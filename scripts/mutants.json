@@ -1454,5 +1454,82 @@
       "morning-review.test.js"
     ],
     "note": "Symmetric case to the trailing widen above, flagged as likely but not separately verified by the same review. Found by an adversarial pre-merge review (a Claude subagent), 2026-09-14."
+  },
+  {
+    "label": "account rate limit: /login/mfa wired to the wrong limiter",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.post('/login/mfa', mfaLimiter, (req, res) => {",
+    "replace": "router.post('/login/mfa', loginLimiter, (req, res) => {",
+    "expect": "killed",
+    "tests": [
+      "login-rate-limit.test.js"
+    ],
+    "note": "Reintroduces the reported defect at the wiring level: an extraneous username field would again pick the account bucket instead of the verified MFA token."
+  },
+  {
+    "label": "account rate limit: /me/password wired to the wrong limiter",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.put('/me/password', requireAuth, sessionActionLimiter, (req, res) => {",
+    "replace": "router.put('/me/password', requireAuth, loginLimiter, (req, res) => {",
+    "expect": "killed",
+    "tests": [
+      "login-rate-limit.test.js"
+    ],
+    "note": "Reintroduces the reported defect on the other affected route: a signed-in caller could again dodge their own limit with an extraneous username field."
+  },
+  {
+    "label": "account rate limit: sessionKey trusts a submitted username over the verified session",
+    "file": "backend/src/routes/auth.js",
+    "find": "  return req.user?.id || '';",
+    "replace": "  return req.body?.username || req.user?.id || '';",
+    "expect": "killed",
+    "tests": [
+      "login-rate-limit.test.js"
+    ],
+    "note": "Function-level version of the same regression - catches it for any current or future route that keys on sessionKey, not just one call site."
+  },
+  {
+    "label": "account rate limit: sessionKey drops the session identity entirely",
+    "file": "backend/src/routes/auth.js",
+    "find": "  return req.user?.id || '';",
+    "replace": "  return 'constant-bucket';",
+    "expect": "killed",
+    "tests": [
+      "login-rate-limit.test.js"
+    ],
+    "note": "Found by adversarial review: the extraneous-username tests alone cannot tell a real session key apart from a constant, since each varies IP and account together. Only the two-accounts-one-IP tests catch this."
+  },
+  {
+    "label": "account rate limit: /me/password mounts the limiter before requireAuth",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.put('/me/password', requireAuth, sessionActionLimiter, (req, res) => {",
+    "replace": "router.put('/me/password', sessionActionLimiter, requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": [
+      "login-rate-limit.test.js"
+    ],
+    "note": "req.user is unset when the account key is computed, so sessionKey returns '' for every caller and every account behind one IP shares one bucket - the #248 shape, reintroduced on this route."
+  },
+  {
+    "label": "account rate limit: /me/mfa/disable mounts the limiter before requireAuth",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.post('/me/mfa/disable', requireAuth, sessionActionLimiter, (req, res) => {",
+    "replace": "router.post('/me/mfa/disable', sessionActionLimiter, requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": [
+      "login-rate-limit.test.js"
+    ],
+    "note": "Same failure as the /me/password version above, on the other route sharing this limiter instance."
+  },
+  {
+    "label": "account rate limit: /me/mfa/disable wired to the wrong limiter",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.post('/me/mfa/disable', requireAuth, sessionActionLimiter, (req, res) => {",
+    "replace": "router.post('/me/mfa/disable', requireAuth, loginLimiter, (req, res) => {",
+    "expect": "killed",
+    "tests": [
+      "login-rate-limit.test.js"
+    ],
+    "note": "Symmetric to the /me/password wiring mutant above - the third of the three affected routes, added for catalogue completeness."
   }
 ]
