@@ -20,7 +20,12 @@ import gotifyRoutes from './routes/gotify.js';
 import notificationsRoutes from './routes/notifications.js';
 import timelapsesRoutes from './routes/timelapses.js';
 import recordingsRoutes from './routes/recordings.js';
-import { requireAuth, requireAuthQueryOrHeader, verifyToken } from './middleware/auth.js';
+import { requireAuth, requireAuthQueryOrHeader, verifyToken, SESSION_TOKEN_TTL_DAYS } from './middleware/auth.js';
+import { demoGuard, isDemoModeActive } from './middleware/demoMode.js';
+import { whepOnlyGuard } from './middleware/whepOnlyGuard.js';
+import {
+  recordWebrtcSessionOwner, webrtcSessionOwners, listWebrtcSessions, kickWebrtcSession, sessionsToKick,
+} from './lib/webrtcSessions.js';
 import { talkConfigured } from './lib/twoWayAudio.js';
 import { handleTalkConnection } from './lib/talkSocket.js';
 import { subConfigured, isSubRunning, startSubStream } from './lib/subStream.js';
@@ -156,21 +161,32 @@ function keepUnderPrefix(proxyRes, prefix) {
   }
 }
 
-// Proxy WHEP (live video signaling) straight through to MediaMTX on the same
-// origin/port as everything else. This must be mounted before express.json()
-// so the SDP request body is streamed through untouched. requireAuth here means
-// only logged-in caregivers can start a stream — MediaMTX itself has no auth of
-// its own, so this is the only gate in front of it now that it's not directly
-// reachable on the network (see mediamtx.yml).
+// Proxy WHEP (live video signaling) straight through to MediaMTX on the same origin/port as
+// everything else. Two gates, not one. requireAuth confirms the caller is a signed-in
+// caregiver — but MediaMTX itself has no authorization model of its own, so whepOnlyGuard is a
+// second, necessary gate (see its own comment, and this repo's Security Advisories, for why):
+// it rejects anything that isn't one of the two exact WHEP-viewing request shapes the frontend
+// ever sends (see WhepPlayer.jsx), before the request ever reaches MediaMTX. This must still be
+// mounted before express.json() so the SDP offer body streams through untouched.
+//
+// Those two gates only run at signaling time, though — once a session starts, audio/video flows
+// directly between the browser and MediaMTX over UDP, outside this proxy entirely. recordWebrtc
+// SessionOwner (in the same proxyRes hook as keepUnderPrefix) remembers which login session opened
+// each view; the periodic sweep below closes it again if that session is revoked while the view is
+// still open (see this repo's Security Advisories for the full writeup).
 app.use(
   '/live',
   requireAuth,
+  whepOnlyGuard,
   createProxyMiddleware({
     target: process.env.MEDIAMTX_WEBRTC_URL || 'http://127.0.0.1:8889',
     changeOrigin: true,
     pathRewrite: { '^/live': '' },
     on: {
-      proxyRes: (proxyRes) => keepUnderPrefix(proxyRes, '/live'),
+      proxyRes: (proxyRes, req) => {
+        keepUnderPrefix(proxyRes, '/live');
+        recordWebrtcSessionOwner(proxyRes, req);
+      },
     },
   })
 );
@@ -196,6 +212,13 @@ app.use(
 );
 
 app.use(express.json());
+
+// Demo-mode guard: when DEMO_MODE=true, blocks every write except log in/out (see
+// middleware/demoMode.js for the full policy and why it's positioned here — after
+// express.json(), before every API router, and deliberately not in front of /live or /hls,
+// which are mounted above and never reach this line). A complete no-op for every real
+// install, where DEMO_MODE is unset.
+app.use(demoGuard);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/children', childrenRoutes);
@@ -295,6 +318,11 @@ server.on('upgrade', (req, socket, head) => {
   let url;
   try { url = new URL(req.url, 'http://localhost'); } catch { socket.destroy(); return; }
   if (url.pathname !== '/api/talk') { socket.destroy(); return; }
+  // WebSocket upgrades never pass through Express's middleware chain, so demoGuard (mounted as
+  // app.use() above) structurally cannot see this request no matter where it's positioned — this
+  // check is the only enforcement point for the demo on this path. Placed before the token/camera
+  // lookups so no unnecessary DB read happens first.
+  if (isDemoModeActive()) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
   // The token rides in the WS URL (browsers can't set headers on the handshake), so it must be a
   // media-scoped token, not the full session token - same reason as the HLS/query-token routes.
   // Kept (not just the verified payload) so handleTalkConnection can re-check it for as long as the
@@ -322,11 +350,59 @@ safeInterval('reconcile', 5 * 60 * 1000, reconcileCameraPaths);
 // 30-day lifetime (see routes/auth.js) can never authenticate again regardless, so
 // deleting it changes nothing except table size.
 function purgeExpiredSessions() {
+  // push_tokens has no FK to sessions (deliberate — same reasoning as its user_id column, see
+  // lib/push.js), so a row bound to one of these about to go stale first, matching every other
+  // session-revocation path in routes/auth.js — not strictly required (activePushTokens() already
+  // excludes it either way) but keeps push_tokens from accumulating rows nothing will ever clean up.
+  db.prepare(
+    `DELETE FROM push_tokens WHERE session_id IN (
+       SELECT id FROM sessions WHERE last_seen_at < datetime('now', '-31 days')
+     )`
+  ).run();
   const { changes } = db.prepare("DELETE FROM sessions WHERE last_seen_at < datetime('now', '-31 days')").run();
   if (changes > 0) logger.info(`Purged ${changes} expired session(s).`);
 }
 purgeExpiredSessions();
 safeInterval('purge-sessions', 24 * 60 * 60 * 1000, purgeExpiredSessions);
+
+// Closes the gap recordWebrtcSessionOwner exists for (see the /live mount's own comment): a login
+// session revoked while its owner is already watching a camera doesn't tear down that view on its
+// own — MediaMTX has no idea the revocation happened. This is the enforcement side: every tick, ask
+// MediaMTX what's actually still open, and end anything whose recorded owner is no longer a live
+// session — checked the SAME way every other revocation path in this repo checks it (exists, AND
+// within its own absolute token lifetime — see SESSION_TOKEN_TTL_DAYS and lib/push.js's identical
+// reasoning for the same class of gap).
+//
+// 15s, matching camera-watchdog's cadence below — the documented bound on how long a revoked
+// session's view can keep playing. `sweeping` skips a tick already in flight: safeInterval does not
+// await the previous call, and listWebrtcSessions/kickWebrtcSession hitting a genuinely stalled
+// MediaMTX (the exact case their own timeout is bounded against, but worth guarding regardless)
+// must not stack up concurrent sweeps.
+const WEBRTC_KICK_INTERVAL_MS = 15 * 1000;
+let sweeping = false;
+safeInterval('webrtc-session-reconcile', WEBRTC_KICK_INTERVAL_MS, async () => {
+  if (sweeping) return;
+  sweeping = true;
+  try {
+    // Captured BEFORE the request, not after — see sessionsToKick's own comment for the race this
+    // guards against (a session recorded while this fetch is in flight must never be pruned just
+    // because it's missing from a snapshot older than it is).
+    const listStartedAt = Date.now();
+    const sessions = await listWebrtcSessions();
+    const isLive = (sid) =>
+      !!db.prepare(`SELECT 1 FROM sessions WHERE id = ? AND created_at > datetime('now', ?)`)
+        .get(sid, `-${SESSION_TOKEN_TTL_DAYS} days`);
+    const { toKick, stale } = sessionsToKick(sessions, webrtcSessionOwners, isLive, listStartedAt);
+    for (const { id, path } of toKick) {
+      await kickWebrtcSession(id);
+      webrtcSessionOwners.delete(id);
+      logger.info(`[webrtc] closed a live view whose session was revoked (path ${path})`);
+    }
+    for (const id of stale) webrtcSessionOwners.delete(id);
+  } finally {
+    sweeping = false;
+  }
+});
 
 // The ONLY thing that recovers a wedged camera stream. This watches MediaMTX's own "is this path
 // actually receiving frames" status directly, and force-restarts a camera's transcoder if it's been

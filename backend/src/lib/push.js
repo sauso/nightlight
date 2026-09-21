@@ -3,6 +3,7 @@ import path from 'path';
 import { logger } from './logger.js';
 import db from '../db.js';
 import { storeSnapshot } from './pushSnapshots.js';
+import { SESSION_TOKEN_TTL_DAYS } from '../middleware/auth.js';
 
 // Push notifications via Firebase Cloud Messaging. The service-account credential is a secret,
 // so it is NEVER baked into the (public) image — it's mounted as a file into the data dir. If
@@ -109,23 +110,82 @@ export function getClientConfig() {
   }
 }
 
-export function registerToken(token, platform, userId, baseUrl) {
+// The only shape of address the app ever legitimately reports is `window.location.origin` — scheme,
+// host and optional port, nothing else — so that is the only shape accepted: http(s)://host[:port],
+// optionally with ONE trailing slash. The host is limited to the characters a hostname or an IPv4/IPv6
+// literal can contain (underscore is allowed because a LAN machine name may have one).
+//
+// ⚠️ This checks the RAW STRING, on purpose, BEFORE handing it to `new URL()`. The WHATWG parser is
+// deliberately forgiving — it turns `http:host`, `https:\\host`, `https://host?`, `https://host/a/..`
+// and a tab in the middle of the host into a perfectly good origin — so validating only what it
+// returns would quietly accept all of those. An adversarial review demonstrated exactly that against
+// an earlier version that checked `pathname`/`search`/`hash` on the parsed result. `new URL()` is kept
+// only to reject what the pattern cannot (a port above 65535, an impossible IPv6 literal) and to
+// canonicalise. The pattern has no `@`, `/`, `?`, `#`, `\` or whitespace in the host, which is what
+// rules out credentials, paths, queries, fragments and smuggled control characters in one place.
+//
+// It is a CHARACTER filter, not a hostname validator: `http://a..b`, `http://.` and legacy numeric
+// IPv4 forms such as `http://0x7f.1` still pass (the parser canonicalises the last to 127.0.0.1, which is
+// also what a browser reports). That is accepted on purpose — only an admin's device can set the shared
+// address and an app reports exactly what a browser reports, so a stricter grammar would add regex
+// complexity to guard a value nothing untrusted can reach.
+const ORIGIN_SHAPE = /^https?:\/\/(?:[a-z0-9._-]+|\[[0-9a-f:.]+\])(?::\d{1,5})?\/?$/i;
+
+// Returns the canonical origin (lower-cased host, default port dropped, no trailing slash) or null.
+//
+// ⚠️ This proves the value is a well-formed http(s) origin, NOT that it reaches this server: nothing
+// here can know that. Who is allowed to *teach* the server an address is the job of registerToken's
+// admin check; this only stops a malformed or non-web value from being stored at all.
+export function normalizeBaseUrl(value) {
+  if (typeof value !== 'string') return null;
+  const s = value.trim();
+  // 255 is well past any real origin (a max-length DNS name is 253); it only bounds hostile input.
+  if (!s || s.length > 255) return null;
+  if (!ORIGIN_SHAPE.test(s)) return null;
+  try {
+    return new URL(s).origin;
+  } catch {
+    return null;
+  }
+}
+
+function isAdminUser(userId) {
+  if (!userId) return false;
+  return !!db.prepare("SELECT 1 FROM users WHERE id = ? AND role = 'admin'").get(userId);
+}
+
+// sessionId: the login session that made this registration call (req.user.sid — always a live
+// session, requireAuth guarantees it). NOT coalesced like base_url — unlike a missing base_url
+// (which just means an older app didn't send one), a re-register always carries a real, current
+// session, and the whole point is to always rebind to whichever session registered most recently
+// (e.g. a fresh sign-in after logging out), never to keep pointing at a now-stale one.
+export function registerToken(token, platform, userId, baseUrl, sessionId) {
   if (!token) return;
+  // A value that isn't a well-formed origin is dropped, not an error: the device still registers (an
+  // unrecognised hint must never cost someone their alerts) and just gets no snapshot/deep-link base.
+  const origin = normalizeBaseUrl(baseUrl);
   // COALESCE on base_url so a re-register from an older app that doesn't send it keeps the last
   // known good value rather than nulling out the device's snapshot-fetch base.
   db.prepare(
-    `INSERT INTO push_tokens (token, user_id, platform, base_url, updated_at)
-       VALUES (?, ?, ?, ?, datetime('now'))
+    `INSERT INTO push_tokens (token, user_id, platform, base_url, session_id, updated_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(token) DO UPDATE SET
        user_id = excluded.user_id, platform = excluded.platform,
-       base_url = COALESCE(excluded.base_url, push_tokens.base_url), updated_at = datetime('now')`
-  ).run(token, userId || null, platform || null, baseUrl || null);
-  // Zero-config learning of THIS server's own public URL: the origin the app reaches us through is,
-  // by definition, an address that opens us in that app. Stash it so deep links can carry it and a
-  // tap always lands on the sending server (see getPublicBaseUrl / detectionAlert.js).
-  if (baseUrl) {
+       base_url = COALESCE(excluded.base_url, push_tokens.base_url),
+       session_id = excluded.session_id, updated_at = datetime('now')`
+  ).run(token, userId || null, platform || null, origin, sessionId || null);
+  // Zero-config learning of THIS server's own public URL: the origin an app reaches us through is an
+  // address that opens us in that app. Stash it so deep links can carry it and a tap always lands on
+  // the sending server (see getPublicBaseUrl / detectionAlert.js).
+  //
+  // Only an ADMIN's device may teach it. This one value is global — every household member's alert
+  // links follow it — so it is server configuration, like everything else only an admin can change,
+  // not a per-device hint. A caregiver's own address is still stored on their own token above (it is
+  // only ever used to build links delivered to that same device). Decided from the database here,
+  // not passed in by the caller, so no future caller can forget the check.
+  if (origin && isAdminUser(userId)) {
     try {
-      db.prepare('UPDATE settings SET public_base_url = ? WHERE id = ?').run(baseUrl.replace(/\/+$/, ''), 'app');
+      db.prepare('UPDATE settings SET public_base_url = ? WHERE id = ?').run(origin, 'app');
     } catch {
       // Non-fatal — deep links just fall back to the server-less scheme.
     }
@@ -134,22 +194,45 @@ export function registerToken(token, platform, userId, baseUrl) {
 
 // This server's own public URL, used to stamp deep links so a tapped alert opens the server that
 // sent it, not whichever server the app last had open. Prefer the value learned on push-register
-// (settings.public_base_url), but fall back to the most recently registered device's base_url — that
-// too is an address a real app used to reach us, so it's a valid "open this server" URL. The
+// (settings.public_base_url), but fall back to the most recently registered ADMIN device's base_url —
+// that too is an address a real app used to reach us, so it's a valid "open this server" URL. The
 // fallback matters right after upgrading to this version: a server registered by an older app has a
 // token base_url but no settings value yet, and would otherwise emit server-less links until the
-// next fresh registration. Null only if nothing has ever registered.
+// next fresh registration. Null when nothing usable exists — including a household whose only app
+// users are caregivers, which degrades to the plain nightlight://camera/:id link (opens in place).
+//
+// Both the stored value and every fallback candidate are re-validated on READ, and the fallback is
+// admin-only for the same reason registerToken's write is: rows written before that check existed
+// (or by any other route to the table) must not be able to change where the household's links point.
 export function getPublicBaseUrl() {
   try {
-    const explicit = db.prepare('SELECT public_base_url FROM settings WHERE id = ?').get('app')?.public_base_url;
-    if (explicit) return explicit.replace(/\/+$/, '');
-    const row = db
-      .prepare("SELECT base_url FROM push_tokens WHERE base_url IS NOT NULL AND base_url != '' ORDER BY updated_at DESC LIMIT 1")
-      .get();
-    return row?.base_url ? row.base_url.replace(/\/+$/, '') : null;
+    const stored = normalizeBaseUrl(
+      db.prepare('SELECT public_base_url FROM settings WHERE id = ?').get('app')?.public_base_url
+    );
+    return stored || newestAdminDeviceBaseUrl();
   } catch {
     return null;
   }
+}
+
+// The fallback half of getPublicBaseUrl. `IN (admins)` rather than `NOT IN (caregivers)` on purpose:
+// push_tokens.user_id has no foreign key, so a row can name a user that no longer exists, and only
+// the positive form excludes it. Walks newest-first and takes the first VALID value, so one malformed
+// legacy row can't hide an older good one behind it.
+function newestAdminDeviceBaseUrl() {
+  const rows = db
+    .prepare(
+      `SELECT pt.base_url FROM push_tokens pt
+        WHERE pt.base_url IS NOT NULL AND pt.base_url != ''
+          AND pt.user_id IN (SELECT id FROM users WHERE role = 'admin')
+        ORDER BY pt.updated_at DESC`
+    )
+    .all();
+  for (const { base_url } of rows) {
+    const origin = normalizeBaseUrl(base_url);
+    if (origin) return origin;
+  }
+  return null;
 }
 
 export function removeToken(token) {
@@ -171,13 +254,29 @@ export function removeToken(token) {
 // left inline in sendToAll) so the filter itself is directly testable without needing a real
 // Firebase Admin SDK setup — `messaging` is module-level, non-exported state only initPush() can
 // set, which real credentials are needed for.
+// Same defense-in-depth reasoning as the user_id filter above, now for the session that registered
+// each device: a row whose session has been revoked (signed out, an admin ending a device, a
+// password reset) must not be delivered to even if some caller never explicitly cleaned it up. A
+// row from before this filter existed (session_id NULL) is excluded too — NULL never satisfies IN
+// (...) — until that device re-registers under a live session (see this repo's Security Advisories
+// for the full writeup).
+//
+// The session subquery ALSO checks absolute age, not just row existence: `sessions` rows are only
+// ever pruned by 31 days of INACTIVITY (db's purgeExpiredSessions, keyed on last_seen_at), so a
+// session that's genuinely outlived its own JWT's SESSION_TOKEN_TTL_DAYS lifetime can still sit in
+// the table — kept "alive" by unrelated activity from the same device — well past when its holder's
+// API access has already, correctly, stopped working. Checking created_at here closes that gap
+// directly rather than silently trusting row presence alone.
 export function activePushTokens() {
   return db
     .prepare(
       `SELECT pt.token, pt.base_url FROM push_tokens pt
-        WHERE pt.user_id IN (SELECT id FROM users)`
+        WHERE pt.user_id IN (SELECT id FROM users)
+          AND pt.session_id IN (
+            SELECT id FROM sessions WHERE created_at > datetime('now', ?)
+          )`
     )
-    .all();
+    .all(`-${SESSION_TOKEN_TTL_DAYS} days`);
 }
 
 // `tag` (ROADMAP §1.6) is a notification-tray dedup key: posting a later message with the SAME tag

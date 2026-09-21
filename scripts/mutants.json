@@ -1012,8 +1012,8 @@
   {
     "label": "redact: drop the // anchor (eats emails and SDP attributes)",
     "file": "backend/src/lib/urlCredentials.js",
-    "find": "  return text.replace(/(\\/\\/)([^/\\s:@]*):([^/\\s@]+)@/g, '$1$2:***@');",
-    "replace": "  return text.replace(/(\\/?\\/?)([^/\\s:@]*):([^/\\s@]+)@/g, '$1$2:***@');",
+    "find": "  const withoutUserinfo = text.replace(/(\\/\\/)([^/\\s:@]*):([^/\\s@]+)@/g, '$1$2:***@');",
+    "replace": "  const withoutUserinfo = text.replace(/(\\/?\\/?)([^/\\s:@]*):([^/\\s@]+)@/g, '$1$2:***@');",
     "expect": "killed",
     "tests": [
       "camera-report-redaction.test.js"
@@ -1023,8 +1023,8 @@
   {
     "label": "redact: forbid a raw colon inside the password",
     "file": "backend/src/lib/urlCredentials.js",
-    "find": "  return text.replace(/(\\/\\/)([^/\\s:@]*):([^/\\s@]+)@/g, '$1$2:***@');",
-    "replace": "  return text.replace(/(\\/\\/)([^/\\s:@]*):([^/\\s:@]+)@/g, '$1$2:***@');",
+    "find": "  const withoutUserinfo = text.replace(/(\\/\\/)([^/\\s:@]*):([^/\\s@]+)@/g, '$1$2:***@');",
+    "replace": "  const withoutUserinfo = text.replace(/(\\/\\/)([^/\\s:@]*):([^/\\s:@]+)@/g, '$1$2:***@');",
     "expect": "killed",
     "tests": [
       "camera-report-redaction.test.js"
@@ -1034,8 +1034,8 @@
   {
     "label": "redact: require a non-empty username",
     "file": "backend/src/lib/urlCredentials.js",
-    "find": "  return text.replace(/(\\/\\/)([^/\\s:@]*):([^/\\s@]+)@/g, '$1$2:***@');",
-    "replace": "  return text.replace(/(\\/\\/)([^/\\s:@]+):([^/\\s@]+)@/g, '$1$2:***@');",
+    "find": "  const withoutUserinfo = text.replace(/(\\/\\/)([^/\\s:@]*):([^/\\s@]+)@/g, '$1$2:***@');",
+    "replace": "  const withoutUserinfo = text.replace(/(\\/\\/)([^/\\s:@]+):([^/\\s@]+)@/g, '$1$2:***@');",
     "expect": "killed",
     "tests": [
       "camera-report-redaction.test.js"
@@ -1107,6 +1107,52 @@
       "camera-report-route.test.js"
     ],
     "note": "server_logs is republished verbatim inside the diagnostics bundle, under a note promising no passwords. Per-producer redaction was tried and lib/onvif.js immediately defeated it."
+  },
+  {
+    "label": "logger raw: bypass the credential-redacting choke point",
+    "file": "backend/src/lib/logger.js",
+    "find": "raw: (source, line) => write(console.log, source, [String(line).replace(LEADING_TIMESTAMP, '')]),",
+    "replace": "raw: (source, line) => { const tagged = `${timestamp()} [${source}] ${String(line).replace(LEADING_TIMESTAMP, '')}`; console.log(tagged); pushToBuffer(tagged); },",
+    "expect": "killed",
+    "tests": [
+      "logger-redaction.test.js"
+    ],
+    "note": "Pins the reviewed defect itself: normal log methods were safe while raw FFmpeg output skipped the shared redactor."
+  },
+  {
+    "label": "redact: leave URL query values and fragments untouched",
+    "file": "backend/src/lib/urlCredentials.js",
+    "find": "'$1[redacted]'",
+    "replace": "'$1'",
+    "expect": "killed",
+    "tests": [
+      "camera-report-redaction.test.js",
+      "logger-redaction.test.js"
+    ],
+    "note": "Camera firmware uses inconsistent names for query credentials, so every URL query value and fragment is private by default."
+  },
+  {
+    "label": "transcoder logs arbitrary stderr chunks as complete lines",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "forwardProcessLines(proc, proc.stderr, (line) => {",
+    "replace": "proc.stderr.on('data', (chunk) => logger.raw(`ffmpeg:${mediamtxPath}`, chunk.toString()));\n    ((line) => {",
+    "expect": "killed",
+    "tests": [
+      "transcoder-log-redaction.test.js"
+    ],
+    "note": "The credential pattern can span data-event boundaries; redacting each arbitrary chunk independently is not sufficient."
+  },
+  {
+    "label": "process output flushes on exit before stderr drains",
+    "file": "backend/src/lib/processOutput.js",
+    "find": "stream.once('end', () => lines.end());",
+    "replace": "proc.once('exit', () => lines.end());",
+    "expect": "killed",
+    "tests": [
+      "logger-redaction.test.js",
+      "transcoder-log-redaction.test.js"
+    ],
+    "note": "Node can emit process exit before the final stdio data events; flushing there publishes a credential-bearing prefix."
   },
   {
     "label": "route: trust the scrub instead of checking it",
@@ -1408,5 +1454,445 @@
       "morning-review.test.js"
     ],
     "note": "Symmetric case to the trailing widen above, flagged as likely but not separately verified by the same review. Found by an adversarial pre-merge review (a Claude subagent), 2026-09-14."
+  },
+  {
+    "label": "account rate limit: /login/mfa wired to the wrong limiter",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.post('/login/mfa', mfaLimiter, (req, res) => {",
+    "replace": "router.post('/login/mfa', loginLimiter, (req, res) => {",
+    "expect": "killed",
+    "tests": [
+      "login-rate-limit.test.js"
+    ],
+    "note": "Reintroduces the reported defect at the wiring level: an extraneous username field would again pick the account bucket instead of the verified MFA token."
+  },
+  {
+    "label": "account rate limit: /me/password wired to the wrong limiter",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.put('/me/password', requireAuth, sessionActionLimiter, (req, res) => {",
+    "replace": "router.put('/me/password', requireAuth, loginLimiter, (req, res) => {",
+    "expect": "killed",
+    "tests": [
+      "login-rate-limit.test.js"
+    ],
+    "note": "Reintroduces the reported defect on the other affected route: a signed-in caller could again dodge their own limit with an extraneous username field."
+  },
+  {
+    "label": "account rate limit: sessionKey trusts a submitted username over the verified session",
+    "file": "backend/src/routes/auth.js",
+    "find": "  return req.user?.id || '';",
+    "replace": "  return req.body?.username || req.user?.id || '';",
+    "expect": "killed",
+    "tests": [
+      "login-rate-limit.test.js"
+    ],
+    "note": "Function-level version of the same regression - catches it for any current or future route that keys on sessionKey, not just one call site."
+  },
+  {
+    "label": "account rate limit: sessionKey drops the session identity entirely",
+    "file": "backend/src/routes/auth.js",
+    "find": "  return req.user?.id || '';",
+    "replace": "  return 'constant-bucket';",
+    "expect": "killed",
+    "tests": [
+      "login-rate-limit.test.js"
+    ],
+    "note": "Found by adversarial review: the extraneous-username tests alone cannot tell a real session key apart from a constant, since each varies IP and account together. Only the two-accounts-one-IP tests catch this."
+  },
+  {
+    "label": "account rate limit: /me/password mounts the limiter before requireAuth",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.put('/me/password', requireAuth, sessionActionLimiter, (req, res) => {",
+    "replace": "router.put('/me/password', sessionActionLimiter, requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": [
+      "login-rate-limit.test.js"
+    ],
+    "note": "req.user is unset when the account key is computed, so sessionKey returns '' for every caller and every account behind one IP shares one bucket - the #248 shape, reintroduced on this route."
+  },
+  {
+    "label": "account rate limit: /me/mfa/disable mounts the limiter before requireAuth",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.post('/me/mfa/disable', requireAuth, sessionActionLimiter, (req, res) => {",
+    "replace": "router.post('/me/mfa/disable', sessionActionLimiter, requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": [
+      "login-rate-limit.test.js"
+    ],
+    "note": "Same failure as the /me/password version above, on the other route sharing this limiter instance."
+  },
+  {
+    "label": "account rate limit: /me/mfa/disable wired to the wrong limiter",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.post('/me/mfa/disable', requireAuth, sessionActionLimiter, (req, res) => {",
+    "replace": "router.post('/me/mfa/disable', requireAuth, loginLimiter, (req, res) => {",
+    "expect": "killed",
+    "tests": [
+      "login-rate-limit.test.js"
+    ],
+    "note": "Symmetric to the /me/password wiring mutant above - the third of the three affected routes, added for catalogue completeness."
+  },
+  {
+    "label": "push public URL: control - a comment edit must change nothing",
+    "file": "backend/src/lib/push.js",
+    "find": "// The only shape of address the app ever legitimately reports is",
+    "replace": "// The only shape of address the app ever legitimately reports is [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Validates the harness for this file. If this is ever KILLED, no other push public URL result means anything."
+  },
+  {
+    "label": "push public URL: any device, not just an admin's, may set the global address",
+    "file": "backend/src/lib/push.js",
+    "find": "if (origin && isAdminUser(userId)) {",
+    "replace": "if (origin) {",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "The admin restriction removed from the write path."
+  },
+  {
+    "label": "push public URL: the admin check accepts any existing user",
+    "file": "backend/src/lib/push.js",
+    "find": "SELECT 1 FROM users WHERE id = ? AND role = 'admin'",
+    "replace": "SELECT 1 FROM users WHERE id = ?",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Same hole one level down: the gate is present but no longer tests the role. Caught by the caregiver and demoted-admin cases."
+  },
+  {
+    "label": "push public URL: the newest-device fallback includes non-admin devices",
+    "file": "backend/src/lib/push.js",
+    "find": "AND pt.user_id IN (SELECT id FROM users WHERE role = 'admin')",
+    "replace": "AND pt.user_id IN (SELECT id FROM users)",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "The fallback must carry the same admin restriction as the stored setting; restricting only the write would leave the fallback (used when the global cell is empty) unrestricted."
+  },
+  {
+    "label": "push public URL: the fallback prefers the OLDEST admin device",
+    "file": "backend/src/lib/push.js",
+    "find": "ORDER BY pt.updated_at DESC",
+    "replace": "ORDER BY pt.updated_at ASC",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Only killable by the two-admin-devices case; before it existed this ordering was pinned by no test at all, because the admin filter leaves one candidate in every other fixture."
+  },
+  {
+    "label": "push public URL: the stored global value is returned without re-validation",
+    "file": "backend/src/lib/push.js",
+    "find": "const stored = normalizeBaseUrl(",
+    "replace": "const stored = ((x) => x)(",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "A value already in the database (older build, any other route to the table) must not be trusted on read."
+  },
+  {
+    "label": "push public URL: registerToken stores the raw base URL on the device token",
+    "file": "backend/src/lib/push.js",
+    "find": ").run(token, userId || null, platform || null, origin, sessionId || null);",
+    "replace": ").run(token, userId || null, platform || null, baseUrl || null, sessionId || null);",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Bypasses validation for the per-device value (which feeds snapshot image links and the per-device deep link)."
+  },
+  {
+    "label": "push public URL: the global setting is written from the raw string, not the canonical origin",
+    "file": "backend/src/lib/push.js",
+    "find": ".run(origin, 'app');",
+    "replace": ".run(baseUrl, 'app');",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "The admin gate and the validity gate both still pass, so only the canonical-form assertion can catch this."
+  },
+  {
+    "label": "push public URL: the origin pattern allows a path",
+    "file": "backend/src/lib/push.js",
+    "find": "\\/?$/i;",
+    "replace": "(?:\\/.*)?$/i;",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Only an origin is ever legitimate; a path would land inside every deep link. Includes the dot-segment and encoded-dot fixtures, which new URL() alone would repair into a bare origin."
+  },
+  {
+    "label": "push public URL: the origin pattern allows a query string",
+    "file": "backend/src/lib/push.js",
+    "find": "\\/?$/i;",
+    "replace": "\\/?(?:\\?.*)?$/i;",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Killed by the empty-query-marker fixture (https://host?), which new URL() alone silently repairs."
+  },
+  {
+    "label": "push public URL: the origin pattern allows a fragment",
+    "file": "backend/src/lib/push.js",
+    "find": "\\/?$/i;",
+    "replace": "\\/?(?:#.*)?$/i;",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Killed by the empty-fragment-marker fixture (https://host#)."
+  },
+  {
+    "label": "push public URL: the origin pattern allows any host characters",
+    "file": "backend/src/lib/push.js",
+    "find": "[a-z0-9._-]+|",
+    "replace": "[^/?#]+|",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "One mutant for the whole host character set: credentials (@), backslashes, tabs/newlines, spaces, quotes and parameter-smuggling characters are all excluded by it and each has its own fixture."
+  },
+  {
+    "label": "push public URL: the origin pattern makes the slashes after the scheme optional",
+    "file": "backend/src/lib/push.js",
+    "find": "^https?:\\/\\/",
+    "replace": "^https?:\\/*",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Killed by http:host, http:/host and http:///host, all of which new URL() alone repairs into a valid origin."
+  },
+  {
+    "label": "push public URL: the origin pattern accepts ws and wss",
+    "file": "backend/src/lib/push.js",
+    "find": "^https?:",
+    "replace": "^(?:https?|wss?):",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Found surviving by review: with the old parsed-result checks only ftp:// pinned the scheme rule, because ws://host passed every other rule."
+  },
+  {
+    "label": "push public URL: the origin pattern accepts an empty port",
+    "file": "backend/src/lib/push.js",
+    "find": "(?::\\d{1,5})?",
+    "replace": "(?::\\d*)?",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "https://host: is a valid URL to the parser but is not something a browser reports as an origin."
+  },
+  {
+    "label": "push public URL: the origin pattern drops IPv6 literals",
+    "file": "backend/src/lib/push.js",
+    "find": "|\\[[0-9a-f:.]+\\])",
+    "replace": ")",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "A home server reached by an IPv6 literal must keep working."
+  },
+  {
+    "label": "push public URL: the origin pattern is case-sensitive",
+    "file": "backend/src/lib/push.js",
+    "find": "$/i;",
+    "replace": "$/;",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "An upper-case scheme or host must still be accepted and canonicalised."
+  },
+  {
+    "label": "push public URL: normalizeBaseUrl does not trim its input",
+    "file": "backend/src/lib/push.js",
+    "find": "const s = value.trim();",
+    "replace": "const s = value;",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Only killable now that the pattern is anchored: before it, new URL() trimmed the input itself and this mutant survived (found by review)."
+  },
+  {
+    "label": "push public URL: normalizeBaseUrl returns the trimmed input instead of the canonical origin",
+    "file": "backend/src/lib/push.js",
+    "find": "return new URL(s).origin;",
+    "replace": "return s;",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Trailing slash, upper-case host and an explicit default port would all be stored as typed."
+  },
+  {
+    "label": "push public URL: length cap moved up by one",
+    "file": "backend/src/lib/push.js",
+    "find": "if (!s || s.length > 255) return null;",
+    "replace": "if (!s || s.length > 256) return null;",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Boundary: the test builds an origin of exactly 255 and exactly 256 characters."
+  },
+  {
+    "label": "push public URL: length cap moved down by one",
+    "file": "backend/src/lib/push.js",
+    "find": "if (!s || s.length > 255) return null;",
+    "replace": "if (!s || s.length >= 255) return null;",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "The other side of the same boundary."
+  },
+  {
+    "label": "push public URL: length cap removed",
+    "file": "backend/src/lib/push.js",
+    "find": "if (!s || s.length > 255) return null;",
+    "replace": "if (!s) return null;",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "The pattern has no length bound of its own, so only the explicit cap bounds hostile input."
+  },
+  {
+    "label": "push public URL: the stored global value and the admin-device fallback swap precedence",
+    "file": "backend/src/lib/push.js",
+    "find": "return stored || newestAdminDeviceBaseUrl();",
+    "replace": "return newestAdminDeviceBaseUrl() || stored;",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Found surviving by review. Only killable by a fixture that holds a valid global AND a DIFFERENT valid admin-device address at once; with one present the two orders are indistinguishable."
+  },
+  {
+    "label": "push public URL: the fallback orders by insertion (rowid) instead of registration time",
+    "file": "backend/src/lib/push.js",
+    "find": "ORDER BY pt.updated_at DESC",
+    "replace": "ORDER BY pt.rowid DESC",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Found surviving by review: every ordering fixture inserted its rows in timestamp order, so insertion order and registration time agreed. Now the newer row is inserted first."
+  },
+  {
+    "label": "push public URL: the fallback only ever considers the two newest admin devices",
+    "file": "backend/src/lib/push.js",
+    "find": "ORDER BY pt.updated_at DESC",
+    "replace": "ORDER BY pt.updated_at DESC LIMIT 2",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Found surviving by review (Codex). Needs three candidates: two malformed newer rows and one valid oldest."
+  },
+  {
+    "label": "push public URL: the fallback excludes caregivers instead of requiring an admin",
+    "file": "backend/src/lib/push.js",
+    "find": "AND pt.user_id IN (SELECT id FROM users WHERE role = 'admin')",
+    "replace": "AND pt.user_id NOT IN (SELECT id FROM users WHERE role = 'caregiver')",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Found surviving by review: push_tokens.user_id has no foreign key, so a row for a deleted user (or a NULL user) passes the negative form. Killed by the orphan-row fixture."
+  },
+  {
+    "label": "push public URL: a device that changes address keeps its old one",
+    "file": "backend/src/lib/push.js",
+    "find": "base_url = COALESCE(excluded.base_url, push_tokens.base_url),",
+    "replace": "base_url = COALESCE(push_tokens.base_url, excluded.base_url),",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Pre-existing line, but this change now feeds it validated values. Nothing else moved a device from one valid address to another."
+  },
+  {
+    "label": "push public URL: sendToAll pairs each token with the NEXT device's address",
+    "file": "backend/src/lib/push.js",
+    "find": "const messages = rows.map(({ token, base_url }) => {",
+    "replace": "const messages = rows.map(({ token }, i) => { const { base_url } = rows[(i + 1) % rows.length];",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Found surviving by review (Codex): the reason a caregiver's own address may be stored at all is that it can only ever reach that same device. Killed by driving the real sendToAll with a faked Firebase."
+  },
+  {
+    "label": "push public URL: sendToAll gives a device with NO address another device's address",
+    "file": "backend/src/lib/push.js",
+    "find": ": stringData;",
+    "replace": ": { ...stringData, server: rows.find((r) => r.base_url)?.base_url || '' };",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Found surviving by second-round review (Codex): needs a fixture device that never reported an address; when every device has one, the branch is never taken."
+  },
+  {
+    "label": "push public URL: the origin pattern rejects five-digit ports",
+    "file": "backend/src/lib/push.js",
+    "find": "(?::\\d{1,5})?",
+    "replace": "(?::\\d{1,4})?",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Found surviving by second-round review: no accepted fixture used a port above 9999."
+  },
+  {
+    "label": "push public URL: the origin pattern requires a dot in the host",
+    "file": "backend/src/lib/push.js",
+    "find": "[a-z0-9._-]+|",
+    "replace": "(?:[a-z0-9_-]+\\.)+[a-z0-9_-]+|",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Found surviving by second-round review: a home server is often reached by a single-label name (tower, localhost), and every accepted fixture had a dot."
+  },
+  {
+    "label": "push public URL: the fallback only looks at the three newest admin devices",
+    "file": "backend/src/lib/push.js",
+    "find": "for (const { base_url } of rows) {",
+    "replace": "for (const { base_url } of rows.slice(0, 3)) {",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Found surviving by second-round review: the three-row fixture that killed LIMIT 2 still let a look-back of three through. The fixture now has five rows."
+  },
+  {
+    "label": "push public URL: the fallback returns the raw stored value instead of the canonical origin",
+    "file": "backend/src/lib/push.js",
+    "find": "if (origin) return origin;",
+    "replace": "if (origin) return base_url;",
+    "expect": "killed",
+    "tests": [
+      "push-public-url.test.js"
+    ],
+    "note": "Found surviving by second-round review: registered rows are already canonical, so only a legacy row with a trailing slash, upper-case host or default port can tell the two apart."
   }
 ]

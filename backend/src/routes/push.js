@@ -24,11 +24,13 @@ router.get('/snapshot/:id', (req, res) => {
 // The mobile app registers its FCM device token here after the user grants notification
 // permission. Idempotent (token is the key), so it's safe to call on every launch / token refresh.
 // baseUrl is the origin the app reaches this server through, used to build a device-fetchable
-// snapshot URL for image alerts (see lib/push.js sendToAll).
+// snapshot URL for image alerts (see lib/push.js sendToAll). Registration always succeeds for any
+// signed-in user; whether baseUrl is kept, and whether it may also become the server's global public
+// URL (admin devices only), is decided inside registerToken.
 router.post('/register', requireAuth, (req, res) => {
   const { token, platform, baseUrl } = req.body || {};
   if (!token || typeof token !== 'string') return res.status(400).json({ error: 'token is required' });
-  registerToken(token, platform, req.user.id, typeof baseUrl === 'string' ? baseUrl : null);
+  registerToken(token, platform, req.user.id, typeof baseUrl === 'string' ? baseUrl : null, req.user.sid);
   res.json({ ok: true, push_enabled: pushEnabled() });
 });
 

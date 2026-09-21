@@ -31,11 +31,12 @@ SLA.
 
 The in-app **diagnostics bundle** (Settings → Logs) and **camera report** (Add camera screen,
 when a camera won't connect) are both designed to be attached to a public GitHub issue: they
-redact passwords and stay on your device until you choose to share them. **Redaction covers
-passwords, not everything a particular camera's firmware might put in an error message or log
-line** — open and read either file before attaching it anywhere public. If you find a secret in
-one that shouldn't be there, that's itself worth a private report under "Reporting a
-vulnerability" above, rather than a public issue.
+redact URL passwords and query values and stay on your device until you choose to share them.
+Diagnostic camera paths omit query strings and fragments entirely. **Redaction cannot identify
+every secret a particular camera's firmware might put into arbitrary error prose or log lines** —
+open and read either file before attaching it anywhere public. If you find a secret in one that
+shouldn't be there, that's itself worth a private report under "Reporting a vulnerability" above,
+rather than a public issue.
 
 **Never paste any of the following into a public issue, PR, or discussion:**
 

@@ -47,6 +47,11 @@ after(async () => { await server?.close(); db.close(); cleanupTempDataDirs(); })
 let mfaSecret;
 
 beforeEach(() => {
+  // push_tokens has no FK to either table (deliberate — see GHSA-q98f), so it needs its own explicit
+  // reset: without this, a row one test inserts and never deletes (e.g. the GHSA-q98f block's
+  // "unrelated user's token survives" case) leaks into every test that runs after it in this file,
+  // which would make any later exhaustive `SELECT * FROM push_tokens` assertion order-dependent.
+  db.prepare('DELETE FROM push_tokens').run();
   db.prepare('DELETE FROM sessions').run();
   db.prepare('DELETE FROM users').run();
   mfaSecret = generateSecret();
@@ -254,6 +259,24 @@ describe('PUT /me/password — the CURRENT password is required', () => {
     assert.equal(res.status, 400);
     assert.equal((await post('/login', { username: 'alice', password: PASSWORD })).status, 200, 'the old password stopped working');
   });
+
+  test('★ the OTHER session’s push registration is revoked too, the current one’s is not', async () => {
+    const keep = await login();
+    const other = await post('/login', { username: 'alice', password: PASSWORD }); // a second device
+    const otherSid = jwt.decode(other.body.token).sid;
+    db.prepare('INSERT INTO push_tokens (token, user_id, session_id, platform) VALUES (?,?,?,?)')
+      .run('tok-keep', 'u-admin', jwt.decode(keep).sid, 'android');
+    db.prepare('INSERT INTO push_tokens (token, user_id, session_id, platform) VALUES (?,?,?,?)')
+      .run('tok-other', 'u-admin', otherSid, 'android');
+
+    await put('/me/password', { current_password: PASSWORD, new_password: 'a-new-long-password' }, keep);
+
+    assert.deepEqual(
+      db.prepare('SELECT token FROM push_tokens ORDER BY token').all().map((r) => r.token),
+      ['tok-keep'],
+      'a password change did not revoke the signed-out device’s push registration'
+    );
+  });
 });
 
 describe('POST /me/mfa/disable — the password is required', () => {
@@ -407,6 +430,43 @@ describe('sessions — you see and revoke your own; an admin sees everyone', () 
     const token = await loginAs('alice');
     assert.equal((await post('/logout', {}, token)).status, 204);
     assert.equal((await call(`${server.url}/api/auth/me`, { token })).status, 401, 'the token still worked after logout');
+  });
+
+  test('★ logout also revokes that device’s push registration, not other devices’', async () => {
+    const token = await loginAs('alice');
+    const other = await loginAs('alice'); // a second device, same account
+    const sid = jwt.decode(token).sid;
+    const otherSid = jwt.decode(other).sid;
+    db.prepare('INSERT INTO push_tokens (token, user_id, session_id, platform) VALUES (?,?,?,?)')
+      .run('tok-signed-out', 'u-admin', sid, 'android');
+    db.prepare('INSERT INTO push_tokens (token, user_id, session_id, platform) VALUES (?,?,?,?)')
+      .run('tok-other-device', 'u-admin', otherSid, 'android');
+
+    await post('/logout', {}, token);
+
+    assert.deepEqual(
+      db.prepare('SELECT token FROM push_tokens ORDER BY token').all().map((r) => r.token),
+      ['tok-other-device'],
+      'logout left the signed-out device’s push registration behind, or removed the wrong one'
+    );
+  });
+
+  test('★ explicitly revoking a session (self or, for an admin, someone else’s) revokes its push registration too', async () => {
+    makeCaregiver();
+    const victimToken = await loginAs('carol');
+    const victimSid = jwt.decode(victimToken).sid;
+    db.prepare('INSERT INTO push_tokens (token, user_id, session_id, platform) VALUES (?,?,?,?)')
+      .run('tok-victim', 'u-care', victimSid, 'android');
+
+    const adminToken = await loginAs('alice');
+    const res = await call(`${server.url}/api/auth/sessions/${victimSid}`, { method: 'DELETE', token: adminToken });
+    assert.equal(res.status, 204);
+
+    assert.equal(
+      db.prepare('SELECT 1 FROM push_tokens WHERE token = ?').get('tok-victim'),
+      undefined,
+      'an admin revoking a caregiver’s session left that device’s push registration active'
+    );
   });
 });
 
@@ -690,6 +750,23 @@ describe('missing and blank fields are handled, not assumed', () => {
       db.prepare('SELECT COUNT(*) c FROM sessions WHERE user_id = ?').get('u-mfa').c,
       0,
       'an admin password reset left the user signed in — the old credential outlived itself'
+    );
+  });
+
+  test('★ an admin password reset also revokes the reset account’s push registrations', async () => {
+    const token = await loginAs('alice');
+    const bobSid = makeSession(db, 'u-mfa'); // bob is logged in on a device
+    db.prepare('INSERT INTO push_tokens (token, user_id, session_id, platform) VALUES (?,?,?,?)')
+      .run('tok-bob-device', 'u-mfa', bobSid, 'android');
+    db.prepare('INSERT INTO push_tokens (token, user_id, session_id, platform) VALUES (?,?,?,?)')
+      .run('tok-alice-device', 'u-admin', jwt.decode(token).sid, 'android');
+
+    await put('/users/u-mfa', { password: 'a-brand-new-password' }, token);
+
+    assert.deepEqual(
+      db.prepare('SELECT token FROM push_tokens ORDER BY token').all().map((r) => r.token),
+      ['tok-alice-device'],
+      'resetting bob’s password left his device’s push registration active, or touched an unrelated account'
     );
   });
 

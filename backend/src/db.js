@@ -682,6 +682,17 @@ if (!pushTokenColumns.includes('base_url')) {
   db.exec('ALTER TABLE push_tokens ADD COLUMN base_url TEXT');
 }
 
+// Which login session registered this device — so revoking that session (sign-out, an admin
+// remotely ending a device, a password reset) can stop this device from receiving further alerts.
+// Plain column, no FK — the same deliberate choice already made for user_id above (see the
+// GHSA-q98f comment below): push.js filters live at send time, so a row surviving here by any
+// path still can't be delivered to. A row from before this migration has session_id = NULL, which
+// can never satisfy that filter — it simply stops receiving pushes until the device re-registers
+// (automatic on next sign-in; see this repo's Security Advisories for the full writeup).
+if (!pushTokenColumns.includes('session_id')) {
+  db.exec('ALTER TABLE push_tokens ADD COLUMN session_id TEXT');
+}
+
 // GHSA-q98f: push_tokens.user_id was never cleaned up when its owning user was deleted (no FK/cascade
 // — unlike sessions.user_id, which does have one). routes/auth.js's DELETE /users/:id now deletes the
 // matching rows going forward; this is the one-time sweep for accounts removed BEFORE that fix existed,
