@@ -21,7 +21,7 @@ import notificationsRoutes from './routes/notifications.js';
 import timelapsesRoutes from './routes/timelapses.js';
 import recordingsRoutes from './routes/recordings.js';
 import { requireAuth, requireAuthQueryOrHeader, verifyToken, SESSION_TOKEN_TTL_DAYS } from './middleware/auth.js';
-import { demoGuard, isDemoModeActive } from './middleware/demoMode.js';
+import { demoGuard, demoRequestLimiter, isDemoModeActive } from './middleware/demoMode.js';
 import { whepOnlyGuard } from './middleware/whepOnlyGuard.js';
 import {
   recordWebrtcSessionOwner, webrtcSessionOwners, listWebrtcSessions, kickWebrtcSession, sessionsToKick,
@@ -136,6 +136,11 @@ app.use(helmet({
     },
   },
 }));
+
+// Unlike the read-only guard below, this must also cover the media proxies: the guest-session cap
+// bounds concurrent sign-ins, but one admitted token can otherwise open many WHEP sessions or make
+// repeated HLS/API requests. Its own DEMO_MODE skip makes this a no-op for normal installations.
+app.use(['/api', '/live', '/hls'], demoRequestLimiter);
 
 // MediaMTX doesn't know it's being reverse-proxied under a prefix (e.g. /live or /hls),
 // so any redirect or resource-location it issues (WHEP's session Location header, HLS's

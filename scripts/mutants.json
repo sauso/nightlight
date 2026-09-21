@@ -1894,5 +1894,239 @@
       "push-public-url.test.js"
     ],
     "note": "Found surviving by second-round review: registered rows are already canonical, so only a legacy row with a trailing slash, upper-case host or default port can tell the two apart."
+  },
+  {
+    "label": "demo guest: endpoint is exposed when demo mode is off",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (!isDemoModeActive()) return next();",
+    "replace": "if (false) return next();",
+    "expect": "killed",
+    "tests": ["demo-guest.test.js"],
+    "namePattern": "plain 404 unless DEMO_MODE"
+  },
+  {
+    "label": "demo guest: fixed identity changes to a body-selected account",
+    "file": "backend/src/routes/auth.js",
+    "find": "const DEMO_GUEST_USERNAME = 'demo-guest';",
+    "replace": "const DEMO_GUEST_USERNAME = 'body-selected';",
+    "expect": "killed",
+    "tests": ["demo-guest.test.js"],
+    "namePattern": "ignores the body"
+  },
+  {
+    "label": "demo guest: cap admits one guest beyond the boundary",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (activeGuestCount.get(user.id).c >= demoMaxGuests()) {",
+    "replace": "if (activeGuestCount.get(user.id).c > demoMaxGuests()) {",
+    "expect": "killed",
+    "tests": ["demo-guest.test.js"],
+    "namePattern": "admits 25 active guests"
+  },
+  {
+    "label": "demo guest: active window widens from two to three minutes",
+    "file": "backend/src/routes/auth.js",
+    "find": "datetime('now', '-2 minutes')",
+    "replace": "datetime('now', '-3 minutes')",
+    "expect": "killed",
+    "tests": ["demo-guest.test.js"],
+    "namePattern": "last two minutes"
+  },
+  {
+    "label": "demo status: readiness file is ignored",
+    "file": "backend/src/routes/auth.js",
+    "find": "ready: fs.existsSync(DEMO_READY_FILE),",
+    "replace": "ready: false,",
+    "expect": "killed",
+    "tests": ["demo-guest.test.js"],
+    "namePattern": "reads readiness live"
+  },
+  {
+    "label": "demo guard: guest sign-in is missing from the exact allowlist",
+    "file": "backend/src/middleware/demoMode.js",
+    "find": "  'POST /api/auth/guest',",
+    "replace": "  'POST /api/auth/not-guest',",
+    "expect": "killed",
+    "tests": ["demo-guest.test.js"],
+    "namePattern": "fixed admin guest identity"
+  },
+  {
+    "label": "demo limiter: global per-IP boundary allows request 601",
+    "file": "backend/src/middleware/demoMode.js",
+    "find": "const DEMO_REQUESTS_PER_MINUTE = 600;",
+    "replace": "const DEMO_REQUESTS_PER_MINUTE = 601;",
+    "expect": "killed",
+    "tests": ["demo-guest.test.js"],
+    "namePattern": "caps one demo IP"
+  },
+  {
+    "label": "demo guest: per-IP sign-in boundary allows attempt 21",
+    "file": "backend/src/routes/auth.js",
+    "find": "const DEMO_GUEST_SIGN_INS_PER_WINDOW = 20;",
+    "replace": "const DEMO_GUEST_SIGN_INS_PER_WINDOW = 21;",
+    "expect": "killed",
+    "tests": ["demo-guest.test.js"],
+    "namePattern": "own per-IP sign-in budget"
+  },
+  {
+    "label": "demo motion: live pixel-diff sampling remains enabled",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "if (isDemoModeActive()) return false;",
+    "replace": "if (false) return false;",
+    "expect": "killed",
+    "tests": ["demo-guest.test.js"],
+    "namePattern": "disables every live pixel-diff leg"
+  },
+  {
+    "label": "demo frontend: status no longer selects automatic guest sign-in",
+    "file": "frontend/src/pages/Login.jsx",
+    "find": "if (!status.demo) {",
+    "replace": "if (true) {",
+    "expect": "killed",
+    "tests": ["demoMode.test.jsx"],
+    "namePattern": "posts the bodyless guest endpoint"
+  },
+  {
+    "label": "demo frontend: zero-minute countdown never reaches ended state",
+    "file": "frontend/src/components/DemoBanner.jsx",
+    "find": "const ended = minutes === 0;",
+    "replace": "const ended = minutes < 0;",
+    "expect": "killed",
+    "tests": ["demoMode.test.jsx"],
+    "namePattern": "links back to the lobby"
+  },
+  {
+    "label": "demo frontend: blocked-write response keeps the server policy wording",
+    "file": "frontend/src/lib/api.js",
+    "find": "const message = res.status === 403",
+    "replace": "const message = res.status === 401",
+    "expect": "killed",
+    "tests": ["demoMode.test.jsx"],
+    "namePattern": "friendly, actionable copy"
+  },
+  {
+    "label": "demo frontend: banner is removed from the signed-in app shell",
+    "file": "frontend/src/components/AppHeader.jsx",
+    "find": "      {showDemoBanner && <DemoBanner />}",
+    "replace": "      {false && showDemoBanner && <DemoBanner />}",
+    "expect": "killed",
+    "tests": ["demoMode.test.jsx"],
+    "namePattern": "DOM sibling after the header"
+  },
+  {
+    "label": "demo frontend: banner is nested in the header instead of following it",
+    "file": "frontend/src/components/AppHeader.jsx",
+    "find": "      </header>\r\n      {showDemoBanner && <DemoBanner />}",
+    "replace": "        {showDemoBanner && <DemoBanner />}\r\n      </header>",
+    "expect": "killed",
+    "tests": ["demoMode.test.jsx"],
+    "namePattern": "DOM sibling after the header"
+  },
+  {
+    "label": "demo frontend: hidden live header duplicates the routed page banner",
+    "file": "frontend/src/components/LiveMonitor.jsx",
+    "find": "      <AppHeader title={settings.app_name} showDemoBanner={isActive} />",
+    "replace": "      <AppHeader title={settings.app_name} />",
+    "expect": "killed",
+    "tests": ["demoMode.test.jsx"],
+    "namePattern": "DOM sibling after the header"
+  },
+  {
+    "label": "demo frontend: shared status promise is bypassed for each hook consumer",
+    "file": "frontend/src/lib/demoStatus.js",
+    "find": "  if (!demoStatusPromise) {",
+    "replace": "  if (true) {",
+    "expect": "killed",
+    "tests": ["demoMode.test.jsx"],
+    "namePattern": "on one shared status request"
+  },
+  {
+    "label": "demo frontend: install prompt renders inside a demo",
+    "file": "frontend/src/components/InstallPrompt.jsx",
+    "find": "  if (demo !== null || isNativeApp() || dismissed || isStandalone()) return null;",
+    "replace": "  if (isNativeApp() || dismissed || isStandalone()) return null;",
+    "expect": "killed",
+    "tests": ["demoMode.test.jsx"],
+    "namePattern": "shows no install prompt in a demo"
+  },
+  {
+    "label": "demo frontend: install listener waits for the status request",
+    "file": "frontend/src/components/InstallPrompt.jsx",
+    "find": "    if (isNativeApp() || isStandalone() || dismissed) return;",
+    "replace": "    if (demo !== null || isNativeApp() || isStandalone() || dismissed) return;",
+    "expect": "killed",
+    "tests": ["demoMode.test.jsx"],
+    "namePattern": "BEFORE the status request"
+  },
+  {
+    "label": "demo frontend: normal browser install event is not observed",
+    "file": "frontend/src/components/InstallPrompt.jsx",
+    "find": "    window.addEventListener('beforeinstallprompt', handleBeforeInstall);",
+    "replace": "    window.addEventListener('appinstalled', handleBeforeInstall);",
+    "expect": "killed",
+    "tests": ["demoMode.test.jsx"],
+    "namePattern": "normal browser install flow"
+  },
+  {
+    "label": "demo status: configured lobby URL is discarded",
+    "file": "backend/src/routes/auth.js",
+    "find": "lobbyUrl: process.env.DEMO_LOBBY_URL || null,",
+    "replace": "lobbyUrl: null,",
+    "expect": "killed",
+    "tests": ["demo-guest.test.js"],
+    "namePattern": "optional lobby URL"
+  },
+  {
+    "label": "demo frontend: banner ignores the configured lobby URL",
+    "file": "frontend/src/components/DemoBanner.jsx",
+    "find": "<a href={demo.lobbyUrl}>start again</a>",
+    "replace": "<a href=\"https://hard-coded.example.test/\">start again</a>",
+    "expect": "killed",
+    "tests": ["demoMode.test.jsx"],
+    "namePattern": "links back to the lobby"
+  },
+  {
+    "label": "demo frontend: start-again link appears without a lobby URL",
+    "file": "frontend/src/components/DemoBanner.jsx",
+    "find": "{demo.lobbyUrl && <a href={demo.lobbyUrl}>start again</a>}",
+    "replace": "{<a href={demo.lobbyUrl}>start again</a>}",
+    "expect": "killed",
+    "tests": ["demoMode.test.jsx"],
+    "namePattern": "no lobby URL"
+  },
+  {
+    "label": "demo frontend: failed automatic sign-in cannot be retried",
+    "file": "frontend/src/pages/Login.jsx",
+    "find": "onClick={handleDemoSignIn}",
+    "replace": "onClick={() => {}}",
+    "expect": "killed",
+    "tests": ["demoMode.test.jsx"],
+    "namePattern": "retries a failed guest sign-in"
+  },
+  {
+    "label": "demo status: full capacity is never reported",
+    "file": "backend/src/routes/auth.js",
+    "find": "        full: demoIsFull(),",
+    "replace": "        full: false,",
+    "expect": "killed",
+    "tests": ["demo-guest.test.js"],
+    "namePattern": "reports full at 25 active guests"
+  },
+  {
+    "label": "demo seed: session night must already be open at boot",
+    "file": "backend/src/lib/demoSeed.js",
+    "find": "    return start < endsAt && now < end;",
+    "replace": "    return start <= now && now < end;",
+    "expect": "killed",
+    "tests": ["demo-seed.test.js"],
+    "namePattern": "opens or closes during the session"
+  },
+  {
+    "label": "demo seed: guest password becomes a real bcrypt hash",
+    "file": "backend/src/lib/demoSeed.js",
+    "find": "const GUEST_PASSWORD_HASH = '!';",
+    "replace": "const GUEST_PASSWORD_HASH = '$2a$12$kzZNi9wkQzHkdpsjjYZaX.hiyWVXeYiSNUXSaVq3avwW.0MUHTU8i';",
+    "expect": "killed",
+    "tests": ["demo-seed.test.js"],
+    "namePattern": "demo seed is deterministic"
   }
 ]
