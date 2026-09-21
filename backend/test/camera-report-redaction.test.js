@@ -69,6 +69,63 @@ describe('redactCredentials', () => {
     assert.ok(!out.includes(enc), `encoded password survived: ${out}`);
   });
 
+  test('drops every query string in camera URLs entirely, including opaque keyless tokens', () => {
+    // Camera firmware is not consistent about which query parameter carries a credential, or even
+    // whether the query is `key=value` shaped at all (an opaque base64 token has no '=' to anchor
+    // on). A deny-list of names, or a "keep the key, redact the value" split, would both miss a
+    // keyless token — so the whole query is private by default rather than partially preserved.
+    const encodedSecret = encodeURIComponent('p@ss word');
+    assert.notEqual(encodedSecret, 'p@ss word', 'fixture must exercise percent-encoded query data');
+    const out = redactCredentials(
+      `ffmpeg: rtsp://${USER}@h/ch0?channel=1&sessionid=${PASS} and ` +
+      `http://cam/snapshot.jpg?auth=${encodedSecret}#${PASS} and ` +
+      `rtsp://cam2/live?${encodedSecret}` // keyless: no '=' at all
+    );
+    assert.ok(!out.includes(PASS), `query credential survived: ${out}`);
+    assert.ok(!out.includes(encodedSecret), `encoded query credential survived: ${out}`);
+    assert.match(out, /ch0\[redacted\]/, 'the first URL\'s query was not marked as redacted');
+    assert.match(out, /snapshot\.jpg\[redacted\]/, 'the second URL\'s query/fragment was not marked as redacted');
+    assert.match(out, /live\[redacted\]/, 'the third (keyless) URL\'s query was not marked as redacted');
+  });
+
+  test('★ a raw apostrophe inside a percent-encoded query value does not truncate the redaction early', () => {
+    // encodeURIComponent's own output alphabet includes a bare "'" (see the function's main
+    // comment) — an earlier version's URL matcher treated "'" as a hard terminator, so a value
+    // containing one left everything past it sitting outside the match, untouched.
+    const out = redactCredentials(`rtsp://cam/live?token=prefix'${PASS}`);
+    assert.ok(!out.includes(PASS), `credential past the apostrophe survived: ${out}`);
+  });
+
+  test('redacts fragment-first and scheme-relative credential forms', () => {
+    const out = redactCredentials(
+      `rtsp://cam/live#${PASS}?token=x ` +
+      `//cam/live?session=${PASS}`
+    );
+    assert.ok(!out.includes(PASS), `URL-reference credential survived: ${out}`);
+    assert.match(out, /rtsp:\/\/cam\/live\[redacted\]/);
+    assert.match(out, /\/\/cam\/live\[redacted\]/);
+  });
+
+  test('★ a bare request-target with no scheme and no // is NOT treated as a URL — a deliberate boundary, not a gap', () => {
+    // Found by adversarial review: an earlier, broader matcher also fired on a bare leading '/'
+    // anywhere in the text — which mangled perfectly ordinary, non-URL diagnostic lines whenever a
+    // '/' was later followed by an unrelated '?' or '#' in the same line (see the next two tests).
+    // Every URL this app or FFmpeg ever actually embeds carries a real scheme or is genuinely
+    // scheme-relative (`//host/...`), so this narrower match loses no real coverage.
+    const out = redactCredentials('reading config from /live?opaque=config-not-a-credential');
+    assert.equal(out, 'reading config from /live?opaque=config-not-a-credential');
+  });
+
+  test('★ THE FIX: ordinary text with a slash-then-hash is not mistaken for a URL fragment', () => {
+    const line = 'restarting camera 1/2#3';
+    assert.equal(redactCredentials(line), line, `ordinary text was mangled: ${redactCredentials(line)}`);
+  });
+
+  test('★ THE FIX: a quoted non-URL path with an unrelated "?" keeps its closing quote', () => {
+    const line = "open '/data/nightlight.db?x' and then more";
+    assert.equal(redactCredentials(line), line, `ordinary quoted text was mangled: ${redactCredentials(line)}`);
+  });
+
   test('★ a RAW colon inside the password is still redacted', () => {
     // Reachable: an operator pastes `rtsp://admin:pa:ss@host/ch0` into the address box (nothing
     // validates it as an address), and the route copies that field into the report. assembleRtspUrl

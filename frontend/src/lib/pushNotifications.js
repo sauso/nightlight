@@ -138,13 +138,19 @@ export async function disableNotifications() {
   } catch {
     /* ignore */
   }
-  await unregisterPushNotifications();
-  registered = false;
+  await unregisterPushNotifications(); // also resets `registered` - see its own comment
 }
 
 // Best-effort unregister of this device's token (on toggle-off or sign-out).
+//
+// Resets `registered` too: AuthContext's logout() calls this directly (not disableNotifications(),
+// which is the explicit toggle-off path below), so without this a sign-out followed by signing back
+// in - without killing and relaunching the app - would leave `registered` stuck true from the FIRST
+// login and initPushNotifications()'s early-return would silently skip re-registering under the new
+// session for the rest of the app's lifetime.
 export async function unregisterPushNotifications() {
   const token = currentToken;
+  registered = false;
   if (!token) return;
   try {
     await api.post('/push/unregister', { token });

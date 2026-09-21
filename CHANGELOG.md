@@ -9,6 +9,55 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-09-21
+
+### Added
+- A `DEMO_MODE` environment flag for the backend: when set, every write action except logging
+  in and out is blocked (including one GET-triggered write and the talk-back WebSocket), and
+  the raw log viewer, diagnostics bundle, and session lists are hidden — the backend half of
+  the public read-only demo instance.
+
+### Changed
+- Nightlight is now on the Unraid Community Applications store — the README's "Running on Unraid"
+  section leads with searching the Apps tab instead of the manual template-install steps, which are
+  now offered as an alternative rather than the only path.
+
+### Security
+- **A caregiver's phone can no longer change the address that Pushover, ntfy and Gotify alert links
+  open.** That address is one shared setting for the whole household, so it is now learned only from
+  an administrator's Android phone, and only if it is a plain `http://` or `https://` address (an
+  optional port is fine; a path, a query, a login or another kind of link is ignored).
+  Caregivers' phones still receive alerts exactly as before, and each phone's own Firebase alert still
+  opens the address that phone uses. If those links ever opened the wrong address and you use the
+  Android app's notifications, open the app on an administrator's phone with notifications on and it
+  is replaced automatically; installs without the Android app's notifications never learn an address,
+  as before. See "Where tapping an alert opens" in `docs/notifications.md`.
+- **An extra field in the request could reset the guess limit protecting a single account's two-factor
+  code, and a signed-in user's own password and MFA-disable changes.** Adding or changing that field
+  can no longer open a fresh limit. The broader per-source limit was never affected.
+- **Camera viewing access can no longer be used to take over another camera's live feed.** The
+  endpoint a signed-in caregiver's browser uses to watch a camera accepted a wider range of
+  requests than viewing actually needs — including ones that could interrupt or replace the video
+  another caregiver was already watching. It's now restricted to exactly the requests real
+  viewing requires; nothing else gets through.
+- **Signing a device out, an admin ending a specific device's session remotely, or resetting a
+  password now also stops that device from receiving further push notifications and snapshot
+  links** — previously a revoked device could keep receiving them until its session naturally
+  expired. (Removing a caregiver's account entirely already stopped this, since 0.31.0.) Devices
+  already registered before this update will receive push notifications again automatically the
+  next time their app is opened while signed in.
+- **Revoking a session — signing a device out remotely, or removing a caregiver's account — now
+  also closes any camera view that device already had open**, within a few seconds. Previously an
+  already-open view kept playing until the tab or app was closed by hand.
+- **A child's nightly timelapse could still include images from a camera you'd disabled.** Camera
+  selection for the nightly timelapse now only considers cameras that are actually enabled, and
+  re-checks that right before saving each image — disabling a camera, reassigning it to a
+  different child, or deleting it mid-capture can no longer produce a stray frame.
+- **Camera credentials are now scrubbed from raw FFmpeg and MediaMTX output before it reaches
+  container logs, the in-app log viewer, or a diagnostics bundle.** URL passwords and query values
+  are redacted, and exported camera paths omit query strings and fragments. If you shared logs from
+  an older version and they included a credential-bearing camera URL, rotate that camera credential.
+
 ## [0.31.0] - 2026-09-19
 
 ### Added

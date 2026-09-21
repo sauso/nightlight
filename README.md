@@ -119,9 +119,13 @@ cameras to children.
 
 ## Running on Unraid
 
-An Unraid Community Applications template is included (`unraid-template.xml`). Until this
-is submitted to the official CA feed (at which point it'll be searchable directly from the
-Apps tab), install it locally by placing the file where Unraid looks for user templates:
+Nightlight is on the **Community Applications** store. Open the **Apps** tab, search
+"nightlight", and click **Install** — every field (network mode, data path, optional
+variables) comes pre-filled; double check the **Data Directory** path if you want something
+other than the default (`/mnt/user/appdata/nightlight`), then **Apply**.
+
+Prefer to install manually, or want the template before Community Applications' cache picks
+up a change? Add it straight from this repo instead:
 
 1. Open the Unraid **Terminal** (or SSH in), then run:
    ```bash
@@ -134,8 +138,8 @@ Apps tab), install it locally by placing the file where Unraid looks for user te
    double check the **Data Directory** path if you want something other than the default
    (`/mnt/user/appdata/nightlight`), then **Apply**.
 
-This is a single container — no extra plugins needed, Unraid's normal Docker UI handles it
-directly.
+Either way, this is a single container — no extra plugins needed, Unraid's normal Docker UI
+handles it directly.
 
 **Already installed from an older copy of the template?** Check that **Extra Parameters**
 (Advanced view, on the container's edit page) contains `--stop-timeout 30`, and add it if
@@ -603,6 +607,15 @@ same protection.
 
 Timestamps use your container's local time (see the `TZ` variable above) rather than
 UTC, so they line up with when you actually remember something happening.
+
+## `DEMO_MODE` (not for normal installs)
+
+An internal flag Nightlight's own public demo deployment sets so that every write action
+(besides logging in and out) returns a 403, and the raw log viewer and diagnostics bundle are
+hidden — even from the demo's own admin account. It has no effect unless set to the exact
+string `true`.
+
+You do not need this for a self-hosted install - leave it unset.
 
 ## Troubleshooting
 

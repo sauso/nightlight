@@ -5,7 +5,7 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { createHash } from 'node:crypto';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
-import { requireAuth, requireAdmin, JWT_SECRET } from '../middleware/auth.js';
+import { requireAuth, requireAdmin, JWT_SECRET, SESSION_TOKEN_TTL_DAYS } from '../middleware/auth.js';
 import {
   generateSecret, keyUri, verifyToken, qrDataUrl, isLegacySecret,
   generateBackupCodes, verifyAndConsumeBackupCode, backupCodesRemaining,
@@ -52,11 +52,11 @@ function signMediaToken(userId, sessionId) {
 //
 // Two keys now, and a request must pass both:
 //
-//   perAccount — IP + username. The real brute-force control, and what stops one person's typo (or one
-//     account being attacked) from locking anyone else out. ⚠️ NOT username alone: the previous
-//     comment here was right that a bare username key lets someone lock a specific user out on
-//     purpose by failing their login from elsewhere. Including the IP keeps that attacker confined to
-//     their own bucket.
+//   perAccount — IP + the route-specific account identity. The real brute-force control, and
+//     what stops one person's typo (or one account being attacked) from locking anyone else out.
+//     ⚠️ NOT account alone: that would let someone lock a specific user out on purpose by failing
+//     authentication from elsewhere. Including the IP keeps that attacker confined to their own
+//     bucket.
 //   perClient — IP alone, deliberately loose. Caps a spray across many usernames from one source,
 //     which per-account keying on its own would allow. Set high enough that a household sharing one
 //     proxy IP cannot hit it by accident, which is the whole complaint above.
@@ -66,8 +66,9 @@ function signMediaToken(userId, sessionId) {
 // per-client key meaningful as well.
 const RATE_WINDOW_MS = 15 * 60 * 1000;
 
-// Per account, per source. 20 was the previous whole-installation budget; it is now per username, so
-// the strength against guessing ONE password is unchanged and the collateral damage is gone.
+// Per account, per source. 20 was the previous whole-installation budget; it is now per route-specific
+// account identity, so the strength against guessing ONE secret is unchanged and the collateral
+// damage is gone.
 const PER_ACCOUNT_LIMIT = 20;
 // Per source, across all accounts. Five accounts' worth — loose enough to be invisible to a household
 // behind one proxy IP, tight enough to stop an untargeted spray.
@@ -79,48 +80,43 @@ const limiterMessage = { error: 'Too many attempts - please wait a few minutes a
 // keyed by subnet rather than by individual address, which a single client can rotate through freely.
 const clientKey = (req) => ipKeyGenerator(req.ip);
 
-// The account this attempt is against.
-//
-// ⚠️ EVERY ROUTE ON THIS LIMITER MUST YIELD AN ACCOUNT, OR IT SILENTLY REVERTS TO THE #248 DEFECT.
-// The first version read `req.body.username` and fell back to `req.user?.id`, which covers /login,
-// /setup, /me/password and /me/mfa/disable — but NOT `/login/mfa`, whose body is `{ mfaToken, code }`
-// and which has no requireAuth, so `req.user` is unset too. Every MFA completion therefore keyed on
-// the SAME empty string: a flat 20-per-IP bucket shared by every account, identical in shape and size
-// to the bug this whole change exists to fix, scoped to exactly the users who enabled 2FA. Found by
-// adversarial review of this PR and reproduced — 20 garbage MFA attempts blocked an unrelated user's
-// real code for fifteen minutes.
-//
-// Lower-cased so `Admin` and `admin` cannot be two budgets against one account.
-function accountKey(req) {
-  const submitted = typeof req.body?.username === 'string' ? req.body.username.trim().toLowerCase() : '';
-  if (submitted) return submitted;
-  if (req.user?.id) return req.user.id;
-
-  // /login/mfa: the account is inside the short-lived MFA token. DECODED, not verified — this only
-  // has to produce a stable bucket, and verifying here would duplicate the route's own check on every
-  // request. A forged token cannot buy extra guesses: reaching the real code check needs a token
-  // signed with JWT_SECRET, and that one always carries the same id, so it always lands in the same
-  // bucket. The perClient limiter caps the volume of forgeries regardless.
-  const mfaToken = typeof req.body?.mfaToken === 'string' ? req.body.mfaToken : '';
-  if (mfaToken) {
-    const id = jwt.decode(mfaToken)?.id;
-    if (id) return `mfa:${id}`;
-    // ⚠️ An unparseable token gets its OWN bucket rather than sharing one. Collapsing these to a
-    // constant would let a stream of garbage tokens from one source block a legitimate user's MFA
-    // completion — the same shared-bucket failure in miniature.
-    return `mfa-bad:${createHash('sha256').update(mfaToken).digest('hex').slice(0, 16)}`;
-  }
-  return '';
+// /login has no verified identity yet, so the submitted username is the account being attempted.
+// Lower-casing keeps `Admin` and `admin` from becoming two budgets against one account.
+function usernameKey(req) {
+  return typeof req.body?.username === 'string' ? req.body.username.trim().toLowerCase() : '';
 }
 
-const perAccountLimiter = rateLimit({
-  windowMs: RATE_WINDOW_MS,
-  limit: PER_ACCOUNT_LIMIT,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: limiterMessage,
-  keyGenerator: (req) => `${clientKey(req)}|${accountKey(req)}`,
-});
+// /login/mfa only: the account is inside its short-lived MFA token. DECODED, not verified — this
+// only needs to produce a stable bucket, while the route itself verifies the token before checking a
+// code. A forged token cannot buy guesses at the real code: a valid token always carries the same id,
+// and the per-client limiter bounds forgery volume. Do not reuse this for routes without mfaToken.
+function mfaTokenKey(req) {
+  const mfaToken = typeof req.body?.mfaToken === 'string' ? req.body.mfaToken : '';
+  if (!mfaToken) return '';
+  const id = jwt.decode(mfaToken)?.id;
+  if (id) return `mfa:${id}`;
+  // An unparseable token gets its own bucket. A shared constant would let garbage tokens from one
+  // source block a legitimate user's MFA completion — the same shared-bucket failure in miniature.
+  return `mfa-bad:${createHash('sha256').update(mfaToken).digest('hex').slice(0, 16)}`;
+}
+
+// /me/password and /me/mfa/disable run requireAuth first, making the session user id their one
+// trustworthy identity. Looking at client-submitted identity fields here would let a signed-in caller
+// create a fresh bucket for every guess at their own password.
+function sessionKey(req) {
+  return req.user?.id || '';
+}
+
+function makeAccountLimiter(keyGen) {
+  return rateLimit({
+    windowMs: RATE_WINDOW_MS,
+    limit: PER_ACCOUNT_LIMIT,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: limiterMessage,
+    keyGenerator: (req) => `${clientKey(req)}|${keyGen(req)}`,
+  });
+}
 
 const perClientLimiter = rateLimit({
   windowMs: RATE_WINDOW_MS,
@@ -131,9 +127,15 @@ const perClientLimiter = rateLimit({
   keyGenerator: clientKey,
 });
 
+const loginAccountLimiter = makeAccountLimiter(usernameKey);
+const mfaAccountLimiter = makeAccountLimiter(mfaTokenKey);
+const sessionAccountLimiter = makeAccountLimiter(sessionKey);
+
 // Applied together, in this order, so a caller who has exhausted their account budget is told so
 // rather than being charged against the looser client budget as well.
-const loginLimiter = [perAccountLimiter, perClientLimiter];
+const loginLimiter = [loginAccountLimiter, perClientLimiter];
+const mfaLimiter = [mfaAccountLimiter, perClientLimiter];
+const sessionActionLimiter = [sessionAccountLimiter, perClientLimiter];
 
 // First-run only, and it 400s once any user exists — so it cannot be used for guessing and does not
 // belong on the login budget. Sharing it meant an install's very first action spent part of the
@@ -195,7 +197,7 @@ function createSession(userId, userAgent) {
 function sign(user, sessionId) {
   return jwt.sign({ id: user.id, username: user.username, role: user.role, sid: sessionId }, JWT_SECRET, {
     algorithm: 'HS256',
-    expiresIn: '30d',
+    expiresIn: `${SESSION_TOKEN_TTL_DAYS}d`,
   });
 }
 
@@ -261,7 +263,7 @@ router.post('/login', loginLimiter, (req, res) => {
 
 // Second login step for MFA accounts: verify the 6-digit authenticator code (or a one-time backup
 // code) against the token from /login, then issue the real session. Rate-limited like /login.
-router.post('/login/mfa', loginLimiter, (req, res) => {
+router.post('/login/mfa', mfaLimiter, (req, res) => {
   const { mfaToken, code } = req.body || {};
   let payload;
   try {
@@ -290,7 +292,13 @@ router.post('/login/mfa', loginLimiter, (req, res) => {
 
 // Ends just the current session - the token stops working on its very next use,
 // rather than remaining valid (just unused) until it naturally expires.
+//
+// Also stops this device's push registration, if it has one - a signed-out device must not keep
+// receiving alerts. Run before the session delete so a caller reading this in order sees cause
+// before effect (activePushTokens() filters live regardless of ordering, but the explicit delete
+// here matches the same order used at every other revocation site below).
 router.post('/logout', requireAuth, (req, res) => {
+  db.prepare('DELETE FROM push_tokens WHERE session_id = ?').run(req.user.sid);
   db.prepare('DELETE FROM sessions WHERE id = ?').run(req.user.sid);
   res.status(204).end();
 });
@@ -334,6 +342,9 @@ router.delete('/sessions/:id', requireAuth, (req, res) => {
   if (session.user_id !== req.user.id && req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Not allowed' });
   }
+  // Same reasoning as /logout above - ending a session (here, possibly someone ELSE'S device)
+  // must also stop that device's push registration.
+  db.prepare('DELETE FROM push_tokens WHERE session_id = ?').run(req.params.id);
   db.prepare('DELETE FROM sessions WHERE id = ?').run(req.params.id);
   res.status(204).end();
 });
@@ -392,7 +403,14 @@ router.put('/users/:id', requireAuth, requireAdmin, (req, res) => {
   // A password reset means the old credential can no longer be trusted - any session
   // opened under it shouldn't outlive it. Spares only the requesting admin's own
   // current session, for the case where they're resetting their own password.
+  //
+  // The push_tokens cleanup runs FIRST, as a subquery over the sessions about to be deleted - it
+  // has to see them before the next statement removes them. Same reasoning as /logout: an ended
+  // session must also stop that device's push registration, not just its API access.
   if (password) {
+    db.prepare(
+      'DELETE FROM push_tokens WHERE session_id IN (SELECT id FROM sessions WHERE user_id = ? AND id != ?)'
+    ).run(req.params.id, req.user.sid);
     db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.params.id, req.user.sid);
   }
 
@@ -429,7 +447,7 @@ router.put('/me', requireAuth, (req, res) => {
 
 // Self-service: any logged-in user can change their own password, given their
 // current one - unlike the admin reset above, this doesn't skip verification.
-router.put('/me/password', requireAuth, loginLimiter, (req, res) => {
+router.put('/me/password', requireAuth, sessionActionLimiter, (req, res) => {
   const { current_password, new_password } = req.body || {};
   if (!new_password || new_password.length < 8) {
     return res.status(400).json({ error: 'New password must be at least 8 characters' });
@@ -443,6 +461,11 @@ router.put('/me/password', requireAuth, loginLimiter, (req, res) => {
   // Sign every other device out. Changing your password is exactly the move someone
   // makes when a logged-in device is lost or no longer trusted - leaving those
   // sessions valid for the rest of their 30 days would defeat the point.
+  //
+  // Same push_tokens cleanup, same reasoning and ordering, as the admin reset path above.
+  db.prepare(
+    'DELETE FROM push_tokens WHERE session_id IN (SELECT id FROM sessions WHERE user_id = ? AND id != ?)'
+  ).run(req.user.id, req.user.sid);
   db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.user.id, req.user.sid);
   res.json({ ok: true });
 });
@@ -489,7 +512,7 @@ router.post('/me/mfa/enable', requireAuth, (req, res) => {
 
 // Turn MFA off. Requires the account password (not just the live session) so a borrowed unlocked
 // device can't quietly strip someone's second factor.
-router.post('/me/mfa/disable', requireAuth, loginLimiter, (req, res) => {
+router.post('/me/mfa/disable', requireAuth, sessionActionLimiter, (req, res) => {
   const { password } = req.body || {};
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (!user || !bcrypt.compareSync(String(password || ''), user.password_hash)) {

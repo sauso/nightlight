@@ -4,6 +4,7 @@ import { recordCameraEvent, EVENT } from './cameraEvents.js';
 import { ffprobeAudioCodec } from './rtspProbe.js';
 import { hlsPathName, upsertPath, isPathConfiguredCorrectly } from './mediamtx.js';
 import { killIfSpawned } from './processGuards.js';
+import { forwardProcessLines } from './processOutput.js';
 
 // camera_id -> { proc, stopped }
 const processes = new Map();
@@ -165,27 +166,21 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraNam
     // soon as ffmpeg reports it and restarting immediately limits the damage to
     // a ~5s reconnect blip instead of hours of garbled output.
     let restarting = false;
-    proc.stderr.on('data', (chunk) => {
-      chunk
-        .toString()
-        .split('\n')
-        .filter((line) => line.length > 0)
-        .forEach((line) => {
-          // Drop the benign per-packet timestamp spam from the logs (and from lastLine, so the exit
-          // message reports the real last error, not a cosmetic warning). The discontinuity check
-          // below still runs on every line — a real "DTS discontinuity" never matches the noise filter.
-          if (isNoisyMediaLine(line)) return;
-          lastLine = line;
-          logger.raw(`ffmpeg:${mediamtxPath}`, line);
-          if (!restarting && line.includes('DTS discontinuity in stream')) {
-            restarting = true;
-            logger.error(
-              `[ffmpeg:${mediamtxPath}] camera sent a corrupt timestamp - restarting now rather than let the session run poisoned`
-            );
-            recordCameraEvent(cameraId, cameraName, EVENT.RESTART, 'camera sent a corrupt timestamp');
-            killIfSpawned(proc, 'SIGTERM');
-          }
-        });
+    forwardProcessLines(proc, proc.stderr, (line) => {
+      // Drop the benign per-packet timestamp spam from the logs (and from lastLine, so the exit
+      // message reports the real last error, not a cosmetic warning). The discontinuity check
+      // below still runs on every line — a real "DTS discontinuity" never matches the noise filter.
+      if (isNoisyMediaLine(line)) return;
+      lastLine = line;
+      logger.raw(`ffmpeg:${mediamtxPath}`, line);
+      if (!restarting && line.includes('DTS discontinuity in stream')) {
+        restarting = true;
+        logger.error(
+          `[ffmpeg:${mediamtxPath}] camera sent a corrupt timestamp - restarting now rather than let the session run poisoned`
+        );
+        recordCameraEvent(cameraId, cameraName, EVENT.RESTART, 'camera sent a corrupt timestamp');
+        killIfSpawned(proc, 'SIGTERM');
+      }
     });
 
     proc.on('exit', (code) => {
