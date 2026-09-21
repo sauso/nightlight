@@ -17,11 +17,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   when used, so the admission cap can be briefly exceeded. It keeps looped camera motion out of seeded
   sleep history, including sessions that cross a sleep-window boundary, and shows a persistent
   countdown with clear read-only feedback, a configurable **start again** link, and a retry after a
-  failed automatic sign-in. Its app-level contract is `DEMO_MODE`, `DEMO_ENDS_AT`,
-  `DEMO_MAX_GUESTS`, `DEMO_LOBBY_URL`, `DEMO_TIMEZONE` and `DEMO_ASSET_DIR`; from `backend`,
-  `node src/lib/demoSeed.js` creates the fictional data using `loop.mp4` and `loop.jpg` from the asset
-  directory, while the deployment marks readiness with `<DATA_DIR>/.demo-ready` only after the seed
-  and camera paths are ready.
+  failed automatic sign-in. This is only for hosting a public demo and does nothing on a normal
+  install; the settings, seed script and readiness contract are documented in
+  [docs/demo-mode.md](docs/demo-mode.md).
 
 ## [0.32.0] - 2026-09-21
 
