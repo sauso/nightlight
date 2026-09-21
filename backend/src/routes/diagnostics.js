@@ -12,6 +12,7 @@ import { getRecentEvents } from '../lib/cameraEvents.js';
 import { getRecentDetectionEvents } from '../lib/detectionEvents.js';
 import { pushConfigured, pushEnabled } from '../lib/push.js';
 import { pushoverConfigured, pushoverEnabled } from '../lib/pushover.js';
+import { findCredentialLeak } from '../lib/urlCredentials.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -34,15 +35,17 @@ function envOrNull(name) {
   return v && v !== 'unknown' ? v : null;
 }
 
-// Split an RTSP URL into non-secret address parts. Node's URL parses arbitrary schemes, so
-// rtsp://user:pass@host:554/path yields hostname/port/pathname with the password left behind.
+// Split an RTSP URL into non-secret address parts. Query values and fragments are deliberately not
+// included: supported cameras use query parameters both for ordinary stream selection and for opaque
+// access tokens, and firmware does not provide a reliable naming convention that can be deny-listed.
+// The pathname is sufficient to identify the endpoint without publishing either kind of value.
 function rtspAddress(url) {
   try {
     const u = new URL(url);
     return {
       host: u.hostname,
       port: u.port,
-      path: (u.pathname || '') + (u.search || ''),
+      path: u.pathname || '',
       username: u.username || '',
       hasPassword: !!u.password,
     };
@@ -188,6 +191,17 @@ router.get('/', requireAuth, requireAdmin, async (req, res) => {
       camera_history: getRecentEvents(200),
       server_logs: logger.getRecent(),
     };
+
+    // ...and then CHECK, rather than trust. Every field above is meant to be secret-free by
+    // construction, but `server_logs` in particular is built from whatever child-process output
+    // actually said — this is remediation step 2 of GHSA-wcgj-6p3c-vr9h (see cameras.js's camera
+    // report for the original instance) applied to this bundle too: assert the invariant instead of
+    // just describing it in this file's own header comment.
+    const leak = findCredentialLeak(bundle);
+    if (leak) {
+      logger.error(`[diagnostics] refused to send a bundle that still contained a credential: ${leak}`);
+      return res.status(500).json({ error: 'Diagnostics bundle failed a safety check — nothing was sent. Please report this.' });
+    }
 
     res.json(bundle);
   } catch (err) {

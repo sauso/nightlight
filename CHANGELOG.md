@@ -39,6 +39,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   selection for the nightly timelapse now only considers cameras that are actually enabled, and
   re-checks that right before saving each image — disabling a camera, reassigning it to a
   different child, or deleting it mid-capture can no longer produce a stray frame.
+- **Camera credentials are now scrubbed from raw FFmpeg and MediaMTX output before it reaches
+  container logs, the in-app log viewer, or a diagnostics bundle.** URL passwords and query values
+  are redacted, and exported camera paths omit query strings and fragments. If you shared logs from
+  an older version and they included a credential-bearing camera URL, rotate that camera credential.
 
 ## [0.31.0] - 2026-09-19
 

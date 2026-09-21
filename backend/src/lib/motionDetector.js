@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import db from '../db.js';
 import { logger } from './logger.js';
+import { forwardProcessLines } from './processOutput.js';
 import { subPathName, getPathStatus } from './mediamtx.js';
 import { inActiveWindow } from './detectSchedule.js';
 import { fireDetectionAlert } from './detectionAlert.js';
@@ -421,12 +422,8 @@ export async function startMotionDetector(camera) {
       }
     });
 
-    proc.stderr.on('data', (chunk) => {
-      chunk
-        .toString()
-        .split('\n')
-        .filter((l) => l.trim())
-        .forEach((l) => logger.raw(`detect:${path}`, l));
+    forwardProcessLines(proc, proc.stderr, (line) => {
+      if (line.trim()) logger.raw(`detect:${path}`, line);
     });
 
     proc.on('exit', (code) => {

@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { logger, isNoisyMediaLine } from './logger.js';
+import { forwardProcessLines } from './processOutput.js';
 import { addHold, removeHold, effectiveHold, clearHolds } from './ringHolds.js';
 import { killIfSpawned } from './processGuards.js';
 
@@ -208,16 +209,10 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
     });
 
     let lastLine = '';
-    proc.stderr.on('data', (chunk) => {
-      chunk
-        .toString()
-        .split('\n')
-        .filter((line) => line.length > 0)
-        .forEach((line) => {
-          if (isNoisyMediaLine(line)) return; // same benign per-packet spam as the transcoder
-          lastLine = line;
-          logger.raw(`clipseg:${pathName}`, line);
-        });
+    forwardProcessLines(proc, proc.stderr, (line) => {
+      if (isNoisyMediaLine(line)) return; // same benign per-packet spam as the transcoder
+      lastLine = line;
+      logger.raw(`clipseg:${pathName}`, line);
     });
 
     proc.on('exit', (code) => {
