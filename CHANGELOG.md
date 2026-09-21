@@ -9,6 +9,20 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- The public demo now signs visitors into one fixed read-only admin guest automatically (with password
+  login structurally disabled), applies its active-guest cap when admitting new guest sessions, limits
+  per-IP traffic, and reports its deadline, readiness, capacity and optional lobby URL through
+  `/api/auth/status`. Idle sessions stop counting after two minutes but remain valid and count again
+  when used, so the admission cap can be briefly exceeded. It keeps looped camera motion out of seeded
+  sleep history, including sessions that cross a sleep-window boundary, and shows a persistent
+  countdown with clear read-only feedback, a configurable **start again** link, and a retry after a
+  failed automatic sign-in. Its app-level contract is `DEMO_MODE`, `DEMO_ENDS_AT`,
+  `DEMO_MAX_GUESTS`, `DEMO_LOBBY_URL`, `DEMO_TIMEZONE` and `DEMO_ASSET_DIR`; from `backend`,
+  `node src/lib/demoSeed.js` creates the fictional data using `loop.mp4` and `loop.jpg` from the asset
+  directory, while the deployment marks readiness with `<DATA_DIR>/.demo-ready` only after the seed
+  and camera paths are ready.
+
 ## [0.32.0] - 2026-09-21
 
 ### Added

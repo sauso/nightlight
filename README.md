@@ -610,12 +610,53 @@ UTC, so they line up with when you actually remember something happening.
 
 ## `DEMO_MODE` (not for normal installs)
 
-An internal flag Nightlight's own public demo deployment sets so that every write action
-(besides logging in and out) returns a 403, and the raw log viewer and diagnostics bundle are
-hidden — even from the demo's own admin account. It has no effect unless set to the exact
-string `true`.
+This is the mode used by Nightlight's isolated public demo deployment. It has no effect unless
+`DEMO_MODE` is the exact string `true`; normal self-hosted installs should leave it unset.
 
-You do not need this for a self-hosted install - leave it unset.
+In demo mode, the sign-in screen calls `POST /api/auth/guest` automatically. That endpoint ignores
+its body and can only create a session for a pre-seeded user whose username is `demo-guest`, role is
+`admin`, and MFA is off. It returns 404 if that exact user is absent or the flag is off. The admin
+role lets visitors explore the complete interface, while the demo guard still returns 403 for every
+write except sign-in, sign-out and media-token creation. It also hides the raw logs, diagnostics and
+session lists, and disables live motion sampling so the looped camera cannot contaminate seeded sleep
+history. The seeded guest has a deliberately non-bcrypt password sentinel: password login as
+`demo-guest` always returns 401 without running an expensive password check; only the guest endpoint
+can sign it in.
+
+Set these values before starting a reusable demo deployment:
+
+| Variable / file | Meaning |
+|---|---|
+| `DEMO_MODE=true` | Enables the guest endpoint, read-only guard, request limits and demo UI. |
+| `DEMO_ENDS_AT` | Session end as an ISO-8601 UTC timestamp, for example `2026-09-21T10:20:00.000Z`. |
+| `DEMO_MAX_GUESTS` | Admission cap for `POST /api/auth/guest`; defaults to 25. A session counts while it has made a request in the last two minutes. An idle session stays valid, stops counting after two minutes, and counts again on its next request without being refused. |
+| `DEMO_LOBBY_URL` | Optional URL for the banner's **start again** link after the demo ends. When unset, the banner only says the demo ended. |
+| `DEMO_TIMEZONE` | IANA timezone used to generate the fictional sleep history; defaults to `UTC`. |
+| `DEMO_ASSET_DIR` | Directory containing the seed assets `loop.mp4` and `loop.jpg`; defaults to `/app/demo`. |
+| `<DATA_DIR>/.demo-ready` | Create only after seed data, the fake camera and camera paths are ready. |
+
+`GET /api/auth/status` remains public and returns
+`{ "needsSetup": false, "demo": false }` on a normal install, or
+`{ "needsSetup": false, "demo": { "endsAt": "…", "lobbyUrl": null, "ready": true, "full": false } }` in demo
+mode. `demo.full` is `true` when the active guest count is at the admission
+cap, otherwise `false`. `demo.lobbyUrl` is the configured string or `null`. The web app shows a persistent
+read-only/countdown strip, offers the configured lobby link after the deadline, and lets visitors
+retry if automatic guest sign-in fails.
+
+The active-session cap is only an admission check, not a hard concurrency, video or CPU bound: one
+token can open several viewers, and a valid idle session can resume even when the lobby says full.
+Clients making a request every one to two minutes keep their slot, while simultaneous resumptions can
+briefly put the active count above the cap. A demo-only per-IP ceiling therefore also limits API and
+WHEP/HLS requests (600/minute), and guest sign-in has its own 20-per-15-minute IP limit. Configure
+`TRUST_PROXY` only after measuring the real proxy chain, so `req.ip` identifies visitors and cannot
+be forged, and load-test the intended viewer count instead of treating either limit as a capacity guarantee.
+
+From the `backend` directory, run `node src/lib/demoSeed.js` after setting the variables above. The
+command resets the configured database and creates the fixed guest, fictional history and sample
+media; it requires `loop.mp4` and `loop.jpg` in `DEMO_ASSET_DIR`. It does not run during normal app
+startup and does not set the deadline or create `<DATA_DIR>/.demo-ready`. A deployment wrapper must
+set the deadline, run the seed, start and verify its camera paths, and only then create the readiness
+file. Never enable this mode or run the seed against a household's real database.
 
 ## Troubleshooting
 

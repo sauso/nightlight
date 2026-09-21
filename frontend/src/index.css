@@ -102,6 +102,26 @@ button {
   padding-bottom: 64px; /* space for bottom nav */
 }
 
+.demo-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 8px 12px;
+  background: var(--bg-elevated-2);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.demo-banner a {
+  color: var(--peri);
+  font-weight: 600;
+}
+
 .app-header {
   position: sticky;
   top: 0;
