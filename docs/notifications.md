@@ -348,6 +348,10 @@ report, with no wake time listed, is what you get.
   (Account → Notifications) and granted the OS notification permission, that the camera has motion
   detection on, and that the app has been opened at least once since enabling (so it registered its
   device token).
+- **Push alerts stopped after updating to 0.32.0.** A phone that registered before that update is
+  tied to no sign-in session yet, so the server skips it until the app is **opened once while signed
+  in**, which re-registers it automatically. Pushover, ntfy and Gotify alerts are not affected. The
+  same applies to any phone you sign out of and back into: alerts resume once it has registered again.
 - **"Notifications aren't set up on this server."** The app can reach the server but
   `google-services.json` isn't present/valid in the data dir. It must be the file from *your* Firebase
   Android app (package `com.sauso.nightlight`).
