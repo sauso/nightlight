@@ -21,6 +21,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   now offered as an alternative rather than the only path.
 
 ### Security
+- **A caregiver's phone can no longer change the address that Pushover, ntfy and Gotify alert links
+  open.** That address is one shared setting for the whole household, so it is now learned only from
+  an administrator's Android phone, and only if it is a plain `http://` or `https://` address (an
+  optional port is fine; a path, a query, a login or another kind of link is ignored).
+  Caregivers' phones still receive alerts exactly as before, and each phone's own Firebase alert still
+  opens the address that phone uses. If those links ever opened the wrong address and you use the
+  Android app's notifications, open the app on an administrator's phone with notifications on and it
+  is replaced automatically; installs without the Android app's notifications never learn an address,
+  as before. See "Where tapping an alert opens" in `docs/notifications.md`.
 - **An extra field in the request could reset the guess limit protecting a single account's two-factor
   code, and a signed-in user's own password and MFA-disable changes.** Adding or changing that field
   can no longer open a fresh limit. The broader per-source limit was never affected.

@@ -158,6 +158,48 @@ Nightlight app. Only the short message + snapshot pass through ntfy — never yo
 Gotify alerts are **text only** (no image — Gotify has no native attachments); tapping one opens the
 camera. Only the short message passes through your Gotify server.
 
+## Where tapping an alert opens (nothing to configure)
+
+Tapping an alert opens the app on *this* server, even if the app was last showing a different one (say
+a staging copy). How the alert knows which server that is depends on the channel:
+
+- **Firebase (the Android app's own notifications).** Each phone's alert carries the address *that
+  phone* uses to reach the server, taken from its own registration — so a phone on your home network
+  and a phone over the internet each open the address they actually use. It does not depend on any
+  other phone.
+- **Pushover, ntfy and Gotify.** These go to apps Nightlight doesn't control, so one address is
+  stamped into the tap link for everyone. The server **learns it from an administrator's Android
+  phone**: the address that phone reaches the server through, sent when the Nightlight app registers
+  for notifications (each time the app is opened while signed in, with notifications turned on for that
+  phone).
+
+About that one shared address:
+
+- **Only an admin's phone can set it.** A caregiver's phone still registers, still receives alerts and
+  still gets its own Firebase pictures and links, but it never changes the address the shared links
+  point at. That is deliberate: the address is one setting for the whole household, so it is treated
+  like any other server setting that only an admin can change.
+- **What counts as an address.** A plain `http://` or `https://` address with an optional port — the
+  same thing your browser shows before the first `/` — such as `https://nightlight.example.com` or
+  `http://192.168.1.100:8080`. Anything else (another scheme, a login name or password, a path, a
+  `?query` or `#fragment`, or spaces or unusual characters inside it) is ignored. The phone still
+  registers and still receives its alerts; it just contributes no address. Only the *shape* is
+  checked — the server cannot know whether an address is actually reachable from outside, or that it
+  is a real hostname.
+- **Known limits.**
+  - In normal use only the Nightlight **Android app** supplies an address, and it only registers when
+    push notifications are set up (Option B) and switched on for that phone. A server that sends
+    alerts through Pushover, ntfy or Gotify **without** the Android app's notifications therefore
+    doesn't learn one: its tap links carry no server address and simply open in whichever server the
+    app is showing. That only matters if you run more than one server. (This is how the app behaves,
+    not something the server enforces: an admin's own request to the registration endpoint would set
+    it too.)
+  - If two admins' phones use different addresses (one on your home network, one over the internet),
+    the most recently registered one wins. Open the app on the phone you want to decide it.
+  - There is no field for this in Settings. To change it, open the Android app on an admin's phone at
+    the new address, signed in with notifications on; the next registration replaces the old one.
+    Nothing can *clear* it.
+
 ## Detection settings on a camera
 
 **Cameras → edit** a camera. Motion and sound are independent detectors — either can be enabled
