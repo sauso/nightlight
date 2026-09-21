@@ -1012,8 +1012,8 @@
   {
     "label": "redact: drop the // anchor (eats emails and SDP attributes)",
     "file": "backend/src/lib/urlCredentials.js",
-    "find": "  return text.replace(/(\\/\\/)([^/\\s:@]*):([^/\\s@]+)@/g, '$1$2:***@');",
-    "replace": "  return text.replace(/(\\/?\\/?)([^/\\s:@]*):([^/\\s@]+)@/g, '$1$2:***@');",
+    "find": "  const withoutUserinfo = text.replace(/(\\/\\/)([^/\\s:@]*):([^/\\s@]+)@/g, '$1$2:***@');",
+    "replace": "  const withoutUserinfo = text.replace(/(\\/?\\/?)([^/\\s:@]*):([^/\\s@]+)@/g, '$1$2:***@');",
     "expect": "killed",
     "tests": [
       "camera-report-redaction.test.js"
@@ -1023,8 +1023,8 @@
   {
     "label": "redact: forbid a raw colon inside the password",
     "file": "backend/src/lib/urlCredentials.js",
-    "find": "  return text.replace(/(\\/\\/)([^/\\s:@]*):([^/\\s@]+)@/g, '$1$2:***@');",
-    "replace": "  return text.replace(/(\\/\\/)([^/\\s:@]*):([^/\\s:@]+)@/g, '$1$2:***@');",
+    "find": "  const withoutUserinfo = text.replace(/(\\/\\/)([^/\\s:@]*):([^/\\s@]+)@/g, '$1$2:***@');",
+    "replace": "  const withoutUserinfo = text.replace(/(\\/\\/)([^/\\s:@]*):([^/\\s:@]+)@/g, '$1$2:***@');",
     "expect": "killed",
     "tests": [
       "camera-report-redaction.test.js"
@@ -1034,8 +1034,8 @@
   {
     "label": "redact: require a non-empty username",
     "file": "backend/src/lib/urlCredentials.js",
-    "find": "  return text.replace(/(\\/\\/)([^/\\s:@]*):([^/\\s@]+)@/g, '$1$2:***@');",
-    "replace": "  return text.replace(/(\\/\\/)([^/\\s:@]+):([^/\\s@]+)@/g, '$1$2:***@');",
+    "find": "  const withoutUserinfo = text.replace(/(\\/\\/)([^/\\s:@]*):([^/\\s@]+)@/g, '$1$2:***@');",
+    "replace": "  const withoutUserinfo = text.replace(/(\\/\\/)([^/\\s:@]+):([^/\\s@]+)@/g, '$1$2:***@');",
     "expect": "killed",
     "tests": [
       "camera-report-redaction.test.js"
@@ -1107,6 +1107,52 @@
       "camera-report-route.test.js"
     ],
     "note": "server_logs is republished verbatim inside the diagnostics bundle, under a note promising no passwords. Per-producer redaction was tried and lib/onvif.js immediately defeated it."
+  },
+  {
+    "label": "logger raw: bypass the credential-redacting choke point",
+    "file": "backend/src/lib/logger.js",
+    "find": "raw: (source, line) => write(console.log, source, [String(line).replace(LEADING_TIMESTAMP, '')]),",
+    "replace": "raw: (source, line) => { const tagged = `${timestamp()} [${source}] ${String(line).replace(LEADING_TIMESTAMP, '')}`; console.log(tagged); pushToBuffer(tagged); },",
+    "expect": "killed",
+    "tests": [
+      "logger-redaction.test.js"
+    ],
+    "note": "Pins the reviewed defect itself: normal log methods were safe while raw FFmpeg output skipped the shared redactor."
+  },
+  {
+    "label": "redact: leave URL query values and fragments untouched",
+    "file": "backend/src/lib/urlCredentials.js",
+    "find": "'$1[redacted]'",
+    "replace": "'$1'",
+    "expect": "killed",
+    "tests": [
+      "camera-report-redaction.test.js",
+      "logger-redaction.test.js"
+    ],
+    "note": "Camera firmware uses inconsistent names for query credentials, so every URL query value and fragment is private by default."
+  },
+  {
+    "label": "transcoder logs arbitrary stderr chunks as complete lines",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "forwardProcessLines(proc, proc.stderr, (line) => {",
+    "replace": "proc.stderr.on('data', (chunk) => logger.raw(`ffmpeg:${mediamtxPath}`, chunk.toString()));\n    ((line) => {",
+    "expect": "killed",
+    "tests": [
+      "transcoder-log-redaction.test.js"
+    ],
+    "note": "The credential pattern can span data-event boundaries; redacting each arbitrary chunk independently is not sufficient."
+  },
+  {
+    "label": "process output flushes on exit before stderr drains",
+    "file": "backend/src/lib/processOutput.js",
+    "find": "stream.once('end', () => lines.end());",
+    "replace": "proc.once('exit', () => lines.end());",
+    "expect": "killed",
+    "tests": [
+      "logger-redaction.test.js",
+      "transcoder-log-redaction.test.js"
+    ],
+    "note": "Node can emit process exit before the final stdio data events; flushing there publishes a credential-bearing prefix."
   },
   {
     "label": "route: trust the scrub instead of checking it",
