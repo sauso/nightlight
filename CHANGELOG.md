@@ -21,6 +21,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   now offered as an alternative rather than the only path.
 
 ### Security
+- **An extra field in the request could reset the guess limit protecting a single account's two-factor
+  code, and a signed-in user's own password and MFA-disable changes.** Adding or changing that field
+  can no longer open a fresh limit. The broader per-source limit was never affected.
 - **Camera viewing access can no longer be used to take over another camera's live feed.** The
   endpoint a signed-in caregiver's browser uses to watch a camera accepted a wider range of
   requests than viewing actually needs — including ones that could interrupt or replace the video
