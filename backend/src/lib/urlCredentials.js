@@ -62,7 +62,7 @@ export function stripUrlPassword(raw) {
 }
 
 /**
- * Replace the password in every `//user:pass@host` occurrence in a block of free text.
+ * Replace credentials in URLs embedded anywhere in a block of free text.
  *
  * THE DEFECT THIS EXISTS FOR (GHSA-wcgj-6p3c-vr9h). The "unsupported camera" report embeds
  * ffprobe's stderr, and ffprobe prefixes its failure line with the input URL — credentials and
@@ -77,8 +77,16 @@ export function stripUrlPassword(raw) {
  * The username is kept — it is already returned in the report as `rtsp_username`, and knowing the
  * probe authenticated as the right user is part of what the report is for.
  *
+ * URL userinfo keeps the username and replaces the password. A query string or fragment is dropped
+ * entirely, not partially redacted: camera firmware uses inconsistent, sometimes keyless shapes for
+ * query tokens, so there is no reliable way to tell "the key" from "the secret value" in general —
+ * see the function body's own comment for two real ways a partial-redaction attempt leaked. The
+ * scheme, host and path are enough to identify the failed endpoint without publishing anything a
+ * camera or operator supplied past that point.
+ *
  * @param {string} text
- * @returns {string} the text with every embedded password replaced by `***`
+ * @returns {string} the text with every embedded credential replaced by `***`, and every query
+ * string / fragment removed entirely
  */
 export function redactCredentials(text) {
   if (typeof text !== 'string' || !text) return text;
@@ -91,7 +99,39 @@ export function redactCredentials(text) {
   // ⚠️ Do NOT restate this as "an encoded password containing ':' still matches": encodeURIComponent
   // emits '%3A', never a literal colon, so that phrasing described a case that cannot occur — and a
   // test named after it sat clear of the boundary it claimed to pin.
-  return text.replace(/(\/\/)([^/\s:@]*):([^/\s@]+)@/g, '$1$2:***@');
+  const withoutUserinfo = text.replace(/(\/\/)([^/\s:@]*):([^/\s@]+)@/g, '$1$2:***@');
+
+  // Work URL-reference by URL-reference so ordinary diagnostics containing `?` or `name=value` are
+  // untouched. Absolute URLs and scheme-relative URLs (`//host/path?...`) both occur in child-process
+  // output. Avoid the URL parser here: failure messages can contain malformed or partial URLs, which
+  // still need best-effort scrubbing and must never make logging throw.
+  //
+  // ⚠️ Anchored to a REAL scheme (rtsp(s)/http(s)) or a scheme-relative `//`, NOT a bare single `/` —
+  // found by adversarial review, reproduced: a bare-`/`-triggers-a-match version mangled perfectly
+  // ordinary text with no URL in it at all wherever a `/` was later followed by an unrelated `?` or
+  // `#` anywhere else in the same line — "restarting camera 1/2#3" (a fraction, then a hash a human
+  // typed) became "restarting camera 1/2", and "'/data/nightlight.db?x'" lost its own closing quote.
+  // Every URL this app or FFmpeg ever embeds carries a real scheme or is genuinely scheme-relative;
+  // nothing here needs to also catch a bare request-target to do its job.
+  //
+  // ⚠️ A query/fragment can be ONE opaque token (a base64 auth token, no key=value structure at all)
+  // rather than named parameters — an earlier version of this tried to keep "the key" and redact only
+  // "the value", which assumes a structure that doesn't universally hold: an opaque token with no `=`
+  // at all had its ENTIRE content preserved (nothing looked like a "value" to redact). A second bug
+  // compounded it: the outer match's terminator class excluded `'`, but a bare apostrophe is inside
+  // `encodeURIComponent`'s own unescaped output alphabet (see the comment above), so a legitimately
+  // percent-encoded value containing one could split the match early and leave a suffix of the real
+  // secret sitting just past it, untouched. Both found by adversarial review, reproduced. Fixed by
+  // dropping the ENTIRE query/fragment rather than trying to partially redact it — the same "can't
+  // prove it's safe, don't echo it" policy already used for the password itself just above.
+  //
+  // The `[redacted]` marker (found missing by adversarial review) is deliberate, not cosmetic: without
+  // it, a reader of a support bundle can't tell "this URL never had a query string" apart from "one was
+  // removed" — the same reasoning `rtsp_has_password` exists for, spelled out instead of implied.
+  return withoutUserinfo.replace(
+    /((?:rtsps?|https?):\/\/[^\s"<>?#]*|\/\/[^\s"<>?#]*)[?#][^\s"<>]*/gi,
+    '$1[redacted]'
+  );
 }
 
 /**

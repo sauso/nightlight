@@ -62,9 +62,11 @@ function pushToBuffer(line) {
 // address on its own line. That is the advisory's whole lesson — ONE unredacted producer is enough —
 // and there is no reason to keep re-learning it once per module.
 //
-// Nothing legitimate is lost: this only rewrites `//user:pass@` into `//user:***@`, a shape that has
-// no innocent meaning in a log line. Callers that key off a raw ffmpeg string (see the note on
-// NOISY_MEDIA_LINE above) test the raw line before logging, so this cannot affect behaviour.
+// Callers that key off a raw ffmpeg string (see the note on NOISY_MEDIA_LINE above) test the raw
+// line before it reaches this function, so redaction here cannot affect their behaviour. Nothing
+// LEGITIMATE is lost either: `redactCredentials` (lib/urlCredentials.js) only rewrites a `//user:
+// pass@` shape and drops a URL's query string / fragment, none of which has an innocent meaning
+// worth publishing in a log line — see that function's own comment for what it does and why.
 function write(stream, level, args) {
   const line = redactCredentials(`${timestamp()} [${level}] ${args
     .map((a) => (typeof a === 'string' ? a : JSON.stringify(a)))
@@ -84,12 +86,10 @@ export const logger = {
   warn: (...args) => write(console.warn, 'WARN', args),
   error: (...args) => write(console.error, 'ERROR', args),
   // For forwarding output from child processes (MediaMTX, FFmpeg) - normalized to the
-  // same "timestamp [source] message" shape as our own lines above.
-  raw: (source, line) => {
-    const tagged = `${timestamp()} [${source}] ${line.replace(LEADING_TIMESTAMP, '')}`;
-    console.log(tagged);
-    pushToBuffer(tagged);
-  },
+  // same "timestamp [source] message" shape as our own lines above. This MUST use `write`: raw
+  // FFmpeg output can repeat its input URL, and bypassing the shared sink used to publish camera
+  // credentials to both docker logs and the diagnostics bundle (security review S05).
+  raw: (source, line) => write(console.log, source, [String(line).replace(LEADING_TIMESTAMP, '')]),
   getRecent: () => [...buffer],
   // Empties the in-memory ring buffer shown in the log viewer (admin action). Doesn't touch
   // stdout/`docker logs` — only the in-app "recent activity" view.

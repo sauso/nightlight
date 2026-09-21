@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import { logger } from './logger.js';
+import { forwardProcessLines } from './processOutput.js';
 import { getPathStatus } from './mediamtx.js';
 import { inActiveWindow } from './detectSchedule.js';
 import { fireDetectionAlert } from './detectionAlert.js';
@@ -199,8 +200,8 @@ export async function startSoundDetector(camera) {
       }
     });
 
-    proc.stderr.on('data', (chunk) => {
-      chunk.toString().split('\n').filter((l) => l.trim()).forEach((l) => logger.raw(`sound:${path}`, l));
+    forwardProcessLines(proc, proc.stderr, (line) => {
+      if (line.trim()) logger.raw(`sound:${path}`, line);
     });
 
     proc.on('exit', (code) => {

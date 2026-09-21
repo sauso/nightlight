@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import { networkInterfaces } from 'os';
 import { logger } from './logger.js';
 import { killIfSpawned } from './processGuards.js';
+import { forwardProcessLines } from './processOutput.js';
 
 let proc = null;
 let stopped = false;
@@ -16,14 +17,6 @@ const RESTART_DELAY_MS = 3000;
 // loopback for WebRTC. A BUDGET, NOT A GUARANTEE — see the header comment on detectHostIPv4s.
 const NETWORK_WAIT_TRIES = 10;
 const NETWORK_WAIT_INTERVAL_MS = 500;
-
-function forwardLines(chunk, onLine) {
-  chunk
-    .toString()
-    .split('\n')
-    .filter((line) => line.length > 0)
-    .forEach(onLine);
-}
 
 // This host's routable (non-loopback) IPv4 addresses. We pass these to MediaMTX explicitly as
 // MTX_WEBRTCADDITIONALHOSTS so it advertises a reachable WebRTC ICE candidate rather than relying on
@@ -122,18 +115,12 @@ export async function startMediaMTX(configPath) {
     });
 
     let lastLine = '';
-    proc.stdout.on('data', (chunk) => {
-      forwardLines(chunk, (line) => {
-        lastLine = line;
-        logger.raw('mediamtx', line);
-      });
-    });
-    proc.stderr.on('data', (chunk) => {
-      forwardLines(chunk, (line) => {
-        lastLine = line;
-        logger.raw('mediamtx', line);
-      });
-    });
+    const forwardLine = (line) => {
+      lastLine = line;
+      logger.raw('mediamtx', line);
+    };
+    forwardProcessLines(proc, proc.stdout, forwardLine);
+    forwardProcessLines(proc, proc.stderr, forwardLine);
 
     proc.on('exit', (code) => {
       // Reaching 'exit' at all means this launch really spawned, so a later spawn failure starts its
