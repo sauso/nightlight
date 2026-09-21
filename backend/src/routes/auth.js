@@ -3,9 +3,12 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
 import { requireAuth, requireAdmin, JWT_SECRET, SESSION_TOKEN_TTL_DAYS } from '../middleware/auth.js';
+import { isDemoModeActive } from '../middleware/demoMode.js';
 import {
   generateSecret, keyUri, verifyToken, qrDataUrl, isLegacySecret,
   generateBackupCodes, verifyAndConsumeBackupCode, backupCodesRemaining,
@@ -13,6 +16,9 @@ import {
 import { normalizePhoto } from '../lib/photo.js';
 
 const router = Router();
+const DATA_DIR = process.env.DATA_DIR || '/app/data';
+const DEMO_READY_FILE = path.join(DATA_DIR, '.demo-ready');
+const DEMO_GUEST_USERNAME = 'demo-guest';
 
 function appName() {
   return db.prepare("SELECT app_name FROM settings WHERE id = 'app'").get()?.app_name || 'Nightlight';
@@ -149,8 +155,44 @@ const setupLimiter = rateLimit({
   keyGenerator: clientKey,
 });
 
+// Guest sign-in has no account secret to guess, so it gets an IP-only budget separate from the
+// password/MFA limiters. It is skipped completely outside demo mode, preserving the endpoint's plain
+// 404 fail-closed behaviour even if somebody probes it repeatedly on a normal installation.
+const DEMO_GUEST_SIGN_INS_PER_WINDOW = 20;
+const guestLimiter = rateLimit({
+  windowMs: RATE_WINDOW_MS,
+  limit: DEMO_GUEST_SIGN_INS_PER_WINDOW,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => !isDemoModeActive(),
+  keyGenerator: clientKey,
+  message: { error: 'Too many demo sign-ins - please wait a few minutes and try again.' },
+});
+
 function userCount() {
   return db.prepare('SELECT COUNT(*) as c FROM users').get().c;
+}
+
+function demoMaxGuests() {
+  const configured = Number(process.env.DEMO_MAX_GUESTS ?? 25);
+  return Number.isSafeInteger(configured) && configured > 0 ? configured : 25;
+}
+
+const activeGuestCount = db.prepare(
+  // Sessions persist for weeks, but the auth middleware refreshes last_seen_at at most once a
+  // minute. Two minutes therefore keeps an actively browsing guest counted while abandoned tabs
+  // release their slot promptly; this is the exact demo image/seed contract, not session expiry.
+  "SELECT COUNT(*) AS c FROM sessions WHERE user_id = ? AND last_seen_at >= datetime('now', '-2 minutes')"
+);
+const demoGuestByUsername = db.prepare(
+  "SELECT * FROM users WHERE username = ? AND role = 'admin' AND mfa_enabled = 0"
+);
+
+function demoIsFull() {
+  const user = demoGuestByUsername.get(DEMO_GUEST_USERNAME);
+  // Found by code review 2026-09-21: status must use the admission route's active-session rule,
+  // otherwise the lobby sends a visitor into a predictable 429 instead of showing "full".
+  return user ? activeGuestCount.get(user.id).c >= demoMaxGuests() : false;
 }
 
 function toPublicUser(u) {
@@ -214,7 +256,36 @@ function toPublicSession(s, currentSessionId) {
 
 // Tells the frontend whether first-run setup (creating the admin account) is needed.
 router.get('/status', (req, res) => {
-  res.json({ needsSetup: userCount() === 0 });
+  const demo = isDemoModeActive()
+    ? {
+        endsAt: process.env.DEMO_ENDS_AT || null,
+        lobbyUrl: process.env.DEMO_LOBBY_URL || null,
+        // The launcher writes this only after seeding, fakecam publication and camera-path setup;
+        // /api/health is intentionally too shallow to tell the lobby the demo is safe to enter.
+        ready: fs.existsSync(DEMO_READY_FILE),
+        full: demoIsFull(),
+      }
+    : false;
+  res.json({ needsSetup: userCount() === 0, demo });
+});
+
+// Public demo sessions can only ever be minted for the one identity created by demo/seed.mjs. The
+// request body is deliberately ignored: accepting even a user id here would turn an unauthenticated
+// convenience endpoint into an identity selector. Outside exact DEMO_MODE=true, next() produces the
+// same unremarkable 404 as a route that does not exist.
+router.post('/guest', guestLimiter, (req, res, next) => {
+  if (!isDemoModeActive()) return next();
+  const user = demoGuestByUsername.get(DEMO_GUEST_USERNAME);
+  if (!user) return res.status(404).json({ error: 'Demo guest is not available' });
+
+  if (activeGuestCount.get(user.id).c >= demoMaxGuests()) {
+    // 429 is intentional rather than 503: Cloudflare may replace a 5xx body, losing the calm,
+    // actionable message the lobby and in-app auto-sign-in need to show.
+    return res.status(429).json({ error: 'The demo is full - try again in a few minutes.' });
+  }
+
+  const sessionId = createSession(user.id, req.headers['user-agent']);
+  res.json({ token: sign(user, sessionId), user: toPublicUser(user) });
 });
 
 // One-time: create the first admin account. Locked once any user exists.

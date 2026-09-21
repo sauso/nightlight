@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import BackLink from './BackLink.jsx';
+import DemoBanner from './DemoBanner.jsx';
 
 // The app's sticky top header. Top-level pages (Live, Alerts, Family, Settings) show the
 // logo on the left, which taps home to Live. Sub-pages pass `back={{ to, label }}` to show
@@ -10,25 +11,28 @@ import BackLink from './BackLink.jsx';
 // a single logo/back + title row. It's pinned (position: sticky) rather than floating, which
 // sidesteps mobile-browser quirks with top-anchored fixed elements drifting during the
 // address-bar hide/show animation.
-export default function AppHeader({ title, back }) {
+export default function AppHeader({ title, back, showDemoBanner = true }) {
   const navigate = useNavigate();
 
   return (
-    <header className="app-header">
-      <div className="app-header__top-row">
-        {back ? (
-          <BackLink fallback={back} />
-        ) : (
-          <button
-            className="app-header__icon-btn"
-            onClick={() => navigate('/')}
-            aria-label="Go to Live"
-          >
-            <img src="/icons/icon-192.png" alt="" className="app-header__icon" />
-          </button>
-        )}
-        <h1>{title}</h1>
-      </div>
-    </header>
+    <>
+      <header className="app-header">
+        <div className="app-header__top-row">
+          {back ? (
+            <BackLink fallback={back} />
+          ) : (
+            <button
+              className="app-header__icon-btn"
+              onClick={() => navigate('/')}
+              aria-label="Go to Live"
+            >
+              <img src="/icons/icon-192.png" alt="" className="app-header__icon" />
+            </button>
+          )}
+          <h1>{title}</h1>
+        </div>
+      </header>
+      {showDemoBanner && <DemoBanner />}
+    </>
   );
 }

@@ -33,6 +33,7 @@ function mockApi(me, over = {}) {
   vi.spyOn(api, 'get').mockImplementation((path) => {
     const p = String(path);
     if (p.startsWith('/auth/me')) return me ? Promise.resolve(me) : Promise.reject(new Error('401'));
+    if (p === '/auth/status') return Promise.resolve({ needsSetup: false, demo: false });
     if (p.startsWith('/settings/mqtt/status')) return Promise.resolve({ enabled: false, connected: false });
     if (p.startsWith('/settings')) return Promise.resolve(SETTINGS);
     if (p.startsWith('/about')) return Promise.resolve({ version: '0.29.0' });

@@ -1,3 +1,4 @@
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { normalizeRequestPath } from '../lib/httpPath.js';
 
 // DEMO_MODE — makes the running app read-only except for logging in and out, for the public
@@ -16,6 +17,22 @@ export function isDemoModeActive() {
 
 const BLOCKED_MESSAGE = 'This is a read-only public demo - that action is disabled here.';
 
+// The viewer cap limits newly-created login sessions, not the work one admitted browser can ask the
+// server to do. Keep a separate per-IP ceiling in front of API and media signalling so snapshot and
+// WHEP/HLS request floods are bounded too. 600/minute leaves room for normal app bootstrap plus HLS
+// playlist/segment traffic; the public deployment still needs the plan's ~25-viewer load measurement
+// before anyone treats this as a CPU or bandwidth capacity claim.
+const DEMO_REQUESTS_PER_MINUTE = 600;
+export const demoRequestLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: DEMO_REQUESTS_PER_MINUTE,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => !isDemoModeActive(),
+  keyGenerator: (req) => ipKeyGenerator(req.ip),
+  message: { error: 'Too many demo requests - please wait a moment and try again.' },
+});
+
 // Exact METHOD + path pairs a demo visitor may still perform, despite being a mutating verb.
 // EXACT-MATCH, not a /api/auth prefix allow: routes/auth.js has plenty of OTHER POST/PUT/DELETE
 // routes under /api/auth (password change, MFA enrolment, user CRUD...) that must stay blocked
@@ -26,6 +43,7 @@ const BLOCKED_MESSAGE = 'This is a read-only public demo - that action is disabl
 // need for <img>/<video> src URLs — snapshots, clips, recordings, timelapses. Without it the demo
 // wouldn't error, it would just silently fail to show any of that.
 const MUTATION_ALLOWLIST = new Set([
+  'POST /api/auth/guest',
   'POST /api/auth/login',
   'POST /api/auth/login/mfa',
   'POST /api/auth/logout',

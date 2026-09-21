@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
@@ -12,6 +12,8 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [demoSignIn, setDemoSignIn] = useState(false);
+  const signInStarted = useRef(false);
   // When a login needs a second factor, /auth/login hands back a short-lived token instead of a
   // session; we hold it here and swap the form for the code step.
   const [mfaToken, setMfaToken] = useState(null);
@@ -21,8 +23,48 @@ export default function Login() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    api.get('/auth/status').then((s) => setNeedsSetup(s.needsSetup)).catch(() => setNeedsSetup(false));
+    // React StrictMode deliberately re-runs mount effects in development. A ref keeps that safety
+    // probe from minting two guest sessions and consuming two of the shared demo's active slots.
+    if (signInStarted.current) return;
+    signInStarted.current = true;
+    async function chooseSignIn() {
+      let status;
+      try {
+        status = await api.get('/auth/status');
+      } catch {
+        // An unavailable status endpoint most likely belongs to an established normal install;
+        // preserve the existing usable sign-in fallback instead of leaving a blank screen.
+        setNeedsSetup(false);
+        return;
+      }
+      if (!status.demo) {
+        setNeedsSetup(status.needsSetup);
+        return;
+      }
+
+      handleDemoSignIn();
+    }
+    chooseSignIn();
   }, []);
+
+  async function handleDemoSignIn() {
+    // The public demo has exactly one seeded identity. Do not render or populate the credential
+    // form: posting the bodyless guest route makes it impossible for page state to select a user.
+    setDemoSignIn(true);
+    setError('');
+    setBusy(true);
+    try {
+      const result = await api.post('/auth/guest');
+      // As with normal/MFA login, publish the session only after its media token is ready; otherwise
+      // the protected route can observe a transient signed-out state and bounce back here.
+      await login(result.token, result.user);
+      navigate('/');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -73,7 +115,27 @@ export default function Login() {
     setError('');
   }
 
-  if (needsSetup === null) return null;
+  if (needsSetup === null && !demoSignIn) return null;
+
+  if (demoSignIn) {
+    return (
+      <div className="auth-screen">
+        <div className="auth-card">
+          <img src="/icons/icon-192.png" alt="" className="auth-icon" />
+          <h1>{settings.app_name}</h1>
+          <p className="tagline">
+            {busy ? 'Opening the read-only demo…' : 'The read-only demo could not be opened.'}
+          </p>
+          {error && <div className="error-banner">{error}</div>}
+          {error && (
+            <button className="btn btn-primary" type="button" onClick={handleDemoSignIn}>
+              Try again
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="auth-screen">
