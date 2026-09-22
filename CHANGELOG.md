@@ -9,6 +9,20 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-09-22
+
+### Added
+- The public demo now signs visitors into one fixed read-only admin guest automatically (with password
+  login structurally disabled), applies its active-guest cap when admitting new guest sessions, limits
+  per-IP traffic, and reports its deadline, readiness, capacity and optional lobby URL through
+  `/api/auth/status`. Idle sessions stop counting after two minutes but remain valid and count again
+  when used, so the admission cap can be briefly exceeded. It keeps looped camera motion out of seeded
+  sleep history, including sessions that cross a sleep-window boundary, and shows a persistent
+  countdown with clear read-only feedback, a configurable **start again** link, and a retry after a
+  failed automatic sign-in. This is only for hosting a public demo and does nothing on a normal
+  install; the settings, seed script and readiness contract are documented in
+  [docs/demo-mode.md](docs/demo-mode.md).
+
 ## [0.32.0] - 2026-09-21
 
 ### Added

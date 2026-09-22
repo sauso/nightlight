@@ -186,7 +186,7 @@ export default function LiveMonitor() {
       className={`live-monitor ${isActive ? 'live-monitor--active' : 'live-monitor--hidden'}`}
       aria-hidden={!isActive}
     >
-      <AppHeader title={settings.app_name} />
+      <AppHeader title={settings.app_name} showDemoBanner={isActive} />
 
       {/* Pull-to-refresh indicator. Its own height is what pushes the content down (in
           normal flow), so there's no doubled offset from also translating the grid. The

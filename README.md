@@ -608,15 +608,6 @@ same protection.
 Timestamps use your container's local time (see the `TZ` variable above) rather than
 UTC, so they line up with when you actually remember something happening.
 
-## `DEMO_MODE` (not for normal installs)
-
-An internal flag Nightlight's own public demo deployment sets so that every write action
-(besides logging in and out) returns a 403, and the raw log viewer and diagnostics bundle are
-hidden — even from the demo's own admin account. It has no effect unless set to the exact
-string `true`.
-
-You do not need this for a self-hosted install - leave it unset.
-
 ## Troubleshooting
 
 - **Camera shows "No signal"**: double check the RTSP URL works with a tool like VLC

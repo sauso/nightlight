@@ -516,7 +516,11 @@ describe('★ nothing but registerToken writes settings.public_base_url', () => 
       return e.name.endsWith('.js') ? [full] : [];
     });
 
-  test('the column is mentioned only by the schema migration and by lib/push.js', () => {
+  // lib/demoSeed.js is on the list deliberately, decided when it was added: it is the offline seed for the
+  // read-only public demo, runs once at boot on a freshly wiped database, is never reachable from a
+  // request, and only CLEARS the value (sets it to NULL). No caller-supplied address ever reaches it, so
+  // it needs neither the admin check nor normalizeBaseUrl.
+  test('the column is mentioned only by the schema migration, by lib/push.js and by the offline demo seed', () => {
     const src = fileURLToPath(new URL('../src/', import.meta.url));
     const scanned = walk(src).map((f) => path.relative(src, f).split(path.sep).join('/'));
     // The scan must actually REACH the directories a writer would live in. Without this a walker that
@@ -530,7 +534,7 @@ describe('★ nothing but registerToken writes settings.public_base_url', () => 
       .sort();
     assert.deepEqual(
       mentioning,
-      ['db.js', 'lib/push.js'],
+      ['db.js', 'lib/demoSeed.js', 'lib/push.js'],
       'a new source file mentions settings.public_base_url — if it WRITES it, it needs an admin check and normalizeBaseUrl, like registerToken; then add it to this list'
     );
   });

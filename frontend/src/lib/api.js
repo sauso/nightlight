@@ -76,7 +76,14 @@ async function request(method, url, body) {
   }
 
   if (!res.ok) {
-    const err = new Error(data?.error || `Request failed (${res.status})`);
+    // Demo writes are expected exploration, not a frightening permission failure. Keep the backend's
+    // exact marker for policy/audit purposes, but turn it into calm, useful copy everywhere forms
+    // already display err.message; unrelated 403s must retain their specific explanation.
+    const message = res.status === 403
+      && data?.error === 'This is a read-only public demo - that action is disabled here.'
+      ? 'This demo is read-only, so changes are disabled. You can still explore the sample data.'
+      : data?.error || `Request failed (${res.status})`;
+    const err = new Error(message);
     err.status = res.status;
     err.data = data; // lets callers act on structured fields (e.g. needsConfirm)
     throw err;

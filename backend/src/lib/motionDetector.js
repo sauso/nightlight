@@ -13,6 +13,7 @@ import {
   createBedTransitionTracker, OOB_CONFIRM_QUIET_MS, IB_CONFIRM_QUIET_MS, IB_LINK_MS,
 } from './bedTransitionTracker.js';
 import { childSamplingActiveNow } from './sleepAnalysis.js';
+import { isDemoModeActive } from '../middleware/demoMode.js';
 import { killIfSpawned } from './processGuards.js';
 
 // Server-side motion detection. Per camera with detection enabled, a cheap FFmpeg leg reads
@@ -186,6 +187,10 @@ export function motionAlerting(camera) {
 // stops it after wake. A camera with no child (or one outside its window) that isn't a framediff alerter
 // runs no leg. Frame-diff ALERT legs above are NOT window-gated — alerts run 24/7.
 export function motionLegWanted(camera) {
+  // Detection switches do not stop the activity-only sleep sampler. The public demo plays a looped
+  // fake camera, so sampling it would mix synthetic live motion into the deterministic seeded night.
+  // Demo sleep remains enabled for analysis; only its live pixel-diff input is suppressed here.
+  if (isDemoModeActive()) return false;
   if (!camera || camera.disabled) return false;
   if (motionAlerting(camera)) return true;
   // childSamplingActiveNow, not childWindowActiveNow: sampling opens a few hours BEFORE the configured
