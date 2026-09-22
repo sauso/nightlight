@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { isNativeApp } from '../lib/nativeBridge.js';
+import { useDemoStatus } from '../lib/demoStatus.js';
 
 const DISMISS_KEY = 'nightlight_install_dismissed';
 
@@ -15,6 +16,7 @@ function isIOS() {
 }
 
 export default function InstallPrompt() {
+  const demo = useDemoStatus();
   const [deferredEvent, setDeferredEvent] = useState(null);
   const [showIOSInstructions, setShowIOSInstructions] = useState(false);
   const [dismissed, setDismissed] = useState(() => localStorage.getItem(DISMISS_KEY) === '1');
@@ -23,6 +25,11 @@ export default function InstallPrompt() {
     // Never inside the native Capacitor app - you're already "installed" there, and
     // Capacitor's WebView doesn't report display-mode: standalone, so isStandalone()
     // wouldn't catch it.
+    // ⚠️ Deliberately does NOT wait for the demo status. The browser fires `beforeinstallprompt` once per
+    // page load and may do so before /auth/status has answered; a listener attached only after the
+    // status resolves could miss it and silently remove the install prompt from every normal install.
+    // So listen exactly as before and gate only what is RENDERED. In the demo this also means the event
+    // is still intercepted (preventDefault), which suppresses the browser's own install mini-bar.
     if (isNativeApp() || isStandalone() || dismissed) return;
 
     function handleBeforeInstall(e) {
@@ -59,7 +66,7 @@ export default function InstallPrompt() {
     dismiss();
   }
 
-  if (isNativeApp() || dismissed || isStandalone()) return null;
+  if (demo !== null || isNativeApp() || dismissed || isStandalone()) return null;
   if (!deferredEvent && !showIOSInstructions) return null;
 
   return (

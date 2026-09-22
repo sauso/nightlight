@@ -9,6 +9,8 @@
 - **[Operations](operations.md)** — backup, restore, upgrade, rollback.
 - **[Multi-factor authentication](mfa.md)** — enrolling, one-time backup codes, admin/console
   recovery if you lose your authenticator.
+- **[Demo mode](demo-mode.md)** — only for hosting a public read-only demo; not needed for a normal
+  install.
 - **[Design language](design-language.md)** — contributor reference: colors, type, icons.
 
 ## Elsewhere in the repo
