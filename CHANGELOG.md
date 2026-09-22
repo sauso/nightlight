@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-09-22
+
 ### Added
 - The public demo now signs visitors into one fixed read-only admin guest automatically (with password
   login structurally disabled), applies its active-guest cap when admitting new guest sessions, limits
