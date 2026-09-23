@@ -260,8 +260,29 @@ export function applyVerdicts(childId, nightDate, verdicts) {
 // Overlaying at display time rather than overwriting the row is what keeps both facts.
 //
 // `asleep_minutes` is re-derived from the corrected span because the two must agree — a card reading
-// "up at 05:29" above "slept 10h 15m" is visibly self-contradictory. Awake minutes are kept as measured
-// (we cannot know how a correction redistributes them) and the result is floored at zero.
+// "up at 05:29" above "slept 10h 15m" is visibly self-contradictory. Both awake_minutes AND
+// unknown_minutes (issue #442) are kept as measured against the ORIGINAL span rather than recomputed
+// against the corrected one — we cannot know how a correction redistributes either. A span recomputed
+// as `span - awake_minutes` alone would silently count any camera-outage minutes within the corrected
+// span as sleep again, reintroducing the exact bug #442 fixed, the moment a parent corrects a night
+// that had one. `unknown_minutes` is NULL on a row computed before that fix shipped, which `?? 0`
+// treats the same as a night with no outage — the best available answer for a row with no better
+// information, matching how `awake_minutes` is already treated.
+//
+// ⚠️ KNOWN LIMIT, both directions, found by adversarial review — a documented gap, not a silent one.
+// `unknown_minutes` is a single COUNT over the ORIGINAL [onset, sleepEnd), not a set of ranges, so it
+// cannot track which specific minutes were unobserved once the span itself moves:
+//   - Shrinking the span (e.g. a later corrected onset) still subtracts the FULL original count, even
+//     though part of the original outage may now sit outside the corrected span — OVER-subtracts,
+//     understating the corrected sleep total. The safer of the two directions: nobody is told a
+//     duration is more confident than it is.
+//   - Expanding the span BACKWARD past the original onset into territory computeNight() never
+//     measured (an outage that happened before the algorithm's own onset, so it was never counted
+//     toward unknown_minutes at all) — UNDER-subtracts, silently re-admitting exactly the outage #442
+//     exists to exclude, for that specific correction shape.
+// A precise fix needs the actual unobserved MINUTE RANGES persisted, not one aggregate count, and a
+// real recompute against them — a materially bigger change than this fix's scope. Not attempted here.
+// The result is floored at zero.
 export function applyCorrection(childId, night) {
   if (!night || !night.night_date) return night;
   const r = getReviewStmt.get(childId, night.night_date);
@@ -279,7 +300,7 @@ export function applyCorrection(childId, night) {
   };
   if (onset && wake) {
     const span = Math.round((Date.parse(`${wake.replace(' ', 'T')}Z`) - Date.parse(`${onset.replace(' ', 'T')}Z`)) / 60000);
-    out.asleep_minutes = Math.max(0, span - (night.awake_minutes ?? 0));
+    out.asleep_minutes = Math.max(0, span - (night.awake_minutes ?? 0) - (night.unknown_minutes ?? 0));
   }
   return out;
 }

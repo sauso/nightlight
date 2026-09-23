@@ -639,6 +639,35 @@ test('asleep minutes are re-derived so the card cannot contradict itself', () =>
   assert.equal(out.asleep_minutes, 599, '19:30 to 05:29 is 9h59m');
 });
 
+test('★★ a corrected night does not re-count a camera outage as sleep (issue #442, adversarial review finding)', () => {
+  // Found by adversarial review of #442's own fix: applyCorrection re-derives asleep_minutes as
+  // `span - awake_minutes`, and a version that stops there silently re-manufactures sleep out of an
+  // outage the moment a parent corrects ANY night that had one — reproducing the exact bug #442 fixed,
+  // on every read of that night from then on.
+  const night = {
+    night_date: DATE, onset_at: exactSql(at(19, 30)), wake_at: exactSql(at(7, 0, 1)),
+    asleep_minutes: 485, awake_minutes: 0, unknown_minutes: 200, // a real 200-minute outage this night
+  };
+  saveNightReview(CHILD, DATE, { trueWakeAt: exactSql(at(5, 29, 1)) }); // corrects wake to 05:29
+  const out = applyCorrection(CHILD, night);
+  // 19:30 to 05:29 is 599 minutes; the 200-minute outage must still not count as sleep after the
+  // correction — only awake_minutes (0) and unknown_minutes (200) are subtracted from the span.
+  assert.equal(out.asleep_minutes, 399, 'the outage must stay excluded after a correction, not silently readmitted');
+});
+
+test('a row computed before this fix (unknown_minutes is NULL) is treated as having no outage', () => {
+  // Compatibility: a night computed before issue #442 shipped has no unknown_minutes column value.
+  // `?? 0` is the best available answer, not a crash or a wrong-shaped subtraction — matches how
+  // awake_minutes is already treated when absent.
+  const night = {
+    night_date: DATE, onset_at: exactSql(at(19, 30)), wake_at: exactSql(at(7, 0, 1)),
+    asleep_minutes: 690, awake_minutes: 0, unknown_minutes: null,
+  };
+  saveNightReview(CHILD, DATE, { trueWakeAt: exactSql(at(5, 29, 1)) });
+  const out = applyCorrection(CHILD, night);
+  assert.equal(out.asleep_minutes, 599, 'unchanged from before this fix when there is no unknown_minutes to subtract');
+});
+
 test('a night nobody corrected is passed through untouched', () => {
   const night = { night_date: DATE, onset_at: 'x', wake_at: 'y', asleep_minutes: 1 };
   assert.deepEqual(applyCorrection(CHILD, night), night);

@@ -524,6 +524,25 @@ describe('what a night lists', () => {
     expect(await screen.findByText(/100%/)).toBeTruthy();
   });
 
+  test('a night with a data gap shows the "No data" legend entry (issue #442)', async () => {
+    // hasGap follows the same conditional-legend pattern as hasRoom/hasChildOut — shipped with no
+    // test covering either branch (adversarial review finding).
+    mockSleep({
+      night: { ...NIGHT, segments: [{ state: 'gap', from_at: NIGHT.onset_at, to_at: NIGHT.wake_at, minutes: 5 }] },
+    });
+    mount();
+    expect(await screen.findByText('No data')).toBeTruthy();
+  });
+
+  test('...and is absent on an ordinary night with no gap', async () => {
+    mockSleep({
+      night: { ...NIGHT, segments: [{ state: 'asleep', from_at: NIGHT.onset_at, to_at: NIGHT.wake_at, minutes: 5 }] },
+    });
+    mount();
+    await screen.findByText('Wake-ups');
+    expect(screen.queryByText('No data')).toBeNull();
+  });
+
   test('★ a live night measures coverage against elapsed time, not the whole window', async () => {
     // Against the full window, a live night would report ~50% coverage at midnight and look broken.
     // `as_of` is what makes the number honest while the night is still running.

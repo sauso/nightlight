@@ -124,6 +124,31 @@ test('a recompute that still scores the night is written', () => {
   assert.ok(row.asleep_minutes > 1);
 });
 
+test('★★ unknown_minutes round-trips through storage (issue #442)', () => {
+  // The persistence half of #442's fix: applyCorrection() (sleepReviews.js) needs this column to
+  // avoid re-counting an outage as sleep once a parent corrects a night — found by adversarial
+  // review. sleepAnalysis.test.js already covers computeNight()'s in-memory computation of this
+  // figure exhaustively; the narrow slice that leaves untested is whether it actually survives a
+  // real computeAndStoreNight → SQLite → SELECT round trip, not just live in memory.
+  for (let t = at(19, 30); t < at(20, 0); t = new Date(t.getTime() + 60000)) {
+    // A brief active burst first (else the empty-bed guard fires instead of scoring the night 'ok'),
+    // then 25 real quiet minutes, which establishes onset.
+    const moving = t < at(19, 35);
+    insertSample.run(CAM, sqlTime(t), moving ? 0.4 : 0.004, moving ? 0.4 : 0.004);
+  }
+  // deliberately no samples 20:00–20:30 — a genuine 30-minute outage
+  for (let t = at(20, 30); t < at(7, 0, 1); t = new Date(t.getTime() + 60000)) {
+    insertSample.run(CAM, sqlTime(t), 0.004, 0.004); // real quiet the rest of the night
+  }
+
+  const summary = computeAndStoreNight(CHILD, DATE);
+  assert.equal(summary.status, 'ok');
+  assert.equal(summary.unknown_minutes, 30, 'sanity: computeNight itself must see the outage');
+
+  const row = db.prepare('SELECT unknown_minutes FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(CHILD, DATE);
+  assert.equal(row.unknown_minutes, 30, 'the value must survive the round trip through SQLite, not just live in memory');
+});
+
 test('an empty night counts as scored and is protected too', () => {
   // `empty` is a real measurement — "we watched, and nobody was in the bed". Losing it to a no_data
   // would be the same data loss as losing an `ok`.
