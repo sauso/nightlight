@@ -42,11 +42,18 @@ const TAIL_SEC = 2;
 export const SEGMENT_SETTLE_MS = 5000;
 const MAX_ACTIVE_MS = 15 * 60 * 1000; // absolute backstop if a stop timer were ever lost
 
-// cameraId -> { id, startMs, timer, userId, holdOwner }
+// cameraId -> { id, startMs, timer, userId, holdOwner, preRollSec }
 // `holdOwner` is the exact key this capture's ring lease is registered under (ondemandHoldOwner(id)).
 // Captured here rather than recomputed at release time (#445): by the time a recording's `finally`
 // runs, `active.get(cameraId)` may already belong to the NEXT overlapping recording on this camera, so
 // releasing "whatever's active now" would release the WRONG lease.
+// `preRollSec` is likewise the value read ONCE at Start, not re-read from settings at Stop (#446): a
+// settings save mid-recording must not change what THIS capture already promised — started_at and the
+// ring hold both used the Start-time pre-roll, so the Stop-time extraction has to agree with them or
+// the window, started_at and duration_s all disagree with each other (the issue measured a 30s
+// recording's reported duration collapse to 0s when pre-roll was edited to 0 mid-capture). Same
+// reasoning as the max-duration cap, which was already snapshotted this way — the timer is set once,
+// at Start, from the value current then.
 const active = new Map();
 
 export function getOndemandSettings() {
@@ -120,7 +127,7 @@ export function startRecording(camera, userId = null) {
   }, Math.min(maxDurationSec, MAX_ACTIVE_MS / 1000) * 1000);
   timer.unref?.();
 
-  active.set(camera.id, { id: info.lastInsertRowid, startMs, timer, userId, holdOwner });
+  active.set(camera.id, { id: info.lastInsertRowid, startMs, timer, userId, holdOwner, preRollSec });
   logger.info(`[rec] recording started for "${camera.name}" (id ${info.lastInsertRowid}, pre-roll ${preRollSec}s)`);
   return recordingState(camera.id);
 }
@@ -138,7 +145,11 @@ export async function stopRecording(cameraId, { settleMs = SEGMENT_SETTLE_MS } =
 
   const cam = db.prepare('SELECT id, name FROM cameras WHERE id = ?').get(cameraId) || { name: cameraId };
   const stopMs = Date.now();
-  const { preRollSec } = getOndemandSettings();
+  // The pre-roll THIS capture started with (#446), not a fresh getOndemandSettings() read — started_at
+  // and the ring hold both used the Start-time value (see the comment on `active` above), so re-reading
+  // here would let the extraction window disagree with both of them. The max-duration cap is already
+  // snapshotted the same way, for the same reason.
+  const { preRollSec } = a;
   // extractClip cuts [at - pre, at + post]; anchor at the button press so `post` is the live span.
   const postRollSec = Math.max(1, Math.round((stopMs - a.startMs) / 1000) + TAIL_SEC);
 

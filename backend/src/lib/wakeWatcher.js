@@ -4,7 +4,7 @@ import { onMinuteFlushed } from './activityTracker.js';
 import { SLEEP_THRESHOLDS, childTracksSleep, childWindowActiveNow } from './sleepAnalysis.js';
 import { holdRing, releaseRing, isSegmenterRunning } from './clipRecorder.js';
 import { RING_OWNER } from './ringHolds.js';
-import { captureWakeClip, pruneWakeClips } from './recordings.js';
+import { captureWakeClip, pruneWakeClips, getWakeClipSettings } from './recordings.js';
 
 // Live wake detection, for recording only — it never alerts.
 //
@@ -113,7 +113,16 @@ export function handleMinute({ cameraId, bucketStart, motionPeak, soundPeak }) {
       st.run = { startMs: at, activeCount: 0, lastActiveMs: at, captured: false, holding: false };
       // Hold from the first active minute so the wake's opening survives the ~63s ring long enough to
       // find out whether this is a wake or just a stir.
-      if (isSegmenterRunning(cameraId)) {
+      //
+      // #446: only take the hold when wake clips are actually enabled. captureWakeClip already returns
+      // null when they're off (recordings.js), so a hold taken anyway protects nothing — it just sits
+      // there. clipCapture.js's reconcileClipRing defers stopping a ring that's no longer wanted while
+      // ANY hold exists, so a restless child kept creating pointless WAKE holds after an admin switched
+      // wake clips off, and the ring's stop kept getting deferred until the sleep window ended. The run
+      // itself, its capture attempt and endRun's release are unchanged — only whether THIS run ever
+      // takes a hold does; `st.run.holding` stays false when it doesn't, and the existing
+      // `if (st.run?.holding)` guards below already treat that as "nothing to release".
+      if (isSegmenterRunning(cameraId) && getWakeClipSettings().enabled) {
         holdRing(cameraId, RING_OWNER.WAKE, at - HOLD_LEAD_MS);
         st.run.holding = true;
       }
