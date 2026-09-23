@@ -835,6 +835,108 @@
     ]
   },
   {
+    "label": "★ #446 M1: reconcileClipRing's resize branch is removed — a settings change no longer resizes a running ring",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "    setRingDepth(camera.id, ringSizing());",
+    "replace": ";",
+    "expect": "killed",
+    "tests": [
+      "clip-capture.test.js"
+    ]
+  },
+  {
+    "label": "★ #446 M2: the hold deferral is removed — a held ring is stopped out from under its holder",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "    if (effectiveHold(camera.id) != null) {",
+    "replace": "    if (false) {",
+    "expect": "killed",
+    "tests": [
+      "clip-capture.test.js"
+    ]
+  },
+  {
+    "label": "★ #446 M3: the hold deferral is applied unconditionally — an unheld, unwanted ring never stops",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "    if (effectiveHold(camera.id) != null) {",
+    "replace": "    if (true) {",
+    "expect": "killed",
+    "tests": [
+      "clip-capture.test.js"
+    ]
+  },
+  {
+    "label": "★ #446 M4: stopRecording re-reads getOndemandSettings().preRollSec instead of the Start-time snapshot",
+    "file": "backend/src/lib/recordings.js",
+    "find": "  const { preRollSec } = a;",
+    "replace": "  const { preRollSec } = getOndemandSettings();",
+    "expect": "killed",
+    "tests": [
+      "recordings-lifecycle.test.js"
+    ]
+  },
+  {
+    "label": "★ #446 M5: enqueueClip's hold for the detection clip is never taken",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "  holdRing(camera.id, holdOwner, clipCoverStartMs(at, preRollSec));",
+    "replace": ";",
+    "expect": "killed",
+    "tests": [
+      "clip-capture.test.js"
+    ]
+  },
+  {
+    "label": "★ #446 M6: enqueueClip's release of its own detection-clip hold is removed",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "      releaseRing(camera.id, holdOwner);",
+    "replace": ";",
+    "expect": "killed",
+    "tests": [
+      "clip-capture.test.js"
+    ]
+  },
+  {
+    "label": "★ #446 M7: setRingDepth reports success without actually resizing the ring",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "  entry.ringDepthMs = ringDepthMsFor(preRollSec, postRollSec);\r\n  return true;",
+    "replace": "  return true;",
+    "expect": "killed",
+    "tests": [
+      "clip-capture.test.js"
+    ]
+  },
+  {
+    "label": "★ #446 M8: the detection clip's hold is too shallow — clipCoverStartMs collapses to the bare trigger time",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "  holdRing(camera.id, holdOwner, clipCoverStartMs(at, preRollSec));",
+    "replace": "  holdRing(camera.id, holdOwner, at);",
+    "expect": "killed",
+    "tests": [
+      "clip-capture.test.js"
+    ],
+    "note": "Codex F2: a lease that exists but is too shallow must still fail the case it exists for — this is why T6 asserts the exact effectiveHold value, not just that a hold exists."
+  },
+  {
+    "label": "★ #446 M9: ringSizing ignores the on-demand pre-roll entirely",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "  return { preRollSec: Math.max(preRollSec, ond.enabled ? ond.preRollSec : 0), postRollSec };",
+    "replace": "  return { preRollSec, postRollSec };",
+    "expect": "killed",
+    "tests": [
+      "clip-capture.test.js"
+    ]
+  },
+  {
+    "label": "★ #446 M10: wakeWatcher takes a WAKE hold even when wake clips are disabled",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "      if (isSegmenterRunning(cameraId) && getWakeClipSettings().enabled) {",
+    "replace": "      if (isSegmenterRunning(cameraId)) {",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "note": "captureWakeClip already no-ops when wake clips are off (recordings.js); a hold taken anyway kept clipCapture.js's reconcileClipRing deferring the ring's stop for a restless child until the sleep window ended."
+  },
+  {
     "label": "routes/recordings: DELETE reports success for an id that does not exist",
     "file": "backend/src/routes/recordings.js",
     "find": "  if (!row) return res.status(404).json({ error: 'No recording for this id' });\r\n  deleteRecording(req.params.id);",

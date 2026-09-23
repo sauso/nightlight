@@ -159,12 +159,12 @@ describe('★ settings.js: the global wake-clip switch re-arms every camera imme
   });
 
   // The STOP direction for THIS route is not provable through a real HTTP call either, for the same
-  // isSegmenterRunning-dies-first reason documented at the top of this file — and unlike children.js's
-  // reconcileChildLegs, this route's re-arm loop has no separate function to call directly; it just
-  // calls the already-exported restartClipCapture, which clip-capture.test.js's "restarting a camera
-  // that no longer wants the ring leaves it stopped" test already exercises synchronously. The wake-
-  // clips-specific case (a camera whose ONLY reason to buffer was wake clips) is added there alongside
-  // it, rather than duplicated here against a route that cannot reliably prove it.
+  // isSegmenterRunning-dies-first reason documented at the top of this file. #446: the route no longer
+  // calls restartClipCapture (removed) — it calls applyRecordingSettingsChange, which loops every
+  // enabled camera through reconcileClipRing exactly as clip-capture.test.js's "applyRecordingSettingsChange
+  // stops a wake-only ring once wake clips are turned off globally" test already exercises
+  // synchronously. That test IS the wake-clips-specific case (a camera whose ONLY reason to buffer was
+  // wake clips), so it is not duplicated here against a route that cannot reliably prove it.
 
   test('a settings save that does not touch wake clips does not restart (and so does not wipe) the ring', async () => {
     startClipCapture(camRow());

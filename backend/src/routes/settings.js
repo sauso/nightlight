@@ -2,7 +2,7 @@ import { Router } from 'express';
 import db from '../db.js';
 import { requireAuth, requireAdmin, optionalAuth, isAdminRequest } from '../middleware/auth.js';
 import { refreshMqttConnection, mqttStatus } from '../lib/mqttClient.js';
-import { restartClipCapture } from '../lib/clipCapture.js';
+import { applyRecordingSettingsChange } from '../lib/clipCapture.js';
 import { clipStorageStats, sweepClips } from '../lib/clipStorage.js';
 import { wakeClipStats } from '../lib/recordings.js';
 
@@ -304,16 +304,19 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     'app'
   );
   refreshMqttConnection();
-  // New pre/post-roll changes the required ring depth, so re-arm any camera that's recording.
+  // New pre/post-roll changes the required ring depth, and on-demand/wake-clips changes what wants the
+  // ring at all — re-evaluate every enabled camera's ring against the new settings.
+  //
+  // #446: this used to STOP AND RESTART every enabled camera's segmenter for ANY of these changes —
+  // which deleted every ring segment and cleared every hold (stopSegmenter's clearHolds), destroying an
+  // active recording, a wake-clip hold, or a detection clip mid-extraction, on nothing more than an
+  // admin editing a pre-roll number. applyRecordingSettingsChange resizes a running, still-wanted ring
+  // IN PLACE instead (no restart needed — depth is a plain field the janitor re-reads every tick), and
+  // only stops a camera that no longer wants the ring at ALL — deferring even that stop while an
+  // in-flight capture still holds it, so the stop happens on a later reconcile once the hold clears
+  // rather than destroying that capture's footage. See clipCapture.js's reconcileClipRing.
   if (clipLenChanged || ondemandChanged || wakeClipsChanged) {
-    // Every enabled camera, not just the clip-recording ones: with on-demand on, a camera that doesn't
-    // record detections still needs a ring for Record's pre-roll (and must lose it when turned off) —
-    // and the same is true of a camera whose only reason to buffer is a sleep-tracked child's wake
-    // clips (issue #387). restartClipCapture -> clipRingWanted re-evaluates all three reasons, so this
-    // is a no-op for any camera none of them apply to.
-    for (const cam of db.prepare('SELECT * FROM cameras WHERE disabled = 0').all()) {
-      restartClipCapture(cam);
-    }
+    applyRecordingSettingsChange();
   }
   // Tighter retention should apply now, not just at the next 15-min sweep.
   if (retentionChanged) {

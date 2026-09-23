@@ -86,8 +86,11 @@ night — which is why the clip is deliberately bounded to its opening rather th
 few seconds of recent video before the wake-up is even confirmed — the same rolling buffer that powers
 on-demand recording and detection clips. Turning "Record wake-ups without alerting" on keeps that
 buffer running on each of the child's assigned cameras, the same as switching on-demand recording on
-would, even if both of the other two recording features are off. Turning it off drops that buffering
-immediately, unless something else on the same camera still needs it.
+would, even if both of the other two recording features are off. Turning it off immediately stops any
+*new* wake-up from holding that buffer open, but the buffering itself only drops once nothing else on
+the camera still needs it — including a wake-up that was already being watched at the moment you turned
+it off, which is allowed to run to completion first (see *When the buffering starts* under On-demand
+recordings, above, for how long that can take and when buffering actually stops).
 
 ---
 
@@ -126,7 +129,7 @@ Capture a moment yourself. Because every camera keeps a rolling buffer, pressing
 
 | Setting | Default | Range | What it does |
 |---|---|---|---|
-| Show a Record button on each camera | On | — | Switching this off also stops the per-camera buffering |
+| Show a Record button on each camera | On | — | Switching this off also stops the per-camera buffering (see *When the buffering starts*, below, for exactly when) |
 | Capture before (seconds) | 30 | 0–60 | How far back pressing Record reaches |
 | Auto-stop after (seconds) | 120 | 5–600 | Stops a recording someone forgot to end |
 
@@ -139,8 +142,26 @@ you don't have to turn anything else on. Note what this costs, since it applies 
 this setting is on: one extra FFmpeg process per camera, reading the stream Nightlight already pulls
 (no second connection to the camera itself), writing a rolling buffer under `clips/.ring/`. The buffer
 is sized to the deeper of the two pre-rolls plus a small margin — about **a minute** at the default
-settings — and old segments are continuously discarded, so it doesn't grow. Turning **Show a Record
-button on each camera** off stops the buffering on every camera that isn't also saving detection clips.
+settings — and old segments are continuously discarded, so it doesn't grow.
+
+**Changing these settings does not restart buffering or disturb a capture in progress.** A pre/post-roll
+edit, or switching on-demand or wake clips on or off, resizes each camera's buffer in place rather than
+stopping and restarting it — so a recording, a wake-clip capture or a detection clip that's already
+under way keeps everything it needs, and a finished recording always reports the pre-roll length it
+actually started with, not whatever the setting has since been changed to.
+Turning **Show a Record button on each camera** off stops the buffering on every camera that isn't also
+saving detection clips or wake clips — but *not instantly* if that camera has a capture already in
+progress: the buffer keeps running until every such capture finishes, then stops at Nightlight's next
+periodic check, which runs about **every 5 minutes**. What "finishes" can take varies with what's in
+flight: an on-demand recording runs until it hits its auto-stop cap above, at most 600 seconds; a
+detection clip runs until it's saved, typically a few seconds; a wake-up already being watched (see
+*Wake clips*, above) runs until it ends, normally a few minutes but up to 20 minutes if the camera stops
+reporting partway through it. So the *total* delay from flipping the switch to the buffering actually
+stopping is that in-progress time plus up to 5 more minutes for the next periodic check — it is not
+simply "5 minutes." The same applies to turning **Record wake-ups without alerting** off, with one
+difference: that switch also stops any *new* wake-up from starting a fresh capture, so only a wake-up
+already under way at the moment you flip it can still hold that camera's buffering open. This is
+deliberate: stopping immediately would have deleted the very footage that capture was still reading.
 
 **No Record button on a camera?** The button hides itself when that camera isn't buffering, because
 reaching backward is the whole point and there'd be nothing to reach into. Check that on-demand
