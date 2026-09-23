@@ -173,6 +173,44 @@ function userCount() {
   return db.prepare('SELECT COUNT(*) as c FROM users').get().c;
 }
 
+// Thrown by keepingAnAdmin (never sent to a client directly) so its two call sites can tell "the
+// mutation would leave no admin" apart from any other error and answer 409 instead of 500.
+class LastAdminError extends Error {}
+
+const adminCount = db.prepare("SELECT COUNT(*) AS c FROM users WHERE role = 'admin'");
+
+// Issue #441: the sole admin could demote themselves via PUT (sending role=caregiver), and the very
+// next request from ANYONE reads the new role straight from the database (middleware/auth.js, issue
+// #261) — so the install lost anyone who could manage accounts or settings, immediately and with no
+// way back (first-run /setup refuses once a user exists; see the recovery script
+// backend/src/scripts/promote-admin.js). PUT is the real path here: DELETE /users/:id already blocks
+// self-delete outright (checked in that route before this wrapper is ever reached), so wrapping it in
+// keepingAnAdmin too is defence in depth against deleting a DIFFERENT admin down to zero, not against
+// self-delete (see that route's own comment).
+//
+// This checks the admin count AFTER `mutate` runs, inside the same transaction, rather than before —
+// a pre-check only rules out the one write path it was written against, while a post-condition holds
+// for every way `mutate` could reduce the count, including ones added later. If it would leave zero
+// admins, the whole transaction (including any session/push-token deletes `mutate` already made)
+// rolls back, so a rejected change is truly a no-op, not a partial one.
+//
+// ⚠️ NOT a defence against concurrent requests racing each other — Node runs each request's
+// middleware and handler synchronously, back to back, so two "concurrent" admin-demoting requests
+// are already serialized before either reaches here; a check-then-write implementation would pass a
+// concurrency test today for that reason alone. The post-condition-in-a-transaction shape is what
+// keeps the invariant true if that ever stops being so (a future await inside the handler, a
+// multi-process deployment) — the test suite's concurrency cases pin today's serialized behaviour,
+// they cannot by themselves prove this design over a naive one, and the PR says so.
+function keepingAnAdmin(mutate) {
+  return db.transaction(() => {
+    const out = mutate();
+    if (adminCount.get().c === 0) throw new LastAdminError();
+    return out;
+  })();
+}
+
+const LAST_ADMIN_MESSAGE = 'This is the only admin account. Make another account an admin first, then change this one.';
+
 function demoMaxGuests() {
   const configured = Number(process.env.DEMO_MAX_GUESTS ?? 25);
   return Number.isSafeInteger(configured) && configured > 0 ? configured : 25;
@@ -471,31 +509,41 @@ router.put('/users/:id', requireAuth, requireAdmin, (req, res) => {
   let photo;
   try { photo = normalizePhoto(req.body?.photo, existing.photo); } catch (e) { return res.status(400).json({ error: e.message }); }
 
-  // A password reset means the old credential can no longer be trusted - any session
-  // opened under it shouldn't outlive it. Spares only the requesting admin's own
-  // current session, for the case where they're resetting their own password.
-  //
-  // The push_tokens cleanup runs FIRST, as a subquery over the sessions about to be deleted - it
-  // has to see them before the next statement removes them. Same reasoning as /logout: an ended
-  // session must also stop that device's push registration, not just its API access.
-  if (password) {
-    db.prepare(
-      'DELETE FROM push_tokens WHERE session_id IN (SELECT id FROM sessions WHERE user_id = ? AND id != ?)'
-    ).run(req.params.id, req.user.sid);
-    db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.params.id, req.user.sid);
-  }
+  // #441: the password-driven deletes below AND the role UPDATE both run inside keepingAnAdmin, so a
+  // demotion that would leave the install with no admin rolls back BOTH — otherwise a rejected
+  // request could still have quietly deleted the other sessions/tokens (see LastAdminError).
+  try {
+    keepingAnAdmin(() => {
+      // A password reset means the old credential can no longer be trusted - any session
+      // opened under it shouldn't outlive it. Spares only the requesting admin's own
+      // current session, for the case where they're resetting their own password.
+      //
+      // The push_tokens cleanup runs FIRST, as a subquery over the sessions about to be deleted - it
+      // has to see them before the next statement removes them. Same reasoning as /logout: an ended
+      // session must also stop that device's push registration, not just its API access.
+      if (password) {
+        db.prepare(
+          'DELETE FROM push_tokens WHERE session_id IN (SELECT id FROM sessions WHERE user_id = ? AND id != ?)'
+        ).run(req.params.id, req.user.sid);
+        db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.params.id, req.user.sid);
+      }
 
-  db.prepare(
-    'UPDATE users SET username = ?, role = ?, first_name = ?, last_name = ?, password_hash = ?, photo = ? WHERE id = ?'
-  ).run(
-    username?.trim() || existing.username,
-    role === 'admin' || role === 'caregiver' ? role : existing.role,
-    first_name !== undefined ? first_name?.trim() || null : existing.first_name,
-    last_name !== undefined ? last_name?.trim() || null : existing.last_name,
-    password_hash,
-    photo,
-    req.params.id
-  );
+      db.prepare(
+        'UPDATE users SET username = ?, role = ?, first_name = ?, last_name = ?, password_hash = ?, photo = ? WHERE id = ?'
+      ).run(
+        username?.trim() || existing.username,
+        role === 'admin' || role === 'caregiver' ? role : existing.role,
+        first_name !== undefined ? first_name?.trim() || null : existing.first_name,
+        last_name !== undefined ? last_name?.trim() || null : existing.last_name,
+        password_hash,
+        photo,
+        req.params.id
+      );
+    });
+  } catch (e) {
+    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });
+    throw e;
+  }
   res.json(toPublicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id)));
 });
 
@@ -606,14 +654,28 @@ router.delete('/users/:id', requireAuth, requireAdmin, (req, res) => {
   if (req.params.id === req.user.id) {
     return res.status(400).json({ error: "You can't remove your own account" });
   }
-  // push_tokens.user_id has no FK/cascade (GHSA-q98f) — a removed caregiver's device otherwise kept
-  // receiving alerts, including camera-snapshot image links, indefinitely. sendToAll (lib/push.js)
-  // also filters its recipient query against live users as defense in depth, so a row missed here (or
-  // by a future caller of this route's logic) still can't be delivered to — but the row should still
-  // be deleted, not just excluded, since a stale row otherwise makes push.js's recipient count read
-  // wrong forever.
-  db.prepare('DELETE FROM push_tokens WHERE user_id = ?').run(req.params.id);
-  db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
+  // #441, defence in depth: today this can never actually fire. The self-delete guard above and the
+  // fact that requireAdmin re-checks the LIVE role on every request (issue #261) already mean the
+  // caller was an admin at the moment of this synchronous, non-`await`ing handler — deleting anyone
+  // else can only reduce a count of >=2 admins, or delete a caregiver and not touch the count at all.
+  // It costs one wrapper to hold the same invariant as PUT /users/:id, and it stops being a no-op the
+  // moment this route (or anything reachable from it) grows an `await` before the deletes, which
+  // would let another request interleave.
+  try {
+    keepingAnAdmin(() => {
+      // push_tokens.user_id has no FK/cascade (GHSA-q98f) — a removed caregiver's device otherwise kept
+      // receiving alerts, including camera-snapshot image links, indefinitely. sendToAll (lib/push.js)
+      // also filters its recipient query against live users as defense in depth, so a row missed here (or
+      // by a future caller of this route's logic) still can't be delivered to — but the row should still
+      // be deleted, not just excluded, since a stale row otherwise makes push.js's recipient count read
+      // wrong forever.
+      db.prepare('DELETE FROM push_tokens WHERE user_id = ?').run(req.params.id);
+      db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
+    });
+  } catch (e) {
+    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });
+    throw e;
+  }
   res.status(204).end();
 });
 

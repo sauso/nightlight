@@ -53,6 +53,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   delayed until nothing is still capturing from it. Also fixed: an on-demand recording could report the
   wrong length if its pre-roll setting was changed while it was still running — a recording now always
   reports the length it actually captured, not whatever the setting happens to be when it's stopped.
+- **The sole administrator could change their own account to caregiver, leaving an install with no one
+  who could manage accounts or settings and no way back in** — first-run setup only runs once, before
+  any account exists. Changing the last admin to caregiver, or removing the last admin, is now refused
+  with a clear message; the Caregivers screen also explains this up front on the only admin's account,
+  before a request is even sent. Installs that already lost their last admin this way have a new
+  console recovery command — see [docs/mfa.md](docs/mfa.md)'s Recovery section.
 
 ## [0.33.0] - 2026-09-22
 
