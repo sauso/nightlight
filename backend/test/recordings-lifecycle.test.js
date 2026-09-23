@@ -232,6 +232,30 @@ describe('★ stopRecording', () => {
   });
 });
 
+// --- pre-roll is snapshotted at Start, not re-read at Stop (#446) -----------------------------------
+//
+// The issue: `stopRecording` used to call `getOndemandSettings()` fresh, while `startRecording` had
+// already used the pre-roll current AT START for `started_at` and the hold depth. Editing the setting
+// mid-recording made the extraction window, `duration_s` and `started_at` disagree — the issue measured
+// a 30s recording's reported duration collapse to 0s when pre-roll was edited to 0 mid-capture.
+describe('★ #446 — pre-roll is snapshotted at Start, not re-read at Stop', () => {
+  test('T7 — editing pre-roll mid-recording does not shrink duration_s (fails on current code)', async () => {
+    setSettings({ ondemand_pre_roll_s: 30 });
+    armRing();
+    const st = startRecording(camera());
+    const startedAtBefore = rowOf(st.id).started_at;
+    // Edited mid-recording, after Start already read 30s for started_at and the hold depth.
+    setSettings({ ondemand_pre_roll_s: 0 });
+    await stopRecording(CAM, { settleMs: 0 });
+    const row = rowOf(st.id);
+    assert.equal(row.started_at, startedAtBefore, 'started_at moved after a mid-recording settings edit');
+    // Same floor as the sibling test above: 30s pre-roll (the value THIS recording started with) + at
+    // least 1s of live span + the tail. If stopRecording re-reads the NEW pre-roll (0) instead of the
+    // snapshot, duration_s collapses to just the tail (~1-3s) — the issue's measured 30s -> 0s, #446.
+    assert.ok(row.duration_s >= 31, `duration_s ${row.duration_s} does not include the pre-roll it started with (issue #446)`);
+  });
+});
+
 // --- overlapping lifecycles (#445) -------------------------------------------------------------------
 //
 // The issue: `startRecording` used to key its ring hold with the bare `RING_OWNER.ONDEMAND` (a single

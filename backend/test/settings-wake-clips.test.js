@@ -209,3 +209,23 @@ describe('permissions', () => {
     assert.equal(get().wake_clips_enabled, 1);
   });
 });
+
+// ★ #446 — a source-wiring assertion, same house pattern as ring-holds.test.js's "the wiring in the
+// callers": the registry (or here, clipCapture.js's reconcile logic) being right is only half of it —
+// review of earlier issues (#255, #277) found the call site wired back up to the OLD, wrong function
+// with the rest of the suite staying green, because nothing referenced what the route actually calls.
+//
+// This route itself CANNOT be tested against a live ring: PATH is not emptied in this file (a real
+// ffmpeg spawn against a bogus RTSP path is otherwise fine for a settings round-trip test, but would
+// leak a relaunching process into a live-ring assertion here), and the route's own handler is exercised
+// end-to-end elsewhere (children-clip-ring-reconcile.test.js's "turning wake clips ON..." case) for the
+// one direction an HTTP round trip CAN prove. What that can't prove — that the route calls the SAFE,
+// resize-in-place function rather than the removed restart-and-wipe one — is what this reads for.
+describe('★ #446 — the settings route is wired to the safe resize function, not the removed restart', () => {
+  test('routes/settings.js calls applyRecordingSettingsChange, and no longer references restartClipCapture', async () => {
+    const fs = await import('node:fs');
+    const src = fs.readFileSync(new URL('../src/routes/settings.js', import.meta.url), 'utf8');
+    assert.match(src, /applyRecordingSettingsChange\(/, 'the route no longer calls applyRecordingSettingsChange');
+    assert.ok(!/restartClipCapture/.test(src), 'the route still references the removed restartClipCapture — the #446 bug is back');
+  });
+});
