@@ -1,25 +1,34 @@
 // The Motion / Sound / Alert-schedule screens — one component serving three routes.
 //
 // ★ WHY THIS SCREEN IS WORTH REAL TESTS. It has no Save button. Every control applies itself, and
-// each write restarts the camera's detector, so the two things that can go wrong are both invisible:
+// each write restarts the camera's detector, so several things that can go wrong are all invisible:
 //
-//  1. **It writes the WHOLE detection state on every change, not a patch.** The screen holds all
-//     three slices (motion, sound, schedule) and re-sends all of them whenever any one is touched.
-//     So a field `fromCam` fails to read, or `toPayload` fails to carry, does not go missing — it goes
-//     out WRONG, and adjusting the sound sensitivity silently rewrites the motion zone or the alert
-//     window. Nothing on screen would show it; the next night's data would just be worse.
-//     (The server-side half of this contract — that an omitted field is kept — is pinned in
-//     backend/test/detection-route.test.js. Only the two together cover the seam.)
+//  1. **It used to write the WHOLE detection state on every change, not a patch** (fixed by #444).
+//     The screen holds all three slices (motion, sound, schedule) in one state object `d`, so a
+//     field `fromCam` fails to read used to go out WRONG rather than missing whenever ANY field
+//     changed — adjusting the sound sensitivity could silently rewrite the motion zone or the alert
+//     window, with nothing on screen to show it. Since #444 every write is a PATCH — only the fields
+//     the user actually touched — routed through the per-camera save queue in
+//     `src/lib/detectionSaves.js` (its own unit tests live in detectionSaves.test.js). `PUT
+//     /:id/detection` keeps any field it isn't sent (backend/test/detection-route.test.js, #443),
+//     which is what makes sending only the changed keys safe.
 //  2. **Writes are debounced at 700 ms and coalesced.** Dragging a slider must produce ONE restart,
 //     not forty. A lost debounce would not fail anything; it would just thrash the detector.
+//  3. **Navigating away, a failed save, and two overlapping writes** (issue #444's three defects) —
+//     covered by the T1/T1b/T2/T4/T5/T7 tests below. T6, in the same file for convenience, covers the
+//     matching failure banner on CameraSettings.jsx, the screen "Back" from here lands on.
 //
 // Role gating is not tested here: the route is <AdminProtected> (routeGuards.test.jsx).
+import { StrictMode } from 'react';
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
 import { renderAsAdmin } from './helpers/render.jsx';
 import DetectionSettings from '../src/pages/DetectionSettings.jsx';
+import CameraSettings from '../src/pages/CameraSettings.jsx';
+import { togglePatch } from '../src/components/CameraTile.jsx';
 import { api } from '../src/lib/api.js';
+import { queuePatch, __resetForTests } from '../src/lib/detectionSaves.js';
 
 // The debounce is 700 ms of real time. Every assertion about a write therefore needs a window wider
 // than that — fake timers were avoided deliberately, because userEvent drives its own clock and the
@@ -53,12 +62,29 @@ const CAM = {
 
 let putSpy;
 
+// Wrapped in StrictMode (issue #444): React double-invokes a functional state updater in
+// development/test mode to surface an impure one. `apply`'s `setD` updater must have no side effects
+// — the actual queueing happens once, outside it — and this is what would catch a regression back to
+// the old shape (a debounce/send started from inside the updater) by sending twice for one change.
 function mount(kind, cam = CAM) {
   return renderAsAdmin(
-    <Routes>
-      <Route path="/cameras/:id/:kind" element={<DetectionSettings />} />
-    </Routes>,
+    <StrictMode>
+      <Routes>
+        <Route path="/cameras/:id/:kind" element={<DetectionSettings />} />
+      </Routes>
+    </StrictMode>,
     { cameras: [cam], route: `/cameras/${cam.id}/${kind}` }
+  );
+}
+
+function mountCameraSettings(cams) {
+  return renderAsAdmin(
+    <StrictMode>
+      <Routes>
+        <Route path="/cameras/:id" element={<CameraSettings />} />
+      </Routes>
+    </StrictMode>,
+    { cameras: cams, route: `/cameras/${cams[0].id}` }
   );
 }
 
@@ -70,58 +96,49 @@ async function sentBody() {
 
 beforeEach(() => {
   putSpy = vi.spyOn(api, 'put').mockResolvedValue({});
+  // The save queue is module-level state (issue #444), so it leaks across tests — and across THIS
+  // file and cameraTileHelpers.test.jsx/detectionSaves.test.js, all of which import the same module
+  // instance — unless reset. Also invalidates any promise still unsettled from a previous test.
+  __resetForTests();
 });
 afterEach(() => vi.restoreAllMocks());
 
-describe('★★ every write carries the whole detection state', () => {
-  test('changing the SOUND sensitivity re-sends the motion slice untouched', async () => {
-    // THE test this file exists for. The sound screen cannot see the motion settings, but it sends
-    // them — so it has to send back exactly what it was given. The bed zone is the one that would
-    // hurt most: it is painted per installation, nothing validates it, and sleep tracking depends on
-    // it entirely.
+describe('★★ every write carries ONLY the changed slice, since #444', () => {
+  test('changing the SOUND sensitivity does not resend the motion slice at all', async () => {
+    // Until #444 the sound screen sent the WHOLE detection state, so this test pinned that the motion
+    // fields it resent were at least unchanged. Since #444 the screen sends only what changed — a
+    // PATCH — so the motion slice (the bed zone above all: it's painted per installation, nothing
+    // validates it, and sleep tracking depends on it entirely) simply isn't part of the request; the
+    // server (PUT /:id/detection, #443) keeps it because it was never sent, not because it round-tripped.
     const { user } = mount('sound');
     const slider = await screen.findByLabelText(/Sensitivity/);
     fireEvent.change(slider, { target: { value: '30' } });
 
     const body = await sentBody();
-    expect(body.sound_sensitivity).toBe(30);
-    expect(body.zone, 'the painted bed zone must survive an unrelated edit').toEqual(CAM.detect_zone);
-    expect(body.sensitivity).toBe(88);
-    expect(body.source).toBe('framediff');
-    expect(body.motion_enabled).toBe(true);
-    expect(body.start).toBe(1140);
-    expect(body.end).toBe(400);
-    expect(body.motion_mqtt_topic).toBe('cam/motion');
-    expect(body.snapshot_url).toBe('http://cam/snap.jpg');
-    expect(body.record_clips).toBe(true);
+    expect(body).toEqual({ sound_sensitivity: 30 });
+    for (const key of ['zone', 'sensitivity', 'source', 'motion_enabled', 'start', 'end', 'motion_mqtt_topic', 'snapshot_url', 'record_clips']) {
+      expect(key in body, `${key} must not be sent at all by an unrelated sound edit`).toBe(false);
+    }
     void user;
   });
 
-  test('changing the SCHEDULE re-sends both detectors untouched', async () => {
+  test('changing the SCHEDULE does not resend the sound or motion slice', async () => {
     const { user } = mount('schedule');
     const from = await screen.findByLabelText('From');
     fireEvent.change(from, { target: { value: '21:30' } });
 
     const body = await sentBody();
-    expect(body.start, '21:30 in minutes since midnight').toBe(1290);
-    expect(body.sound_sensitivity).toBe(72);
-    expect(body.sensitivity).toBe(88);
-    expect(body.zone).toEqual(CAM.detect_zone);
+    expect(body, '21:30 in minutes since midnight, and nothing else').toEqual({ start: 1290 });
     void user;
   });
 
-  test('the payload carries every field the route understands', async () => {
-    // An exact key set. A field dropped here would be preserved by the route rather than cleared, so
-    // the symptom would not be data loss — it would be a control on this screen that silently stops
-    // having any effect, which is harder to notice and harder to diagnose.
+  test('the payload carries exactly the keys this screen actually changed — one field, one key', async () => {
+    // A field appearing here that the user did not touch would mean this screen (or the queue's
+    // shared toPartialPayload) had started resending untouched state again — the #444 regression.
     mount('sound');
     fireEvent.change(await screen.findByLabelText(/Sensitivity/), { target: { value: '30' } });
     const body = await sentBody();
-    expect(Object.keys(body).sort()).toEqual([
-      'confirm_s', 'cooldown_s', 'end', 'motion_enabled', 'motion_mqtt_topic', 'motion_mqtt_value',
-      'record_clips', 'schedule_enabled', 'sensitivity', 'snapshot_url', 'sound_confirm_s',
-      'sound_cooldown_s', 'sound_enabled', 'sound_sensitivity', 'source', 'start', 'zone',
-    ]);
+    expect(Object.keys(body)).toEqual(['sound_sensitivity']);
   });
 
   test('numbers typed into text boxes are sent as numbers, not strings', async () => {
@@ -285,18 +302,17 @@ describe('the alert schedule', () => {
     expect(body.end, 'a real 07:00').toBe(420);
   });
 
-  test('re-enabling a schedule that already has a real window does not re-seed it', async () => {
+  test('re-enabling a schedule that already has a real window does not re-seed it — and does not resend it either', async () => {
     // The commit-a-real-window behavior above only applies while there is genuinely no window yet
     // (start === end). A camera that already has a real, if currently-disabled, window must keep it
-    // exactly as stored when the switch is flipped back on.
+    // exactly as stored when the switch is flipped back on — and since #444, "keep it" means the
+    // patch doesn't mention start/end at all, not that it resends the same values.
     mount('schedule', { ...CAM, detect_schedule_enabled: 0 }); // CAM's default window is 19:00–06:40
     await screen.findByText('Alerting 24/7.');
     fireEvent.click(screen.getByRole('switch'));
 
     const body = await sentBody();
-    expect(body.schedule_enabled).toBe(true);
-    expect(body.start).toBe(1140);
-    expect(body.end).toBe(400);
+    expect(body).toEqual({ schedule_enabled: true });
   });
 
   test('with the schedule off there are no times to set', async () => {
@@ -308,13 +324,14 @@ describe('the alert schedule', () => {
   test('★★ an unrelated SOUND edit does not narrow an already-enabled all-day schedule (#443)', async () => {
     // The issue's literal repro: a schedule already saved as enabled with equal start/end — all-day,
     // per inActiveWindow's own "start === end" rule — must survive a save triggered from a completely
-    // different screen.
+    // different screen. Since #444 that's because the patch a sound edit sends doesn't mention the
+    // schedule fields at all — there's nothing left FOR it to narrow.
     mount('sound', { ...CAM, detect_schedule_enabled: 1, detect_start: 0, detect_end: 0 });
     fireEvent.change(await screen.findByLabelText(/Sensitivity/), { target: { value: '30' } });
 
     const body = await sentBody();
-    expect(body.schedule_enabled).toBe(true);
-    expect(body.start, 'must stay all-day, not narrow to 20:00–07:00').toBe(body.end);
+    expect(body).toEqual({ sound_sensitivity: 30 });
+    expect('schedule_enabled' in body, 'the schedule is not part of this payload at all').toBe(false);
   });
 
   test('★★ an unrelated MOTION edit does not narrow an already-enabled all-day schedule (#443)', async () => {
@@ -324,8 +341,8 @@ describe('the alert schedule', () => {
     fireEvent.change(await screen.findByLabelText('Cooldown (seconds)'), { target: { value: '90' } });
 
     const body = await sentBody();
-    expect(body.schedule_enabled).toBe(true);
-    expect(body.start, 'must stay all-day, not narrow to 20:00–07:00').toBe(body.end);
+    expect(body).toEqual({ cooldown_s: 90 });
+    expect('schedule_enabled' in body, 'the schedule is not part of this payload at all').toBe(false);
   });
 
   test('editing one time field while the suggestion is showing commits BOTH as displayed', async () => {
@@ -357,11 +374,14 @@ describe('the alert schedule', () => {
     expect(from.value, 'must keep showing what was typed, not revert to the 20:00 suggestion').toBe('07:00');
 
     // A second, later edit to "To" must change only "To" — not silently restore "From" to 20:00.
+    // Since #444 that "must not restore" shows up in the FORM (`from.value` below); the payload
+    // itself now carries only the field actually touched this time, "To" — it no longer resends
+    // "From" at all, so there's nothing there left to have reverted.
     fireEvent.change(screen.getByLabelText('To'), { target: { value: '09:00' } });
     await waitFor(() => expect(putSpy.mock.calls.length).toBeGreaterThan(1), SETTLE);
     body = putSpy.mock.calls[putSpy.mock.calls.length - 1][1];
-    expect(body.start, '"From" must still read 07:00, not have reverted to 20:00').toBe(420);
-    expect(body.end).toBe(540);
+    expect(body).toEqual({ end: 540 });
+    expect(from.value, '"From" must still read 07:00, not have reverted to 20:00').toBe('07:00');
   });
 
   test('★★ the same guard applies editing "To" first, not just "From" (#443 review finding)', async () => {
@@ -378,22 +398,25 @@ describe('the alert schedule', () => {
     expect(body.end, 'To, as typed').toBe(1200);
     expect(to.value, 'must keep showing what was typed, not revert to the 07:00 suggestion').toBe('20:00');
 
+    // Since #444 the payload for this second edit carries only "From" — nothing left to have
+    // reverted "To"; the form value (`to.value` below) is what pins that it stayed 20:00.
     fireEvent.change(screen.getByLabelText('From'), { target: { value: '18:00' } });
     await waitFor(() => expect(putSpy.mock.calls.length).toBeGreaterThan(1), SETTLE);
     body = putSpy.mock.calls[putSpy.mock.calls.length - 1][1];
-    expect(body.start).toBe(1080);
-    expect(body.end, '"To" must still read 20:00, not have reverted to 07:00').toBe(1200);
+    expect(body).toEqual({ start: 1080 });
+    expect(to.value, '"To" must still read 20:00, not have reverted to 07:00').toBe('20:00');
   });
 
   test('once a real window exists, editing one field leaves the other alone', async () => {
     // The paired-commit above only applies while start === end. A camera with a genuine window
-    // (CAM's default 19:00–06:40) must go back to editing each field independently.
+    // (CAM's default 19:00–06:40) must go back to editing each field independently — and since #444
+    // that means the untouched "From" isn't resent at all, not merely resent unchanged.
     mount('schedule');
     fireEvent.change(await screen.findByLabelText('To'), { target: { value: '08:00' } });
 
     const body = await sentBody();
-    expect(body.start, 'From (19:00) is untouched').toBe(1140);
-    expect(body.end).toBe(480);
+    expect(body).toEqual({ end: 480 });
+    expect('start' in body, 'From (19:00) is not sent, not merely unchanged').toBe(false);
   });
 });
 
@@ -481,11 +504,15 @@ describe('the snapshot password field (#271)', () => {
   const WITH_PW = { ...CAM, snapshot_url: 'http://admin@cam.local/snap.jpg', snapshot_has_password: true };
 
   test('an ordinary save sends NO snapshot_password at all', async () => {
+    // Since #444 an ordinary save of an unrelated field (sensitivity here) is a one-key patch, so
+    // snapshot_url isn't sent either — the load-bearing part of this test, that the stored URL
+    // survives, now holds because it was never sent, not because it round-tripped unchanged.
     mount('motion', WITH_PW);
     fireEvent.change(await screen.findByLabelText(/Sensitivity/), { target: { value: '30' } });
     const body = await sentBody();
+    expect(body).toEqual({ sensitivity: 30 });
     expect('snapshot_password' in body).toBe(false);
-    expect(body.snapshot_url).toBe('http://admin@cam.local/snap.jpg');
+    expect('snapshot_url' in body).toBe(false);
   });
 
   test('typing one sends it', async () => {
@@ -548,5 +575,158 @@ describe('the snapshot password label follows the server (#271)', () => {
     fireEvent.change(url, { target: { value: 'http://typing-in-progress/snap.jpg' } });
     rerenderWith({ cameras: [{ ...CAM, snapshot_has_password: true }] });
     expect((await screen.findByLabelText(/Alert image URL/)).value).toBe('http://typing-in-progress/snap.jpg');
+  });
+});
+
+// -------------------------------------------------------------------------------------------
+// Issue #444 — a per-camera save queue that outlives this component. T1/T1b/T2/T4/T5/T7 exercise it
+// through this screen; T6 (same file, for convenience — it's the failure state the "Back" button from
+// here lands on) exercises the matching banner on CameraSettings.jsx.
+describe('★★ #444: navigating away must not cancel a pending save', () => {
+  test('T1: unmount well inside the 700ms debounce still saves — flush, not cancel (fails on the pre-#444 cancel-on-unmount code)', async () => {
+    const { unmount } = mount('motion'); // CAM: detect_motion_enabled = 1
+    const [motionToggle] = await screen.findAllByRole('switch');
+    fireEvent.click(motionToggle);
+    unmount(); // long before the 700ms debounce would fire on its own
+
+    // ⚠️ Asserted SYNCHRONOUSLY, straight after unmount, with no waitFor. The debounce timer lives in the
+    // module-level queue (detectionSaves.js), so even an unmount that did NOTHING would still send the
+    // change ~700ms later — a waitFor here passed against exactly that mutant (#444 M1 survived the first
+    // mutation run). What flush-on-unmount adds is sending AT THE MOMENT the user leaves (flush → doSend
+    // calls `send` synchronously), which is what survives the app being closed right after tapping Back.
+    // Only a no-wait assertion can tell those apart.
+    expect(putSpy, 'leaving the screen did not send the pending change immediately').toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(putSpy).toHaveBeenCalled(), SETTLE);
+    expect(putSpy).toHaveBeenCalledTimes(1);
+    expect(putSpy.mock.calls[0][0]).toBe('/cameras/cam-1/detection');
+    expect(putSpy.mock.calls[0][1]).toEqual({ motion_enabled: false });
+  });
+
+  test('T1b: unmount AFTER the debounce has already sent still produces exactly one PUT (Codex F3)', async () => {
+    const { unmount } = mount('motion');
+    const [motionToggle] = await screen.findAllByRole('switch');
+    fireEvent.click(motionToggle);
+    await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1), SETTLE);
+
+    unmount(); // nothing left unsent — this must be a no-op, not a second PUT
+    await new Promise((r) => setTimeout(r, 100));
+    expect(putSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('★★ #444: a failed save is visible and recoverable', () => {
+  test('T2: a rejected PUT shows "Not saved" with a Retry button; the value sticks; Retry saves it (fails on the pre-#444 code, which just goes quiet)', async () => {
+    putSpy.mockRejectedValueOnce(new Error('camera is offline'));
+    mount('sound');
+    const slider = await screen.findByLabelText(/Sensitivity/);
+    fireEvent.change(slider, { target: { value: '30' } });
+
+    await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1), SETTLE);
+    expect(await screen.findByText(/Not saved/, {}, SETTLE)).toBeTruthy();
+    const retryBtn = await screen.findByRole('button', { name: 'Retry' });
+    expect(slider.value, "the user's value sticks — it is their intent, and Retry sends exactly it").toBe('30');
+
+    fireEvent.click(retryBtn);
+    await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(2), SETTLE);
+    expect(putSpy.mock.calls[1][1], 'Retry resends the same (still one-key) patch').toEqual({ sound_sensitivity: 30 });
+    expect(await screen.findByText('Saved ✓', {}, SETTLE)).toBeTruthy();
+  });
+});
+
+describe('★★ #444: overlapping writes are serialized, not raced', () => {
+  test('T4: a change made while the first save is still in flight sends no second PUT until it resolves, then sends the latest (fails on the pre-#444 code, which has no in-flight guard)', async () => {
+    let resolveFirst;
+    putSpy.mockImplementationOnce(() => new Promise((r) => { resolveFirst = r; }));
+    mount('sound');
+    const slider = await screen.findByLabelText(/Sensitivity/);
+    fireEvent.change(slider, { target: { value: '20' } });
+    await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1), SETTLE); // first PUT sent, hanging
+
+    fireEvent.change(slider, { target: { value: '35' } }); // a further change while it's still pending
+    await new Promise((r) => setTimeout(r, 900)); // well past the 700ms debounce
+    expect(putSpy, 'no second PUT while the first is still pending').toHaveBeenCalledTimes(1);
+
+    resolveFirst({});
+    await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(2), SETTLE);
+    expect(putSpy.mock.calls[1][1], 'the second PUT carries the latest value').toEqual({ sound_sensitivity: 35 });
+  });
+
+  test('T7: a page edit in flight and a tile toggle on the same camera are serialized, each payload carrying only its own key', async () => {
+    let resolveFirst;
+    putSpy.mockImplementationOnce(() => new Promise((r) => { resolveFirst = r; }));
+    mount('sound');
+    fireEvent.change(await screen.findByLabelText(/Sensitivity/), { target: { value: '15' } });
+    await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1), SETTLE);
+    expect(putSpy.mock.calls[0][1]).toEqual({ sound_sensitivity: 15 });
+
+    // What CameraTile.jsx's toggleDetection does: build the patch, then queue it through the SAME
+    // module-level queue — the tile itself can't be rendered in jsdom (cameraTileHelpers.test.jsx).
+    const tilePatch = togglePatch(CAM, 'motion');
+    queuePatch(CAM.id, tilePatch, {
+      kind: null,
+      immediate: true,
+      send: (payload) => api.put(`/cameras/${CAM.id}/detection`, payload),
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(putSpy, "the tile's write waits for the page's in-flight one").toHaveBeenCalledTimes(1);
+
+    resolveFirst({});
+    await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(2), SETTLE);
+    expect(putSpy.mock.calls[1][1], "the tile's payload carries only its own key").toEqual({ motion_enabled: false });
+  });
+});
+
+describe('★★ #444: revisiting a screen shows unsaved reality, not the server\'s', () => {
+  test('T5: a failed save, unmount, remount → the form shows the pending value and the failed state', async () => {
+    putSpy.mockRejectedValueOnce(new Error('offline'));
+    const { unmount } = mount('sound');
+    fireEvent.change(await screen.findByLabelText(/Sensitivity/), { target: { value: '77' } });
+    await screen.findByText(/Not saved/, {}, SETTLE);
+    unmount();
+
+    mount('sound'); // a fresh mount, same camera — NOT the same component instance
+    expect((await screen.findByLabelText(/Sensitivity/)).value).toBe('77');
+    expect(await screen.findByText(/Not saved/, {}, SETTLE)).toBeTruthy();
+  });
+});
+
+describe('★★ #444: the CameraSettings banner (where "Back" from a detection screen lands)', () => {
+  test('T6: a failed detection save shows a banner with Retry that clears on success; Retry only calls the detection PUT', async () => {
+    putSpy.mockRejectedValueOnce(new Error('offline'));
+    const { unmount } = mount('sound');
+    fireEvent.change(await screen.findByLabelText(/Sensitivity/), { target: { value: '10' } });
+    await screen.findByText(/Not saved/, {}, SETTLE);
+    unmount();
+
+    mountCameraSettings([CAM]);
+    expect(await screen.findByText(/wasn't saved/i, {}, SETTLE)).toBeTruthy();
+    const retryBtn = screen.getByRole('button', { name: 'Retry' });
+
+    const callsBefore = putSpy.mock.calls.length;
+    fireEvent.click(retryBtn); // a non-submit control — must not touch the camera-settings form's own PUT
+    await waitFor(() => expect(putSpy.mock.calls.length).toBeGreaterThan(callsBefore), SETTLE);
+    const lastCall = putSpy.mock.calls[putSpy.mock.calls.length - 1];
+    expect(lastCall[0], 'only the detection PUT, never PUT /cameras/:id').toBe('/cameras/cam-1/detection');
+    expect(lastCall[1]).toEqual({ sound_sensitivity: 10 });
+    await waitFor(() => expect(screen.queryByText(/wasn't saved/i)).toBeNull(), SETTLE);
+  });
+
+  test('T6b: no banner for a different camera than the one that failed', async () => {
+    putSpy.mockRejectedValueOnce(new Error('offline'));
+    const { unmount } = mount('sound'); // fails on cam-1 (CAM)
+    fireEvent.change(await screen.findByLabelText(/Sensitivity/), { target: { value: '10' } });
+    await screen.findByText(/Not saved/, {}, SETTLE);
+    unmount();
+
+    const otherCam = { ...CAM, id: 'cam-2', name: 'Other room' };
+    mountCameraSettings([otherCam]);
+    await screen.findByText('Other room');
+    expect(screen.queryByText(/wasn't saved/i)).toBeNull();
+  });
+
+  test('T6c: no banner at all when nothing has failed', async () => {
+    mountCameraSettings([{ ...CAM, id: 'cam-3', name: 'Clean room' }]);
+    await screen.findByText('Clean room');
+    expect(screen.queryByText(/wasn't saved/i)).toBeNull();
   });
 });

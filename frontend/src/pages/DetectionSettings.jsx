@@ -5,32 +5,27 @@ import { useCameras } from '../lib/CamerasContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
 import CribZonePicker from '../components/CribZonePicker.jsx';
+import { queuePatch, flush, retry, useDetectionSave, pendingPatch, minToHHMM } from '../lib/detectionSaves.js';
 
-const minToHHMM = (m) => `${String(Math.floor((m || 0) / 60)).padStart(2, '0')}:${String((m || 0) % 60).padStart(2, '0')}`;
-const hhmmToMin = (s) => {
-  const [h, mm] = String(s || '0:0').split(':').map(Number);
-  return (h || 0) * 60 + (mm || 0);
-};
-
-const TITLES = { motion: 'Motion detection', sound: 'Sound detection', schedule: 'Alert schedule' };
+export const TITLES = { motion: 'Motion detection', sound: 'Sound detection', schedule: 'Alert schedule' };
 
 // Build the full detection state (all three slices) from a camera row.
 //
-// Each screen sends the WHOLE payload with only its own slice changed. `PUT /:id/detection` keeps
-// any field it is not sent, for every field including `motion_enabled` (backend/test/detection-
-// route.test.js). The keep-on-absent rule is why the camera tile's quick toggles can get away with
-// omitting `zone` and `record_clips`. It is because this component holds all three slices
-// in one state object and has no way to know which fields the user actually touched. That makes the
-// round-trip load-bearing: whatever `fromCam` reads, `toPayload` writes back — so a field misread
-// here is not dropped, it is sent back WRONG, and an edit on the sound screen rewrites the motion
-// zone or the alert window with nothing on screen to show it.
+// This component still holds all three slices in one state object `d` — motion, sound and schedule
+// — because each screen only shows one of them and needs the others to still be here when it isn't
+// looking at them (e.g. so ScheduleForm can tell a real window from an unset one). But since #444,
+// `apply` below only ever QUEUES the fields a screen actually changed, via detectionSaves.js's
+// `queuePatch` — it does not resend `d` wholesale the way this screen used to. `PUT /:id/detection`
+// keeps any field it isn't sent (backend/test/detection-route.test.js, issue #443), which is what
+// makes that safe: an edit on the sound screen no longer has any way to rewrite the motion zone or
+// the alert window, because it never sends them.
 //
-// ⚠️ `start`/`end` MUST be the true stored value here, even when they're equal ("all-day" — see
-// inActiveWindow in backend/src/lib/detectSchedule.js). Substituting a friendly display default
-// (e.g. 20:00–07:00) at this layer used to corrupt every unrelated save: since `toPayload` below
-// always re-sends whatever is in this state, a sound/motion edit would silently narrow a real
-// all-day schedule the moment it hit the wire (issue #443). Any "here's a suggested window" UI
-// belongs at render time in ScheduleForm, which can show a suggestion without adopting it.
+// ⚠️ `start`/`end` MUST still be the true stored value here, even when they're equal ("all-day" —
+// see inActiveWindow in backend/src/lib/detectSchedule.js). Substituting a friendly display default
+// (e.g. 20:00–07:00) at this layer would corrupt the FORM's own idea of the schedule even though it
+// is no longer resent on unrelated saves — ScheduleForm relies on `d.start === d.end` to know
+// whether a real window exists at all (issue #443). Any "here's a suggested window" UI belongs at
+// render time in ScheduleForm, which can show a suggestion without adopting it.
 function fromCam(cam) {
   return {
     motion_enabled: !!cam.detect_motion_enabled,
@@ -63,30 +58,6 @@ function fromCam(cam) {
   };
 }
 
-function toPayload(d) {
-  return {
-    motion_enabled: !!d.motion_enabled,
-    sensitivity: Number(d.sensitivity),
-    cooldown_s: Number(d.cooldown_s),
-    confirm_s: Number(d.confirm_s),
-    schedule_enabled: !!d.schedule_enabled,
-    start: hhmmToMin(d.start),
-    end: hhmmToMin(d.end),
-    source: d.source,
-    zone: d.zone ?? null,
-    motion_mqtt_topic: d.motion_mqtt_topic,
-    motion_mqtt_value: d.motion_mqtt_value,
-    snapshot_url: d.snapshot_url,
-    // Omitted when blank so the server keeps the stored password rather than clearing it.
-    ...(d.snapshot_password ? { snapshot_password: d.snapshot_password } : {}),
-    sound_enabled: !!d.sound_enabled,
-    sound_sensitivity: Number(d.sound_sensitivity),
-    sound_confirm_s: Number(d.sound_confirm_s),
-    sound_cooldown_s: Number(d.sound_cooldown_s),
-    record_clips: !!d.record_clips,
-  };
-}
-
 // Shared "record a clip" opt-in, shown on both the motion and sound screens (a clip is captured on
 // any detection). Writes the per-camera detect_record_clips flag via the same /detection payload.
 function RecordClipsToggle({ d, apply }) {
@@ -102,42 +73,43 @@ function RecordClipsToggle({ d, apply }) {
 
 // Motion / Sound / Schedule as their own routed screens (/cameras/:id/:kind). Changes apply
 // immediately (debounced) via the /detection endpoint, which restarts the detector — no Save
-// button. The other two slices are preserved on every write (see fromCam).
+// button. Saving is a per-camera queue (detectionSaves.js) that outlives this component, not a
+// timer owned by it (issue #444) — see `apply` below.
 export default function DetectionSettings() {
   const { id, kind } = useParams();
   const { cameras, refresh } = useCameras();
   const cam = cameras.find((c) => c.id === id);
 
   const [d, setD] = useState(null);
-  const [status, setStatus] = useState(''); // '' | 'saving' | 'saved'
   const initedRef = useRef(false);
-  const timerRef = useRef(null);
+  const save = useDetectionSave(id); // { state: 'idle'|'saving'|'saved'|'failed', kind, error }
 
   useEffect(() => {
     if (initedRef.current || !cam) return;
     initedRef.current = true;
-    setD(fromCam(cam));
-  }, [cam]);
+    // Layer the camera's own unsaved changes over the server's values — from ANY of the three
+    // screens, since the queue is per-camera, not per-screen — so revisiting mid-edit or after a
+    // failure shows what the user actually has, not what the server last confirmed (issue #444).
+    setD({ ...fromCam(cam), ...pendingPatch(id) });
+  }, [cam, id]);
 
-  useEffect(() => () => clearTimeout(timerRef.current), []);
+  // Flushes rather than cancels on unmount (defect 1 of #444): the queue lives outside this
+  // component, so a write already committed to completes after navigation, exactly once. Re-runs
+  // (flushing the OLD id first) whenever `id` itself changes, not only on a true unmount, so
+  // switching cameras without unmounting can't strand a pending write under the wrong id.
+  useEffect(() => () => flush(id), [id]);
 
+  // A pure updater (React StrictMode invokes it twice — it must not have side effects, defect 4).
+  // The actual send is queued separately, once, below.
   function apply(patch) {
-    setD((prev) => {
-      const next = { ...prev, ...patch };
-      setStatus('saving');
-      clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(async () => {
-        try {
-          await api.put(`/cameras/${id}/detection`, toPayload(next));
-          await refresh();
-          setStatus('saved');
-          setTimeout(() => setStatus(''), 1500);
-        } catch {
-          setStatus('');
-        }
-      }, 700);
-      return next;
-    });
+    setD((prev) => ({ ...prev, ...patch }));
+    // The promise queuePatch() returns (issue #444 fix 1/3) is for a caller that needs to know THIS
+    // specific write landed — CameraTile's quick toggle does, to know when it's safe to clear its own
+    // "busy" guard. This screen doesn't need that: it already reads its outcome from
+    // useDetectionSave(id) below (the Saving…/Saved ✓/Not saved flag), so it's ignored here. That's
+    // safe — queuePatch() always attaches its own no-op catch internally, so a failed save here can
+    // never surface as an unhandled promise rejection; the failure still reaches the UI via `save`.
+    queuePatch(id, patch, { kind, send: (payload) => api.put(`/cameras/${id}/detection`, payload), onSaved: refresh });
   }
 
   const back = { to: `/cameras/${id}`, label: 'Camera' };
@@ -155,7 +127,18 @@ export default function DetectionSettings() {
     <>
       <AppHeader title={TITLES[kind] || 'Detection'} back={back} />
       <main className="app-main">
-        <div className="save-flag">{status === 'saving' ? 'Saving…' : status === 'saved' ? 'Saved ✓' : ''}</div>
+        {save.state === 'failed' ? (
+          // A persistent failure banner (defect 2): unlike the old blank-on-failure status, this
+          // never clears itself — only a successful Retry (or a fresh edit that goes on to save)
+          // does. The controls below keep showing the user's own values; that's their intent, and
+          // Retry sends exactly that.
+          <div className="error-banner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            <span>Not saved.</span>
+            <button type="button" className="btn btn-sm btn-secondary" onClick={() => retry(id)}>Retry</button>
+          </div>
+        ) : (
+          <div className="save-flag">{save.state === 'saving' ? 'Saving…' : save.state === 'saved' ? 'Saved ✓' : ''}</div>
+        )}
         {kind === 'motion' && <MotionForm d={d} apply={apply} cameraId={id} cam={cam} />}
         {kind === 'sound' && <SoundForm d={d} apply={apply} />}
         {kind === 'schedule' && <ScheduleForm d={d} apply={apply} />}

@@ -2317,5 +2317,101 @@
     "tests": ["auth-routes.test.js"],
     "namePattern": "#441",
     "note": "Unreachable today, recorded honestly rather than hidden: DELETE /users/:id already refuses self-delete (checked above this wrapper), and requireAdmin re-checks the LIVE role (issue #261) on every request, while the whole handler runs synchronously with no `await`. So the caller was necessarily an admin at the exact moment this code ran, and deleting a DIFFERENT user can only reduce a count of >=2 admins, or delete a non-admin and not touch the count at all — no fixture can make this route delete the last admin without also deleting the caller's own account, which the guard above already blocks. Kept as defence in depth for if this route (or something it calls) ever grows an `await` before the deletes, which would let another request interleave."
+  },
+  {
+    "label": "★ #444 M1: unmount goes back to cancelling the pending save instead of flushing it",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "useEffect(() => () => flush(id), [id]);",
+    "replace": "useEffect(() => () => {}, [id]);",
+    "expect": "killed",
+    "tests": ["detectionSettings.test.jsx"],
+    "namePattern": "T1:"
+  },
+  {
+    "label": "★ #444 M2: the in-flight guard is dropped — a second PUT can fire while the first is still pending",
+    "file": "frontend/src/lib/detectionSaves.js",
+    "find": "  if (entry.inFlight) return;",
+    "replace": "  if (false) return;",
+    "expect": "killed",
+    "tests": ["detectionSaves.test.js", "detectionSettings.test.jsx"]
+  },
+  {
+    "label": "#444 M3: coalescing keeps the FIRST queued value instead of the latest",
+    "file": "frontend/src/lib/detectionSaves.js",
+    "find": "entry.pending = { ...entry.pending, ...patch }; // later keys win — the most recent edit wins",
+    "replace": "entry.pending = { ...patch, ...entry.pending }; // later keys win — the most recent edit wins",
+    "expect": "killed",
+    "tests": ["detectionSaves.test.js"],
+    "namePattern": "Q2"
+  },
+  {
+    "label": "★ #444 M4: a failed send resets to idle instead of a persistent failed state",
+    "file": "frontend/src/lib/detectionSaves.js",
+    "find": "      e.state = 'failed';",
+    "replace": "      e.state = 'idle';",
+    "expect": "killed",
+    "tests": ["detectionSaves.test.js", "detectionSettings.test.jsx"]
+  },
+  {
+    "label": "★ #444 M5: the pending patch is dropped on failure — Retry would have nothing left to send",
+    "file": "frontend/src/lib/detectionSaves.js",
+    "find": "      e.pending = { ...snapshot, ...e.pending };",
+    "replace": "      e.pending = {};",
+    "expect": "killed",
+    "tests": ["detectionSaves.test.js"],
+    "namePattern": "Q3"
+  },
+  {
+    "label": "#444 M6: success is reported without checking rev === sentRev — a stale response can say Saved",
+    "file": "frontend/src/lib/detectionSaves.js",
+    "find": "      if (e.rev !== sentRev) {",
+    "replace": "      if (false) {",
+    "expect": "killed",
+    "tests": ["detectionSaves.test.js"],
+    "namePattern": "Q5"
+  },
+  {
+    "label": "★ #444 M7: the rev > sentRev guard is dropped — flush (and the debounce racing it) can send twice",
+    "file": "frontend/src/lib/detectionSaves.js",
+    "find": "  if (!force && entry.rev <= entry.sentRev) return;",
+    "replace": "  if (false) return;",
+    "expect": "killed",
+    "tests": ["detectionSaves.test.js", "detectionSettings.test.jsx"]
+  },
+  {
+    "label": "★ #444 M8: toPartialPayload sends every known field instead of only the changed ones — back to a full payload",
+    "file": "frontend/src/lib/detectionSaves.js",
+    "find": "  for (const key of Object.keys(patch)) {",
+    "replace": "  for (const key of Object.keys(FIELD_CONVERTERS)) {",
+    "expect": "killed",
+    "tests": ["detectionSaves.test.js"],
+    "namePattern": "Q9"
+  },
+  {
+    "label": "★ #444 review M9: a caller's promise resolves without awaiting onSaved (fix 3)",
+    "file": "frontend/src/lib/detectionSaves.js",
+    "find": "        await onSavedFn?.();",
+    "replace": "        onSavedFn?.();",
+    "expect": "killed",
+    "tests": ["detectionSaves.test.js"],
+    "namePattern": "F3"
+  },
+  {
+    "label": "★ #444 review M10: pendingPatch() omits the in-flight snapshot (fix 2)",
+    "file": "frontend/src/lib/detectionSaves.js",
+    "find": "  return { ...entry.inFlightPatch, ...entry.pending };",
+    "replace": "  return { ...entry.pending };",
+    "expect": "killed",
+    "tests": ["detectionSaves.test.js"],
+    "namePattern": "F2"
+  },
+  {
+    "label": "★ #444 review M11: the empty-converted-payload guard is removed — a blank snapshot_password fires an empty PUT again (fix 4)",
+    "file": "frontend/src/lib/detectionSaves.js",
+    "find": "  if (Object.keys(payload).length === 0) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["detectionSaves.test.js"],
+    "namePattern": "F4"
   }
 ]

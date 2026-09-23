@@ -7,34 +7,31 @@ import { useSettings } from '../lib/SettingsContext.jsx';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { isNativeApp, isIOS, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip, hasNativePip, subscribeBackgroundPaused, isBackgroundPaused, setBackgroundPaused, setPipAutoEnteredFullscreen } from '../lib/nativeBridge.js';
+import { queuePatch, minToHHMM } from '../lib/detectionSaves.js';
 import WhepPlayer from './WhepPlayer.jsx';
 import HlsPlayer from './HlsPlayer.jsx';
 import BreathingDot from './BreathingDot.jsx';
 
-// The /detection endpoint replaces the whole detection config at once, so a quick motion/sound
-// toggle from the tile must resend every field (from the camera row) with just its flag flipped —
-// the same full-payload shape DetectionSettings uses. start/end are stored minutes; pass through.
-// The three helpers below are exported for tests. The tile itself cannot be rendered in jsdom —
-// it mounts live WebRTC/HLS players — but these carry real logic and are worth pinning.
-export function detectionPayload(cam, patch) {
-  return {
-    motion_enabled: !!cam.detect_motion_enabled,
-    sensitivity: cam.detect_sensitivity ?? 50,
-    cooldown_s: cam.detect_cooldown_s ?? 60,
-    confirm_s: cam.detect_confirm_s ?? 3,
-    schedule_enabled: !!cam.detect_schedule_enabled,
-    start: cam.detect_start ?? 1200,
-    end: cam.detect_end ?? 420,
-    source: cam.detect_source === 'mqtt' ? 'mqtt' : cam.detect_source === 'onvif' ? 'onvif' : 'framediff',
-    motion_mqtt_topic: cam.motion_mqtt_topic || '',
-    motion_mqtt_value: cam.motion_mqtt_value || '',
-    snapshot_url: cam.snapshot_url || '',
-    sound_enabled: !!cam.detect_sound_enabled,
-    sound_sensitivity: cam.sound_sensitivity ?? 50,
-    sound_confirm_s: cam.sound_confirm_s ?? 4,
-    sound_cooldown_s: cam.sound_cooldown_s ?? 120,
-    ...patch,
-  };
+// The tile's quick motion/sound/schedule toggles write to the same /detection endpoint the full
+// DetectionSettings screens do, and since #444 both go through the same per-camera save queue
+// (detectionSaves.js) — so a toggle here and an in-progress edit on the settings screen for the same
+// camera can never both be in flight at once, and neither can silently drop the other's change.
+// `togglePatch` only builds the PATCH (just the flag/fields this toggle changes); the queue is what
+// turns it into a request. start/end are given as HH:MM strings, like DetectionSettings' own form
+// state, because that's the shape the queue's shared field-conversion table (toPartialPayload)
+// expects — not the raw stored minutes.
+// The helpers below are exported for tests. The tile itself cannot be rendered in jsdom — it mounts
+// live WebRTC/HLS players — but these carry real logic and are worth pinning.
+export function togglePatch(cam, kind) {
+  if (kind === 'motion') return { motion_enabled: !cam.detect_motion_enabled };
+  if (kind === 'sound') return { sound_enabled: !cam.detect_sound_enabled };
+  // Schedule: if it's never had a real window (start === end), enabling it seeds the same
+  // overnight default the full settings screen uses, so it doesn't come on as an empty window.
+  const enabling = !cam.detect_schedule_enabled;
+  const noWindow = (cam.detect_start ?? 0) === (cam.detect_end ?? 0);
+  return enabling && noWindow
+    ? { schedule_enabled: true, start: minToHHMM(1200), end: minToHHMM(420) }
+    : { schedule_enabled: enabling };
 }
 
 // Room temperature / humidity from MQTT, one entry per available reading, each with its own
@@ -349,27 +346,38 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   }
 
   // Quick-toggle motion / sound / schedule from the tile (admin only) without opening full settings.
-  function togglePatch(kind) {
-    if (kind === 'motion') return { motion_enabled: !camera.detect_motion_enabled };
-    if (kind === 'sound') return { sound_enabled: !camera.detect_sound_enabled };
-    // Schedule: if it's never had a real window (start === end), enabling it seeds the same
-    // overnight default the full settings screen uses, so it doesn't come on as an empty window.
-    const enabling = !camera.detect_schedule_enabled;
-    const noWindow = (camera.detect_start ?? 0) === (camera.detect_end ?? 0);
-    return enabling && noWindow
-      ? { schedule_enabled: true, start: 1200, end: 420 }
-      : { schedule_enabled: enabling };
-  }
-
+  // Routed through the shared save queue with `immediate: true` (no debounce — a deliberate tap
+  // should not wait), `kind: null` (this isn't one of the three routed screens, so there is nothing
+  // for CameraSettings' failure banner to link to), so it's serialized against any in-flight write
+  // from the full settings screen for the same camera (issue #444, §1b).
   async function toggleDetection(kind) {
     if (detBusy) return;
     setDetBusy(true);
-    const patch = togglePatch(kind);
+    const patch = togglePatch(camera, kind);
     try {
-      await api.put(`/cameras/${camera.id}/detection`, detectionPayload(camera, patch));
-      await refreshCameras();
+      // `send` is a plain function with no per-caller side effects (issue #444 fix 1, adversarial
+      // review round). The old code built its OWN Promise around `send` and resolved/rejected it
+      // from inside there — but the queue entry has exactly one `send` slot, so the moment a SECOND
+      // caller queued a patch for the same camera (the settings page mid-edit, another tap here),
+      // that overwrote `send` before THIS call's request had even gone out, and this promise then
+      // never settled — `detBusy` got stuck true and every detection button on the tile stayed
+      // disabled. `queuePatch` now tracks each call's own revision and returns its own promise,
+      // settled once a send carrying that revision resolves — see detectionSaves.js.
+      //
+      // Awaiting it (not just the PUT) also means `detBusy` only clears after `refreshCameras` (the
+      // `onSaved` below) has actually landed (issue #444 fix 3) — otherwise a fast second tap could
+      // read the still-stale `camera.detect_*` prop and re-send an already-current target state,
+      // restarting the detector again for nothing.
+      await queuePatch(camera.id, patch, {
+        kind: null,
+        immediate: true,
+        send: (payload) => api.put(`/cameras/${camera.id}/detection`, payload),
+        onSaved: refreshCameras,
+      });
     } catch {
-      // Leave the switch as-is on failure; the next refresh reflects the real state.
+      // Leave the switch as-is on failure; the next refresh reflects the real state. The tile's own
+      // failure feedback is a pre-existing gap (issue #444 only serializes its writes) — a failed
+      // tile write does now show on the camera settings page's banner (CameraSettings.jsx).
     } finally {
       setDetBusy(false);
     }
