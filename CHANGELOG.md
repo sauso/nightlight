@@ -59,6 +59,19 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   with a clear message; the Caregivers screen also explains this up front on the only admin's account,
   before a request is even sent. Installs that already lost their last admin this way have a new
   console recovery command — see [docs/mfa.md](docs/mfa.md)'s Recovery section.
+- **A detection setting (motion, sound or the alert schedule) could be silently lost, shown as saved
+  when it wasn't, or overwritten by a slower earlier save landing after a faster later one.** The
+  screen's autosave had no lifecycle of its own: tapping Back right after a change cancelled the save
+  outright, a save that failed reset to the same "nothing to see" status as one that hadn't started,
+  and nothing stopped two writes for the same camera being in flight at once. Saving is now a queue
+  that outlives the screen — a change you make and immediately navigate away from still saves, a
+  failure shows a persistent **Not saved** with a **Retry** (also surfaced on the camera's own
+  settings page if you've already gone Back), and at most one save per camera is ever in flight, so
+  the most recent change always wins regardless of network timing. The camera tile's quick motion/
+  sound/schedule toggles go through the same queue, so a toggle there and an edit on the settings
+  screen for the same camera can no longer race each other. Each save now sends only the field(s)
+  that changed, rather than the whole detection form, which is also what makes a toggle and an edit
+  safe to interleave.
 
 ## [0.33.0] - 2026-09-22
 
