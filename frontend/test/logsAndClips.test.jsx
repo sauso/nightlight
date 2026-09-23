@@ -342,7 +342,18 @@ describe('clip management', () => {
     // one" is satisfied by an implementation that puts EVERYTHING in one group. Replacing the day key
     // with a constant survived the one-group assertion alone — so this pins that grouping actually
     // discriminates, which is also what the whole day-filter feature is keyed on.
-    mockClips(CLIPS); // c1/c2 hours apart, c3 fifty hours back
+    //
+    // ⚠️ FIXED TIMESTAMPS, NOT `CLIPS`. This used the shared fixture (c1/c2 at now-2h/now-3h), which
+    // put c1 and c2 on DIFFERENT local days whenever the suite ran between 02:00 and 03:00 Auckland
+    // time (this suite's TZ, see vite.config.js) — 14:00-15:00 UTC every day — so it failed for one
+    // hour in every 24 and passed the rest. Caught when PR #470's CI ran at 14:17 UTC, an hour after
+    // the identical dev commit passed. These are all mid-morning NZST (UTC+12 in August, no DST), far
+    // from local midnight: c1/c2 share 31 Aug, c3 is 29 Aug — so exactly two headings, at any hour.
+    mockClips([
+      { id: 'c1', type: 'motion', camera_name: 'A', created_at: '2026-08-31 00:00:00', clip_bytes: 1024 * 1024 },
+      { id: 'c2', type: 'sound', camera_name: 'A', created_at: '2026-08-30 22:00:00', clip_bytes: 1024 * 1024 },
+      { id: 'c3', type: 'motion', camera_name: 'B', created_at: '2026-08-28 23:00:00', clip_bytes: 1024 * 1024 },
+    ]);
     mountClips();
     await screen.findByText(/3 clips/);
     expect(document.querySelectorAll('.card.tight .card-title').length).toBe(2);
