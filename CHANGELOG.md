@@ -43,6 +43,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   first is still being written to a video. Each on-demand recording now protects its own footage until
   its video is saved, instead of sharing one protection slot that the newer recording could silently
   shorten or the older one could clear out from under it.
+- **Editing recording settings could destroy footage that was actively being captured.** Changing the
+  clip pre/post-roll, or switching on-demand recording or wake clips on or off, stopped and restarted
+  buffering on every recording-enabled camera — which deleted the camera's whole rolling buffer and
+  dropped every in-progress protection on it. That could wipe out a recording in progress, a wake-clip
+  capture, or a detection clip mid-extraction, usually without anyone being told: the recording was
+  later saved as far too short, or as failed. A settings change now resizes each camera's buffer in
+  place instead of restarting it, and if a camera no longer needs to buffer at all, stopping it is
+  delayed until nothing is still capturing from it. Also fixed: an on-demand recording could report the
+  wrong length if its pre-roll setting was changed while it was still running — a recording now always
+  reports the length it actually captured, not whatever the setting happens to be when it's stopped.
 
 ## [0.33.0] - 2026-09-22
 

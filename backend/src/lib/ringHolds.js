@@ -2,9 +2,12 @@
 //
 // THE DEFECT THIS EXISTS FOR (issue #255). The hold used to be a single field on the segmenter entry,
 // `entry.holdFromMs`, written unconditionally by holdRing and cleared unconditionally by releaseRing.
-// TWO independent features share it:
+// THREE independent features share it:
 //   - on-demand Record (recordings.js) — holds on start, releases when the clip is cut
 //   - automatic wake clips (wakeWatcher.js) — holds when a run begins, releases on a stir or after cut
+//   - a detection clip mid-extraction (clipCapture.js's enqueueClip) — holds from just before it's
+//     queued, releases in the job's `finally` (#446: added once a settings save could resize the ring
+//     out from under a clip that was still relying on depth-based pruning alone to protect it)
 //
 // The realistic sequence is not exotic. A child wakes; the wake watcher takes a hold so the opening of
 // the wake survives the ~63s ring; a parent watching that same event on their phone presses Record.
@@ -42,6 +45,16 @@ export const RING_OWNER = {
 // the existing min-of-owners logic in effectiveHold does the rest — no change needed there.
 export function ondemandHoldOwner(recordingId) {
   return `${RING_OWNER.ONDEMAND}:${recordingId}`;
+}
+
+// #446: a detection clip's own namespace, same reasoning as ondemandHoldOwner — an event id is unique
+// (SQLite AUTOINCREMENT) and multiple clips can be in flight at once (the concurrency-2 queue), so each
+// gets its own slot rather than sharing one. Before this existed, a detection clip relied ONLY on ring
+// depth to keep its segments; a settings save that shrank the depth mid-capture had nothing else
+// protecting them (the old restart-based settings.js wiped the ring outright — this is what replaces
+// that wipe with an actual guarantee for the in-flight clip).
+export function clipHoldOwner(eventId) {
+  return `clip:${eventId}`;
 }
 
 export function addHold(cameraId, owner, fromMs) {

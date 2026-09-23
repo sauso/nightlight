@@ -7,12 +7,26 @@
 // in a log you'd read. So the state machine is tested directly, one synthetic minute at a time.
 import { test, before, after, beforeEach, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { useTempDataDir, cleanupTempDataDirs, makeChild, makeCamera } from './helpers/harness.js';
 
 const DATA_DIR = useTempDataDir();
 
+// Before any import that can spawn: an empty directory as the entire PATH, so ffmpeg never resolves.
+// #446's regression test arms a REAL segmenter (clipRecorder.startSegmenter) to prove whether a WAKE
+// hold gets taken — same technique, same reasoning, as clip-capture.test.js (read its header): a real
+// ffmpeg would spawn against an RTSP address that isn't there, behave differently per machine, and leak
+// a relaunching process into whatever test runs next. `node --test` runs each file in its own process,
+// so this cannot leak into another suite.
+const emptyBinDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-nobin-'));
+process.env.PATH = emptyBinDir;
+
 const { default: db } = await import('../src/db.js');
 const { SLEEP_THRESHOLDS } = await import('../src/lib/sleepAnalysis.js');
+const { startSegmenter, stopAllSegmenters, isSegmenterRunning } = await import('../src/lib/clipRecorder.js');
+const { holdOwners, RING_OWNER } = await import('../src/lib/ringHolds.js');
 const { handleMinute, startWakeWatcher, stopWakeWatcher, sweepStaleRuns, _state } =
   await import('../src/lib/wakeWatcher.js');
 
@@ -68,12 +82,15 @@ before(() => {
 
 after(() => {
   stopWakeWatcher();
+  stopAllSegmenters();
   db.close();
   cleanupTempDataDirs();
+  try { fs.rmSync(emptyBinDir, { recursive: true, force: true }); } catch { /* best effort */ }
 });
 
 beforeEach(() => {
   stopWakeWatcher();
+  stopAllSegmenters(); // #446 tests arm a real segmenter; never let one leak into the next test
   _state().clear();
   clock = 0;
 });
@@ -242,6 +259,46 @@ describe('a camera that stops reporting mid-wake', () => {
     settle(); // armed, but nothing active — so there is no run to sweep
     assert.equal(_state().get(CAM).run, null);
     assert.equal(sweepStaleRuns(Date.now() + 60 * 60 * 1000), 0);
+  });
+});
+
+describe('★ #446 — a WAKE hold is gated on wake clips actually being enabled', () => {
+  // clipCapture.js's reconcileClipRing defers stopping a ring that's no longer wanted while ANY hold
+  // exists on it. Before this fix, handleMinute took a WAKE hold for every active run purely because a
+  // segmenter was running, with no regard for wake_clips_enabled — so after an admin switched wake clips
+  // off, a restless child kept creating pointless WAKE holds (captureWakeClip already no-ops when
+  // disabled — recordings.js) and the ring's stop kept getting deferred until the sleep window ended.
+  //
+  // Both tests arm a REAL segmenter (clipRecorder.startSegmenter) rather than stub isSegmenterRunning,
+  // because that live map entry is the actual gate handleMinute checks. With no ffmpeg on PATH the
+  // entry only exists SYNCHRONOUSLY, right after startSegmenter returns — the spawn's 'error' event
+  // deletes it on a later tick (see the file-header note and clip-capture.test.js's own). handleMinute,
+  // settle() and moving() are all plain synchronous calls, so running them with no `await` in between
+  // keeps the segmenter "live" for the whole test.
+  function armSegmenter() {
+    const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(CAM);
+    startSegmenter(CAM, camera.mediamtx_path, { preRollSec: 5, postRollSec: 15 });
+    assert.equal(isSegmenterRunning(CAM), true, 'precondition: the segmenter armed synchronously');
+  }
+
+  test('an active run on a sleeping child takes NO hold once wake clips are switched off (fails on current code)', () => {
+    db.prepare("UPDATE settings SET wake_clips_enabled = 0 WHERE id = 'app'").run();
+    armSegmenter();
+
+    settle();
+    for (let i = 0; i < WAKE_ACTIVE_MIN; i++) moving();
+
+    assert.deepEqual(holdOwners(CAM), [], 'a WAKE hold was taken even though wake clips are disabled');
+  });
+
+  test('the same run DOES take a WAKE hold when wake clips are enabled (control)', () => {
+    db.prepare("UPDATE settings SET wake_clips_enabled = 1 WHERE id = 'app'").run();
+    armSegmenter();
+
+    settle();
+    for (let i = 0; i < WAKE_ACTIVE_MIN; i++) moving();
+
+    assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE], 'a WAKE hold should have been taken');
   });
 });
 

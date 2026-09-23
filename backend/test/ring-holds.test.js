@@ -27,6 +27,7 @@ import {
   holdOwners,
   RING_OWNER,
   ondemandHoldOwner,
+  clipHoldOwner,
 } from '../src/lib/ringHolds.js';
 const { holdRing, releaseRing, startSegmenter, stopSegmenter } = await import('../src/lib/clipRecorder.js');
 const fsMod = await import('node:fs');
@@ -152,6 +153,16 @@ describe('ring holds', () => {
     // Even a recording id that happens to spell "wake" must still not collide — the colon separator is
     // what guarantees that, not luck about which ids are in use.
     assert.notEqual(ondemandHoldOwner('wake'), RING_OWNER.WAKE);
+  });
+
+  test('★ #446 — clipHoldOwner keys differ per event id, and never collide with WAKE or ondemandHoldOwner', () => {
+    assert.notEqual(clipHoldOwner(1), clipHoldOwner(2), 'two different event ids produced the same lease key');
+    assert.notEqual(clipHoldOwner(1), RING_OWNER.WAKE);
+    assert.notEqual(clipHoldOwner(1), ondemandHoldOwner(1), 'a clip and a recording with the same numeric id collided');
+    // Same "id that happens to spell a reserved word" case as ondemandHoldOwner above — the colon
+    // separator and the distinct prefix are what guarantee it, not luck about which ids are in use.
+    assert.notEqual(clipHoldOwner('wake'), RING_OWNER.WAKE);
+    assert.notEqual(clipHoldOwner('9'), ondemandHoldOwner('9'));
   });
 });
 
