@@ -9,6 +9,18 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+- **An unrelated detection edit could silently narrow an all-day alert schedule to 20:00–07:00.**
+  The detection-settings screen showed a suggested overnight window for a camera whose schedule was
+  stored as all-day (equal start/end), but that suggestion was being treated as the real value on
+  every subsequent save — so changing sound sensitivity or a motion setting, with the schedule
+  screen never opened, would quietly stop daytime alerts. The suggestion is now display-only until
+  the user actually acts on it — editing a time field, or turning "Only alert during set hours" on
+  for a camera that never had a real window — rather than being adopted silently by an unrelated
+  save. Also fixed: `PUT /api/cameras/:id/detection` no longer forces motion detection off when a
+  request omits `motion_enabled` — every other field on this route already preserved an omitted
+  value, and this was the one exception.
+
 ## [0.33.0] - 2026-09-22
 
 ### Added

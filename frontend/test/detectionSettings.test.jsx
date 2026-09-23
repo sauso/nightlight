@@ -256,35 +256,144 @@ describe('the alert schedule', () => {
   });
 
   test('★ a camera that never had a window offers a night, not 00:00–00:00', async () => {
-    // start === end is how "never set" is stored, and it is also a zero-length window. Showing it
-    // literally would offer someone a schedule that alerts for no minutes of the day, which reads as
-    // broken; the screen suggests 20:00–07:00 instead. ⚠️ This is a SUGGESTION, not a saved value —
-    // see the test below.
+    // start === end is how "all-day" is stored (inActiveWindow in detectSchedule.js treats it as
+    // always active), and it is also a zero-length window. Showing it literally would offer someone a
+    // schedule that alerts for no minutes of the day, which reads as broken; the screen suggests
+    // 20:00–07:00 instead. This is a render-time SUGGESTION only — the next tests are why it must
+    // never become the saved value on its own.
     mount('schedule', { ...CAM, detect_start: 0, detect_end: 0 });
     expect((await screen.findByLabelText('From')).value).toBe('20:00');
     expect(screen.getByLabelText('To').value).toBe('07:00');
   });
 
-  test('⚠️ but the suggested window IS written on the next change, whatever was changed', async () => {
-    // Documenting a real consequence of the whole-payload design rather than asserting it is correct:
-    // because every write carries all three slices, touching the switch on a never-scheduled camera
-    // also persists the suggested 20:00–07:00. Harmless today — the window is ignored while the
-    // schedule is off — but it means the suggestion silently becomes the stored value, and anyone
-    // changing the default needs to know that is what happens.
+  test('★★ enabling the schedule on a never-set camera commits a REAL window, not an inert one (#443 review finding)', async () => {
+    // Turning the switch on is the user's own deliberate schedule edit, not an unrelated one — so it
+    // must commit the suggested window for real, matching the camera tile's quick toggle
+    // (cameraTileHelpers.test.jsx). The alternative — leaving start===end while schedule_enabled
+    // becomes true — would make this switch inert: inActiveWindow() (backend/src/lib/
+    // detectSchedule.js, covered by detectSchedule.test.js) treats an equal pair as always active
+    // REGARDLESS of schedule_enabled, so the screen would show "Only alert during set hours" with a
+    // specific 20:00–07:00 window while alerts kept firing around the clock. Found by adversarial
+    // review of this fix's first draft, which made exactly that mistake.
     mount('schedule', { ...CAM, detect_start: 0, detect_end: 0, detect_schedule_enabled: 0 });
     await screen.findByText('Alerting 24/7.');
     fireEvent.click(screen.getByRole('switch'));
 
     const body = await sentBody();
     expect(body.schedule_enabled).toBe(true);
-    expect(body.start).toBe(1200);
-    expect(body.end).toBe(420);
+    expect(body.start, 'a real 20:00, not an inert equal pair').toBe(1200);
+    expect(body.end, 'a real 07:00').toBe(420);
+  });
+
+  test('re-enabling a schedule that already has a real window does not re-seed it', async () => {
+    // The commit-a-real-window behavior above only applies while there is genuinely no window yet
+    // (start === end). A camera that already has a real, if currently-disabled, window must keep it
+    // exactly as stored when the switch is flipped back on.
+    mount('schedule', { ...CAM, detect_schedule_enabled: 0 }); // CAM's default window is 19:00–06:40
+    await screen.findByText('Alerting 24/7.');
+    fireEvent.click(screen.getByRole('switch'));
+
+    const body = await sentBody();
+    expect(body.schedule_enabled).toBe(true);
+    expect(body.start).toBe(1140);
+    expect(body.end).toBe(400);
   });
 
   test('with the schedule off there are no times to set', async () => {
     mount('schedule', { ...CAM, detect_schedule_enabled: 0 });
     expect(await screen.findByText('Alerting 24/7.')).toBeTruthy();
     expect(screen.queryByLabelText('From')).toBeNull();
+  });
+
+  test('★★ an unrelated SOUND edit does not narrow an already-enabled all-day schedule (#443)', async () => {
+    // The issue's literal repro: a schedule already saved as enabled with equal start/end — all-day,
+    // per inActiveWindow's own "start === end" rule — must survive a save triggered from a completely
+    // different screen.
+    mount('sound', { ...CAM, detect_schedule_enabled: 1, detect_start: 0, detect_end: 0 });
+    fireEvent.change(await screen.findByLabelText(/Sensitivity/), { target: { value: '30' } });
+
+    const body = await sentBody();
+    expect(body.schedule_enabled).toBe(true);
+    expect(body.start, 'must stay all-day, not narrow to 20:00–07:00').toBe(body.end);
+  });
+
+  test('★★ an unrelated MOTION edit does not narrow an already-enabled all-day schedule (#443)', async () => {
+    // Same repro, via the other screen — a fix scoped to only one of the two screens would pass the
+    // test above and still corrupt the schedule from here.
+    mount('motion', { ...CAM, detect_schedule_enabled: 1, detect_start: 0, detect_end: 0 });
+    fireEvent.change(await screen.findByLabelText('Cooldown (seconds)'), { target: { value: '90' } });
+
+    const body = await sentBody();
+    expect(body.schedule_enabled).toBe(true);
+    expect(body.start, 'must stay all-day, not narrow to 20:00–07:00').toBe(body.end);
+  });
+
+  test('editing one time field while the suggestion is showing commits BOTH as displayed', async () => {
+    // If only the touched field were committed, the untouched "From" would silently fall back to the
+    // real pre-suggestion stored time (00:00) instead of the 20:00 on screen — a different, quieter
+    // version of the same "what you see is not what gets saved" bug.
+    mount('schedule', { ...CAM, detect_start: 0, detect_end: 0 });
+    await screen.findByLabelText('From');
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '08:00' } });
+
+    const body = await sentBody();
+    expect(body.start, '20:00, matching what "From" displayed').toBe(1200);
+    expect(body.end).toBe(480);
+  });
+
+  test('★★ an edit that happens to land on equal values is not silently reverted (#443 review finding)', async () => {
+    // Typing 07:00 into "From" while "To" still shows the suggested 07:00 produces an equal pair —
+    // which is ALSO how all-day is stored. A version of the fix that re-derives "still showing the
+    // suggestion" from `d.start === d.end` on every render (instead of latching it off after the
+    // first real edit) misreads this as "still the suggestion" and silently swaps the display back to
+    // 20:00–07:00, discarding what was just typed and overwriting it again on the next save.
+    mount('schedule', { ...CAM, detect_start: 0, detect_end: 0 });
+    const from = await screen.findByLabelText('From');
+    fireEvent.change(from, { target: { value: '07:00' } });
+
+    let body = await sentBody();
+    expect(body.start, 'From, as typed').toBe(420);
+    expect(body.end, 'To, as it was displayed (07:00)').toBe(420);
+    expect(from.value, 'must keep showing what was typed, not revert to the 20:00 suggestion').toBe('07:00');
+
+    // A second, later edit to "To" must change only "To" — not silently restore "From" to 20:00.
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '09:00' } });
+    await waitFor(() => expect(putSpy.mock.calls.length).toBeGreaterThan(1), SETTLE);
+    body = putSpy.mock.calls[putSpy.mock.calls.length - 1][1];
+    expect(body.start, '"From" must still read 07:00, not have reverted to 20:00').toBe(420);
+    expect(body.end).toBe(540);
+  });
+
+  test('★★ the same guard applies editing "To" first, not just "From" (#443 review finding)', async () => {
+    // The two fields are edited by separate handlers (editStart/editEnd), each with its own copy of
+    // "stop showing the suggestion." The "From"-first case above does not exercise editEnd's copy at
+    // all — a version of the fix that reset the latch in editStart but not editEnd passed every
+    // existing test in this file. Mirrors the assertions above onto the other input.
+    mount('schedule', { ...CAM, detect_start: 0, detect_end: 0 });
+    const to = await screen.findByLabelText('To');
+    fireEvent.change(to, { target: { value: '20:00' } });
+
+    let body = await sentBody();
+    expect(body.start, 'From, as it was displayed (20:00)').toBe(1200);
+    expect(body.end, 'To, as typed').toBe(1200);
+    expect(to.value, 'must keep showing what was typed, not revert to the 07:00 suggestion').toBe('20:00');
+
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '18:00' } });
+    await waitFor(() => expect(putSpy.mock.calls.length).toBeGreaterThan(1), SETTLE);
+    body = putSpy.mock.calls[putSpy.mock.calls.length - 1][1];
+    expect(body.start).toBe(1080);
+    expect(body.end, '"To" must still read 20:00, not have reverted to 07:00').toBe(1200);
+  });
+
+  test('once a real window exists, editing one field leaves the other alone', async () => {
+    // The paired-commit above only applies while start === end. A camera with a genuine window
+    // (CAM's default 19:00–06:40) must go back to editing each field independently.
+    mount('schedule');
+    fireEvent.change(await screen.findByLabelText('To'), { target: { value: '08:00' } });
+
+    const body = await sentBody();
+    expect(body.start, 'From (19:00) is untouched').toBe(1140);
+    expect(body.end).toBe(480);
   });
 });
 

@@ -133,7 +133,7 @@ test('★ an omitted field is kept, one field at a time', async () => {
 
   assert.equal(after.sound_sensitivity, 40, 'the field that WAS sent changes');
   for (const col of [
-    'detect_zone', 'detect_sensitivity', 'detect_cooldown_s', 'detect_confirm_s',
+    'detect_motion_enabled', 'detect_zone', 'detect_sensitivity', 'detect_cooldown_s', 'detect_confirm_s',
     'detect_schedule_enabled', 'detect_start', 'detect_end', 'detect_source',
     'motion_mqtt_topic', 'motion_mqtt_value', 'snapshot_url',
     'detect_sound_enabled', 'sound_confirm_s', 'sound_cooldown_s', 'detect_record_clips',
@@ -142,17 +142,24 @@ test('★ an omitted field is kept, one field at a time', async () => {
   }
 });
 
-test('⚠️ but motion_enabled is NOT optional — an absent one turns motion OFF', async () => {
-  // The one field that does not follow the rule: `motion_enabled ? 1 : 0`, with no undefined check.
-  // Pinned because it is a genuine inconsistency and a trap for the next caller that writes a partial
-  // payload — every other field can be omitted safely, this one cannot.
-  //
-  // Deliberately NOT "fixed" here. Making it keep-on-absent is a real behaviour change, not a tidy-up:
-  // it would silently redefine what an omitted `motion_enabled` means for every future caller, and
-  // that is a decision to take on purpose rather than as a side effect of writing a test. Every
-  // caller today sends the field, so nothing is broken; what was missing was anyone knowing.
+test('★ motion_enabled now follows the same keep-on-absent rule as every other field (#443)', async () => {
+  // Used to be the one field that didn't: `motion_enabled ? 1 : 0`, with no undefined check, so an
+  // omitted field hard-coded OFF. Fixed as part of #443's "partial updates preserve every field the
+  // request didn't touch" acceptance criterion — no current caller omits this field, so the fix is a
+  // pure correctness fix, not a behaviour change for anything in the app today.
   await put({ sound_sensitivity: 40 });
-  assert.equal(row().detect_motion_enabled, 0, 'motion is switched off by a payload that omits it');
+  assert.equal(row().detect_motion_enabled, 1, 'an omitted motion_enabled must keep the stored value');
+});
+
+test('★ …and the kept value is genuinely whatever was stored, not just "stays on"', async () => {
+  // The obvious way to fix `x ? 1 : 0` into `x === undefined ? existing : x ? 1 : 0` is easy to get
+  // backwards for the falsy case, since `existing.detect_motion_enabled` being 0 looks a lot like
+  // "omitted". Turn it off with an explicit write first, then omit it, and confirm it STAYS off.
+  await put({ motion_enabled: false, sound_sensitivity: 1 });
+  assert.equal(row().detect_motion_enabled, 0, 'explicitly turned off');
+
+  await put({ sound_sensitivity: 2 });
+  assert.equal(row().detect_motion_enabled, 0, 'an omitted field must not turn it back on');
 });
 
 test('the zone round-trips: what the route returns can be sent straight back', async () => {

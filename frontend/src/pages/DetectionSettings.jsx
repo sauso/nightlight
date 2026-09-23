@@ -16,27 +16,30 @@ const TITLES = { motion: 'Motion detection', sound: 'Sound detection', schedule:
 
 // Build the full detection state (all three slices) from a camera row.
 //
-// Each screen sends the WHOLE payload with only its own slice changed. ⚠️ Not because the route
-// demands it: `PUT /:id/detection` keeps any field it is not sent — **with one exception,
-// `motion_enabled`, which is read as `motion_enabled ? 1 : 0` with no undefined check, so omitting it
-// switches motion OFF.** Both halves are verified in backend/test/detection-route.test.js. The
-// keep-on-absent rule is why the camera tile's quick toggles can get away with omitting `zone` and
-// `record_clips`; the exception is why no caller may omit `motion_enabled`. It is because this
-// component holds all three slices
+// Each screen sends the WHOLE payload with only its own slice changed. `PUT /:id/detection` keeps
+// any field it is not sent, for every field including `motion_enabled` (backend/test/detection-
+// route.test.js). The keep-on-absent rule is why the camera tile's quick toggles can get away with
+// omitting `zone` and `record_clips`. It is because this component holds all three slices
 // in one state object and has no way to know which fields the user actually touched. That makes the
 // round-trip load-bearing: whatever `fromCam` reads, `toPayload` writes back — so a field misread
 // here is not dropped, it is sent back WRONG, and an edit on the sound screen rewrites the motion
 // zone or the alert window with nothing on screen to show it.
+//
+// ⚠️ `start`/`end` MUST be the true stored value here, even when they're equal ("all-day" — see
+// inActiveWindow in backend/src/lib/detectSchedule.js). Substituting a friendly display default
+// (e.g. 20:00–07:00) at this layer used to corrupt every unrelated save: since `toPayload` below
+// always re-sends whatever is in this state, a sound/motion edit would silently narrow a real
+// all-day schedule the moment it hit the wire (issue #443). Any "here's a suggested window" UI
+// belongs at render time in ScheduleForm, which can show a suggestion without adopting it.
 function fromCam(cam) {
-  const hasWindow = cam.detect_start !== cam.detect_end;
   return {
     motion_enabled: !!cam.detect_motion_enabled,
     sensitivity: cam.detect_sensitivity ?? 50,
     cooldown_s: cam.detect_cooldown_s ?? 60,
     confirm_s: cam.detect_confirm_s ?? 3,
     schedule_enabled: !!cam.detect_schedule_enabled,
-    start: minToHHMM(hasWindow ? cam.detect_start : 20 * 60),
-    end: minToHHMM(hasWindow ? cam.detect_end : 7 * 60),
+    start: minToHHMM(cam.detect_start),
+    end: minToHHMM(cam.detect_end),
     source: cam.detect_source === 'mqtt' ? 'mqtt' : cam.detect_source === 'onvif' ? 'onvif' : 'framediff',
     zone: cam.detect_zone || null,
     motion_mqtt_topic: cam.motion_mqtt_topic || '',
@@ -348,21 +351,68 @@ function SoundForm({ d, apply }) {
   );
 }
 
+// A stored all-day schedule (start === end, see fromCam) has no real window to show in a time
+// picker, so the inputs display a suggested overnight range without writing it into `d` — `d.start`/
+// `d.end` stay at their true equal value until the user actually edits a schedule field, so a save
+// triggered from anywhere else (including just toggling `schedule_enabled`) keeps sending the real
+// all-day value instead of silently adopting the suggestion (issue #443). The first edit made while
+// the suggestion is showing commits BOTH fields as displayed, not just the one touched — otherwise
+// the untouched field would silently fall back to the real (pre-suggestion) stored time instead of
+// the 20:00/07:00 the user was looking at when they typed.
+//
+// ⚠️ Whether to SHOW the suggestion is latched in a ref, not re-derived from `d.start === d.end` on
+// every render. Re-deriving it would misfire the moment a genuine edit happens to land on equal
+// values — e.g. typing 07:00 into "From" while "To" still reads the suggested 07:00 commits
+// start=07:00/end=07:00, which is equal again, so a render-time `d.start === d.end` check would
+// silently swap the display straight back to the 20:00 suggestion, discarding what was just typed
+// and reverting it on the very next unrelated save. Found by adversarial review of this fix. Once
+// the user has made one real edit this visit to the screen, both fields go back to editing
+// independently, equal or not.
 function ScheduleForm({ d, apply }) {
+  const showingSuggestion = useRef(d.start === d.end);
+  const allDay = showingSuggestion.current;
+  const showStart = allDay ? '20:00' : d.start;
+  const showEnd = allDay ? '07:00' : d.end;
+  function editStart(value) {
+    const patch = allDay ? { start: value, end: showEnd } : { start: value };
+    showingSuggestion.current = false;
+    apply(patch);
+  }
+  function editEnd(value) {
+    const patch = allDay ? { start: showStart, end: value } : { end: value };
+    showingSuggestion.current = false;
+    apply(patch);
+  }
+  // Turning scheduling ON while there is no real window yet (`allDay`) is itself the user's
+  // deliberate schedule edit, not an unrelated one — so unlike toggling it off, or toggling it on
+  // when a real window already exists, THIS commits the suggested window for real, the same as the
+  // camera tile's quick toggle (CameraTile.jsx's togglePatch). Leaving start/end at the true equal
+  // value here would make "Only alert during set hours" an inert control: inActiveWindow() treats
+  // start===end as always active regardless of schedule_enabled, so the screen would show a
+  // specific 20:00–07:00 window under "no push and no in-app alert outside these hours" while
+  // alerts kept firing around the clock. Found by adversarial review of this fix.
+  function toggleEnabled(v) {
+    if (v && allDay) {
+      showingSuggestion.current = false;
+      apply({ schedule_enabled: true, start: showStart, end: showEnd });
+    } else {
+      apply({ schedule_enabled: v });
+    }
+  }
   return (
     <>
-      <EnableToggle checked={d.schedule_enabled} onChange={(v) => apply({ schedule_enabled: v })}
+      <EnableToggle checked={d.schedule_enabled} onChange={toggleEnabled}
         label="Only alert during set hours" sub="Outside the window, motion and sound are ignored entirely." />
       {d.schedule_enabled ? (
         <>
           <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
             <div className="field" style={{ flex: 1 }}>
               <label htmlFor="sched-start">From</label>
-              <input id="sched-start" type="time" value={d.start} onChange={(e) => apply({ start: e.target.value })} />
+              <input id="sched-start" type="time" value={showStart} onChange={(e) => editStart(e.target.value)} />
             </div>
             <div className="field" style={{ flex: 1 }}>
               <label htmlFor="sched-end">To</label>
-              <input id="sched-end" type="time" value={d.end} onChange={(e) => apply({ end: e.target.value })} />
+              <input id="sched-end" type="time" value={showEnd} onChange={(e) => editEnd(e.target.value)} />
             </div>
           </div>
           <div className="camera-tile__sub" style={{ marginTop: 6 }}>

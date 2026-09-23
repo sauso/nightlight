@@ -982,7 +982,9 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
     record_clips,
   } = req.body || {};
 
-  const enabled = motion_enabled ? 1 : 0;
+  // Keep-on-absent, same as every other field below (issue #443) — an omitted `motion_enabled`
+  // used to hard-code OFF, a trap for any future caller that sends a partial body.
+  const enabled = motion_enabled === undefined ? existing.detect_motion_enabled : motion_enabled ? 1 : 0;
   const recordClips = record_clips === undefined ? existing.detect_record_clips : record_clips ? 1 : 0;
   const zoneJson = zone === undefined ? existing.detect_zone : serializeZone(zone);
   // Detection source: only the known values; anything else falls back to the current value. 'onvif'
