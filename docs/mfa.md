@@ -50,6 +50,31 @@ Lost your authenticator? Use a **backup code** at login. If you're also out of b
   The affected user can then sign in with just their password. Replace `nightlight` with
   `nightlight-dev` for the staging container.
 
+## Related: no admin account left at all
+
+A different, rarer failsafe for a different problem — there must always be at least one admin (see
+"Adding caregivers" in the README), and the app itself refuses any change that would leave zero. But
+an install that got into that state before that protection existed, or one whose database was edited
+by hand, has no admin to sign in as and no admin route it can reach to fix itself — and first-run
+setup (`/setup`) refuses to run again once any user exists.
+
+The console failsafe is the same shape as the two-factor one above, over SSH/console against the
+running container:
+
+```sh
+# List every account and its role
+docker exec nightlight node src/scripts/promote-admin.js
+
+# Make one account an admin
+docker exec nightlight node src/scripts/promote-admin.js <username>
+
+# Same, if <username> itself starts with "-" (e.g. an account literally named "-h")
+docker exec nightlight node src/scripts/promote-admin.js -- <username>
+```
+
+It never picks an account on its own — there is no "promote whoever was created first" option — an
+operator has to name the specific account being trusted with admin.
+
 ## Optional: strengthening a pre-0.26.0 secret
 
 Two-factor secrets created **before 0.26.0** were 80-bit. From 0.26.0 they're 160-bit, matching the

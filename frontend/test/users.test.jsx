@@ -415,4 +415,42 @@ describe('adding and editing a caregiver', () => {
       expect(await screen.findByText('Not permitted')).toBeTruthy();
     });
   });
+
+  // -------------------------------------------------------------------------------------------
+  // Issue #441: the server refuses to demote the only admin (routes/auth.js's keepingAnAdmin), but a
+  // request that only ever gets rejected is a worse experience than one that never gets sent — this
+  // explains the rule on the Role field itself, before a save is attempted.
+  //
+  // MUTANT THIS KILLS: M3, the frontend admin-count comparison changed from `=== 1` to `=== 2`. T6
+  // pins the sole-admin case, T7 is the two-admin control that catches the mutant going the other way
+  // (a `=== 2` comparison would show NO hint for the actual sole-admin case in T6, which T6 already
+  // catches — T7 is what catches it wrongly showing the hint for a NON-sole admin).
+  describe('★ the only admin cannot be demoted to caregiver from here (#441)', () => {
+    test('T6: viewing the only admin — Caregiver is disabled, with the hint shown', async () => {
+      mockApi({ users: [ME, NANNY] }); // ME is the only admin in this fixture
+      mountEdit(ME.id);
+      const role = await screen.findByLabelText(/Role/);
+      expect(role.value).toBe('admin');
+      expect(within(role).getByRole('option', { name: 'Caregiver' }).disabled).toBe(true);
+      expect(screen.getByText(/This is the only admin/)).toBeTruthy();
+    });
+
+    test('T7 (control): a second admin exists — Caregiver is enabled, no hint', async () => {
+      const SECOND_ADMIN = { id: 'u-admin2', username: 'zara', role: 'admin', first_name: 'Zara', last_name: '', photo: null, mfa_enabled: 0 };
+      mockApi({ users: [ME, SECOND_ADMIN, NANNY] });
+      mountEdit(ME.id);
+      const role = await screen.findByLabelText(/Role/);
+      expect(role.value).toBe('admin');
+      expect(within(role).getByRole('option', { name: 'Caregiver' }).disabled).toBe(false);
+      expect(screen.queryByText(/This is the only admin/)).toBeNull();
+    });
+
+    test('T8: a caregiver\'s own page never shows the hint — the rule only concerns admins', async () => {
+      mockApi({ users: [ME, NANNY] }); // ME is the sole admin, but NANNY is a caregiver, not the admin in question
+      mountEdit(NANNY.id);
+      await screen.findByLabelText(/Role/);
+      expect(screen.queryByText(/This is the only admin/)).toBeNull();
+      expect(within(screen.getByLabelText(/Role/)).getByRole('option', { name: 'Caregiver' }).disabled).toBe(false);
+    });
+  });
 });

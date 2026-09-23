@@ -427,6 +427,15 @@ they’re signed in on. Demoting an admin to caregiver does *not* sign them out:
 a caregiver and simply lose the admin-only screens. Deleting an account, by contrast, ends its
 sessions at once and signs that person out everywhere.
 
+**There must always be at least one admin.** The only admin on an install can't be changed to
+caregiver until another account is made an admin first, and no account can ever delete itself —
+another admin has to remove it. Both are enforced by the server, not just hidden in the UI: the Role
+field explains it up front when it applies, and a request that tries anyway gets a clear error rather
+than a partial change. If an install somehow already has no admin (a database edited by hand, or
+from before this was enforced), see **[docs/mfa.md](docs/mfa.md)**'s recovery section for the console
+command that fixes it — it's documented there alongside the equivalent two-factor recovery, not
+because it's about two-factor, but because it's the same kind of last-resort console fix.
+
 Any account can also turn on **two-factor authentication** for its own login — see
 **[docs/mfa.md](docs/mfa.md)** for enrolling, one-time backup codes, and how to recover if an
 admin loses their authenticator.
