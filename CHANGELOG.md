@@ -37,6 +37,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   save. Also fixed: `PUT /api/cameras/:id/detection` no longer forces motion detection off when a
   request omits `motion_enabled` — every other field on this route already preserved an omitted
   value, and this was the one exception.
+- **Starting an on-demand recording on a camera while a previous one was still being saved could lose
+  the beginning of either recording.** This happens whenever two overlapping recordings occur on the
+  same camera — another device starting one, or pressing Record again right after Stop, while the
+  first is still being written to a video. Each on-demand recording now protects its own footage until
+  its video is saved, instead of sharing one protection slot that the newer recording could silently
+  shorten or the older one could clear out from under it.
 
 ## [0.33.0] - 2026-09-22
 

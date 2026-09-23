@@ -30,7 +30,7 @@ useTempDataDir();
 const { default: db } = await import('../src/db.js');
 const { CLIPS_DIR, startSegmenter, stopSegmenter, stopAllSegmenters } = await import('../src/lib/clipRecorder.js');
 const { checkClipStorage } = await import('../src/lib/clipStorage.js');
-const { holdOwners, RING_OWNER } = await import('../src/lib/ringHolds.js');
+const { holdOwners, effectiveHold, RING_OWNER, ondemandHoldOwner } = await import('../src/lib/ringHolds.js');
 const {
   startRecording, stopRecording, stopAllRecordings, stopAllRecordingsForShutdown,
   isRecording, recordingState, reconcileStaleRecordings,
@@ -147,7 +147,8 @@ describe('★ startRecording, when it does start', () => {
     assert.equal(row.status, 'recording');
     assert.equal(row.child_id, CHILD, 'the recording is not attached to the child whose page shows it');
     assert.equal(row.triggered_by, 'u-admin');
-    assert.deepEqual(holdOwners(CAM), [RING_OWNER.ONDEMAND], 'the pre-roll is not protected from pruning');
+    // #445: keyed per recording, not the bare RING_OWNER.ONDEMAND — see ringHolds.js.
+    assert.deepEqual(holdOwners(CAM), [ondemandHoldOwner(st.id)], 'the pre-roll is not protected from pruning');
   });
 
   test('★ started_at is the first frame of the finished video — pre-roll INCLUDED', () => {
@@ -212,8 +213,9 @@ describe('★ stopRecording', () => {
     // restarts — an unbounded directory, produced by the failure path, which is the one that happens
     // when something is already wrong.
     armRing();
-    startRecording(camera());
-    assert.deepEqual(holdOwners(CAM), [RING_OWNER.ONDEMAND], 'precondition: the hold is in place');
+    const st = startRecording(camera());
+    // #445: keyed per recording, not the bare RING_OWNER.ONDEMAND — see ringHolds.js.
+    assert.deepEqual(holdOwners(CAM), [ondemandHoldOwner(st.id)], 'precondition: the hold is in place');
     await stopRecording(CAM, { settleMs: 0 });
     assert.deepEqual(holdOwners(CAM), [], 'the hold outlived a failed recording');
   });
@@ -227,6 +229,101 @@ describe('★ stopRecording', () => {
     // 30s pre-roll + at least 1s of live span + the tail. Asserted as a floor rather than a value:
     // the exact number depends on how long the test took, and pinning it would be pinning the clock.
     assert.ok(row.duration_s >= 31, `duration_s ${row.duration_s} does not include the pre-roll`);
+  });
+});
+
+// --- overlapping lifecycles (#445) -------------------------------------------------------------------
+//
+// The issue: `startRecording` used to key its ring hold with the bare `RING_OWNER.ONDEMAND` (a single
+// slot, shared by every on-demand capture on a camera). `stopRecording` deletes the camera from `active`
+// SYNCHRONOUSLY, before it ever awaits `extractClip` — see the file header of ringHolds.js and #255's
+// same lesson one level down. So a second Start (another device, or the same person pressing Record
+// again right after Stop) is accepted while an earlier Stop's extraction is still running, and with one
+// shared key: the second Start's `addHold` overwrote the first's `fromMs` (shortening or destroying its
+// protection while it is still being read), and the first's `finally` later deleted the second's hold
+// outright (the janitor could then prune it on its next 2s tick).
+//
+// Ordering is deterministic without mocked timers: `stopRecording` runs synchronously up to its first
+// `await extractClip(...)`, so a synchronous `startRecording` called immediately after an UN-AWAITED
+// `stopRecording` always lands while the earlier recording is still being cut.
+//
+// ⚠️ Every test below drains every promise it started before it ends (both stops awaited, both rows
+// 'failed', holds back to `[]`) — an un-awaited extraction left running would finish during a LATER
+// test, and under a collapsed-key mutant its `finally` would release THAT test's hold, making mutation
+// results order-dependent.
+describe('★ #445 — an earlier on-demand recording must not release (or shorten) a later one\'s hold', () => {
+  test('T1 — the issue\'s exact repro: A finishing must not wipe out B\'s hold', async () => {
+    armRing();
+    const a = startRecording(camera(), 'u-phone');
+    const pA = stopRecording(CAM, { settleMs: 0 }); // un-awaited — still inside A's extraction
+    const b = startRecording(camera(), 'u-tablet'); // accepted: `active` was already emptied by the stop above
+    await pA; // let A's `finally` run before asserting anything about the hold registry
+
+    assert.equal(isRecording(CAM), true, 'B is not recording after A settled');
+    // Same formula as recordings.js's holdRing call — derived from B's own started_at_ms (returned by
+    // startRecording) rather than a fresh Date.now(), so this is exact, not a race-prone approximation.
+    const bFrom = b.started_at_ms - 30 * 1000 - 5000; // ondemand_pre_roll_s is 30, the beforeEach default
+    assert.equal(effectiveHold(CAM), bFrom, "A finishing wiped B's hold instead of releasing only its own");
+    assert.deepEqual(holdOwners(CAM), [ondemandHoldOwner(b.id)], "B's lease is missing, or keyed wrong");
+
+    await stopRecording(CAM, { settleMs: 0 });
+    assert.equal(rowOf(a.id).status, 'failed');
+    assert.equal(rowOf(b.id).status, 'failed');
+    assert.equal(rowOf(a.id).triggered_by, 'u-phone', 'two devices = two distinct triggered_by values');
+    assert.equal(rowOf(b.id).triggered_by, 'u-tablet');
+    assert.deepEqual(holdOwners(CAM), [], 'a hold outlived both recordings');
+  });
+
+  test('T2 — starting B must not shorten A\'s still-open hold', async () => {
+    armRing();
+    const a = startRecording(camera(), 'u-phone');
+    const aFrom = effectiveHold(CAM); // only A holds so far — this IS A's own raw lease value
+    const pA = stopRecording(CAM, { settleMs: 300 }); // slow enough that B starts mid-extraction, un-awaited
+
+    // ⚠️ ORDER MATTERS (Codex review, F2): `stopRecording` re-reads `ondemand_pre_roll_s` SYNCHRONOUSLY
+    // at the call above (recordings.js, for its OWN postRollSec math). Changing the setting only AFTER
+    // that call isolates what this test is actually about — does B's shallower pre-roll leak backward
+    // and shorten A's already-taken hold — from any accidental effect on A's own stop.
+    setSettings({ ondemand_pre_roll_s: 10 });
+    const b = startRecording(camera(), 'u-tablet');
+    const bFrom = b.started_at_ms - 10 * 1000 - 5000; // same formula as recordings.js's holdRing call
+
+    assert.ok(bFrom > aFrom, `precondition failed: B's lease (${bFrom}) is not shallower than A's (${aFrom})`);
+    assert.equal(effectiveHold(CAM), aFrom, "B's shallower hold shortened A's still-open one");
+    assert.deepEqual(
+      holdOwners(CAM).sort(),
+      [ondemandHoldOwner(a.id), ondemandHoldOwner(b.id)].sort(),
+      'both leases must coexist while both recordings are in flight'
+    );
+
+    await pA;
+    assert.deepEqual(holdOwners(CAM), [ondemandHoldOwner(b.id)], "A finishing deleted B's hold instead of only its own");
+    assert.equal(effectiveHold(CAM), bFrom);
+
+    await stopRecording(CAM, { settleMs: 0 });
+    assert.deepEqual(holdOwners(CAM), [], 'a hold outlived both recordings');
+    assert.equal(rowOf(a.id).status, 'failed');
+    assert.equal(rowOf(b.id).status, 'failed');
+  });
+
+  test('T3 — reverse completion order: B finishing first must not touch A\'s still-open hold', async () => {
+    // The mirror of T1/T2: the SLOW capture is the one still running when the FAST one finishes.
+    armRing();
+    const a = startRecording(camera(), 'u-phone');
+    const aFrom = effectiveHold(CAM);
+    const pA = stopRecording(CAM, { settleMs: 300 }); // slow: still open when B starts AND finishes, un-awaited
+    const b = startRecording(camera(), 'u-tablet');
+    await stopRecording(CAM, { settleMs: 0 }); // B finishes first — awaited, so its `finally` has run
+
+    assert.equal(effectiveHold(CAM), aFrom, "B finishing released A's still-open hold");
+    assert.deepEqual(holdOwners(CAM), [ondemandHoldOwner(a.id)], "A's lease is missing after B finished");
+    assert.equal(rowOf(b.id).status, 'failed');
+    assert.equal(rowOf(b.id).triggered_by, 'u-tablet');
+
+    await pA;
+    assert.deepEqual(holdOwners(CAM), [], 'a hold outlived both recordings');
+    assert.equal(rowOf(a.id).status, 'failed');
+    assert.equal(rowOf(a.id).triggered_by, 'u-phone');
   });
 });
 
