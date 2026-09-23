@@ -18,7 +18,7 @@ import { SortableContext, rectSortingStrategy, arrayMove } from '@dnd-kit/sortab
 // end by the first drag anyone does. That means the indices must be looked up in `full`, never in the
 // list on screen; computing them from the visible subset would write an order missing every disabled
 // camera. It lives out here because it is pure logic worth testing directly — same arrangement as
-// CameraTile's `detectionPayload`.
+// CameraTile's `togglePatch`.
 //
 // ⚠️ NOT because the component is untestable. This used to say the surrounding component "cannot run
 // under jsdom" and cited a coverage exclusion in vite.config.js as evidence; that exclusion has since

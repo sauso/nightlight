@@ -205,6 +205,28 @@ About that one shared address:
 **Cameras → edit** a camera. Motion and sound are independent detectors — either can be enabled
 without the other, and each has its own sensitivity, confirmation delay and cooldown.
 
+### Changes save automatically
+
+The Motion, Sound and Alert schedule screens have no Save button — every change (a slider, a switch,
+a typed number) saves itself about a second after you stop moving it, and applies immediately: the
+camera's detector restarts to match.
+
+A small flag above the settings says **Saving…**, then **Saved ✓**. Leaving the screen right away —
+tapping Back the instant you make a change — still saves it; you don't need to wait for the flag.
+
+If a save can't reach the server, the flag is replaced by **Not saved**, with a **Retry** button.
+Unlike the flag, this doesn't clear itself — it stays until Retry succeeds, and your change is not
+lost or overwritten in the meantime, on this screen or (if you've already gone Back) on the camera's
+own settings page, which shows the same message. The quick motion/sound/schedule toggles on a camera
+tile in **Live** save the same way, through the same in-progress check, so a toggle there and an edit
+on this screen for the same camera can't overwrite each other.
+
+**Known limits:** this only protects against navigating within the app. Closing the browser tab, or
+reloading the page, within that first second or two can still lose a change that hadn't saved yet —
+and a failed-save warning is only kept for the current browser session, so reloading after a failure
+forgets it too (though the setting itself never silently reverts; whatever was last successfully
+saved is what the camera is still using).
+
 | Setting | Default | Range | What it does |
 |---|---|---|---|
 | **Motion sensitivity** | 50 | 1–100 | How much of the detection zone must change between frames. Higher = more sensitive. |
