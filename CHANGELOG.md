@@ -10,6 +10,23 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Fixed
+- **A camera outage during the night could be silently counted and displayed as sleep.** Sleep
+  analysis already tracked, per minute, whether a camera actually recorded anything — but immediately
+  discarded that distinction, so a stretch with no data at all (a detector restart, a dead camera) was
+  treated exactly like a stretch confirmed quiet. A long enough outage could seed the night's onset
+  from inside itself, inflate the reported asleep duration, extend the longest unbroken stretch shown,
+  and display as an "asleep" segment on the sleep bar — while the detailed per-minute timeline for the
+  same minutes correctly called it a gap, so the two views of one night could visibly disagree. Missing
+  minutes are now their own state throughout: they can't start or extend a confirmed-quiet run, don't
+  count toward the reported asleep time, and show as a distinct "no data" segment (striped, so it can't
+  be mistaken for the existing before/after-sleep shading) matching the detailed timeline, with a
+  legend entry on any night that has one. A scattered handful of missed minutes — a merely flaky
+  connection rather than an outage — no longer blocks bedtime detection either: only a long, confirmed
+  gap can, never a single missed sample. Internally, a new `unknown_minutes` figure (alongside the
+  existing asleep/awake counts) records how many minutes of the night simply weren't observed and is
+  stored with the rest of a night's numbers — not yet shown as its own figure anywhere, but needed so
+  that manually correcting a night's onset or wake time can't silently re-count an outage as sleep by
+  recomputing the duration from scratch.
 - **An unrelated detection edit could silently narrow an all-day alert schedule to 20:00–07:00.**
   The detection-settings screen showed a suggested overnight window for a camera whose schedule was
   stored as all-day (equal start/end), but that suggestion was being treated as the real value on
