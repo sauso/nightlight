@@ -615,7 +615,7 @@
   {
     "label": "★ startRecording: the pre-roll is never protected from pruning",
     "file": "backend/src/lib/recordings.js",
-    "find": "  holdRing(camera.id, RING_OWNER.ONDEMAND, startMs - preRollSec * 1000 - 5000);",
+    "find": "  holdRing(camera.id, holdOwner, startMs - preRollSec * 1000 - 5000);",
     "replace": ";",
     "expect": "killed",
     "tests": [
@@ -625,8 +625,39 @@
   {
     "label": "★ stopRecording: the ring hold is never released",
     "file": "backend/src/lib/recordings.js",
-    "find": "    releaseRing(cameraId, RING_OWNER.ONDEMAND);",
+    "find": "    releaseRing(cameraId, a.holdOwner);",
     "replace": ";",
+    "expect": "killed",
+    "tests": [
+      "recordings-lifecycle.test.js"
+    ]
+  },
+  {
+    "label": "★ #445 M1: ondemandHoldOwner collapses back to the shared RING_OWNER.ONDEMAND key",
+    "file": "backend/src/lib/ringHolds.js",
+    "find": "  return `${RING_OWNER.ONDEMAND}:${recordingId}`;",
+    "replace": "  return RING_OWNER.ONDEMAND;",
+    "expect": "killed",
+    "tests": [
+      "ring-holds.test.js",
+      "recordings-lifecycle.test.js"
+    ]
+  },
+  {
+    "label": "★ #445 M2: stopRecording releases the CURRENT active recording's lease instead of its own",
+    "file": "backend/src/lib/recordings.js",
+    "find": "    releaseRing(cameraId, a.holdOwner);",
+    "replace": "    releaseRing(cameraId, active.get(cameraId)?.holdOwner ?? a.holdOwner);",
+    "expect": "killed",
+    "tests": [
+      "recordings-lifecycle.test.js"
+    ]
+  },
+  {
+    "label": "★ #445 M3: startRecording keys its hold by camera instead of by recording",
+    "file": "backend/src/lib/recordings.js",
+    "find": "  const holdOwner = ondemandHoldOwner(info.lastInsertRowid);",
+    "replace": "  const holdOwner = ondemandHoldOwner(camera.id);",
     "expect": "killed",
     "tests": [
       "recordings-lifecycle.test.js"

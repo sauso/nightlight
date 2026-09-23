@@ -136,9 +136,12 @@ export function isSegmenterRunning(cameraId) {
 // Returns false if no segmenter is running for the camera, so the caller can refuse to start a
 // recording that would have nothing to cut.
 //
-// `owner` is required and comes from RING_OWNER. Two features hold this ring — on-demand Record and
-// automatic wake clips — and before #255 they shared a single slot, so whichever acted last silently
-// replaced the other's protection and whichever finished first destroyed it. See ringHolds.js.
+// `owner` is required, and must be a distinct key per holder — RING_OWNER.WAKE for the wake watcher, or
+// `ondemandHoldOwner(recordingId)` (ringHolds.js) for on-demand Record, one per capture. Before #255,
+// two features (Record and wake clips) shared a single slot, so whichever acted last silently replaced
+// the other's protection and whichever finished first destroyed it; #445 found the identical bug ONE
+// LEVEL DOWN, between two overlapping on-demand recordings sharing the bare RING_OWNER.ONDEMAND string.
+// See ringHolds.js.
 export function holdRing(cameraId, owner, fromMs) {
   const entry = segmenters.get(cameraId);
   if (!entry) return false;
