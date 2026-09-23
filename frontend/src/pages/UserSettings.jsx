@@ -28,6 +28,10 @@ export default function UserSettings() {
   const [resettingMfa, setResettingMfa] = useState(false);
   const [mfaResetBusy, setMfaResetBusy] = useState(false);
   const [photoStatus, setPhotoStatus] = useState(''); // '' | 'saving' | 'saved'
+  // #441: true only when this account IS an admin AND is the only one. The backend enforces the
+  // invariant either way (routes/auth.js's keepingAnAdmin) - this just explains it before a demotion
+  // is even attempted, instead of the caregiver-list screen only learning about it from a 409.
+  const [onlyAdmin, setOnlyAdmin] = useState(false);
 
   // Persist just the photo immediately for an existing caregiver (no Save press). A new caregiver
   // has no record yet, so their photo rides along when the form is first saved.
@@ -65,12 +69,17 @@ export default function UserSettings() {
   const back = { to: '/settings/users', label: 'Caregivers' };
 
   useEffect(() => {
+    // Reset immediately, not just on success below: this effect re-runs when `id` changes (this is a
+    // routed screen reused across caregivers), and the previous account's restriction must not still
+    // be showing while the new one's data is still loading.
+    setOnlyAdmin(false);
     if (isNew) return;
     api.get('/auth/users').then((users) => {
       const u = users.find((x) => x.id === id);
       if (u) {
         setForm({ username: u.username, password: '', role: u.role, first_name: u.first_name || '', last_name: u.last_name || '', photo: u.photo || null });
         setMfaEnabled(!!u.mfa_enabled);
+        setOnlyAdmin(u.role === 'admin' && users.filter((x) => x.role === 'admin').length === 1);
       }
       setLoaded(true);
     }).catch((err) => { setError(err.message); setLoaded(true); });
@@ -183,12 +192,20 @@ export default function UserSettings() {
               <div className="field" style={{ marginBottom: 0 }}>
                 <label htmlFor="u-role">Role</label>
                 <select id="u-role" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-                  <option value="caregiver">Caregiver</option>
+                  {/* Disabled, not omitted: the account IS a caregiver-eligible role in general, just not
+                      from here while it's the only admin - a caregiver option no one can currently pick
+                      would be more confusing than one that's visibly there but greyed out. */}
+                  <option value="caregiver" disabled={onlyAdmin}>Caregiver</option>
                   <option value="admin">Admin</option>
                 </select>
                 <div className="camera-tile__sub" style={{ marginTop: 6 }}>
                   Caregivers can view cameras and manage children/cameras, but can't manage accounts or change app-wide settings.
                 </div>
+                {onlyAdmin && (
+                  <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                    This is the only admin. Make another account an admin before changing this one to caregiver.
+                  </div>
+                )}
               </div>
             </div>
 

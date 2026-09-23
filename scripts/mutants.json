@@ -2159,5 +2159,61 @@
     "expect": "killed",
     "tests": ["demo-seed.test.js"],
     "namePattern": "demo seed is deterministic"
+  },
+  {
+    "label": "#441: keepingAnAdmin's post-condition never fires (off-by-one on the admin count)",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (adminCount.get().c === 0) throw new LastAdminError();",
+    "replace": "if (adminCount.get().c === -1) throw new LastAdminError();",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "T1:"
+  },
+  {
+    "label": "#441: PUT /users/:id's password-driven session/push-token deletes move back outside the transaction",
+    "file": "backend/src/routes/auth.js",
+    "find": "  try {\r\n    keepingAnAdmin(() => {\r\n      // A password reset means the old credential can no longer be trusted - any session\r\n      // opened under it shouldn't outlive it. Spares only the requesting admin's own\r\n      // current session, for the case where they're resetting their own password.\r\n      //\r\n      // The push_tokens cleanup runs FIRST, as a subquery over the sessions about to be deleted - it\r\n      // has to see them before the next statement removes them. Same reasoning as /logout: an ended\r\n      // session must also stop that device's push registration, not just its API access.\r\n      if (password) {\r\n        db.prepare(\r\n          'DELETE FROM push_tokens WHERE session_id IN (SELECT id FROM sessions WHERE user_id = ? AND id != ?)'\r\n        ).run(req.params.id, req.user.sid);\r\n        db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.params.id, req.user.sid);\r\n      }\r\n\r\n      db.prepare(",
+    "replace": "  if (password) {\r\n    db.prepare(\r\n      'DELETE FROM push_tokens WHERE session_id IN (SELECT id FROM sessions WHERE user_id = ? AND id != ?)'\r\n    ).run(req.params.id, req.user.sid);\r\n    db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.params.id, req.user.sid);\r\n  }\r\n  try {\r\n    keepingAnAdmin(() => {\r\n      db.prepare(",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "T2:",
+    "note": "A multi-line find with \\r\\n, per the plan (repo files are CRLF). Moving the password-driven deletes to run unconditionally before the transaction recreates the pre-#441 partial-change bug: T2's hostile fixture (a second session/push token that would survive the unfixed route) is deleted immediately, even though the subsequent role UPDATE still rolls back inside keepingAnAdmin."
+  },
+  {
+    "label": "#441: onlyAdmin (frontend) checks for TWO admins instead of one",
+    "file": "frontend/src/pages/UserSettings.jsx",
+    "find": "users.filter((x) => x.role === 'admin').length === 1",
+    "replace": "users.filter((x) => x.role === 'admin').length === 2",
+    "expect": "killed",
+    "tests": ["users.test.jsx"],
+    "namePattern": "T6|T7"
+  },
+  {
+    "label": "#441: promote-admin.js's recovery script writes the wrong role",
+    "file": "backend/src/scripts/promote-admin.js",
+    "find": "if (!wasAdmin) db.prepare(\"UPDATE users SET role = 'admin' WHERE id = ?\").run(user.id);",
+    "replace": "if (!wasAdmin) db.prepare(\"UPDATE users SET role = 'caregiver' WHERE id = ?\").run(user.id);",
+    "expect": "killed",
+    "tests": ["promote-admin.test.js"],
+    "namePattern": "a stranded caregiver becomes an admin"
+  },
+  {
+    "label": "#441: promote-admin.js's parseArgs stops stripping the `--` end-of-options marker",
+    "file": "backend/src/scripts/promote-admin.js",
+    "find": "if (first === '--') return { mode: 'promote', username: second };",
+    "replace": "if (first === '--') return { mode: 'promote', username: first };",
+    "expect": "killed",
+    "tests": ["promote-admin.test.js"],
+    "namePattern": "flag"
+  },
+  {
+    "label": "#441: DELETE /users/:id's keepingAnAdmin wrapper removed",
+    "file": "backend/src/routes/auth.js",
+    "find": "  try {\r\n    keepingAnAdmin(() => {\r\n      // push_tokens.user_id has no FK/cascade (GHSA-q98f) — a removed caregiver's device otherwise kept\r\n      // receiving alerts, including camera-snapshot image links, indefinitely. sendToAll (lib/push.js)\r\n      // also filters its recipient query against live users as defense in depth, so a row missed here (or\r\n      // by a future caller of this route's logic) still can't be delivered to — but the row should still\r\n      // be deleted, not just excluded, since a stale row otherwise makes push.js's recipient count read\r\n      // wrong forever.\r\n      db.prepare('DELETE FROM push_tokens WHERE user_id = ?').run(req.params.id);\r\n      db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);\r\n    });\r\n  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n    throw e;\r\n  }",
+    "replace": "    // push_tokens.user_id has no FK/cascade (GHSA-q98f) — a removed caregiver's device otherwise kept\r\n    // receiving alerts, including camera-snapshot image links, indefinitely. sendToAll (lib/push.js)\r\n    // also filters its recipient query against live users as defense in depth, so a row missed here (or\r\n    // by a future caller of this route's logic) still can't be delivered to — but the row should still\r\n    // be deleted, not just excluded, since a stale row otherwise makes push.js's recipient count read\r\n    // wrong forever.\r\n    db.prepare('DELETE FROM push_tokens WHERE user_id = ?').run(req.params.id);\r\n    db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);",
+    "expect": "equivalent",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "#441",
+    "note": "Unreachable today, recorded honestly rather than hidden: DELETE /users/:id already refuses self-delete (checked above this wrapper), and requireAdmin re-checks the LIVE role (issue #261) on every request, while the whole handler runs synchronously with no `await`. So the caller was necessarily an admin at the exact moment this code ran, and deleting a DIFFERENT user can only reduce a count of >=2 admins, or delete a non-admin and not touch the count at all — no fixture can make this route delete the last admin without also deleting the caller's own account, which the guard above already blocks. Kept as defence in depth for if this route (or something it calls) ever grows an `await` before the deletes, which would let another request interleave."
   }
 ]

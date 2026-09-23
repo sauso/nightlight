@@ -43,6 +43,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   first is still being written to a video. Each on-demand recording now protects its own footage until
   its video is saved, instead of sharing one protection slot that the newer recording could silently
   shorten or the older one could clear out from under it.
+- **The sole administrator could demote themselves to caregiver, or (in a future code path) delete
+  their own account, leaving an install with no one who could manage accounts or settings and no way
+  back in** — first-run setup only runs once, before any account exists. Changing the last admin to
+  caregiver, or removing the last admin, is now refused with a clear message; the Caregivers screen
+  also explains this up front on the only admin's account, before a request is even sent. Installs that
+  already lost their last admin this way have a new console recovery command — see
+  [docs/mfa.md](docs/mfa.md)'s Recovery section.
 
 ## [0.33.0] - 2026-09-22
 
