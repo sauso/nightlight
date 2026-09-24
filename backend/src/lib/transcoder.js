@@ -132,8 +132,12 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraNam
   // Ensure the sibling AAC/HLS path exists before we publish to it (see buildArgs — the second output).
   // Same publisher-only config as the main path; created once and left in place across restarts (the
   // isConfigured check avoids a needless reload). The main path itself is created by reconcile/routes.
+  // `=== false`, never `!`: null means MediaMTX did not answer, and writing then could reload a path
+  // that was fine (#451; see isPathConfiguredCorrectly). If the path really was missing, ffmpeg cannot
+  // publish to it, the stream goes unready, and the watchdog's restart comes back through here to ask
+  // again once MediaMTX answers.
   const hlsPath = hlsPathName(mediamtxPath);
-  if (!(await isPathConfiguredCorrectly(hlsPath))) {
+  if ((await isPathConfiguredCorrectly(hlsPath)) === false) {
     await upsertPath(hlsPath).catch((e) => logger.error(`[hls-path:${hlsPath}] ${e.message}`));
   }
 
