@@ -9,6 +9,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.33.2] - 2026-09-25
+
+### Changed
+- **Library updates.** The Compatibility video player's streaming library (hls.js) is now 1.7.3, the
+  ONVIF camera library (used for camera-reported motion and pan/tilt) is now 0.8.3, and the icon set
+  (lucide-react) is now 1.47.0. The only visible difference is a slightly redrawn door icon next to
+  "Room activity" and "Movement-only estimate" on a night's sleep page.
+
 ### Security
 - **The MQTT library is updated to fix six advisories in which a malicious or misbehaving MQTT broker
   could crash the app using it or break its connection.** Nightlight uses MQTT for room temperature
