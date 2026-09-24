@@ -156,14 +156,14 @@ describe('nothing in the backend performs an UNBOUNDED fetch', () => {
   // `process.cwd()`, so it cannot silently scan the wrong tree when the runner's cwd differs.
 
   // Every entry needs a reason. These are the only unbounded fetches left in the backend.
+  //
+  // `lib/mediamtx.js` USED TO BE HERE ("loopback API in the same container; out of scope for #262"). #451
+  // showed loopback is not enough: a MediaMTX that accepts and never answers held GET /api/cameras and the
+  // camera watchdog for undici's full 300s per call. Its calls now carry a deadline, so the scan holds it
+  // to the same rule as everything else. Do not add it back.
   const ALLOWED = {
     // The bounded helper itself — its fetch is the one carrying the signal.
     'lib/httpNotify.js': 'defines postWithTimeout',
-    // ⚠️ KNOWN LIMIT, DOCUMENTED RATHER THAN HIDDEN. mediamtx.js talks to MediaMTX's HTTP API on
-    // 127.0.0.1 inside the same container, so it cannot hang on a network partition the way a remote
-    // provider can, and its callers now run under safeInterval's crash guard. Still technically
-    // unbounded, and out of scope for #262, which is about notification providers.
-    'lib/mediamtx.js': 'loopback API in the same container; out of scope for #262',
   };
 
   // A text scan is fooled by comments and string literals in BOTH directions — review of #262 hid a

@@ -10,6 +10,22 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Fixed
+- **A streaming server that stopped answering could freeze the camera list for five minutes and pile up
+  camera restarts.** Nightlight asks its built-in streaming server (MediaMTX) whether each camera is
+  delivering video, and those requests had no time limit of their own. If the server accepted a
+  request and never replied, the camera list waited up to five minutes, and the camera watchdog
+  started a fresh check every 15 seconds on top of the stuck ones. When the server woke up, the
+  pending checks all resumed at once and could restart the same camera several times over. Every
+  request now gives up after 5 seconds and counts as "unknown". The camera list answers within those
+  5 seconds (a camera whose status didn't come back just shows as not ready), and each camera has at
+  most one check pending at a time. A camera whose previous check is still running is skipped, not
+  queued. An unknown answer never triggers a restart, a Camera history entry or a rewrite of the
+  streaming server's configuration, since those could drop a stream that was fine. The camera-offline
+  notification still counts that time, so a stuck streaming server still reaches you if you turned the
+  alert on. Up to four cameras are now checked at once instead of one after another, and a camera's
+  main stream and its Low-quality sub-stream are checked separately, so a slow restart of one never
+  holds up the other. See
+  [KNOWN-ISSUES.md](KNOWN-ISSUES.md) for what the new `[guard:mediamtx-api]` log line means.
 - **Flipping the on-demand recording switch on the Recording settings page could silently discard any
   other unsaved edit on that page.** That switch applies immediately (by design — it's the one control
   on the page that doesn't wait for Save), and refreshing the page's settings afterward was replacing

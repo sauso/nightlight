@@ -2477,5 +2477,293 @@
     "replace": "disabled={busy}",
     "expect": "killed",
     "tests": ["settingsRecording.test.jsx"]
+  },
+  {
+    "label": "#451 M1: MediaMTX API requests lose their deadline signal",
+    "file": "backend/src/lib/mediamtx.js",
+    "find": "      signal: deadline,\r\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["mediamtx-api-deadline.test.js"],
+    "namePattern": "^T[12]"
+  },
+  {
+    "label": "#451 M2: an aborted body read is swallowed and reported as an answer",
+    "file": "backend/src/lib/mediamtx.js",
+    "find": "if (deadline.aborted) throw e;",
+    "replace": ";",
+    "expect": "killed",
+    "tests": ["mediamtx-api-deadline.test.js"],
+    "namePattern": "^T2:"
+  },
+  {
+    "label": "#451 M3: the raw abort message passes through to the caller",
+    "file": "backend/src/lib/mediamtx.js",
+    "find": "new MediamtxTimeoutError(`MediaMTX API did not answer ${method} ${apiPath} within ${describeMs(apiTimeoutMs)}`)",
+    "replace": "new MediamtxTimeoutError(e.message)",
+    "expect": "killed",
+    "tests": ["mediamtx-api-deadline.test.js"],
+    "namePattern": "^T4:"
+  },
+  {
+    "label": "#451 M4: the MediaMTX API deadline is raised back to 300s",
+    "file": "backend/src/lib/mediamtx.js",
+    "find": "export const MEDIAMTX_API_TIMEOUT_MS = 5000;",
+    "replace": "export const MEDIAMTX_API_TIMEOUT_MS = 300000;",
+    "expect": "killed",
+    "tests": ["mediamtx-api-deadline.test.js"],
+    "namePattern": "^T7:"
+  },
+  {
+    "label": "#451 M5: a refused or failed status call is also marked unknown",
+    "file": "backend/src/lib/mediamtx.js",
+    "find": "? { ready: false, tracks: [], unknown: true } : { ready: false, tracks: [] }",
+    "replace": "? { ready: false, tracks: [], unknown: true } : { ready: false, tracks: [], unknown: true }",
+    "expect": "killed",
+    "tests": ["mediamtx-api-deadline.test.js"],
+    "namePattern": "^T9:"
+  },
+  {
+    "label": "#451 M6: a MediaMTX API timeout is no longer logged",
+    "file": "backend/src/lib/mediamtx.js",
+    "find": "reportGuardFailure('mediamtx-api', err);",
+    "replace": ";",
+    "expect": "killed",
+    "tests": ["mediamtx-api-deadline.test.js"],
+    "namePattern": "^T6:"
+  },
+  {
+    "label": "#451 M7: perTargetRunner no longer skips a target that is still in flight",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "      if (pending) {",
+    "replace": "      if (false) {",
+    "expect": "killed",
+    "tests": ["process-guards.test.js"],
+    "namePattern": "^P1 "
+  },
+  {
+    "label": "#451 M8: perTargetRunner never clears a settled target's in-flight mark",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "if (inFlight.get(key) === entry) inFlight.delete(key);",
+    "replace": ";",
+    "expect": "killed",
+    "tests": ["process-guards.test.js"],
+    "namePattern": "^P2 "
+  },
+  {
+    "label": "#451 M9: perTargetRunner checks targets one at a time",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "i < Math.min(concurrency, queue.length); i++",
+    "replace": "i < Math.min(1, queue.length); i++",
+    "expect": "killed",
+    "tests": ["process-guards.test.js"],
+    "namePattern": "^P5 "
+  },
+  {
+    "label": "#451 M10: perTargetRunner's concurrency cap removed",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "i < Math.min(concurrency, queue.length); i++",
+    "replace": "i < queue.length; i++",
+    "expect": "killed",
+    "tests": ["process-guards.test.js"],
+    "namePattern": "^P6:"
+  },
+  {
+    "label": "#451 M11: perTargetRunner marks a target in flight when it STARTS, not when it is queued",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "      const entry = { since: now(), skipped: false };\r\n      inFlight.set(key, entry);\r\n      queue.push({ target, key, entry });\r\n    }\r\n\r\n    let next = 0;\r\n    const worker = async () => {\r\n      while (next < queue.length) {\r\n        const { target, key, entry } = queue[next++];\r\n",
+    "replace": "      const entry = { since: now(), skipped: false };\r\n      queue.push({ target, key, entry });\r\n    }\r\n\r\n    let next = 0;\r\n    const worker = async () => {\r\n      while (next < queue.length) {\r\n        const { target, key, entry } = queue[next++];\r\n        inFlight.set(key, entry);\r\n",
+    "expect": "killed",
+    "tests": ["process-guards.test.js"],
+    "namePattern": "^P7:"
+  },
+  {
+    "label": "#451 M12: perTargetRunner's per-target catch rethrows",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "reportGuardFailure(`${label}:${nameOf(target)}`, err);",
+    "replace": "throw err;",
+    "expect": "killed",
+    "tests": ["process-guards.test.js"],
+    "namePattern": "^P3:"
+  },
+  {
+    "label": "#451 M13: a long-pending check is skipped without being reported",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "if (pendingMs >= staleAfterMs) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["process-guards.test.js"],
+    "namePattern": "^P8:"
+  },
+  {
+    "label": "#451 M14: the camera watchdog treats an unknown main status as not ready",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "const unknown = status.unknown === true;",
+    "replace": "const unknown = false;",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W1:"
+  },
+  {
+    "label": "#451 M15: an unknown main status holds the restart timer instead of breaking it",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (unknown) {\r\n      // No answer is not evidence (#451): break the run, so a restart needs 30s of CONFIRMED not-ready.\r\n      notReadySince.delete(cam.id);\r\n",
+    "replace": "    if (unknown) {\r\n      // No answer is not evidence (#451): break the run, so a restart needs 30s of CONFIRMED not-ready.\r\n",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W2:"
+  },
+  {
+    "label": "#451 M16: an unknown status does not start the offline-push clock",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "if (!offlineSince.has(cam.id)) offlineSince.set(cam.id, observedAt);",
+    "replace": "if (!unknown && !offlineSince.has(cam.id)) offlineSince.set(cam.id, observedAt);",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W3:"
+  },
+  {
+    "label": "#451 M17: the sub leg treats an unknown status as not ready",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (sub.unknown) {",
+    "replace": "    if (false) {",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W4:"
+  },
+  {
+    "label": "#451 M18: index.js hands safeInterval the camera watchdog object instead of its tick",
+    "file": "backend/src/index.js",
+    "find": "createCameraWatchdog().tick);",
+    "replace": "createCameraWatchdog());",
+    "expect": "killed",
+    "tests": ["process-guards.test.js"],
+    "namePattern": "hands each watchdog"
+  },
+  {
+    "label": "#451 M19: isPathConfiguredCorrectly returns false (write) instead of null (unknown) on a timeout",
+    "file": "backend/src/lib/mediamtx.js",
+    "find": "if (e instanceof MediamtxTimeoutError) return null;",
+    "replace": "if (e instanceof MediamtxTimeoutError) return false;",
+    "expect": "killed",
+    "tests": ["mediamtx-api-deadline.test.js"],
+    "namePattern": "^T3"
+  },
+  {
+    "label": "#451 M20a: startSubStream writes the sub path on an unknown config read",
+    "file": "backend/src/lib/subStream.js",
+    "find": "if ((await isPathConfiguredCorrectly(path)) === false) await upsertPath(path);",
+    "replace": "if (!(await isPathConfiguredCorrectly(path))) await upsertPath(path);",
+    "expect": "killed",
+    "tests": ["mediamtx-api-deadline.test.js"],
+    "namePattern": "^T3b:"
+  },
+  {
+    "label": "#451 M20b: startTranscoder writes the HLS path on an unknown config read",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "if ((await isPathConfiguredCorrectly(hlsPath)) === false) {",
+    "replace": "if (!(await isPathConfiguredCorrectly(hlsPath))) {",
+    "expect": "killed",
+    "tests": ["mediamtx-api-deadline.test.js"],
+    "namePattern": "^T3b:"
+  },
+  {
+    "label": "#451 M20c: reconcileCameraPaths writes a path on an unknown config read",
+    "file": "backend/src/index.js",
+    "find": "if ((await isPathConfiguredCorrectly(cam.mediamtx_path)) === false) {",
+    "replace": "if (!(await isPathConfiguredCorrectly(cam.mediamtx_path))) {",
+    "expect": "killed",
+    "tests": ["mediamtx-api-deadline.test.js"],
+    "namePattern": "^T3c"
+  },
+  {
+    "label": "#451 M21a: the main leg's onSkip is a no-op, so a skip does not break the main restart run",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "  function onMainSkip(cam) {\r\n    notReadySince.delete(cam.id);\r\n  }",
+    "replace": "  function onMainSkip() {}",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W9:"
+  },
+  {
+    "label": "#451 M21c: the sub leg's onSkip is a no-op, so a skip does not break the sub restart run",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "  function onSubSkip(cam) {\r\n    subNotReadySince.delete(cam.id);\r\n  }",
+    "replace": "  function onSubSkip() {}",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W9b:"
+  },
+  {
+    "label": "#451 M21b: the audio watchdog's onSkip is a no-op, so a skip does not break the stall count",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "  function onSkip(cam) {\r\n    audioStallCounts.delete(cam.id);\r\n  }",
+    "replace": "  function onSkip() {}",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W10:"
+  },
+  {
+    "label": "#451 M22: the ctx.skipped guard before the MAIN restart decision is removed",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (ctx.skipped) return;\r\n    if (unknown) {",
+    "replace": "    if (unknown) {",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W9:"
+  },
+  {
+    "label": "#451 M22b: the ctx.skipped guard before the AUDIO stall count is removed",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (ctx.skipped) return;\r\n    if (flowing !== false) {",
+    "replace": "    if (flowing !== false) {",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W10:"
+  },
+  {
+    "label": "#451 M22c: the ctx.skipped guard before the SUB restart decision is removed",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (ctx.skipped) return;\r\n    if (sub.unknown) {",
+    "replace": "    if (sub.unknown) {",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W9b:"
+  },
+  {
+    "label": "#451 M23: the main restart is timed at decision time instead of when the reading was taken",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "} else if (observedAt - since > STUCK_THRESHOLD_MS) {",
+    "replace": "} else if (deps.now() - since > STUCK_THRESHOLD_MS) {",
+    "expect": "equivalent",
+    "tests": ["camera-watchdogs.test.js"],
+    "note": "Equivalent since the #451 fix round split the main and sub legs: nothing is awaited between the main reading (observedAt) and this comparison, so now() returns the same value. It was killed by the original W11 while the sub leg sat in between. Kept as a record: if an await is ever added there, this becomes killable again and needs a test."
+  },
+  {
+    "label": "#451 M24: a default watchdog dep is swapped (startSubStream bound to startTranscoder)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "  startSubStream,\r\n  subConfigured,\r\n",
+    "replace": "  startSubStream: startTranscoder,\r\n  subConfigured,\r\n",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W12:"
+  },
+  {
+    "label": "#451 M25: the main and sub legs merged back into one run, sub leg awaited first (the starvation BLOCKER)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    await Promise.all([\r\n      runMain(cameras, byId, byName, (cam, ctx) => checkMain(cam, offlineCfg, ctx), { onSkip: onMainSkip }),\r\n      runSub(cameras, byId, byName, checkSub, { onSkip: onSubSkip }),\r\n    ]);",
+    "replace": "    await runMain(cameras, byId, byName, async (cam, ctx) => { await checkSub(cam, ctx); await checkMain(cam, offlineCfg, ctx); }, { onSkip: (cam) => { onMainSkip(cam); onSubSkip(cam); } });",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W16:"
+  },
+  {
+    "label": "#451 M25b: the main and sub legs merged back into one run, main leg awaited first (moves the starvation onto the sub leg)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    await Promise.all([\r\n      runMain(cameras, byId, byName, (cam, ctx) => checkMain(cam, offlineCfg, ctx), { onSkip: onMainSkip }),\r\n      runSub(cameras, byId, byName, checkSub, { onSkip: onSubSkip }),\r\n    ]);",
+    "replace": "    await runMain(cameras, byId, byName, async (cam, ctx) => { await checkMain(cam, offlineCfg, ctx); await checkSub(cam, ctx); }, { onSkip: (cam) => { onMainSkip(cam); onSubSkip(cam); } });",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W17:"
   }
 ]
