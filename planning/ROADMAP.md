@@ -1114,13 +1114,6 @@ and unblocked, and are the right thing to reach for in a gap.
 Not features — small, agreed, unblocked work with no dependency on the holdout. **This is the list to
 pick from when there is a gap**, which is why it is one list rather than four notes in four places.
 
-- **E1. Clear the `qs` and `uuid` advisories** — `DONE` (unreleased, #455). No `--force` was needed.
-  Express 4.22.3 and body-parser 1.20.8 resolve to `qs` 6.16.0. Firebase Admin 14.5.0 brings
-  teeny-request 11, which no longer depends on `uuid`. Its optional `@google-cloud/storage` 8.2.0
-  still uses gaxios 6, so a scoped `gaxios@6` override resolves `uuid` ^11.1.1 there. The gaxios 6
-  storage subtree is not loaded by Nightlight's messaging path. The E2E Playwright pin and browser
-  image are 1.63.0, with Dependabot coverage and a version-match guard.
-
 - **E2. `routes/auth.js` branch coverage** — `NEXT` · *small*. **73%**, under the 80 bar, and invisible
   because the gate is an aggregate. Lines are 99.6% and functions 100%, so what is missing is the
   either-or paths, not whole functions. See §2.3, where it sits on the coverage list.

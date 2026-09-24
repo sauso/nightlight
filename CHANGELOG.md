@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.33.1] - 2026-09-24
+
 ### Fixed
 - **A streaming server that stopped answering could freeze the camera list for five minutes and pile up
   camera restarts.** Nightlight asks its built-in streaming server (MediaMTX) whether each camera is
