@@ -24,3 +24,12 @@ updates:
     target-branch: "dev"
     schedule:
       interval: "weekly"
+
+  # No committed E2E lock: it is a per-run artefact (see playwright/.gitignore).
+  # Dependabot bumps the manifest only. Bump the Playwright image tag in the same
+  # PR; dependency-hygiene.test.js keeps the PR red until the versions match.
+  - package-ecosystem: "npm"
+    directory: "/e2e/playwright"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"

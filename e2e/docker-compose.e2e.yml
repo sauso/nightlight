@@ -64,8 +64,10 @@ services:
   # it reaches the app by service name and needs no host Node. Behind the "test"
   # profile so the Phase 1 prove-out (`prove.sh`) doesn't start it; run it with
   # `docker compose --profile test run --rm playwright` (or via ./test.sh).
+  # Keep the image tag equal to the @playwright/test pin in playwright/package.json;
+  # backend/test/dependency-hygiene.test.js enforces this on every PR.
   playwright:
-    image: mcr.microsoft.com/playwright:v1.49.0-jammy
+    image: mcr.microsoft.com/playwright:v1.63.0-jammy
     profiles: ["test"]
     depends_on:
       - nightlight
