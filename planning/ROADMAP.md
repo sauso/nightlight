@@ -917,8 +917,11 @@ In the gate today at **97.6% lines / 86.8% branches / 93.8% functions**, across 
 `routes/recordings.js`** (added 2026-09-06).
 
 ⚠️ **THE THRESHOLDS ARE AGGREGATES ACROSS THE WHOLE LIST, not per file.** A module at 88% sits happily
-under a green gate — `lib/clipRecorder.js` does, and so does `routes/auth.js` at 73% *branches*. That
-is not a flaw to fix by adding per-file gates; it is the reason the include list must keep growing, and
+under a green gate — `lib/clipRecorder.js` does. `routes/auth.js` used to be the other example, at 73%
+*branches* (see E2, closed 2026-09-25: now 83.89%, driven up with tests for the either-or paths line
+coverage alone had hidden — describeDevice's OS/browser matrix, the two admin-guard rethrow paths, and
+three defaulting fallbacks). That is not a flaw to fix by adding per-file gates; it is the reason the
+include list must keep growing, and
 the reason to read a module's own row (`npm run test:core 2>&1 | grep -E '^ℹ +<file>\.js'`) rather than
 the summary line. Admitting the clip modules moved the aggregate 98.6 → 97.6, which is the gap becoming
 visible rather than a regression.
@@ -954,9 +957,13 @@ newly makes reachable.**
 - `routes/cameras.js` (1,036 lines) — the biggest surface, and the one with real authz branching.
   **The last big one left.**
 - `lib/motionDetector.js` — zone-mask maths
-- ✅ `routes/auth.js` — **DONE 2026-09-05** (#295): 86.5 → 99.6% lines. ⚠️ Branches are **73%**, under
-  the 80 bar and hidden by the aggregate; worth a deliberate pass rather than bolting on — tracked as
-  **§3 E2**.
+- ✅ `routes/auth.js` — **DONE 2026-09-05** (#295): 86.5 → 99.6% lines. Branches followed separately,
+  **DONE 2026-09-25**: 73% → **83.89%**, clearing the 80 bar. The gap was entirely either-or paths line
+  coverage can't see: `describeDevice`'s OS/browser matrix (every test's fetch() sends `User-Agent:
+  node`, which matches none of its regexes), the two admin-guard `catch` blocks' non-`LastAdminError`
+  rethrow, and three untested defaulting fallbacks (`appName()`, `demoMaxGuests()`,
+  `createSession`'s user-agent). New tests in `backend/test/auth-routes-branches.test.js`, mutants
+  `#E2 M1`–`M11` in `scripts/mutants.json`.
 - ✅ `lib/clipStorage.js` — **DONE 2026-09-06** (#296), 100% lines, along with the other four clip
   modules. It had no test file at all, which is how `sweepClips(){ return; }` — deleting the entire
   retention sweeper — passed a green 389-test suite.
@@ -1113,10 +1120,6 @@ and unblocked, and are the right thing to reach for in a gap.
 ### E. Maintenance and housekeeping
 Not features — small, agreed, unblocked work with no dependency on the holdout. **This is the list to
 pick from when there is a gap**, which is why it is one list rather than four notes in four places.
-
-- **E2. `routes/auth.js` branch coverage** — `NEXT` · *small*. **73%**, under the 80 bar, and invisible
-  because the gate is an aggregate. Lines are 99.6% and functions 100%, so what is missing is the
-  either-or paths, not whole functions. See §2.3, where it sits on the coverage list.
 
 - **E4. Move the soak stack into the repo as `e2e/soak/`** — `NEXT` · *small*. It currently lives
   outside the repo on the dev machine, which was the right call while it was unproven. **It has earned
