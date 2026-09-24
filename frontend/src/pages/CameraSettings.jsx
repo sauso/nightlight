@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Zap, AudioLines, Clock, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
@@ -7,6 +7,8 @@ import AppHeader from '../components/AppHeader.jsx';
 import Modal from '../components/Modal.jsx';
 import DetectionRow from '../components/DetectionRow.jsx';
 import CameraReportButton from '../components/CameraReportButton.jsx';
+import { useDetectionSave, retry } from '../lib/detectionSaves.js';
+import { TITLES as DETECTION_TITLES } from './DetectionSettings.jsx';
 
 const minToHHMM = (m) => `${String(Math.floor((m || 0) / 60)).padStart(2, '0')}:${String((m || 0) % 60).padStart(2, '0')}`;
 
@@ -179,10 +181,30 @@ export default function CameraSettings() {
 
   const detFrom = { state: { from: { to: `/cameras/${id}`, label: 'Camera' } } };
 
+  // The queue that backs the three detection screens (and the camera tile's quick toggles) lives
+  // outside any one screen (issue #444), so a write that fails after the user has already navigated
+  // BACK to this page must still surface here — this is where "Back" from a detection screen lands.
+  // Deliberately outside the <form> below (Codex F6 of the #444 plan): this page is one big form
+  // whose own submit does something completely different (saves the camera's connection settings),
+  // and Retry must never be able to trigger that by being a descendant of it.
+  const detSave = useDetectionSave(id);
+
   return (
     <>
       <AppHeader title={isNew ? 'Add camera' : (cam?.name || 'Camera')} back={back} />
       <main className="app-main">
+        {!isNew && detSave.state === 'failed' && (
+          // A sibling of <form> below, never a descendant of it — see the comment on `detSave` above.
+          <div className="error-banner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            <span>
+              Your last detection change for this camera wasn't saved.
+              {detSave.kind && DETECTION_TITLES[detSave.kind] && (
+                <> <Link to={`/cameras/${id}/${detSave.kind}`}>Open {DETECTION_TITLES[detSave.kind]}</Link></>
+              )}
+            </span>
+            <button type="button" className="btn btn-sm btn-secondary" onClick={() => retry(id)}>Retry</button>
+          </div>
+        )}
         {!isNew && !cam ? (
           <div className="empty-state">Loading…</div>
         ) : (

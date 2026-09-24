@@ -15,10 +15,16 @@
 // Role gating is NOT tested here: the route sits under <AdminProtected> (covered in
 // routeGuards.test.jsx), so this component never sees a caregiver and does no gating of its own.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import { renderAsAdmin } from './helpers/render.jsx';
+import { useState } from 'react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
+import { renderAsAdmin, ADMIN } from './helpers/render.jsx';
 import SettingsRecording from '../src/pages/SettingsRecording.jsx';
 import { api } from '../src/lib/api.js';
+import { AuthContext } from '../src/lib/AuthContext.jsx';
+import { SettingsContext } from '../src/lib/SettingsContext.jsx';
+import { CamerasContext } from '../src/lib/CamerasContext.jsx';
 
 // The defaults and ranges as docs/recording.md states them. Kept as one table so the assertions read
 // as "the screen agrees with the documentation" rather than as a pile of magic numbers.
@@ -35,15 +41,36 @@ const DOCUMENTED = [
 
 let putSpy;
 
-function mockApi({ putFails = null } = {}) {
+// `putImpl` (added for #449's T1b/T1c/T5) lets a test hold a PUT open — to inspect the optimistic,
+// in-flight state before resolving or rejecting it on its own schedule — without duplicating this
+// whole setup. `putFails`/no-arg behaviour is unchanged for every existing test.
+function mockApi({ putFails = null, putImpl = null } = {}) {
   vi.spyOn(api, 'get').mockResolvedValue({ total_bytes: 0, clip_count: 0 });
-  putSpy = vi.spyOn(api, 'put').mockImplementation(() =>
-    putFails ? Promise.reject(new Error(putFails)) : Promise.resolve({})
+  putSpy = vi.spyOn(api, 'put').mockImplementation(
+    putImpl || (() => (putFails ? Promise.reject(new Error(putFails)) : Promise.resolve({})))
   );
 }
 
 // The screen reads its values from SettingsContext, so a "stored" setting is one injected there.
 const renderWith = (settings = {}) => renderAsAdmin(<SettingsRecording />, { settings });
+
+// A complete admin recording-settings object — every field this screen reads. Used by the #449 tests
+// below, which must always publish a FULL settings object on a (simulated) context refresh: passing
+// just the one changed key would silently drop every other field back to DEFAULT_SETTINGS (see
+// helpers/render.jsx's `build` and its comment on `commit`/`rerenderWith`), which is not what a real
+// refresh does — GET /settings always sends everything.
+const FULL_SETTINGS = {
+  clip_pre_roll_s: 5,
+  clip_post_roll_s: 15,
+  clip_retention_days: 14,
+  clip_retention_max_gb: 5,
+  wake_clips_enabled: true,
+  wake_clip_seconds: 30,
+  wake_clip_retention_days: 14,
+  ondemand_enabled: true,
+  ondemand_pre_roll_s: 30,
+  ondemand_max_duration_s: 120,
+};
 
 beforeEach(() => mockApi());
 afterEach(() => vi.restoreAllMocks());
@@ -233,5 +260,297 @@ describe('★ the on-demand switch applies immediately', () => {
     renderWith({ ondemand_enabled: true });
     expect(await screen.findByLabelText('Capture before (seconds)')).toBeTruthy();
     expect(screen.getByLabelText('Auto-stop after (seconds)')).toBeTruthy();
+  });
+});
+
+// --- #449: the on-demand toggle discarding other unsaved recording settings --------------------
+//
+// Root cause: the old `useEffect(() => { if (settings) setForm(settings); }, [settings])` replaced
+// the WHOLE form on any change to the SettingsContext object, including a change caused by the
+// on-demand switch's own immediate save + refresh(). Every test above renders once and never
+// publishes a new `settings` object afterwards, so none of them exercise that effect a second time —
+// which is exactly why the bug shipped with a green suite. The tests below are the ones that do:
+// each either uses `rerenderWith` (helpers/render.jsx) to publish a fresh, COMPLETE settings object,
+// or a small stateful provider whose `commit`/`refresh` genuinely change what the screen reads (Codex
+// F3) — the injected `refresh`/`commit` from `renderWith` are deliberately inert `vi.fn()`s and would
+// let a naive version of these tests pass against the broken component.
+describe('★ unsaved drafts survive a context refresh (#449)', () => {
+  const SWITCH_LABEL = 'Show a Record button on each camera';
+  const withOndemand = (enabled) => ({ ...FULL_SETTINGS, ondemand_enabled: enabled });
+
+  // A REAL stateful settings context, for tests below that need `commit`/`refresh` to actually
+  // change what the screen reads — the injected mocks from helpers/render.jsx are deliberately
+  // inert (see its comment): a mocked `commit` there records the call but never updates `settings`,
+  // so a test asserting what the screen shows AFTER a successful commit needs this instead.
+  function renderStateful(initialSettings, refreshImpl) {
+    function Harness() {
+      const [settings, setSettings] = useState(initialSettings);
+      const value = {
+        settings,
+        loading: false,
+        commit: (s) => setSettings(s),
+        refresh: refreshImpl || (async () => {}),
+      };
+      return (
+        <MemoryRouter>
+          <AuthContext.Provider
+            value={{ user: ADMIN, loading: false, login: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}
+          >
+            <SettingsContext.Provider value={value}>
+              <CamerasContext.Provider value={{ kids: [], cameras: [], error: '', refresh: vi.fn() }}>
+                <SettingsRecording />
+              </CamerasContext.Provider>
+            </SettingsContext.Provider>
+          </AuthContext.Provider>
+        </MemoryRouter>
+      );
+    }
+    const result = render(<Harness />);
+    return { ...result, user: userEvent.setup() };
+  }
+
+  test('T1: pre-roll, a wake-clip field, and a HIDDEN on-demand field all survive a toggle + context republish', async () => {
+    const { user, rerenderWith } = renderWith(FULL_SETTINGS);
+
+    const preRoll = await screen.findByLabelText('Pre-roll (seconds)');
+    await user.clear(preRoll);
+    await user.type(preRoll, '12');
+
+    const wakeField = await screen.findByLabelText('Clip length (seconds)');
+    await user.clear(wakeField);
+    await user.type(wakeField, '45');
+
+    const ondemandPre = await screen.findByLabelText('Capture before (seconds)');
+    await user.clear(ondemandPre);
+    await user.type(ondemandPre, '22');
+
+    await user.click(screen.getByLabelText(SWITCH_LABEL));
+    await waitFor(() => expect(putSpy).toHaveBeenCalledWith('/settings', { ondemand_enabled: false }));
+
+    // Stands in for the real SettingsProvider re-fetching after the toggle's refresh() — a NEW
+    // settings object, same shape a real GET /settings would return.
+    rerenderWith({ settings: withOndemand(false) });
+
+    // The on-demand fields correctly hide themselves while the feature is off — but a field being
+    // off-screen must not be what clears its draft (Codex F4).
+    await waitFor(() => expect(screen.queryByLabelText('Capture before (seconds)')).toBeNull());
+    expect(screen.getByLabelText('Pre-roll (seconds)').value).toBe('12');
+    expect(screen.getByLabelText('Clip length (seconds)').value).toBe('45');
+
+    // Toggle back on — a second PUT, a second republish.
+    await user.click(screen.getByLabelText(SWITCH_LABEL));
+    await waitFor(() => expect(putSpy).toHaveBeenCalledWith('/settings', { ondemand_enabled: true }));
+    rerenderWith({ settings: withOndemand(true) });
+
+    // The on-demand pre-roll draft, typed before the field was ever hidden, is still there —
+    const ondemandPreAgain = await screen.findByLabelText('Capture before (seconds)');
+    expect(ondemandPreAgain.value).toBe('22');
+    expect(screen.getByLabelText('Pre-roll (seconds)').value).toBe('12');
+    expect(screen.getByLabelText('Clip length (seconds)').value).toBe('45');
+
+    // — and it reaches the next Save payload, not just the screen.
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalledWith('/settings', expect.objectContaining({
+      clip_pre_roll_s: '12',
+      ondemand_pre_roll_s: '22',
+    })));
+  });
+
+  test('T1b: the switch shows the optimistic value and disables itself while the toggle is in flight, then re-enables and STAYS on success', async () => {
+    // Uses renderStateful, not renderWith: with an inert commit(), pendingOndemand clearing on
+    // success would make the switch flicker back to the OLD committed value (nothing ever updated
+    // it) — a harness artifact, not the behaviour being pinned. A real commit is what "stays" means.
+    vi.restoreAllMocks();
+    let resolvePut;
+    mockApi({ putImpl: () => new Promise((resolve) => { resolvePut = resolve; }) });
+    const { user } = renderStateful(withOndemand(true));
+
+    const toggle = await screen.findByLabelText(SWITCH_LABEL);
+    expect(toggle.checked).toBe(true);
+    await user.click(toggle);
+
+    // Optimistic AND disabled the instant the request goes out, before the PUT resolves (Codex F5
+    // for the value, F2 for the disable — a second click here must not be able to start a race).
+    expect(screen.getByLabelText(SWITCH_LABEL).checked).toBe(false);
+    expect(screen.getByLabelText(SWITCH_LABEL)).toBeDisabled();
+
+    resolvePut({ ...FULL_SETTINGS, ondemand_enabled: false }); // the PUT's own response, as PUT /settings really answers
+    await waitFor(() => expect(screen.getByLabelText(SWITCH_LABEL)).not.toBeDisabled());
+    expect(screen.getByLabelText(SWITCH_LABEL).checked).toBe(false);
+  });
+
+  test('T1b: a rejected toggle re-enables the switch too, as well as reverting it', async () => {
+    vi.restoreAllMocks();
+    let rejectPut;
+    mockApi({ putImpl: () => new Promise((_resolve, reject) => { rejectPut = reject; }) });
+    const { user } = renderWith(withOndemand(true));
+
+    const toggle = await screen.findByLabelText(SWITCH_LABEL);
+    await user.click(toggle);
+    expect(screen.getByLabelText(SWITCH_LABEL)).toBeDisabled();
+
+    rejectPut(new Error('Server unavailable'));
+    await waitFor(() => expect(screen.getByLabelText(SWITCH_LABEL)).not.toBeDisabled());
+    expect(screen.getByLabelText(SWITCH_LABEL).checked).toBe(true);
+    expect(await screen.findByText('Server unavailable')).toBeTruthy();
+  });
+
+  test('T1c: the PUT response is shown for both the toggle and Save even though refresh() fails, and a second Save is not stale', async () => {
+    // #449 Codex F1: SettingsContext's refresh() swallows a failed GET, so "clear the draft, then
+    // refresh()" can leave a stale value on screen next to a "Saved ✓" banner, ready to be re-sent by
+    // the next Save. The fix is to never depend on refresh() landing at all after a successful write —
+    // commit() uses the PUT's own response instead. This proves that: refresh() here always throws,
+    // and the UI must still be correct.
+    const failingRefresh = vi.fn(async () => { throw new Error('refresh boom'); });
+    vi.spyOn(api, 'get').mockResolvedValue({ total_bytes: 0, clip_count: 0 });
+    putSpy = vi.spyOn(api, 'put').mockImplementation((_path, body) =>
+      'ondemand_enabled' in body
+        ? Promise.resolve({ ...FULL_SETTINGS, ondemand_enabled: body.ondemand_enabled })
+        // Deliberately returns a clip_retention_days that does NOT match what was typed (99), so a
+        // passing assertion can only mean the UI is showing the RESPONSE, not coincidentally echoing
+        // the input back.
+        : Promise.resolve({ ...FULL_SETTINGS, ...body, clip_retention_days: 7 })
+    );
+
+    const { user } = renderStateful(FULL_SETTINGS, failingRefresh);
+
+    const toggle = await screen.findByLabelText(SWITCH_LABEL);
+    await user.click(toggle);
+    await waitFor(() => expect(screen.getByLabelText(SWITCH_LABEL).checked).toBe(false));
+    expect(failingRefresh).not.toHaveBeenCalled(); // commit() supersedes refresh() entirely (M7)
+
+    const field = await screen.findByLabelText('Keep clips for (days)');
+    await user.clear(field);
+    await user.type(field, '99');
+    // Grabbed once and reused for both clicks below — its accessible name changes to "Saved ✓" after
+    // the first save (see the button's ternary), so re-querying by the "Save changes" name would fail
+    // to find it for the second click.
+    const saveBtn = screen.getByRole('button', { name: 'Save changes' });
+    await user.click(saveBtn);
+    // The button ALSO reads "Saved ✓" once saved (see its ternary), so getByRole('button', ...)
+    // disambiguates it from the banner div — a plain getByText('Saved ✓') matches both.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Saved ✓' })).toBeTruthy());
+    // Shows the server's normalised 7, not the 99 that was typed.
+    expect(screen.getByLabelText('Keep clips for (days)').value).toBe('7');
+
+    // A second Save, nothing further edited, must send what was actually just committed (7) — not a
+    // stale pre-fix value that a dropped commit() would leave behind.
+    await user.click(saveBtn);
+    await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(3));
+    expect(putSpy.mock.calls[2][1].clip_retention_days).toBe(7);
+    expect(failingRefresh).not.toHaveBeenCalled();
+  });
+
+  test('T2: a failed toggle preserves an unsaved pre-roll draft (pinning existing behaviour, not a regression test — see the plan)', async () => {
+    vi.restoreAllMocks();
+    mockApi({ putFails: 'Server unavailable' });
+    const { user } = renderWith(withOndemand(true));
+
+    const preRoll = await screen.findByLabelText('Pre-roll (seconds)');
+    await user.clear(preRoll);
+    await user.type(preRoll, '19');
+
+    await user.click(screen.getByLabelText(SWITCH_LABEL));
+    await screen.findByText('Server unavailable');
+    expect(screen.getByLabelText('Pre-roll (seconds)').value).toBe('19');
+  });
+
+  test('T3: an untouched field follows the server on a context refresh (kills a "never sync" implementation)', async () => {
+    const { rerenderWith } = renderWith(FULL_SETTINGS);
+    expect((await screen.findByLabelText('Keep clips for (days)')).value).toBe('14');
+
+    rerenderWith({ settings: { ...FULL_SETTINGS, clip_retention_days: 30 } });
+    await waitFor(() => expect(screen.getByLabelText('Keep clips for (days)').value).toBe('30'));
+  });
+
+  test('T4: Save clears the draft, and a LATER context change to that field still shows through', async () => {
+    const { user, rerenderWith } = renderWith({ ...FULL_SETTINGS, clip_retention_days: 14 });
+    const field = await screen.findByLabelText('Keep clips for (days)');
+    await user.clear(field);
+    await user.type(field, '30');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    // The button ALSO reads "Saved ✓" once saved (see its ternary), so getByRole('button', ...)
+    // disambiguates it from the banner div — a plain getByText('Saved ✓') matches both.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Saved ✓' })).toBeTruthy());
+
+    // The server normalises the typed "30" (string) to 30 (number) and the context republishes it.
+    rerenderWith({ settings: { ...FULL_SETTINGS, clip_retention_days: 30 } });
+    expect(screen.getByLabelText('Keep clips for (days)').value).toBe('30');
+
+    // A LATER, DIFFERENT server value must still show through — proof the draft was actually dropped
+    // by markSaved, not that it merely happened to still match the one above.
+    rerenderWith({ settings: { ...FULL_SETTINGS, clip_retention_days: 45 } });
+    await waitFor(() => expect(screen.getByLabelText('Keep clips for (days)').value).toBe('45'));
+  });
+
+  // Save and the toggle each commit a FULL settings snapshot from their own PUT response (commit() in
+  // SettingsContext.jsx). The race this guards against: toggle PUT sent -> Save PUT sent -> Save's
+  // response lands first and commits (markSaved clears the numeric drafts) -> the toggle's response —
+  // a snapshot taken BEFORE the save — lands afterwards and commits, reverting the just-saved numeric
+  // values on screen, ready for the NEXT Save to write them back over the server. Disabling each
+  // control while the other's request is in flight makes that overlap impossible.
+  describe('★ Save and the toggle exclude each other while either is in flight (#449 P1)', () => {
+    test('holding the toggle PUT disables Save, and a submit while it is disabled sends no PUT', async () => {
+      vi.restoreAllMocks();
+      let resolveTogglePut;
+      mockApi({ putImpl: () => new Promise((resolve) => { resolveTogglePut = resolve; }) });
+      const { user } = renderWith(FULL_SETTINGS);
+
+      const toggle = await screen.findByLabelText(SWITCH_LABEL);
+      await user.click(toggle);
+      await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1));
+
+      const saveBtn = screen.getByRole('button', { name: 'Save changes' });
+      expect(saveBtn).toBeDisabled();
+
+      await user.click(saveBtn); // a disabled button; userEvent does not fire its handler
+      expect(putSpy).toHaveBeenCalledTimes(1); // still just the toggle's own PUT — no second one went out
+
+      resolveTogglePut({ ...FULL_SETTINGS, ondemand_enabled: false });
+      await waitFor(() => expect(saveBtn).not.toBeDisabled());
+    });
+
+    test('holding a Save PUT disables the toggle, and a click while it is disabled sends no PUT', async () => {
+      vi.restoreAllMocks();
+      let resolveSavePut;
+      mockApi({ putImpl: () => new Promise((resolve) => { resolveSavePut = resolve; }) });
+      const { user } = renderWith(FULL_SETTINGS);
+
+      await screen.findByLabelText('Pre-roll (seconds)');
+      await user.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1));
+
+      const toggle = screen.getByLabelText(SWITCH_LABEL);
+      expect(toggle).toBeDisabled();
+
+      await user.click(toggle); // a disabled switch; userEvent does not fire its handler
+      expect(putSpy).toHaveBeenCalledTimes(1); // still just Save's own PUT — no toggle PUT went out
+
+      resolveSavePut({ ...FULL_SETTINGS });
+      await waitFor(() => expect(toggle).not.toBeDisabled());
+    });
+  });
+
+  test('T5: an edit made while Save is in flight survives the save that was already sending', async () => {
+    vi.restoreAllMocks();
+    let resolvePut;
+    mockApi({ putImpl: () => new Promise((resolve) => { resolvePut = resolve; }) });
+    const { user } = renderWith({ ...FULL_SETTINGS, clip_pre_roll_s: 5 });
+
+    const field = await screen.findByLabelText('Pre-roll (seconds)');
+    await user.clear(field);
+    await user.type(field, '10');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    // The PUT is hanging — edit again before it resolves.
+    await user.clear(field);
+    await user.type(field, '20');
+    resolvePut({});
+
+    // The button ALSO reads "Saved ✓" once saved (see its ternary), so getByRole('button', ...)
+    // disambiguates it from the banner div — a plain getByText('Saved ✓') matches both.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Saved ✓' })).toBeTruthy());
+    expect(screen.getByLabelText('Pre-roll (seconds)').value).toBe('20');
   });
 });

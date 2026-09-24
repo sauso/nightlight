@@ -9,7 +9,7 @@ import {
   holdRing,
   releaseRing,
 } from './clipRecorder.js';
-import { RING_OWNER } from './ringHolds.js';
+import { ondemandHoldOwner } from './ringHolds.js';
 import { hasMinFreeSpace } from './clipStorage.js';
 
 // On-demand recording: the tile's Record button. This is the SAME capture machinery as detection
@@ -23,6 +23,14 @@ import { hasMinFreeSpace } from './clipStorage.js';
 // pruning (holdRing) — otherwise a 2-minute capture would lose its own opening. The hold is bounded by
 // the max-duration cap and always released, including on failure.
 //
+// ⚠️ "recording" (a camera_id key in `active`, below) and "still consuming the ring" (a lease in the
+// hold registry) are DIFFERENT states that can overlap in time (issue #445). `stopRecording` deletes
+// the camera from `active` synchronously and only THEN awaits the encode — so a second Start can be
+// accepted, and legitimately begin its OWN recording, while the first is still reading ring segments
+// the encoder hasn't consumed yet. Each capture owns its own lease (`ondemandHoldOwner(recordingId)`,
+// see ringHolds.js) precisely so two overlapping captures on one camera don't fight over one slot the
+// way `active` briefly makes it look like there is only ever one.
+//
 // Recordings live in their OWN table, not detection_events: they're deliberate keepsakes, and putting
 // them in the alert feed would bury them among motion/sound events and hand them to the clip retention
 // sweeper, which would delete the very moments someone chose to keep.
@@ -34,7 +42,18 @@ const TAIL_SEC = 2;
 export const SEGMENT_SETTLE_MS = 5000;
 const MAX_ACTIVE_MS = 15 * 60 * 1000; // absolute backstop if a stop timer were ever lost
 
-// cameraId -> { id, startMs, timer, userId }
+// cameraId -> { id, startMs, timer, userId, holdOwner, preRollSec }
+// `holdOwner` is the exact key this capture's ring lease is registered under (ondemandHoldOwner(id)).
+// Captured here rather than recomputed at release time (#445): by the time a recording's `finally`
+// runs, `active.get(cameraId)` may already belong to the NEXT overlapping recording on this camera, so
+// releasing "whatever's active now" would release the WRONG lease.
+// `preRollSec` is likewise the value read ONCE at Start, not re-read from settings at Stop (#446): a
+// settings save mid-recording must not change what THIS capture already promised — started_at and the
+// ring hold both used the Start-time pre-roll, so the Stop-time extraction has to agree with them or
+// the window, started_at and duration_s all disagree with each other (the issue measured a 30s
+// recording's reported duration collapse to 0s when pre-roll was edited to 0 mid-capture). Same
+// reasoning as the max-duration cap, which was already snapshotted this way — the timer is set once,
+// at Start, from the value current then.
 const active = new Map();
 
 export function getOndemandSettings() {
@@ -77,8 +96,6 @@ export function startRecording(camera, userId = null) {
   if (!hasMinFreeSpace()) throw new Error('Not enough free disk space to record.');
 
   const startMs = Date.now();
-  // Reach back over the pre-roll, and protect those segments for as long as we're recording.
-  holdRing(camera.id, RING_OWNER.ONDEMAND, startMs - preRollSec * 1000 - 5000);
 
   const info = db
     .prepare(
@@ -93,13 +110,24 @@ export function startRecording(camera, userId = null) {
       triggered_by: userId,
     });
 
+  // Reach back over the pre-roll, and protect those segments for as long as we're recording. Keyed
+  // PER RECORDING (#445), not the bare RING_OWNER.ONDEMAND: two on-demand captures on the same camera
+  // can overlap (another device, or Record pressed again right after Stop, while the first is still
+  // being cut — see the file header), and a shared key meant the second Start silently shortened or
+  // outright deleted the first's protection. The row id is only known after the INSERT above, which is
+  // why the hold moved here — safe to reorder, because the INSERT is synchronous so nothing (no janitor
+  // tick) can run between the segmenter check and this call. Side benefit: an INSERT that throws no
+  // longer leaves an orphaned hold with nothing to release it.
+  const holdOwner = ondemandHoldOwner(info.lastInsertRowid);
+  holdRing(camera.id, holdOwner, startMs - preRollSec * 1000 - 5000);
+
   const timer = setTimeout(() => {
     logger.info(`[rec] auto-stopping "${camera.name}" at the ${maxDurationSec}s cap`);
     stopRecording(camera.id).catch(() => {});
   }, Math.min(maxDurationSec, MAX_ACTIVE_MS / 1000) * 1000);
   timer.unref?.();
 
-  active.set(camera.id, { id: info.lastInsertRowid, startMs, timer, userId });
+  active.set(camera.id, { id: info.lastInsertRowid, startMs, timer, userId, holdOwner, preRollSec });
   logger.info(`[rec] recording started for "${camera.name}" (id ${info.lastInsertRowid}, pre-roll ${preRollSec}s)`);
   return recordingState(camera.id);
 }
@@ -117,7 +145,11 @@ export async function stopRecording(cameraId, { settleMs = SEGMENT_SETTLE_MS } =
 
   const cam = db.prepare('SELECT id, name FROM cameras WHERE id = ?').get(cameraId) || { name: cameraId };
   const stopMs = Date.now();
-  const { preRollSec } = getOndemandSettings();
+  // The pre-roll THIS capture started with (#446), not a fresh getOndemandSettings() read — started_at
+  // and the ring hold both used the Start-time value (see the comment on `active` above), so re-reading
+  // here would let the extraction window disagree with both of them. The max-duration cap is already
+  // snapshotted the same way, for the same reason.
+  const { preRollSec } = a;
   // extractClip cuts [at - pre, at + post]; anchor at the button press so `post` is the live span.
   const postRollSec = Math.max(1, Math.round((stopMs - a.startMs) / 1000) + TAIL_SEC);
 
@@ -155,7 +187,10 @@ export async function stopRecording(cameraId, { settleMs = SEGMENT_SETTLE_MS } =
     logger.error(`[rec] recording ${a.id} failed for "${cam.name}": ${err.message}`);
     return a.id;
   } finally {
-    releaseRing(cameraId, RING_OWNER.ONDEMAND);
+    // Release THIS capture's own lease — captured on `a` at Start, never re-derived from `active` here
+    // (#445). By now `active.get(cameraId)` may already hold the NEXT overlapping recording, and
+    // releasing "whatever's active now" would release the wrong one's protection mid-extraction.
+    releaseRing(cameraId, a.holdOwner);
   }
 }
 

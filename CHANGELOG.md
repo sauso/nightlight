@@ -9,6 +9,104 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.33.1] - 2026-09-24
+
+### Fixed
+- **A streaming server that stopped answering could freeze the camera list for five minutes and pile up
+  camera restarts.** Nightlight asks its built-in streaming server (MediaMTX) whether each camera is
+  delivering video, and those requests had no time limit of their own. If the server accepted a
+  request and never replied, the camera list waited up to five minutes, and the camera watchdog
+  started a fresh check every 15 seconds on top of the stuck ones. When the server woke up, the
+  pending checks all resumed at once and could restart the same camera several times over. Every
+  request now gives up after 5 seconds and counts as "unknown". The camera list answers within those
+  5 seconds (a camera whose status didn't come back just shows as not ready), and each camera has at
+  most one check pending at a time. A camera whose previous check is still running is skipped, not
+  queued. An unknown answer never triggers a restart, a Camera history entry or a rewrite of the
+  streaming server's configuration, since those could drop a stream that was fine. The camera-offline
+  notification still counts that time, so a stuck streaming server still reaches you if you turned the
+  alert on. Up to four cameras are now checked at once instead of one after another, and a camera's
+  main stream and its Low-quality sub-stream are checked separately, so a slow restart of one never
+  holds up the other. See
+  [KNOWN-ISSUES.md](KNOWN-ISSUES.md) for what the new `[guard:mediamtx-api]` log line means.
+- **Flipping the on-demand recording switch on the Recording settings page could silently discard any
+  other unsaved edit on that page.** That switch applies immediately (by design — it's the one control
+  on the page that doesn't wait for Save), and refreshing the page's settings afterward was replacing
+  the *entire* form with the server's values, wiping out an in-progress edit to the pre-roll,
+  retention, or wake-clip fields even though none of them were touched by the toggle. Unsaved edits on
+  that page now survive a toggle (and any other settings refresh) until you actually save them
+  yourself — including a field that was temporarily hidden by the toggle itself. The switch is also now
+  briefly disabled while its own request is in flight, so a second click can't race the first — and
+  **Save changes** and the switch now briefly disable *each other* while either request is in flight,
+  closing a narrower version of the same race between an overlapping Save and toggle.
+- **A camera outage during the night could be silently counted and displayed as sleep.** Sleep
+  analysis already tracked, per minute, whether a camera actually recorded anything — but immediately
+  discarded that distinction, so a stretch with no data at all (a detector restart, a dead camera) was
+  treated exactly like a stretch confirmed quiet. A long enough outage could seed the night's onset
+  from inside itself, inflate the reported asleep duration, extend the longest unbroken stretch shown,
+  and display as an "asleep" segment on the sleep bar — while the detailed per-minute timeline for the
+  same minutes correctly called it a gap, so the two views of one night could visibly disagree. Missing
+  minutes are now their own state throughout: they can't start or extend a confirmed-quiet run, don't
+  count toward the reported asleep time, and show as a distinct "no data" segment (striped, so it can't
+  be mistaken for the existing before/after-sleep shading) matching the detailed timeline, with a
+  legend entry on any night that has one. A scattered handful of missed minutes — a merely flaky
+  connection rather than an outage — no longer blocks bedtime detection either: only a long, confirmed
+  gap can, never a single missed sample. Internally, a new `unknown_minutes` figure (alongside the
+  existing asleep/awake counts) records how many minutes of the night simply weren't observed and is
+  stored with the rest of a night's numbers — not yet shown as its own figure anywhere, but needed so
+  that manually correcting a night's onset or wake time can't silently re-count an outage as sleep by
+  recomputing the duration from scratch.
+- **An unrelated detection edit could silently narrow an all-day alert schedule to 20:00–07:00.**
+  The detection-settings screen showed a suggested overnight window for a camera whose schedule was
+  stored as all-day (equal start/end), but that suggestion was being treated as the real value on
+  every subsequent save — so changing sound sensitivity or a motion setting, with the schedule
+  screen never opened, would quietly stop daytime alerts. The suggestion is now display-only until
+  the user actually acts on it — editing a time field, or turning "Only alert during set hours" on
+  for a camera that never had a real window — rather than being adopted silently by an unrelated
+  save. Also fixed: `PUT /api/cameras/:id/detection` no longer forces motion detection off when a
+  request omits `motion_enabled` — every other field on this route already preserved an omitted
+  value, and this was the one exception.
+- **Starting an on-demand recording on a camera while a previous one was still being saved could lose
+  the beginning of either recording.** This happens whenever two overlapping recordings occur on the
+  same camera — another device starting one, or pressing Record again right after Stop, while the
+  first is still being written to a video. Each on-demand recording now protects its own footage until
+  its video is saved, instead of sharing one protection slot that the newer recording could silently
+  shorten or the older one could clear out from under it.
+- **Editing recording settings could destroy footage that was actively being captured.** Changing the
+  clip pre/post-roll, or switching on-demand recording or wake clips on or off, stopped and restarted
+  buffering on every recording-enabled camera — which deleted the camera's whole rolling buffer and
+  dropped every in-progress protection on it. That could wipe out a recording in progress, a wake-clip
+  capture, or a detection clip mid-extraction, usually without anyone being told: the recording was
+  later saved as far too short, or as failed. A settings change now resizes each camera's buffer in
+  place instead of restarting it, and if a camera no longer needs to buffer at all, stopping it is
+  delayed until nothing is still capturing from it. Also fixed: an on-demand recording could report the
+  wrong length if its pre-roll setting was changed while it was still running — a recording now always
+  reports the length it actually captured, not whatever the setting happens to be when it's stopped.
+- **The sole administrator could change their own account to caregiver, leaving an install with no one
+  who could manage accounts or settings and no way back in** — first-run setup only runs once, before
+  any account exists. Changing the last admin to caregiver, or removing the last admin, is now refused
+  with a clear message; the Caregivers screen also explains this up front on the only admin's account,
+  before a request is even sent. Installs that already lost their last admin this way have a new
+  console recovery command — see [docs/mfa.md](docs/mfa.md)'s Recovery section.
+- **A detection setting (motion, sound or the alert schedule) could be silently lost, shown as saved
+  when it wasn't, or overwritten by a slower earlier save landing after a faster later one.** The
+  screen's autosave had no lifecycle of its own: tapping Back right after a change cancelled the save
+  outright, a save that failed reset to the same "nothing to see" status as one that hadn't started,
+  and nothing stopped two writes for the same camera being in flight at once. Saving is now a queue
+  that outlives the screen — a change you make and immediately navigate away from still saves, a
+  failure shows a persistent **Not saved** with a **Retry** (also surfaced on the camera's own
+  settings page if you've already gone Back), and at most one save per camera is ever in flight, so
+  the most recent change always wins regardless of network timing. The camera tile's quick motion/
+  sound/schedule toggles go through the same queue, so a toggle there and an edit on the settings
+  screen for the same camera can no longer race each other. Each save now sends only the field(s)
+  that changed, rather than the whole detection form, which is also what makes a toggle and an edit
+  safe to interleave.
+
+### Security
+- Updated backend dependencies for #455: Express 4.22.3 resolves to `qs` 6.16.0; Firebase Admin
+  14.5.0 and a scoped gaxios 6 override remove every `uuid` below 11.1.1 from the lockfile.
+  No exploit path was demonstrated. The E2E stack now uses Playwright 1.63.0, and Dependabot
+  watches its manifest; a test requires the browser image tag to match its package pin.
+
 ## [0.33.0] - 2026-09-22
 
 ### Added

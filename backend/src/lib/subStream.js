@@ -35,7 +35,9 @@ export function isSubRunning(cameraId) {
 export async function startSubStream(camera) {
   if (!subConfigured(camera)) return;
   const path = subPathName(camera.mediamtx_path);
-  if (!(await isPathConfiguredCorrectly(path))) await upsertPath(path);
+  // `=== false`, never `!`: null means MediaMTX did not answer, and a write we give up on can still land
+  // and drop a live publisher (#451; see isPathConfiguredCorrectly). Skipped now, retried by reconcile.
+  if ((await isPathConfiguredCorrectly(path)) === false) await upsertPath(path);
   await startTranscoder(subCameraId(camera.id), camera.sub_rtsp_url, path, `${camera.name} (low)`);
 }
 

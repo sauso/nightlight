@@ -615,7 +615,7 @@
   {
     "label": "★ startRecording: the pre-roll is never protected from pruning",
     "file": "backend/src/lib/recordings.js",
-    "find": "  holdRing(camera.id, RING_OWNER.ONDEMAND, startMs - preRollSec * 1000 - 5000);",
+    "find": "  holdRing(camera.id, holdOwner, startMs - preRollSec * 1000 - 5000);",
     "replace": ";",
     "expect": "killed",
     "tests": [
@@ -625,8 +625,39 @@
   {
     "label": "★ stopRecording: the ring hold is never released",
     "file": "backend/src/lib/recordings.js",
-    "find": "    releaseRing(cameraId, RING_OWNER.ONDEMAND);",
+    "find": "    releaseRing(cameraId, a.holdOwner);",
     "replace": ";",
+    "expect": "killed",
+    "tests": [
+      "recordings-lifecycle.test.js"
+    ]
+  },
+  {
+    "label": "★ #445 M1: ondemandHoldOwner collapses back to the shared RING_OWNER.ONDEMAND key",
+    "file": "backend/src/lib/ringHolds.js",
+    "find": "  return `${RING_OWNER.ONDEMAND}:${recordingId}`;",
+    "replace": "  return RING_OWNER.ONDEMAND;",
+    "expect": "killed",
+    "tests": [
+      "ring-holds.test.js",
+      "recordings-lifecycle.test.js"
+    ]
+  },
+  {
+    "label": "★ #445 M2: stopRecording releases the CURRENT active recording's lease instead of its own",
+    "file": "backend/src/lib/recordings.js",
+    "find": "    releaseRing(cameraId, a.holdOwner);",
+    "replace": "    releaseRing(cameraId, active.get(cameraId)?.holdOwner ?? a.holdOwner);",
+    "expect": "killed",
+    "tests": [
+      "recordings-lifecycle.test.js"
+    ]
+  },
+  {
+    "label": "★ #445 M3: startRecording keys its hold by camera instead of by recording",
+    "file": "backend/src/lib/recordings.js",
+    "find": "  const holdOwner = ondemandHoldOwner(info.lastInsertRowid);",
+    "replace": "  const holdOwner = ondemandHoldOwner(camera.id);",
     "expect": "killed",
     "tests": [
       "recordings-lifecycle.test.js"
@@ -802,6 +833,108 @@
     "tests": [
       "clip-capture.test.js"
     ]
+  },
+  {
+    "label": "★ #446 M1: reconcileClipRing's resize branch is removed — a settings change no longer resizes a running ring",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "    setRingDepth(camera.id, ringSizing());",
+    "replace": ";",
+    "expect": "killed",
+    "tests": [
+      "clip-capture.test.js"
+    ]
+  },
+  {
+    "label": "★ #446 M2: the hold deferral is removed — a held ring is stopped out from under its holder",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "    if (effectiveHold(camera.id) != null) {",
+    "replace": "    if (false) {",
+    "expect": "killed",
+    "tests": [
+      "clip-capture.test.js"
+    ]
+  },
+  {
+    "label": "★ #446 M3: the hold deferral is applied unconditionally — an unheld, unwanted ring never stops",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "    if (effectiveHold(camera.id) != null) {",
+    "replace": "    if (true) {",
+    "expect": "killed",
+    "tests": [
+      "clip-capture.test.js"
+    ]
+  },
+  {
+    "label": "★ #446 M4: stopRecording re-reads getOndemandSettings().preRollSec instead of the Start-time snapshot",
+    "file": "backend/src/lib/recordings.js",
+    "find": "  const { preRollSec } = a;",
+    "replace": "  const { preRollSec } = getOndemandSettings();",
+    "expect": "killed",
+    "tests": [
+      "recordings-lifecycle.test.js"
+    ]
+  },
+  {
+    "label": "★ #446 M5: enqueueClip's hold for the detection clip is never taken",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "  holdRing(camera.id, holdOwner, clipCoverStartMs(at, preRollSec));",
+    "replace": ";",
+    "expect": "killed",
+    "tests": [
+      "clip-capture.test.js"
+    ]
+  },
+  {
+    "label": "★ #446 M6: enqueueClip's release of its own detection-clip hold is removed",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "      releaseRing(camera.id, holdOwner);",
+    "replace": ";",
+    "expect": "killed",
+    "tests": [
+      "clip-capture.test.js"
+    ]
+  },
+  {
+    "label": "★ #446 M7: setRingDepth reports success without actually resizing the ring",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "  entry.ringDepthMs = ringDepthMsFor(preRollSec, postRollSec);\r\n  return true;",
+    "replace": "  return true;",
+    "expect": "killed",
+    "tests": [
+      "clip-capture.test.js"
+    ]
+  },
+  {
+    "label": "★ #446 M8: the detection clip's hold is too shallow — clipCoverStartMs collapses to the bare trigger time",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "  holdRing(camera.id, holdOwner, clipCoverStartMs(at, preRollSec));",
+    "replace": "  holdRing(camera.id, holdOwner, at);",
+    "expect": "killed",
+    "tests": [
+      "clip-capture.test.js"
+    ],
+    "note": "Codex F2: a lease that exists but is too shallow must still fail the case it exists for — this is why T6 asserts the exact effectiveHold value, not just that a hold exists."
+  },
+  {
+    "label": "★ #446 M9: ringSizing ignores the on-demand pre-roll entirely",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "  return { preRollSec: Math.max(preRollSec, ond.enabled ? ond.preRollSec : 0), postRollSec };",
+    "replace": "  return { preRollSec, postRollSec };",
+    "expect": "killed",
+    "tests": [
+      "clip-capture.test.js"
+    ]
+  },
+  {
+    "label": "★ #446 M10: wakeWatcher takes a WAKE hold even when wake clips are disabled",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "      if (isSegmenterRunning(cameraId) && getWakeClipSettings().enabled) {",
+    "replace": "      if (isSegmenterRunning(cameraId)) {",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "note": "captureWakeClip already no-ops when wake clips are off (recordings.js); a hold taken anyway kept clipCapture.js's reconcileClipRing deferring the ring's stop for a restless child until the sleep window ended."
   },
   {
     "label": "routes/recordings: DELETE reports success for an id that does not exist",
@@ -2128,5 +2261,617 @@
     "expect": "killed",
     "tests": ["demo-seed.test.js"],
     "namePattern": "demo seed is deterministic"
+  },
+  {
+    "label": "#441: keepingAnAdmin's post-condition never fires (off-by-one on the admin count)",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (adminCount.get().c === 0) throw new LastAdminError();",
+    "replace": "if (adminCount.get().c === -1) throw new LastAdminError();",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "T1:"
+  },
+  {
+    "label": "#441: PUT /users/:id's password-driven session/push-token deletes move back outside the transaction",
+    "file": "backend/src/routes/auth.js",
+    "find": "  try {\r\n    keepingAnAdmin(() => {\r\n      // A password reset means the old credential can no longer be trusted - any session\r\n      // opened under it shouldn't outlive it. Spares only the requesting admin's own\r\n      // current session, for the case where they're resetting their own password.\r\n      //\r\n      // The push_tokens cleanup runs FIRST, as a subquery over the sessions about to be deleted - it\r\n      // has to see them before the next statement removes them. Same reasoning as /logout: an ended\r\n      // session must also stop that device's push registration, not just its API access.\r\n      if (password) {\r\n        db.prepare(\r\n          'DELETE FROM push_tokens WHERE session_id IN (SELECT id FROM sessions WHERE user_id = ? AND id != ?)'\r\n        ).run(req.params.id, req.user.sid);\r\n        db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.params.id, req.user.sid);\r\n      }\r\n\r\n      db.prepare(",
+    "replace": "  if (password) {\r\n    db.prepare(\r\n      'DELETE FROM push_tokens WHERE session_id IN (SELECT id FROM sessions WHERE user_id = ? AND id != ?)'\r\n    ).run(req.params.id, req.user.sid);\r\n    db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.params.id, req.user.sid);\r\n  }\r\n  try {\r\n    keepingAnAdmin(() => {\r\n      db.prepare(",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "T2:",
+    "note": "A multi-line find with \\r\\n, per the plan (repo files are CRLF). Moving the password-driven deletes to run unconditionally before the transaction recreates the pre-#441 partial-change bug: T2's hostile fixture (a second session/push token that would survive the unfixed route) is deleted immediately, even though the subsequent role UPDATE still rolls back inside keepingAnAdmin."
+  },
+  {
+    "label": "#441: onlyAdmin (frontend) checks for TWO admins instead of one",
+    "file": "frontend/src/pages/UserSettings.jsx",
+    "find": "users.filter((x) => x.role === 'admin').length === 1",
+    "replace": "users.filter((x) => x.role === 'admin').length === 2",
+    "expect": "killed",
+    "tests": ["users.test.jsx"],
+    "namePattern": "T6|T7"
+  },
+  {
+    "label": "#441: promote-admin.js's recovery script writes the wrong role",
+    "file": "backend/src/scripts/promote-admin.js",
+    "find": "if (!wasAdmin) db.prepare(\"UPDATE users SET role = 'admin' WHERE id = ?\").run(user.id);",
+    "replace": "if (!wasAdmin) db.prepare(\"UPDATE users SET role = 'caregiver' WHERE id = ?\").run(user.id);",
+    "expect": "killed",
+    "tests": ["promote-admin.test.js"],
+    "namePattern": "a stranded caregiver becomes an admin"
+  },
+  {
+    "label": "#441: promote-admin.js's parseArgs stops stripping the `--` end-of-options marker",
+    "file": "backend/src/scripts/promote-admin.js",
+    "find": "if (first === '--') return { mode: 'promote', username: second };",
+    "replace": "if (first === '--') return { mode: 'promote', username: first };",
+    "expect": "killed",
+    "tests": ["promote-admin.test.js"],
+    "namePattern": "flag"
+  },
+  {
+    "label": "#441: DELETE /users/:id's keepingAnAdmin wrapper removed",
+    "file": "backend/src/routes/auth.js",
+    "find": "  try {\r\n    keepingAnAdmin(() => {\r\n      // push_tokens.user_id has no FK/cascade (GHSA-q98f) — a removed caregiver's device otherwise kept\r\n      // receiving alerts, including camera-snapshot image links, indefinitely. sendToAll (lib/push.js)\r\n      // also filters its recipient query against live users as defense in depth, so a row missed here (or\r\n      // by a future caller of this route's logic) still can't be delivered to — but the row should still\r\n      // be deleted, not just excluded, since a stale row otherwise makes push.js's recipient count read\r\n      // wrong forever.\r\n      db.prepare('DELETE FROM push_tokens WHERE user_id = ?').run(req.params.id);\r\n      db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);\r\n    });\r\n  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n    throw e;\r\n  }",
+    "replace": "    // push_tokens.user_id has no FK/cascade (GHSA-q98f) — a removed caregiver's device otherwise kept\r\n    // receiving alerts, including camera-snapshot image links, indefinitely. sendToAll (lib/push.js)\r\n    // also filters its recipient query against live users as defense in depth, so a row missed here (or\r\n    // by a future caller of this route's logic) still can't be delivered to — but the row should still\r\n    // be deleted, not just excluded, since a stale row otherwise makes push.js's recipient count read\r\n    // wrong forever.\r\n    db.prepare('DELETE FROM push_tokens WHERE user_id = ?').run(req.params.id);\r\n    db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);",
+    "expect": "equivalent",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "#441",
+    "note": "Unreachable today, recorded honestly rather than hidden: DELETE /users/:id already refuses self-delete (checked above this wrapper), and requireAdmin re-checks the LIVE role (issue #261) on every request, while the whole handler runs synchronously with no `await`. So the caller was necessarily an admin at the exact moment this code ran, and deleting a DIFFERENT user can only reduce a count of >=2 admins, or delete a non-admin and not touch the count at all — no fixture can make this route delete the last admin without also deleting the caller's own account, which the guard above already blocks. Kept as defence in depth for if this route (or something it calls) ever grows an `await` before the deletes, which would let another request interleave."
+  },
+  {
+    "label": "★ #444 M1: unmount goes back to cancelling the pending save instead of flushing it",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "useEffect(() => () => flush(id), [id]);",
+    "replace": "useEffect(() => () => {}, [id]);",
+    "expect": "killed",
+    "tests": ["detectionSettings.test.jsx"],
+    "namePattern": "T1:"
+  },
+  {
+    "label": "★ #444 M2: the in-flight guard is dropped — a second PUT can fire while the first is still pending",
+    "file": "frontend/src/lib/detectionSaves.js",
+    "find": "  if (entry.inFlight) return;",
+    "replace": "  if (false) return;",
+    "expect": "killed",
+    "tests": ["detectionSaves.test.js", "detectionSettings.test.jsx"]
+  },
+  {
+    "label": "#444 M3: coalescing keeps the FIRST queued value instead of the latest",
+    "file": "frontend/src/lib/detectionSaves.js",
+    "find": "entry.pending = { ...entry.pending, ...patch }; // later keys win — the most recent edit wins",
+    "replace": "entry.pending = { ...patch, ...entry.pending }; // later keys win — the most recent edit wins",
+    "expect": "killed",
+    "tests": ["detectionSaves.test.js"],
+    "namePattern": "Q2"
+  },
+  {
+    "label": "★ #444 M4: a failed send resets to idle instead of a persistent failed state",
+    "file": "frontend/src/lib/detectionSaves.js",
+    "find": "      e.state = 'failed';",
+    "replace": "      e.state = 'idle';",
+    "expect": "killed",
+    "tests": ["detectionSaves.test.js", "detectionSettings.test.jsx"]
+  },
+  {
+    "label": "★ #444 M5: the pending patch is dropped on failure — Retry would have nothing left to send",
+    "file": "frontend/src/lib/detectionSaves.js",
+    "find": "      e.pending = { ...snapshot, ...e.pending };",
+    "replace": "      e.pending = {};",
+    "expect": "killed",
+    "tests": ["detectionSaves.test.js"],
+    "namePattern": "Q3"
+  },
+  {
+    "label": "#444 M6: success is reported without checking rev === sentRev — a stale response can say Saved",
+    "file": "frontend/src/lib/detectionSaves.js",
+    "find": "      if (e.rev !== sentRev) {",
+    "replace": "      if (false) {",
+    "expect": "killed",
+    "tests": ["detectionSaves.test.js"],
+    "namePattern": "Q5"
+  },
+  {
+    "label": "★ #444 M7: the rev > sentRev guard is dropped — flush (and the debounce racing it) can send twice",
+    "file": "frontend/src/lib/detectionSaves.js",
+    "find": "  if (!force && entry.rev <= entry.sentRev) return;",
+    "replace": "  if (false) return;",
+    "expect": "killed",
+    "tests": ["detectionSaves.test.js", "detectionSettings.test.jsx"]
+  },
+  {
+    "label": "★ #444 M8: toPartialPayload sends every known field instead of only the changed ones — back to a full payload",
+    "file": "frontend/src/lib/detectionSaves.js",
+    "find": "  for (const key of Object.keys(patch)) {",
+    "replace": "  for (const key of Object.keys(FIELD_CONVERTERS)) {",
+    "expect": "killed",
+    "tests": ["detectionSaves.test.js"],
+    "namePattern": "Q9"
+  },
+  {
+    "label": "★ #444 review M9: a caller's promise resolves without awaiting onSaved (fix 3)",
+    "file": "frontend/src/lib/detectionSaves.js",
+    "find": "        await onSavedFn?.();",
+    "replace": "        onSavedFn?.();",
+    "expect": "killed",
+    "tests": ["detectionSaves.test.js"],
+    "namePattern": "F3"
+  },
+  {
+    "label": "★ #444 review M10: pendingPatch() omits the in-flight snapshot (fix 2)",
+    "file": "frontend/src/lib/detectionSaves.js",
+    "find": "  return { ...entry.inFlightPatch, ...entry.pending };",
+    "replace": "  return { ...entry.pending };",
+    "expect": "killed",
+    "tests": ["detectionSaves.test.js"],
+    "namePattern": "F2"
+  },
+  {
+    "label": "★ #444 review M11: the empty-converted-payload guard is removed — a blank snapshot_password fires an empty PUT again (fix 4)",
+    "file": "frontend/src/lib/detectionSaves.js",
+    "find": "  if (Object.keys(payload).length === 0) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["detectionSaves.test.js"],
+    "namePattern": "F4"
+  },
+  {
+    "label": "#449 M1: form derivation lets the server win over a draft",
+    "file": "frontend/src/lib/useSettingsDraft.js",
+    "find": "  const form = useMemo(() => ({ ...settings, ...drafts }), [settings, drafts]);",
+    "replace": "  const form = useMemo(() => ({ ...drafts, ...settings }), [settings, drafts]);",
+    "expect": "killed",
+    "tests": ["settingsRecording.test.jsx"]
+  },
+  {
+    "label": "#449 M2: markSaved becomes a no-op",
+    "file": "frontend/src/lib/useSettingsDraft.js",
+    "find": "    setDrafts((prev) => {",
+    "replace": "    if (false) setDrafts((prev) => {",
+    "expect": "killed",
+    "tests": ["settingsRecording.test.jsx"]
+  },
+  {
+    "label": "#449 M3: markSaved clears every draft regardless of its current value",
+    "file": "frontend/src/lib/useSettingsDraft.js",
+    "find": "        if (key in next && Object.is(next[key], sentValues[key])) delete next[key];",
+    "replace": "        if (key in next) delete next[key];",
+    "expect": "killed",
+    "tests": ["settingsRecording.test.jsx"]
+  },
+  {
+    "label": "#449 M4: form ignores settings entirely (drafts over an empty base)",
+    "file": "frontend/src/lib/useSettingsDraft.js",
+    "find": "  const form = useMemo(() => ({ ...settings, ...drafts }), [settings, drafts]);",
+    "replace": "  const form = useMemo(() => ({ ...drafts }), [settings, drafts]);",
+    "expect": "killed",
+    "tests": ["settingsRecording.test.jsx"]
+  },
+  {
+    "label": "#449 M5: the on-demand switch ignores the optimistic pendingOndemand value",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "  const ondemandOn = pendingOndemand ?? (form.ondemand_enabled ?? true);",
+    "replace": "  const ondemandOn = form.ondemand_enabled ?? true;",
+    "expect": "killed",
+    "tests": ["settingsRecording.test.jsx"]
+  },
+  {
+    "label": "#449 M6: the on-demand switch is not disabled while its toggle is in flight",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "                disabled={toggleBusy || busy}",
+    "replace": "                disabled={busy}",
+    "expect": "killed",
+    "tests": ["settingsRecording.test.jsx"]
+  },
+  {
+    "label": "#449 M7: Save drops commit(response) and relies on refresh() instead",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "        commit(response);\r\n        markSaved(payload);",
+    "replace": "        refresh();\r\n        markSaved(payload);",
+    "expect": "killed",
+    "tests": ["settingsRecording.test.jsx"]
+  },
+  {
+    "label": "#449 M8: Save is not disabled while the toggle is in flight",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "disabled={busy || toggleBusy}",
+    "replace": "disabled={busy}",
+    "expect": "killed",
+    "tests": ["settingsRecording.test.jsx"]
+  },
+  {
+    "label": "#451 M1: MediaMTX API requests lose their deadline signal",
+    "file": "backend/src/lib/mediamtx.js",
+    "find": "      signal: deadline,\r\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["mediamtx-api-deadline.test.js"],
+    "namePattern": "^T[12]"
+  },
+  {
+    "label": "#451 M2: an aborted body read is swallowed and reported as an answer",
+    "file": "backend/src/lib/mediamtx.js",
+    "find": "if (deadline.aborted) throw e;",
+    "replace": ";",
+    "expect": "killed",
+    "tests": ["mediamtx-api-deadline.test.js"],
+    "namePattern": "^T2:"
+  },
+  {
+    "label": "#451 M3: the raw abort message passes through to the caller",
+    "file": "backend/src/lib/mediamtx.js",
+    "find": "new MediamtxTimeoutError(`MediaMTX API did not answer ${method} ${apiPath} within ${describeMs(apiTimeoutMs)}`)",
+    "replace": "new MediamtxTimeoutError(e.message)",
+    "expect": "killed",
+    "tests": ["mediamtx-api-deadline.test.js"],
+    "namePattern": "^T4:"
+  },
+  {
+    "label": "#451 M4: the MediaMTX API deadline is raised back to 300s",
+    "file": "backend/src/lib/mediamtx.js",
+    "find": "export const MEDIAMTX_API_TIMEOUT_MS = 5000;",
+    "replace": "export const MEDIAMTX_API_TIMEOUT_MS = 300000;",
+    "expect": "killed",
+    "tests": ["mediamtx-api-deadline.test.js"],
+    "namePattern": "^T7:"
+  },
+  {
+    "label": "#451 M5: a refused or failed status call is also marked unknown",
+    "file": "backend/src/lib/mediamtx.js",
+    "find": "? { ready: false, tracks: [], unknown: true } : { ready: false, tracks: [] }",
+    "replace": "? { ready: false, tracks: [], unknown: true } : { ready: false, tracks: [], unknown: true }",
+    "expect": "killed",
+    "tests": ["mediamtx-api-deadline.test.js"],
+    "namePattern": "^T9:"
+  },
+  {
+    "label": "#451 M6: a MediaMTX API timeout is no longer logged",
+    "file": "backend/src/lib/mediamtx.js",
+    "find": "reportGuardFailure('mediamtx-api', err);",
+    "replace": ";",
+    "expect": "killed",
+    "tests": ["mediamtx-api-deadline.test.js"],
+    "namePattern": "^T6:"
+  },
+  {
+    "label": "#451 M7: perTargetRunner no longer skips a target that is still in flight",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "      if (pending) {",
+    "replace": "      if (false) {",
+    "expect": "killed",
+    "tests": ["process-guards.test.js"],
+    "namePattern": "^P1 "
+  },
+  {
+    "label": "#451 M8: perTargetRunner never clears a settled target's in-flight mark",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "if (inFlight.get(key) === entry) inFlight.delete(key);",
+    "replace": ";",
+    "expect": "killed",
+    "tests": ["process-guards.test.js"],
+    "namePattern": "^P2 "
+  },
+  {
+    "label": "#451 M9: perTargetRunner checks targets one at a time",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "i < Math.min(concurrency, queue.length); i++",
+    "replace": "i < Math.min(1, queue.length); i++",
+    "expect": "killed",
+    "tests": ["process-guards.test.js"],
+    "namePattern": "^P5 "
+  },
+  {
+    "label": "#451 M10: perTargetRunner's concurrency cap removed",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "i < Math.min(concurrency, queue.length); i++",
+    "replace": "i < queue.length; i++",
+    "expect": "killed",
+    "tests": ["process-guards.test.js"],
+    "namePattern": "^P6:"
+  },
+  {
+    "label": "#451 M11: perTargetRunner marks a target in flight when it STARTS, not when it is queued",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "      const entry = { since: now(), skipped: false };\r\n      inFlight.set(key, entry);\r\n      queue.push({ target, key, entry });\r\n    }\r\n\r\n    let next = 0;\r\n    const worker = async () => {\r\n      while (next < queue.length) {\r\n        const { target, key, entry } = queue[next++];\r\n",
+    "replace": "      const entry = { since: now(), skipped: false };\r\n      queue.push({ target, key, entry });\r\n    }\r\n\r\n    let next = 0;\r\n    const worker = async () => {\r\n      while (next < queue.length) {\r\n        const { target, key, entry } = queue[next++];\r\n        inFlight.set(key, entry);\r\n",
+    "expect": "killed",
+    "tests": ["process-guards.test.js"],
+    "namePattern": "^P7:"
+  },
+  {
+    "label": "#451 M12: perTargetRunner's per-target catch rethrows",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "reportGuardFailure(`${label}:${nameOf(target)}`, err);",
+    "replace": "throw err;",
+    "expect": "killed",
+    "tests": ["process-guards.test.js"],
+    "namePattern": "^P3:"
+  },
+  {
+    "label": "#451 M13: a long-pending check is skipped without being reported",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "if (pendingMs >= staleAfterMs) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["process-guards.test.js"],
+    "namePattern": "^P8:"
+  },
+  {
+    "label": "#451 M14: the camera watchdog treats an unknown main status as not ready",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "const unknown = status.unknown === true;",
+    "replace": "const unknown = false;",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W1:"
+  },
+  {
+    "label": "#451 M15: an unknown main status holds the restart timer instead of breaking it",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (unknown) {\r\n      // No answer is not evidence (#451): break the run, so a restart needs 30s of CONFIRMED not-ready.\r\n      notReadySince.delete(cam.id);\r\n",
+    "replace": "    if (unknown) {\r\n      // No answer is not evidence (#451): break the run, so a restart needs 30s of CONFIRMED not-ready.\r\n",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W2:"
+  },
+  {
+    "label": "#451 M16: an unknown status does not start the offline-push clock",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "if (!offlineSince.has(cam.id)) offlineSince.set(cam.id, observedAt);",
+    "replace": "if (!unknown && !offlineSince.has(cam.id)) offlineSince.set(cam.id, observedAt);",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W3:"
+  },
+  {
+    "label": "#451 M17: the sub leg treats an unknown status as not ready",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (sub.unknown) {",
+    "replace": "    if (false) {",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W4:"
+  },
+  {
+    "label": "#451 M18: index.js hands safeInterval the camera watchdog object instead of its tick",
+    "file": "backend/src/index.js",
+    "find": "createCameraWatchdog().tick);",
+    "replace": "createCameraWatchdog());",
+    "expect": "killed",
+    "tests": ["process-guards.test.js"],
+    "namePattern": "hands each watchdog"
+  },
+  {
+    "label": "#451 M19: isPathConfiguredCorrectly returns false (write) instead of null (unknown) on a timeout",
+    "file": "backend/src/lib/mediamtx.js",
+    "find": "if (e instanceof MediamtxTimeoutError) return null;",
+    "replace": "if (e instanceof MediamtxTimeoutError) return false;",
+    "expect": "killed",
+    "tests": ["mediamtx-api-deadline.test.js"],
+    "namePattern": "^T3"
+  },
+  {
+    "label": "#451 M20a: startSubStream writes the sub path on an unknown config read",
+    "file": "backend/src/lib/subStream.js",
+    "find": "if ((await isPathConfiguredCorrectly(path)) === false) await upsertPath(path);",
+    "replace": "if (!(await isPathConfiguredCorrectly(path))) await upsertPath(path);",
+    "expect": "killed",
+    "tests": ["mediamtx-api-deadline.test.js"],
+    "namePattern": "^T3b:"
+  },
+  {
+    "label": "#451 M20b: startTranscoder writes the HLS path on an unknown config read",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "if ((await isPathConfiguredCorrectly(hlsPath)) === false) {",
+    "replace": "if (!(await isPathConfiguredCorrectly(hlsPath))) {",
+    "expect": "killed",
+    "tests": ["mediamtx-api-deadline.test.js"],
+    "namePattern": "^T3b:"
+  },
+  {
+    "label": "#451 M20c: reconcileCameraPaths writes a path on an unknown config read",
+    "file": "backend/src/index.js",
+    "find": "if ((await isPathConfiguredCorrectly(cam.mediamtx_path)) === false) {",
+    "replace": "if (!(await isPathConfiguredCorrectly(cam.mediamtx_path))) {",
+    "expect": "killed",
+    "tests": ["mediamtx-api-deadline.test.js"],
+    "namePattern": "^T3c"
+  },
+  {
+    "label": "#451 M21a: the main leg's onSkip is a no-op, so a skip does not break the main restart run",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "  function onMainSkip(cam) {\r\n    notReadySince.delete(cam.id);\r\n  }",
+    "replace": "  function onMainSkip() {}",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W9:"
+  },
+  {
+    "label": "#451 M21c: the sub leg's onSkip is a no-op, so a skip does not break the sub restart run",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "  function onSubSkip(cam) {\r\n    subNotReadySince.delete(cam.id);\r\n  }",
+    "replace": "  function onSubSkip() {}",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W9b:"
+  },
+  {
+    "label": "#451 M21b: the audio watchdog's onSkip is a no-op, so a skip does not break the stall count",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "  function onSkip(cam) {\r\n    audioStallCounts.delete(cam.id);\r\n  }",
+    "replace": "  function onSkip() {}",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W10:"
+  },
+  {
+    "label": "#451 M22: the ctx.skipped guard before the MAIN restart decision is removed",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (ctx.skipped) return;\r\n    if (unknown) {",
+    "replace": "    if (unknown) {",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W9:"
+  },
+  {
+    "label": "#451 M22b: the ctx.skipped guard before the AUDIO stall count is removed",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (ctx.skipped) return;\r\n    if (flowing !== false) {",
+    "replace": "    if (flowing !== false) {",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W10:"
+  },
+  {
+    "label": "#451 M22c: the ctx.skipped guard before the SUB restart decision is removed",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (ctx.skipped) return;\r\n    if (sub.unknown) {",
+    "replace": "    if (sub.unknown) {",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W9b:"
+  },
+  {
+    "label": "#451 M23: the main restart is timed at decision time instead of when the reading was taken",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "} else if (observedAt - since > STUCK_THRESHOLD_MS) {",
+    "replace": "} else if (deps.now() - since > STUCK_THRESHOLD_MS) {",
+    "expect": "equivalent",
+    "tests": ["camera-watchdogs.test.js"],
+    "note": "Equivalent since the #451 fix round split the main and sub legs: nothing is awaited between the main reading (observedAt) and this comparison, so now() returns the same value. It was killed by the original W11 while the sub leg sat in between. Kept as a record: if an await is ever added there, this becomes killable again and needs a test."
+  },
+  {
+    "label": "#451 M24: a default watchdog dep is swapped (startSubStream bound to startTranscoder)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "  startSubStream,\r\n  subConfigured,\r\n",
+    "replace": "  startSubStream: startTranscoder,\r\n  subConfigured,\r\n",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W12:"
+  },
+  {
+    "label": "#451 M25: the main and sub legs merged back into one run, sub leg awaited first (the starvation BLOCKER)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    await Promise.all([\r\n      runMain(cameras, byId, byName, (cam, ctx) => checkMain(cam, offlineCfg, ctx), { onSkip: onMainSkip }),\r\n      runSub(cameras, byId, byName, checkSub, { onSkip: onSubSkip }),\r\n    ]);",
+    "replace": "    await runMain(cameras, byId, byName, async (cam, ctx) => { await checkSub(cam, ctx); await checkMain(cam, offlineCfg, ctx); }, { onSkip: (cam) => { onMainSkip(cam); onSubSkip(cam); } });",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W16:"
+  },
+  {
+    "label": "#451 M25b: the main and sub legs merged back into one run, main leg awaited first (moves the starvation onto the sub leg)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    await Promise.all([\r\n      runMain(cameras, byId, byName, (cam, ctx) => checkMain(cam, offlineCfg, ctx), { onSkip: onMainSkip }),\r\n      runSub(cameras, byId, byName, checkSub, { onSkip: onSubSkip }),\r\n    ]);",
+    "replace": "    await runMain(cameras, byId, byName, async (cam, ctx) => { await checkMain(cam, offlineCfg, ctx); await checkSub(cam, ctx); }, { onSkip: (cam) => { onMainSkip(cam); onSubSkip(cam); } });",
+    "expect": "killed",
+    "tests": ["camera-watchdogs.test.js"],
+    "namePattern": "^W17:"
+  },
+  {
+    "label": "#455 M1: E2E Dependabot directory becomes a nonrecursive parent",
+    "file": ".github/dependabot.yml",
+    "find": "    directory: \"/e2e/playwright\"",
+    "replace": "    directory: \"/e2e\"",
+    "expect": "killed",
+    "tests": ["dependency-hygiene.test.js"],
+    "namePattern": "^T1:"
+  },
+  {
+    "label": "#455 M9: E2E Dependabot turns version-update PRs off",
+    "file": ".github/dependabot.yml",
+    "find": "    directory: \"/e2e/playwright\"",
+    "replace": "    directory: \"/e2e/playwright\"\n    open-pull-requests-limit: 0",
+    "expect": "killed",
+    "tests": ["dependency-hygiene.test.js"],
+    "namePattern": "^T1:"
+  },
+  {
+    "label": "#455 M2: Playwright browser image falls behind the package",
+    "file": "e2e/docker-compose.e2e.yml",
+    "find": "    image: mcr.microsoft.com/playwright:v1.63.0-jammy",
+    "replace": "    image: mcr.microsoft.com/playwright:v1.62.1-jammy",
+    "expect": "killed",
+    "tests": ["dependency-hygiene.test.js"],
+    "namePattern": "^T2:"
+  },
+  {
+    "label": "#455 M3: Playwright pin becomes a range",
+    "file": "e2e/playwright/package.json",
+    "find": "\"@playwright/test\": \"1.63.0\"",
+    "replace": "\"@playwright/test\": \"^1.63.0\"",
+    "expect": "killed",
+    "tests": ["dependency-hygiene.test.js"],
+    "namePattern": "^T2:"
+  },
+  {
+    "label": "#455 M4: backend qs lock regresses below its advisory floor",
+    "file": "backend/package-lock.json",
+    "find": "\"version\": \"6.16.0\"",
+    "replace": "\"version\": \"6.15.3\"",
+    "expect": "killed",
+    "tests": ["dependency-hygiene.test.js"],
+    "namePattern": "^T3:"
+  },
+  {
+    "label": "#455 M5: direct backend uuid lock regresses",
+    "file": "backend/package-lock.json",
+    "find": "\"version\": \"14.0.2\"",
+    "replace": "\"version\": \"9.0.1\"",
+    "expect": "killed",
+    "tests": ["dependency-hygiene.test.js"],
+    "namePattern": "^T3:"
+  },
+  {
+    "label": "#455 M8: nested gaxios uuid lock regresses",
+    "file": "backend/package-lock.json",
+    "find": "\"version\": \"11.1.1\"",
+    "replace": "\"version\": \"9.0.1\"",
+    "expect": "killed",
+    "tests": ["dependency-hygiene.test.js"],
+    "namePattern": "^T3:"
+  },
+  {
+    "label": "#455 M6: Playwright pin regresses below its advisory floor",
+    "file": "e2e/playwright/package.json",
+    "find": "\"@playwright/test\": \"1.63.0\"",
+    "replace": "\"@playwright/test\": \"1.49.0\"",
+    "expect": "killed",
+    "tests": ["dependency-hygiene.test.js"],
+    "namePattern": "^T3:"
+  },
+  {
+    "label": "#455 M7: push passes an invalid service-account credential",
+    "file": "backend/src/lib/push.js",
+    "find": "cert(cred)",
+    "replace": "cert({})",
+    "expect": "killed",
+    "tests": ["push-firebase-contract.test.js"],
+    "namePattern": "^T4:"
+  },
+  {
+    "label": "snapshot password-only save (0.33.1 review F1) M1: a password sent alone is ignored again",
+    "file": "backend/src/routes/cameras.js",
+    "find": "      : typedSnapPassword && strippedStored !== ''",
+    "replace": "      : false",
+    "expect": "killed",
+    "tests": ["detection-route.test.js"],
+    "namePattern": "password sent on its own replaces"
+  },
+  {
+    "label": "snapshot password-only save (0.33.1 review F1) M2: an unparseable stored address is passed on as '' and wiped",
+    "file": "backend/src/routes/cameras.js",
+    "find": "typedSnapPassword && strippedStored !== ''",
+    "replace": "typedSnapPassword",
+    "expect": "killed",
+    "tests": ["detection-route.test.js"],
+    "namePattern": "does not parse is never wiped"
+  },
+  {
+    "label": "snapshot password-only save (0.33.1 review F1) M3: the stored password is not stripped first, so the old one wins",
+    "file": "backend/src/routes/cameras.js",
+    "find": "submitted: strippedStored,",
+    "replace": "submitted: existing.snapshot_url,",
+    "expect": "killed",
+    "tests": ["detection-route.test.js"],
+    "namePattern": "password sent on its own replaces"
   }
 ]

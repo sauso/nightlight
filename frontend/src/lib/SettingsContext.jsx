@@ -75,8 +75,33 @@ export function SettingsProvider({ children }) {
     refresh();
   }, [user?.id, user?.role]);
 
+  // Publish a settings object a caller already HAS — a PUT's response body — as the new committed
+  // state, instead of asking the caller to call refresh() and re-fetch it. #449 (Codex review F1):
+  // `refresh()`'s catch above swallows a failed GET and leaves `settings` unchanged, so "save, clear
+  // the local drafts, then refresh()" can show the OLD value next to a "Saved ✓" banner if that
+  // refresh's request happens to fail — and the next Save would then write that stale value back over
+  // the one the server actually has. A PUT's response is the server's own word on what it just wrote,
+  // so a caller holding one (PUT /settings returns the full, normalised admin settings — see
+  // backend/src/routes/settings.js) should commit it directly rather than trusting a second, separate
+  // read that can fail independently of the write that already succeeded. Bumps reqSeq first so an
+  // older refresh() already in flight can't land after this and overwrite it with a stale read.
+  function commit(serverSettings) {
+    ++reqSeq.current;
+    loadedOnce.current = true;
+    setSettings(serverSettings);
+    applyTheme(serverSettings);
+    // A commit IS an authoritative load, same as a successful refresh() (see its `finally` above) —
+    // it's the server's own word on the current settings, just delivered via a PUT response instead of
+    // a GET. Without this, a commit landing while the initial (or post-login) refresh() is still
+    // in-flight never clears `loading`: refresh()'s `finally` only fires for the request whose `seq`
+    // still matches `reqSeq.current`, and bumping reqSeq above means that in-flight refresh's `finally`
+    // now targets a stale seq and skips its `setLoading(false)` — so `loading` would stay true forever
+    // with real settings already on screen.
+    setLoading(false);
+  }
+
   return (
-    <SettingsContext.Provider value={{ settings, loading, refresh }}>
+    <SettingsContext.Provider value={{ settings, loading, refresh, commit }}>
       {children}
     </SettingsContext.Provider>
   );

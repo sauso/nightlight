@@ -347,14 +347,22 @@ describe('Settings → Recording', () => {
 
   test('the on-demand switch applies IMMEDIATELY, without waiting for Save', async () => {
     withStorage(0);
-    vi.spyOn(api, 'put').mockResolvedValue({});
+    // #449: PUT /settings always answers with the full, normalised admin settings row (see
+    // backend/src/routes/settings.js) — not `{}`. commit() uses that response directly now, so a
+    // mock that returned an empty object here would be testing against a response shape the real
+    // route never sends.
+    vi.spyOn(api, 'put').mockResolvedValue({ ...SETTINGS, ondemand_enabled: false });
     const { user, settingsValue } = renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
 
     await user.click(screen.getByRole('switch', { name: 'Show a Record button on each camera' }));
     // ⚠️ The pill shape promises immediate apply (see Switch.jsx), and turning it off has to stop the
     // per-camera FFmpeg buffering right away rather than at some later Save that may never come.
     await waitFor(() => expect(api.put).toHaveBeenCalledWith('/settings', { ondemand_enabled: false }));
-    await waitFor(() => expect(settingsValue.refresh).toHaveBeenCalled());
+    // #449 Codex F1: the toggle commits the PUT's own response as the new settings instead of
+    // calling refresh() — a second, separate re-read that could fail independently of the write that
+    // already succeeded (see SettingsContext's commit()).
+    await waitFor(() => expect(settingsValue.commit).toHaveBeenCalledWith({ ...SETTINGS, ondemand_enabled: false }));
+    expect(settingsValue.refresh).not.toHaveBeenCalled();
   });
 
   test('a failed immediate toggle PUTS THE SWITCH BACK and says why', async () => {
@@ -385,7 +393,9 @@ describe('Settings → Recording', () => {
     expect(screen.getByLabelText('Clip length (seconds)')).toBeInTheDocument();
     expect(screen.getByLabelText('Capture before (seconds)')).toBeInTheDocument();
 
-    vi.spyOn(api, 'put').mockResolvedValue({});
+    // Realistic response, as above — an empty object would leave `ondemandOn` derived from a
+    // settings object that no longer even has the key, once commit() republishes it.
+    vi.spyOn(api, 'put').mockResolvedValue({ ...SETTINGS, ondemand_enabled: false });
     await user.click(screen.getByRole('switch', { name: 'Show a Record button on each camera' }));
     await waitFor(() => expect(screen.queryByLabelText('Capture before (seconds)')).not.toBeInTheDocument());
     // The wake-clip fields belong to the OTHER feature and must be untouched by that.

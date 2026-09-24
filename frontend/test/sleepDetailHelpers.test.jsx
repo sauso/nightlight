@@ -216,6 +216,10 @@ describe('labels', () => {
     expect(labelFor('asleep')).toBe('asleep');
     expect(labelFor('stir')).toBe('stirring');
     expect(labelFor('wake')).toBe('awake');
+    // A minute with no sample at all (issue #442) must read as missing data, not silently fall into
+    // the generic "before/after sleep" bucket — that bucket means something specific (settling/awake)
+    // and a camera outage mid-night is neither.
+    expect(labelFor('gap')).toBe('no data');
     // Anything else — including 'settling' and an unknown state — is the out-of-sleep bucket.
     expect(labelFor('settling')).toBe('before/after sleep');
     expect(labelFor(undefined)).toBe('before/after sleep');

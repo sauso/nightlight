@@ -14,10 +14,10 @@ import { logger } from './logger.js';
 // I originally claimed the crash was reachable from every watchdog via `upsertPath`, which is a bare
 // `fetch` that also throws on a non-2xx. That is only half true, and the half asserted loudest was
 // false. `startTranscoder` ALREADY catches it (transcoder.js:135, `.catch(...)`), and everything else
-// it awaits swallows its own errors — `isPathConfiguredCorrectly` and `getPathStatus` both return a
-// falsy default from a `catch`. So `startTranscoder` has no demonstrated rejection path at all, which
-// means the AUDIO watchdog has none either. The issue's original framing — one bare call site — was
-// closer to right than the rebuttal to it.
+// it awaits swallows its own errors — `isPathConfiguredCorrectly` returns `false`, or `null` for a call
+// MediaMTX never answered (#451), and `getPathStatus` returns a not-ready status, all from a `catch`. So
+// `startTranscoder` has no demonstrated rejection path at all, which means the AUDIO watchdog has none
+// either. The issue's original framing — one bare call site — was closer to right than the rebuttal to it.
 //
 // What IS demonstrated:
 //   1. `subStream.js:38` — the one genuinely bare `await upsertPath(path)`. Reached only from the
@@ -30,9 +30,10 @@ import { logger } from './logger.js';
 //
 // The guard is therefore defence in depth with one proven trigger, not the three first claimed.
 // One place to report a swallowed failure, so every guard reads the same in the log viewer. Exported
-// because the per-camera guard is a plain try/catch at the call site rather than a wrapper: the loop
-// bodies use `continue`, which is legal inside a try but cannot cross a function boundary, so wrapping
-// them in a callback would mean rewriting control flow that is not what this change is about.
+// because it is called from other modules too: the watchdogs' sub-leg try/catch (lib/cameraWatchdogs.js)
+// and MediaMTX API timeouts (lib/mediamtx.js). The per-camera guard itself now lives in perTargetRunner
+// below: #451 moved the watchdog loop bodies into functions, so `continue` became `return` and the
+// objection that kept them inline (a `continue` cannot cross a function boundary) no longer applies.
 export function reportGuardFailure(label, err) {
   const detail = err instanceof Error ? err.stack || err.message : String(err);
   // logger.error, deliberately, not info: the log viewer's Errors filter is a substring match on
@@ -109,6 +110,105 @@ export function safeInterval(label, ms, fn) {
     // `fn` is normally async; guard the thenable case without assuming it.
     if (result && typeof result.then === 'function') result.then(undefined, (err) => reportGuardFailure(label, err));
   }, ms);
+}
+
+// One pending check per camera, and only a few at once (issue #451).
+//
+// THE DEFECT. safeInterval above does not wait for the previous tick (a timer cannot), and the camera and
+// audio watchdogs had no in-flight guard. Against a MediaMTX that accepted connections and never answered,
+// every 15s tick added one more pending loop; when the stall cleared they all resumed together, and each
+// restarted the same camera. startTranscoder is not safe under two concurrent calls for one camera (both
+// stop, both launch, and the second orphans the first FFmpeg), so that pile-up was real harm, not noise.
+//
+// THE RULES, each pinned by a P-case in test/process-guards.test.js:
+//   * At most ONE pending check per key, ever (AC2). A key still in flight is SKIPPED, never queued a second
+//     time. It is marked when QUEUED, not when started, so a target still waiting in one run's queue cannot
+//     also be picked up by the next run.
+//   * NO escape hatch. The first plan restarted a check pending for 2 minutes; Codex's plan review showed
+//     that is still an unbounded backlog if the old check never ends. A long-pending check is only REPORTED
+//     (rate-limited) when skipped. That is safe because every await inside a watchdog check is now bounded
+//     (#451 gave the MediaMTX calls a deadline, the last unbounded step), and the report makes the
+//     should-never-happen case visible instead of silent.
+//   * A worker pool of `concurrency`, so one camera's stalled request cannot hold up the others (AC3) and a
+//     MediaMTX-wide outage cannot start a restart for every camera at once (Codex P1).
+//     ⚠️ KNOWN LIMIT of that pool (Codex code review of #451, SHOULD; P10 pins it): with more targets than
+//     workers and the first `concurrency` of them stuck, the later ones WAIT for a free worker. Every real
+//     check is bounded, so the wait is bounded too, by one check's worst case per batch of `concurrency`,
+//     but it is a limit on AC3 for installs with more than 4 cameras. Not redesigned, deliberately.
+//   * A per-target try/catch reporting `${label}:${name}`: the SAME labels the inline loops in index.js
+//     used, so `[guard:camera-watchdog:Nursery]` in KNOWN-ISSUES.md stays true. run() never rejects.
+//   * A skip is a MISSED OBSERVATION (Codex round 2, P0). `onSkip(target)` tells the caller, and the pending
+//     check's `ctx.skipped` flips to true, so a check that resumes after a later tick skipped over it knows
+//     its readings no longer form an unbroken run.
+//
+// ⚠️ Serialisation is per RUNNER. The camera watchdog has two (its main and sub legs) and the audio
+// watchdog one, so this does not stop the camera watchdog, the audio watchdog, reconcile and the camera
+// routes calling startTranscoder for one camera at the same time; that predates #451 and is a follow-up
+// of its own.
+
+// ⚠️ A HYPOTHESIS, NOT A MEASUREMENT. Typical installs have 1-4 cameras, so they are checked fully in
+// parallel; bigger ones are bounded. The shape of the load did change: before #451 cameras were checked
+// one at a time, now up to 4 at once per runner (the camera watchdog's main and sub legs each have one).
+export const WATCHDOG_CONCURRENCY = 4;
+// Past this, skipping a still-pending check is reported. 8 camera-watchdog intervals: well past anything
+// the bounded awaits in a check can add up to, so a report means something unexpected is holding it.
+export const STALE_RUN_MS = 2 * 60 * 1000;
+
+/**
+ * @param {string} label  guard label prefix, e.g. 'camera-watchdog'
+ * @returns {(targets, keyOf, nameOf, fn, opts?) => Promise<void>} `run`; fn is called as fn(target, ctx)
+ *   where `ctx.skipped` reads live. `opts.onSkip(target)` fires for each target skipped as in flight.
+ */
+export function perTargetRunner(label, { concurrency = WATCHDOG_CONCURRENCY, staleAfterMs = STALE_RUN_MS, now = Date.now } = {}) {
+  const inFlight = new Map(); // key -> { since, skipped }
+
+  return async function run(targets, keyOf, nameOf, fn, { onSkip } = {}) {
+    const queue = [];
+    for (const target of targets) {
+      const key = keyOf(target);
+      const pending = inFlight.get(key);
+      if (pending) {
+        pending.skipped = true;
+        const pendingMs = now() - pending.since;
+        if (pendingMs >= staleAfterMs) {
+          reportGuardFailure(
+            `${label}:stale:${nameOf(target)}`,
+            `previous check still running after ${Math.round(pendingMs / 1000)}s; skipped, not stacked`
+          );
+        }
+        if (onSkip) {
+          try {
+            onSkip(target);
+          } catch (skipErr) {
+            reportGuardFailure(`${label}:${nameOf(target)}`, skipErr);
+          }
+        }
+        continue;
+      }
+      const entry = { since: now(), skipped: false };
+      inFlight.set(key, entry);
+      queue.push({ target, key, entry });
+    }
+
+    let next = 0;
+    const worker = async () => {
+      while (next < queue.length) {
+        const { target, key, entry } = queue[next++];
+        const ctx = { get skipped() { return entry.skipped; } };
+        try {
+          // Inside the try, so a SYNCHRONOUS throw from fn is caught too, not only a rejection.
+          await fn(target, ctx);
+        } catch (err) {
+          reportGuardFailure(`${label}:${nameOf(target)}`, err);
+        } finally {
+          if (inFlight.get(key) === entry) inFlight.delete(key);
+        }
+      }
+    };
+    const workers = [];
+    for (let i = 0; i < Math.min(concurrency, queue.length); i++) workers.push(worker());
+    await Promise.all(workers);
+  };
 }
 
 // Rate limiting, per label. A guard does not fix the fault it catches, so a repeating timer keeps

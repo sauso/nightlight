@@ -576,6 +576,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     wake_at_algo: null,
     asleep_minutes: null,
     awake_minutes: null,
+    unknown_minutes: null,
     wake_count: null,
     longest_stretch_minutes: null,
     coverage_minutes: 0,
@@ -664,8 +665,14 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // ONSET_SOUND_MOTION_WITHIN_MIN). Movement always counts; a noise counts only if this room moved around
   // the same time. Used ONLY by the two onset helpers below — every other measurement on the night
   // (wakes, stirs, awake minutes, the segment bar) keeps reading `active`.
+  //
+  // Tri-state, matching state[]'s convention (issue #442): a minute with no sample at all stays `null`
+  // rather than falling into the same `false` as a real confirmed-quiet minute — motionAt/soundAt are
+  // both false either way, so without this check firstQuietRunFrom's put-down-anchored search could not
+  // tell a camera outage from silence and would seed onset from inside an outage.
   const activeForOnset = new Array(totalMin);
   for (let i = 0; i < totalMin; i++) {
+    if (state[i] === null) { activeForOnset[i] = null; continue; }
     if (motionAt[i]) { activeForOnset[i] = true; continue; }
     if (!soundAt[i]) { activeForOnset[i] = false; continue; }
     let witnessed = false;
@@ -702,11 +709,30 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // before he was carried in were still and merely noisy, so discounting there declared him asleep at
   // 19:00, an hour and a half early. Anchored on the put-down, the same data gives the right answer.
   const firstQuietRunFrom = (from, afterPutDown = false) => {
-    const view = afterPutDown ? activeForOnset : active;
+    // Tri-state view (issue #442): `state` directly for the unanchored search, `activeForOnset` for
+    // the put-down-anchored one — both null-aware. Any ACTIVE minute still disqualifies a candidate
+    // run outright, same as always. Unknown minutes do NOT: requiring the whole window to be 100%
+    // sampled sounded right but regressed a merely flaky camera's entire night to `status: 'no_sleep'`
+    // — scattered single-minute gaps meant no ONSET_QUIET_MIN window anywhere in the night was ever
+    // fully observed, even on an otherwise ordinary night (found by adversarial review of this fix's
+    // first draft). Instead, a window qualifies once at least MIN_COVERAGE_FRAC of it is CONFIRMED
+    // quiet — reusing the coverage ratio this file already applies to an analogous "was this span
+    // sufficiently observed" question (the put-down coverage guard below), not inventing a new one. A
+    // window that is mostly or entirely missing data (a real outage) still cannot qualify.
+    //
+    // Returns the window's FIRST CONFIRMED-quiet minute, not its first index — onset must land on real
+    // evidence, never on a leading unknown minute the window average merely tolerated. This also keeps
+    // the returned index compatible with the put-down guard below (`state[q] === null` must never be
+    // true for an accepted q).
+    const view = afterPutDown ? activeForOnset : state;
+    const minConfirmed = ONSET_QUIET_MIN * MIN_COVERAGE_FRAC;
     for (let i = Math.max(0, from); i + ONSET_QUIET_MIN <= totalMin; i++) {
-      let quiet = true;
-      for (let j = i; j < i + ONSET_QUIET_MIN; j++) if (view[j]) { quiet = false; break; }
-      if (quiet) return i;
+      let confirmed = 0, firstConfirmed = -1, active = false;
+      for (let j = i; j < i + ONSET_QUIET_MIN; j++) {
+        if (view[j] === true) { active = true; break; }
+        if (view[j] === false) { confirmed++; if (firstConfirmed < 0) firstConfirmed = j; }
+      }
+      if (!active && confirmed >= minConfirmed) return firstConfirmed;
     }
     return null;
   };
@@ -1275,15 +1301,31 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     sleepEnd = Math.min(Math.max(transitionExitIdx, onset), totalMin);
   }
 
-  // Metrics over [onset, to): asleep = minutes not in a wake run; awake = minutes in wake runs. Reads
-  // inWakeArr only — the marking pass (markWakeRuns) is a separate step, called once per array, so
-  // re-scoring an already-marked range (the common case just below) never re-runs the marking scan.
-  function accumulateMetrics(inWakeArr, from, to) {
-    let asleep = 0, awake = 0, wakeCount = 0, longest = 0, run = 0, prevWake = false;
+  // Metrics over [onset, to): asleep = CONFIRMED quiet minutes not in a wake run; awake = minutes in
+  // wake runs; unknown = minutes with no sample at all, not in a wake run — issue #442: a data outage
+  // cannot itself be evidence of continuous sleep, so it neither counts toward `asleep` nor extends
+  // the longest-stretch run (the run breaks there, the same way a wake would break it). Reads
+  // inWakeArr for the wake/not-wake split and stateArr for the confirmed-quiet/unknown split — the
+  // marking pass (markWakeRuns) is a separate step, called once per array, so re-scoring an
+  // already-marked range (the common case just below) never re-runs the marking scan.
+  //
+  // ⚠️ MAGNITUDE, stated plainly (found worth naming by adversarial review): unlike onset (which
+  // tolerates scattered gaps below MIN_COVERAGE_FRAC per window — see firstQuietRunFrom), `longest`
+  // resets on EVERY unknown minute, no matter how brief. A camera dropping one sample an hour caps the
+  // reported "longest unbroken stretch" at roughly an hour, even on an otherwise perfect night. This is
+  // the deliberate, literal reading of "missing intervals must break continuity-sensitive decisions" —
+  // claiming an unbroken stretch THROUGH a minute nobody observed is exactly the kind of confident
+  // claim from missing data this fix exists to stop making. `asleep_minutes` is gentler by comparison:
+  // it only excludes the unknown minutes themselves, it does not also forfeit the minutes around them.
+  function accumulateMetrics(inWakeArr, stateArr, from, to) {
+    let asleep = 0, awake = 0, unknown = 0, wakeCount = 0, longest = 0, run = 0, prevWake = false;
     for (let i = from; i < to; i++) {
       if (inWakeArr[i]) {
         awake++;
         if (!prevWake) wakeCount++;
+        run = 0;
+      } else if (stateArr[i] === null) {
+        unknown++;
         run = 0;
       } else {
         asleep++;
@@ -1292,7 +1334,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       }
       prevWake = inWakeArr[i];
     }
-    return { asleep, awake, wakeCount, longest };
+    return { asleep, awake, unknown, wakeCount, longest };
   }
 
   // ⚠️ WINDOW-BOUNDED, ALWAYS COMPUTED FIRST (issue #352). `status` (empty/no_sleep/ok) is decided from
@@ -1301,7 +1343,12 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // first-write-only notification/timelapse-discard timing depends on that: see its own comment).
   // `inWake` here is already fully populated up to totalMin (the markWakeRuns call that fed
   // algoSleepEnd, above) — sleepEnd is <= totalMin at this point, so no further marking is needed.
-  let { asleep, awake, wakeCount, longest } = accumulateMetrics(inWake, onset, sleepEnd);
+  //
+  // `metricsState` tracks whichever tri-state array actually corresponds to accumulateMetrics' current
+  // [onset, to) range — `state` here, reassigned to `stateMetrics` below if the post-window extension
+  // widens the range past totalMin (issue #442).
+  let metricsState = state;
+  let { asleep, awake, unknown, wakeCount, longest } = accumulateMetrics(inWake, metricsState, onset, sleepEnd);
 
   // EMPTY BED — nobody slept here. Distinct from no_data ("we couldn't see"): coverage is fine, we
   // watched all night, there was simply no child in the bed. Without this the algo reports a perfect
@@ -1329,8 +1376,11 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       // A second, independent pass over a COMBINED array — not an extension of activeForWake/inWake
       // above, which has already been fully consumed into algoSleepEnd's captured number and the
       // status decision just made. Classifies the extra span with the exact same rule (isActiveRow)
-      // the main population loop uses, defaulting an unsampled minute to quiet (this file's existing
-      // gap convention — a real unknown-state bucket here is issue #349's job, not this one's).
+      // the main population loop uses. `activeMetrics` still defaults an unsampled minute to
+      // not-active (needed for markWakeRuns' run-walk, which only asks "is this minute active");
+      // `stateMetrics` is the tri-state twin that lets accumulateMetrics tell that default apart from
+      // a real confirmed-quiet row (issue #442 — this block used to default an unsampled minute to
+      // quiet here too; see the now-rewritten test in sleepAnalysis.test.js).
       const extraRows = db
         .prepare(
           `SELECT bucket_start AS t, motion_peak, sound_peak, motion_out_peak FROM activity_samples
@@ -1338,14 +1388,23 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
         )
         .all(...scoreCams, minuteTime(totalMin), minuteTime(metricsEnd));
       const activeMetrics = activeForWake.concat(new Array(metricsEnd - totalMin).fill(false));
+      const stateMetrics = state.concat(new Array(metricsEnd - totalMin).fill(null));
       for (const r of extraRows) {
         const i = idxOf(r.t);
         if (i < totalMin || i >= metricsEnd) continue;
-        if (isActiveRow(r)) activeMetrics[i] = true;
+        const rowActive = isActiveRow(r);
+        if (rowActive) activeMetrics[i] = true;
+        // OR-merge, matching the main population loop's own rule for `state` (line ~646) — a forced
+        // flush can write TWO rows for one minute (activity_samples has no uniqueness constraint on
+        // camera_id+bucket_start), and last-write-wins here could let a quiet duplicate silently
+        // downgrade a minute activeMetrics already correctly marked active, disagreeing about the
+        // same minute for no real reason (issue #442, found by adversarial review).
+        stateMetrics[i] = stateMetrics[i] === null ? rowActive : stateMetrics[i] || rowActive;
       }
+      metricsState = stateMetrics;
       inWake = new Array(metricsEnd).fill(false);
       markWakeRuns(activeMetrics, onset, metricsEnd, inWake);
-      ({ asleep, awake, wakeCount, longest } = accumulateMetrics(inWake, onset, metricsEnd));
+      ({ asleep, awake, unknown, wakeCount, longest } = accumulateMetrics(inWake, metricsState, onset, metricsEnd));
       sleepEnd = metricsEnd;
     }
   }
@@ -1366,7 +1425,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       bridgeWakeGaps(inWake, onset, sleepEnd);
       // wakeCount can DECREASE here (an episode bridging two previously-separate activity runs merges
       // them into one) even as awake_minutes increases — expected to be rare; scored explicitly (plan §7).
-      ({ asleep, awake, wakeCount, longest } = accumulateMetrics(inWake, onset, sleepEnd));
+      ({ asleep, awake, unknown, wakeCount, longest } = accumulateMetrics(inWake, metricsState, onset, sleepEnd));
     }
   }
 
@@ -1382,6 +1441,13 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     wake_at: (USE_TRANSITION_TIMES && transitionWakeAt) || (sleepEnd < totalMin ? minuteTime(sleepEnd) : null),
     asleep_minutes: asleep,
     awake_minutes: awake,
+    // Minutes in [onset, sleepEnd) with no sample at all — never counted toward asleep/awake/longest
+    // (issue #442). Persisted to sleep_nights (unlike a purely display-only figure) because
+    // applyCorrection() in sleepReviews.js needs it: a parent-corrected span re-derives asleep_minutes
+    // from the corrected span minus awake_minutes, and without unknown_minutes to also subtract, a
+    // review correction on a night with a real outage would silently reintroduce this exact bug on
+    // every subsequent read of that night. Found by adversarial review.
+    unknown_minutes: unknown,
     wake_count: wakeCount,
     longest_stretch_minutes: longest,
     // The movement-only figures, kept so the two methods stay comparable night by night.
@@ -1564,8 +1630,17 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     // Run-length segments across the WHOLE window for the to-scale bar. Each minute is labelled:
     // settling (before onset), asleep (quiet), stir (brief in-bed movement/noise that didn't reach a
     // full awakening), wake (a counted awakening), or awake (morning, after the final wake).
+    //
+    // state[i] === null ⇒ 'gap', matching out.timeline's own vocabulary (issue #442) — checked BEFORE
+    // the settling/awake position checks, not only inside [onset, sleepEnd). An unsampled minute
+    // BEFORE onset is not evidence the child was "settling" any more than one inside the sleep span is
+    // evidence of "asleep" — both are just missing data, and displaying a specific state either side
+    // makes the same over-claim the timeline already correctly avoids. `inWake` still wins over `gap`
+    // (unchanged): a data gap bridged into an already-established wake by real activity on both sides
+    // is real evidence of being awake, not missing data (see markWakeRuns). Found by adversarial
+    // review of this fix's first draft, which only fixed the mislabel inside the sleep span.
     const label = (i) =>
-      i < onset ? 'settling' : i >= sleepEnd ? 'awake' : inWake[i] ? 'wake' : active[i] ? 'stir' : 'asleep';
+      inWake[i] ? 'wake' : state[i] === null ? 'gap' : i < onset ? 'settling' : i >= sleepEnd ? 'awake' : state[i] === true ? 'stir' : 'asleep';
     const segments = [];
     for (let i = displayStart; i < totalMin; ) {
       const l = label(i);
@@ -1629,11 +1704,11 @@ const upsertNight = db.prepare(
      (child_id, night_date, window_start, window_end, status, onset_at, wake_at,
       onset_at_shadow, wake_at_shadow, onset_at_algo, wake_at_algo,
       asleep_minutes, awake_minutes, wake_count, longest_stretch_minutes, coverage_minutes,
-      avg_temperature, avg_humidity, computed_at)
+      unknown_minutes, avg_temperature, avg_humidity, computed_at)
    VALUES (@child_id, @night_date, @window_start, @window_end, @status, @onset_at, @wake_at,
            @onset_at_shadow, @wake_at_shadow, @onset_at_algo, @wake_at_algo,
            @asleep_minutes, @awake_minutes, @wake_count, @longest_stretch_minutes, @coverage_minutes,
-           @avg_temperature, @avg_humidity, @computed_at)
+           @unknown_minutes, @avg_temperature, @avg_humidity, @computed_at)
    ON CONFLICT(child_id, night_date) DO UPDATE SET
      window_start=excluded.window_start, window_end=excluded.window_end, status=excluded.status,
      onset_at=excluded.onset_at, wake_at=excluded.wake_at,
@@ -1642,6 +1717,7 @@ const upsertNight = db.prepare(
      asleep_minutes=excluded.asleep_minutes,
      awake_minutes=excluded.awake_minutes, wake_count=excluded.wake_count,
      longest_stretch_minutes=excluded.longest_stretch_minutes, coverage_minutes=excluded.coverage_minutes,
+     unknown_minutes=excluded.unknown_minutes,
      avg_temperature=excluded.avg_temperature, avg_humidity=excluded.avg_humidity,
      computed_at=excluded.computed_at`
 );

@@ -123,7 +123,14 @@ followed by the app carrying on normally.
 reconcile, the timelapse sampler — are wrapped so that a failure in one of them is reported and
 skipped instead of taking the whole app down. The commonest cause is the streaming server (MediaMTX)
 being briefly unavailable, which is also exactly what makes a camera look unready in the first place,
-so the two tend to appear together.
+so the two tend to appear together. In both watchdogs each camera's check runs independently (up to
+four cameras at once), and a camera's main stream and its Low-quality sub-stream are checked
+separately, so one camera's failure or stall doesn't hold up the others, nor one stream the other.
+A check whose previous run is still going when the next tick comes round is skipped, not queued
+behind it. With more than four cameras, if four checks are stuck at once the rest wait for one of
+them to finish, which every check does within a bounded time. A check that has been running for over
+two minutes is reported as `[guard:camera-watchdog:stale:<name>]` (or `camera-watchdog:sub:stale:`,
+`audio-watchdog:stale:`), which shouldn't happen and is worth reading if it does.
 
 **What to do:** if it appears once or twice around a camera restart, ignore it — the next tick
 (15-30 seconds later) retries on its own. If the *same* guard line repeats steadily for many minutes,
@@ -134,6 +141,42 @@ doing, and restart the container if cameras are not recovering.
 > normally left unattended overnight — a monitor that is degraded is more useful at 3am than one that
 > has quit. The trade-off is that these lines are worth reading rather than assuming the app is fine
 > just because it is still up.
+
+## Cameras show connecting/offline and the log has `[guard:mediamtx-api]` lines
+
+**What you see:** camera tiles go to "connecting" and then "offline", and the log shows a line like
+`[guard:mediamtx-api] background task failed (continuing): MediamtxTimeoutError: MediaMTX API did not
+answer GET /v3/paths/get/cam_… within 5s`, about once a minute however many cameras are affected.
+There is **no** watchdog restart and **nothing** in Camera history. If you turned on camera-offline
+alerts, you still get the "No video from … for N+ minutes" notification after N minutes.
+
+**Why:** Nightlight asks the streaming server (MediaMTX) whether each camera is delivering video
+through MediaMTX's local API, and every one of those requests has a fixed **5-second** deadline. It
+isn't configurable: in the published image MediaMTX runs inside the same container and answers in
+milliseconds, so 5 seconds without an answer means it is stuck, not slow. When it doesn't answer,
+Nightlight treats the camera's state as **unknown**, and the two automatic behaviours treat unknown
+differently on purpose:
+
+| | Needs | While the API isn't answering |
+|---|---|---|
+| Watchdog restart | 30s of *confirmed* not-ready (audio: 2 *confirmed* stalls in a row) | No restart, no history event. The unknown also resets the 30s, so a restart needs 30 fresh seconds of confirmed not-ready once it answers again. |
+| Camera-offline notification | N minutes from the first check that couldn't *confirm* the camera was up (only a confirmed "up" stops the clock) | An unanswered check counts as one that couldn't confirm it, so the clock starts or keeps running and the notification fires as usual. |
+
+Restarting a camera can't fix a streaming server that isn't answering, and might drop a stream that
+was actually fine. A parent still needs to hear that video has stopped, though. For the same reason,
+while the API isn't answering Nightlight **won't rewrite MediaMTX's path configuration**. The
+5-minute reconcile skips the write and asks again next time, because a write reloads the path and
+could disconnect a stream that was still working.
+
+**What to do:** check the streaming server from inside the container (the same check as in the
+README's troubleshooting section):
+```bash
+docker exec nightlight wget -qO- http://127.0.0.1:9997/v3/paths/list
+```
+If that hangs too, MediaMTX is wedged: restart the container. **Known limit:** Nightlight restarts
+MediaMTX when its process exits, but not when the process stays alive with an API that has stopped
+answering. If the check answers, the stall was temporary: everything recovers on its own at the next
+check, and nothing needs restarting.
 
 ## Video comes back before Record does, after a restart
 
