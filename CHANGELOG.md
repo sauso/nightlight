@@ -10,6 +10,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Fixed
+- **Flipping the on-demand recording switch on the Recording settings page could silently discard any
+  other unsaved edit on that page.** That switch applies immediately (by design — it's the one control
+  on the page that doesn't wait for Save), and refreshing the page's settings afterward was replacing
+  the *entire* form with the server's values, wiping out an in-progress edit to the pre-roll,
+  retention, or wake-clip fields even though none of them were touched by the toggle. Unsaved edits on
+  that page now survive a toggle (and any other settings refresh) until you actually save them
+  yourself — including a field that was temporarily hidden by the toggle itself. The switch is also now
+  briefly disabled while its own request is in flight, so a second click can't race the first — and
+  **Save changes** and the switch now briefly disable *each other* while either request is in flight,
+  closing a narrower version of the same race between an overlapping Save and toggle.
 - **A camera outage during the night could be silently counted and displayed as sleep.** Sleep
   analysis already tracked, per minute, whether a camera actually recorded anything — but immediately
   discarded that distinction, so a stretch with no data at all (a detector restart, a dead camera) was

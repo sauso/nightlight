@@ -2413,5 +2413,69 @@
     "expect": "killed",
     "tests": ["detectionSaves.test.js"],
     "namePattern": "F4"
+  },
+  {
+    "label": "#449 M1: form derivation lets the server win over a draft",
+    "file": "frontend/src/lib/useSettingsDraft.js",
+    "find": "  const form = useMemo(() => ({ ...settings, ...drafts }), [settings, drafts]);",
+    "replace": "  const form = useMemo(() => ({ ...drafts, ...settings }), [settings, drafts]);",
+    "expect": "killed",
+    "tests": ["settingsRecording.test.jsx"]
+  },
+  {
+    "label": "#449 M2: markSaved becomes a no-op",
+    "file": "frontend/src/lib/useSettingsDraft.js",
+    "find": "    setDrafts((prev) => {",
+    "replace": "    if (false) setDrafts((prev) => {",
+    "expect": "killed",
+    "tests": ["settingsRecording.test.jsx"]
+  },
+  {
+    "label": "#449 M3: markSaved clears every draft regardless of its current value",
+    "file": "frontend/src/lib/useSettingsDraft.js",
+    "find": "        if (key in next && Object.is(next[key], sentValues[key])) delete next[key];",
+    "replace": "        if (key in next) delete next[key];",
+    "expect": "killed",
+    "tests": ["settingsRecording.test.jsx"]
+  },
+  {
+    "label": "#449 M4: form ignores settings entirely (drafts over an empty base)",
+    "file": "frontend/src/lib/useSettingsDraft.js",
+    "find": "  const form = useMemo(() => ({ ...settings, ...drafts }), [settings, drafts]);",
+    "replace": "  const form = useMemo(() => ({ ...drafts }), [settings, drafts]);",
+    "expect": "killed",
+    "tests": ["settingsRecording.test.jsx"]
+  },
+  {
+    "label": "#449 M5: the on-demand switch ignores the optimistic pendingOndemand value",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "  const ondemandOn = pendingOndemand ?? (form.ondemand_enabled ?? true);",
+    "replace": "  const ondemandOn = form.ondemand_enabled ?? true;",
+    "expect": "killed",
+    "tests": ["settingsRecording.test.jsx"]
+  },
+  {
+    "label": "#449 M6: the on-demand switch is not disabled while its toggle is in flight",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "                disabled={toggleBusy || busy}",
+    "replace": "                disabled={busy}",
+    "expect": "killed",
+    "tests": ["settingsRecording.test.jsx"]
+  },
+  {
+    "label": "#449 M7: Save drops commit(response) and relies on refresh() instead",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "        commit(response);\r\n        markSaved(payload);",
+    "replace": "        refresh();\r\n        markSaved(payload);",
+    "expect": "killed",
+    "tests": ["settingsRecording.test.jsx"]
+  },
+  {
+    "label": "#449 M8: Save is not disabled while the toggle is in flight",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "disabled={busy || toggleBusy}",
+    "replace": "disabled={busy}",
+    "expect": "killed",
+    "tests": ["settingsRecording.test.jsx"]
   }
 ]

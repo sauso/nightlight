@@ -133,6 +133,16 @@ Capture a moment yourself. Because every camera keeps a rolling buffer, pressing
 | Capture before (seconds) | 30 | 0–60 | How far back pressing Record reaches |
 | Auto-stop after (seconds) | 120 | 5–600 | Stops a recording someone forgot to end |
 
+**"Show a Record button on each camera" applies the instant you flip it — unlike every other
+control on this page.** The Clip length/retention fields above, the wake-clip switch, and *Capture
+before*/*Auto-stop after* here all wait for **Save changes**; this one switch writes immediately, the
+same way the two-state pill shape is used elsewhere in the app for an instant toggle. Flipping it does
+**not** touch anything you've typed but not yet saved elsewhere on this page — those edits are still
+there, unsent, when you come back to Save them. The switch is also briefly **disabled** while its own
+request is in flight, so a second click can't race the first — and **Save changes** is briefly
+disabled too while the switch's request is in flight (and vice versa), so the two can't overlap and
+have one write's confirmation land after the other's and revert it on screen.
+
 Recordings appear in the **Recordings** card on the child's page. **They are never deleted
 automatically** — unlike the other two kinds, these are keepsakes someone chose to keep, so deleting
 one is the only way to reclaim its space.

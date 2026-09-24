@@ -29,10 +29,22 @@ const DEFAULT_SETTINGS = {
 // The injected values MUST match the shape the real providers publish, or a screen can pass its test
 // while breaking in the app. These are taken from the providers themselves:
 //   AuthContext     -> { user, loading, login, logout, refresh }
-//   SettingsContext -> { settings, loading, refresh }
+//   SettingsContext -> { settings, loading, refresh, commit }
 //   CamerasContext  -> { kids, cameras, error, refresh }
 // (An earlier version of this helper published `setSettings`/`reload` and omitted `error`, none of
 // which the app ever produces — Cameras.jsx and CameraSettings.jsx both destructure `error`.)
+//
+// `commit` (added for #449) is REAL, unlike `refresh` (still an inert `vi.fn()`): it republishes the
+// object it's given as the new `settings`, the same way the real SettingsProvider's commit() makes a
+// PUT's response the new committed state immediately, without a second round-trip. It has to be real,
+// not inert, because #449's fix relies on that: a page calls commit(response) and then drops its own
+// optimistic override, trusting settings to already reflect the write. An inert commit would make
+// every such page look like it forgets its own successful write the instant that override clears —
+// which is a harness artifact, not a real bug (see settingsForms.test.jsx's "on-demand switch applies
+// IMMEDIATELY" and "per-feature fields" tests, which needed exactly this to keep passing).
+// `refresh` stays inert on purpose: a test that needs to prove a context REFRESH (not a commit) can't
+// wipe an unsaved draft must publish one itself, e.g. via `rerenderWith({ settings: {...} })`, or use
+// its own stateful provider — see settingsRecording.test.jsx's T1/T3/T4.
 export function renderAs(
   user,
   ui,
@@ -49,7 +61,16 @@ export function renderAs(
     // lands stays empty and then saves those blanks over the real values.
     // The spies are rebuilt each time, so grab handles from the returned `auth` AFTER a rerenderWith.
     auth = { user: opts.user, loading: opts.loading, login: vi.fn(), logout: vi.fn(), refresh: vi.fn() };
-    settingsValue = { settings: { ...DEFAULT_SETTINGS, ...opts.settings }, loading: opts.loading, refresh: vi.fn() };
+    settingsValue = {
+      settings: { ...DEFAULT_SETTINGS, ...opts.settings },
+      loading: opts.loading,
+      refresh: vi.fn(),
+      // See the module comment above: real, not inert — republishes via the same mechanism
+      // rerenderWith uses, so a commit(response) inside the component under test behaves like the
+      // real provider's. `rerenderWith` is declared further down but already assigned by the time
+      // any test can actually trigger a click that calls this (closures, not call order).
+      commit: vi.fn((newSettings) => rerenderWith({ settings: newSettings })),
+    };
     camerasValue = { kids: opts.kids, cameras: opts.cameras, error: opts.error, refresh: vi.fn() };
     return (
       <MemoryRouter initialEntries={[opts.route]}>
