@@ -21,11 +21,12 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { useTempDataDir, cleanupTempDataDirs } from './helpers/harness.js';
+import { stripCommentsOnly } from './helpers/sourceScan.js';
 
 const scriptDir = useTempDataDir();
 
 const { logger } = await import('../src/lib/logger.js');
-const { safeInterval, reportGuardFailure, resetGuardRateLimit, killIfSpawned } = await import('../src/lib/processGuards.js');
+const { safeInterval, reportGuardFailure, resetGuardRateLimit, killIfSpawned, perTargetRunner } = await import('../src/lib/processGuards.js');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -228,6 +229,236 @@ describe('reportGuardFailure', () => {
   });
 });
 
+describe('perTargetRunner (#451): at most one pending check per camera, bounded fan-out', () => {
+  // The defect: safeInterval starts a new async tick while the previous one is still pending, and the
+  // two camera watchdogs had no in-flight guard. Against a MediaMTX that accepted and never answered,
+  // ticks stacked up every 15s, and when the stall cleared they all resumed at once and each restarted
+  // the same camera (startTranscoder is not safe under two concurrent calls for one camera).
+  //
+  // ⚠️ Every promise here is CONTROLLED BY THE TEST and the clock is INJECTED. `flush` below drains the
+  // microtask queue and a few event-loop turns; it is not a duration, and no assertion depends on how
+  // fast this machine is. Every fake either resolves at once or waits on a deferred the test settles.
+  const deferred = () => {
+    let resolve;
+    let reject;
+    const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+    return { promise, resolve, reject };
+  };
+  const flush = async () => {
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+  };
+  const cam = (id) => ({ id, name: `Cam-${id}` });
+  const byId = (t) => t.id;
+  const byName = (t) => t.name;
+  const never = () => new Promise(() => {});
+
+  test('P1 (AC2): a target whose check never settles is checked ONCE across many runs; a healthy one every run', async () => {
+    const run = perTargetRunner('p1');
+    const stuck = cam('stuck');
+    const healthy = cam('healthy');
+    const calls = { stuck: 0, healthy: 0 };
+    let pendingStuck = 0;
+    let peakStuck = 0;
+    const fn = (t) => {
+      calls[t.id] += 1;
+      if (t.id !== 'stuck') return Promise.resolve();
+      pendingStuck += 1;
+      peakStuck = Math.max(peakStuck, pendingStuck);
+      return never();
+    };
+    for (let i = 0; i < 5; i++) {
+      run([stuck, healthy], byId, byName, fn);
+      await flush();
+    }
+    assert.equal(calls.stuck, 1, 'a stuck check was started again: that is the backlog');
+    assert.equal(peakStuck, 1, 'more than one check for the same camera was pending at once');
+    assert.equal(calls.healthy, 5, 'the healthy camera was not checked every run');
+  });
+
+  test('P2 (AC3): once the stuck check settles, the next run checks that target again', async () => {
+    const run = perTargetRunner('p2');
+    const t = cam('flaky');
+    const gate = deferred();
+    let calls = 0;
+    const fn = () => {
+      calls += 1;
+      return calls === 1 ? gate.promise : Promise.resolve();
+    };
+    run([t], byId, byName, fn);
+    await flush();
+    run([t], byId, byName, fn);
+    await flush();
+    assert.equal(calls, 1, 'precondition: the second run skipped the pending target');
+
+    gate.resolve();
+    await flush();
+    await run([t], byId, byName, fn);
+    assert.equal(calls, 2, 'a settled check left its in-flight mark behind: that camera is never checked again');
+  });
+
+  test('P3: a target whose check REJECTS is reported as label:name, its siblings still run, and run() resolves', async () => {
+    const run = perTargetRunner('p3');
+    const ran = [];
+    const fn = async (t) => {
+      ran.push(t.id);
+      if (t.id === 'bad') throw new Error('p3-reject-marker');
+    };
+    await run([cam('a'), cam('bad'), cam('c')], byId, byName, fn);
+    assert.deepEqual(ran.sort(), ['a', 'bad', 'c']);
+    assert.equal(logged('[guard:p3:Cam-bad]'), 1, 'the failure was not reported under the per-camera label');
+    assert.equal(logged('p3-reject-marker'), 1, 'the report does not carry the real reason');
+  });
+
+  test('P4: a SYNCHRONOUS throw inside fn is caught the same way', async () => {
+    const run = perTargetRunner('p4');
+    const ran = [];
+    const fn = (t) => {
+      ran.push(t.id);
+      if (t.id === 'bad') throw new Error('p4-sync-marker');
+      return Promise.resolve();
+    };
+    await run([cam('bad'), cam('b')], byId, byName, fn);
+    assert.deepEqual(ran.sort(), ['b', 'bad']);
+    assert.equal(logged('[guard:p4:Cam-bad]'), 1);
+  });
+
+  test('P5 (AC3): a stuck target listed FIRST does not delay a healthy one listed after it', async () => {
+    const run = perTargetRunner('p5');
+    const calls = [];
+    run([cam('stuck'), cam('healthy')], byId, byName, (t) => {
+      calls.push(t.id);
+      return t.id === 'stuck' ? never() : Promise.resolve();
+    });
+    await flush();
+    assert.deepEqual(calls, ['stuck', 'healthy'], 'the healthy camera waited behind the stuck one: the loop is sequential');
+  });
+
+  test('P6: with 10 targets, at most 4 checks run at once, and all 10 still run', async () => {
+    const run = perTargetRunner('p6');
+    const gates = new Map();
+    let active = 0;
+    let peak = 0;
+    const started = [];
+    const fn = (t) => {
+      started.push(t.id);
+      active += 1;
+      peak = Math.max(peak, active);
+      const g = deferred();
+      gates.set(t.id, g);
+      return g.promise.finally(() => { active -= 1; });
+    };
+    const targets = Array.from({ length: 10 }, (_, i) => cam(`t${i}`));
+    const done = run(targets, byId, byName, fn);
+    await flush();
+    assert.equal(peak, 4, `expected exactly 4 at once (a MediaMTX-wide outage must not start 10 restarts at once), saw ${peak}`);
+    for (let i = 0; i < 10; i++) {
+      gates.get(started[i])?.resolve();
+      await flush();
+    }
+    await done;
+    assert.equal(started.length, 10, 'not every target was checked');
+    assert.equal(peak, 4, 'the cap was exceeded as slots freed up');
+  });
+
+  test('P7: a target still WAITING in run 1\'s queue is skipped by run 2: it is marked when queued, not when started', async () => {
+    const run = perTargetRunner('p7', { concurrency: 1 });
+    const gate = deferred();
+    const calls = [];
+    const fn = (t) => {
+      calls.push(t.id);
+      return t.id === 'stuck' ? gate.promise : Promise.resolve();
+    };
+    run([cam('stuck'), cam('queued')], byId, byName, fn);
+    await flush();
+    assert.deepEqual(calls, ['stuck'], 'precondition: `queued` is waiting behind the stuck worker');
+
+    await run([cam('queued')], byId, byName, fn);
+    assert.deepEqual(calls, ['stuck'], 'run 2 started a target run 1 had already queued: two checks for one camera');
+
+    gate.resolve();
+    await flush();
+    assert.deepEqual(calls, ['stuck', 'queued'], 'run 1 never got to the queued target, or ran it twice');
+  });
+
+  test('P8: a check pending past staleAfterMs is REPORTED on skip, rate-limited, and still never started again', async () => {
+    // v1 of the plan restarted a check after 2 minutes. Codex showed that is still an unbounded backlog if
+    // the old one never ends, so the runner only reports. Clock injected: no wall-clock wait decides this.
+    let clock = 1_000_000;
+    const run = perTargetRunner('p8', { staleAfterMs: 120_000, now: () => clock });
+    let calls = 0;
+    const fn = () => {
+      calls += 1;
+      return never();
+    };
+    const t = cam('wedged');
+    run([t], byId, byName, fn);
+    await flush();
+
+    clock += 119_999;
+    await run([t], byId, byName, fn);
+    assert.equal(logged('still running'), 0, 'a skip was reported as stale before staleAfterMs');
+
+    clock += 1;
+    await run([t], byId, byName, fn);
+    assert.equal(logged('[guard:p8:stale:Cam-wedged]'), 1, 'a check pending past staleAfterMs was skipped silently');
+    assert.equal(logged('previous check still running after 120s; skipped, not stacked'), 1);
+
+    clock += 60_000;
+    await run([t], byId, byName, fn);
+    assert.equal(logged('still running'), 1, 'the stale report is not rate-limited');
+    assert.equal(calls, 1, 'the stale check was started again: an escape hatch is a backlog');
+  });
+
+  test('P9: every skip calls onSkip(target), and the pending check sees ctx.skipped flip to true', async () => {
+    // Round 2, P0: a skip is a MISSED OBSERVATION. A check that some later tick skipped over while it was
+    // pending holds readings that no longer form an unbroken run, and must be able to tell.
+    const run = perTargetRunner('p9');
+    const ctxs = {};
+    const fn = (t, ctx) => {
+      ctxs[t.id] = ctx;
+      return never();
+    };
+    const skipped = [];
+    const onSkip = (t) => skipped.push(t.id);
+    run([cam('s'), cam('quiet')], byId, byName, fn, { onSkip });
+    await flush();
+    assert.equal(ctxs.s.skipped, false, 'a check nobody has skipped yet already reads as skipped');
+
+    await run([cam('s')], byId, byName, fn, { onSkip });
+    await run([cam('s')], byId, byName, fn, { onSkip });
+    assert.deepEqual(skipped, ['s', 's'], 'onSkip must fire once per skipped run');
+    assert.equal(ctxs.s.skipped, true, 'the pending check cannot see that it was skipped');
+    assert.equal(ctxs.quiet.skipped, false, 'a check nobody skipped reads as skipped');
+
+    // run() never rejects, even if the caller's onSkip throws.
+    await run([cam('s')], byId, byName, fn, { onSkip: () => { throw new Error('p9-onskip-marker'); } });
+    assert.equal(logged('p9-onskip-marker'), 1, 'a throwing onSkip was swallowed silently');
+  });
+
+  test('P10 (the documented AC3 limit): with every worker stuck, a later target waits for the first free worker', async () => {
+    // Pins a LIMIT, not a fix (Codex code review of #451, SHOULD): with more cameras than workers and the
+    // first `concurrency` of them stuck, the rest wait. Every real check is bounded, so the wait is bounded
+    // by one check's worst case per batch. If this ever changes, the comment on perTargetRunner and
+    // KNOWN-ISSUES.md must change with it.
+    const run = perTargetRunner('p10');
+    const gates = new Map();
+    const started = [];
+    const fn = (t) => {
+      started.push(t.id);
+      const g = deferred();
+      gates.set(t.id, g);
+      return g.promise;
+    };
+    run(['a', 'b', 'c', 'd', 'e'].map(cam), byId, byName, fn);
+    await flush();
+    assert.deepEqual(started, ['a', 'b', 'c', 'd'], 'expected exactly the first 4 to start, and the 5th to wait');
+
+    gates.get('b').resolve();
+    await flush();
+    assert.deepEqual(started, ['a', 'b', 'c', 'd', 'e'], 'the 5th target did not start when a worker came free');
+  });
+});
+
 describe('installCrashGuards', () => {
   // ⚠️ THESE RUN IN A CHILD PROCESS, and that is not incidental. node:test installs its OWN
   // unhandledRejection/uncaughtException handling and attributes anything it catches to the running
@@ -393,24 +624,67 @@ describe('index.js wiring', () => {
     );
   });
 
+  // ⚠️ #451 MOVED THE WATCHDOG LOOPS to lib/cameraWatchdogs.js, and their per-camera guard into
+  // processGuards.perTargetRunner, so the label and catch-body checks below read those files now. The
+  // labels are pinned BEHAVIOURALLY too (camera-watchdogs.test.js W8); these are the cheap, fail-fast half.
+  const watchdogsSrc = fs.readFileSync(path.join(backendDir, 'src', 'lib', 'cameraWatchdogs.js'), 'utf8');
+  const guardsSrc = fs.readFileSync(path.join(backendDir, 'src', 'lib', 'processGuards.js'), 'utf8');
+
   test('both watchdog loops isolate a camera, and the sub leg is isolated from the main leg', () => {
-    // Per-camera was not enough: the sub leg runs FIRST and holds the only bare upsertPath, so a sub
-    // path MediaMTX keeps rejecting stopped the main leg's code from ever running for that camera.
-    for (const label of ['camera-watchdog:${cam.name}', 'audio-watchdog:${cam.name}', 'camera-watchdog:sub:${cam.name}']) {
-      assert.ok(indexSrc.includes(`reportGuardFailure(\`${label}\`, err)`), `missing guard: ${label}`);
+    // Per-camera was not enough: the sub leg ran FIRST and holds the only bare upsertPath, so a sub path
+    // MediaMTX keeps rejecting stopped the main leg's code from ever running for that camera. Since the
+    // #451 fix round the sub leg is a check of its own, with its own runner (and so its own catch).
+    // Per camera and per leg: each runner reports as `<label>:<camera name>`.
+    for (const label of ['camera-watchdog', 'camera-watchdog:sub', 'audio-watchdog']) {
+      assert.match(watchdogsSrc, new RegExp(`perTargetRunner\\('${label}'`), `the ${label} checks no longer run through their own perTargetRunner`);
     }
+    assert.match(watchdogsSrc, /const byName = \(cam\) => cam\.name;/, 'the per-camera label is no longer the camera name');
+    assert.ok(guardsSrc.includes('reportGuardFailure(`${label}:${nameOf(target)}`, err)'), 'perTargetRunner no longer reports per target');
   });
 
   test('every guard catch does nothing but report — no break, no rethrow', () => {
     // `break` or `throw err` inside those catch blocks reinstates the defect while still satisfying a
     // naive "does it mention reportGuardFailure" check. Both survived as mutants until this case.
-    const catches = [...indexSrc.matchAll(/\}\s*catch\s*\(err\)\s*\{([\s\S]*?)\n\s*\}/g)].map((m) => m[1]);
-    assert.ok(catches.length >= 3, `expected at least 3 guard catch blocks, found ${catches.length}`);
-    for (const body of catches) {
-      if (!body.includes('reportGuardFailure')) continue; // not one of ours
+    // Comments stripped: safeInterval's catch EXPLAINS "a synchronous throw" in prose, and a checker that
+    // cannot tell code from prose cries wolf.
+    const catchesIn = (src) =>
+      [...stripCommentsOnly(src).matchAll(/\}\s*catch\s*\(err\)\s*\{([\s\S]*?)\n\s*\}/g)]
+        .map((m) => m[1])
+        .filter((b) => b.includes('reportGuardFailure'));
+    // cameraWatchdogs.js has no guard catch of its own since the fix round (every check goes through a
+    // runner), but any that is added later is held to the same rule.
+    const watchdogCatches = catchesIn(watchdogsSrc);
+    const runnerCatches = catchesIn(guardsSrc);
+    // safeInterval's own catch, and perTargetRunner's per-target one.
+    assert.ok(runnerCatches.length >= 2, `expected at least 2 guard catch blocks in processGuards.js, found ${runnerCatches.length}`);
+    for (const body of [...watchdogCatches, ...runnerCatches, ...catchesIn(indexSrc)]) {
       assert.ok(!/\bbreak\b/.test(body), `a guard catch block breaks out of its loop: ${body.trim()}`);
       assert.ok(!/\bthrow\b/.test(body), `a guard catch block rethrows: ${body.trim()}`);
     }
+  });
+
+  test('index.js hands each watchdog\'s TICK to safeInterval, under its own label and interval (#451)', () => {
+    // The watchdogs are no longer written out in index.js, so the only thing left to break here is the
+    // wiring, and one way to break it is silent: passing the watchdog OBJECT instead of its `.tick` makes
+    // safeInterval throw on every call, reported and swallowed, with no watchdog running at all.
+    // Comments stripped first (strings kept, the labels are strings), so a line quoted in a comment
+    // cannot satisfy this.
+    const code = stripCommentsOnly(indexSrc);
+    assert.match(
+      code,
+      /safeInterval\(\s*'camera-watchdog'\s*,\s*WATCHDOG_INTERVAL_MS\s*,\s*createCameraWatchdog\([^)]*\)\.tick\s*\)/,
+      'the camera watchdog is not wired: safeInterval(\'camera-watchdog\', WATCHDOG_INTERVAL_MS, createCameraWatchdog().tick)'
+    );
+    assert.match(
+      code,
+      /safeInterval\(\s*'audio-watchdog'\s*,\s*AUDIO_CHECK_INTERVAL_MS\s*,\s*createAudioWatchdog\([^)]*\)\.tick\s*\)/,
+      'the audio watchdog is not wired: safeInterval(\'audio-watchdog\', AUDIO_CHECK_INTERVAL_MS, createAudioWatchdog().tick)'
+    );
+    assert.match(
+      code,
+      /import\s*\{[^}]*\bcreateCameraWatchdog\b[^}]*\bcreateAudioWatchdog\b[^}]*\}\s*from\s*'\.\/lib\/cameraWatchdogs\.js'/,
+      'the factories are called in index.js but not imported from lib/cameraWatchdogs.js'
+    );
   });
 
   test('index.js actually parses', async () => {

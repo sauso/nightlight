@@ -30,6 +30,15 @@ second notification when it recovers. A brief blip that clears on its own — sh
 threshold — never alerts, and each outage produces exactly one "went offline" notification, not
 a repeat per minute it stays down.
 
+The threshold is measured from the first check (every 15 seconds) that couldn't *confirm* the
+camera was delivering video, and only a confirmed picture stops it. A check where the streaming
+server inside Nightlight (MediaMTX) isn't answering at all counts as one that couldn't confirm it,
+so that time counts toward the threshold too. This is different from the
+automatic restart, which never fires while the streaming server isn't answering, because it only
+acts on a confirmed "no video" (see [KNOWN-ISSUES.md](../KNOWN-ISSUES.md), "Cameras show
+connecting/offline and the log has `[guard:mediamtx-api]` lines"). So if the streaming server gets
+stuck, you still get this notification, even though nothing was restarted.
+
 This is a global on/off with one global threshold: it applies to every camera the same way,
 there's no per-camera override.
 
