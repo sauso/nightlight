@@ -13,9 +13,9 @@
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^13.0.3",
-    "express": "^4.21.2",
+    "express": "^4.22.3",
     "express-rate-limit": "^8.7.0",
-    "firebase-admin": "^14.3.0",
+    "firebase-admin": "^14.5.0",
     "helmet": "^8.0.0",
     "http-proxy-middleware": "^3.0.3",
     "jsonwebtoken": "^9.0.2",
@@ -25,5 +25,11 @@
     "qrcode": "^1.5.4",
     "uuid": "^14.0.2",
     "ws": "^8.21.3"
+  },
+  "//": "overrides: issue #455. firebase-admin's OPTIONAL @google-cloud/storage still pulls gaxios 6, whose uuid ^9 matches GHSA-w5hq-g745-h8pq (npm audit fix cannot clear it). Scoped to gaxios 6 only: uuid 11 keeps CommonJS require() and the v4() gaxios calls; the override goes inert once storage moves to gaxios 7. Guarded by test/dependency-hygiene.test.js.",
+  "overrides": {
+    "gaxios@6": {
+      "uuid": "^11.1.1"
+    }
   }
 }

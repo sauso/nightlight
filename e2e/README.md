@@ -39,6 +39,15 @@ full of other images) can run out of space pulling it.
 CI (`.github/workflows/e2e.yml`) runs both phases on `ubuntu-latest`, on a
 dev → main PR, nightly on dev, and on manual dispatch.
 
+## Upgrading Playwright
+
+Move the exact `@playwright/test` version in `playwright/package.json` and the
+`mcr.microsoft.com/playwright` image tag in `docker-compose.e2e.yml` together.
+The backend `dependency-hygiene.test.js` guard checks that they match. On a
+Dependabot PR, push the matching image bump to that PR before merging it.
+`playwright/package-lock.json` is gitignored because the container creates it
+on each run; the exact Playwright pin determines the package versions.
+
 ## Refreshing the documentation screenshots
 
 `playwright/tests/05-screenshots.spec.js` captures the app's main screens (as a byproduct

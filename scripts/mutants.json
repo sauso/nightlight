@@ -2765,5 +2765,86 @@
     "expect": "killed",
     "tests": ["camera-watchdogs.test.js"],
     "namePattern": "^W17:"
+  },
+  {
+    "label": "#455 M1: E2E Dependabot directory becomes a nonrecursive parent",
+    "file": ".github/dependabot.yml",
+    "find": "    directory: \"/e2e/playwright\"",
+    "replace": "    directory: \"/e2e\"",
+    "expect": "killed",
+    "tests": ["dependency-hygiene.test.js"],
+    "namePattern": "^T1:"
+  },
+  {
+    "label": "#455 M9: E2E Dependabot turns version-update PRs off",
+    "file": ".github/dependabot.yml",
+    "find": "    directory: \"/e2e/playwright\"",
+    "replace": "    directory: \"/e2e/playwright\"\n    open-pull-requests-limit: 0",
+    "expect": "killed",
+    "tests": ["dependency-hygiene.test.js"],
+    "namePattern": "^T1:"
+  },
+  {
+    "label": "#455 M2: Playwright browser image falls behind the package",
+    "file": "e2e/docker-compose.e2e.yml",
+    "find": "    image: mcr.microsoft.com/playwright:v1.63.0-jammy",
+    "replace": "    image: mcr.microsoft.com/playwright:v1.62.1-jammy",
+    "expect": "killed",
+    "tests": ["dependency-hygiene.test.js"],
+    "namePattern": "^T2:"
+  },
+  {
+    "label": "#455 M3: Playwright pin becomes a range",
+    "file": "e2e/playwright/package.json",
+    "find": "\"@playwright/test\": \"1.63.0\"",
+    "replace": "\"@playwright/test\": \"^1.63.0\"",
+    "expect": "killed",
+    "tests": ["dependency-hygiene.test.js"],
+    "namePattern": "^T2:"
+  },
+  {
+    "label": "#455 M4: backend qs lock regresses below its advisory floor",
+    "file": "backend/package-lock.json",
+    "find": "\"version\": \"6.16.0\"",
+    "replace": "\"version\": \"6.15.3\"",
+    "expect": "killed",
+    "tests": ["dependency-hygiene.test.js"],
+    "namePattern": "^T3:"
+  },
+  {
+    "label": "#455 M5: direct backend uuid lock regresses",
+    "file": "backend/package-lock.json",
+    "find": "\"version\": \"14.0.2\"",
+    "replace": "\"version\": \"9.0.1\"",
+    "expect": "killed",
+    "tests": ["dependency-hygiene.test.js"],
+    "namePattern": "^T3:"
+  },
+  {
+    "label": "#455 M8: nested gaxios uuid lock regresses",
+    "file": "backend/package-lock.json",
+    "find": "\"version\": \"11.1.1\"",
+    "replace": "\"version\": \"9.0.1\"",
+    "expect": "killed",
+    "tests": ["dependency-hygiene.test.js"],
+    "namePattern": "^T3:"
+  },
+  {
+    "label": "#455 M6: Playwright pin regresses below its advisory floor",
+    "file": "e2e/playwright/package.json",
+    "find": "\"@playwright/test\": \"1.63.0\"",
+    "replace": "\"@playwright/test\": \"1.49.0\"",
+    "expect": "killed",
+    "tests": ["dependency-hygiene.test.js"],
+    "namePattern": "^T3:"
+  },
+  {
+    "label": "#455 M7: push passes an invalid service-account credential",
+    "file": "backend/src/lib/push.js",
+    "find": "cert(cred)",
+    "replace": "cert({})",
+    "expect": "killed",
+    "tests": ["push-firebase-contract.test.js"],
+    "namePattern": "^T4:"
   }
 ]

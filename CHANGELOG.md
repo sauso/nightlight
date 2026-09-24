@@ -99,6 +99,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   that changed, rather than the whole detection form, which is also what makes a toggle and an edit
   safe to interleave.
 
+### Security
+- Updated backend dependencies for #455: Express 4.22.3 resolves to `qs` 6.16.0; Firebase Admin
+  14.5.0 and a scoped gaxios 6 override remove every `uuid` below 11.1.1 from the lockfile.
+  No exploit path was demonstrated. The E2E stack now uses Playwright 1.63.0, and Dependabot
+  watches its manifest; a test requires the browser image tag to match its package pin.
+
 ## [0.33.0] - 2026-09-22
 
 ### Added
