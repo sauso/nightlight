@@ -20,7 +20,7 @@
     "http-proxy-middleware": "^3.0.3",
     "jsonwebtoken": "^9.0.2",
     "mqtt": "^5.10.1",
-    "onvif": "^0.8.2",
+    "onvif": "^0.8.3",
     "otplib": "^13.5.0",
     "qrcode": "^1.5.4",
     "uuid": "^14.0.2",
