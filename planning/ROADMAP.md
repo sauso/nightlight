@@ -1121,18 +1121,6 @@ and unblocked, and are the right thing to reach for in a gap.
 Not features — small, agreed, unblocked work with no dependency on the holdout. **This is the list to
 pick from when there is a gap**, which is why it is one list rather than four notes in four places.
 
-- **E3. Fix the third state in `02-add-camera`'s e2e wait** — `NEXT` · *small*. The spec clicks **Add
-  camera**, then waits up to 8 s for the **Save anyway** button that appears when the pre-save stream
-  validation fails against a cold synthetic source. Its `catch` treats "the button never appeared" as
-  *"validated on the first try"* — but there is a third state: **validation failed AND the button was
-  slower than 8 s**. The run then continues as though the camera had been saved and fails ~20 s later
-  waiting for "Save changes", which points at the wrong thing entirely.
-  - Observed 2026-09-06 on the dependency batch; the screenshot showed the app correctly reporting an
-    unreachable camera. Re-run 3× on the identical image: 3/3 passed, so it is a flake, not a
-    regression — but it costs an investigation every time it fires.
-  - **Fix:** decide between the two outcomes explicitly rather than inferring from a timeout — wait for
-    *either* "Save changes" *or* "Save anyway", and fail with a message naming which appeared.
-
 ---
 
 ## 4. Deferred / shelved
