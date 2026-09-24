@@ -51,7 +51,9 @@ const SEGMENT_SEC = 2;
 const RESTART_DELAY_MS = 5000;
 
 // cameraId -> { proc, stopped, ringDir, ringDepthMs, janitor }. Holds live in ringHolds.js, keyed by
-// owner, because two features share this ring — see #255.
+// owner, because THREE features share this ring — see #255 (on-demand Record vs. wake clips) and #446
+// (a detection clip mid-extraction gained its own hold too, once a settings save could resize the ring
+// out from under one — see clipCapture.js's enqueueClip).
 const segmenters = new Map();
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -136,9 +138,12 @@ export function isSegmenterRunning(cameraId) {
 // Returns false if no segmenter is running for the camera, so the caller can refuse to start a
 // recording that would have nothing to cut.
 //
-// `owner` is required and comes from RING_OWNER. Two features hold this ring — on-demand Record and
-// automatic wake clips — and before #255 they shared a single slot, so whichever acted last silently
-// replaced the other's protection and whichever finished first destroyed it. See ringHolds.js.
+// `owner` is required, and must be a distinct key per holder — RING_OWNER.WAKE for the wake watcher, or
+// `ondemandHoldOwner(recordingId)` (ringHolds.js) for on-demand Record, one per capture. Before #255,
+// two features (Record and wake clips) shared a single slot, so whichever acted last silently replaced
+// the other's protection and whichever finished first destroyed it; #445 found the identical bug ONE
+// LEVEL DOWN, between two overlapping on-demand recordings sharing the bare RING_OWNER.ONDEMAND string.
+// See ringHolds.js.
 export function holdRing(cameraId, owner, fromMs) {
   const entry = segmenters.get(cameraId);
   if (!entry) return false;
@@ -151,6 +156,14 @@ export function holdRing(cameraId, owner, fromMs) {
 // holds are untouched — that is the whole point of #255.
 export function releaseRing(cameraId, owner) {
   removeHold(cameraId, owner);
+}
+
+// The ring depth: always the deepest configured pre-roll plus the post-roll plus a margin, so a
+// trigger can always reach back far enough. Factored out of startSegmenter (#446) so setRingDepth can
+// recompute it for a RUNNING ring, when settings change, without restarting the segmenter — see its
+// comment for why a restart is no longer needed just to change this number.
+export function ringDepthMsFor(preRollSec, postRollSec) {
+  return (preRollSec + postRollSec + 4 * SEGMENT_SEC + 10) * 1000;
 }
 
 // Start (or restart) the continuous segmenter for a camera. `pathName` is the camera's local MediaMTX
@@ -168,7 +181,7 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
     }
   }
 
-  const ringDepthMs = (preRollSec + postRollSec + 4 * SEGMENT_SEC + 10) * 1000;
+  const ringDepthMs = ringDepthMsFor(preRollSec, postRollSec);
   // fastFails counts consecutive launches that died almost immediately (the classic case: the
   // upstream MediaMTX path is momentarily gone during a transcoder restart, so ffmpeg gets a 404
   // and exits within a second, every 5s). We used to log an ERROR on every one of those, which
@@ -265,6 +278,38 @@ export function stopAllSegmenters() {
   for (const cameraId of [...segmenters.keys()]) stopSegmenter(cameraId);
 }
 
+// Resize a RUNNING ring's depth in place: no ffmpeg restart, no ring-dir deletion, no clearHolds (#446).
+// Before this existed, the only way to change depth was startSegmenter (via restartClipCapture), which
+// stops the segmenter first — and stopSegmenter unconditionally clears every hold and deletes every
+// segment on (re)start. That destroyed an active recording, a wake-clip hold, or a detection clip
+// mid-extraction on ANY pre/post-roll edit, even though depth is just a plain field the janitor already
+// re-reads every tick (see the `setInterval` in startSegmenter) — a shrink takes effect on the very next
+// tick, and pruneRing never prunes past `effectiveHold`, so every active consumer keeps exactly what it
+// holds while the nominal depth changes around it. Returns false if nothing is running for this camera.
+export function setRingDepth(cameraId, { preRollSec, postRollSec }) {
+  const entry = segmenters.get(cameraId);
+  if (!entry) return false;
+  entry.ringDepthMs = ringDepthMsFor(preRollSec, postRollSec);
+  return true;
+}
+
+// Diagnostic only: the ring depth currently in effect, or null if nothing is running for this camera.
+// Exported so a test can assert a resize actually happened WITHOUT re-deriving ringDepthMsFor itself —
+// re-implementing the formula in an assertion would test the assertion against itself, not the code
+// (see clip-capture.test.js's file header on exactly this trap).
+export function ringDepthMs(cameraId) {
+  return segmenters.get(cameraId)?.ringDepthMs ?? null;
+}
+
+// The wall-clock point a hold or an extraction must reach back to for a clip centred at `at` with this
+// pre-roll — mirrors extractClip's own generous selection margin (2 extra segments either side) exactly,
+// so a caller that takes a hold from this formula can never be shallower than what extractClip will
+// actually read back (#446, Codex F2: a lease that exists but is too shallow must still fail the case it
+// exists for). The hold and the extraction share this ONE formula and cannot drift apart.
+export function clipCoverStartMs(at, preRollSec) {
+  return at - (preRollSec + 2 * SEGMENT_SEC) * 1000;
+}
+
 function runFfmpeg(args, { tool = 'ffmpeg' } = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawn(tool, args, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -321,7 +366,9 @@ export async function extractClip(
   // Select GENEROUSLY — every segment that could touch [at-pre, at+post] plus a couple-segment margin
   // each side — so the concatenated source is guaranteed to fully contain the requested window. The
   // exact bounds are then cut by the precise trim below, so this doesn't need to be tight.
-  const coverStart = at - (preRollSec + 2 * SEGMENT_SEC) * 1000;
+  // coverStart shares its formula with clipCoverStartMs (#446) — a hold taken from that function is
+  // guaranteed to reach at least as far back as this selection actually reads.
+  const coverStart = clipCoverStartMs(at, preRollSec);
   const coverEnd = at + (postRollSec + 2 * SEGMENT_SEC) * 1000;
   const now = Date.now();
 

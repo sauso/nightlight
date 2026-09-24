@@ -273,6 +273,166 @@ function layLateExitNight() {
   insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(6, 59, 1, 30)));
 }
 
+// --- Missing data is never counted as confirmed sleep (issue #442) ---------------------------------
+//
+// state[] (the per-minute null/false/true array built above) was always correctly tri-state, but a
+// single collapsing line right after the coverage gate folded null (no sample) and false (confirmed
+// quiet) into the same boolean — so onset detection, duration accumulation, and the displayed segment
+// bar could not tell a camera outage from real silence. This block is the regression coverage for that
+// fix: it must not be possible to establish onset from inside an outage, count an outage as asleep
+// minutes, extend the longest confirmed-quiet run across one, or disagree with the raw timeline about
+// what a gap minute is.
+describe('★★ missing data is never counted as confirmed sleep (issue #442)', () => {
+  test('★★★ THE FIX: the issue\'s own repro — a long outage cannot seed onset or become "confirmed" sleep', () => {
+    // Mirrors the issue's literal reproduction: a brief settle, then a genuine camera outage (no rows
+    // at all, not quiet ones) long enough to have satisfied the OLD quiet-run test on its own, then
+    // real confirmed-quiet data through to the window end. Before this fix: onset landed at 19:35 (the
+    // START of the outage, the collapsed active[] reading it as 15+ minutes of "quiet") and
+    // asleep_minutes counted the whole 205-minute outage as sleep.
+    laySamples(at(19, 30), at(19, 35), [[at(19, 30), at(19, 35)]]);
+    // deliberately NO laySamples call for 19:35–23:00 — a genuine 205-minute outage, not quiet data
+    laySamples(at(23, 0), at(7, 0, 1), []);
+
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(hhmm(night.onset_at), '23:00', 'onset must not be established from inside the outage');
+    assert.equal(night.asleep_minutes, 480, 'only the real confirmed-quiet span (23:00-07:00) counts');
+    assert.equal(night.unknown_minutes, 0, 'the outage sits entirely before onset, so it never enters the metrics span');
+  });
+
+  test('★★ a gap strictly AFTER onset breaks the longest confirmed-quiet stretch, not extend it', () => {
+    // Onset is established normally from real quiet BEFORE the gap, so this isolates accumulateMetrics'
+    // handling from firstQuietRunFrom's — a fix that only touched onset detection would still pass this
+    // fixture's asleep_minutes/longest_stretch_minutes with the old, wrong numbers.
+    laySamples(at(19, 30), at(20, 0), [[at(19, 30), at(19, 35)]]); // settle, then 25 real quiet minutes
+    // deliberately NO laySamples call for 20:00–23:20 — a genuine 200-minute outage
+    laySamples(at(23, 20), at(7, 0, 1), []); // real confirmed quiet the rest of the night
+
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(hhmm(night.onset_at), '19:35');
+    assert.equal(night.unknown_minutes, 200, 'the outage minutes must be counted, not silently absorbed');
+    assert.equal(night.asleep_minutes, 485, 'only the CONFIRMED quiet minutes count as asleep (25 + 460)');
+    assert.equal(
+      night.longest_stretch_minutes, 460,
+      'the longest run is the post-gap quiet stretch alone — the outage must not bridge it to the pre-gap one'
+    );
+  });
+
+  test('a brief gap INSIDE an already-established wake is still counted as awake, not lost or manufactured as sleep', () => {
+    // Real activity on both sides of a short (<= WAKE_GAP_MIN) data gap — the surrounding evidence
+    // already proves the child was awake through it, so it bridges into one wake exactly like a real
+    // quiet gap would (unchanged, pre-existing markWakeRuns behavior — this test pins that the fix
+    // does not disturb it). The gap must not be pulled back out into unknown_minutes once it is part
+    // of a confirmed wake.
+    laySamples(at(19, 30), at(22, 0), [[at(19, 30), at(19, 35)]]);
+    laySamples(at(22, 0), at(22, 3), [[at(22, 0), at(22, 3)]]); // 3 real active minutes
+    // deliberately NO laySamples call for 22:03–22:05 — a 2-minute outage, inside WAKE_GAP_MIN
+    laySamples(at(22, 5), at(7, 0, 1), [[at(22, 5), at(22, 8)]]); // 3 more real active minutes, then quiet
+
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(night.wake_count, 1, 'one bridged wake, not two, and not silently dropped');
+    assert.equal(night.unknown_minutes, 0, 'the bridged gap belongs to the wake, not to unknown');
+  });
+
+  test('coverage boundary: one minute below MIN_COVERAGE_FRAC is no_data, exactly at it is not', () => {
+    // Window is 690 minutes (19:30-07:00); MIN_COVERAGE_FRAC = 0.5 ⇒ the boundary is 345 minutes. The
+    // existing 'a night with too few samples is no_data' test sits well clear of this line (90 min of
+    // 690) — this is the boundary itself, both sides.
+    laySamples(at(19, 30), at(1, 14, 1), []); // 344 real minutes — one short
+    assert.equal(computeNight(CHILD, DATE).status, 'no_data', '344/690 must still be no_data');
+  });
+
+  test('...and 345 real minutes clears the coverage gate', () => {
+    laySamples(at(19, 30), at(1, 15, 1), []); // 345 real minutes — exactly the boundary
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.coverage_minutes, 345);
+    assert.notEqual(night.status, 'no_data', '345/690 must clear the coverage gate');
+  });
+
+  test('the segment bar and the raw timeline agree on a gap minute', () => {
+    // The issue's second complaint: out.timeline (built from state[] directly) already correctly
+    // called a gap minute 'gap', while out.segments (built from the collapsed active[]) called the
+    // SAME minute 'asleep'. Direct regression for that disagreement.
+    laySamples(at(19, 30), at(20, 0), [[at(19, 30), at(19, 35)]]);
+    laySamples(at(23, 20), at(7, 0, 1), []);
+    // deliberately NO laySamples call for 20:00–23:20
+
+    const night = computeNight(CHILD, DATE, { includeTimeline: true });
+    const gapMinute = night.timeline.find((m) => hhmm(m.t) === '21:00');
+    assert.equal(gapMinute.state, 'gap', 'sanity: the raw timeline must call this a gap');
+
+    // Match by real timestamp, not array index — night.segments starts from `display_start` (the
+    // earlier of onset/window-start/put-down), while night.timeline starts from the analysis origin
+    // (which includes the lookbehind), so the two arrays are not index-aligned with each other.
+    const gapMs = utcMs(gapMinute.t);
+    const seg = night.segments.find((s) => gapMs >= utcMs(s.from_at) && gapMs < utcMs(s.to_at));
+    assert.equal(seg.state, 'gap', 'the displayed segment for the SAME minute must say the same thing');
+  });
+
+  test('the same holds BEFORE onset, not only inside the sleep span (adversarial review finding)', () => {
+    // The first draft's label() fix only replaced 'asleep' with 'gap' inside [onset, sleepEnd) — a gap
+    // sitting before onset (exactly the issue's own headline repro) still showed as 'settling', a
+    // different but equally wrong positive claim about a stretch nobody observed.
+    laySamples(at(19, 30), at(19, 35), [[at(19, 30), at(19, 35)]]);
+    laySamples(at(23, 0), at(7, 0, 1), []);
+    // deliberately NO laySamples call for 19:35–23:00
+
+    const night = computeNight(CHILD, DATE, { includeTimeline: true });
+    const gapMinute = night.timeline.find((m) => hhmm(m.t) === '21:00');
+    assert.equal(gapMinute.state, 'gap');
+    assert.ok(utcMs(gapMinute.t) < utcMs(night.onset_at), 'sanity: this minute really is before onset');
+
+    const gapMs = utcMs(gapMinute.t);
+    const seg = night.segments.find((s) => gapMs >= utcMs(s.from_at) && gapMs < utcMs(s.to_at));
+    assert.equal(seg.state, 'gap', 'a pre-onset gap must not display as "settling"');
+  });
+
+  test('★★★ a flaky camera (scattered single-minute gaps) still reports the night, not "no sleep" (adversarial review finding)', () => {
+    // A REAL, ordinary, fully-occupied quiet night — just with a camera dropping one sample every 5
+    // minutes (a flaky connection, not an outage). The first draft of this fix required every
+    // ONSET_QUIET_MIN window to be 100% sampled, so a gap recurring more often than every 15 minutes
+    // meant NO window anywhere in the whole night was ever fully observed — the entire night came back
+    // `status: 'no_sleep'` ("No clear sleep detected overnight"), a far worse, far more visible wrong
+    // answer than the bug being fixed.
+    laySamples(at(19, 30), at(19, 35), [[at(19, 30), at(19, 35)]]); // brief settle
+    for (let t = at(19, 35); t < at(7, 0, 1); t = new Date(t.getTime() + 60000)) {
+      const sinceSettle = Math.round((t.getTime() - at(19, 35).getTime()) / 60000);
+      if (sinceSettle % 5 === 4) continue; // deliberately skip one minute in five
+      insertSample.run(CAM, sqlTime(t), STILL_EMPTY, STILL_EMPTY);
+    }
+
+    const night = computeNight(CHILD, DATE);
+    assert.notEqual(night.status, 'no_sleep', 'a flaky camera must not read as "no sleep all night"');
+    assert.equal(night.status, 'ok');
+    assert.equal(hhmm(night.onset_at), '19:35', 'onset must still be found promptly, not blocked by scattered gaps');
+  });
+
+  test('★★ the put-down-anchored search also treats a gap as unknown, not confirmed quiet (adversarial review finding)', () => {
+    // Isolates activeForOnset's OWN null-propagation from firstQuietRunFrom's (the unanchored search
+    // already has dedicated coverage above). A mutant removing JUST activeForOnset's null guard
+    // survived the full suite before this test existed, because every other put-down/outage fixture
+    // on record also trips a DIFFERENT, independent guard (`state[q] === null`, checked right after
+    // the put-down loop) that happens to catch the same bug for an unrelated reason. This fixture
+    // keeps a real sample exactly at the put-down so that other guard passes regardless, isolating
+    // this one.
+    insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(19, 0)));
+    laySamples(at(19, 0), at(19, 1), [], STILL_OCCUPIED); // one real quiet minute right at the put-down
+    // deliberately NO laySamples call for 19:01–19:16 — a genuine 15-minute outage
+    // A brief real stir well after onset — an occupied night, not the empty-bed guard's "nobody in the
+    // bed all night" case, which a fixture with zero active minutes anywhere would otherwise trip.
+    laySamples(at(19, 16), at(7, 0, 1), [[at(2, 0, 1), at(2, 3, 1)]], STILL_OCCUPIED);
+
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.ok(
+      night.onset_at >= sqlTime(at(19, 16)),
+      `onset must not be established from inside the outage (got ${hhmm(night.onset_at)})`
+    );
+  });
+});
+
 describe('★ departure confirmation waits for real elapsed time, not just calendar time (issue #350)', () => {
   test('★ THE FIX: a departure is NOT confirmed moments after it happens, before real time proves it', (t) => {
     layLateExitNight();
@@ -454,15 +614,17 @@ describe('★ the metrics span extends to match a confirmed post-window departur
     assert.equal(night.asleep_minutes + night.awake_minutes, span);
   });
 
-  test('late exit after a camera outage: the unobserved gap defaults to asleep, no crash or mis-total', (t) => {
+  test('★★ late exit after a camera outage: the unobserved gap becomes unknown, not asleep (issue #442)', (t) => {
     laySamples(at(19, 30), at(7, 5, 1), [
       [at(19, 30), at(19, 40)],
       [at(23, 0), at(23, 6)],
     ]);
     // A genuine outage — no rows at all for 15 minutes, not just quiet ones — sitting INSIDE the
-    // extension's span. If the extension defaulted a missing minute to "still awake" (carried state
-    // forward) instead of this file's existing gap convention (unsampled = quiet), it would wrongly
-    // inflate awake_minutes and could bridge two unrelated wake runs into one.
+    // extension's span (issue #352's post-window pass, which used to default an unsampled extra
+    // minute straight to quiet, exactly the pattern issue #442 fixes for the rest of computeNight
+    // too). This is the "at the morning exit" case named in #442's own acceptance criteria: the
+    // extension's tri-state twin (stateMetrics) must carry the same null-aware distinction the main
+    // population loop's state[] does, not just default to "quiet" here.
     laySamples(at(7, 20, 1), at(7, 50, 1), [
       [at(7, 40, 1), at(7, 50, 1)], // stirs, then gets out
     ]);
@@ -474,8 +636,12 @@ describe('★ the metrics span extends to match a confirmed post-window departur
     assert.equal(night.status, 'ok');
     assert.equal(hhmm(night.wake_at), '07:50');
     const span = Math.round((utcMs(night.wake_at) - utcMs(night.onset_at)) / 60000);
-    assert.equal(night.asleep_minutes + night.awake_minutes, span, 'no crash / mis-total across the outage');
-    assert.equal(night.awake_minutes, 16, 'the 15 unsampled minutes must default to asleep, not be counted as awake');
+    assert.equal(
+      night.asleep_minutes + night.awake_minutes + night.unknown_minutes, span,
+      'no crash / mis-total across the outage — every minute lands in exactly one bucket'
+    );
+    assert.equal(night.unknown_minutes, 15, 'the 15 unsampled minutes must be counted, not silently folded into asleep');
+    assert.equal(night.awake_minutes, 16, 'and must not be counted as awake either — unchanged from before this fix');
   });
 
   test('★ an empty night does not retroactively flip once post-window data is examined', (t) => {
@@ -1592,6 +1758,26 @@ describe('midnight episode integration', () => {
     assert.deepEqual(night.wakes[0], {
       start_at: sqlTime(at(7, 5, 1)), end_at: sqlTime(at(7, 14, 1)), minutes: 9,
     });
+  });
+
+  test('★★ a data gap surviving into the post-episode metrics pass is unknown, not silently absorbed (adversarial review finding)', (t) => {
+    // The 3RD of accumulateMetrics' three call sites — after detectMidnightEpisodes has OR'd episode
+    // minutes into inWake and bridgeWakeGaps has re-bridged it — was never exercised by a fixture with
+    // a real gap in scope (issue #442). `metricsState` is correct here by construction (traced by
+    // adversarial review), but nothing proved it: reverting metricsState back to `state` at this call
+    // site left the whole suite green before this test existed.
+    t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+    layNight(at(7, 40, 1));
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+      .run(CAM, sqlTime(at(7, 20, 1)), sqlTime(at(7, 30, 1))); // a genuine 10-minute outage, post-window
+    addPair(at(7, 5, 1, 10), at(7, 13, 1, 20));
+
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(night.awake_minutes, 9, 'unaffected — matches the sibling test above with no outage');
+    assert.equal(night.unknown_minutes, 10, 'the post-episode pass must still see the outage, not silently drop it');
+    const span = Math.round((utcMs(night.wake_at) - utcMs(night.onset_at)) / 60000);
+    assert.equal(night.asleep_minutes + night.awake_minutes + night.unknown_minutes, span, 'every minute accounted for exactly once');
   });
 
   test('last-minute return preserves the movement-only final wake', (t) => {

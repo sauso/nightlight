@@ -389,7 +389,12 @@ measurement**, and (like everything here) never a safety device — see the warn
   **got out of bed** — and they are deliberately the only two shown: they're the put-down and
   the morning departure the night's times were actually derived from. A single camera can see
   that something crossed the edge of the bed, but not *who*, so movement in between is reported
-  as exactly that and never attributed to a person.
+  as exactly that and never attributed to a person. A stretch the camera has no data for at
+  all — a detector restart, a dead connection — shows as its own striped **"No data"** segment
+  rather than being folded into asleep or awake; it isn't counted toward the reported sleep
+  duration either, and a night with a long enough gap can come back with less sleep counted, or
+  occasionally no clear sleep detected, than the raw hours between bedtime and waking would
+  suggest.
 - **Room temperature (optional).** If a camera reports temperature/humidity over **MQTT** (set
   up under **Settings → MQTT**, e.g. via Zigbee2MQTT — the readings also show on the camera
   tile), the sleep detail overlays the night's room temperature beneath the timeline, aligned to
@@ -421,6 +426,15 @@ for them rather than the whole screen being off-limits.
 they’re signed in on. Demoting an admin to caregiver does *not* sign them out: they keep browsing as
 a caregiver and simply lose the admin-only screens. Deleting an account, by contrast, ends its
 sessions at once and signs that person out everywhere.
+
+**There must always be at least one admin.** The only admin on an install can't be changed to
+caregiver until another account is made an admin first, and no account can ever delete itself —
+another admin has to remove it. Both are enforced by the server, not just hidden in the UI: the Role
+field explains it up front when it applies, and a request that tries anyway gets a clear error rather
+than a partial change. If an install somehow already has no admin (a database edited by hand, or
+from before this was enforced), see **[docs/mfa.md](docs/mfa.md)**'s recovery section for the console
+command that fixes it — it's documented there alongside the equivalent two-factor recovery, not
+because it's about two-factor, but because it's the same kind of last-resort console fix.
 
 Any account can also turn on **two-factor authentication** for its own login — see
 **[docs/mfa.md](docs/mfa.md)** for enrolling, one-time backup codes, and how to recover if an

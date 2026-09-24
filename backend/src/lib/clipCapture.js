@@ -7,8 +7,13 @@ import {
   stopSegmenter,
   stopAllSegmenters,
   isSegmenterRunning,
+  setRingDepth,
   extractClip,
+  clipCoverStartMs,
+  holdRing,
+  releaseRing,
 } from './clipRecorder.js';
+import { effectiveHold, clipHoldOwner } from './ringHolds.js';
 import { markClipPending, setClipReady, setClipFailed } from './detectionEvents.js';
 import { clipStorageReady, hasMinFreeSpace } from './clipStorage.js';
 
@@ -102,31 +107,30 @@ export function clipRingWanted(camera) {
   return !!camera.child_id && childTracksSleep(camera.child_id) && getWakeClipSettings().enabled;
 }
 
+// The ring's required depth: sized for the deeper of the two pre-rolls, so whichever trigger fires can
+// reach back far enough. (A long on-demand recording additionally HOLDS its segments from pruning while
+// it runs — see holdRing — so the ring doesn't need to be sized for the max recording length, only for
+// the pre-roll.) Factored out of startClipCapture (#446) so reconcileClipRing's resize branch can call
+// the SAME formula on a running ring — one sizing decision, not two copies that can drift.
+function ringSizing() {
+  const { preRollSec, postRollSec } = getClipSettings();
+  const ond = getOndemandSettings();
+  return { preRollSec: Math.max(preRollSec, ond.enabled ? ond.preRollSec : 0), postRollSec };
+}
+
 // Start (idempotently) a camera's segmenter if either feature wants the ring. No-op if already running
 // so a reconcile tick never drops it. Mirrors startMotionDetector's guard.
 export function startClipCapture(camera) {
   if (!clipRingWanted(camera)) return;
-  const ond = getOndemandSettings();
   // Storage unusable (unmapped/unwritable CLIPS_DIR) — don't run a segmenter that can't produce clips.
   if (!clipStorageReady()) return;
   if (isSegmenterRunning(camera.id)) return;
-  const { preRollSec, postRollSec } = getClipSettings();
-  // Size the ring for the deeper of the two pre-rolls, so whichever trigger fires can reach back far
-  // enough. (A long on-demand recording additionally HOLDS its segments from pruning while it runs —
-  // see holdRing — so the ring doesn't need to be sized for the max recording length.)
-  const deepestPreRoll = Math.max(preRollSec, ond.enabled ? ond.preRollSec : 0);
-  startSegmenter(camera.id, camera.mediamtx_path, { preRollSec: deepestPreRoll, postRollSec });
+  startSegmenter(camera.id, camera.mediamtx_path, ringSizing());
 }
 
 export function stopClipCapture(cameraId) {
+  deferredStops.delete(cameraId); // whatever deferred it is moot once it's actually stopped
   stopSegmenter(cameraId);
-}
-
-// Force the segmenter to pick up new pre/post-roll (which change the ring depth): stop, then start
-// fresh if still opted in. Used when the global clip settings change.
-export function restartClipCapture(camera) {
-  stopSegmenter(camera.id);
-  startClipCapture(camera);
 }
 
 export const isClipCapturing = isSegmenterRunning;
@@ -135,24 +139,69 @@ export function stopAllClipCapture() {
   stopAllSegmenters();
 }
 
-// Reconcile one camera's ring against clipRingWanted: start if wanted and not running, stop if running
-// and no longer wanted. Used by index.js's periodic reconcileCameraPaths, which previously had only the
-// start half (issue #387 adversarial review) — every OTHER leg reconciled there (motion, ONVIF motion)
-// already had both directions, so a missed call site anywhere else self-healed within 5 minutes; the
-// ring's missing stop half meant a camera that stopped wanting it kept its segmenter (and so its ffmpeg
-// process) running forever. Exported here, not left inline in index.js, because index.js has import-time
-// side effects (it spawns MediaMTX/transcoders) that every existing test deliberately avoids triggering
-// — this lets the stop half be tested directly instead.
+// Cameras whose stop is currently deferred because something still holds the ring (see reconcileClipRing
+// below). Logged once, on the tick that ADDS a camera here, not on every later tick that still finds it
+// held — #446, Codex F5: an on-demand recording can hold for up to its ≤600s cap and a wake run for up
+// to its 20-min stale-run window (wakeWatcher.js), so without this the same line would repeat every 5
+// minutes (index.js's reconcile interval) for a good while. Cleared once the ring actually stops, or if
+// the camera starts wanting the ring again before that happens.
+const deferredStops = new Set();
+
+// Reconcile one camera's ring against clipRingWanted: start if wanted and not running, resize in place
+// if wanted and already running, defer-then-stop if running and no longer wanted. Used by index.js's
+// periodic reconcileCameraPaths, which previously had only the start half (issue #387 adversarial
+// review) — every OTHER leg reconciled there (motion, ONVIF motion) already had both directions, so a
+// missed call site anywhere else self-healed within 5 minutes; the ring's missing stop half meant a
+// camera that stopped wanting it kept its segmenter (and so its ffmpeg process) running forever.
+// Exported here, not left inline in index.js, because index.js has import-time side effects (it spawns
+// MediaMTX/transcoders) that every existing test deliberately avoids triggering — this lets the stop
+// half be tested directly instead.
 export function reconcileClipRing(camera) {
   // Evaluated once, not per branch — clipRingWanted can run 1-3 DB queries and this runs over every
   // camera on every 5-minute reconcile tick. (startClipCapture still re-checks it internally on the
   // start path; that copy stays, per "CALL THIS AT EVERY CALL SITE" above — it's what makes
   // startClipCapture itself safe to call from anywhere, not just from here.)
   const wanted = clipRingWanted(camera);
-  if (wanted && !isSegmenterRunning(camera.id)) {
+  const running = isSegmenterRunning(camera.id);
+
+  if (wanted && running) {
+    deferredStops.delete(camera.id);
+    // #446: idempotent (a field write inside setRingDepth) and cheap, so safe to call on every 5-minute
+    // reconcile tick too, not just a settings save — this is what lets a settings save resize the ring
+    // WITHOUT a restart: see setRingDepth's own comment for why that's safe.
+    setRingDepth(camera.id, ringSizing());
+  } else if (wanted && !running) {
+    deferredStops.delete(camera.id);
     startClipCapture(camera);
-  } else if (!wanted && isSegmenterRunning(camera.id)) {
+  } else if (!wanted && running) {
+    // #446: not wanted any more, but a capture still in flight (a detection clip mid-extraction, an
+    // on-demand recording, a wake capture) has its own hold on these segments — stopping now would
+    // delete them out from under it, exactly what the old restart-based settings.js loop used to do.
+    // Leave the ring running and let a LATER reconcile — index.js's periodic tick, every 5 minutes —
+    // do the stop once the last hold clears. Bounded: an on-demand recording holds for at most its
+    // ≤600s cap, and a wake run for at most its 20-minute stale-run window.
+    if (effectiveHold(camera.id) != null) {
+      if (!deferredStops.has(camera.id)) {
+        logger.info(
+          `[clip] "${camera.name}" no longer wants its ring, but an in-flight capture still holds it — deferring the stop`
+        );
+        deferredStops.add(camera.id);
+      }
+      return;
+    }
+    deferredStops.delete(camera.id);
     stopClipCapture(camera.id);
+  }
+}
+
+// Re-evaluate every enabled camera's ring against the CURRENT settings — the resize/defer/start/stop
+// decision reconcileClipRing already makes, run once per camera. Moved out of routes/settings.js (#446)
+// so it is a plain synchronous function a test can call directly against a real (PATH-emptied) ring; a
+// route-level test can't drive that (see clip-capture.test.js's file header on why PATH is emptied) and
+// couldn't observe the synchronous resize before a later tick deleted the segmenter entry either.
+export function applyRecordingSettingsChange() {
+  for (const cam of db.prepare('SELECT * FROM cameras WHERE disabled = 0').all()) {
+    reconcileClipRing(cam);
   }
 }
 
@@ -179,6 +228,17 @@ export function enqueueClip(camera, eventId, at = Date.now()) {
   busyCameras.add(camera.id);
   markClipPending(eventId);
   const { preRollSec, postRollSec } = getClipSettings();
+  // #446: hold the ring for this clip's own pre-roll, not just depth-based pruning — a settings save
+  // that shrinks the ring mid-capture must not prune what this clip still needs (the old restart-based
+  // settings.js used to wipe the ring outright, which was strictly worse). clipCoverStartMs is the SAME
+  // formula extractClip uses to select segments, so this lease is never shallower than what the
+  // extraction will actually read. Taken LAST, directly before the job is queued — after markClipPending
+  // above, which writes the database and can throw — so a throw there can never leave a lease behind
+  // with nothing left to release it (Codex F4). Released in the job's own `finally` below; a side
+  // benefit of holding from here rather than from inside the job is that a clip still waiting in the
+  // concurrency-2 queue is protected too, not only one that has started running.
+  const holdOwner = clipHoldOwner(eventId);
+  holdRing(camera.id, holdOwner, clipCoverStartMs(at, preRollSec));
 
   queue.push(async () => {
     try {
@@ -200,6 +260,7 @@ export function enqueueClip(camera, eventId, at = Date.now()) {
       logger.error(`[clip] capture failed for "${camera.name}" event ${eventId}: ${e.message}`);
     } finally {
       busyCameras.delete(camera.id);
+      releaseRing(camera.id, holdOwner);
     }
   });
   pump();

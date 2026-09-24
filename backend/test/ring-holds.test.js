@@ -26,6 +26,8 @@ import {
   clearHolds,
   holdOwners,
   RING_OWNER,
+  ondemandHoldOwner,
+  clipHoldOwner,
 } from '../src/lib/ringHolds.js';
 const { holdRing, releaseRing, startSegmenter, stopSegmenter } = await import('../src/lib/clipRecorder.js');
 const fsMod = await import('node:fs');
@@ -119,13 +121,48 @@ describe('ring holds', () => {
     clearHolds('never-seen');
   });
 
-  test('the two real owners are distinct constants', () => {
+  test('WAKE is a single owner; ONDEMAND is a prefix, not an owner — the two never collide', () => {
     // (see below for the wiring cases — the registry being right is only half of it)
     // A typo'd owner string in a RELEASE would silently leak a hold — the ring then grows until the
-    // segmenter restarts, with nothing logged and nothing failing. Constants are the guard.
+    // segmenter restarts, with nothing logged and nothing failing. Constants are the guard for WAKE.
+    // ONDEMAND on its own is no longer used as a hold key at all (#445) — every on-demand lease is
+    // `ondemandHoldOwner(recordingId)`; RING_OWNER.ONDEMAND survives only as the shared string prefix.
     assert.notEqual(RING_OWNER.WAKE, RING_OWNER.ONDEMAND);
     assert.equal(typeof RING_OWNER.WAKE, 'string');
     assert.equal(typeof RING_OWNER.ONDEMAND, 'string');
+  });
+
+  test('★ #445 — two ondemandHoldOwner leases on one camera coexist; removing one leaves the other', () => {
+    // The #255 fix (distinct owners) applied one level down: two overlapping on-demand recordings on
+    // the SAME camera must each get their own slot, not share RING_OWNER.ONDEMAND between them.
+    const idA = 101;
+    const idB = 102;
+    addHold(CAM, ondemandHoldOwner(idA), DEEP);
+    addHold(CAM, ondemandHoldOwner(idB), SHALLOW);
+    assert.deepEqual(holdOwners(CAM).sort(), [ondemandHoldOwner(idA), ondemandHoldOwner(idB)].sort());
+    assert.equal(effectiveHold(CAM), DEEP, 'the deeper of the two per-recording leases did not win');
+
+    removeHold(CAM, ondemandHoldOwner(idA));
+    assert.deepEqual(holdOwners(CAM), [ondemandHoldOwner(idB)], "removing one recording's lease took the other's too");
+    assert.equal(effectiveHold(CAM), SHALLOW);
+  });
+
+  test('★ #445 — ondemandHoldOwner keys differ per recording id, and never equal RING_OWNER.WAKE', () => {
+    assert.notEqual(ondemandHoldOwner(1), ondemandHoldOwner(2), 'two different recording ids produced the same lease key');
+    assert.notEqual(ondemandHoldOwner(1), RING_OWNER.WAKE);
+    // Even a recording id that happens to spell "wake" must still not collide — the colon separator is
+    // what guarantees that, not luck about which ids are in use.
+    assert.notEqual(ondemandHoldOwner('wake'), RING_OWNER.WAKE);
+  });
+
+  test('★ #446 — clipHoldOwner keys differ per event id, and never collide with WAKE or ondemandHoldOwner', () => {
+    assert.notEqual(clipHoldOwner(1), clipHoldOwner(2), 'two different event ids produced the same lease key');
+    assert.notEqual(clipHoldOwner(1), RING_OWNER.WAKE);
+    assert.notEqual(clipHoldOwner(1), ondemandHoldOwner(1), 'a clip and a recording with the same numeric id collided');
+    // Same "id that happens to spell a reserved word" case as ondemandHoldOwner above — the colon
+    // separator and the distinct prefix are what guarantee it, not luck about which ids are in use.
+    assert.notEqual(clipHoldOwner('wake'), RING_OWNER.WAKE);
+    assert.notEqual(clipHoldOwner('9'), ondemandHoldOwner('9'));
   });
 });
 
@@ -202,10 +239,21 @@ describe('the wiring in the callers', () => {
   // review of #277 showed those mutants surviving at all three call sites.
   const read = (rel) => fsMod.readFileSync(new URL(rel, import.meta.url), 'utf8');
 
-  test('on-demand Record holds and releases as ONDEMAND', () => {
+  test('★ #445 — on-demand Record holds and releases PER RECORDING, never the bare ONDEMAND owner', () => {
+    // The bare `RING_OWNER.ONDEMAND` key IS the #445 bug: two overlapping on-demand recordings on one
+    // camera would collapse onto a single slot. This is the same "wired up wrong" guard as the #255
+    // cases above, one level down — a registry that is perfect but called with the wrong key regresses
+    // silently, with the suite otherwise green.
     const src = read('../src/lib/recordings.js');
-    assert.match(src, /holdRing\(camera\.id, RING_OWNER\.ONDEMAND,/, 'Record no longer holds as ONDEMAND');
-    assert.match(src, /releaseRing\(cameraId, RING_OWNER\.ONDEMAND\)/, 'Record no longer releases as ONDEMAND');
+    assert.ok(
+      !/holdRing\(camera\.id, RING_OWNER\.ONDEMAND,/.test(src),
+      'Record holds the ring with the bare ONDEMAND owner again — the #445 bug is back'
+    );
+    assert.ok(
+      !/releaseRing\(cameraId, RING_OWNER\.ONDEMAND\)/.test(src),
+      'Record releases the ring with the bare ONDEMAND owner again — the #445 bug is back'
+    );
+    assert.match(src, /ondemandHoldOwner\(/, "Record no longer keys its ring hold with ondemandHoldOwner");
     assert.ok(!/RING_OWNER\.WAKE/.test(src), 'recordings.js touches the wake watcher’s hold');
   });
 

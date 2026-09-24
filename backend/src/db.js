@@ -192,6 +192,7 @@ db.exec(`
     wake_count INTEGER,
     longest_stretch_minutes INTEGER,
     coverage_minutes INTEGER,
+    unknown_minutes INTEGER,
     computed_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (child_id, night_date)
   );
@@ -798,6 +799,14 @@ if (!sleepNightsColumns.includes('onset_at_algo')) {
 if (!sleepNightsColumns.includes('notified_at')) {
   db.exec('ALTER TABLE sleep_nights ADD COLUMN notified_at TEXT');
   db.exec('ALTER TABLE sleep_nights ADD COLUMN notified_wake_at TEXT');
+}
+
+// Minutes within [onset, sleepEnd) with no activity_samples row at all — never counted toward
+// asleep/awake (issue #442). NULL on rows computed before this migration, same as every other
+// figure here for a pre-existing row; applyCorrection() (sleepReviews.js) treats a NULL the same
+// as 0 via `?? 0`, matching how it already treats a missing awake_minutes.
+if (!sleepNightsColumns.includes('unknown_minutes')) {
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN unknown_minutes INTEGER');
 }
 
 // Quick-silence: a per-camera temporary mute of ALL alerts (motion/sound/ONVIF/MQTT), for when you're

@@ -783,3 +783,148 @@ describe('missing and blank fields are handled, not assumed', () => {
     assert.equal(res.body.needsSetup, false, 'users exist, so setup must not be offered');
   });
 });
+
+// -------------------------------------------------------------------------------------------
+// Issue #441: the sole administrator could demote (or, on a future async route, delete)
+// themselves, stranding an install with no one who could manage accounts or settings. The next
+// request reads the role live from the database (middleware/auth.js, issue #261), so the demotion
+// took effect immediately and irreversibly — first-run setup refuses to run again once a user
+// exists, so there was no way back in short of editing the database by hand (see the recovery
+// script, backend/src/scripts/promote-admin.js).
+//
+// MUTANTS THIS KILLS: M1 (the post-condition removed from keepingAnAdmin), M2 (the password-driven
+// session/push-token deletes moved back outside the transaction).
+describe('the only admin cannot be demoted or deleted (#441)', () => {
+  test('★ T1: the sole admin cannot demote themselves — 409, and nothing changed', async () => {
+    const token = await loginAs('alice'); // alice is the only admin in this file's fixture
+    const res = await put('/users/u-admin', { role: 'caregiver' }, token);
+    assert.equal(res.status, 409, `a sole admin was demoted: ${JSON.stringify(res.body)}`);
+    assert.equal(
+      db.prepare('SELECT role FROM users WHERE id = ?').get('u-admin').role,
+      'admin',
+      'the role was changed despite the rejection'
+    );
+    assert.equal(
+      db.prepare("SELECT COUNT(*) c FROM users WHERE role = 'admin'").get().c,
+      1,
+      'the install now has zero admins'
+    );
+  });
+
+  test('★★ T2: a rejected demotion makes NO partial change — hostile fixture, a second live session', async () => {
+    // ⚠️ THE HOSTILE PART: `otherSid` is a SECOND session for the same admin, deliberately not the one
+    // making this request, carrying a push token whose session_id names IT. A token on NULL or on the
+    // requesting session would survive even the unfixed route (it isn't in the DELETE...WHERE id !=
+    // req.user.sid target set) and would prove nothing about whether the rejection rolled back what the
+    // route already did before failing.
+    const token = await loginAs('alice'); // the requesting session
+    const otherSid = makeSession(db, 'u-admin');
+    db.prepare('INSERT INTO push_tokens (token, user_id, session_id, platform) VALUES (?,?,?,?)')
+      .run('tok-other-admin-device', 'u-admin', otherSid, 'android');
+    const passwordBefore = db.prepare('SELECT password_hash FROM users WHERE id = ?').get('u-admin').password_hash;
+
+    const res = await put('/users/u-admin', { role: 'caregiver', password: 'newpassword1' }, token);
+
+    assert.equal(res.status, 409, `a partial demotion was accepted: ${JSON.stringify(res.body)}`);
+    const row = db.prepare('SELECT * FROM users WHERE id = ?').get('u-admin');
+    assert.equal(row.password_hash, passwordBefore, 'the password was changed even though the demotion was rejected');
+    assert.equal(row.role, 'admin', 'the role was changed even though the demotion was rejected');
+    assert.ok(
+      db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(otherSid),
+      'the second session was deleted before the rejection took effect'
+    );
+    assert.ok(
+      db.prepare('SELECT 1 FROM push_tokens WHERE token = ?').get('tok-other-admin-device'),
+      'the push token was deleted before the rejection took effect'
+    );
+    assert.equal(db.prepare("SELECT COUNT(*) c FROM users WHERE role = 'admin'").get().c, 1);
+  });
+
+  const makeAdmin = (id, username) =>
+    db.prepare('INSERT INTO users (id, username, password_hash, role) VALUES (?,?,?,?)')
+      .run(id, username, bcrypt.hashSync(PASSWORD, 4), 'admin');
+
+  test('★ T3: demotion works once a second admin exists, and takes effect on the demoted admin’s EXISTING token', async () => {
+    makeAdmin('u-admin2', 'zara');
+    const aToken = await loginAs('alice');
+    const bToken = await loginAs('zara'); // minted while zara is STILL an admin (Codex F5) — a token
+    // minted AFTER the demotion would prove nothing about the live-role check running on old tokens.
+
+    const res = await put('/users/u-admin2', { role: 'caregiver' }, aToken);
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(db.prepare('SELECT role FROM users WHERE id = ?').get('u-admin2').role, 'caregiver');
+
+    // middleware/auth.js reads role LIVE (issue #261): zara's pre-existing token is refused on an
+    // admin route on its very next use, not just tokens minted after the demotion.
+    const after = await call(`${server.url}/api/auth/users`, { token: bToken });
+    assert.equal(after.status, 403, 'a token minted while still admin kept admin access after being demoted');
+  });
+
+  test('T3b: self-demotion succeeds once a second admin exists — the rule is about the COUNT, not "self"', async () => {
+    makeAdmin('u-admin2', 'zara');
+    const token = await loginAs('alice');
+    const res = await put('/users/u-admin', { role: 'caregiver' }, token);
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(db.prepare('SELECT role FROM users WHERE id = ?').get('u-admin').role, 'caregiver');
+  });
+
+  test('T4(a): two concurrent self-demotions from the sole admin both fail, and one admin remains', async () => {
+    // Pins TODAY'S behaviour, not the transactional design (see the Context note in the plan and
+    // keepingAnAdmin's own comment): Node runs each request's synchronous middleware+handler back to
+    // back with no `await` in between, so these two requests were already serialized before either
+    // reached this route. A naive check-then-write implementation passes this exact test for the same
+    // reason. It's here because the invariant must hold today, not because this test can tell the two
+    // designs apart.
+    const token = await loginAs('alice');
+    const [r1, r2] = await Promise.all([
+      put('/users/u-admin', { role: 'caregiver' }, token),
+      put('/users/u-admin', { role: 'caregiver' }, token),
+    ]);
+    assert.equal(r1.status, 409, JSON.stringify(r1.body));
+    assert.equal(r2.status, 409, JSON.stringify(r2.body));
+    assert.equal(db.prepare("SELECT COUNT(*) c FROM users WHERE role = 'admin'").get().c, 1);
+  });
+
+  test('T4(b): two admins demoting each other simultaneously — exactly one succeeds, one admin remains', async () => {
+    // Same pinning caveat as T4(a). Both tokens are minted BEFORE either request fires (Codex F5),
+    // matching T3's requirement that a live-role check is what's under test, not token freshness.
+    makeAdmin('u-admin2', 'zara');
+    const aToken = await loginAs('alice');
+    const bToken = await loginAs('zara');
+
+    const [r1, r2] = await Promise.all([
+      put('/users/u-admin2', { role: 'caregiver' }, aToken), // alice demotes zara
+      put('/users/u-admin', { role: 'caregiver' }, bToken), // zara demotes alice
+    ]);
+
+    const statuses = [r1.status, r2.status];
+    assert.equal(statuses.filter((s) => s === 200).length, 1, `expected exactly one 200: ${JSON.stringify(statuses)}`);
+    assert.ok(
+      statuses.every((s) => s === 200 || s === 409 || s === 403),
+      `unexpected status pair: ${JSON.stringify(statuses)}`
+    );
+    assert.equal(
+      db.prepare("SELECT COUNT(*) c FROM users WHERE role = 'admin'").get().c,
+      1,
+      'zero or two admins remained after the race'
+    );
+  });
+});
+
+describe('DELETE /users/:id honours the same invariant (#441)', () => {
+  test('T5: self-delete is still refused, and deleting a DIFFERENT admin succeeds when two exist', async () => {
+    db.prepare('INSERT INTO users (id, username, password_hash, role) VALUES (?,?,?,?)')
+      .run('u-admin2', 'zara', bcrypt.hashSync(PASSWORD, 4), 'admin');
+    const token = await loginAs('alice');
+
+    // Existing behaviour (already covered above by "an admin cannot delete their OWN account") must
+    // be unchanged by this route now also wrapping its deletes in keepingAnAdmin.
+    const self = await call(`${server.url}/api/auth/users/u-admin`, { method: 'DELETE', token });
+    assert.equal(self.status, 400, 'self-delete behaviour changed');
+
+    const res = await call(`${server.url}/api/auth/users/u-admin2`, { method: 'DELETE', token });
+    assert.equal(res.status, 204, JSON.stringify(res.body));
+    assert.equal(db.prepare('SELECT 1 FROM users WHERE id = ?').get('u-admin2'), undefined);
+    assert.equal(db.prepare("SELECT COUNT(*) c FROM users WHERE role = 'admin'").get().c, 1);
+  });
+});

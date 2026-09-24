@@ -1140,8 +1140,8 @@ body.in-pip .tile-menu-backdrop {
 
 /* --- Sleep detail page --- */
 /* Timeline segment colours (theme-aware) */
-:root { --sleep-asleep: #5b63c4; --sleep-stir: #a7ade4; --sleep-wake: #e0894a; --sleep-awake: #d2d0e2; --sleep-visit: #2fa39a; --sleep-temp: #cf5b39; }
-:root[data-theme='dark'] { --sleep-asleep: #7c85e6; --sleep-stir: #4a4f86; --sleep-wake: #e89a5c; --sleep-awake: #3c3f60; --sleep-visit: #3ec4b8; --sleep-temp: #ef8a5e; }
+:root { --sleep-asleep: #5b63c4; --sleep-stir: #a7ade4; --sleep-wake: #e0894a; --sleep-awake: #d2d0e2; --sleep-visit: #2fa39a; --sleep-temp: #cf5b39; --sleep-gap: #c7c7c7; }
+:root[data-theme='dark'] { --sleep-asleep: #7c85e6; --sleep-stir: #4a4f86; --sleep-wake: #e89a5c; --sleep-awake: #3c3f60; --sleep-visit: #3ec4b8; --sleep-temp: #ef8a5e; --sleep-gap: #5a5c6e; }
 
 .sleep-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .sleep-nav__arrow { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; }
@@ -1188,6 +1188,10 @@ body.in-pip .tile-menu-backdrop {
 .sleep-seg--stir { background: var(--sleep-stir); }
 .sleep-seg--wake { background: var(--sleep-wake); }
 .sleep-seg--awake { background: var(--sleep-awake); }
+/* Striped, not flat — a flat gray sat too close to --sleep-awake's own light gray to reliably tell
+   apart on a thin bar segment (found by adversarial review). A hatch pattern reads as "no data" on
+   sight regardless of exact hue, the same convention used for a missing-image placeholder. */
+.sleep-seg--gap { background: repeating-linear-gradient(135deg, var(--sleep-gap), var(--sleep-gap) 4px, var(--bg-elevated-2) 4px, var(--bg-elevated-2) 8px); }
 .sleep-legend__sw--visit { background: var(--sleep-visit); border-radius: 50%; }
 .sleep-legend__sw--out { background: var(--sleep-wake); border-radius: 50%; }
 .sleep-wakes__dur--visit { color: var(--sleep-visit); }

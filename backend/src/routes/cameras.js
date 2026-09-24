@@ -982,7 +982,9 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
     record_clips,
   } = req.body || {};
 
-  const enabled = motion_enabled ? 1 : 0;
+  // Keep-on-absent, same as every other field below (issue #443) — an omitted `motion_enabled`
+  // used to hard-code OFF, a trap for any future caller that sends a partial body.
+  const enabled = motion_enabled === undefined ? existing.detect_motion_enabled : motion_enabled ? 1 : 0;
   const recordClips = record_clips === undefined ? existing.detect_record_clips : record_clips ? 1 : 0;
   const zoneJson = zone === undefined ? existing.detect_zone : serializeZone(zone);
   // Detection source: only the known values; anything else falls back to the current value. 'onvif'
@@ -1004,14 +1006,35 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
   // which means a plain save would WIPE it. resolveUrlPassword carries the stored one forward, but
   // only while the submitted URL still points at the same protocol/host/username/path. Retype the
   // host and the password is dropped rather than silently forwarded to somewhere else.
+  //
+  // A password can also arrive on its OWN: the detection screen autosaves only what changed (#444), so
+  // typing a password with the address untouched sends `{ snapshot_password }` alone. Ignoring it and
+  // answering 200 made the screen say "Saved" for a change that never happened (0.33.1 release review,
+  // finding F1). It now applies to the address already stored, stripped of its old password first
+  // (otherwise resolveUrlPassword's rule 1 would keep the old one). So it can only ever land on the
+  // host the operator already chose.
+  // ⚠️ With nothing usable to attach it to (no stored address, or one that does not parse, where the
+  // strip returns ''), it is deliberately NOT a 400. The autosave queue merges a failed patch into every
+  // later one (detectionSaves.js), so a 400 here would block every later detection save for the camera.
+  // Nor may it fall through to resolveUrlPassword(''), which returns null and would WIPE an unparseable
+  // stored address. Those cases keep the stored value, as 0.33.0 did (fix-round review of this change).
+  const typedSnapPassword =
+    typeof req.body?.snapshot_password === 'string' && req.body.snapshot_password !== '' ? req.body.snapshot_password : null;
+  const strippedStored = typedSnapPassword && existing.snapshot_url ? stripUrlPassword(existing.snapshot_url) : '';
   const snapUrl =
-    snapshot_url === undefined
-      ? existing.snapshot_url
-      : resolveUrlPassword({
+    snapshot_url !== undefined
+      ? resolveUrlPassword({
           submitted: snapshot_url,
           stored: existing.snapshot_url,
           password: req.body?.snapshot_password,
-        });
+        })
+      : typedSnapPassword && strippedStored !== ''
+      ? resolveUrlPassword({
+          submitted: strippedStored,
+          stored: existing.snapshot_url,
+          password: typedSnapPassword,
+        })
+      : existing.snapshot_url;
   const sens =
     sensitivity === undefined
       ? existing.detect_sensitivity

@@ -1114,17 +1114,6 @@ and unblocked, and are the right thing to reach for in a gap.
 Not features — small, agreed, unblocked work with no dependency on the holdout. **This is the list to
 pick from when there is a gap**, which is why it is one list rather than four notes in four places.
 
-- **E1. Clear the `qs` and `uuid` advisories** — `NEXT` · *small*. `npm audit --omit=dev` on the backend
-  reports **9 moderate** advisories: `qs` (array-limit bypass, DoS via attacker-controlled `isBuffer`)
-  and `uuid` (missing buffer bounds check in v3/v5/v6). Both are **transitive through
-  `gaxios`/`teeny-request`**, i.e. Firebase Admin, not direct dependencies. The frontend reports 0.
-  - **Confirmed pre-existing, not introduced by the 2026-09-06 dependency batch** — that lockfile diff
-    touches neither package (0 changed lines mentioning them).
-  - `qs` has a **non-breaking** `npm audit fix`. `uuid` needs `--force`, which can move majors.
-  - ⚠️ **Read what `--force` actually proposes before running it**, and re-run the suite plus a real
-    image build after — `firebase-admin` is on the push path, and a broken push is silent until an
-    alert fails to arrive.
-
 - **E2. `routes/auth.js` branch coverage** — `NEXT` · *small*. **73%**, under the 80 bar, and invisible
   because the gate is an aggregate. Lines are 99.6% and functions 100%, so what is missing is the
   either-or paths, not whole functions. See §2.3, where it sits on the coverage list.

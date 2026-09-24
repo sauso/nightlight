@@ -41,10 +41,11 @@ useTempDataDir();
 
 const { default: db } = await import('../src/db.js');
 const ev = await import('../src/lib/detectionEvents.js');
-const { isSegmenterRunning, CLIPS_DIR } = await import('../src/lib/clipRecorder.js');
+const { isSegmenterRunning, CLIPS_DIR, ringDepthMs, clipCoverStartMs, holdRing, releaseRing } = await import('../src/lib/clipRecorder.js');
 const { checkClipStorage } = await import('../src/lib/clipStorage.js');
+const { effectiveHold, holdOwners, RING_OWNER, ondemandHoldOwner, clipHoldOwner } = await import('../src/lib/ringHolds.js');
 const {
-  clipRingWanted, startClipCapture, stopClipCapture, restartClipCapture, reconcileClipRing,
+  clipRingWanted, startClipCapture, stopClipCapture, applyRecordingSettingsChange, reconcileClipRing,
   isClipCapturing, stopAllClipCapture, enqueueClip,
 } = await import('../src/lib/clipCapture.js');
 
@@ -182,27 +183,6 @@ describe('starting and stopping a camera’s ring', () => {
     stopClipCapture('never-existed');
   });
 
-  test('★ restart really restarts: the ring is emptied and the segmenter comes back', () => {
-    // Called when the global pre/post-roll changes, and the ring DEPTH is a function of those — so a
-    // restart that skipped the stop would leave a ring sized for the old settings, and one that
-    // skipped the start would leave the camera silently not buffering at all. Both halves asserted.
-    const c = cam({ detect_record_clips: 1 });
-    startClipCapture(c);
-    const ring = path.join(CLIPS_DIR, '.ring', 'cam-1');
-    fs.writeFileSync(path.join(ring, 'seg-stale.mkv'), 'x');
-    restartClipCapture(c);
-    assert.equal(fs.existsSync(path.join(ring, 'seg-stale.mkv')), false, 'the old ring survived a restart');
-    assert.equal(isSegmenterRunning('cam-1'), true, 'the camera stopped buffering after a restart');
-  });
-
-  test('restarting a camera that no longer wants the ring leaves it stopped', () => {
-    const c = cam({ detect_record_clips: 1 });
-    startClipCapture(c);
-    setSettings({ ondemand_enabled: 0 });
-    restartClipCapture({ ...c, detect_record_clips: 0 });
-    assert.equal(isSegmenterRunning('cam-1'), false, 'a restart re-armed a camera that had opted out');
-  });
-
   test('stopAllClipCapture takes down every camera at once', () => {
     // `cam()` clears the cameras table, so it has to come FIRST — the second camera is added after it.
     startClipCapture(cam({ detect_record_clips: 1 }));
@@ -213,6 +193,100 @@ describe('starting and stopping a camera’s ring', () => {
     stopAllClipCapture();
     assert.equal(isSegmenterRunning('cam-1'), false);
     assert.equal(isSegmenterRunning('cam-2'), false);
+  });
+});
+
+// --- #446: a settings save resizes a running ring instead of destroying it ------------------------
+//
+// The old behaviour (stop, then start again — `restartClipCapture`, removed) ran `stopSegmenter` on
+// every enabled camera for ANY clip-settings change: that cleared every hold (`clearHolds`) and deleted
+// every `.mkv` in the ring dir (`startSegmenter` starts clean), destroying an active recording, a
+// wake-clip hold, or a detection clip mid-extraction — none of them told, the extraction later failing
+// or cutting a truncated clip. `applyRecordingSettingsChange` (called from routes/settings.js, and
+// exercised directly here) replaces that with `reconcileClipRing`'s resize branch: a still-wanted,
+// still-running ring only has `setRingDepth` called on it — no restart, no file deletion, no
+// `clearHolds` — because depth is a plain field the janitor already re-reads every 2s tick, and
+// `pruneRing` never prunes past `effectiveHold`.
+//
+// ⚠️ Codex F1 (a blocker on the plan review): `beforeEach` leaves `ondemand_pre_roll_s` at its schema
+// default, 30, and ring sizing is `max(clip pre, ondemand pre)`. So a `clip_pre_roll_s` edit from 5 to
+// 20 changes NOTHING observable while on-demand's 30s pre-roll still dominates the max. Every resize
+// test below sets `ondemand_pre_roll_s: 0` explicitly (on-demand stays ENABLED — only its pre-roll
+// drops out of the max) so `clip_pre_roll_s` is what actually drives the depth. Every depth assertion is
+// a DELTA against a depth captured before the change, never a re-derived formula — re-implementing
+// `ringDepthMsFor` in the assertion would test the assertion against itself, not the code (see this
+// file's own header on exactly that trap).
+describe('★ #446 — a settings change resizes the ring in place, never destroys it', () => {
+  test('T1 — a settings change must not wipe the ring (fails on unfixed code)', () => {
+    setSettings({ ondemand_pre_roll_s: 0, clip_pre_roll_s: 5 });
+    const c = cam({ detect_record_clips: 1 });
+    startClipCapture(c);
+    const ring = path.join(CLIPS_DIR, '.ring', 'cam-1');
+    fs.writeFileSync(path.join(ring, 'seg-fixture.mkv'), 'x');
+    holdRing('cam-1', ondemandHoldOwner(9001), Date.now() - 20_000);
+    holdRing('cam-1', RING_OWNER.WAKE, Date.now() - 30_000);
+    const depthBefore = ringDepthMs('cam-1');
+
+    setSettings({ clip_pre_roll_s: 20 });
+    applyRecordingSettingsChange();
+
+    assert.equal(isSegmenterRunning('cam-1'), true, 'the ring stopped running');
+    assert.equal(fs.existsSync(path.join(ring, 'seg-fixture.mkv')), true, 'a settings change destroyed the ring fixture');
+    assert.deepEqual(
+      holdOwners('cam-1').sort(),
+      [ondemandHoldOwner(9001), RING_OWNER.WAKE].sort(),
+      'a settings change cleared active holds'
+    );
+    assert.ok(ringDepthMs('cam-1') > depthBefore, 'the deeper pre-roll was not reflected in the ring depth');
+  });
+
+  test('T2 — a shrink resizes in place too: file and holds still survive', () => {
+    setSettings({ ondemand_pre_roll_s: 0, clip_pre_roll_s: 20 });
+    const c = cam({ detect_record_clips: 1 });
+    startClipCapture(c);
+    const ring = path.join(CLIPS_DIR, '.ring', 'cam-1');
+    fs.writeFileSync(path.join(ring, 'seg-fixture.mkv'), 'x');
+    holdRing('cam-1', ondemandHoldOwner(9002), Date.now() - 20_000);
+    const depthBefore = ringDepthMs('cam-1');
+
+    setSettings({ clip_pre_roll_s: 5 });
+    applyRecordingSettingsChange();
+
+    assert.equal(isSegmenterRunning('cam-1'), true);
+    assert.equal(fs.existsSync(path.join(ring, 'seg-fixture.mkv')), true, 'a shrink destroyed the ring fixture');
+    assert.deepEqual(holdOwners('cam-1'), [ondemandHoldOwner(9002)], 'a shrink cleared an active hold');
+    assert.ok(ringDepthMs('cam-1') < depthBefore, 'the shallower pre-roll was not reflected in the ring depth');
+  });
+
+  describe('T2b — the other sizing inputs (Codex F3)', () => {
+    test('raising clip_post_roll_s makes the depth bigger', () => {
+      setSettings({ ondemand_pre_roll_s: 0, clip_pre_roll_s: 5, clip_post_roll_s: 0 });
+      startClipCapture(cam({ detect_record_clips: 1 }));
+      const depthBefore = ringDepthMs('cam-1');
+
+      setSettings({ clip_post_roll_s: 10 });
+      applyRecordingSettingsChange();
+
+      assert.ok(ringDepthMs('cam-1') > depthBefore, 'a bigger post-roll did not deepen the ring');
+    });
+
+    test('raising ondemand_pre_roll_s above the clip pre-roll makes the depth bigger, and turning on-demand off shrinks it back', () => {
+      // detect_record_clips stays ON, so the camera keeps wanting the ring for both steps — the only
+      // thing changing is which of the two pre-rolls is driving `ringSizing`'s max().
+      setSettings({ ondemand_pre_roll_s: 0, clip_pre_roll_s: 5 });
+      startClipCapture(cam({ detect_record_clips: 1 }));
+      const depthAtClipPreRoll = ringDepthMs('cam-1');
+
+      setSettings({ ondemand_pre_roll_s: 40 }); // now the deeper of the two
+      applyRecordingSettingsChange();
+      const depthAtOndemandPreRoll = ringDepthMs('cam-1');
+      assert.ok(depthAtOndemandPreRoll > depthAtClipPreRoll, 'a deeper on-demand pre-roll did not widen the ring');
+
+      setSettings({ ondemand_enabled: 0 }); // the 40s on-demand pre-roll no longer counts at all
+      applyRecordingSettingsChange();
+      assert.equal(isSegmenterRunning('cam-1'), true, 'precondition: detect_record_clips still wants the ring');
+      assert.ok(ringDepthMs('cam-1') < depthAtOndemandPreRoll, 'turning on-demand off did not shrink the ring back');
+    });
   });
 });
 
@@ -245,22 +319,21 @@ describe('★ wake clips actually start the segmenter, not just the predicate (i
     assert.equal(isSegmenterRunning('cam-1'), false);
   });
 
-  test('restartClipCapture stops a wake-only ring once wake clips are turned off globally — the same call settings.js makes on save', () => {
-    // Mirrors the sibling "restarting a camera that no longer wants the ring leaves it stopped" test
-    // below, for the THIRD reason a camera can want a ring. settings.js's PUT handler re-arms every
-    // enabled camera through exactly this function when wake_clips_enabled changes (routes/settings.js)
-    // — this is the synchronous, non-racy proof of that STOP direction; see
+  test('applyRecordingSettingsChange stops a wake-only ring once wake clips are turned off globally — the same call settings.js makes on save', () => {
+    // Mirrors T3/T4 below, for the THIRD reason a camera can want a ring. settings.js's PUT handler
+    // re-arms every enabled camera through exactly this function when wake_clips_enabled changes
+    // (routes/settings.js) — this is the synchronous, non-racy proof of that STOP direction; see
     // test/children-clip-ring-reconcile.test.js's header for why a real HTTP call to that route cannot
     // prove it (isSegmenterRunning dies on its own, from the empty-PATH spawn failure, faster than an
-    // awaited round trip).
+    // awaited round trip). Nothing holds this ring, so the stop is not deferred — see T3/T4 for that.
     setSettings({ ondemand_enabled: 0, wake_clips_enabled: 1 });
     makeChild(db, { id: 'kid-1', track: 1 });
     const c = cam({ detect_record_clips: 0 }, 'kid-1');
     startClipCapture(c);
     assert.equal(isSegmenterRunning('cam-1'), true, 'precondition: the wake-only ring is running');
     setSettings({ wake_clips_enabled: 0 });
-    restartClipCapture(c);
-    assert.equal(isSegmenterRunning('cam-1'), false, 'a restart left a wake-only ring running after wake clips were turned off');
+    applyRecordingSettingsChange();
+    assert.equal(isSegmenterRunning('cam-1'), false, 'a settings save left a wake-only ring running after wake clips were turned off');
   });
 
   test('re-evaluating after "Track sleep" turns off stops an already-running wake-only ring', () => {
@@ -304,6 +377,37 @@ describe('★ reconcileClipRing — the single start-or-stop decision every call
     setSettings({ ondemand_enabled: 0 });
     reconcileClipRing({ ...c, detect_record_clips: 0 });
     assert.equal(isSegmenterRunning('cam-1'), false, 'a no-longer-wanted ring kept running');
+  });
+
+  test('★ #446 T3 — not wanted but held means a deferred stop', () => {
+    // A camera whose only reason to buffer is on-demand: detect_record_clips 0, no child (so wake
+    // clips never apply either). Taking an on-demand lease and then turning on-demand off must not
+    // delete the segments that lease is still protecting — the old restart-based settings.js did
+    // exactly that.
+    const c = cam({ detect_record_clips: 0 });
+    startClipCapture(c);
+    assert.equal(isSegmenterRunning('cam-1'), true, 'precondition: on-demand alone is enough to want the ring');
+    holdRing('cam-1', ondemandHoldOwner(9101), Date.now() - 20_000);
+
+    setSettings({ ondemand_enabled: 0 });
+    applyRecordingSettingsChange();
+    assert.equal(isSegmenterRunning('cam-1'), true, 'a held ring was stopped out from under its holder');
+    assert.deepEqual(holdOwners('cam-1'), [ondemandHoldOwner(9101)], 'the deferred stop cleared the hold itself');
+
+    releaseRing('cam-1', ondemandHoldOwner(9101));
+    reconcileClipRing(c);
+    assert.equal(isSegmenterRunning('cam-1'), false, 'the ring did not stop once its last hold cleared');
+  });
+
+  test('★ #446 T4 — not wanted and not held stops right away (control for T3)', () => {
+    // Without this, a mutant that defers EVERY stop (not just a held one) would leave T3 as the only
+    // evidence and could still pass it — T3 alone never proves an unheld camera stops at all.
+    const c = cam({ detect_record_clips: 0 });
+    startClipCapture(c);
+    assert.equal(isSegmenterRunning('cam-1'), true, 'precondition');
+    setSettings({ ondemand_enabled: 0 });
+    applyRecordingSettingsChange();
+    assert.equal(isSegmenterRunning('cam-1'), false, 'an unheld, no-longer-wanted ring was left running');
   });
 
   test('leaves an already-running, still-wanted ring alone (does not restart/wipe it)', () => {
@@ -416,6 +520,30 @@ describe('★ enqueueClip refuses in every case where a clip would be empty or u
       enqueueClip(c, ev1);
     }
     for (const id of ids) assert.equal(await settled(id), 'failed', `event ${id} never finished — the queue stalled`);
+  });
+
+  test('★ #446 T6 — enqueueClip takes a hold for this clip, matching extractClip’s own formula', async () => {
+    // Before #446, a detection clip relied ONLY on ring depth to keep its segments — a settings save
+    // that shrank the depth mid-capture would prune what it still needed. This proves the hold exists,
+    // is keyed correctly, is taken SYNCHRONOUSLY (before the job even reaches the queue), is deep enough
+    // (Codex F2: a lease that exists but is too shallow must still fail the case it exists for — so this
+    // asserts the exact value, not just presence), and is released once the capture settles.
+    const c = cam({ detect_record_clips: 1 });
+    setSettings({ clip_pre_roll_s: 7 });
+    startClipCapture(c);
+    const id = newEvent();
+    const at = Date.now();
+    enqueueClip(c, id, at);
+    assert.deepEqual(holdOwners('cam-1'), [clipHoldOwner(id)], 'enqueueClip did not take a hold for this clip');
+    // clipCoverStartMs is the SAME formula extractClip uses to select segments (clipRecorder.js) — this
+    // is the assertion Codex F2 asked for: not merely "some hold exists", but that it reaches back
+    // exactly as far as the extraction itself will read.
+    assert.equal(
+      effectiveHold('cam-1'), clipCoverStartMs(at, 7),
+      'the hold does not match extractClip’s own coverStart formula — a shallower lease would exist but fail'
+    );
+    await settled(id); // no ffmpeg in this suite — every capture here fails, which is what releases it
+    assert.deepEqual(holdOwners('cam-1'), [], 'the hold outlived the (failed) capture');
   });
 });
 

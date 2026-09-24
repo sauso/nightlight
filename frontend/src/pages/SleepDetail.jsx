@@ -33,9 +33,11 @@ export function fmtDur(min) {
 }
 
 // Colours for the timeline segments — tuned to read on both themes (defined against tokens in CSS).
+// 'gap' (issue #442): minutes with no sample at all — a distinct neutral, not folded into 'asleep'
+// or any other state, so a camera outage reads as missing data rather than a claim about the child.
 const SEG_CLASS = {
   asleep: 'sleep-seg--asleep', stir: 'sleep-seg--stir', wake: 'sleep-seg--wake',
-  settling: 'sleep-seg--awake', awake: 'sleep-seg--awake',
+  settling: 'sleep-seg--awake', awake: 'sleep-seg--awake', gap: 'sleep-seg--gap',
 };
 
 export default function SleepDetail() {
@@ -239,6 +241,7 @@ function NightBody({ night, fmtTime, tz, tempUnit, childId, date, onRecomputed }
   const visits = night.visits || [];
   const hasChildOut = visits.some((v) => v.type === 'child_out');
   const hasRoom = visits.some((v) => v.type !== 'child_out');
+  const hasGap = (night.segments || []).some((s) => s.state === 'gap');
   const alerts = night.alerts || [];
   const wakeClips = night.wakeClips || [];
   // Coverage is measured against elapsed time so far for a live night, not the full window.
@@ -278,6 +281,7 @@ function NightBody({ night, fmtTime, tz, tempUnit, childId, date, onRecomputed }
           <span><i className="sleep-legend__sw sleep-seg--stir" /> Stirring</span>
           <span><i className="sleep-legend__sw sleep-seg--wake" /> Awake</span>
           <span><i className="sleep-legend__sw sleep-seg--awake" /> Before/after sleep</span>
+          {hasGap && <span><i className="sleep-legend__sw sleep-seg--gap" /> No data</span>}
           {hasRoom && <span><i className="sleep-legend__sw sleep-legend__sw--visit" /> Movement outside the bed</span>}
           {hasChildOut && <span><i className="sleep-legend__sw sleep-legend__sw--out" /> Out of bed</span>}
           {(night.transitions || []).length > 0 && (
@@ -767,7 +771,7 @@ function AlertTypeIcon({ type }) {
 }
 
 export const pctOf = (s, startMs, totalMs) => (s ? ((utcMs(s) - startMs) / totalMs) * 100 : null);
-export const labelFor = (state) => (state === 'asleep' ? 'asleep' : state === 'stir' ? 'stirring' : state === 'wake' ? 'awake' : 'before/after sleep');
+export const labelFor = (state) => (state === 'asleep' ? 'asleep' : state === 'stir' ? 'stirring' : state === 'wake' ? 'awake' : state === 'gap' ? 'no data' : 'before/after sleep');
 export function shortHour(ms, tz) {
   const s = new Intl.DateTimeFormat([], { timeZone: tz, hour: 'numeric', hour12: true }).format(new Date(ms));
   return s.replace(/\s?AM/i, 'a').replace(/\s?PM/i, 'p');
