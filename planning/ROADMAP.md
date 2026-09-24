@@ -1130,16 +1130,6 @@ pick from when there is a gap**, which is why it is one list rather than four no
   - **Fix:** decide between the two outcomes explicitly rather than inferring from a timeout — wait for
     *either* "Save changes" *or* "Save anyway", and fail with a message naming which appeared.
 
-- **E4. Move the soak stack into the repo as `e2e/soak/`** — `NEXT` · *small*. It currently lives
-  outside the repo on the dev machine, which was the right call while it was unproven. **It has earned
-  its place**: it validated #257 end to end, caught the #274 review's finding in a live container,
-  proved #254's per-leg isolation, measured the shutdown-grace gap that became #279, and confirmed
-  #297's fix under fault injection. None of that was reachable from a unit test.
-  - Brings with it the two fault-injection recipes (hide `ffmpeg`; hide `mediamtx`) that are currently
-    only in an agent's notes.
-  - It already mounts `e2e/fakecam/mediamtx.yml` from the repo, so the move mostly means the compose
-    file and a README. ⚠️ Keep the warning that it must never be pointed at a bedroom camera.
-
 ---
 
 ## 4. Deferred / shelved

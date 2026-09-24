@@ -1,0 +1,69 @@
+# Nightlight SOAK stack — a third environment, deliberately separate from prod, staging, and the
+# ../docker-compose.e2e.yml stack.
+#
+# WHY THIS EXISTS. Runtime-plumbing bugs — a spawn that fails, a migration transaction, a watchdog
+# crash guard — are exactly the class of bug a unit test cannot reach: they only show up once the real
+# image has been running for a while and something is broken on purpose while it's up. See
+# ../soak/README.md for the incidents this has already caught and the fault-injection recipes.
+#
+# ⚠️ NEVER point this at a real bedroom/nursery camera. A third RTSP puller adds load a
+# resource-constrained camera may not absorb, and losing the real feed while this stack is mid fault
+# injection is exactly the outcome nobody wants from a testing tool. Use the bundled synthetic camera,
+# or a dedicated test camera of your own.
+#
+# Differences from e2e/docker-compose.e2e.yml, which this borrows the fakecam config from:
+#   - data is a real bind mount, not tmpfs, so config survives a restart (that IS the soak)
+#   - restart: unless-stopped, so it survives a host reboot and keeps running for days
+#   - reachable on the LAN (PUBLIC_HOST), so a phone/browser can watch it and a real test camera can
+#     reach it
+#
+#   cd e2e/soak
+#   PUBLIC_HOST=<this machine's LAN IP> docker compose -f docker-compose.soak.yml up -d
+#   docker compose -f docker-compose.soak.yml logs -f nightlight
+#   docker compose -f docker-compose.soak.yml down          # keeps ./data
+#
+# See ./README.md for the full runbook: refresh, fault injection, and the camera warning above.
+
+name: nightlight-soak
+
+services:
+  # Synthetic RTSP camera: test pattern + G.711 tone, published continuously. Config is the e2e one,
+  # mounted from the repo rather than copied, so improvements made there flow here too — one source of
+  # truth. Paths: `test` (open) and `secure` (needs the credentials in ../fakecam/mediamtx.yml).
+  fakecam:
+    image: bluenviron/mediamtx:latest-ffmpeg
+    restart: unless-stopped
+    volumes:
+      - ../fakecam/mediamtx.yml:/mediamtx.yml:ro
+
+  nightlight:
+    image: ${NIGHTLIGHT_IMAGE:-sauso/nightlight:dev}
+    restart: unless-stopped
+    depends_on:
+      - fakecam
+    environment:
+      # Log timestamps in UTC. The APP's own timezone is a setting in the database (defaults to UTC) —
+      # this only affects container log lines, matching the convention in docker-compose.e2e.yml.
+      - TZ=UTC
+      # Root inside the container: this is a disposable test box, and a bind mount from an arbitrary
+      # host makes uid/gid remapping pointless friction. Prod keeps PUID/PGID 99/100 — see the top-level
+      # docker-compose.yml.
+      - PUID=0
+      - PGID=0
+      # WebRTC needs an ICE candidate the browser can actually reach. Prod solves this with a dedicated
+      # LAN IP (ipvlan); here the container is behind a bridge, so its own addresses are unroutable and
+      # MediaMTX must be told the HOST's address instead — see detectHostIPv4s / MTX_WEBRTCADDITIONALHOSTS
+      # in backend/src/lib/mediamtxProcess.js. Required, no default: a silently wrong guess here just
+      # means WebRTC quietly can't connect, which is worse than failing to start.
+      - PUBLIC_HOST=${PUBLIC_HOST:?set PUBLIC_HOST to this machine's LAN IP}
+    ports:
+      # 4100, not 4000: the e2e stack (../docker-compose.e2e.yml) defaults to 4000, and the two need to
+      # be able to run at the same time — this stack is meant to be left up for days, not brought up
+      # only for a single CI run.
+      - "4100:4000"
+      # WebRTC media. Everything else MediaMTX listens on (RTSP 8554, HLS 8888, API 9997) is bound to
+      # 127.0.0.1 inside the container and reached through the backend's proxy on 4000 — this is the one
+      # port that must be published for video to actually play.
+      - "8189:8189/udp"
+    volumes:
+      - ./data:/app/data
