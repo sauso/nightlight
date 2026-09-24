@@ -38,6 +38,10 @@ services:
 
   nightlight:
     image: ${NIGHTLIGHT_IMAGE:-sauso/nightlight:dev}
+    # Same declaration as production (see docker-compose.yml). Issue #279 was FOUND on this soak box: a
+    # bare `docker stop` SIGKILLed mid-recording because no grace was declared. The soak stack must shut
+    # down like the real one, and shutdown-grace-declared.test.js checks that every compose file agrees.
+    stop_grace_period: 30s
     restart: unless-stopped
     depends_on:
       - fakecam
