@@ -329,4 +329,53 @@ describe('snapshot_url credentials (#271)', () => {
     await put({ ...CONFIGURED_PAYLOAD(), snapshot_url: '' });
     assert.equal(row().snapshot_url, null);
   });
+
+  // ★ THE AUTOSAVE SHAPE (#444). The detection screen now sends only what changed, so typing a password
+  // with the address untouched sends `{ snapshot_password }` ALONE. The route used to read the password
+  // only inside the `snapshot_url` branch: it was ignored, the answer was 200, and the screen said
+  // "Saved" (0.33.1 release review, finding F1). These bodies are exactly what the new client sends.
+  test('★ a password sent on its own replaces the stored one', async () => {
+    setStored(WITH_PW);
+    const res = await put({ snapshot_password: 'replaced' });
+    assert.equal(res.status, 200);
+    assert.equal(row().snapshot_url, 'http://admin:replaced@cam.local/snap.jpg', 'a password-only save was dropped');
+    assert.ok(!JSON.stringify(res.body).includes('replaced'), `the new password came back in the response: ${JSON.stringify(res.body)}`);
+    assert.equal(res.body.snapshot_has_password, true);
+  });
+
+  test('★ …and adds one to a stored address that had none', async () => {
+    setStored('http://admin@cam.local/snap.jpg');
+    const res = await put({ snapshot_password: 'first' });
+    assert.equal(res.status, 200);
+    assert.equal(row().snapshot_url, 'http://admin:first@cam.local/snap.jpg');
+  });
+
+  // ⚠️ NOT a 400: the autosave queue merges a failed patch into every later one, so refusing an orphan
+  // password would block every later detection save for this camera. The other field in the body is
+  // what proves the rest of the save still goes through.
+  test('★ a password with no address to attach it to never blocks the rest of the save', async () => {
+    setStored(null);
+    const res = await put({ snapshot_password: 'orphan', sensitivity: 33 });
+    assert.equal(res.status, 200, 'an orphan password blocked the whole save');
+    assert.equal(row().detect_sensitivity, 33, 'the other field in the same save was lost');
+    assert.equal(row().snapshot_url, null);
+  });
+
+  test('★ a stored address that does not parse is never wiped by a password-only save', async () => {
+    // `#` in the password makes this unparseable, so stripUrlPassword returns ''. Passing that on would
+    // resolve to null and delete the address.
+    const UNPARSEABLE = 'http://admin:pa#ss@cam.local/snap.jpg';
+    setStored(UNPARSEABLE);
+    const res = await put({ snapshot_password: 'x' });
+    assert.equal(res.status, 200);
+    assert.equal(row().snapshot_url, UNPARSEABLE, 'a password-only save wiped the stored address');
+  });
+
+  // A guard, not a regression test: this also passes on the pre-fix route, and it pins "blank means keep".
+  test('a blank password sent on its own changes nothing', async () => {
+    setStored(WITH_PW);
+    const res = await put({ snapshot_password: '' });
+    assert.equal(res.status, 200);
+    assert.equal(row().snapshot_url, WITH_PW);
+  });
 });

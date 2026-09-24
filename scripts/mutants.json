@@ -2846,5 +2846,32 @@
     "expect": "killed",
     "tests": ["push-firebase-contract.test.js"],
     "namePattern": "^T4:"
+  },
+  {
+    "label": "snapshot password-only save (0.33.1 review F1) M1: a password sent alone is ignored again",
+    "file": "backend/src/routes/cameras.js",
+    "find": "      : typedSnapPassword && strippedStored !== ''",
+    "replace": "      : false",
+    "expect": "killed",
+    "tests": ["detection-route.test.js"],
+    "namePattern": "password sent on its own replaces"
+  },
+  {
+    "label": "snapshot password-only save (0.33.1 review F1) M2: an unparseable stored address is passed on as '' and wiped",
+    "file": "backend/src/routes/cameras.js",
+    "find": "typedSnapPassword && strippedStored !== ''",
+    "replace": "typedSnapPassword",
+    "expect": "killed",
+    "tests": ["detection-route.test.js"],
+    "namePattern": "does not parse is never wiped"
+  },
+  {
+    "label": "snapshot password-only save (0.33.1 review F1) M3: the stored password is not stripped first, so the old one wins",
+    "file": "backend/src/routes/cameras.js",
+    "find": "submitted: strippedStored,",
+    "replace": "submitted: existing.snapshot_url,",
+    "expect": "killed",
+    "tests": ["detection-route.test.js"],
+    "namePattern": "password sent on its own replaces"
   }
 ]
