@@ -29,6 +29,9 @@ function Probe() {
       <span data-testid="name">{ctx.settings.app_name}</span>
       <span data-testid="unit">{ctx.settings.temp_unit}</span>
       <button onClick={() => ctx.refresh()}>reload</button>
+      <button onClick={() => ctx.commit({ app_name: 'Committed', accent_color: '#f4c56a' })}>
+        commit
+      </button>
     </div>
   );
 }
@@ -118,6 +121,44 @@ describe('theming (CSSOM, never inline styles - the CSP depends on it)', () => {
     stubFetch(() => ({ body: { app_name: 'Casa Nightlight' } }));
     renderProvider();
     await waitFor(() => expect(document.title).toBe('Casa Nightlight'));
+  });
+});
+
+describe('commit() (#449)', () => {
+  // A PUT's response is the server's own word on what it just wrote, and a page (e.g.
+  // SettingsRecording.jsx) uses commit() to publish it directly instead of a second refresh() that
+  // could fail on its own (see commit()'s comment in SettingsContext.jsx). But commit() bumps reqSeq
+  // so a stale, already-in-flight refresh can't land on top of it — and until this fix, that bump was
+  // the ONLY thing commit() did to reqSeq/loading: refresh()'s `finally` only calls setLoading(false)
+  // for the request whose own `seq` still matches `reqSeq.current`, so bumping reqSeq without also
+  // clearing `loading` left it stuck at `true` forever whenever a commit landed while the initial (or
+  // post-login) fetch was still in flight — even though real, authoritative settings were already on
+  // screen.
+  test('a commit landing during an in-flight initial fetch clears loading and is not overwritten by that fetch resolving later', async () => {
+    let releaseInitialFetch;
+    globalThis.fetch = vi.fn(() => new Promise((resolve) => { releaseInitialFetch = resolve; }));
+    renderProvider();
+
+    // The initial GET /settings never resolved yet - this is the failing case before the fix:
+    // loading stays true and would stay true even after commit() below without it.
+    expect(screen.getByTestId('loading')).toHaveTextContent('true');
+
+    await act(async () => { screen.getByText('commit').click(); });
+
+    expect(screen.getByTestId('loading')).toHaveTextContent('false');
+    expect(screen.getByTestId('name')).toHaveTextContent('Committed');
+
+    // Now let the stale initial GET resolve, with DIFFERENT values. Its `seq` no longer matches
+    // reqSeq.current (commit() bumped it), so it must not overwrite the committed settings.
+    await act(async () => {
+      releaseInitialFetch({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ app_name: 'StaleGET' }),
+      });
+    });
+
+    expect(screen.getByTestId('name')).toHaveTextContent('Committed');
   });
 });
 
