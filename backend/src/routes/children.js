@@ -227,7 +227,10 @@ router.put('/:id/review/:date', (req, res) => {
   if (!DATE_ONLY.test(req.params.date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
 
   const body = req.body || {};
-  const { true_onset_local: onsetHm, true_wake_local: wakeHm, note, dismissed, verdicts } = body;
+  // `reasons` is additive: an older open tab never sends it, and `undefined` means "unchanged", exactly
+  // like `verdicts`. A stale reason cannot survive that tab changing a verdict — the verdict write
+  // itself clears it (setTransitionVerdict).
+  const { true_onset_local: onsetHm, true_wake_local: wakeHm, note, dismissed, verdicts, reasons } = body;
 
   // The client sends what the person typed — a wall-clock 'HH:MM' — and the server resolves it against
   // the app's configured timezone and the night's date. `undefined` back from localHmToUtcSql means the
@@ -261,8 +264,9 @@ router.put('/:id/review/:date', (req, res) => {
     }
   }
 
-  // Verdicts are scoped to THIS child and THIS night inside applyVerdicts, and rejected as a batch.
-  const check = applyVerdicts(req.params.id, req.params.date, verdicts);
+  // Verdicts (and the reasons paired with them) are scoped to THIS child and THIS night inside
+  // applyVerdicts, and rejected as a batch — except a reason for a non-'wrong' verdict, which it drops.
+  const check = applyVerdicts(req.params.id, req.params.date, verdicts, reasons);
   if (check.error) return res.status(400).json({ error: check.error });
 
   const review = saveNightReview(req.params.id, req.params.date, {
@@ -281,7 +285,7 @@ router.put('/:id/review/:date', (req, res) => {
     note,
     dismissed,
   });
-  res.json({ review, verdicts_applied: check.applied });
+  res.json({ review, verdicts_applied: check.applied, reasons_applied: check.reasons_applied });
 });
 
 // ⚠️ DELETING A CHILD MUST TAKE ITS VIDEO WITH IT (issue #259). `timelapses` and `recordings` both

@@ -143,13 +143,13 @@ export function recordBedTransition(cameraId, type, peak = null, { outPeak = nul
 
 // All transitions for the given cameras within [startSql, endSql) (UTC 'YYYY-MM-DD HH:MM:SS' strings),
 // ascending by time. Returns [{ id, camera_id, type, created_at, peak, out_peak, out_frames, snapshot,
-// verdict }]. Empty for no cameras.
+// verdict, wrong_reason }]. Empty for no cameras.
 export function getBedTransitions(cameraIds, startSql, endSql) {
   if (!cameraIds || cameraIds.length === 0) return [];
   const ph = cameraIds.map(() => '?').join(',');
   return db
     .prepare(
-      `SELECT id, camera_id, type, created_at, peak, out_peak, out_frames, snapshot, verdict
+      `SELECT id, camera_id, type, created_at, peak, out_peak, out_frames, snapshot, verdict, wrong_reason
          FROM bed_transitions
          WHERE camera_id IN (${ph}) AND created_at >= ? AND created_at < ?
          ORDER BY created_at ASC`
@@ -334,11 +334,48 @@ export function getLingeringBedMotion({
 // validate against ONE list — a second copy would drift, and a typo'd label is worse than a missing one
 // because everything else gets measured against these.
 export const VERDICTS = Object.freeze(['correct', 'wrong', 'unclear']);
-const setVerdictStmt = db.prepare('UPDATE bed_transitions SET verdict = ? WHERE id = ?');
+
+// WHO it was, when a person answers 'wrong': another adult (typically the parent leaving after a
+// story), the child moving in bed, or someone walking past / nothing at all. Same frozen
+// single-source-of-truth shape as VERDICTS, and deliberately a SEPARATE list, never extra verdict
+// values: 'wrong' means "the detector's claim did not happen", and every existing score, the prune
+// exemption and the quick-reversal/lingering cards all read the verdict as exactly that three-way
+// answer. Folding "who" into it would silently change what 'wrong' counts. It exists because 542
+// staging-verdicted exits could not score a parent-exit rule at all (2026-09-25): "wrong" lumped the
+// three cases together, so no candidate rule could be told from noise.
+export const WRONG_REASONS = Object.freeze(['adult', 'child_moved', 'other']);
+
+// ⚠️ A verdict other than 'wrong' clears wrong_reason IN THE SAME STATEMENT. A reason only means
+// something beside a 'wrong' verdict; if the person later changes their mind to 'correct' (or clears
+// it), a surviving 'adult' would be a label nobody gave. Doing it here rather than trusting the client
+// to send a matching `reasons` entry is what keeps an already-open older tab — which never sends
+// `reasons` at all — from leaving a stale one behind. Found by both plan reviewers, 2026-09-25.
+const setVerdictKeepReasonStmt = db.prepare('UPDATE bed_transitions SET verdict = ? WHERE id = ?');
+const setVerdictClearReasonStmt = db.prepare('UPDATE bed_transitions SET verdict = ?, wrong_reason = NULL WHERE id = ?');
 
 export function setTransitionVerdict(id, verdict) {
   const n = Number(id);
   if (!Number.isInteger(n) || n <= 0) return false;
   if (verdict != null && !VERDICTS.includes(verdict)) return false;
-  return setVerdictStmt.run(verdict ?? null, n).changes > 0;
+  const stmt = verdict === 'wrong' ? setVerdictKeepReasonStmt : setVerdictClearReasonStmt;
+  return stmt.run(verdict ?? null, n).changes > 0;
+}
+
+// Record (or clear, with null) WHO it was for one transition. Same validation shape as
+// setTransitionVerdict: a positive-integer id, and a value from WRONG_REASONS or null. Returns whether a
+// row was updated.
+//
+// ⚠️ This does NOT check the row's verdict, and the caller must: sleepReviews.applyVerdicts decides
+// from the verdict the row will have AFTER the same save, and only calls this when that is 'wrong'.
+// An `AND verdict = 'wrong'` in the SQL was tried and taken out (2026-09-25): applyVerdicts writes the
+// verdicts first, so the SQL guard reproduced that decision exactly and made it untestable — a broken
+// null-vs-absent check there (see applyVerdicts) survived every test. One check that a test can break
+// beats two where one hides the other. The only caller is applyVerdicts; keep it that way.
+const setReasonStmt = db.prepare('UPDATE bed_transitions SET wrong_reason = ? WHERE id = ?');
+
+export function setTransitionReason(id, reason) {
+  const n = Number(id);
+  if (!Number.isInteger(n) || n <= 0) return false;
+  if (reason != null && !WRONG_REASONS.includes(reason)) return false;
+  return setReasonStmt.run(reason ?? null, n).changes > 0;
 }
