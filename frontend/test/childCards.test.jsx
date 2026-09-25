@@ -179,6 +179,76 @@ describe('SleepSummaryCard', () => {
     expect(await screen.findByText(/Once a camera with motion or sound detection runs overnight/)).toBeInTheDocument();
   });
 
+  // --- "In bed" beside "Asleep" (issue #501) ---
+  // Only a night with a real gap between put-down and sleep gets the second line. Both branches are
+  // tested, because a fixture that always carried a gap would pass with the condition deleted.
+  const inBedLine = () => document.querySelector('.night__inbed')?.textContent ?? null;
+
+  test('a story night shows "In bed" and "Asleep" as two labelled times, in the APP timezone', async () => {
+    live({ scope: 'last_night', night: { ...OK_NIGHT, in_bed_at: '2026-09-01 08:47:12' } }); // 18:47 Melbourne
+    show();
+    await screen.findByText('10h 37m asleep');
+    expect(inBedLine()).toMatch(/^In bed .* · Asleep .*$/);
+    expect(inBedLine()).toMatch(hhmm(18, 47));
+    expect(inBedLine()).toMatch(hhmm(19, 10));
+    expect(soon(), 'the range line is untouched').not.toMatch(/In bed/);
+  });
+
+  test('mid-night and still asleep, it reads "in bed since", matching "asleep since"', async () => {
+    live({ scope: 'tonight', night: { ...OK_NIGHT, wake_at: null, in_bed_at: '2026-09-01 08:47:12' } });
+    show();
+    await screen.findByText('Tonight · so far');
+    expect(inBedLine()).toMatch(/^in bed since /);
+    expect(inBedLine()).toMatch(hhmm(18, 47));
+  });
+
+  test('mid-night but already up, it gives both times rather than "since"', async () => {
+    live({ scope: 'tonight', night: { ...OK_NIGHT, in_bed_at: '2026-09-01 08:47:12' } });
+    show();
+    await screen.findByText('Tonight · so far');
+    expect(inBedLine()).toMatch(/^In bed .* · Asleep /);
+  });
+
+  test.each([
+    ['no put-down was found', null],
+    ['the put-down is the minute sleep began', '2026-09-01 09:10:00'],
+    ['the put-down is seconds AFTER the floored onset (a one-way check, never an absolute one)', '2026-09-01 09:10:45'],
+    // Well after "asleep", not just seconds: the one-way check alone must refuse it. (A CORRECTED
+    // night is also hidden by its own guard — see the corrected-onset tests below.)
+    ['the put-down is well AFTER "asleep"', '2026-09-01 09:30:00'],
+  ])('no second line when %s', async (_why, inBed) => {
+    live({ scope: 'last_night', night: { ...OK_NIGHT, in_bed_at: inBed } });
+    show();
+    await screen.findByText('10h 37m asleep');
+    expect(inBedLine()).toBeNull();
+  });
+
+  test('no second line on a night whose onset was corrected LATER than the computed put-down', async () => {
+    // The shape adversarial code review found (2026-09-25): computed put-down 18:47, the person said
+    // asleep at 19:30 — a full gap, so the one-way check alone passes, and the card paired the
+    // person's time with the put-down estimate they had just overridden.
+    live({
+      scope: 'last_night',
+      night: {
+        ...OK_NIGHT, in_bed_at: '2026-09-01 08:47:12', algo_onset_at: OK_NIGHT.onset_at,
+        onset_at: '2026-09-01 09:30:00', corrected: true,
+      },
+    });
+    show();
+    expect(await screen.findByText('You corrected this')).toBeInTheDocument();
+    expect(inBedLine()).toBeNull();
+  });
+
+  test('a WAKE-only correction still shows "In bed" — the onset and put-down are still one story', async () => {
+    live({
+      scope: 'last_night',
+      night: { ...OK_NIGHT, in_bed_at: '2026-09-01 08:47:12', algo_onset_at: OK_NIGHT.onset_at, corrected: true },
+    });
+    show();
+    expect(await screen.findByText('You corrected this')).toBeInTheDocument();
+    expect(inBedLine()).toMatch(/^In bed .* · Asleep .*$/);
+  });
+
   test('a CORRECTED night says so, and drops the estimate disclaimer', async () => {
     live({ scope: 'last_night', night: { ...OK_NIGHT, corrected: 1 } });
     const { unmount } = show();

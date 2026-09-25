@@ -570,6 +570,12 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     analysis_camera_name: mainCam ? mainCam.name : null,
     onset_at: null,
     wake_at: null,
+    // ⚠️ MUST stay here, not only on `out` below. Six early returns (off, three no_data, no_sleep,
+    // empty) hand back `base` without ever reaching `out`, and upsertNight binds @in_bed_at as a
+    // named parameter — better-sqlite3 throws "Missing named parameter" for an absent key, so without
+    // this default storing any non-'ok' night crashes. Found in plan review (2026-09-25), reproduced
+    // before any code was written; see the no_data/off round-trip test in morning-review.test.js.
+    in_bed_at: null,
     onset_at_shadow: null,
     wake_at_shadow: null,
     onset_at_algo: null,
@@ -1497,6 +1503,16 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     out.onset_at_shadow = transitionOnset != null ? minuteTime(transitionOnset) : minuteTime(algoOnset);
     out.wake_at_shadow = transitionWakeAt || algoWakeAt;
 
+    // "In bed": the put-down that began this sleep, as a headline field beside onset_at ("asleep").
+    // On a bedtime-story night the two are minutes apart and the owner wants both — the app was
+    // answering "asleep" while the parent was checking it against "when I put them down" (2026-09-25).
+    // Deliberately OUTSIDE the includeTimeline gate below: the summary card never asks for a timeline.
+    // Assigned as-is, NOT through minuteTime() — onsetTransitionAt is already the transition's own
+    // created_at string, carrying its real second, while onset_at is floored to the minute. So it can
+    // sit up to 59s AFTER onset_at on a night with no real gap; the UI compares one way only
+    // (onset_at − in_bed_at ≥ 60s) for exactly that reason. null when no put-down qualified.
+    out.in_bed_at = onsetTransitionAt ?? null;
+
 
     // Only the two transitions the analysis ACTUALLY ADOPTED — the put-down that began the night's sleep
     // and the corroborated morning departure. Every other marker in the stream is an uncorroborated
@@ -1704,14 +1720,14 @@ const upsertNight = db.prepare(
      (child_id, night_date, window_start, window_end, status, onset_at, wake_at,
       onset_at_shadow, wake_at_shadow, onset_at_algo, wake_at_algo,
       asleep_minutes, awake_minutes, wake_count, longest_stretch_minutes, coverage_minutes,
-      unknown_minutes, avg_temperature, avg_humidity, computed_at)
+      unknown_minutes, in_bed_at, avg_temperature, avg_humidity, computed_at)
    VALUES (@child_id, @night_date, @window_start, @window_end, @status, @onset_at, @wake_at,
            @onset_at_shadow, @wake_at_shadow, @onset_at_algo, @wake_at_algo,
            @asleep_minutes, @awake_minutes, @wake_count, @longest_stretch_minutes, @coverage_minutes,
-           @unknown_minutes, @avg_temperature, @avg_humidity, @computed_at)
+           @unknown_minutes, @in_bed_at, @avg_temperature, @avg_humidity, @computed_at)
    ON CONFLICT(child_id, night_date) DO UPDATE SET
      window_start=excluded.window_start, window_end=excluded.window_end, status=excluded.status,
-     onset_at=excluded.onset_at, wake_at=excluded.wake_at,
+     onset_at=excluded.onset_at, wake_at=excluded.wake_at, in_bed_at=excluded.in_bed_at,
      onset_at_shadow=excluded.onset_at_shadow, wake_at_shadow=excluded.wake_at_shadow,
      onset_at_algo=excluded.onset_at_algo, wake_at_algo=excluded.wake_at_algo,
      asleep_minutes=excluded.asleep_minutes,

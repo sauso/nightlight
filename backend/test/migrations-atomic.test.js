@@ -118,6 +118,56 @@ describe('sound percentile diagnostic migration', () => {
   });
 });
 
+describe('issue #501 columns: sleep_nights.in_bed_at and bed_transitions.wrong_reason', () => {
+  // Each is in BOTH the literal CREATE TABLE (fresh installs) and a guarded ALTER (upgrades). A fresh
+  // boot cannot tell the two apart — the ALTER would quietly cover a missing CREATE — so this rewinds a
+  // real database to before the columns existed and proves the ALTER path brings them back, with old
+  // rows NULL rather than invented, and that a second boot is a clean no-op.
+  test('an existing install gains both columns on upgrade, nullable, and a reboot changes nothing', () => {
+    const dir = freshDir();
+    assert.equal(bootDbJs(dir).status, 0);
+    const full = { sleep_nights: columnsOf(dir, 'sleep_nights'), bed_transitions: columnsOf(dir, 'bed_transitions') };
+    assert.ok(full.sleep_nights.includes('in_bed_at'), 'a fresh install has in_bed_at');
+    assert.ok(full.bed_transitions.includes('wrong_reason'), 'a fresh install has wrong_reason');
+    {
+      const db = new Database(join(dir, 'babymonitor.db'));
+      try {
+        db.exec('ALTER TABLE sleep_nights DROP COLUMN in_bed_at');
+        db.exec('ALTER TABLE bed_transitions DROP COLUMN wrong_reason');
+        db.exec(`INSERT INTO sleep_nights (child_id, night_date, window_start, window_end, status, onset_at)
+                 VALUES ('old-kid', '2026-09-01', '2026-09-01 09:30:00', '2026-09-01 21:00:00', 'ok', '2026-09-01 09:40:00')`);
+        db.exec(`INSERT INTO bed_transitions (camera_id, type, created_at, verdict)
+                 VALUES ('old-cam', 'out_of_bed', '2026-09-01 10:00:00', 'wrong')`);
+      } finally {
+        db.close();
+      }
+    }
+    assert.ok(!columnsOf(dir, 'sleep_nights').includes('in_bed_at'), 'setup: rewound');
+    assert.ok(!columnsOf(dir, 'bed_transitions').includes('wrong_reason'), 'setup: rewound');
+
+    for (let bootNumber = 1; bootNumber <= 2; bootNumber++) {
+      const boot = bootDbJs(dir);
+      assert.equal(boot.status, 0, `upgrade/reboot ${bootNumber}: ${boot.stderr}`);
+      for (const table of ['sleep_nights', 'bed_transitions']) {
+        assert.deepEqual(columnsOf(dir, table).sort(), [...full[table]].sort(), `${table} after boot ${bootNumber}`);
+      }
+      const db = new Database(join(dir, 'babymonitor.db'));
+      try {
+        for (const [table, col] of [['sleep_nights', 'in_bed_at'], ['bed_transitions', 'wrong_reason']]) {
+          const def = db.prepare(`PRAGMA table_info(${table})`).all().find((c) => c.name === col);
+          assert.equal(def.type, 'TEXT');
+          assert.equal(def.notnull, 0, `${col} must be nullable — "unknown" is a real answer`);
+          assert.equal(def.dflt_value, null);
+        }
+        assert.equal(db.prepare("SELECT in_bed_at FROM sleep_nights WHERE child_id = 'old-kid'").get().in_bed_at, null);
+        assert.equal(db.prepare("SELECT wrong_reason FROM bed_transitions WHERE camera_id = 'old-cam'").get().wrong_reason, null);
+      } finally {
+        db.close();
+      }
+    }
+  });
+});
+
 describe('a migration group that fails partway', () => {
   test('leaves none of its columns behind', () => {
     const dir = freshDir();
