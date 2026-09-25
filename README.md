@@ -340,6 +340,30 @@ measurement**, and (like everything here) never a safety device — see the warn
     - This is **not** the same as marking an event *correct*. An exit can be perfectly real and
       still not be the end of the night — a child who gets out at 5:45, goes back, and gets up
       again at 6:00 had two genuine exits and only one of them ended the night.
+    - **Known limit:** picking a put-down frame sets the *asleep* time to that frame. On a night with
+      a bedtime story, that usually makes "asleep" the same as "in bed", so the card then shows one
+      time, not two. Type the asleep time instead if you want both kept.
+  - **Saying "No" can say what it really was.** In the full event list, answering **No** offers an
+    optional follow-up: **Me or another adult**, **They moved in bed**, or **Someone walking by /
+    nothing**. A plain "No" can't tell a parent leaving after a story from a child rolling over, and
+    telling those apart is what future detection work needs. Skipping the follow-up is fine: a "No"
+    with nothing else is still a complete answer. Changing the answer away from "No" removes the
+    follow-up too. The **Quick check-in?** and **Still moving?** cards don't ask it, because their own
+    buttons ("That was me", "No, still in bed") already say what happened. Those events also appear
+    in the full list with your answer shown, but without the follow-up. **That was me** is saved as
+    **Me or another adult** without asking; **No, still in bed** is saved with no follow-up.
+  - **Afternoon events are grouped out of the way.** Events recorded before **16:00** on the night's
+    date, in the timezone set in Settings, are collected at the top of the full list as **Before
+    bedtime (N)**, collapsed. They are usually someone walking across the bed zone. **None of these
+    were a bedtime event** marks them all **No** in one tap. The button stays greyed out until you
+    have opened the group at least once, so a real nap can't be marked "No" before anyone has looked
+    at it. Closing the group again doesn't lock it. It never overwrites an answer you've
+    already given, and it leaves out any event that has its own Quick check-in or Still moving card.
+    Open the group to change any single one before you save, for example to mark a real afternoon
+    nap as **Yes**. 16:00 is a first guess, not a measured value, and it's the same for every house.
+    If your child's night really starts before 16:00, don't use the button: it would mark their
+    real bedtime "No". A night with no bedtime information at all (no put-down, no sleep time, no
+    frame picked, no bedtime you typed in) shows the list ungrouped.
   - **Your times become the ones shown.** Once you correct a night, the child's card, the history list
     and the sleep detail page all show *your* times, marked **You corrected this**, with the total
     sleep recalculated to match. This is different from **Recompute this night**, which re-runs the
@@ -375,6 +399,15 @@ measurement**, and (like everything here) never a safety device — see the warn
   days — the same span the date picker offers — so the oldest night you can browse sits right on that
   edge. If its data has aged out, the recompute is refused and the saved summary is left alone, rather
   than being replaced with "no data".
+- **In bed, then asleep.** On a night where your child was put down a while before they fell asleep
+  (a bedtime story, a slow settle), the card and the detail page show both: **In bed** is the
+  put-down the camera recorded, and **Asleep** is when the room went quiet. That's the same time the
+  app has always reported as bedtime. The extra time appears only when "in bed" is at least a minute
+  before "asleep", so most nights still show one time. If you corrected a night's asleep time, "In
+  bed" is hidden and only your time is shown: the recorded put-down belongs to the bedtime you
+  corrected, so it may not match yours. Correcting only the wake-up time keeps it. A night saved
+  before this update has no "in bed" time on the child's card until it's recomputed. The detail page
+  works the night out fresh each time, so it shows the time straight away.
 - **At a glance, and live.** Each child's page summarises last night — total sleep, wake-ups,
   longest stretch — and while a night is in progress it updates as **"Tonight · so far"**, so an
   early-morning wake appears within a minute or two rather than only after the window closes.

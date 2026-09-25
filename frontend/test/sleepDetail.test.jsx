@@ -358,6 +358,43 @@ describe('what it shows for a night', () => {
     mount();
     expect(await screen.findByText(/asleep since .* \(ongoing\)/)).toBeTruthy();
   });
+
+  // Issue #501: "In bed" and "Asleep" as two times, on a night with a real gap between them (a bedtime
+  // story), and ONLY then — both branches, since a fixture that always had a gap would pass even if
+  // the condition were deleted.
+  test('a story night shows "In bed" as its own stat, before the asleep range, in the APP timezone', async () => {
+    mockSleep({ night: { ...NIGHT, in_bed_at: '2026-08-30 09:13:41' } }); // 19:13 Melbourne, 17 min before sleep
+    mount();
+    const stat = (await screen.findByText('In bed')).closest('.sleep-stat');
+    expect(within(stat).getByText(/7:13\s*pm/i)).toBeTruthy();
+    const labels = [...document.querySelectorAll('.sleep-stat__label')].map((n) => n.textContent);
+    expect(labels.slice(0, 2)).toEqual(['In bed', 'Asleep from → to']);
+  });
+
+  test.each([
+    ['no put-down was found', null],
+    ['the put-down is the same minute as sleep', '2026-08-30 09:30:00'],
+    ['the put-down carries seconds past the floored onset', '2026-08-30 09:30:40'],
+  ])('no "In bed" stat when %s', async (_why, inBed) => {
+    mockSleep({ night: { ...NIGHT, in_bed_at: inBed } });
+    mount();
+    await screen.findByText('Wake-ups');
+    expect(screen.queryByText('In bed')).toBeNull();
+  });
+
+  test('no "In bed" stat on a night whose onset was corrected LATER than the computed put-down', async () => {
+    // Computed put-down 19:13, the person said asleep at 19:45 (algorithm: 19:30). A full gap, so only
+    // the corrected-onset guard in showsInBed keeps the stale put-down off the page.
+    mockSleep({
+      night: {
+        ...NIGHT, in_bed_at: '2026-08-30 09:13:41', algo_onset_at: NIGHT.onset_at,
+        onset_at: '2026-08-30 09:45:00', corrected: true,
+      },
+    });
+    mount();
+    await screen.findByText('Wake-ups');
+    expect(screen.queryByText('In bed')).toBeNull();
+  });
 });
 
 describe('★ the empty states each say a different thing', () => {

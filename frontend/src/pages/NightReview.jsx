@@ -39,6 +39,48 @@ const VERDICTS = [
   { key: 'unclear', label: "Can't tell", Icon: HelpCircle },
 ];
 
+// After a "No": WHO it was. Keys must match WRONG_REASONS in backend/src/lib/bedTransitions.js — the
+// server refuses anything else. "No" alone lumps a parent leaving after a story, the child rolling
+// over and someone walking past into one label, and a rule to tell them apart could not be scored
+// against 542 such labels because of exactly that (2026-09-25).
+//
+// Only on the FULL list's plain "No", deliberately not under the quick check-in or "Still moving?"
+// cards: their own buttons already say more than a bare "wrong" ("That was me" answers who by itself,
+// and records 'adult' automatically), and they share this screen's one verdict map — a reason picker
+// keyed on "wrong" there would also pop up under "No, still in bed", which is a different question.
+// For the same reason those events get no picker when they ALSO appear in the full list (hasOwnCard).
+const WRONG_REASONS = [
+  { key: 'adult', label: 'Me or another adult' },
+  { key: 'child_moved', label: 'They moved in bed' },
+  { key: 'other', label: 'Someone walking by / nothing' },
+];
+
+// Events before this LOCAL hour on the night's own date are grouped as "Before bedtime" and can be
+// answered in one tap. A STARTING GUESS, not a measured threshold — it comes from the owner's own
+// description of the noise (someone walking across the zone in the early afternoon), not from any
+// scored nights. Revisit it once the grouped events have verdicts to measure against.
+//
+// A fixed clock time, deliberately NOT an offset from the computed bedtime: a badly late computed onset
+// (the 4:20am mis-onset case sleepAnalysis.js documents) would put the REAL put-down inside the
+// collapsed group, "Put down here" button and all — hiding the one event the person needs to find.
+// This cannot move with whatever the algorithm currently believes. It is in the app's configured
+// timezone like every other time here, so it means the same thing in any house. ⚠️ KNOWN LIMIT, stated
+// in the README rather than left silent: a family whose night genuinely starts before 16:00 still sees
+// every event (grouped, nothing answered without a tap), but the one-tap button would mark their real
+// put-down "No" — so for them the button is wrong, and the README says not to use it.
+const EARLY_CUTOFF_HOUR = 16;
+const EARLY_CUTOFF_LABEL = `${String(EARLY_CUTOFF_HOUR).padStart(2, '0')}:00`;
+
+// UTC 'YYYY-MM-DD HH:MM:SS' -> { date: 'YYYY-MM-DD', hour } in the app's timezone. Via Intl so DST is
+// the platform's problem, not ours.
+function localDateHour(utc, tz) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz || undefined, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit',
+  }).formatToParts(new Date(`${utc.replace(' ', 'T')}Z`));
+  const get = (type) => parts.find((p) => p.type === type).value;
+  return { date: `${get('year')}-${get('month')}-${get('day')}`, hour: Number(get('hour')) };
+}
+
 // UTC 'YYYY-MM-DD HH:MM:SS' -> the 'HH:MM' shown in the app's configured timezone — the same zone the
 // sleep card renders in, so the review and the thing it is correcting always agree.
 //
@@ -81,6 +123,18 @@ export default function NightReview() {
   // just reached from a new direction. Verdicts still need their OWN protection from the same race
   // (the seeding effect below also resets `verdicts`), which is what this flag is for.
   const [verdictsTouched, setVerdictsTouched] = useState(false);
+  // id -> WRONG_REASONS key, or null. Rides on `verdictsTouched`, not a flag of its own: a reason is
+  // part of the same answer as its "No", and must survive the same late-timezone reseed a verdict does.
+  const [reasons, setReasons] = useState({});
+  // The "Before bedtime" group inside the full event list starts collapsed, like the list itself.
+  const [showEarly, setShowEarly] = useState(false);
+  // Has "Before bedtime" been opened at least once this sitting? The one-tap "None of these" stays
+  // disabled until it has. Without this it could mark every unanswered event in the group "No" without
+  // anyone having looked — and a genuine nap sitting in there, unanswered, would be written into the
+  // ground-truth labels as a false detector event (found in adversarial code review, 2026-09-25).
+  // Deliberately NOT reset when the group is closed again: the point is one glance at what is in there,
+  // not keeping it open while tapping.
+  const [earlyOpened, setEarlyOpened] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   // The transition whose snapshot is currently open full-size, or null. A transition row (id, type,
@@ -118,10 +172,33 @@ export default function NightReview() {
       setWakeFrame(data.review?.true_wake_transition_id ?? null);
       setEditing(Boolean(data.review?.true_onset_at || data.review?.true_wake_at));
     }
+    // ⚠️ Reasons are seeded INSIDE this guard, not in an effect of their own. This file has been bitten
+    // twice by a tz arriving late and re-running a seed over someone's answers (see `touched` and
+    // `verdictsTouched` above); an unguarded reasons seed would be the third.
     if (!verdictsTouched) {
       setVerdicts(Object.fromEntries((data.transitions || []).filter((t) => t.verdict).map((t) => [t.id, t.verdict])));
+      setReasons(Object.fromEntries((data.transitions || []).filter((t) => t.wrong_reason).map((t) => [t.id, t.wrong_reason])));
     }
   }, [data, tz, touched, verdictsTouched]);
+
+  // Every verdict button on the screen goes through here, because all three places share one map.
+  // Tapping the chosen answer again clears it: a mis-tap must be undoable, since a wrong label is worse
+  // than a missing one — everything else gets scored on it.
+  //
+  // Leaving "No" also drops that event's reason, to null rather than deleting the key: null is SENT,
+  // and clears a reason already stored. Deleting would leave a stored "Me or another adult" alive if the
+  // person went No -> Yes -> No and saved with no reason picked. (The server also clears a reason
+  // whenever a verdict other than 'wrong' is written; this keeps the screen honest before the save.)
+  const answer = (id, key) => {
+    const next = verdicts[id] === key ? null : key;
+    setVerdictsTouched(true);
+    setVerdicts((v) => ({ ...v, [id]: next }));
+    if (next !== 'wrong' && reasons[id] != null) setReasons((r) => ({ ...r, [id]: null }));
+  };
+  const answerReason = (id, key) => {
+    setVerdictsTouched(true);
+    setReasons((r) => ({ ...r, [id]: r[id] === key ? null : key }));
+  };
 
   const fmtEvent = useMemo(() => (t) => toLocalHhmm(t.created_at, tz), [tz]);
 
@@ -153,6 +230,9 @@ export default function NightReview() {
         computed_onset_at: data?.computed?.onset_at ?? null,
         computed_wake_at: data?.computed?.wake_at ?? null,
         verdicts,
+        // Beside the verdicts they belong to. The server keeps a reason only where the verdict after
+        // this save is 'wrong', and drops (not refuses) the rest.
+        reasons,
       });
       // Back to the night just corrected, not the child page. Correcting a backlog of older nights
       // means saving and immediately wanting the next one, and landing on the child screen cost a
@@ -202,6 +282,138 @@ export default function NightReview() {
   // but ask only once per event; both cards write into the same shared verdict.
   const lingeringOnly = transitions.filter(
     (t) => t.lingering_motion_minutes != null && t.quick_reversal_of == null
+  );
+  // A transition asked about on its OWN card above ("Quick check-in?" or "Still moving?"). Such an
+  // event still appears in the full list below, but two things the full list does must leave it alone:
+  // the one-tap "None of these" (its own card asks a sharper question), and the "What was it?"
+  // follow-up to a "No" (its own card's "No" already says what it was — "That was me" records
+  // reason 'adult' by itself — so a second picker under it could contradict the answer given above).
+  // One predicate for both, so the two exclusions cannot drift apart.
+  const hasOwnCard = (t) => t.quick_reversal_of != null || t.lingering_motion_minutes != null;
+
+  // "Before bedtime": the early-afternoon events a walk across the zone produces (see
+  // EARLY_CUTOFF_HOUR for why a fixed clock hour). Only once the night has SOME bedtime anchor — a
+  // computed put-down, a frame the person named, or a computed onset. With none of those there is no
+  // night to be "before", so the list renders flat exactly as it always did.
+  // `review.true_onset_at` covers a correction the person TYPED, with no frame named: it is as much a
+  // bedtime as a named frame is, and without it a night the detector missed but a person fixed would
+  // lose its grouping on the next visit (found in adversarial code review, 2026-09-25).
+  const hasBedtime = Boolean(
+    data.computed?.in_bed_at || onsetFrame || data.computed?.onset_at || data.review?.true_onset_at
+  );
+  const isEarly = (t) => {
+    const { date: localDate, hour } = localDateHour(t.created_at, tz);
+    return localDate === date && hour < EARLY_CUTOFF_HOUR;
+  };
+  const early = hasBedtime ? transitions.filter(isEarly) : [];
+  const later = hasBedtime ? transitions.filter((t) => !isEarly(t)) : transitions;
+  // What "None of these were a bedtime event" may pre-fill. NOT a quick check-in or "Still moving?"
+  // event — those have their own card and their own sharper question. NOT anything already answered,
+  // either here or earlier in this sitting (checked again inside the updater, against the live map):
+  // silently overwriting a "Yes" or "Can't tell" is how a genuine nap turns into a false label.
+  const bulkable = early.filter((t) => !hasOwnCard(t));
+  const bulkLeft = bulkable.filter((t) => verdicts[t.id] == null).length;
+  const markEarlyWrong = () => {
+    setVerdictsTouched(true);
+    setVerdicts((v) => {
+      const next = { ...v };
+      for (const t of bulkable) if (next[t.id] == null) next[t.id] = 'wrong';
+      return next;
+    });
+  };
+
+  // One row of the full event list — used both inside "Before bedtime" and for everything after it,
+  // so a grouped event is answered with exactly the same controls as any other.
+  const renderEvent = (t) => (
+    <div key={t.id} className="review-event">
+      {t.snapshot ? (
+        <button
+          type="button"
+          className="review-event__frame-btn"
+          aria-label="Enlarge photo"
+          onClick={() => setPreview(t)}
+        >
+          <img
+            className="review-event__frame"
+            src={api.url(`/cameras/bed-transitions/${t.id}/snapshot`)}
+            alt=""
+            loading="lazy"
+          />
+        </button>
+      ) : (
+        <div className="review-event__frame review-event__frame--none">No frame</div>
+      )}
+      <div className="review-event__body">
+        <div className="review-event__when">
+          {fmtEvent(t)} — we said they{' '}
+          <strong>{t.type === 'into_bed' ? 'got into bed' : 'got out of bed'}</strong>
+        </div>
+        {t.camera_name && <div className="camera-tile__sub">{t.camera_name}</div>}
+        {/* Naming the moment, which is a DIFFERENT claim from "this event is correct". An exit
+            can be perfectly real and still not be the end of the night — 05:45 was a genuine
+            got-out-of-bed on a morning the child went back and got up again at 06:00. Tying
+            the wake to the "correct" verdict would have ended that night at the wrong one. */}
+        <div className="review-event__verdicts">
+          <button
+            type="button"
+            className={`review-chip review-chip--moment${
+              (t.type === 'into_bed' ? onsetFrame : wakeFrame) === t.id ? ' review-chip--on' : ''}`}
+            aria-pressed={(t.type === 'into_bed' ? onsetFrame : wakeFrame) === t.id}
+            onClick={() => {
+              setTouched(true);
+              // Naming a frame IS correcting the night, so open the times for review: the
+              // filled value has to be visible and there has to be something to press. Without
+              // this the screen stayed on "That's right / Not quite" and the pick led nowhere.
+              setEditing(true);
+              const time = fmtEvent(t);
+              if (t.type === 'into_bed') {
+                const on = onsetFrame === t.id;
+                setOnsetFrame(on ? null : t.id);
+                if (!on) setOnset(time);
+              } else {
+                const on = wakeFrame === t.id;
+                setWakeFrame(on ? null : t.id);
+                if (!on) setWake(time);
+              }
+            }}
+          >
+            <Moon size={16} /> {t.type === 'into_bed' ? 'Put down here' : 'Up for the day here'}
+          </button>
+        </div>
+        <div className="review-event__verdicts">
+          {VERDICTS.map(({ key, label, Icon }) => (
+            <button
+              key={key}
+              type="button"
+              className={`review-chip${verdicts[t.id] === key ? ' review-chip--on' : ''}`}
+              aria-pressed={verdicts[t.id] === key}
+              onClick={() => answer(t.id, key)}
+            >
+              <Icon size={16} /> {label}
+            </button>
+          ))}
+        </div>
+        {/* The follow-up to "No" — see WRONG_REASONS for why only here, and hasOwnCard for why not on
+            an event that also has a card of its own. Optional: a "No" with no reason is still a
+            complete answer, exactly as before this existed. */}
+        {verdicts[t.id] === 'wrong' && !hasOwnCard(t) && (
+          <div className="review-event__reasons" role="group" aria-label="What was it?">
+            <span className="review-event__reasons-label">What was it?</span>
+            {WRONG_REASONS.map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                className={`review-chip${reasons[t.id] === key ? ' review-chip--on' : ''}`}
+                aria-pressed={reasons[t.id] === key}
+                onClick={() => answerReason(t.id, key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 
   return (
@@ -318,8 +530,14 @@ export default function NightReview() {
                       className={`review-chip${verdicts[oob.id] === key ? ' review-chip--on' : ''}`}
                       aria-pressed={verdicts[oob.id] === key}
                       onClick={() => {
-                        setVerdictsTouched(true);
-                        setVerdicts((v) => ({ ...v, [oob.id]: v[oob.id] === key ? null : key }));
+                        answer(oob.id, key);
+                        // "That was me" IS the reason, in the button's own words — record it as 'adult'
+                        // with no extra question, so these answers land in the same "who was it" data as
+                        // the full list's. Only when this tap SETS 'wrong': tapping it again clears the
+                        // verdict, and answer() then clears the reason with it.
+                        if (key === 'wrong' && verdicts[oob.id] !== 'wrong') {
+                          setReasons((r) => ({ ...r, [oob.id]: 'adult' }));
+                        }
                       }}
                     >
                       <Icon size={16} /> {label}
@@ -372,10 +590,7 @@ export default function NightReview() {
                       type="button"
                       className={`review-chip${verdicts[t.id] === key ? ' review-chip--on' : ''}`}
                       aria-pressed={verdicts[t.id] === key}
-                      onClick={() => {
-                        setVerdictsTouched(true);
-                        setVerdicts((v) => ({ ...v, [t.id]: v[t.id] === key ? null : key }));
-                      }}
+                      onClick={() => answer(t.id, key)}
                     >
                       <Icon size={16} /> {label}
                     </button>
@@ -417,80 +632,49 @@ export default function NightReview() {
               <span className="review-card__go" aria-hidden="true">{showEvents ? '⌃' : '›'}</span>
             </button>
           )}
-          {showEvents && transitions.map((t) => (
-            <div key={t.id} className="review-event">
-              {t.snapshot ? (
+          {/* Grouped at the TOP of the open list, itself collapsed, with a one-tap answer for the lot —
+              the owner's complaint was a 2pm walk across the zone flooding the list. The group is a
+              shortcut, never a lock: open it and every event has its own chips, same as below. */}
+          {showEvents && early.length > 0 && (
+            <div className="review-early">
+              <button
+                type="button"
+                className="review-events__toggle"
+                aria-expanded={showEarly}
+                onClick={() => { setShowEarly((v) => !v); setEarlyOpened(true); }}
+              >
+                <span className="review-events__toggle-text">
+                  <span className="card-title">Before bedtime ({early.length})</span>
+                  <span className="camera-tile__sub">
+                    Recorded before {EARLY_CUTOFF_LABEL} — usually someone passing through, not bedtime
+                  </span>
+                </span>
+                <span className="review-card__go" aria-hidden="true">{showEarly ? '⌃' : '›'}</span>
+              </button>
+              {/* Says "not a bedtime event", deliberately NOT "none of these happened": a nap is a real
+                  event in this window (sleepAnalysis.js carries a nap guard for exactly that), and this
+                  must not claim otherwise on the person's behalf. */}
+              <div className="review-early__bulk">
+                {/* Disabled until the group has been opened once — see `earlyOpened`. Not hidden: the
+                    button being visible is what tells someone the shortcut exists at all. */}
                 <button
                   type="button"
-                  className="review-event__frame-btn"
-                  aria-label="Enlarge photo"
-                  onClick={() => setPreview(t)}
+                  className="review-chip"
+                  disabled={!earlyOpened || bulkLeft === 0}
+                  onClick={markEarlyWrong}
                 >
-                  <img
-                    className="review-event__frame"
-                    src={api.url(`/cameras/bed-transitions/${t.id}/snapshot`)}
-                    alt=""
-                    loading="lazy"
-                  />
+                  <X size={16} /> None of these were a bedtime event
                 </button>
-              ) : (
-                <div className="review-event__frame review-event__frame--none">No frame</div>
-              )}
-              <div className="review-event__body">
-                <div className="review-event__when">
-                  {fmtEvent(t)} — we said they{' '}
-                  <strong>{t.type === 'into_bed' ? 'got into bed' : 'got out of bed'}</strong>
-                </div>
-                {t.camera_name && <div className="camera-tile__sub">{t.camera_name}</div>}
-                {/* Naming the moment, which is a DIFFERENT claim from "this event is correct". An exit
-                    can be perfectly real and still not be the end of the night — 05:45 was a genuine
-                    got-out-of-bed on a morning the child went back and got up again at 06:00. Tying
-                    the wake to the "correct" verdict would have ended that night at the wrong one. */}
-                <div className="review-event__verdicts">
-                  <button
-                    type="button"
-                    className={`review-chip review-chip--moment${
-                      (t.type === 'into_bed' ? onsetFrame : wakeFrame) === t.id ? ' review-chip--on' : ''}`}
-                    aria-pressed={(t.type === 'into_bed' ? onsetFrame : wakeFrame) === t.id}
-                    onClick={() => {
-                      setTouched(true);
-                      // Naming a frame IS correcting the night, so open the times for review: the
-                      // filled value has to be visible and there has to be something to press. Without
-                      // this the screen stayed on "That's right / Not quite" and the pick led nowhere.
-                      setEditing(true);
-                      const time = fmtEvent(t);
-                      if (t.type === 'into_bed') {
-                        const on = onsetFrame === t.id;
-                        setOnsetFrame(on ? null : t.id);
-                        if (!on) setOnset(time);
-                      } else {
-                        const on = wakeFrame === t.id;
-                        setWakeFrame(on ? null : t.id);
-                        if (!on) setWake(time);
-                      }
-                    }}
-                  >
-                    <Moon size={16} /> {t.type === 'into_bed' ? 'Put down here' : 'Up for the day here'}
-                  </button>
-                </div>
-                <div className="review-event__verdicts">
-                  {VERDICTS.map(({ key, label, Icon }) => (
-                    <button
-                      key={key}
-                      type="button"
-                      className={`review-chip${verdicts[t.id] === key ? ' review-chip--on' : ''}`}
-                      aria-pressed={verdicts[t.id] === key}
-                      // Tapping the chosen verdict again clears it: a mis-tap must be undoable, because
-                      // a wrong label is worse than a missing one — everything else gets scored on it.
-                      onClick={() => { setVerdictsTouched(true); setVerdicts((v) => ({ ...v, [t.id]: v[t.id] === key ? null : key })); }}
-                    >
-                      <Icon size={16} /> {label}
-                    </button>
-                  ))}
-                </div>
+                <span className="camera-tile__sub">
+                  {earlyOpened
+                    ? 'Marks the unanswered ones “No”. A nap? Answer that one yourself first.'
+                    : 'Open this to check first — a nap in here is a real event, not a “No”.'}
+                </span>
               </div>
+              {showEarly && early.map(renderEvent)}
             </div>
-          ))}
+          )}
+          {showEvents && later.map(renderEvent)}
         </div>
 
         {error && <div className="error-banner">{error}</div>}

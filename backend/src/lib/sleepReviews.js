@@ -2,7 +2,10 @@ import db from '../db.js';
 import {
   computeNight, lastCompletedNightDate, childTracksSleep, zonedToUtc, toSqlUtc,
 } from './sleepAnalysis.js';
-import { getBedTransitions, getActivitySamples, getPriorTransitionType, setTransitionVerdict, VERDICTS } from './bedTransitions.js';
+import {
+  getBedTransitions, getActivitySamples, getPriorTransitionType, setTransitionVerdict, setTransitionReason,
+  VERDICTS, WRONG_REASONS,
+} from './bedTransitions.js';
 import { findQuickReversals, findAllLingeringBedMotion, LINGERING_WINDOW_MS } from './bedTransitionRules.js';
 
 // What actually happened last night, as told by the person who was there.
@@ -16,7 +19,7 @@ import { findQuickReversals, findAllLingeringBedMotion, LINGERING_WINDOW_MS } fr
 // It is not analysis and it is not a setting: nothing here feeds back into computeNight. It records
 // what was true, so a future change can be scored rather than argued about.
 
-export { VERDICTS };
+export { VERDICTS, WRONG_REASONS };
 
 const getReviewStmt = db.prepare('SELECT * FROM sleep_reviews WHERE child_id = ? AND night_date = ?');
 
@@ -179,6 +182,11 @@ export function getNightReview(childId, nightDate) {
     computed: {
       status: computed.status,
       onset_at: computed.onset_at ?? null,
+      // The put-down ("in bed") beside onset_at ("asleep"). The review screen needs it as one of the
+      // anchors that decide whether a night has a bedtime at all before it groups daytime events —
+      // without it here the screen never receives the value, however correctly computeNight returns
+      // it (caught by both plan reviewers, 2026-09-25).
+      in_bed_at: computed.in_bed_at ?? null,
       wake_at: computed.wake_at ?? null,
       asleep_minutes: computed.asleep_minutes ?? null,
       wake_count: computed.wake_count ?? null,
@@ -235,17 +243,50 @@ export function saveNightReview(childId, nightDate, patch = {}) {
 //
 // Rejected as a batch rather than partially applied: a half-saved review leaves the person unable to
 // tell which of their answers landed.
-export function applyVerdicts(childId, nightDate, verdicts) {
+//
+// `reasons` (id -> a WRONG_REASONS value, or null to clear) is WHO it was, for a 'wrong' answer. Folded
+// in here rather than a sibling applyReasons() so both maps are validated up front, before anything is
+// written, off ONE transitionsFor() scan — a save already walks the night's transitions three times
+// (here, and twice via transitionInstant), and it is the costliest call on this path.
+//
+// Validation is the same batch-refusal as verdicts: an id outside this night, or a reason value that is
+// not in WRONG_REASONS, 400s the whole save — a typo'd label is worse than a missing one.
+//
+// ⚠️ ONE DELIBERATE ASYMMETRY. A well-formed reason for an id whose verdict AFTER THIS SAVE is not
+// 'wrong' is DROPPED, not refused. A reader expecting parity with the all-or-nothing verdicts should
+// know this is on purpose: the two are paired in the UI, and refusing would make a reason left over
+// from a verdict the person has just changed sink every other answer in the save. Dropping it is
+// correct, not merely lenient — a reason beside 'correct' would be a label nobody gave.
+//
+// ⚠️ "After this save" is `Object.hasOwn(verdicts, id) ? verdicts[id] : stored`, NEVER
+// `verdicts[id] ?? stored`: an explicit null in `verdicts` CLEARS the verdict, and `??` would fall
+// through to a stored 'wrong' and keep a reason for a verdict that no longer exists.
+export function applyVerdicts(childId, nightDate, verdicts, reasons) {
   const entries = Object.entries(verdicts || {});
-  if (entries.length === 0) return { applied: 0 };
-  const allowed = new Set(transitionsFor(childId, nightDate).map((t) => String(t.id)));
+  const reasonEntries = Object.entries(reasons || {});
+  if (entries.length === 0 && reasonEntries.length === 0) return { applied: 0, reasons_applied: 0 };
+  const byId = new Map(transitionsFor(childId, nightDate).map((t) => [String(t.id), t]));
   for (const [id, verdict] of entries) {
-    if (!allowed.has(String(id))) return { error: `Transition ${id} is not part of this night` };
+    if (!byId.has(String(id))) return { error: `Transition ${id} is not part of this night` };
     if (verdict != null && !VERDICTS.includes(verdict)) return { error: `Not a valid verdict for transition ${id}` };
   }
+  for (const [id, reason] of reasonEntries) {
+    if (!byId.has(String(id))) return { error: `Transition ${id} is not part of this night` };
+    if (reason != null && !WRONG_REASONS.includes(reason)) return { error: `Not a valid reason for transition ${id}` };
+  }
+  const given = verdicts || {};
   let applied = 0;
-  for (const [id, verdict] of entries) if (setTransitionVerdict(id, verdict)) applied++;
-  return { applied };
+  let reasonsApplied = 0;
+  // One transaction, so verdicts and reasons land together or not at all.
+  db.transaction(() => {
+    for (const [id, verdict] of entries) if (setTransitionVerdict(id, verdict)) applied++;
+    for (const [id, reason] of reasonEntries) {
+      const resulting = Object.hasOwn(given, id) ? given[id] : byId.get(String(id)).verdict;
+      if (resulting !== 'wrong') continue; // dropped on purpose — see above
+      if (setTransitionReason(id, reason)) reasonsApplied++;
+    }
+  })();
+  return { applied, reasons_applied: reasonsApplied };
 }
 
 // A night as it should be SHOWN: the algorithm's answer with any human correction laid over the top.

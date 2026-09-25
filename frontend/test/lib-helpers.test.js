@@ -3,6 +3,7 @@
 import { describe, test, expect, afterEach, vi } from 'vitest';
 import { ageLabel } from '../src/lib/age.js';
 import { getGreeting, getCommonTimezones } from '../src/lib/greeting.js';
+import { showsInBed } from '../src/lib/inBed.js';
 
 // A fixed "now" so age maths can't drift with the calendar; otherwise these tests rot silently.
 function freeze(iso) {
@@ -94,5 +95,50 @@ describe('getCommonTimezones', () => {
     expect(Array.isArray(zones)).toBe(true);
     expect(zones.length).toBeGreaterThan(0);
     expect(zones).toContain('Australia/Melbourne');
+  });
+});
+
+describe('showsInBed (issue #501)', () => {
+  const ONSET = '2026-09-01 09:10:00'; // floored to the minute, as sleepAnalysis stores it
+  const night = (in_bed_at, onset_at = ONSET) => ({ in_bed_at, onset_at });
+
+  test('shows the put-down only once it is a full minute before sleep — pinned on the boundary', () => {
+    expect(showsInBed(night('2026-09-01 09:09:00'))).toBe(true); // exactly 60 s
+    expect(showsInBed(night('2026-09-01 09:09:01'))).toBe(false); // 59 s
+    expect(showsInBed(night('2026-09-01 08:47:12'))).toBe(true); // a real story gap
+  });
+
+  test('is one-directional: a put-down seconds AFTER the floored onset is not a gap', () => {
+    // in_bed_at keeps its real second while onset_at is floored, so a child asleep the moment they
+    // went down can have in_bed_at up to 59 s later. An absolute difference would show both times.
+    expect(showsInBed(night('2026-09-01 09:10:59'))).toBe(false);
+    expect(showsInBed(night('2026-09-01 09:30:00'))).toBe(false); // a put-down well after the onset
+  });
+
+  // The corrected-night bug (adversarial code review, 2026-09-25): the overlay replaces onset_at but
+  // leaves in_bed_at as the ALGORITHM's put-down. A corrected onset LATER than that stale put-down
+  // passes the one-way check above, so without its own guard the card read "In bed 19:47 · Asleep
+  // 20:05" — pairing the person's time with the estimate they had just rejected.
+  test('never on a night whose ONSET a person corrected, even with a full gap before it', () => {
+    const corrected = {
+      in_bed_at: '2026-09-01 09:47:00', // the computed put-down: 19:47 Melbourne
+      algo_onset_at: '2026-09-01 09:50:00', // what the algorithm said
+      onset_at: '2026-09-01 10:05:00', // what the person said: 20:05, 18 min after the stale put-down
+      corrected: true,
+    };
+    expect(showsInBed({ ...corrected, corrected: false }), 'setup: the gap alone would show it').toBe(true);
+    expect(showsInBed(corrected)).toBe(false);
+  });
+
+  test('a WAKE-only correction keeps it: the onset is still the algorithm\'s, so the pair is one story', () => {
+    // Pins the other side of the guard — `corrected` alone must not hide it.
+    expect(showsInBed({ ...night('2026-09-01 08:47:12'), algo_onset_at: ONSET, corrected: true })).toBe(true);
+  });
+
+  test('needs both times', () => {
+    expect(showsInBed(night(null))).toBe(false);
+    expect(showsInBed(night('2026-09-01 08:47:12', null))).toBe(false);
+    expect(showsInBed(null)).toBe(false);
+    expect(showsInBed(undefined)).toBe(false);
   });
 });

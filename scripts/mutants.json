@@ -2873,5 +2873,285 @@
     "expect": "killed",
     "tests": ["detection-route.test.js"],
     "namePattern": "password sent on its own replaces"
+  },
+  {
+    "label": "#501 reason: an explicit null verdict falls through to the stored 'wrong' (hasOwn -> ??)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "Object.hasOwn(given, id) ? given[id] : byId.get(String(id)).verdict",
+    "replace": "given[id] ?? byId.get(String(id)).verdict",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"]
+  },
+  {
+    "label": "#501 reason: kept for a verdict that is not 'wrong' after the save",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "if (resulting !== 'wrong') continue;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"]
+  },
+  {
+    "label": "#501 reason: a reasons-only save is short-circuited as empty",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "if (entries.length === 0 && reasonEntries.length === 0)",
+    "replace": "if (entries.length === 0)",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"]
+  },
+  {
+    "label": "#501 reason: an unknown reason value is not refused",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "if (reason != null && !WRONG_REASONS.includes(reason)) return { error: `Not a valid reason for transition ${id}` };",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"]
+  },
+  {
+    "label": "#501 in_bed_at: the review screen's computed block drops it",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "in_bed_at: computed.in_bed_at ?? null,",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"]
+  },
+  {
+    "label": "#501 reason: a verdict other than 'wrong' leaves a stale reason",
+    "file": "backend/src/lib/bedTransitions.js",
+    "find": "verdict === 'wrong' ? setVerdictKeepReasonStmt : setVerdictClearReasonStmt",
+    "replace": "setVerdictKeepReasonStmt",
+    "expect": "killed",
+    "tests": ["bedTransitions.test.js", "morning-review.test.js"]
+  },
+  {
+    "label": "#501 reason: re-affirming 'wrong' wipes the reason already given",
+    "file": "backend/src/lib/bedTransitions.js",
+    "find": "verdict === 'wrong' ? setVerdictKeepReasonStmt : setVerdictClearReasonStmt",
+    "replace": "setVerdictClearReasonStmt",
+    "expect": "killed",
+    "tests": ["bedTransitions.test.js"]
+  },
+  {
+    "label": "#501 reason: the lib stores any reason string",
+    "file": "backend/src/lib/bedTransitions.js",
+    "find": "if (reason != null && !WRONG_REASONS.includes(reason)) return false;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["bedTransitions.test.js"]
+  },
+  {
+    "label": "#501 reason: the review never reads wrong_reason back",
+    "file": "backend/src/lib/bedTransitions.js",
+    "find": "snapshot, verdict, wrong_reason",
+    "replace": "snapshot, verdict",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"]
+  },
+  {
+    "label": "#501 in_bed_at: a recompute keeps a stale put-down (ON CONFLICT forgets it)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": " in_bed_at=excluded.in_bed_at,",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"]
+  },
+  {
+    "label": "#501 in_bed_at: only reported alongside a timeline",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "out.in_bed_at = onsetTransitionAt ?? null;",
+    "replace": "if (includeTimeline) out.in_bed_at = onsetTransitionAt ?? null;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"]
+  },
+  {
+    "label": "#501 in_bed_at: floored to the minute instead of the transition's own second",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "out.in_bed_at = onsetTransitionAt ?? null;",
+    "replace": "out.in_bed_at = onsetTransitionAt ? onsetTransitionAt.slice(0, 17) + '00' : null;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js", "morning-review.test.js"]
+  },
+  {
+    "label": "#501 in_bed_at: no ALTER guard, so an upgraded install never gets the column",
+    "file": "backend/src/db.js",
+    "find": "  db.exec('ALTER TABLE sleep_nights ADD COLUMN in_bed_at TEXT');",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["migrations-atomic.test.js"]
+  },
+  {
+    "label": "#501 reason: no ALTER guard, so an upgraded install never gets the column",
+    "file": "backend/src/db.js",
+    "find": "  db.exec('ALTER TABLE bed_transitions ADD COLUMN wrong_reason TEXT');",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["migrations-atomic.test.js"]
+  },
+  {
+    "label": "#501 in bed: the one-minute gap becomes strictly more than a minute",
+    "file": "frontend/src/lib/inBed.js",
+    "find": ">= 60000",
+    "replace": "> 60000",
+    "expect": "killed",
+    "tests": ["lib-helpers.test.js"]
+  },
+  {
+    "label": "#501 in bed: an absolute difference instead of a one-way one",
+    "file": "frontend/src/lib/inBed.js",
+    "find": "return utcMs(night.onset_at) - utcMs(night.in_bed_at) >= 60000;",
+    "replace": "return Math.abs(utcMs(night.onset_at) - utcMs(night.in_bed_at)) >= 60000;",
+    "expect": "killed",
+    "tests": ["lib-helpers.test.js", "childCards.test.jsx"]
+  },
+  {
+    "label": "#501 in bed: the card shows it whenever it exists",
+    "file": "frontend/src/components/SleepSummaryCard.jsx",
+    "find": "if (showsInBed(night)) {",
+    "replace": "if (night.in_bed_at) {",
+    "expect": "killed",
+    "tests": ["childCards.test.jsx"]
+  },
+  {
+    "label": "#501 in bed: the detail page shows the stat whenever",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "{showsInBed(night) && <Stat label=\"In bed\"",
+    "replace": "{<Stat label=\"In bed\"",
+    "expect": "killed",
+    "tests": ["sleepDetail.test.jsx"]
+  },
+  {
+    "label": "#501 before bedtime: 16:00 itself is grouped",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "hour < EARLY_CUTOFF_HOUR",
+    "replace": "hour <= EARLY_CUTOFF_HOUR",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 before bedtime: next morning's events are grouped too (night date ignored)",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "return localDate === date && hour < EARLY_CUTOFF_HOUR;",
+    "replace": "return hour < EARLY_CUTOFF_HOUR;",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 before bedtime: grouped even with no bedtime anchor",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "data.computed?.in_bed_at || onsetFrame || data.computed?.onset_at || data.review?.true_onset_at",
+    "replace": "true",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 before bedtime: the one-tap answer overwrites answers already given",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "for (const t of bulkable) if (next[t.id] == null) next[t.id] = 'wrong';",
+    "replace": "for (const t of bulkable) next[t.id] = 'wrong';",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 before bedtime: the one-tap answer includes quick check-in events",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "const hasOwnCard = (t) => t.quick_reversal_of != null || t.lingering_motion_minutes != null;",
+    "replace": "const hasOwnCard = (t) => t.lingering_motion_minutes != null;",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 reason chips: leaving 'No' keeps the reason",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "if (next !== 'wrong' && reasons[id] != null) setReasons((r) => ({ ...r, [id]: null }));",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 reason chips: shown under every event, not only a 'No'",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "{verdicts[t.id] === 'wrong' && !hasOwnCard(t) && (",
+    "replace": "{true && !hasOwnCard(t) && (",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 reason chips: reasons never sent",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "        reasons,",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 in_bed_at: the base object's default is deleted, so every early return crashes the store",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    in_bed_at: null,",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["morning-review.test.js", "sleepAnalysis.test.js"]
+  },
+  {
+    "label": "#501 before bedtime: the one-tap answer works without the group ever being opened",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "disabled={!earlyOpened || bulkLeft === 0}",
+    "replace": "disabled={bulkLeft === 0}",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 before bedtime: opening the group never unlocks the one-tap answer",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "onClick={() => { setShowEarly((v) => !v); setEarlyOpened(true); }}",
+    "replace": "onClick={() => setShowEarly((v) => !v)}",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 before bedtime: a typed onset correction is not a bedtime anchor",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": " || data.review?.true_onset_at",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 reason chips: 'That was me' does not record reason 'adult'",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "setReasons((r) => ({ ...r, [oob.id]: 'adult' }));",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 reason chips: un-tapping 'That was me' re-adds 'adult' to a cleared verdict",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "if (key === 'wrong' && verdicts[oob.id] !== 'wrong') {",
+    "replace": "if (key === 'wrong') {",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 reason chips: a second picker under an event that has its own card",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "{verdicts[t.id] === 'wrong' && !hasOwnCard(t) && (",
+    "replace": "{verdicts[t.id] === 'wrong' && (",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 in bed: a corrected onset still shows the computed put-down",
+    "file": "frontend/src/lib/inBed.js",
+    "find": "if (onsetWasCorrected(night)) return false;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["lib-helpers.test.js", "childCards.test.jsx", "sleepDetail.test.jsx"]
+  },
+  {
+    "label": "#501 in bed: ANY correction hides it, even a wake-only one",
+    "file": "frontend/src/lib/inBed.js",
+    "find": "Boolean(night?.corrected) && night.onset_at !== night.algo_onset_at",
+    "replace": "Boolean(night?.corrected)",
+    "expect": "killed",
+    "tests": ["lib-helpers.test.js", "childCards.test.jsx"]
   }
 ]
