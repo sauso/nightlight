@@ -21,6 +21,7 @@ MediaMTX → WHEP/HLS) is exercised with no camera hardware. See
 - `test.sh` — brings up a fresh stack and runs the Playwright suite in-network.
   The report + traces land in `playwright/playwright-report` and
   `playwright/test-results`.
+- `soak/` — a separate, continuously-running third environment for catching runtime-plumbing bugs a single clean e2e run can't reach; see `soak/README.md`.
 
 ## Run (needs a Docker host)
 

@@ -16,19 +16,27 @@ test('add a camera through the UI and see it go live on the grid', async ({ page
   await page.getByRole('button', { name: 'Add camera', exact: true }).click();
 
   // The on-demand source can be cold on the very first connect, tripping the pre-save
-  // stream validation; the UI then offers "Save anyway". Take it if it shows up —
-  // otherwise the save already succeeded.
+  // stream validation; the UI then offers "Save anyway". There are really only two honest
+  // outcomes here — validation failed (Save anyway) or it passed (straight to Save changes)
+  // — but a fixed "wait N s for Save anyway, else assume success" used to collapse them with
+  // a THIRD, dishonest one: validation failed AND took longer than N s to say so, which read
+  // as success and only surfaced ~20 s later as a confusing failure on "Save changes" (flake
+  // investigated 2026-09-06, see ROADMAP E3). Wait for whichever button actually appears
+  // instead of inferring success from a timeout, so there is no path where "neither showed up
+  // yet" is mistaken for "validated".
   const saveAnyway = page.getByRole('button', { name: 'Save anyway' });
-  try {
-    await saveAnyway.waitFor({ state: 'visible', timeout: 8000 });
+  const saveChanges = page.getByRole('button', { name: 'Save changes', exact: true });
+  await expect(
+    saveAnyway.or(saveChanges),
+    'expected either "Save anyway" (pre-save validation failed) or "Save changes" (validated) after Add camera, but neither appeared'
+  ).toBeVisible({ timeout: 30_000 });
+  if (await saveAnyway.isVisible()) {
     await saveAnyway.click();
-  } catch {
-    /* validated on the first try */
   }
 
   // Adding a camera lands on the new camera's own settings page (edit mode) so detection can be set
   // up next; its submit button reads "Save changes". That's the signal the save went through.
-  await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeVisible();
+  await expect(saveChanges).toBeVisible();
 
   // The tile renders on the dashboard with a mounted player.
   await page.goto('/');

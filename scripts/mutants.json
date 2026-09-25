@@ -3153,5 +3153,148 @@
     "replace": "Boolean(night?.corrected)",
     "expect": "killed",
     "tests": ["lib-helpers.test.js", "childCards.test.jsx"]
+  },
+  {
+    "label": "#E2 M1: describeDevice mislabels iPhone as iPad",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (/iPhone/.test(userAgent)) os = 'iPhone';",
+    "replace": "  if (/iPhone/.test(userAgent)) os = 'iPad';",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "The iPhone UA case in the device-labels test asserts the exact string \"Safari on iPhone\" — a wrong OS assignment fails it directly."
+  },
+  {
+    "label": "#E2 M2: describeDevice mislabels Edge as Chrome",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (/Edg\\//.test(userAgent)) browser = 'Edge';",
+    "replace": "  if (/Edg\\//.test(userAgent)) browser = 'Chrome';",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "The Edge-on-Windows case uses a real Edge UA (contains \"Chrome/\" and \"Safari/\" too) and asserts \"Edge on Windows\" exactly — losing the Edge branch would read it as Chrome instead."
+  },
+  {
+    "label": "#E2 M3: describeDevice drops the Chromium-vs-Chrome guard",
+    "file": "backend/src/routes/auth.js",
+    "find": "  else if (/CriOS\\//.test(userAgent) || (/Chrome\\//.test(userAgent) && !/Chromium/.test(userAgent))) browser = 'Chrome';",
+    "replace": "  else if (/CriOS\\//.test(userAgent) || (/Chrome\\//.test(userAgent))) browser = 'Chrome';",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "The \"HeadlessRig\" case UA contains both \"Chromium/\" and \"Chrome/\" and asserts the browser stays \"Unknown browser\" — removing this guard would misread it as Chrome."
+  },
+  {
+    "label": "#E2 M4: describeDevice drops the Chrome-vs-Safari guard",
+    "file": "backend/src/routes/auth.js",
+    "find": "  else if (/Safari\\//.test(userAgent) && !/Chrome/.test(userAgent)) browser = 'Safari';",
+    "replace": "  else if (/Safari\\//.test(userAgent)) browser = 'Safari';",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "Same \"HeadlessRig\" case: it contains \"Safari/\" and \"Chrome/\" both. Removing this guard alone would misread it as Safari."
+  },
+  {
+    "label": "#E2 M5: POST /users accepts a sub-8-character password",
+    "file": "backend/src/routes/auth.js",
+    "find": "  const { username, password, role, first_name, last_name } = req.body || {};\r\n  if (!username || !password || password.length < 8) {\r\n    return res.status(400).json({ error: 'Username and an 8+ character password are required' });\r\n  }",
+    "replace": "  const { username, password, role, first_name, last_name } = req.body || {};\r\n  if (!username || !password) {\r\n    return res.status(400).json({ error: 'Username and an 8+ character password are required' });\r\n  }",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "The new \"sub-8-character password is refused\" test creates an account with a 6-character password and asserts 400 — dropping the length check would accept it (201)."
+  },
+  {
+    "label": "#E2 M6: PUT /users/:id swallows a non-LastAdminError instead of rethrowing",
+    "file": "backend/src/routes/auth.js",
+    "find": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n    throw e;\r\n  }\r\n  res.json(toPublicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id)));",
+    "replace": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n  }\r\n  res.json(toPublicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id)));",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "The temp-trigger test aborts the UPDATE and asserts a 500, not 200 — deleting `throw e` falls through to the 200 response below the catch block even though the write never happened."
+  },
+  {
+    "label": "#E2 M7: DELETE /users/:id swallows a non-LastAdminError instead of rethrowing",
+    "file": "backend/src/routes/auth.js",
+    "find": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n    throw e;\r\n  }\r\n  res.status(204).end();",
+    "replace": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n  }\r\n  res.status(204).end();",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "The temp-trigger test aborts the DELETE and asserts a 500, not 204 — deleting `throw e` would falsely report the account removed while it still exists."
+  },
+  {
+    "label": "#E2 M8: appName() fallback string changed",
+    "file": "backend/src/routes/auth.js",
+    "find": "  return db.prepare(\"SELECT app_name FROM settings WHERE id = 'app'\").get()?.app_name || 'Nightlight';",
+    "replace": "  return db.prepare(\"SELECT app_name FROM settings WHERE id = 'app'\").get()?.app_name || 'NightlightFallbackBroken';",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "The blank-app_name test asserts the otpauth_uri contains \"Nightlight\" specifically — a different fallback literal fails it."
+  },
+  {
+    "label": "#E2 M9: demoMaxGuests() nullish-fallback changed from 25 to 30",
+    "file": "backend/src/routes/auth.js",
+    "find": "  const configured = Number(process.env.DEMO_MAX_GUESTS ?? 25);",
+    "replace": "  const configured = Number(process.env.DEMO_MAX_GUESTS ?? 30);",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "With DEMO_MAX_GUESTS unset and exactly 25 active guest sessions seeded, the test asserts demo.full === true. A cap of 30 would leave it not-full, failing the assertion."
+  },
+  {
+    "label": "#E2 M10: demoMaxGuests() invalid-value fallback changed from 25 to 30",
+    "file": "backend/src/routes/auth.js",
+    "find": "  return Number.isSafeInteger(configured) && configured > 0 ? configured : 25;",
+    "replace": "  return Number.isSafeInteger(configured) && configured > 0 ? configured : 30;",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "With DEMO_MAX_GUESTS=\"not-a-number\" and 25 active guest sessions seeded, the test asserts demo.full === true. A fallback of 30 would leave it not-full, failing the assertion."
+  },
+  {
+    "label": "#E2 M11: createSession stores a placeholder string instead of NULL for a missing User-Agent",
+    "file": "backend/src/routes/auth.js",
+    "find": "  db.prepare('INSERT INTO sessions (id, user_id, user_agent) VALUES (?, ?, ?)').run(id, userId, userAgent || null);",
+    "replace": "  db.prepare('INSERT INTO sessions (id, user_id, user_agent) VALUES (?, ?, ?)').run(id, userId, userAgent || 'unknown-ua-placeholder');",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "The empty-User-Agent test asserts the stored user_agent column is exactly NULL — a placeholder string fails that assertion."
+  },
+  {
+    "label": "#E2 M12: demoMaxGuests() nullish-fallback lowered from 25 to 24",
+    "file": "backend/src/routes/auth.js",
+    "find": "  const configured = Number(process.env.DEMO_MAX_GUESTS ?? 25);",
+    "replace": "  const configured = Number(process.env.DEMO_MAX_GUESTS ?? 24);",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "Found by the Codex review 2026-09-25: the first version only checked that 25 sessions are full, which a cap of 24 also satisfies. The test now also asserts 24 sessions are NOT full. (?? 0 is an EQUIVALENT mutant, because 0 fails the > 0 guard and falls back to 25, so 24 is the value that exposes a one-sided check.)"
+  },
+  {
+    "label": "#E2 M13: demoMaxGuests() invalid-value fallback changed from 25 to 0 (a permanently full demo)",
+    "file": "backend/src/routes/auth.js",
+    "find": "  return Number.isSafeInteger(configured) && configured > 0 ? configured : 25;",
+    "replace": "  return Number.isSafeInteger(configured) && configured > 0 ? configured : 0;",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "Found by the Codex review 2026-09-25: a cap of 0 makes the demo permanently full, and the one-sided 25-is-full check could not see it. The 24-is-NOT-full assertion kills it."
   }
 ]
