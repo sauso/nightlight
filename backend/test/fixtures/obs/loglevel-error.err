@@ -1,0 +1,80 @@
+[h264 @ 0x7d7b9889e8c0] non-existing PPS 0 referenced
+    Last message repeated 4 times
+[h264 @ 0x7d7b9889e8c0] no frame!
+[h264 @ 0x7d7b9889e8c0] non-existing PPS 0 referenced
+    Last message repeated 5 times
+[h264 @ 0x7d7b9889e8c0] no frame!
+[h264 @ 0x7d7b9889e8c0] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7d7b9889e8c0] no frame!
+[h264 @ 0x7d7b9889e8c0] non-existing PPS 0 referenced
+    Last message repeated 4 times
+[h264 @ 0x7d7b9889e8c0] no frame!
+[h264 @ 0x7d7b9889e8c0] non-existing PPS 0 referenced
+    Last message repeated 4 times
+[h264 @ 0x7d7b9889e8c0] no frame!
+[h264 @ 0x7d7b9889e8c0] non-existing PPS 0 referenced
+    Last message repeated 4 times
+[h264 @ 0x7d7b9889e8c0] no frame!
+[h264 @ 0x7d7b9889e8c0] non-existing PPS 0 referenced
+    Last message repeated 4 times
+[h264 @ 0x7d7b9889e8c0] no frame!
+[h264 @ 0x7d7b9889e8c0] non-existing PPS 0 referenced
+    Last message repeated 4 times
+[h264 @ 0x7d7b9889e8c0] no frame!
+[h264 @ 0x7d7b9889e8c0] non-existing PPS 0 referenced
+    Last message repeated 4 times
+[h264 @ 0x7d7b9889e8c0] no frame!
+[h264 @ 0x7d7b9889e8c0] non-existing PPS 0 referenced
+    Last message repeated 4 times
+[h264 @ 0x7d7b9889e8c0] no frame!
+[h264 @ 0x7d7b9722dbc0] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7d7b9722dbc0] no frame!
+[vist#0:0/h264 @ 0x7d7b97669cc0] [dec:h264 @ 0x7d7b97098600] Decoding error: Invalid data found when processing input
+[h264 @ 0x7d7b9715c8c0] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7d7b9715c8c0] no frame!
+[vist#0:0/h264 @ 0x7d7b97669cc0] [dec:h264 @ 0x7d7b97098600] Decoding error: Invalid data found when processing input
+[h264 @ 0x7d7b97152940] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7d7b97152940] no frame!
+[vist#0:0/h264 @ 0x7d7b97669cc0] [dec:h264 @ 0x7d7b97098600] Decoding error: Invalid data found when processing input
+[h264 @ 0x7d7b971238c0] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7d7b971238c0] no frame!
+[vist#0:0/h264 @ 0x7d7b97669cc0] [dec:h264 @ 0x7d7b97098600] Decoding error: Invalid data found when processing input
+[h264 @ 0x7d7b9711e8c0] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7d7b9711e8c0] no frame!
+[vist#0:0/h264 @ 0x7d7b97669cc0] [dec:h264 @ 0x7d7b97098600] Decoding error: Invalid data found when processing input
+[h264 @ 0x7d7b970968c0] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7d7b970968c0] no frame!
+[vist#0:0/h264 @ 0x7d7b97669cc0] [dec:h264 @ 0x7d7b97098600] Decoding error: Invalid data found when processing input
+[h264 @ 0x7d7b9708f8c0] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7d7b9708f8c0] no frame!
+[vist#0:0/h264 @ 0x7d7b97669cc0] [dec:h264 @ 0x7d7b97098600] Decoding error: Invalid data found when processing input
+[h264 @ 0x7d7b9722dbc0] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7d7b9722dbc0] no frame!
+[vist#0:0/h264 @ 0x7d7b97669cc0] [dec:h264 @ 0x7d7b97098600] Decoding error: Invalid data found when processing input
+[h264 @ 0x7d7b9715c8c0] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7d7b9715c8c0] no frame!
+[vist#0:0/h264 @ 0x7d7b97669cc0] [dec:h264 @ 0x7d7b97098600] Decoding error: Invalid data found when processing input
+[h264 @ 0x7d7b97152940] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7d7b97152940] no frame!
+[vist#0:0/h264 @ 0x7d7b97669cc0] [dec:h264 @ 0x7d7b97098600] Decoding error: Invalid data found when processing input
+[vist#0:0/h264 @ 0x7d7b97669cc0] [dec:h264 @ 0x7d7b97098600] Decode error rate 1 exceeds maximum 0.666667
+[vf#0:0 @ 0x7d7b96e7e5c0] Cannot determine format of input 0:0 after EOF
+[vf#0:0 @ 0x7d7b96e7e5c0] Task finished with error code: -1094995529 (Invalid data found when processing input)
+[vf#0:0 @ 0x7d7b96e7e5c0] Terminating thread with return code -1094995529 (Invalid data found when processing input)
+[vist#0:0/h264 @ 0x7d7b97669cc0] [dec:h264 @ 0x7d7b97098600] Task finished with error code: -1145393733 (No error information)
+[vist#0:0/h264 @ 0x7d7b97669cc0] [dec:h264 @ 0x7d7b97098600] Terminating thread with return code -1145393733 (No error information)
+[vost#0:0/rawvideo @ 0x7d7b973298c0] [enc:rawvideo @ 0x7d7b9a27ef00] Could not open encoder before EOF
+[vost#0:0/rawvideo @ 0x7d7b973298c0] Task finished with error code: -22 (Invalid argument)
+[vost#0:0/rawvideo @ 0x7d7b973298c0] Terminating thread with return code -22 (Invalid argument)
+[out#0/rawvideo @ 0x7d7b9ce777c0] Nothing was written into output file, because at least one of its streams received no packets.

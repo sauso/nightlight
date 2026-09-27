@@ -1,0 +1,43 @@
+[info] ffmpeg version 8.1.2 Copyright (c) 2000-2026 the FFmpeg developers
+[info]   built with gcc 15.2.0 (Alpine 15.2.0)
+[info]   configuration: --prefix=/usr --disable-librtmp --disable-lzma --disable-static --disable-stripping --enable-avfilter --enable-gpl --enable-ladspa --enable-libaom --enable-libass --enable-libbluray --enable-libdav1d --enable-libdrm --enable-libdvdnav --enable-libdvdread --enable-libfontconfig --enable-libfreetype --enable-libfribidi --enable-libharfbuzz --enable-libjxl --enable-libmp3lame --enable-libopenmpt --enable-libopus --enable-libplacebo --enable-libpulse --enable-librav1e --enable-librist --enable-libshaderc --enable-libsoxr --enable-libsrt --enable-libssh --enable-libtheora --enable-libv4l2 --enable-libvidstab --enable-libvorbis --enable-libvpx --enable-libwebp --enable-libx264 --enable-libx265 --enable-libxcb --enable-libxml2 --enable-libxvid --enable-libzimg --enable-libzmq --enable-lto=auto --enable-lv2 --enable-openssl --enable-pic --enable-pthreads --enable-shared --enable-vaapi --enable-vdpau --enable-version3 --enable-vulkan --optflags=-O3 --enable-libsvtav1 --enable-libvpl
+[info]   libavutil      60. 26.102 / 60. 26.102
+[info]   libavcodec     62. 28.102 / 62. 28.102
+[info]   libavformat    62. 12.102 / 62. 12.102
+[info]   libavdevice    62.  3.102 / 62.  3.102
+[info]   libavfilter    11. 14.102 / 11. 14.102
+[info]   libswscale      9.  5.102 /  9.  5.102
+[info]   libswresample   6.  3.102 /  6.  3.102
+[aist#0:0/pcm_alaw @ 0x7510a1dd4cc0] [warning] Guessed Channel Layout: mono
+[info] Input #0, matroska,webm, from '/tmp/alaw8k.mkv':
+[info]   Metadata:
+[info]     ENCODER         : Lavf62.12.102
+[info]   Duration: 00:00:00.50, start: 0.000000, bitrate: 74 kb/s
+[info]   Stream #0:0: Audio: pcm_alaw ([6][0][0][0] / 0x0006), 8000 Hz, mono, s16, 64 kb/s
+[info]     Metadata:
+[info]       ENCODER         : Lavc62.28.102 pcm_alaw
+[info]       DURATION        : 00:00:00.500000000
+[info] Stream mapping:
+[info]   Stream #0:0 -> #0:0 (pcm_alaw (native) -> pcm_s16le (native))
+[Parsed_ashowinfo_0 @ 0x7510a73cf380] [info] n:0 pts:0 pts_time:0 fmt:s16 channels:1 chlayout:mono rate:8000 nb_samples:320 checksum:88A53FEB plane_checksums: [ 88A53FEB ]
+[info] Output #0, s16le, to 'pipe:':
+[info]   Metadata:
+[info]     encoder         : Lavf62.12.102
+[info]   Stream #0:0: Audio: pcm_s16le, 8000 Hz, mono, s16, 128 kb/s
+[info]     Metadata:
+[info]       encoder         : Lavc62.28.102 pcm_s16le
+[info]       DURATION        : 00:00:00.500000000
+[Parsed_ashowinfo_0 @ 0x7510a73cf380] [info] n:1 pts:320 pts_time:0.04 fmt:s16 channels:1 chlayout:mono rate:8000 nb_samples:320 checksum:3C873A5E plane_checksums: [ 3C873A5E ]
+[Parsed_ashowinfo_0 @ 0x7510a73cf380] [info] n:2 pts:640 pts_time:0.08 fmt:s16 channels:1 chlayout:mono rate:8000 nb_samples:320 checksum:BC3B3E65 plane_checksums: [ BC3B3E65 ]
+[Parsed_ashowinfo_0 @ 0x7510a73cf380] [info] n:3 pts:960 pts_time:0.12 fmt:s16 channels:1 chlayout:mono rate:8000 nb_samples:320 checksum:314C3BB7 plane_checksums: [ 314C3BB7 ]
+[Parsed_ashowinfo_0 @ 0x7510a73cf380] [info] n:4 pts:1280 pts_time:0.16 fmt:s16 channels:1 chlayout:mono rate:8000 nb_samples:320 checksum:0CFF40C6 plane_checksums: [ 0CFF40C6 ]
+[Parsed_ashowinfo_0 @ 0x7510a73cf380] [info] n:5 pts:1600 pts_time:0.2 fmt:s16 channels:1 chlayout:mono rate:8000 nb_samples:320 checksum:E65F477F plane_checksums: [ E65F477F ]
+[Parsed_ashowinfo_0 @ 0x7510a73cf380] [info] n:6 pts:1920 pts_time:0.24 fmt:s16 channels:1 chlayout:mono rate:8000 nb_samples:320 checksum:C47D4225 plane_checksums: [ C47D4225 ]
+[Parsed_ashowinfo_0 @ 0x7510a73cf380] [info] n:7 pts:2240 pts_time:0.28 fmt:s16 channels:1 chlayout:mono rate:8000 nb_samples:320 checksum:25EC3A91 plane_checksums: [ 25EC3A91 ]
+[Parsed_ashowinfo_0 @ 0x7510a73cf380] [info] n:8 pts:2560 pts_time:0.32 fmt:s16 channels:1 chlayout:mono rate:8000 nb_samples:320 checksum:C9543FA0 plane_checksums: [ C9543FA0 ]
+[Parsed_ashowinfo_0 @ 0x7510a73cf380] [info] n:9 pts:2880 pts_time:0.36 fmt:s16 channels:1 chlayout:mono rate:8000 nb_samples:320 checksum:DF993C50 plane_checksums: [ DF993C50 ]
+[Parsed_ashowinfo_0 @ 0x7510a73cf380] [info] n:10 pts:3200 pts_time:0.4 fmt:s16 channels:1 chlayout:mono rate:8000 nb_samples:320 checksum:A2153866 plane_checksums: [ A2153866 ]
+[Parsed_ashowinfo_0 @ 0x7510a73cf380] [info] n:11 pts:3520 pts_time:0.44 fmt:s16 channels:1 chlayout:mono rate:8000 nb_samples:320 checksum:456B446E plane_checksums: [ 456B446E ]
+[Parsed_ashowinfo_0 @ 0x7510a73cf380] [info] n:12 pts:3840 pts_time:0.48 fmt:s16 channels:1 chlayout:mono rate:8000 nb_samples:160 checksum:F79CA18E plane_checksums: [ F79CA18E ]
+[out#0/s16le @ 0x7510a77037c0] [info] video:0KiB audio:8KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: 0.000000%
+[info] size=       8KiB time=00:00:00.50 bitrate= 128.0kbits/s speed=3.05x elapsed=0:00:00.16    
