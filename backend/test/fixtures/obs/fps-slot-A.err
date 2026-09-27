@@ -1,0 +1,25 @@
+[info] Input #0, lavfi, from 'color=c=black:size=64x48:rate=20,geq=lum='random(1)*255':cb=128:cr=128':
+[info]   Duration: N/A, start: 0.000000, bitrate: N/A
+[info]   Stream #0:0: Video: wrapped_avframe, yuv420p, 64x48 [SAR 1:1 DAR 4:3], 20 fps, 20 tbr, 20 tbn
+[info] Stream mapping:
+[info]   Stream #0:0 -> #0:0 (wrapped_avframe (native) -> wrapped_avframe (native))
+[showinfo@in @ 0x795abdce5240] [info] config in time_base: 1/20, frame_rate: 20/1
+[showinfo@in @ 0x795abdce5240] [info] config out time_base: 0/0, frame_rate: 0/0
+[showinfo@out @ 0x795abdce5480] [info] config in time_base: 1/5, frame_rate: 5/1
+[showinfo@out @ 0x795abdce5480] [info] config out time_base: 0/0, frame_rate: 0/0
+[showinfo@in @ 0x795abdce5240] [info] n:   0 pts:      0 pts_time:0       duration:      1 duration_time:0.05    fmt:yuv420p cl:unspecified sar:1/1 s:64x48 i:P iskey:1 type:I checksum:3471ED67 plane_checksum:[7DE3ED3A E1C0800F E1C0800F] mean:[126 128 128] stdev:[74.0 0.0 0.0]
+[showinfo@in @ 0x795abdce5240] [info] color_range:unknown color_space:unknown color_primaries:unknown color_trc:unknown
+[showinfo@in @ 0x795abdce5240] [info] n:   1 pts:      1 pts_time:0.05    duration:      1 duration_time:0.05    fmt:yuv420p cl:unspecified sar:1/1 s:64x48 i:P iskey:1 type:I checksum:3611B52C plane_checksum:[F542B4FF E1C0800F E1C0800F] mean:[122 128 128] stdev:[74.0 0.0 0.0]
+[showinfo@in @ 0x795abdce5240] [info] color_range:unknown color_space:unknown color_primaries:unknown color_trc:unknown
+[showinfo@in @ 0x795abdce5240] [info] n:   2 pts:      4 pts_time:0.2     duration:      1 duration_time:0.05    fmt:yuv420p cl:unspecified sar:1/1 s:64x48 i:P iskey:1 type:I checksum:9408006E plane_checksum:[06DB0041 E1C0800F E1C0800F] mean:[128 128 128] stdev:[72.7 0.0 0.0]
+[showinfo@in @ 0x795abdce5240] [info] color_range:unknown color_space:unknown color_primaries:unknown color_trc:unknown
+[showinfo@out @ 0x795abdce5480] [info] n:   0 pts:      0 pts_time:0       duration:      1 duration_time:0.2     fmt:yuv420p cl:unspecified sar:1/1 s:64x48 i:P iskey:1 type:I checksum:3611B52C plane_checksum:[F542B4FF E1C0800F E1C0800F] mean:[122 128 128] stdev:[74.0 0.0 0.0]
+[showinfo@out @ 0x795abdce5480] [info] color_range:unknown color_space:unknown color_primaries:unknown color_trc:unknown
+[info] Output #0, null, to 'pipe:':
+[info]   Metadata:
+[info]     encoder         : Lavf62.12.102
+[info]   Stream #0:0: Video: wrapped_avframe, yuv420p(progressive), 64x48 [SAR 1:1 DAR 4:3], q=2-31, 200 kb/s, 5 fps, 5 tbn
+[info]     Metadata:
+[info]       encoder         : Lavc62.28.102 wrapped_avframe
+[out#0/null @ 0x795abe579800] [info] video:0KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown
+[info] frame=    1 fps=0.0 q=-0.0 Lsize=N/A time=00:00:00.20 bitrate=N/A speed=0.974x elapsed=0:00:00.20    

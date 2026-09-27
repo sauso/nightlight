@@ -10,6 +10,7 @@ import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.j
 import { startMotionDetector, stopMotionDetector, motionLegWanted } from '../lib/motionDetector.js';
 import { startOnvifMotion, stopOnvifMotion, onvifMotionWanted } from '../lib/onvifMotion.js';
 import { startSoundDetector, stopSoundDetector } from '../lib/soundDetector.js';
+import { forgetObservationClocks } from '../lib/observationClock.js';
 import { startClipCapture, stopClipCapture, isClipCapturing, reconcileClipRing } from '../lib/clipCapture.js';
 import { transitionSnapshotPath } from '../lib/bedTransitions.js';
 import {
@@ -1145,6 +1146,9 @@ router.delete('/:id', requireAdmin, async (req, res) => {
   await stopMotionDetector(req.params.id).catch(() => {});
   await stopOnvifMotion(req.params.id).catch(() => {});
   await stopSoundDetector(req.params.id).catch(() => {});
+  // #373: a deleted camera's observation clocks go, tombstones included (a stopped camera keeps its own
+  // until the idle sweep, so its next start still reports the restart).
+  forgetObservationClocks(req.params.id);
   stopClipCapture(req.params.id);
   try {
     await removePath(existing.mediamtx_path);

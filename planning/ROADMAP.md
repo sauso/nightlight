@@ -858,6 +858,32 @@ as a separate durable doc this time — the plan file itself (now implemented) c
 history on `backend/src/lib/sleepAnalysis.js`'s `runNightlySleepJob`/`computeAndStoreNight` and
 `backend/src/lib/sleepReportAlert.js` for the shipped shape. **Options 2 and 3 remain not built.**
 
+### 1.7 Observation time and coverage (#373) — instrument `BUILT` (Stage 2, on dev once merged), consumers `NEXT`
+
+**What exists after #373 Stage 2:** `lib/observationClock.js` (fed by `lib/ffmpegSideChannel.js`) gives
+every motion frame and sound window a class (REAL / fps clone / CFR dup / UNKNOWN, or observed / UNKNOWN
+for sound), an observation time in monotonic and UTC, and sampler/analysis coverage, and reports them
+as the 15-minute `[obs]` line (KNOWN-ISSUES.md). **Nothing reads it yet** — decisions and stored numbers
+are unchanged, pinned by `detector-observation-wiring.test.js`'s golden with a working, a throwing and
+no clock. Every threshold in it came from ONE house's runs (Stage 1: night, overnight, day, soak box).
+
+**Open, in the order the plan gives them — each switches ONE consumer over, with its own A/B:**
+- **#493** stop consuming fabricated frames (fps clones, CFR dups) in the motion detector. Changes the
+  calibration basis of every motion threshold, so it needs an A/B on real nights.
+- **#447** activity buckets by observation time instead of flush time; must name sampler or analysis
+  coverage and accept FINALIZE_MS (5 s) of latency.
+- **#452** confirmation across an outage (read `restarts`/`gaps`), **#448** the wake watcher, **#369**
+  stale-sampler restarts.
+
+**Owed before those, from the #373 plan's Verification section (not done in the build):**
+- the soak-box runs with an image built from the branch: 3 s and 12 s DROPs, a 3 s HOLD and a 3 s Node
+  block through the stall proxy, with `[obs]` checked against the proxy's own log; a clean 30 minutes at
+  `unknown=0`; CPU before/after;
+- the worst-case load run: 4 fakecam cameras at 30 fps, main stream only, event-loop lag p99 and CPU
+  with the clock on and off (the build's microbenchmark is a simulation, not this);
+- 24 h on staging after merge: the daily 10:00 camera reboot must read as one ~64 s restart and a new
+  generation; `activity_samples` per-minute counts unchanged in distribution.
+
 ## 2. Specced, not built
 
 ### 2.1 Sub-stream sanity check — warn when "Low" isn't actually low — `SPECCED`

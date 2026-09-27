@@ -8,6 +8,8 @@ import { ALERT } from './detectionEvents.js';
 import { recordSound } from './activityTracker.js';
 import { createSoundAnalyser, marginDb } from './soundBaseline.js';
 import { killIfSpawned } from './processGuards.js';
+import { buildSoundTaps, createStderrRouter, SIDE_CHANNEL_LOG_ARGS } from './ffmpegSideChannel.js';
+import { openObservation } from './observationClock.js';
 
 // Server-side SOUND detection, parallel to motionDetector.js. Per camera with sound detection
 // enabled, a cheap audio-only FFmpeg leg reads the already-published MediaMTX stream and reports a
@@ -55,6 +57,11 @@ const READY_POLL_MS = 2000;
 const WIN_RATE = 8000;
 const WIN_SAMPLES = 1600;
 const WIN_BYTES = WIN_SAMPLES * 2; // s16le = 2 bytes/sample, mono
+
+// Issue #373: one ashowinfo tap BEFORE the downmix/resample, so the observation clock sees the camera's own
+// rate and sample counts. It changes what ffmpeg prints, never the PCM it writes (stdout sha256 identical
+// on G711 8 kHz and AAC 16/48 kHz, ffmpegSideChannel.js's header), so no decision here moves.
+const TAPS = buildSoundTaps();
 
 // If a launch yields no loudness readings at all and exits quickly this many times in a row, the
 // camera almost certainly has no audio track — stop trying (and say so) instead of restart-looping.
@@ -117,16 +124,21 @@ export async function startSoundDetector(camera) {
     }
     const args = [
       '-nostdin',
-      '-loglevel', 'error',
+      // `+level+info -nostats` (was `-loglevel error`) so the tap's INFO records reach us; the router below
+      // drops everything under ERROR again. See ffmpegSideChannel.js.
+      ...SIDE_CHANNEL_LOG_ARGS,
       '-rtsp_transport', 'tcp',
       '-i', `rtsp://127.0.0.1:8554/${path}`,
       '-vn',
+      '-af', TAPS.filter,
       '-ac', '1', // mono
       '-ar', String(WIN_RATE),
       '-f', 's16le', '-', // raw 16-bit PCM to stdout — streamed promptly, RMS computed below
     ];
     const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     entry.proc = proc;
+    // One observation generation per ffmpeg process (#373, C3); fail-safe, see motionDetector.js.
+    const obs = openObservation(camera.id, 'sound', { label: camera.name, path, windowSeconds: WIN_SAMPLES / WIN_RATE });
 
     proc.on('error', (err) => {
       // A spawn that never started. Node emits 'error' INSTEAD OF 'exit' here, so nothing downstream
@@ -185,6 +197,8 @@ export async function startSoundDetector(camera) {
     }
 
     proc.stdout.on('data', (chunk) => {
+      // #373: the receipt time, once per 'data' event (see motionDetector.js).
+      const rx = obs.receipt();
       pcm = pcm.length ? Buffer.concat([pcm, chunk]) : chunk;
       while (pcm.length >= WIN_BYTES) {
         const win = pcm.subarray(0, WIN_BYTES);
@@ -196,12 +210,30 @@ export async function startSoundDetector(camera) {
         }
         const rms = Math.sqrt(sumSq / WIN_SAMPLES);
         // dBFS: 0 dB = full scale (32768). True silence (rms 0) -> -Infinity, ignored upstream.
-        handleReading(rms > 0 ? 20 * Math.log10(rms / 32768) : -Infinity);
+        const level = rms > 0 ? 20 * Math.log10(rms / 32768) : -Infinity;
+        handleReading(level);
+        // #373: one observation per window, AFTER its decision handler returned (R1-F8). It runs for every
+        // window, silent ones included — the early return inside handleReading cannot skip it — and a
+        // silent window counts as SAMPLED but not ANALYSED coverage (C5).
+        obs.onSample(win, rx.mono, rx.wall, { analysed: Number.isFinite(level) });
       }
     });
 
+    // #373: records to the observation clock, errors to the log as before (ffmpegSideChannel.js).
+    const router = createStderrRouter({
+      taps: TAPS.taps,
+      forward: (line) => logger.raw(`sound:${path}`, line),
+      onRecord: obs.onRecord,
+      onConfig: obs.onConfig,
+      onParseError: obs.onParseError,
+    });
     forwardProcessLines(proc, proc.stderr, (line) => {
-      if (line.trim()) logger.raw(`sound:${path}`, line);
+      if (line.trim()) router.line(line);
+    });
+    // The generation ends on 'close', never 'exit' (R1-F7); see motionDetector.js.
+    proc.once('close', (code, signal) => {
+      router.end();
+      obs.end(entry.stopped ? 'stop' : 'exit', { code, signal });
     });
 
     proc.on('exit', (code) => {
