@@ -1,0 +1,40 @@
+[info] ffmpeg version 8.1.2 Copyright (c) 2000-2026 the FFmpeg developers
+[info]   built with gcc 15.2.0 (Alpine 15.2.0)
+[info]   configuration: --prefix=/usr --disable-librtmp --disable-lzma --disable-static --disable-stripping --enable-avfilter --enable-gpl --enable-ladspa --enable-libaom --enable-libass --enable-libbluray --enable-libdav1d --enable-libdrm --enable-libdvdnav --enable-libdvdread --enable-libfontconfig --enable-libfreetype --enable-libfribidi --enable-libharfbuzz --enable-libjxl --enable-libmp3lame --enable-libopenmpt --enable-libopus --enable-libplacebo --enable-libpulse --enable-librav1e --enable-librist --enable-libshaderc --enable-libsoxr --enable-libsrt --enable-libssh --enable-libtheora --enable-libv4l2 --enable-libvidstab --enable-libvorbis --enable-libvpx --enable-libwebp --enable-libx264 --enable-libx265 --enable-libxcb --enable-libxml2 --enable-libxvid --enable-libzimg --enable-libzmq --enable-lto=auto --enable-lv2 --enable-openssl --enable-pic --enable-pthreads --enable-shared --enable-vaapi --enable-vdpau --enable-version3 --enable-vulkan --optflags=-O3 --enable-libsvtav1 --enable-libvpl
+[info]   libavutil      60. 26.102 / 60. 26.102
+[info]   libavcodec     62. 28.102 / 62. 28.102
+[info]   libavformat    62. 12.102 / 62. 12.102
+[info]   libavdevice    62.  3.102 / 62.  3.102
+[info]   libavfilter    11. 14.102 / 11. 14.102
+[info]   libswscale      9.  5.102 /  9.  5.102
+[info]   libswresample   6.  3.102 /  6.  3.102
+[info] Input #0, lavfi, from 'sine=frequency=440:sample_rate=8000:duration=1':
+[info]   Duration: N/A, start: 0.000000, bitrate: 128 kb/s
+[info]   Stream #0:0: Audio: pcm_s16le, 8000 Hz, mono, s16, 128 kb/s
+[info] Stream mapping:
+[info]   Stream #0:0 -> #0:0 (pcm_s16le (native) -> pcm_s16le (native))
+[Parsed_volume_0 @ 0x7021dcf59580] [warning] Invalid value NaN for volume, setting to 0
+    Last message repeated 1 times
+[Parsed_ashowinfo_1 @ 0x7021dcf597c0] [info] n:0 pts:0 pts_time:0 fmt:flt channels:1 chlayout:mono rate:8000 nb_samples:1024 checksum:0999FC00 plane_checksums: [ 0999FC00 ]
+[info] Output #0, s16le, to '/dev/null':
+[info]   Metadata:
+[info]     encoder         : Lavf62.12.102
+[info]   Stream #0:0: Audio: pcm_s16le, 8000 Hz, mono, s16, 128 kb/s
+[info]     Metadata:
+[info]       encoder         : Lavc62.28.102 pcm_s16le
+[Parsed_volume_0 @ 0x7021dcf59580] [warning] Invalid value NaN for volume, setting to 0
+[Parsed_ashowinfo_1 @ 0x7021dcf597c0] [info] n:1 pts:1024 pts_time:0.128 fmt:flt channels:1 chlayout:mono rate:8000 nb_samples:1024 checksum:F9E3FD00 plane_checksums: [ F9E3FD00 ]
+[Parsed_volume_0 @ 0x7021dcf59580] [warning] Invalid value NaN for volume, setting to 0
+[Parsed_ashowinfo_1 @ 0x7021dcf597c0] [info] n:2 pts:2048 pts_time:0.256 fmt:flt channels:1 chlayout:mono rate:8000 nb_samples:1024 checksum:1C5BFF00 plane_checksums: [ 1C5BFF00 ]
+[Parsed_volume_0 @ 0x7021dcf59580] [warning] Invalid value NaN for volume, setting to 0
+[Parsed_ashowinfo_1 @ 0x7021dcf597c0] [info] n:3 pts:3072 pts_time:0.384 fmt:flt channels:1 chlayout:mono rate:8000 nb_samples:1024 checksum:3864FC80 plane_checksums: [ 3864FC80 ]
+[Parsed_volume_0 @ 0x7021dcf59580] [warning] Invalid value NaN for volume, setting to 0
+[Parsed_ashowinfo_1 @ 0x7021dcf597c0] [info] n:4 pts:4096 pts_time:0.512 fmt:flt channels:1 chlayout:mono rate:8000 nb_samples:1024 checksum:1545FC80 plane_checksums: [ 1545FC80 ]
+[Parsed_volume_0 @ 0x7021dcf59580] [warning] Invalid value NaN for volume, setting to 0
+[Parsed_ashowinfo_1 @ 0x7021dcf597c0] [info] n:5 pts:5120 pts_time:0.64 fmt:flt channels:1 chlayout:mono rate:8000 nb_samples:1024 checksum:2EA6FF00 plane_checksums: [ 2EA6FF00 ]
+[Parsed_volume_0 @ 0x7021dcf59580] [warning] Invalid value NaN for volume, setting to 0
+[Parsed_ashowinfo_1 @ 0x7021dcf597c0] [info] n:6 pts:6144 pts_time:0.768 fmt:flt channels:1 chlayout:mono rate:8000 nb_samples:1024 checksum:532FFD00 plane_checksums: [ 532FFD00 ]
+[Parsed_volume_0 @ 0x7021dcf59580] [warning] Invalid value NaN for volume, setting to 0
+[Parsed_ashowinfo_1 @ 0x7021dcf597c0] [info] n:7 pts:7168 pts_time:0.896 fmt:flt channels:1 chlayout:mono rate:8000 nb_samples:832 checksum:C939CF00 plane_checksums: [ C939CF00 ]
+[out#0/s16le @ 0x7021dcf59440] [info] video:0KiB audio:16KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: 0.000000%
+[info] size=      16KiB time=00:00:01.00 bitrate= 128.0kbits/s speed=7.88x elapsed=0:00:00.12    

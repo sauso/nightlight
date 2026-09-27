@@ -1,0 +1,53 @@
+[info] ffmpeg version 8.1.2 Copyright (c) 2000-2026 the FFmpeg developers
+[info]   built with gcc 15.2.0 (Alpine 15.2.0)
+[info]   configuration: --prefix=/usr --disable-librtmp --disable-lzma --disable-static --disable-stripping --enable-avfilter --enable-gpl --enable-ladspa --enable-libaom --enable-libass --enable-libbluray --enable-libdav1d --enable-libdrm --enable-libdvdnav --enable-libdvdread --enable-libfontconfig --enable-libfreetype --enable-libfribidi --enable-libharfbuzz --enable-libjxl --enable-libmp3lame --enable-libopenmpt --enable-libopus --enable-libplacebo --enable-libpulse --enable-librav1e --enable-librist --enable-libshaderc --enable-libsoxr --enable-libsrt --enable-libssh --enable-libtheora --enable-libv4l2 --enable-libvidstab --enable-libvorbis --enable-libvpx --enable-libwebp --enable-libx264 --enable-libx265 --enable-libxcb --enable-libxml2 --enable-libxvid --enable-libzimg --enable-libzmq --enable-lto=auto --enable-lv2 --enable-openssl --enable-pic --enable-pthreads --enable-shared --enable-vaapi --enable-vdpau --enable-version3 --enable-vulkan --optflags=-O3 --enable-libsvtav1 --enable-libvpl
+[info]   libavutil      60. 26.102 / 60. 26.102
+[info]   libavcodec     62. 28.102 / 62. 28.102
+[info]   libavformat    62. 12.102 / 62. 12.102
+[info]   libavdevice    62.  3.102 / 62.  3.102
+[info]   libavfilter    11. 14.102 / 11. 14.102
+[info]   libswscale      9.  5.102 /  9.  5.102
+[info]   libswresample   6.  3.102 /  6.  3.102
+[info] Input #0, matroska,webm, from '/tmp/aac48000.mkv':
+[info]   Metadata:
+[info]     ENCODER         : Lavf62.12.102
+[info]   Duration: 00:00:00.52, start: 0.000000, bitrate: 78 kb/s
+[info]   Stream #0:0: Audio: aac (LC), 48000 Hz, mono, fltp
+[info]     Metadata:
+[info]       ENCODER         : Lavc62.28.102 aac
+[info]       DURATION        : 00:00:00.521000000
+[info] Stream mapping:
+[info]   Stream #0:0 -> #0:0 (aac (native) -> pcm_s16le (native))
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:0 pts:0 pts_time:0 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:3E2CE8A7 plane_checksums: [ 3E2CE8A7 ]
+[info] Output #0, s16le, to 'pipe:':
+[info]   Metadata:
+[info]     encoder         : Lavf62.12.102
+[info]   Stream #0:0: Audio: pcm_s16le, 8000 Hz, mono, s16, 128 kb/s
+[info]     Metadata:
+[info]       encoder         : Lavc62.28.102 pcm_s16le
+[info]       DURATION        : 00:00:00.521000000
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:1 pts:1024 pts_time:0.0213333 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:C9E40D3D plane_checksums: [ C9E40D3D ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:2 pts:2048 pts_time:0.0426667 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:644E0C06 plane_checksums: [ 644E0C06 ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:3 pts:3072 pts_time:0.064 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:69F5E957 plane_checksums: [ 69F5E957 ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:4 pts:4096 pts_time:0.0853333 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:DC5FFE16 plane_checksums: [ DC5FFE16 ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:5 pts:5120 pts_time:0.106667 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:9D3D07E2 plane_checksums: [ 9D3D07E2 ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:6 pts:6144 pts_time:0.128 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:941C0AA7 plane_checksums: [ 941C0AA7 ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:7 pts:7168 pts_time:0.149333 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:8F1614C3 plane_checksums: [ 8F1614C3 ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:8 pts:8192 pts_time:0.170667 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:C37CD28D plane_checksums: [ C37CD28D ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:9 pts:9216 pts_time:0.192 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:CBF4F86B plane_checksums: [ CBF4F86B ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:10 pts:10240 pts_time:0.213333 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:D125F459 plane_checksums: [ D125F459 ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:11 pts:11264 pts_time:0.234667 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:8C5600E9 plane_checksums: [ 8C5600E9 ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:12 pts:12288 pts_time:0.256 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:D729F37C plane_checksums: [ D729F37C ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:13 pts:13312 pts_time:0.277333 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:64B6E7EF plane_checksums: [ 64B6E7EF ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:14 pts:14336 pts_time:0.298667 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:61E4F3C5 plane_checksums: [ 61E4F3C5 ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:15 pts:15360 pts_time:0.32 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:E81F0FCA plane_checksums: [ E81F0FCA ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:16 pts:16384 pts_time:0.341333 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:1063F732 plane_checksums: [ 1063F732 ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:17 pts:17408 pts_time:0.362667 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:75F715E1 plane_checksums: [ 75F715E1 ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:18 pts:18432 pts_time:0.384 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:5F7E04ED plane_checksums: [ 5F7E04ED ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:19 pts:19456 pts_time:0.405333 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:49EEFA30 plane_checksums: [ 49EEFA30 ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:20 pts:20480 pts_time:0.426667 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:D6B90409 plane_checksums: [ D6B90409 ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:21 pts:21504 pts_time:0.448 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:933A1DD2 plane_checksums: [ 933A1DD2 ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:22 pts:22528 pts_time:0.469333 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:BCE41CA5 plane_checksums: [ BCE41CA5 ]
+[Parsed_ashowinfo_0 @ 0x70c4e5443780] [info] n:23 pts:23552 pts_time:0.490667 fmt:fltp channels:1 chlayout:mono rate:48000 nb_samples:1024 checksum:C1D7D843 plane_checksums: [ C1D7D843 ]
+[out#0/s16le @ 0x70c4e59197c0] [info] video:0KiB audio:8KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: 0.000000%
+[info] size=       8KiB time=00:00:00.51 bitrate= 128.0kbits/s speed=1.35x elapsed=0:00:00.38    

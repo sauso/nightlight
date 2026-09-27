@@ -46,6 +46,7 @@ import { startActivityTracker, stopActivityTracker } from './lib/activityTracker
 import { startSleepJob, stopSleepJob } from './lib/sleepAnalysis.js';
 import { startWakeWatcher, stopWakeWatcher } from './lib/wakeWatcher.js';
 import { startTimelapseSampler, stopTimelapseSampler } from './lib/timelapse.js';
+import { startObservationLog, stopObservationLog } from './lib/observationClock.js';
 import { logger } from './lib/logger.js';
 import { applyTrustProxy } from './lib/trustProxy.js';
 import { safeInterval, installCrashGuards, markBootComplete } from './lib/processGuards.js';
@@ -70,6 +71,7 @@ startSensorSampler(); // persist MQTT temp/humidity over time (Stage-2 sleep-tra
 startActivityTracker(); // bucket motion/sound activity per minute (Stage-2 sleep-tracking timeline)
 startSleepJob(); // compute the nightly per-child sleep summary from that timeline
 startWakeWatcher(); // record a short clip when a wake starts — deliberately WITHOUT alerting
+startObservationLog(); // the 15-minute `[obs]` line per camera and leg (issue #373; KNOWN-ISSUES.md)
 
 // Before anything can fail: a background task that throws must not take the monitor down at 3am.
 // The individual call sites are guarded too (see safeInterval, and the per-camera guard the watchdogs in
@@ -567,6 +569,9 @@ async function shutdown() {
   stopSleepJob();
   stopTimelapseSampler();
   stopWakeWatcher();
+  // #373: unref'd, so it could never hold the process open — stopped anyway, for the #286 rule that every
+  // periodic job shutdown knows about is stopped explicitly (suite-exits-cleanly.test.js asserts it).
+  stopObservationLog();
   process.exit(0);
 }
 process.on('SIGTERM', shutdown);

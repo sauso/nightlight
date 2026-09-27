@@ -33,6 +33,19 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
     moving?" card. You can still change any single answer in the group before saving, for example to
     mark a real nap as "Yes". The 16:00 cutoff is a first guess, not a measured value. A night with no bedtime
     information at all shows the list ungrouped, as before.
+- **The server log now says, every 15 minutes, what the motion and sound detectors actually observed.**
+  Each camera gets an `[obs]` line per detector: how many samples were genuine new pictures or sound, how
+  many were repeats ffmpeg made up while a camera stalled, gaps and restarts in what arrived, and how much
+  of the time was covered. Where the evidence cannot tell, for example a timestamp line lost beside a
+  run of identical pictures, the sample is counted as `unknown` rather than guessed, and every list the
+  measurement keeps has a size limit, so a broken stream cannot grow memory. This is a measurement only
+  (issue #373): motion and sound alerts, the sleep timeline and every stored number are unchanged, and
+  nothing reads the new information yet. The
+  detectors' ffmpeg now prints its own per-frame timestamps, which costs about 30-40 parsed and discarded
+  log lines a second per camera and 1-2% more ffmpeg CPU. ffmpeg errors are logged exactly as before,
+  except that a burst of identical errors is collapsed into one line with a repeat count, and a flood of
+  unrecognised output is capped with a one-line summary. Every field is explained in
+  [KNOWN-ISSUES.md](KNOWN-ISSUES.md) under "The `[obs]` line".
 
 ## [0.33.2] - 2026-09-25
 

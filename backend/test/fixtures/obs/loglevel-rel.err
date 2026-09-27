@@ -1,0 +1,100 @@
+[info] ffmpeg version 8.1.2 Copyright (c) 2000-2026 the FFmpeg developers
+[info]   built with gcc 15.2.0 (Alpine 15.2.0)
+[info]   configuration: --prefix=/usr --disable-librtmp --disable-lzma --disable-static --disable-stripping --enable-avfilter --enable-gpl --enable-ladspa --enable-libaom --enable-libass --enable-libbluray --enable-libdav1d --enable-libdrm --enable-libdvdnav --enable-libdvdread --enable-libfontconfig --enable-libfreetype --enable-libfribidi --enable-libharfbuzz --enable-libjxl --enable-libmp3lame --enable-libopenmpt --enable-libopus --enable-libplacebo --enable-libpulse --enable-librav1e --enable-librist --enable-libshaderc --enable-libsoxr --enable-libsrt --enable-libssh --enable-libtheora --enable-libv4l2 --enable-libvidstab --enable-libvorbis --enable-libvpx --enable-libwebp --enable-libx264 --enable-libx265 --enable-libxcb --enable-libxml2 --enable-libxvid --enable-libzimg --enable-libzmq --enable-lto=auto --enable-lv2 --enable-openssl --enable-pic --enable-pthreads --enable-shared --enable-vaapi --enable-vdpau --enable-version3 --enable-vulkan --optflags=-O3 --enable-libsvtav1 --enable-libvpl
+[info]   libavutil      60. 26.102 / 60. 26.102
+[info]   libavcodec     62. 28.102 / 62. 28.102
+[info]   libavformat    62. 12.102 / 62. 12.102
+[info]   libavdevice    62.  3.102 / 62.  3.102
+[info]   libavfilter    11. 14.102 / 11. 14.102
+[info]   libswscale      9.  5.102 /  9.  5.102
+[info]   libswresample   6.  3.102 /  6.  3.102
+[in#0 @ 0x7f6bf8d43340] [warning] Format h264 detected only with low score of 1, misdetection possible!
+[h264 @ 0x7f6bf46738c0] [error] non-existing PPS 0 referenced
+    Last message repeated 4 times
+[h264 @ 0x7f6bf46738c0] [error] no frame!
+[h264 @ 0x7f6bf46738c0] [error] non-existing PPS 0 referenced
+    Last message repeated 5 times
+[h264 @ 0x7f6bf46738c0] [error] no frame!
+[h264 @ 0x7f6bf46738c0] [error] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7f6bf46738c0] [error] no frame!
+[h264 @ 0x7f6bf46738c0] [error] non-existing PPS 0 referenced
+    Last message repeated 4 times
+[h264 @ 0x7f6bf46738c0] [error] no frame!
+[h264 @ 0x7f6bf46738c0] [error] non-existing PPS 0 referenced
+    Last message repeated 4 times
+[h264 @ 0x7f6bf46738c0] [error] no frame!
+[h264 @ 0x7f6bf46738c0] [error] non-existing PPS 0 referenced
+    Last message repeated 4 times
+[h264 @ 0x7f6bf46738c0] [error] no frame!
+[h264 @ 0x7f6bf46738c0] [error] non-existing PPS 0 referenced
+    Last message repeated 4 times
+[h264 @ 0x7f6bf46738c0] [error] no frame!
+[h264 @ 0x7f6bf46738c0] [error] non-existing PPS 0 referenced
+    Last message repeated 4 times
+[h264 @ 0x7f6bf46738c0] [error] no frame!
+[h264 @ 0x7f6bf46738c0] [error] non-existing PPS 0 referenced
+    Last message repeated 4 times
+[h264 @ 0x7f6bf46738c0] [error] no frame!
+[h264 @ 0x7f6bf46738c0] [error] non-existing PPS 0 referenced
+    Last message repeated 4 times
+[h264 @ 0x7f6bf46738c0] [error] no frame!
+[in#0/h264 @ 0x7f6bf8d43340] [warning] Could not find codec parameters for stream 0 (Video: h264, none): unspecified size
+Consider increasing the value for the 'analyzeduration' (0) and 'probesize' (5000000) options
+[info] Input #0, h264, from '/tmp/nops4.h264':
+[info]   Duration: N/A, bitrate: N/A
+[info]   Stream #0:0: Video: h264, none, 25 fps, 1200k tbr, 1200k tbn
+[info] Stream mapping:
+[info]   Stream #0:0 -> #0:0 (h264 (native) -> rawvideo (native))
+[h264 @ 0x7f6bf2ff2ac0] [error] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7f6bf2ff2ac0] [error] no frame!
+[vist#0:0/h264 @ 0x7f6bf34a5dc0] [dec:h264 @ 0x7f6bf2e6d600] [error] Decoding error: Invalid data found when processing input
+[h264 @ 0x7f6bf2f27940] [error] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7f6bf2f27940] [error] no frame!
+[vist#0:0/h264 @ 0x7f6bf34a5dc0] [dec:h264 @ 0x7f6bf2e6d600] [error] Decoding error: Invalid data found when processing input
+[h264 @ 0x7f6bf2f008c0] [error] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7f6bf2f008c0] [error] no frame!
+[vist#0:0/h264 @ 0x7f6bf34a5dc0] [dec:h264 @ 0x7f6bf2e6d600] [error] Decoding error: Invalid data found when processing input
+[h264 @ 0x7f6bf2ef38c0] [error] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7f6bf2ef38c0] [error] no frame!
+[vist#0:0/h264 @ 0x7f6bf34a5dc0] [dec:h264 @ 0x7f6bf2e6d600] [error] Decoding error: Invalid data found when processing input
+[h264 @ 0x7f6bf2eed940] [error] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7f6bf2eed940] [error] no frame!
+[vist#0:0/h264 @ 0x7f6bf34a5dc0] [dec:h264 @ 0x7f6bf2e6d600] [error] Decoding error: Invalid data found when processing input
+[h264 @ 0x7f6bf2e648c0] [error] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7f6bf2e648c0] [error] no frame!
+[vist#0:0/h264 @ 0x7f6bf34a5dc0] [dec:h264 @ 0x7f6bf2e6d600] [error] Decoding error: Invalid data found when processing input
+[h264 @ 0x7f6bf2dc3ac0] [error] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7f6bf2dc3ac0] [error] no frame!
+[vist#0:0/h264 @ 0x7f6bf34a5dc0] [dec:h264 @ 0x7f6bf2e6d600] [error] Decoding error: Invalid data found when processing input
+[h264 @ 0x7f6bf2ff2ac0] [error] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7f6bf2ff2ac0] [error] no frame!
+[vist#0:0/h264 @ 0x7f6bf34a5dc0] [dec:h264 @ 0x7f6bf2e6d600] [error] Decoding error: Invalid data found when processing input
+[h264 @ 0x7f6bf2f27940] [error] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7f6bf2f27940] [error] no frame!
+[vist#0:0/h264 @ 0x7f6bf34a5dc0] [dec:h264 @ 0x7f6bf2e6d600] [error] Decoding error: Invalid data found when processing input
+[h264 @ 0x7f6bf2f008c0] [error] non-existing PPS 0 referenced
+    Last message repeated 3 times
+[h264 @ 0x7f6bf2f008c0] [error] no frame!
+[vist#0:0/h264 @ 0x7f6bf34a5dc0] [dec:h264 @ 0x7f6bf2e6d600] [error] Decoding error: Invalid data found when processing input
+[vist#0:0/h264 @ 0x7f6bf34a5dc0] [dec:h264 @ 0x7f6bf2e6d600] [fatal] Decode error rate 1 exceeds maximum 0.666667
+[vf#0:0 @ 0x7f6bf2c535c0] [error] Cannot determine format of input 0:0 after EOF
+[vf#0:0 @ 0x7f6bf2c535c0] [error] Task finished with error code: -1094995529 (Invalid data found when processing input)
+[vist#0:0/h264 @ 0x7f6bf34a5dc0] [dec:h264 @ 0x7f6bf2e6d600] [error] Task finished with error code: -1145393733 (No error information)
+[vist#0:0/h264 @ 0x7f6bf34a5dc0] [dec:h264 @ 0x7f6bf2e6d600] [error] Terminating thread with return code -1145393733 (No error information)
+[vost#0:0/rawvideo @ 0x7f6bf30fe8c0] [enc:rawvideo @ 0x7f6bf6053f00] [error] Could not open encoder before EOF
+[vost#0:0/rawvideo @ 0x7f6bf30fe8c0] [error] Task finished with error code: -22 (Invalid argument)
+[vost#0:0/rawvideo @ 0x7f6bf30fe8c0] [error] Terminating thread with return code -22 (Invalid argument)
+[vf#0:0 @ 0x7f6bf2c535c0] [error] Terminating thread with return code -1094995529 (Invalid data found when processing input)
+[out#0/rawvideo @ 0x7f6bf8c4c7c0] [error] Nothing was written into output file, because at least one of its streams received no packets.
+[info] frame=    0 fps=0.0 q=0.0 Lsize=       0KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:00.18    
+[info] Conversion failed!
