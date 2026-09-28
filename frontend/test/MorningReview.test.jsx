@@ -958,5 +958,88 @@ describe('the review screen', () => {
       await screen.findAllByRole('button', { name: /^No$/ });
       expect(screen.queryByRole('button', { name: /Before bedtime/ })).toBeNull();
     });
+
+    // --- the timezone the 16:00 cutoff is judged in has to be the REAL one (0.34.0 release review) -------
+    //
+    // SettingsContext starts at timezone 'UTC' and replaces it when /settings resolves (or never, if that
+    // request fails). Planted night of 2026-08-29, Melbourne (+10):
+    //   61  into_bed  09:20 UTC = 19:20 Melbourne — the REAL put-down. Before 16:00 in UTC, NOT in Melbourne:
+    //       the one event whose bucket depends on which zone is used.
+    //   62  out_of_bed 04:00 UTC = 14:00 Melbourne — genuinely before bedtime in either zone.
+    //   63  out_of_bed 19:45 UTC = 05:45 the next morning — after 16:00 in either zone.
+    // `loading: false, settingsLoaded: false` is exactly what a FAILED first /settings request leaves, so
+    // an implementation gated on `loading` instead of `loaded` fails these too.
+    const TZ_NIGHT = {
+      ...NIGHT,
+      computed: { status: 'ok', onset_at: '2026-08-29 09:33:00', in_bed_at: '2026-08-29 09:20:00', wake_at: '2026-08-29 19:48:00' },
+      transitions: [
+        tx(62, '2026-08-29 04:00:00'),
+        tx(61, '2026-08-29 09:20:00', { type: 'into_bed' }),
+        tx(63, '2026-08-29 19:45:22'),
+      ],
+    };
+    const beforeSettings = () => renderAsAdmin(routed, {
+      route: '/children/c-1/review/2026-08-29',
+      kids: [{ id: 'c-1', name: 'Raffa' }],
+      settings: { timezone: 'UTC' }, // SettingsContext's placeholder, not a configured zone
+      loading: false,
+      settingsLoaded: false,
+    });
+    const realZoneArrives = (rerenderWith) =>
+      rerenderWith({ settings: { timezone: 'Australia/Melbourne' }, settingsLoaded: true });
+
+    test('the review\'s reproduction: a real 19:20 put-down is never saved "No" by a one-tap made before the zone arrived', async () => {
+      // Codex's execution-verified repro, step for step: the timezone still the UTC placeholder, open
+      // "Before bedtime", tap "None of these were a bedtime event", THEN the real zone (Melbourne) arrives,
+      // and save. Before the fix 61 — 09:20 UTC, i.e. "before 16:00" in the placeholder zone — was in the
+      // group, and was saved as 'wrong' for a real put-down. The steps are taken with whatever the screen
+      // offers at that moment; the next test pins that it offers neither control until the zone is known.
+      api.get.mockResolvedValue(TZ_NIGHT);
+      const { user, rerenderWith } = beforeSettings();
+      await openEvents(user);
+      await screen.findAllByRole('button', { name: /^No$/ });
+      const group = screen.queryByRole('button', { name: /Before bedtime/ });
+      if (group) {
+        await user.click(group);
+        await user.click(screen.getByRole('button', { name: /None of these were a bedtime event/ }));
+      }
+
+      realZoneArrives(rerenderWith);
+      await waitFor(() => expect(screen.getByText('19:33')).toBeInTheDocument());
+
+      await user.click(screen.getByRole('button', { name: /Save just the event answers/ }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+      expect(api.put.mock.calls[0][1].verdicts[61], 'the real 19:20 put-down').toBeUndefined();
+    });
+
+    test('before the zone is known the list is flat — nothing grouped, no one-tap — and it groups by the REAL zone once it is', async () => {
+      api.get.mockResolvedValue(TZ_NIGHT);
+      const { user, rerenderWith } = beforeSettings();
+      await openEvents(user);
+      await waitFor(() => expect(rowOf(61)).toBeTruthy());
+      expect(screen.queryByRole('button', { name: /Before bedtime/ }), 'no group on a guessed zone').toBeNull();
+      expect(screen.queryByRole('button', { name: /None of these were a bedtime event/ })).toBeNull();
+      expect(earlyBox()).toBeNull();
+      // Nothing is hidden meanwhile: every event is drawn with its own chips, as on a night with no bedtime.
+      for (const id of [61, 62, 63]) {
+        expect(within(rowOf(id)).getByRole('button', { name: 'No', exact: true }), `row ${id}`).toBeInTheDocument();
+      }
+
+      realZoneArrives(rerenderWith);
+      // Melbourne: only 62 (14:00) is before 16:00 on the 29th. 61 (19:20) is NOT, whatever UTC said.
+      expect(await screen.findByRole('button', { name: /Before bedtime \(1\)/ })).toBeInTheDocument();
+      expect(rowOf(61), 'the put-down is outside the collapsed group, still drawn').toBeTruthy();
+      await openGroup(user);
+      expect(earlyBox().contains(rowOf(62))).toBe(true);
+      expect(earlyBox().contains(rowOf(61))).toBe(false);
+      await user.click(screen.getByRole('button', { name: /None of these were a bedtime event/ }));
+
+      await user.click(screen.getByRole('button', { name: /Save just the event answers/ }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+      const { verdicts } = api.put.mock.calls[0][1];
+      expect(verdicts[62], 'the genuinely early event').toBe('wrong');
+      expect(verdicts[61], 'the real put-down').toBeUndefined();
+      expect(verdicts[63]).toBeUndefined();
+    });
   });
 });
