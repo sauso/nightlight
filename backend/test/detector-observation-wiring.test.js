@@ -43,13 +43,15 @@
 // router rate-limits them by design (ffmpeg-side-channel.test.js, "drifted-format flood").
 import { test, mock, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
-import { createServer } from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { useTempDataDir, cleanupTempDataDirs, makeCamera } from './helpers/harness.js';
 import { zlibAdler0 } from './helpers/obsRig.js';
+// #369 moved the fake ffmpeg and the fake MediaMTX server into this shared helper, unchanged in behaviour, so
+// the detector-watchdog tests drive the very same fake. The goldens, the scenarios and every assertion in this
+// file are untouched.
+import { FakeFfmpeg, startFakeMediamtx } from './helpers/fakeFfmpeg.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(HERE, 'fixtures', 'obs');
@@ -59,50 +61,12 @@ useTempDataDir();
 // ⚠️ ORDER MATTERS: mediamtx.js reads MEDIAMTX_API at module load, so the fake has to be listening and
 // the env var set BEFORE the dynamic imports below (see restart-cancellation.test.js for the vacuous
 // pass this once caused).
-const mediamtx = createServer((req, res) => {
-  res.setHeader('content-type', 'application/json');
-  if (req.url.includes('/v3/paths/get/')) return res.end(JSON.stringify({ ready: true, name: 'x' }));
-  res.end('{}');
-});
-await new Promise((r) => mediamtx.listen(0, '127.0.0.1', r));
-process.env.MEDIAMTX_API = `http://127.0.0.1:${mediamtx.address().port}`;
+const mediamtx = await startFakeMediamtx();
 
 // --- the fake ffmpeg --------------------------------------------------------------------------------
 // Detector processes are driven by the test. Anything else (the alert and bed-transition snapshot
 // grabs, `-f image2`) fails at once with exit 1, so each snapshot resolves null without a network.
 const detectorProcs = [];
-let pid = 41000;
-
-class FakeFfmpeg extends EventEmitter {
-  constructor(command, args) {
-    super();
-    this.command = command;
-    this.args = args;
-    this.pid = pid++; // killIfSpawned refuses a pid-less process
-    this.stdout = new EventEmitter();
-    this.stderr = new EventEmitter();
-    this.signals = [];
-    this.ended = false;
-  }
-
-  // Node's order for a real child: 'exit', then the stdio streams end, then 'close'.
-  finish(code, signal = null) {
-    if (this.ended) return;
-    this.ended = true;
-    queueMicrotask(() => {
-      this.emit('exit', code, signal);
-      this.stdout.emit('end');
-      this.stderr.emit('end');
-      this.emit('close', code, signal);
-    });
-  }
-
-  kill(signal) {
-    this.signals.push(signal);
-    this.finish(null, signal);
-    return true;
-  }
-}
 
 mock.module('node:child_process', {
   exports: {
@@ -128,7 +92,7 @@ const {
 } = await import('../src/lib/observationClock.js');
 
 after(async () => {
-  await new Promise((r) => mediamtx.close(r));
+  await mediamtx.close();
   cleanupTempDataDirs();
 });
 
