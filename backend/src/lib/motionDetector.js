@@ -6,7 +6,7 @@ import { subPathName, getPathStatus } from './mediamtx.js';
 import { inActiveWindow } from './detectSchedule.js';
 import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
-import { recordMotion, recordMotionOut } from './activityTracker.js';
+import { recordMotion, recordMotionOut, excludeClone } from './activityTracker.js';
 import { recordBedTransition, TRANSITION } from './bedTransitions.js';
 import { OOB_LINK_MS, OOB_LINK_SLOW_MS, OOB_SLOW_OUT_MIN } from './bedTransitionRules.js';
 import {
@@ -281,7 +281,28 @@ export async function startMotionDetector(camera) {
     // One observation GENERATION per ffmpeg process (#373, C3): the stdout and stderr handlers below close
     // over this launch's own handle, so a late 'close' or late bytes from an old process can never touch a
     // newer one. The handle is fail-safe: whatever the clock does, it cannot throw into this file.
-    const obs = openObservation(camera.id, 'motion', { label: camera.name, path, fps: FPS });
+    //
+    // #493: the clock's verdicts arrive ~5 s after each frame was counted (FINALIZE_MS), so a frame it
+    // PROVES was a clone ffmpeg made up during a stall is taken back out of activity_samples' observed
+    // counts (activityTracker.js's clone ledger). ONLY fps-clone / cfr-clone: `unknown` is never corrected,
+    // because one lost stderr line, or a genuinely still and noiseless real room, finalizes real frames as
+    // `unknown` too (the #493 plan's second review round). The listener keys by the observation's OWN `gen`,
+    // not this launch's, so a verdict landing after a reconnect still corrects the frame it is about (the
+    // clock keeps one listener per camera, refreshed on every launch). Nothing here feeds a decision: bed
+    // transitions, alerts and every peak are what they were (bed-transition gating is deferred to #452).
+    const obs = openObservation(camera.id, 'motion', {
+      label: camera.name,
+      path,
+      fps: FPS,
+      onObservation: (o) => {
+        if (o.cls === 'fps-clone' || o.cls === 'cfr-clone') excludeClone(camera.id, o.gen, o.token);
+      },
+    });
+    // This launch's generation id, read once: null when there is no working clock, and then no frame is
+    // staged at all, so the counts are exactly what they were before #493. `frameSeq` numbers this launch's
+    // stdout frames; it is the `token` both the ledger and the clock carry for each one.
+    const obsGen = obs.gen;
+    let frameSeq = 0;
 
     proc.on('error', (err) => {
       // A spawn that never started. Node emits 'error' INSTEAD OF 'exit' here, so nothing downstream
@@ -312,7 +333,7 @@ export async function startMotionDetector(camera) {
 
     const outPixels = mask ? FRAME_BYTES - zonePixels : 0; // area outside the bed zone (0 = whole frame)
 
-    function handleFrame(frame) {
+    function handleFrame(frame, token) {
       if (prev) {
         let changed = 0;
         let changedOut = 0;
@@ -332,14 +353,17 @@ export async function startMotionDetector(camera) {
         }
         const fraction = changed / zonePixels;
         const now = Date.now();
+        // #493: what the clone ledger needs to find this frame again, or null (no working clock).
+        const sample = obsGen === null ? null : { gen: obsGen, token };
         // Feed the raw per-frame movement into the per-minute activity timeline (independent of the
         // alert threshold/cooldown below), so sleep tracking sees continuous motion, not just alerts.
-        recordMotion(camera.id, fraction);
+        // Still counted HERE, synchronously, whatever the clock later says: see openObservation above.
+        recordMotion(camera.id, fraction, sample);
         // Outside-bed movement (only meaningful when a bed zone carves out an "outside") — a separate
         // channel so sleep tracking can flag someone in the room vs stirring in the bed.
         if (outPixels > 0) {
           const outFraction = changedOut / outPixels;
-          recordMotionOut(camera.id, outFraction);
+          recordMotionOut(camera.id, outFraction, sample);
           // --- "Out of bed" / "into bed" classification. Runs whether the leg is alerting or
           // activity-only (a distinct, low-rate signal, not raw motion). The candidate state machine
           // itself lives in bedTransitionTracker.js (extracted 2026-09-18, see its header); this block
@@ -469,11 +493,13 @@ export async function startMotionDetector(camera) {
       buf = buf.length ? Buffer.concat([buf, chunk]) : chunk;
       while (buf.length >= FRAME_BYTES) {
         const frame = Buffer.from(buf.subarray(0, FRAME_BYTES));
-        handleFrame(frame);
+        const token = frameSeq++;
+        handleFrame(frame, token);
         // #373: exactly one observation per frame, AFTER its decision handler has returned (plan §D,
         // R1-F8): the handler's inputs are the same bytes in the same order, and its own Date.now() is
         // read before any observation work for this frame. The clock only reads the frame.
-        obs.onSample(frame, rx.mono, rx.wall);
+        // #493: the same token, so the verdict on this frame finds the counts handleFrame just staged.
+        obs.onSample(frame, rx.mono, rx.wall, { token });
         buf = buf.subarray(FRAME_BYTES);
       }
     });
