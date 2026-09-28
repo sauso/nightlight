@@ -7,7 +7,7 @@ import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
 import { recordSound } from './activityTracker.js';
 import { createSoundAnalyser, marginDb } from './soundBaseline.js';
-import { killIfSpawned } from './processGuards.js';
+import { killIfSpawned, detectorHealthOf, killStalledDetector } from './processGuards.js';
 import { buildSoundTaps, createStderrRouter, SIDE_CHANNEL_LOG_ARGS } from './ffmpegSideChannel.js';
 import { openObservation } from './observationClock.js';
 
@@ -25,7 +25,8 @@ import { openObservation } from './observationClock.js';
 // that was FACTUALLY FALSE for any step landing inside the dead band, and the comment stated it
 // confidently for months while the opposite shipped. See soundBaseline.js's DEAD_BAND_MAX_MS.
 
-// camera_id -> { proc, stopped }
+// camera_id -> { proc, stopped, path, spawnedMono, lastDataMono, lastInputRecordMono, watchdogKill }
+// The four #369 fields are the detector watchdog's only view of this leg (getSoundDetectorHealth below).
 const detectors = new Map();
 
 // Cameras with a relaunch SCHEDULED but no process yet — the 5s gap between an ffmpeg exit and the
@@ -85,6 +86,18 @@ export function isSoundDetecting(cameraId) {
   return detectors.has(cameraId);
 }
 
+// #369: this leg's freshness for the detector watchdog, as AGES (processGuards.js detectorHealthOf). Bytes, not
+// readings: a digitally silent window never sets `sawReading`, but its PCM bytes still arrive, so a silent room
+// reads as fresh. Test the result with `!= null`, never truthiness.
+export function getSoundDetectorHealth(cameraId) {
+  return detectorHealthOf(detectors.get(cameraId));
+}
+
+// #369: the watchdog's lever for this leg (it has no L2: see createDetectorWatchdog). See killStalledDetector.
+export function restartSoundDetector(cameraId, expect) {
+  return killStalledDetector(detectors.get(cameraId), expect, FORCE_KILL_TIMEOUT_MS);
+}
+
 export async function startSoundDetector(camera) {
   await stopSoundDetector(camera.id);
   if (!camera.detect_sound_enabled || camera.disabled) return;
@@ -137,6 +150,9 @@ export async function startSoundDetector(camera) {
     ];
     const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     entry.proc = proc;
+    // #369: freshness stamps for the detector watchdog, monotonic and per process; see motionDetector.js.
+    entry.path = path;
+    entry.spawnedMono = performance.now();
     // One observation generation per ffmpeg process (#373, C3); fail-safe, see motionDetector.js.
     const obs = openObservation(camera.id, 'sound', { label: camera.name, path, windowSeconds: WIN_SAMPLES / WIN_RATE });
 
@@ -197,6 +213,9 @@ export async function startSoundDetector(camera) {
     }
 
     proc.stdout.on('data', (chunk) => {
+      // #369: "a stdout byte arrived", from performance.now() directly, once per event, before the #373 receipt
+      // (see motionDetector.js for why it is not rx.mono).
+      entry.lastDataMono = performance.now();
       // #373: the receipt time, once per 'data' event (see motionDetector.js).
       const rx = obs.receipt();
       pcm = pcm.length ? Buffer.concat([pcm, chunk]) : chunk;
@@ -223,7 +242,12 @@ export async function startSoundDetector(camera) {
     const router = createStderrRouter({
       taps: TAPS.taps,
       forward: (line) => logger.raw(`sound:${path}`, line),
-      onRecord: obs.onRecord,
+      // #369, DIAGNOSIS ONLY: the leg's input tap is `audio` (the ashowinfo before the downmix); its absence is
+      // inconclusive, exactly as for motion's `in` tap.
+      onRecord: (rec) => {
+        if (rec?.tap === 'audio') entry.lastInputRecordMono = performance.now();
+        obs.onRecord(rec);
+      },
       onConfig: obs.onConfig,
       onParseError: obs.onParseError,
     });
@@ -240,8 +264,15 @@ export async function startSoundDetector(camera) {
       const wasTracked = detectors.get(camera.id) === entry;
       if (wasTracked) detectors.delete(camera.id);
       if (entry.stopped || !wasTracked) return;
-      // A quick exit with no readings ever = almost certainly no audio track on this camera.
-      if (!sawReading && Date.now() - startedAt < 10000) {
+      if (entry.watchdogKill) {
+        // #369: a kill by the detector watchdog is NEVER a no-microphone strike, and it resets the count the way
+        // any exit of a long-lived process does: the lever only kills an entry at least MIN_KILL_AGE_MS old on
+        // the MONOTONIC clock, i.e. not a quick exit. Checked BEFORE the rule below because that rule reads the
+        // WALL clock: a backward clock step makes `Date.now() - startedAt` small or negative, so without this a
+        // stalled leg killed three times could be declared "no microphone" and stopped for good (Astra R2).
+        noAudioStrikes = 0;
+      } else if (!sawReading && Date.now() - startedAt < 10000) {
+        // A quick exit with no readings ever = almost certainly no audio track on this camera.
         noAudioStrikes += 1;
         if (noAudioStrikes >= NO_AUDIO_MAX_STRIKES) {
           logger.error(`[sound:${path}] no audio readings after ${noAudioStrikes} tries — does this camera have a microphone? Sound detection stopped.`);
@@ -250,7 +281,9 @@ export async function startSoundDetector(camera) {
       } else {
         noAudioStrikes = 0;
       }
-      if (code === 0) logger.raw(`sound:${path}`, 'stream ended, reconnecting');
+      // #369: a watchdog kill is a recovery, logged at INFO, keeping "restarting in 5s" (see motionDetector.js).
+      if (entry.watchdogKill) logger.info(`[sound:${path}] stopped by the detector watchdog (no audio data), restarting in 5s`);
+      else if (code === 0) logger.raw(`sound:${path}`, 'stream ended, reconnecting');
       else logger.error(`[sound:${path}] exited (code ${code}), restarting in 5s`);
       pendingRestarts.set(camera.id, setTimeout(() => {
         pendingRestarts.delete(camera.id);

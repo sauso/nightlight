@@ -52,6 +52,7 @@ import { applyTrustProxy } from './lib/trustProxy.js';
 import { safeInterval, installCrashGuards, markBootComplete } from './lib/processGuards.js';
 import {
   createCameraWatchdog, createAudioWatchdog, WATCHDOG_INTERVAL_MS, AUDIO_CHECK_INTERVAL_MS,
+  createDetectorWatchdog, createRestartRequests, DETECTOR_CHECK_INTERVAL_MS,
 } from './lib/cameraWatchdogs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -415,15 +416,23 @@ safeInterval('webrtc-session-reconcile', WEBRTC_KICK_INTERVAL_MS, async () => {
 // The camera watchdog (15s) and the audio watchdog (30s) — the ONLY things that recover a wedged camera
 // stream. Their loop bodies live in lib/cameraWatchdogs.js since #451, so they can be tested through their
 // real logic (this file cannot be imported: it boots the app). Each factory's deps default to the real
-// functions, so nothing is overridden here. The per-camera guard and the "one pending check per camera"
-// rule live in lib/processGuards.js's perTargetRunner; the `[guard:camera-watchdog:<name>]`,
-// `[guard:camera-watchdog:sub:<name>]` and `[guard:audio-watchdog:<name>]` labels are unchanged.
+// functions, so nothing is overridden here except the shared #369 mailbox below. The per-camera guard and
+// the "one pending check per camera" rule live in lib/processGuards.js's perTargetRunner; the
+// `[guard:camera-watchdog:<name>]`, `[guard:camera-watchdog:sub:<name>]` and `[guard:audio-watchdog:<name>]`
+// labels are unchanged (the detector watchdog's are `[guard:detector-watchdog:<name>:motion|sound]`).
 //
 // ⚠️ `.tick` must be what is handed over, not the watchdog object: safeInterval calls its argument, and an
 // object would throw every tick, reported and swallowed, with no watchdog running at all. The wiring
 // tripwire in process-guards.test.js pins this line.
-safeInterval('camera-watchdog', WATCHDOG_INTERVAL_MS, createCameraWatchdog().tick);
+//
+// #369: the DETECTOR watchdog (15s) recovers a motion or sound detector that is alive but receiving nothing.
+// It never starts a publisher itself: when a detector restart is not enough it posts a request, and the camera
+// watchdog consumes it. That only works if both hold the SAME mailbox, so it is built exactly once, here
+// (detector-watchdog.test.js pins this wiring).
+const restartRequests = createRestartRequests();
+safeInterval('camera-watchdog', WATCHDOG_INTERVAL_MS, createCameraWatchdog({ restartRequests }).tick);
 safeInterval('audio-watchdog', AUDIO_CHECK_INTERVAL_MS, createAudioWatchdog().tick);
+safeInterval('detector-watchdog', DETECTOR_CHECK_INTERVAL_MS, createDetectorWatchdog({ restartRequests }).tick);
 
 // MediaMTX only learns about a camera when it's added/edited through our API, or from
 // this reconciliation. Important: every actual config write to MediaMTX forces it to

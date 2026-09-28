@@ -92,6 +92,78 @@ export function killIfSpawned(proc, signal = 'SIGTERM') {
   }
 }
 
+// #369: the youngest a detector process may be before the detector watchdog (lib/cameraWatchdogs.js) is
+// allowed to kill it, measured on the MONOTONIC clock from its spawn. It lives here, beside killIfSpawned,
+// because BOTH detectors' restart levers enforce it and cameraWatchdogs.js reads it for its own ordering pin
+// (DETECTOR_STARTUP_GRACE_MS > MIN_KILL_AGE_MS >= 10 s): the detectors cannot import cameraWatchdogs.js, which
+// imports them, without an import cycle.
+// Why 10 s: the sound leg's no-microphone rule counts an exit within 10 s of spawn as a strike (soundDetector.js),
+// so a kill younger than that could be mistaken for "this camera has no audio" (the lever also marks its kill,
+// see `watchdogKill` there, because that rule reads the WALL clock and 10 s monotonic cannot survive a clock
+// step). It is a floor against killing a process that has not had a chance to connect, not a tuning knob.
+export const MIN_KILL_AGE_MS = 10_000;
+
+// #369: one detector entry's freshness, as AGES computed here, at the moment of the call, on the monotonic
+// clock. The two detectors' getMotionDetectorHealth/getSoundDetectorHealth are thin wrappers over this, so the
+// rule lives once. Returning ages instead of stamps is the point (Sol R2): a consumer in another module needs
+// no clock of its own, so it cannot compare a performance.now() stamp with a Date.now() one, which is the
+// mistake that turned a recovery notification into "29,841,119 minutes offline" during planning.
+//   null             no entry: the 5 s relaunch gap, or the leg is not running at all
+//   { waiting:true } an entry with no process yet (still picking a ready path, up to 45 s on motion)
+//   otherwise        { path, spawnedMono, lastDataMono, spawnAgeMs, dataAgeMs, inputRecordAgeMs }
+// `spawnedMono`/`lastDataMono` are OPAQUE TOKENS for the restart lever below (never do arithmetic on them in
+// another module); `dataAgeMs`/`inputRecordAgeMs` are null when nothing has arrived yet in this generation.
+export function detectorHealthOf(entry) {
+  if (!entry) return null;
+  if (!entry.proc) return { waiting: true };
+  const now = performance.now();
+  return {
+    path: entry.path,
+    spawnedMono: entry.spawnedMono,
+    lastDataMono: entry.lastDataMono,
+    spawnAgeMs: now - entry.spawnedMono,
+    dataAgeMs: entry.lastDataMono == null ? null : now - entry.lastDataMono,
+    inputRecordAgeMs: entry.lastInputRecordMono == null ? null : now - entry.lastInputRecordMono,
+  };
+}
+
+// #369: the detector watchdog's restart lever for one tracked detector entry. Returns true only if it
+// signalled a process. It restarts through the detector's OWN exit handler, which relaunches after 5 s via
+// pendingRestarts, so there is a single lineage and a stop* inside that gap still cancels it (#253); it never
+// sets `stopped`, and never calls start*, which is not concurrency-safe and would rebuild closure state.
+// Every guard below exists so the kill can only land on the process the watchdog actually judged:
+//   * the entry is the one the detector TRACKS (the caller looks it up in its map). That already means "not
+//     stopped": stop* deletes the entry from the map synchronously, in the same call that marks it stopped.
+//   * `expectSpawn`: the entry's spawn token when the watchdog read its health. A different token means a new
+//     generation replaced it during the watchdog's awaits, and that one has not been judged. An entry still
+//     `waiting` for a ready path has no token at all, so it can never match a judged one.
+//   * `expectLastData`: if a byte arrived since, the leg recovered while the probe ran (Astra R1): no kill.
+//   * MIN_KILL_AGE_MS on the monotonic clock: never a process that has not had time to connect.
+//   * `watchdogKill` already set: a second call while the first kill is in flight is a no-op, so one judged
+//     stall can never arm two SIGKILL timers.
+// SIGKILL follows after `forceKillMs` if SIGTERM is ignored (a wedged ffmpeg can be), unref'd so it never holds
+// the process open, and cleared on 'exit' so a process that obeyed SIGTERM is signalled exactly once.
+// `watchdogKill` stays set on the entry for its exit handler: the sound leg must not count this exit as a
+// no-microphone strike, and both legs log it as a recovery, not a failure.
+export function killStalledDetector(entry, { expectSpawn, expectLastData } = {}, forceKillMs) {
+  if (!entry || entry.watchdogKill) return false;
+  if (entry.spawnedMono !== expectSpawn) return false;
+  if (entry.lastDataMono != null && (expectLastData == null || entry.lastDataMono > expectLastData)) return false;
+  if (performance.now() - entry.spawnedMono < MIN_KILL_AGE_MS) return false;
+  const proc = entry.proc;
+  entry.watchdogKill = true;
+  if (!killIfSpawned(proc, 'SIGTERM')) {
+    // Nothing was signalled (no process yet, a spawn that never really started, or one already reaped): leave
+    // the exit path exactly as it was, and say so.
+    entry.watchdogKill = false;
+    return false;
+  }
+  const force = setTimeout(() => killIfSpawned(proc, 'SIGKILL'), forceKillMs);
+  force.unref?.();
+  proc.once('exit', () => clearTimeout(force));
+  return true;
+}
+
 // setInterval for an async callback. A sync throw or a rejected promise is logged and the timer KEEPS
 // RUNNING — a watchdog that stops watching after one bad tick would silently stop healing anything,
 // which is the same outage in slow motion.

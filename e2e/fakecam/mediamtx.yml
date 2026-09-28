@@ -33,6 +33,8 @@ authInternalUsers:
       - action: publish
       - action: read
         path: test
+      - action: read
+        path: videogap # the #369 soak recipe's path (see `videogap:` below)
   - user: e2ecam
     pass: e2e-cam-pw
     permissions:
@@ -69,3 +71,9 @@ paths:
       -c:a pcm_mulaw -ar 8000 -ac 1
       -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/secure
     runOnInitRestart: yes
+
+  videogap:
+    # IDLE on purpose: nothing publishes here unless a person does. The soak recipe for the detector
+    # watchdog (#369, ../soak/README.md "(b)") publishes a stream whose VIDEO ends while its AUDIO keeps
+    # going, the failure staging most likely had. No spec reads this path, so it costs the e2e run nothing.
+    source: publisher
