@@ -325,6 +325,11 @@ within the times in the table above. If it sits at *exactly* the same value for 
 `maxAvgOver` stays between half and all of the "fires at" figure, you are running a version from
 before that fix.
 
+This line reports what the sound detector *decided from*; a separate `[obs]` line every 15 minutes reports
+what it actually *received*: how much of the time was covered, gaps and restarts, and sound that arrived
+late and caught up. It changes nothing about alerts. Every field is explained in
+[KNOWN-ISSUES.md](../KNOWN-ISSUES.md) under "The `[obs]` line".
+
 **Still true regardless of version:** sleep tracking scores each minute on that minute's *loudest*
 window, so a room with a lot of variation — a white-noise machine close to the microphone is the usual
 cause — reads as noisier than its average suggests, and can still overstate awake time even with a

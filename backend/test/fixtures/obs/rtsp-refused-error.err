@@ -1,0 +1,4 @@
+[tcp @ 0x78fde35b0e40] Connection to tcp://127.0.0.1:1?timeout=0 failed: Connection refused
+[in#0 @ 0x78fddd6e2b00] Error opening input: Connection refused
+Error opening input file rtsp://127.0.0.1:1/nope.
+Error opening input files: Connection refused

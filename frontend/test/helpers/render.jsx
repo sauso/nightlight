@@ -29,7 +29,7 @@ const DEFAULT_SETTINGS = {
 // The injected values MUST match the shape the real providers publish, or a screen can pass its test
 // while breaking in the app. These are taken from the providers themselves:
 //   AuthContext     -> { user, loading, login, logout, refresh }
-//   SettingsContext -> { settings, loading, refresh, commit }
+//   SettingsContext -> { settings, loading, loaded, refresh, commit }
 //   CamerasContext  -> { kids, cameras, error, refresh }
 // (An earlier version of this helper published `setSettings`/`reload` and omitted `error`, none of
 // which the app ever produces — Cameras.jsx and CameraSettings.jsx both destructure `error`.)
@@ -45,10 +45,16 @@ const DEFAULT_SETTINGS = {
 // `refresh` stays inert on purpose: a test that needs to prove a context REFRESH (not a commit) can't
 // wipe an unsaved draft must publish one itself, e.g. via `rerenderWith({ settings: {...} })`, or use
 // its own stateful provider — see settingsRecording.test.jsx's T1/T3/T4.
+//
+// `settingsLoaded` is the provider's `loaded`: true (the default) means `settings` are the server's own —
+// which is what every test that injects a timezone means by it. Pass false for the moment after boot when
+// SettingsContext still holds its placeholder DEFAULTS (timezone 'UTC'), or for a first /settings request
+// that FAILED (`loading` false, `loaded` false: the placeholder stays for the whole visit), then publish
+// the real ones with `rerenderWith({ settings: {...}, settingsLoaded: true })`.
 export function renderAs(
   user,
   ui,
-  { settings = {}, cameras = [], kids = [], error = '', loading = false, route = '/' } = {}
+  { settings = {}, cameras = [], kids = [], error = '', loading = false, settingsLoaded = true, route = '/' } = {}
 ) {
   // Kept in scope so the returned handles always refer to the CURRENT render, not the first one.
   let auth;
@@ -64,6 +70,7 @@ export function renderAs(
     settingsValue = {
       settings: { ...DEFAULT_SETTINGS, ...opts.settings },
       loading: opts.loading,
+      loaded: opts.settingsLoaded,
       refresh: vi.fn(),
       // See the module comment above: real, not inert — republishes via the same mechanism
       // rerenderWith uses, so a commit(response) inside the component under test behaves like the
@@ -83,7 +90,7 @@ export function renderAs(
     );
   };
 
-  let opts = { settings, cameras, kids, error, loading, route, ui, user };
+  let opts = { settings, cameras, kids, error, loading, settingsLoaded, route, ui, user };
   const result = render(build(opts));
 
   // ⚠️ RTL's own `rerender` replaces the tree WITHOUT the providers, so anything using a context

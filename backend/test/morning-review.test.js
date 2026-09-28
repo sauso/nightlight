@@ -783,6 +783,158 @@ test('a frame from another night or another child is refused', async () => {
   assert.equal(db.prepare('SELECT COUNT(*) c FROM sleep_reviews').get().c, 0, 'and nothing was stored');
 });
 
+// --- "in bed" beside "asleep" (issue #501, part A) -------------------------------------------------
+
+test('★ a night with no times at all still stores — in_bed_at defaults on every early return (crash regression)', () => {
+  // upsertNight binds @in_bed_at as a NAMED parameter, and better-sqlite3 throws "Missing named
+  // parameter" when the key is absent. `off` and `no_data` return computeNight's `base` object early,
+  // never reaching the `out` object the value is set on, so without the null default in `base` storing
+  // either one crashed. Reproduced in plan review before a line was written; this is the test that
+  // fails without that one line. Both statuses, because they leave through different early returns.
+  assert.doesNotThrow(() => computeAndStoreNight(CHILD, DATE), 'no samples at all: no_data');
+  let row = db.prepare('SELECT status, in_bed_at FROM sleep_nights WHERE child_id = ?').get(CHILD);
+  assert.deepEqual({ ...row }, { status: 'no_data', in_bed_at: null });
+
+  db.prepare('UPDATE children SET track_sleep = 0 WHERE id = ?').run(CHILD);
+  assert.doesNotThrow(() => computeAndStoreNight(CHILD, DATE), 'tracking off');
+  row = db.prepare('SELECT status, in_bed_at FROM sleep_nights WHERE child_id = ?').get(CHILD);
+  assert.deepEqual({ ...row }, { status: 'off', in_bed_at: null });
+});
+
+test('in_bed_at round-trips: computed, stored, read back to the second, and handed to the review screen', async () => {
+  // A story night: put down at 19:30:25, reading and settling until 19:40, asleep after. The two
+  // headline times differ by ten minutes, which is the whole reason both are shown. The put-down's
+  // SECONDS survive (19:30:25, not 19:30:00): it is the transition's own timestamp, not a minute index.
+  laySamples();
+  const putDown = exactSql(new Date(at(19, 30).getTime() + 25000));
+  layTransition(TRANSITION.INTO_BED, putDown);
+
+  const summary = computeAndStoreNight(CHILD, DATE);
+  assert.equal(summary.status, 'ok');
+  assert.equal(summary.in_bed_at, putDown);
+  assert.ok(summary.onset_at > summary.in_bed_at, 'asleep comes after in bed on a story night');
+
+  const row = db.prepare('SELECT in_bed_at, onset_at FROM sleep_nights WHERE child_id = ?').get(CHILD);
+  assert.equal(row.in_bed_at, putDown, 'persisted unchanged');
+  assert.equal(row.onset_at, summary.onset_at);
+
+  // A recompute that no longer finds the put-down must CLEAR it, not keep the old value — the
+  // ON CONFLICT update has to name the column, or a stale "in bed" outlives its evidence.
+  db.prepare('DELETE FROM bed_transitions').run();
+  computeAndStoreNight(CHILD, DATE);
+  assert.equal(db.prepare('SELECT in_bed_at FROM sleep_nights WHERE child_id = ?').get(CHILD).in_bed_at, null);
+
+  layTransition(TRANSITION.INTO_BED, putDown);
+  assert.equal(getNightReview(CHILD, DATE).computed.in_bed_at, putDown, 'the review screen receives it');
+  const res = await call(`${server.url}/api/children/${CHILD}/review/${DATE}`, { token });
+  assert.equal(res.body.computed.in_bed_at, putDown, 'and so does the route');
+});
+
+// --- WHO it was, on a "No" (issue #501, part B1) --------------------------------------------------
+
+const reviewUrl = () => `${server.url}/api/children/${CHILD}/review/${DATE}`;
+const txRow = (id) => ({ ...db.prepare('SELECT verdict, wrong_reason FROM bed_transitions WHERE id = ?').get(id) });
+
+test('a "No" and who it was save together, over the real route', async () => {
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(19, 50)));
+  const res = await call(reviewUrl(), {
+    method: 'PUT', token, body: { verdicts: { [id]: 'wrong' }, reasons: { [id]: 'adult' } },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.reasons_applied, 1);
+  assert.deepEqual(txRow(id), { verdict: 'wrong', wrong_reason: 'adult' }, 'cross-checked on the raw row');
+  const shown = (await call(reviewUrl(), { token })).body.transitions.find((t) => t.id === id);
+  assert.equal(shown.wrong_reason, 'adult', 'and the review screen reads it back');
+});
+
+test('changing a "No" to "Yes" later clears who it was — even from a client that never sends reasons', async () => {
+  // The stale-reason bug both plan reviewers found: 'adult' surviving beside 'correct' is a label
+  // nobody gave. The second PUT is exactly what an already-open older tab sends: no `reasons` at all.
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(19, 50)));
+  await call(reviewUrl(), { method: 'PUT', token, body: { verdicts: { [id]: 'wrong' }, reasons: { [id]: 'adult' } } });
+  const res = await call(reviewUrl(), { method: 'PUT', token, body: { verdicts: { [id]: 'correct' } } });
+  assert.equal(res.status, 200);
+  assert.deepEqual(txRow(id), { verdict: 'correct', wrong_reason: null });
+});
+
+test('a reason for a transition that is not "No" after this save is DROPPED, and the rest of the save still lands', async () => {
+  // The one deliberate asymmetry with the all-or-nothing verdict validation. Three rows, one per way a
+  // reason can arrive without a matching 'wrong': verdicted something else in THIS save, verdicted
+  // something else BEFORE this save and untouched now, and never verdicted at all. A fourth row is a
+  // genuine "No" in the same payload, and must be stored — refusing the batch would have lost it.
+  const nowCorrect = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(19, 50)));
+  const wasUnclear = layTransition(TRANSITION.INTO_BED, exactSql(at(20, 10)));
+  const neverJudged = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(21, 0)));
+  const realNo = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(22, 0)));
+  setTransitionVerdict(wasUnclear, 'unclear');
+
+  const res = await call(reviewUrl(), {
+    method: 'PUT', token,
+    body: {
+      verdicts: { [nowCorrect]: 'correct', [realNo]: 'wrong' },
+      reasons: { [nowCorrect]: 'adult', [wasUnclear]: 'other', [neverJudged]: 'child_moved', [realNo]: 'child_moved' },
+    },
+  });
+  assert.equal(res.status, 200, 'dropped, not refused');
+  assert.equal(res.body.verdicts_applied, 2);
+  assert.equal(res.body.reasons_applied, 1, 'only the genuine "No" took its reason');
+  assert.deepEqual(txRow(nowCorrect), { verdict: 'correct', wrong_reason: null });
+  assert.deepEqual(txRow(wasUnclear), { verdict: 'unclear', wrong_reason: null });
+  assert.deepEqual(txRow(neverJudged), { verdict: null, wrong_reason: null });
+  assert.deepEqual(txRow(realNo), { verdict: 'wrong', wrong_reason: 'child_moved' });
+});
+
+test('a reason for a STORED "No" untouched by this save is kept — the stored verdict counts', async () => {
+  // The other half of "the verdict after this save": an id absent from `verdicts` keeps its stored one.
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(19, 50)));
+  setTransitionVerdict(id, 'wrong');
+  const res = await call(reviewUrl(), { method: 'PUT', token, body: { reasons: { [id]: 'other' } } });
+  assert.equal(res.status, 200);
+  assert.deepEqual(txRow(id), { verdict: 'wrong', wrong_reason: 'other' });
+});
+
+test('★ clearing a stored "No" with an explicit null is not read as "still No" (Object.hasOwn, never ??)', async () => {
+  // `verdicts[id] ?? stored` would fall through the explicit null to the stored 'wrong' and keep a
+  // reason for a verdict the person just took away. Planted exactly: stored 'wrong', no stored reason,
+  // then a save clearing the verdict while (from a stale reason chip) still sending a reason.
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(19, 50)));
+  setTransitionVerdict(id, 'wrong');
+  const res = await call(reviewUrl(), {
+    method: 'PUT', token, body: { verdicts: { [id]: null }, reasons: { [id]: 'adult' } },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.reasons_applied, 0);
+  assert.deepEqual(txRow(id), { verdict: null, wrong_reason: null });
+});
+
+test('a reason can be taken back again with null, leaving the "No" itself alone', async () => {
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(19, 50)));
+  await call(reviewUrl(), { method: 'PUT', token, body: { verdicts: { [id]: 'wrong' }, reasons: { [id]: 'adult' } } });
+  await call(reviewUrl(), { method: 'PUT', token, body: { reasons: { [id]: null } } });
+  assert.deepEqual(txRow(id), { verdict: 'wrong', wrong_reason: null });
+});
+
+test('an unknown reason, or one aimed at another night, refuses the WHOLE save like a bad verdict does', async () => {
+  // Only the verdict-mismatch case is dropped; a malformed label is still a 4xx that stores nothing.
+  db.prepare("INSERT INTO children (id, name, track_sleep, sleep_window_start, sleep_window_end)"
+    + " VALUES ('other-kid', 'Other', 1, '19:30', '07:00')").run();
+  db.prepare("INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path, sort_order, disabled)"
+    + " VALUES ('other-cam', 'Other Cam', 'rtsp://x', 'other-kid', 'other-p', 0, 0)").run();
+  const foreign = db.prepare('INSERT INTO bed_transitions (camera_id, type, peak, created_at, verdict) VALUES (?, ?, 0.4, ?, ?)')
+    .run('other-cam', TRANSITION.OUT_OF_BED, exactSql(at(19, 50)), 'wrong').lastInsertRowid;
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(19, 50)));
+
+  for (const reasons of [{ [id]: 'parent' }, { [id]: 'wrong' }, { [foreign]: 'adult' }]) {
+    const res = await call(reviewUrl(), {
+      method: 'PUT', token, body: { true_wake_local: '06:00', verdicts: { [id]: 'wrong' }, reasons },
+    });
+    assert.equal(res.status, 400, `${JSON.stringify(reasons)} must be refused`);
+  }
+  assert.deepEqual(txRow(id), { verdict: null, wrong_reason: null }, 'the verdict in the same save did not land either');
+  assert.equal(txRow(foreign).wrong_reason, null, "another child's row is untouched");
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM sleep_reviews').get().c, 0, 'and nothing was stored');
+});
+
 test('transitionInstant tells "no frame named" apart from "not this night\'s frame"', () => {
   // null must not collapse into undefined: one means "they typed a time instead", the other is an
   // error the caller has to reject rather than store as no answer.

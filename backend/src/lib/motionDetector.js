@@ -15,6 +15,8 @@ import {
 import { childSamplingActiveNow } from './sleepAnalysis.js';
 import { isDemoModeActive } from '../middleware/demoMode.js';
 import { killIfSpawned } from './processGuards.js';
+import { buildMotionTaps, createStderrRouter, SIDE_CHANNEL_LOG_ARGS } from './ffmpegSideChannel.js';
+import { openObservation } from './observationClock.js';
 
 // Server-side motion detection. Per camera with detection enabled, a cheap FFmpeg leg reads
 // the already-published MediaMTX stream (the sub-stream when there is one — far cheaper to
@@ -57,6 +59,12 @@ const FW = 320;
 const FH = 180;
 const FPS = 5;
 const FRAME_BYTES = FW * FH; // gray8: 1 byte/pixel
+
+// Issue #373: two showinfo taps around the same fps/scale/format chain, so the observation clock can read
+// each real input frame's PTS (`in`) and align every stdout frame with its record by content (`out`). They
+// change what ffmpeg PRINTS, never what it WRITES to stdout: the stdout sha256 was identical with and
+// without them on real and synthetic inputs (ffmpegSideChannel.js's header), so no decision here moves.
+const TAPS = buildMotionTaps({ fps: FPS, width: FW, height: FH });
 
 // A pixel counts as "changed" only if its brightness moved more than this (0..255) — filters
 // sensor noise and compression shimmer.
@@ -236,16 +244,23 @@ export async function startMotionDetector(camera) {
     }
     const args = [
       '-nostdin',
-      '-loglevel', 'error',
+      // `+level+info -nostats` (was `-loglevel error`): the taps log at INFO. The stderr router below
+      // drops everything under ERROR again, so the log sees what it always saw. See ffmpegSideChannel.js
+      // for why the RELATIVE spelling and -nostats are both load-bearing.
+      ...SIDE_CHANNEL_LOG_ARGS,
       '-rtsp_transport', 'tcp',
       '-i', `rtsp://127.0.0.1:8554/${path}`,
       '-an',
-      '-vf', `fps=${FPS},scale=${FW}:${FH},format=gray`,
+      '-vf', TAPS.filter,
       '-f', 'rawvideo',
       '-',
     ];
     const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     entry.proc = proc;
+    // One observation GENERATION per ffmpeg process (#373, C3): the stdout and stderr handlers below close
+    // over this launch's own handle, so a late 'close' or late bytes from an old process can never touch a
+    // newer one. The handle is fail-safe: whatever the clock does, it cannot throw into this file.
+    const obs = openObservation(camera.id, 'motion', { label: camera.name, path, fps: FPS });
 
     proc.on('error', (err) => {
       // A spawn that never started. Node emits 'error' INSTEAD OF 'exit' here, so nothing downstream
@@ -420,15 +435,41 @@ export async function startMotionDetector(camera) {
     }
 
     proc.stdout.on('data', (chunk) => {
+      // #373: the receipt time, read ONCE per 'data' event, so a frame split across two reads carries the
+      // completing read's time. Two clock reads per event; nothing else of the observation runs before a
+      // frame's own decision.
+      const rx = obs.receipt();
       buf = buf.length ? Buffer.concat([buf, chunk]) : chunk;
       while (buf.length >= FRAME_BYTES) {
-        handleFrame(Buffer.from(buf.subarray(0, FRAME_BYTES)));
+        const frame = Buffer.from(buf.subarray(0, FRAME_BYTES));
+        handleFrame(frame);
+        // #373: exactly one observation per frame, AFTER its decision handler has returned (plan §D,
+        // R1-F8): the handler's inputs are the same bytes in the same order, and its own Date.now() is
+        // read before any observation work for this frame. The clock only reads the frame.
+        obs.onSample(frame, rx.mono, rx.wall);
         buf = buf.subarray(FRAME_BYTES);
       }
     });
 
+    // #373: stderr now carries the taps' per-frame records as well as ffmpeg's errors. The router sends
+    // records to the observation clock and the errors to the log exactly as `-loglevel error` printed them
+    // (see ffmpegSideChannel.js for the rules, the rate limits and the repeat collapse).
+    const router = createStderrRouter({
+      taps: TAPS.taps,
+      forward: (line) => logger.raw(`detect:${path}`, line),
+      onRecord: obs.onRecord,
+      onConfig: obs.onConfig,
+      onParseError: obs.onParseError,
+    });
     forwardProcessLines(proc, proc.stderr, (line) => {
-      if (line.trim()) logger.raw(`detect:${path}`, line);
+      if (line.trim()) router.line(line);
+    });
+    // The generation ends on 'close', NEVER 'exit' (R1-F7): stdout can still drain after 'exit'
+    // (processOutput.js), and those frames are real and analysed. Registered after forwardProcessLines,
+    // whose own 'close' listener flushes the last partial stderr line first (listeners run in order).
+    proc.once('close', (code, signal) => {
+      router.end();
+      obs.end(entry.stopped ? 'stop' : 'exit', { code, signal });
     });
 
     proc.on('exit', (code) => {

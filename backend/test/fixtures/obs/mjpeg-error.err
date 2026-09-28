@@ -1,0 +1,13 @@
+[mjpeg @ 0x74e496d068c0] sof: invalid len 56065
+[mjpeg @ 0x74e496a648c0] sof: invalid len 56065
+[vist#0:0/mjpeg @ 0x74e495580d40] [dec:mjpeg @ 0x74e495500600] Error submitting packet to decoder: Invalid data found when processing input
+[vist#0:0/mjpeg @ 0x74e495580d40] [dec:mjpeg @ 0x74e495500600] Decode error rate 1 exceeds maximum 0.666667
+[vist#0:0/mjpeg @ 0x74e495580d40] [dec:mjpeg @ 0x74e495500600] Task finished with error code: -1145393733 (No error information)
+[vist#0:0/mjpeg @ 0x74e495580d40] [dec:mjpeg @ 0x74e495500600] Terminating thread with return code -1145393733 (No error information)
+[vf#0:0 @ 0x74e4952e6b00] Cannot determine format of input 0:0 after EOF
+[vf#0:0 @ 0x74e4952e6b00] Task finished with error code: -1094995529 (Invalid data found when processing input)
+[vf#0:0 @ 0x74e4952e6b00] Terminating thread with return code -1094995529 (Invalid data found when processing input)
+[vost#0:0/rawvideo @ 0x74e496bcac00] [enc:rawvideo @ 0x74e49ae5dec0] Could not open encoder before EOF
+[vost#0:0/rawvideo @ 0x74e496bcac00] Task finished with error code: -22 (Invalid argument)
+[vost#0:0/rawvideo @ 0x74e496bcac00] Terminating thread with return code -22 (Invalid argument)
+[out#0/rawvideo @ 0x74e49b2df7c0] Nothing was written into output file, because at least one of its streams received no packets.

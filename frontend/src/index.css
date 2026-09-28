@@ -1128,6 +1128,9 @@ body.in-pip .tile-menu-backdrop {
 .night__edit { font-size: 12.5px; color: #c7caff; opacity: 0.85; flex-shrink: 0; }
 .night__sleep { display: flex; align-items: center; gap: 11px; margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.1); color: #cdd0ff; }
 .night__soon { font-size: 12px; color: #9fa3e0; margin-top: 2px; }
+/* "In bed 19:47 · Asleep 20:04" — same weight as the range line above it. Its own class rather than a
+   second .night__soon so nothing selecting "the range line" can pick this one up instead. */
+.night__inbed { font-size: 12px; color: #9fa3e0; margin-top: 2px; }
 .night__sleep-head { font-weight: 600; font-size: 13px; color: #cdd0ff; }
 .night__sleep-big { font-size: 22px; font-weight: 700; color: #fff; margin: 1px 0 2px; line-height: 1.1; }
 .night__est { font-size: 10.5px; color: #8f93d0; margin-top: 5px; }
@@ -2756,6 +2759,17 @@ input[type='range'] {
 }
 .review-chip:hover { color: var(--text-primary); border-color: var(--peri-soft); }
 .review-chip--on { background: var(--peri); border-color: var(--peri); color: #fff; }
+.review-chip:disabled { opacity: 0.45; cursor: default; }
+
+/* WHO it was, under a "No" in the full event list. Its own wrapper, deliberately NOT a second
+   .review-event__verdicts: tests count that container to prove each event asks exactly once, and the
+   follow-up is a different question. Same chips, just labelled so it reads as a follow-up. */
+.review-event__reasons { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.review-event__reasons-label { font-size: 12px; color: var(--text-secondary); margin-right: 2px; }
+
+/* "Before bedtime (N)" — early-afternoon events grouped at the top of the full list. */
+.review-early { border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 4px; }
+.review-early__bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 6px; }
 
 /* The review card's answered state, and the confirm-or-correct block on the review screen. */
 .review-card--done .review-card__body { padding-right: 4px; }

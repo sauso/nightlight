@@ -10,6 +10,7 @@ import MediaPlayerModal from '../components/MediaPlayerModal.jsx';
 import RecomputeNight from '../components/RecomputeNight.jsx';
 import ReviewNightButton from '../components/ReviewNightButton.jsx';
 import ReviewReceipt from '../components/ReviewReceipt.jsx';
+import { showsInBed } from '../lib/inBed.js';
 
 // Sleep detail: a to-scale timeline of one night for a child, with the wake-ups marked, plus a date
 // picker to browse back through the retained nights (~30 days of activity_samples). Reached by tapping
@@ -253,6 +254,9 @@ function NightBody({ night, fmtTime, tz, tempUnit, childId, date, onRecomputed }
       <div className="card sleep-detail__summary">
         <div className="sleep-detail__big">{fmtDurBig(night.asleep_minutes)}<span> asleep{night.in_progress ? ' so far' : ''}</span></div>
         <div className="sleep-detail__stats">
+          {/* "In bed" first, so the two times read in the order they happened. Only when the put-down
+              is a real minute or more before sleep — see showsInBed for why that check is one-way. */}
+          {showsInBed(night) && <Stat label="In bed" value={fmtTime(night.in_bed_at)} />}
           <Stat label={night.in_progress ? 'Asleep' : 'Asleep from → to'} value={range} />
           <Stat label="Wake-ups" value={String(night.wake_count ?? 0)} />
           <Stat label="Longest stretch" value={fmtDurAbbr(night.longest_stretch_minutes)} />

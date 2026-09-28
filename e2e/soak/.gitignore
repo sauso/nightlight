@@ -1,0 +1,4 @@
+data/
+.soak-token
+sub.json
+*.jsonl

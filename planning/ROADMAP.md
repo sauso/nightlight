@@ -858,6 +858,37 @@ as a separate durable doc this time — the plan file itself (now implemented) c
 history on `backend/src/lib/sleepAnalysis.js`'s `runNightlySleepJob`/`computeAndStoreNight` and
 `backend/src/lib/sleepReportAlert.js` for the shipped shape. **Options 2 and 3 remain not built.**
 
+### 1.7 Observation time and coverage (#373) — instrument `SHIPPED` (0.34.0), consumers `NEXT`
+
+**What exists after #373 Stage 2:** `lib/observationClock.js` (fed by `lib/ffmpegSideChannel.js`) gives
+every motion frame and sound window a class (REAL / fps clone / CFR dup / UNKNOWN, or observed / UNKNOWN
+for sound), an observation time in monotonic and UTC, and sampler/analysis coverage, and reports them
+as the 15-minute `[obs]` line (KNOWN-ISSUES.md). **Nothing reads it yet** — decisions and stored numbers
+are unchanged, pinned by `detector-observation-wiring.test.js`'s golden with a working, a throwing and
+no clock. Every threshold in it came from ONE house's runs (Stage 1: night, overnight, day, soak box).
+
+**Open, in the order the plan gives them — each switches ONE consumer over, with its own A/B:**
+- **#493** stop consuming fabricated frames (fps clones, CFR dups) in the motion detector. Changes the
+  calibration basis of every motion threshold, so it needs an A/B on real nights.
+- **#447** activity buckets by observation time instead of flush time; must name sampler or analysis
+  coverage and accept FINALIZE_MS (5 s) of latency.
+- **#452** confirmation across an outage (read `restarts`/`gaps`), **#448** the wake watcher, **#369**
+  stale-sampler restarts.
+
+**Owed before those, from the #373 plan's Verification section:**
+- ✅ **24 h on staging after merge — DONE 2026-09-28.** The 10:00 reboot read as one restart per channel
+  (~24–70 s) and a new generation; `activity_samples` per-minute counts were unaffected (0 gaps/dups).
+  It also caught a real, unrelated bug live: Child B's staging sound sampler silently stopped observing
+  for 18h15m with no auto-recovery until the reboot force-restarted it — see issue #369 (the exact
+  "alive sampler, no recovery" gap #369 already tracks) and issue #509 (the sleep-side consequence).
+  Motion `age` settles at a stable ~600 ms p50 on both cameras once clear of a restart — the ~330 ms
+  figure in KNOWN-ISSUES.md is one-house-specific and should be reworded, not treated as a regression.
+- still owed: the soak-box runs with an image built from the branch (3 s and 12 s DROPs, a 3 s HOLD and
+  a 3 s Node block through the stall proxy, `[obs]` checked against the proxy's own log, a clean 30
+  minutes at `unknown=0`, CPU before/after);
+- still owed: the worst-case load run (4 fakecam cameras at 30 fps, main stream only, event-loop lag p99
+  and CPU with the clock on and off — the build's microbenchmark is a simulation, not this).
+
 ## 2. Specced, not built
 
 ### 2.1 Sub-stream sanity check — warn when "Low" isn't actually low — `SPECCED`
@@ -917,8 +948,11 @@ In the gate today at **97.6% lines / 86.8% branches / 93.8% functions**, across 
 `routes/recordings.js`** (added 2026-09-06).
 
 ⚠️ **THE THRESHOLDS ARE AGGREGATES ACROSS THE WHOLE LIST, not per file.** A module at 88% sits happily
-under a green gate — `lib/clipRecorder.js` does, and so does `routes/auth.js` at 73% *branches*. That
-is not a flaw to fix by adding per-file gates; it is the reason the include list must keep growing, and
+under a green gate — `lib/clipRecorder.js` does. `routes/auth.js` used to be the other example, at 73%
+*branches* (see E2, closed 2026-09-25: now 83.89%, driven up with tests for the either-or paths line
+coverage alone had hidden — describeDevice's OS/browser matrix, the two admin-guard rethrow paths, and
+three defaulting fallbacks). That is not a flaw to fix by adding per-file gates; it is the reason the
+include list must keep growing, and
 the reason to read a module's own row (`npm run test:core 2>&1 | grep -E '^ℹ +<file>\.js'`) rather than
 the summary line. Admitting the clip modules moved the aggregate 98.6 → 97.6, which is the gap becoming
 visible rather than a regression.
@@ -954,9 +988,13 @@ newly makes reachable.**
 - `routes/cameras.js` (1,036 lines) — the biggest surface, and the one with real authz branching.
   **The last big one left.**
 - `lib/motionDetector.js` — zone-mask maths
-- ✅ `routes/auth.js` — **DONE 2026-09-05** (#295): 86.5 → 99.6% lines. ⚠️ Branches are **73%**, under
-  the 80 bar and hidden by the aggregate; worth a deliberate pass rather than bolting on — tracked as
-  **§3 E2**.
+- ✅ `routes/auth.js` — **DONE 2026-09-05** (#295): 86.5 → 99.6% lines. Branches followed separately,
+  **DONE 2026-09-25**: 73% → **83.89%**, clearing the 80 bar. The gap was entirely either-or paths line
+  coverage can't see: `describeDevice`'s OS/browser matrix (every test's fetch() sends `User-Agent:
+  node`, which matches none of its regexes), the two admin-guard `catch` blocks' non-`LastAdminError`
+  rethrow, and three untested defaulting fallbacks (`appName()`, `demoMaxGuests()`,
+  `createSession`'s user-agent). New tests in `backend/test/auth-routes-branches.test.js`, mutants
+  `#E2 M1`–`M11` in `scripts/mutants.json`.
 - ✅ `lib/clipStorage.js` — **DONE 2026-09-06** (#296), 100% lines, along with the other four clip
   modules. It had no test file at all, which is how `sweepClips(){ return; }` — deleting the entire
   retention sweeper — passed a green 389-test suite.
@@ -1113,32 +1151,6 @@ and unblocked, and are the right thing to reach for in a gap.
 ### E. Maintenance and housekeeping
 Not features — small, agreed, unblocked work with no dependency on the holdout. **This is the list to
 pick from when there is a gap**, which is why it is one list rather than four notes in four places.
-
-- **E2. `routes/auth.js` branch coverage** — `NEXT` · *small*. **73%**, under the 80 bar, and invisible
-  because the gate is an aggregate. Lines are 99.6% and functions 100%, so what is missing is the
-  either-or paths, not whole functions. See §2.3, where it sits on the coverage list.
-
-- **E3. Fix the third state in `02-add-camera`'s e2e wait** — `NEXT` · *small*. The spec clicks **Add
-  camera**, then waits up to 8 s for the **Save anyway** button that appears when the pre-save stream
-  validation fails against a cold synthetic source. Its `catch` treats "the button never appeared" as
-  *"validated on the first try"* — but there is a third state: **validation failed AND the button was
-  slower than 8 s**. The run then continues as though the camera had been saved and fails ~20 s later
-  waiting for "Save changes", which points at the wrong thing entirely.
-  - Observed 2026-09-06 on the dependency batch; the screenshot showed the app correctly reporting an
-    unreachable camera. Re-run 3× on the identical image: 3/3 passed, so it is a flake, not a
-    regression — but it costs an investigation every time it fires.
-  - **Fix:** decide between the two outcomes explicitly rather than inferring from a timeout — wait for
-    *either* "Save changes" *or* "Save anyway", and fail with a message naming which appeared.
-
-- **E4. Move the soak stack into the repo as `e2e/soak/`** — `NEXT` · *small*. It currently lives
-  outside the repo on the dev machine, which was the right call while it was unproven. **It has earned
-  its place**: it validated #257 end to end, caught the #274 review's finding in a live container,
-  proved #254's per-leg isolation, measured the shutdown-grace gap that became #279, and confirmed
-  #297's fix under fault injection. None of that was reachable from a unit test.
-  - Brings with it the two fault-injection recipes (hide `ffmpeg`; hide `mediamtx`) that are currently
-    only in an agent's notes.
-  - It already mounts `e2e/fakecam/mediamtx.yml` from the repo, so the move mostly means the compose
-    file and a README. ⚠️ Keep the warning that it must never be pointed at a bedroom camera.
 
 ---
 
