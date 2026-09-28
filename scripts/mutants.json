@@ -4742,5 +4742,45 @@
     "replace": "see `loaded`.\r\n",
     "expect": "killed",
     "tests": ["lib/SettingsContext.test.jsx"]
+  },
+  {
+    "label": "0.34.0 review F2: side read from the last generation's cumulative usable() again (the pre-fix rule)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      side: this.sideState(),",
+    "replace": "      side: g ? (g.usable() ? 'ok' : g.finalizedCount > 0 ? 'unavailable' : 'pending') : 'none',",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js", "observation-clock-sound.test.js"]
+  },
+  {
+    "label": "0.34.0 review F2: a period where EVERY sample is unknown still reads ok (< flipped to <=)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    return p.unknown < p.samples ? 'ok' : 'unavailable';",
+    "replace": "    return p.unknown <= p.samples ? 'ok' : 'unavailable';",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js", "observation-clock-sound.test.js"]
+  },
+  {
+    "label": "0.34.0 review F2: any unknown at all reads unavailable (a partial loss treated as a dead channel)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    return p.unknown < p.samples ? 'ok' : 'unavailable';",
+    "replace": "    return p.unknown === 0 ? 'ok' : 'unavailable';",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js", "observation-clock-sound.test.js"]
+  },
+  {
+    "label": "0.34.0 review F2: a period with no finalized sample reads ok instead of pending",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (p.samples === 0) return this.lastGen ? 'pending' : 'none';",
+    "replace": "    if (p.samples === 0) return this.lastGen ? 'ok' : 'none';",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "0.34.0 review F2: a clock that never began a generation reads pending instead of none",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (p.samples === 0) return this.lastGen ? 'pending' : 'none';",
+    "replace": "    if (p.samples === 0) return 'pending';",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
   }
 ]

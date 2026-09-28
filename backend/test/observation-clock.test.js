@@ -19,7 +19,7 @@ import {
   formatSummaryLine, roundNearInf, startObservationLog, stopObservationLog, ObservationClock, observationHandleFailures,
   _setObservationClockFactoryForTests, _resetObservationClocksForTests,
 } from '../src/lib/observationClock.js';
-import { motionRig, feedStream, steadyFrames, frameOf, zlibAdler0, makeClock, WALL0 } from './helpers/obsRig.js';
+import { motionRig, feedStream, steadyFrames, frameOf, zlibAdler0, makeClock, slotOf90k, WALL0 } from './helpers/obsRig.js';
 import { createStderrRouter, buildMotionTaps } from '../src/lib/ffmpegSideChannel.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -1136,6 +1136,108 @@ describe('fail-safe (R2-O5, C6): nothing a clock does can reach a detector', () 
     assert.ok(r.obs.every((x) => x.cls === 'unknown'));
     assert.equal(r.logs.filter((l) => l.includes('side-channel unavailable')).length, 1);
     assert.equal(r.clock.summary().side, 'unavailable');
+  });
+});
+
+// `side` used to be the last generation's cumulative usable(): once one usable record had arrived it read
+// `ok` for the rest of the run, however unusable the stream became. The 0.34.0 release review (Codex,
+// 2026-09-28) reproduced it — samples=250 unknown=250 side=ok after the tap lines stopped parsing — and a
+// live sound leg printed side=ok beside cover=0.0% for over 18 hours. These drive the REAL [obs] timer body
+// (logObservationSummaries), period by period, and read the printed line. PLANTED oracle: which frames had
+// usable tap lines is a fact of the fixture.
+describe('`side` is judged per [obs] period, from what the samples came out as (0.34.0 release review)', () => {
+  const field = (line, name) => new RegExp(` ${name}=(\\S+)`).exec(line)?.[1];
+
+  function periodMotion() {
+    const t = { mono: 100_000 };
+    const clocks = { monoNow: () => t.mono, wallNow: () => t.mono + WALL0 };
+    const logs = [];
+    const clock = getObservationClock('cam-side', 'motion', { clocks, label: 'Side Cam', log: (l) => logs.push(l) });
+    const open = () => {
+      const g = clock.beginGeneration({ path: 'cam-sub', fps: 5 });
+      g.onConfig({ tap: 'in', dir: 'in', tbNum: 1, tbDen: 90000 });
+      g.onConfig({ tap: 'out', dir: 'in', tbNum: 1, tbDen: 5 });
+      return {
+        g,
+        inRec: (n, pts, at) => { t.mono = at; g.onRecord({ tap: 'in', n, pts }); },
+        outRec: (n, slot, c, at) => { t.mono = at; g.onRecord({ tap: 'out', n, pts: slot, checksum: zlibAdler0(frameOf(c)) }); },
+        sample: (c, at) => { t.mono = at; g.onSample(frameOf(c), at, at + WALL0); },
+      };
+    };
+    // One [obs] tick at `at`: returns this clock's printed period line.
+    const tick = (at) => {
+      t.mono = at;
+      const before = logs.length;
+      logObservationSummaries();
+      const printed = logs.slice(before).filter((l) => l.includes(' samples='));
+      assert.equal(printed.length, 1, 'one [obs] line per tick');
+      return printed[0];
+    };
+    return { t, clock, open, tick, logs };
+  }
+
+  test('motion: tap lines that STOP parsing after a healthy start read side=unavailable for the next full period, and ok again after a relaunch', () => {
+    const r = periodMotion();
+    const gen1 = r.open();
+    // Period 1: one healthy minute (every tap line usable).
+    feedStream(gen1, steadyFrames({ fps: 5, count: 300, base: 100_000 })).flush(160_000);
+    const p1 = r.tick(160_000);
+    assert.equal(field(p1, 'side'), 'ok', p1);
+
+    // From here every `in` and `out` tap line fails the grammar (what ffmpegSideChannel's router reports as
+    // onParseError, e.g. after an ffmpeg upgrade changes the format). The pictures still reach stdout.
+    let k = 0;
+    const broken = (until) => {
+      for (; 160_200 + k * 200 <= until; k += 1) {
+        gen1.g.onParseError('in');
+        gen1.g.onParseError('out');
+        gen1.sample(`X${k}`, 160_200 + k * 200);
+      }
+    };
+    // Period 2: it breaks inside the period. The healthy samples still finalizing from period 1 were
+    // placed, so this period is `ok` — a PARTIAL loss shows in `unknown`, not in `side`.
+    broken(220_000);
+    const p2 = r.tick(220_000);
+    assert.equal(field(p2, 'side'), 'ok', p2);
+    assert.ok(Number(field(p2, 'unknown')) > 0 && Number(field(p2, 'real')) > 0, p2);
+
+    // Period 3: a FULL 15 minutes of nothing but unparseable tap lines — the review's reproduction.
+    broken(220_000 + 900_000);
+    const p3 = r.tick(220_000 + 900_000);
+    const samples = Number(field(p3, 'samples'));
+    assert.ok(samples > 4000, `a full period of samples: ${p3}`);
+    assert.equal(field(p3, 'unknown'), String(samples), 'every one of them UNKNOWN');
+    assert.equal(field(p3, 'cover'), '0.0%/0.0%');
+    assert.equal(field(p3, 'side'), 'unavailable', `was side=ok here before the fix: ${p3}`);
+    // No internal error was involved, so `warn` rightly stays 0: it counts caught exceptions, not health.
+    assert.equal(field(p3, 'warn'), '0');
+
+    // Period 4: the detector relaunches and the new run's lines parse. `side` follows the evidence back.
+    r.t.mono = 1_120_100;
+    gen1.g.end('exit');
+    const gen2 = r.open();
+    feedStream(gen2, steadyFrames({ fps: 5, count: 300, base: 1_125_000 })).flush(1_185_000);
+    const p4 = r.tick(1_190_000);
+    assert.equal(field(p4, 'side'), 'ok', p4);
+  });
+
+  test('a period with records flowing but NO sample finalized reads pending, not ok — there is nothing to judge', () => {
+    // The detector's stdout stalled while its stderr tap lines kept coming. The old per-generation answer
+    // was `ok` because the records were usable; nothing was placed, and nothing was UNKNOWN either.
+    const r = periodMotion();
+    const g = r.open();
+    for (const f of steadyFrames({ fps: 5, count: 300, base: 100_000 })) {
+      g.inRec(f.n, f.pts, f.rx);
+      g.outRec(f.n, slotOf90k(f.pts), `S${f.n}`, f.rx + 0.1);
+    }
+    const line = r.tick(160_000);
+    assert.equal(field(line, 'samples'), '0', line);
+    assert.equal(field(line, 'side'), 'pending', line);
+  });
+
+  test('a clock that never began a generation reads side=none', () => {
+    const c = new ObservationClock('cam-never', 'motion', { clocks: { monoNow: () => 100_000, wallNow: () => 100_000 + WALL0 } });
+    assert.equal(c.summary().side, 'none');
   });
 });
 
