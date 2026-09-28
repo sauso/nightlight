@@ -210,6 +210,23 @@ describe('which night it opens on', () => {
 });
 
 describe('moving between nights', () => {
+  // ⚠️ THE CLOCK IS PINNED FOR THIS WHOLE GROUP (2026-09-29, CI went red on a PR that touched no
+  // frontend). The fixture night is a fixed 2026-08-30, but the screen's maximum comes from the REAL
+  // clock — yesterday in the app timezone, or the live night if later — and its floor is 29 nights
+  // before that. Once real time moved on, the fixture stopped being the latest night, and on
+  // 2026-09-29 it fell exactly ON the floor, so `Previous night` was disabled and both the arrows
+  // test and the latest-night test failed. Nothing in the app was wrong; the fixtures had a shelf life.
+  //
+  // Pinned to a fixed instant rather than derived from now on purpose: NIGHT's times assume
+  // Melbourne's +10, and Melbourne changes offset in October, so a derived date would exercise a
+  // different offset by season. Only `Date` is faked (timers stay real, so waitFor and userEvent
+  // keep working); the afterEach at the top of the file restores it.
+  // 02:00Z on the 31st is noon there, so 2026-08-30 is "yesterday".
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-08-31T02:00:00Z'));
+  });
+
   test('the arrows step one night at a time', async () => {
     const get = mockSleep();
     const { user } = mount();
@@ -224,9 +241,15 @@ describe('moving between nights', () => {
   test('★ you cannot go past the latest night', async () => {
     // The next arrow is disabled at the maximum. Without it the screen would ask for a night that
     // does not exist yet and show "no data" for tomorrow.
-    mockSleep();
+    //
+    // ⚠️ The wait is for the night's own request, NOT for `Next night` to be disabled: that arrow is
+    // ALSO disabled before anything has loaded (no maximum yet), so the old wait passed on the loading
+    // state and proved nothing about the latest night. The request is made in the same step that sets
+    // the maximum, so once it appears both arrows are in their real state.
+    const get = mockSleep();
     mount();
-    await waitFor(() => expect(screen.getByLabelText('Next night').disabled).toBe(true));
+    await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-30'));
+    expect(screen.getByLabelText('Next night').disabled).toBe(true);
     expect(screen.getByLabelText('Previous night').disabled).toBe(false);
   });
 
