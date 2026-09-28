@@ -98,7 +98,9 @@ export default function NightReview() {
   const { id, date } = useParams();
   const navigate = useNavigate();
   const { kids } = useCameras();
-  const { settings } = useSettings();
+  // `loaded`: the server's settings have arrived, so `tz` is the app's REAL zone, not SettingsContext's
+  // placeholder 'UTC'. Only "Before bedtime" needs it — see `groupEarly` for why that one thing does.
+  const { settings, loaded: settingsLoaded } = useSettings();
   const tz = settings?.timezone;
   const kid = kids.find((k) => k.id === id);
 
@@ -305,8 +307,21 @@ export default function NightReview() {
     const { date: localDate, hour } = localDateHour(t.created_at, tz);
     return localDate === date && hour < EARLY_CUTOFF_HOUR;
   };
-  const early = hasBedtime ? transitions.filter(isEarly) : [];
-  const later = hasBedtime ? transitions.filter((t) => !isEarly(t)) : transitions;
+  // ⚠️ ...and only once the app's REAL timezone has arrived. The fourth time a late timezone has bitten
+  // this file (see `touched`, `verdictsTouched` and the reasons seed), and the first where the damage is
+  // a WRITE the person made rather than a reseed over one: SettingsContext starts at 'UTC' and replaces it
+  // when /settings resolves, so for that moment — or for the whole visit, if that request failed — 16:00
+  // is judged in the wrong zone. Found in the 0.34.0 release review (Codex, 2026-09-28): a real 19:20
+  // Melbourne put-down is 09:20 UTC, so it was grouped as "Before bedtime", its one-tap "None of these"
+  // saved it "No", and the answer stayed saved after the real zone arrived. Unlike a reseed, a stored
+  // verdict cannot be put right by the zone arriving later, so the group is never offered on a guess.
+  // Gated on `loaded`, NOT on `tz !== 'UTC'`: UTC is a real configured zone too ("the cutoff follows the
+  // APP timezone" test pins a UTC install still grouping). Scoped to the grouping alone, the way
+  // `verdictsTouched` was scoped to the verdicts: until then the list renders flat, exactly as for a night
+  // with no bedtime, every event with its own chips, and the rest of the screen is unaffected.
+  const groupEarly = settingsLoaded && hasBedtime;
+  const early = groupEarly ? transitions.filter(isEarly) : [];
+  const later = groupEarly ? transitions.filter((t) => !isEarly(t)) : transitions;
   // What "None of these were a bedtime event" may pre-fill. NOT a quick check-in or "Still moving?"
   // event — those have their own card and their own sharper question. NOT anything already answered,
   // either here or earlier in this sitting (checked again inside the updater, against the live map):

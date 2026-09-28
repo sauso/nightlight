@@ -363,7 +363,10 @@ measurement**, and (like everything here) never a safety device — see the warn
     nap as **Yes**. 16:00 is a first guess, not a measured value, and it's the same for every house.
     If your child's night really starts before 16:00, don't use the button: it would mark their
     real bedtime "No". A night with no bedtime information at all (no put-down, no sleep time, no
-    frame picked, no bedtime you typed in) shows the list ungrouped.
+    frame picked, no bedtime you typed in) shows the list ungrouped. The list is also ungrouped until
+    the app has loaded your timezone setting. That is usually a moment after the page opens, but it
+    lasts the whole visit if the settings can't be loaded. Grouping by a guessed timezone could put
+    a real evening bedtime in the afternoon group, where the button would mark it "No".
   - **Your times become the ones shown.** Once you correct a night, the child's card, the history list
     and the sleep detail page all show *your* times, marked **You corrected this**, with the total
     sleep recalculated to match. This is different from **Recompute this night**, which re-runs the

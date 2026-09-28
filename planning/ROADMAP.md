@@ -858,7 +858,7 @@ as a separate durable doc this time — the plan file itself (now implemented) c
 history on `backend/src/lib/sleepAnalysis.js`'s `runNightlySleepJob`/`computeAndStoreNight` and
 `backend/src/lib/sleepReportAlert.js` for the shipped shape. **Options 2 and 3 remain not built.**
 
-### 1.7 Observation time and coverage (#373) — instrument `BUILT` (Stage 2, on dev once merged), consumers `NEXT`
+### 1.7 Observation time and coverage (#373) — instrument `SHIPPED` (0.34.0), consumers `NEXT`
 
 **What exists after #373 Stage 2:** `lib/observationClock.js` (fed by `lib/ffmpegSideChannel.js`) gives
 every motion frame and sound window a class (REAL / fps clone / CFR dup / UNKNOWN, or observed / UNKNOWN
@@ -879,14 +879,19 @@ no clock. Every threshold in it came from ONE house's runs (Stage 1: night, over
   event, not `rx.mono` or any `[obs]` output, and it moves no calibrated number (no detection threshold,
   no stored sleep figure). It only restarts processes. KNOWN-ISSUES.md "A detector was restarted".
 
-**Owed before those, from the #373 plan's Verification section (not done in the build):**
-- the soak-box runs with an image built from the branch: 3 s and 12 s DROPs, a 3 s HOLD and a 3 s Node
-  block through the stall proxy, with `[obs]` checked against the proxy's own log; a clean 30 minutes at
-  `unknown=0`; CPU before/after;
-- the worst-case load run: 4 fakecam cameras at 30 fps, main stream only, event-loop lag p99 and CPU
-  with the clock on and off (the build's microbenchmark is a simulation, not this);
-- 24 h on staging after merge: the daily 10:00 camera reboot must read as one ~64 s restart and a new
-  generation; `activity_samples` per-minute counts unchanged in distribution.
+**Owed before those, from the #373 plan's Verification section:**
+- ✅ **24 h on staging after merge — DONE 2026-09-28.** The 10:00 reboot read as one restart per channel
+  (~24–70 s) and a new generation; `activity_samples` per-minute counts were unaffected (0 gaps/dups).
+  It also caught a real, unrelated bug live: Raffa's staging sound sampler silently stopped observing
+  for 18h15m with no auto-recovery until the reboot force-restarted it — see issue #369 (the exact
+  "alive sampler, no recovery" gap #369 already tracks) and issue #509 (the sleep-side consequence).
+  Motion `age` settles at a stable ~600 ms p50 on both cameras once clear of a restart — the ~330 ms
+  figure in KNOWN-ISSUES.md is one-house-specific and should be reworded, not treated as a regression.
+- still owed: the soak-box runs with an image built from the branch (3 s and 12 s DROPs, a 3 s HOLD and
+  a 3 s Node block through the stall proxy, `[obs]` checked against the proxy's own log, a clean 30
+  minutes at `unknown=0`, CPU before/after);
+- still owed: the worst-case load run (4 fakecam cameras at 30 fps, main stream only, event-loop lag p99
+  and CPU with the clock on and off — the build's microbenchmark is a simulation, not this).
 
 ## 2. Specced, not built
 
