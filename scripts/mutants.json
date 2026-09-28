@@ -2634,8 +2634,8 @@
   {
     "label": "#451 M18: index.js hands safeInterval the camera watchdog object instead of its tick",
     "file": "backend/src/index.js",
-    "find": "createCameraWatchdog().tick);",
-    "replace": "createCameraWatchdog());",
+    "find": "createCameraWatchdog({ restartRequests }).tick);",
+    "replace": "createCameraWatchdog({ restartRequests }));",
     "expect": "killed",
     "tests": ["process-guards.test.js"],
     "namePattern": "hands each watchdog"
@@ -4694,5 +4694,1247 @@
     "expect": "killed",
     "tests": ["detector-observation-wiring.test.js"],
     "namePattern": "F8 sound"
+  },
+  {
+    "label": "#369 CONTROL: a comment edit in probeVideoFlowing",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "// stdout arrives in arbitrary chunks, not lines",
+    "replace": "// stdout arrives in arbitrary chunks, not lines [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": ["audio-liveness.test.js", "detector-watchdog.test.js"],
+    "note": "Validates the harness for the #369 chunk. If this is ever KILLED, no other #369 result in the run means anything."
+  },
+  {
+    "label": "#369 M-V01 (claim 19): the video probe copies the audio probe's `-select_streams a:0`",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "      '-read_intervals', `%+${VIDEO_PROBE_READ_SECONDS}`,\r\n",
+    "replace": "      '-select_streams', 'a:0',\r\n      '-read_intervals', `%+${VIDEO_PROBE_READ_SECONDS}`,\r\n",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#369 M-V02 (claim 19): the video probe's read is packet-bounded (the audio probe's %+#20), not time-bounded",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "`%+${VIDEO_PROBE_READ_SECONDS}`",
+    "replace": "'%+#20'",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#369 M-V03 (claim 19): the video probe reads 10 s instead of 5 (past its own 8 s kill timer)",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "const VIDEO_PROBE_READ_SECONDS = 5;",
+    "replace": "const VIDEO_PROBE_READ_SECONDS = 10;",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#369 M-V04 (claim 19): the video probe prints pts_time (the audio probe's field), so no codec_type is ever seen",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "'packet=codec_type'",
+    "replace": "'packet=pts_time'",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#369 M-V05 (claim 19): a video packet is counted as audio",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "if (type === 'video') video += 1;",
+    "replace": "if (type === 'video') audio += 1;",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#369 M-V06 (claim 19): audio-only reads as flowing video (the one-packet audio probe's answer)",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "finish(video > 0 ? true : audio > 0 ? 'video-missing' : null);",
+    "replace": "finish(video > 0 ? true : audio > 0 ? true : null);",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#369 M-V07 (claim 19): seeing nothing reads as a negative (false) instead of inconclusive",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "finish(video > 0 ? true : audio > 0 ? 'video-missing' : null);",
+    "replace": "finish(video > 0 ? true : audio > 0 ? 'video-missing' : false);",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#369 M-V08 (claim 19): a non-zero exit is classified from what it printed",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "if (code !== 0) return finish(null);",
+    "replace": "if (false) return finish(null);",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#369 M-V09 (claim 19): classified on 'exit', so packets drained after it are lost",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "proc.on('close', (code) => {",
+    "replace": "proc.on('exit', (code) => {",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#369 M-V10 (claim 19): the last stdout line without a newline is dropped",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "      count(partial); // a last line with no trailing newline\r\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#369 M-V11 (claim 19): a line split across two stdout chunks is lost",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "      partial = lines.pop();",
+    "replace": "      lines.pop();",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#369 M-V12 (claim 19): the kill timer is 80 s, not 8 s",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "const VIDEO_PROBE_KILL_MS = 8000;",
+    "replace": "const VIDEO_PROBE_KILL_MS = 80000;",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#369 M-V13 (claim 19): the kill timer resolves but never kills the probe (a leaked ffprobe per stalled tick)",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "      killIfSpawned(proc, 'SIGKILL');\r\n      finish(null);\r\n",
+    "replace": "      finish(null);\r\n",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#369 M-V14 (claim 19): a timed-out probe reports the partial packets it saw",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "      killIfSpawned(proc, 'SIGKILL');\r\n      finish(null);\r\n",
+    "replace": "      killIfSpawned(proc, 'SIGKILL');\r\n      finish(video > 0 ? true : null);\r\n",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#369 M-V15 (claim 19): spawn() throwing reads as flowing",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "      resolve(null);\r\n      return;\r\n    }\r\n\r\n    let video = 0;",
+    "replace": "      resolve(true);\r\n      return;\r\n    }\r\n\r\n    let video = 0;",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#369 M-V16 (claim 19): a spawn error event reads as video-missing",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "proc.on('error', () => finish(null)); // ffprobe missing / could not spawn",
+    "replace": "proc.on('error', () => finish('video-missing')); // ffprobe missing / could not spawn",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#369 CONTROL: a comment edit in the detector watchdog",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "// How often each detector leg is judged.",
+    "replace": "// How often each detector leg is judged. [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": ["detector-watchdog.test.js", "detector-watchdog-levers.test.js"],
+    "note": "Validates the harness for the #369 watchdog chunk. If this is ever KILLED, no other #369 result in the run means anything."
+  },
+  {
+    "label": "#369 CONTROL: a comment edit in the restart lever",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "// #369: the detector watchdog's restart lever for one tracked detector entry.",
+    "replace": "// #369: the detector watchdog's restart lever for one tracked detector entry. [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": ["detector-watchdog.test.js", "detector-watchdog-levers.test.js"],
+    "note": "Validates the harness for the #369 lever chunk."
+  },
+  {
+    "label": "#369 M01 (claim 1): the default clock is the UNBOUND performance.now (throws in Node 24)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "  now: () => performance.now(),",
+    "replace": "  now: performance.now,",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C1:"
+  },
+  {
+    "label": "#369 M02 (claim 2): the CAMERA watchdog is given a monotonic clock",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "  notifyCameraRecovered,\r\n  now: Date.now,\r\n",
+    "replace": "  notifyCameraRecovered,\r\n  now: () => performance.now(),\r\n",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C2:"
+  },
+  {
+    "label": "#369 M03a (claim 3): STALE is infinite (a dark leg is never judged stale)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "export const DETECTOR_STALE_MS = 60 * 1000;",
+    "replace": "export const DETECTOR_STALE_MS = Infinity;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C3a:"
+  },
+  {
+    "label": "#369 M03b (claim 3): STALE is 90 s instead of 60",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "export const DETECTOR_STALE_MS = 60 * 1000;",
+    "replace": "export const DETECTOR_STALE_MS = 90 * 1000;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C3a:"
+  },
+  {
+    "label": "#369 M03c (claim 3): the healthy boundary flips (<= becomes <)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "health.dataAgeMs <= DETECTOR_STALE_MS;",
+    "replace": "health.dataAgeMs < DETECTOR_STALE_MS;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C3b:"
+  },
+  {
+    "label": "#369 M03d (claim 3): the check interval VALUE is 30 s",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "export const DETECTOR_CHECK_INTERVAL_MS = 15 * 1000;",
+    "replace": "export const DETECTOR_CHECK_INTERVAL_MS = 30 * 1000;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C3c:"
+  },
+  {
+    "label": "#369 M03e (claim 3): the camera_events detail no longer names the detector",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "`${leg} detector getting no ${L.noun} (${dark}) - ${levers} by the detector watchdog`",
+    "replace": "'force-restarted by watchdog'",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C3a:"
+  },
+  {
+    "label": "#369 M04a (claim 4): no leg is ever healthy",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "  return health != null && health.dataAgeMs != null && health.dataAgeMs <= DETECTOR_STALE_MS;",
+    "replace": "  return false;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C4:"
+  },
+  {
+    "label": "#369 M04b (claims 4, 17): the sound leg stamps nothing on stdout (a silent room reads as dead)",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "      entry.lastDataMono = performance.now();\r\n",
+    "replace": "      // (mutant: no stamp)\r\n",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C17c"
+  },
+  {
+    "label": "#369 M05a (claim 5): STARTUP_GRACE is 60 s (the test time must be in (60, 90])",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "export const DETECTOR_STARTUP_GRACE_MS = 90 * 1000;",
+    "replace": "export const DETECTOR_STARTUP_GRACE_MS = 60 * 1000;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C5a:"
+  },
+  {
+    "label": "#369 M05b (claim 5): the grace boundary flips (> becomes >=)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "health?.spawnAgeMs > DETECTOR_STARTUP_GRACE_MS;",
+    "replace": "health?.spawnAgeMs >= DETECTOR_STARTUP_GRACE_MS;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C5a:"
+  },
+  {
+    "label": "#369 M05c (claim 5): a `waiting` entry (no process yet) is judged stalled",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    const entryStalled = health?.dataAgeMs != null || ",
+    "replace": "    const entryStalled = health?.waiting === true || health?.dataAgeMs != null || ",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C(5b|9a):"
+  },
+  {
+    "label": "#369 M05d (claims 5, 13): MIN_KILL_AGE is 5 s (the lever kills a 9 s old process)",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "export const MIN_KILL_AGE_MS = 10_000;",
+    "replace": "export const MIN_KILL_AGE_MS = 5_000;",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C13b"
+  },
+  {
+    "label": "#369 M05e (claim 5): MIN_KILL_AGE drops under the 10 s sound strike window (the ordering pin)",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "export const MIN_KILL_AGE_MS = 10_000;",
+    "replace": "export const MIN_KILL_AGE_MS = 9_000;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C5c:"
+  },
+  {
+    "label": "#369 M05f (claim 5): episode escalation also KILLS (a young replacement inside its grace)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    const kill = verdict.entryStalled; // (c) alone never kills: never a young replacement inside its grace",
+    "replace": "    const kill = verdict.entryStalled || verdict.episodeStalled;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C5d:"
+  },
+  {
+    "label": "#369 M05g (claims 5, 9): ONE generation without data is enough for episode escalation",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "      && st.gensWithoutData >= 2;",
+    "replace": "      && st.gensWithoutData >= 1;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C5e:"
+  },
+  {
+    "label": "#369 M06a (claim 6): the path-readiness gate before the probe is dropped",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (!confirmedReady(await deps.getPathStatus(path))) return;",
+    "replace": "    await deps.getPathStatus(path);",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C6a:"
+  },
+  {
+    "label": "#369 M06b (claim 6): the path-readiness recheck after the probe is dropped",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (!confirmedReady(status)) return;",
+    "replace": "    if (false) return;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C6b:"
+  },
+  {
+    "label": "#369 M06c (claim 6): any answer counts as ready (not-ready and UNKNOWN included)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "  const confirmedReady = (status) => status?.ready === true;",
+    "replace": "  const confirmedReady = (status) => status != null;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C6a:"
+  },
+  {
+    "label": "#369 M07a (claim 7): a probe that sees video packets VETOES the action",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (!kill && !requestKind) return;",
+    "replace": "    if ((!kill && !requestKind) || probe === true) return;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C7:"
+  },
+  {
+    "label": "#369 M07b (claim 7): a 'video-missing' probe VETOES the action",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (!kill && !requestKind) return;",
+    "replace": "    if ((!kill && !requestKind) || probe === 'video-missing') return;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C7:"
+  },
+  {
+    "label": "#369 M07c (claim 7): an inconclusive probe VETOES the action",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (!kill && !requestKind) return;",
+    "replace": "    if ((!kill && !requestKind) || probe == null) return;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C7:"
+  },
+  {
+    "label": "#369 M07d (claim 7): escalation to a publisher request waits for attempt 3",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    } else if (attempts >= 1 && deps.restartRequests) {",
+    "replace": "    } else if (attempts >= 2 && deps.restartRequests) {",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C7:"
+  },
+  {
+    "label": "#369 M07e (claim 7): the FIRST action already requests a publisher restart",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    } else if (attempts >= 1 && deps.restartRequests) {",
+    "replace": "    } else if (attempts >= 0 && deps.restartRequests) {",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C7:"
+  },
+  {
+    "label": "#369 M07f (claim 7): the sub and main publishers are swapped",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    (path === deps.subPathName(cam.mediamtx_path) ? 'sub' : path === cam.mediamtx_path ? 'main' : null);",
+    "replace": "    (path === deps.subPathName(cam.mediamtx_path) ? 'main' : path === cam.mediamtx_path ? 'sub' : null);",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C7"
+  },
+  {
+    "label": "#369 M08a (claim 8): a sound probe saying NO audio no longer skips (the DTX camera gets restarted)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "      if (probe === false) {",
+    "replace": "      if (probe === 'never') {",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C8b:"
+  },
+  {
+    "label": "#369 M08b (claim 8): an inconclusive sound probe blocks recovery for good",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "      if (probe !== true && !inconclusiveProbe.has(key)) {",
+    "replace": "      if (probe !== true) {",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C8c:"
+  },
+  {
+    "label": "#369 M08c (claim 8): the sound leg acts on the FIRST inconclusive probe",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "      if (probe !== true && !inconclusiveProbe.has(key)) {",
+    "replace": "      if (false) {",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C8c:"
+  },
+  {
+    "label": "#369 M08d (claim 8): the sound leg takes the motion ladder (requests, no probe gate)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (leg === 'sound') {",
+    "replace": "    if (leg === 'no-such-leg') {",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C8a:"
+  },
+  {
+    "label": "#369 M08e (claim 8): a healthy tick does not reset the inconclusive-probe memory",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "      inconclusiveProbe.delete(key);\r\n      if (!st) return;",
+    "replace": "      if (!st) return;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C8d:"
+  },
+  {
+    "label": "#369 M08f (claim 8): a `false` probe does not reset the inconclusive-probe memory",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "        inconclusiveProbe.delete(key);\r\n        return;",
+    "replace": "        return;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C8e:"
+  },
+  {
+    "label": "#369 M08g (claim 8): a THROWING probe reads as `false` (it would block the sound leg for good)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    } catch {\r\n      return null;\r\n    }",
+    "replace": "    } catch {\r\n      return false;\r\n    }",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C8f:"
+  },
+  {
+    "label": "#369 M08h (claim 8/10): the sound leg ignores the camera's sound switch",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "      wanted: (cam) => !!cam.detect_sound_enabled,",
+    "replace": "      wanted: () => true,",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C8f:"
+  },
+  {
+    "label": "#369 M09a (claim 9): the relaunch gap wipes the episode (escalation lost)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (st) {\r\n      st.flowingSinceMono = null;",
+    "replace": "    if (st && health == null) episodes.delete(key);\r\n    if (st) {\r\n      st.flowingSinceMono = null;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C9a:"
+  },
+  {
+    "label": "#369 M09b (claim 9): EPISODE_STALL is 30 minutes",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "export const DETECTOR_EPISODE_STALL_MS = 3 * 60 * 1000;",
+    "replace": "export const DETECTOR_EPISODE_STALL_MS = 30 * 60 * 1000;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C9b:"
+  },
+  {
+    "label": "#369 M09c (claim 9): the episode boundary flips (> becomes >=)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "      && now - st.lastActionMono > DETECTOR_EPISODE_STALL_MS",
+    "replace": "      && now - st.lastActionMono >= DETECTOR_EPISODE_STALL_MS",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C9b:"
+  },
+  {
+    "label": "#369 M09d (claim 9): new generations are never counted (a crash loop never escalates)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "        st.gensWithoutData += 1;",
+    "replace": "        st.gensWithoutData += 0;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C9b:"
+  },
+  {
+    "label": "#369 M09e (claim 9): a healthy tick since the action no longer blocks episode escalation",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "      && (st.lastHealthyMono == null || st.lastHealthyMono <= st.lastActionMono)",
+    "replace": "      && true",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C9c:"
+  },
+  {
+    "label": "#369 M09f (claim 9): an action does not reset the generation count",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    ep.gensWithoutData = 0;",
+    "replace": "    void ep;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C9d:"
+  },
+  {
+    "label": "#369 M09g (claim 9): the process an action judged is later counted as a replacement generation",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (fresh?.spawnedMono != null) ep.lastSeenSpawnMono = fresh.spawnedMono;",
+    "replace": "    // (mutant: judged process not remembered)",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C9e:"
+  },
+  {
+    "label": "#369 M08i (claims 8, 10): a deleted camera's inconclusive-probe memory is not pruned",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    for (const [key, camId] of inconclusiveProbe) if (!ids.has(camId)) inconclusiveProbe.delete(key);",
+    "replace": "    // (mutant: no probe-memory prune)",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C8g:"
+  },
+  {
+    "label": "#369 M10a (claim 10): the backoff floor is 30 s",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "export const DETECTOR_RESTART_FLOOR_MS = 60 * 1000;",
+    "replace": "export const DETECTOR_RESTART_FLOOR_MS = 30 * 1000;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C10a:"
+  },
+  {
+    "label": "#369 M10b (claim 10): the backoff doubles one step early",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "DETECTOR_RESTART_FLOOR_MS * 2 ** (attempts - 1), DETECTOR_RESTART_CAP_MS);",
+    "replace": "DETECTOR_RESTART_FLOOR_MS * 2 ** attempts, DETECTOR_RESTART_CAP_MS);",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C10a:"
+  },
+  {
+    "label": "#369 M10c (claim 10): the backoff cap is 60 minutes",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "export const DETECTOR_RESTART_CAP_MS = 30 * 60 * 1000;",
+    "replace": "export const DETECTOR_RESTART_CAP_MS = 60 * 60 * 1000;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C10a:"
+  },
+  {
+    "label": "#369 M10d (claim 10): the backoff has no cap",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "  return Math.min(DETECTOR_RESTART_FLOOR_MS * 2 ** (attempts - 1), DETECTOR_RESTART_CAP_MS);",
+    "replace": "  return DETECTOR_RESTART_FLOOR_MS * 2 ** (attempts - 1);",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C10a:"
+  },
+  {
+    "label": "#369 M10e (claim 10): the backoff gate boundary flips (< becomes <=)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (st && now - st.lastActionMono < detectorRestartFloorMs(st.attempts)) return;",
+    "replace": "    if (st && now - st.lastActionMono <= detectorRestartFloorMs(st.attempts)) return;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C10a:"
+  },
+  {
+    "label": "#369 M10f (claim 10): the backoff before any action is one floor, not zero",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "  if (attempts <= 0) return 0;",
+    "replace": "  if (attempts <= 0) return DETECTOR_RESTART_FLOOR_MS;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C10a:"
+  },
+  {
+    "label": "#369 M10g (claim 10): the recovery boundary flips (>= becomes >)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "      if (now - st.flowingSinceMono >= DETECTOR_RECOVERED_MS) episodes.delete(key);",
+    "replace": "      if (now - st.flowingSinceMono > DETECTOR_RECOVERED_MS) episodes.delete(key);",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C10c:"
+  },
+  {
+    "label": "#369 M10h (claim 10): RECOVERED is 10 minutes",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "export const DETECTOR_RECOVERED_MS = 5 * 60 * 1000;",
+    "replace": "export const DETECTOR_RECOVERED_MS = 10 * 60 * 1000;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C10c:"
+  },
+  {
+    "label": "#369 M10i (claim 10): a non-healthy tick does not restart the recovery clock",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "      st.flowingSinceMono = null;",
+    "replace": "      st.flowingSinceMono = st.flowingSinceMono;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C10d:"
+  },
+  {
+    "label": "#369 M10j (claim 10): a camera that left listCameras keeps its episode",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "        episodes.delete(key);\r\n        deps.restartRequests?.cancel(ep.camId);",
+    "replace": "        deps.restartRequests?.cancel(ep.camId);",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C10e: a leg removed"
+  },
+  {
+    "label": "#369 M10k (claim 10): a camera that left listCameras keeps its queued requests",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "        deps.restartRequests?.cancel(ep.camId);",
+    "replace": "        void 0;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C10e: a leg removed"
+  },
+  {
+    "label": "#369 M10l (claim 10): a disabled / unwanted leg keeps its episode",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "      forget(key);\r\n      if (leg === 'motion') deps.restartRequests?.cancel(cam.id);",
+    "replace": "      if (leg === 'motion') deps.restartRequests?.cancel(cam.id);",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C10e: a leg (disabled|no longer)"
+  },
+  {
+    "label": "#369 M10m (claims 10, 16): a disabled / unwanted motion leg keeps its queued requests",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "      if (leg === 'motion') deps.restartRequests?.cancel(cam.id);",
+    "replace": "      void 0;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C10e: a leg (disabled|no longer)"
+  },
+  {
+    "label": "#369 M10n (claim 10): a DISABLED camera's legs are still judged",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (cam.disabled || !L.wanted(cam)) {",
+    "replace": "    if (!L.wanted(cam)) {",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C10e: a leg disabled"
+  },
+  {
+    "label": "#369 M11a (claim 11): no health recheck after the probe (a recovered leg is killed)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (detectorLegHealthy(fresh)) return;",
+    "replace": "    if (false) return;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C11:"
+  },
+  {
+    "label": "#369 M11b (claim 11): the verdict after the probe uses the health read BEFORE it",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    const verdict = stallOf(leg, episodes.get(key), fresh, at);",
+    "replace": "    const verdict = stallOf(leg, episodes.get(key), health, now);",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C11c:"
+  },
+  {
+    "label": "#369 M11c (claim 11): a detector that moved path during the probe is acted on for the OLD path",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if ((fresh?.path ?? st?.path) !== path) return;",
+    "replace": "    void st;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C11b:"
+  },
+  {
+    "label": "#369 M12a (claim 12): the committed attempt is never stored (a throwing lever retries every tick)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    episodes.set(key, ep);",
+    "replace": "    void ep;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C12b:"
+  },
+  {
+    "label": "#369 M12b (claims 12, 17): an absent input-tap record is not labelled inconclusive",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "'no record (inconclusive)'",
+    "replace": "'none'",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C12c"
+  },
+  {
+    "label": "#369 M13a (claim 13): the lever ignores the spawn token (a kill lands on an unjudged generation)",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "  if (entry.spawnedMono !== expectSpawn) return false;",
+    "replace": "  // (mutant: no spawn token check)",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C13b"
+  },
+  {
+    "label": "#369 M13b (claim 13): the lever ignores data newer than it judged",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "  if (entry.lastDataMono != null && (expectLastData == null || entry.lastDataMono > expectLastData)) return false;",
+    "replace": "  // (mutant: no data token check)",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C13b"
+  },
+  {
+    "label": "#369 M13c (claim 13): the lever needs data a whole second newer before it refuses",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "entry.lastDataMono > expectLastData)) return false;",
+    "replace": "entry.lastDataMono > expectLastData + 1000)) return false;",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C13b"
+  },
+  {
+    "label": "#369 M13d (claim 13): the lever has no minimum age",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "  if (performance.now() - entry.spawnedMono < MIN_KILL_AGE_MS) return false;",
+    "replace": "  // (mutant: no minimum age)",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C13b"
+  },
+  {
+    "label": "#369 M13e (claim 13): a second kill can be armed while the first is in flight",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "  if (!entry || entry.watchdogKill) return false;",
+    "replace": "  if (!entry) return false;",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C13c"
+  },
+  {
+    "label": "#369 M13f (claim 13): no SIGKILL fallback (a wedged ffmpeg lives on)",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "  const force = setTimeout(() => killIfSpawned(proc, 'SIGKILL'), forceKillMs);",
+    "replace": "  const force = setTimeout(() => {}, forceKillMs);",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C13c"
+  },
+  {
+    "label": "#369 M13g (claim 13): the SIGKILL fallback is not cleared when the process obeys SIGTERM",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "  proc.once('exit', () => clearTimeout(force));",
+    "replace": "  void force;",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C13a"
+  },
+  {
+    "label": "#369 M13h (claim 13): the lever marks the entry stopped (no relaunch: the leg dies for good)",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "  entry.watchdogKill = true;\r\n  if (!killIfSpawned",
+    "replace": "  entry.watchdogKill = true;\r\n  entry.stopped = true;\r\n  if (!killIfSpawned",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C13a"
+  },
+  {
+    "label": "#369 M13i (claim 13): a kill that signalled nothing leaves the entry marked as killed",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "    entry.watchdogKill = false;\r\n    return false;",
+    "replace": "    return false;",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C13d"
+  },
+  {
+    "label": "#369 M13j (claim 13): a kill that signalled nothing claims it did",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "    entry.watchdogKill = false;\r\n    return false;",
+    "replace": "    entry.watchdogKill = false;\r\n    return true;",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C13d"
+  },
+  {
+    "label": "#369 M13k (claim 13): the motion lever waits a minute before SIGKILL",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "  return killStalledDetector(detectors.get(cameraId), expect, FORCE_KILL_TIMEOUT_MS);",
+    "replace": "  return killStalledDetector(detectors.get(cameraId), expect, 60_000);",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C13c"
+  },
+  {
+    "label": "#369 M14a (claim 14): a watchdog kill of the sound leg counts as a no-microphone strike",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "      if (entry.watchdogKill) {",
+    "replace": "      if (false) {",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C14a"
+  },
+  {
+    "label": "#369 M14b (claim 14): a watchdog kill leaves the strike count as it was",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "        noAudioStrikes = 0;\r\n      } else if (!sawReading",
+    "replace": "        noAudioStrikes += 0;\r\n      } else if (!sawReading",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C14c"
+  },
+  {
+    "label": "#369 M14c (claim 14): the strike skip also swallows ORDINARY quick crashes",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "      if (entry.watchdogKill) {",
+    "replace": "      if (entry.watchdogKill || !sawReading) {",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C14b"
+  },
+  {
+    "label": "#369 M15a (claim 15): the motion watchdog-kill line is logged as an ERROR",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        if (entry.watchdogKill) logger.info(",
+    "replace": "        if (entry.watchdogKill) logger.error(",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C15 motion"
+  },
+  {
+    "label": "#369 M15b (claim 15): the motion watchdog-kill line loses the phrase restart-cancellation counts",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "(no frames), restarting in 5s",
+    "replace": "(no frames), relaunching",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C15 motion"
+  },
+  {
+    "label": "#369 M15c (claim 15): the sound watchdog-kill line is logged as an ERROR",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "      if (entry.watchdogKill) logger.info(",
+    "replace": "      if (entry.watchdogKill) logger.error(",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C15 sound"
+  },
+  {
+    "label": "#369 M15d (claim 15): stopMotionDetector no longer cancels the relaunch a watchdog kill armed",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "  cancelPendingRestart(cameraId);",
+    "replace": "  void cameraId;",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C15 motion"
+  },
+  {
+    "label": "#369 M16a (claim 16): the TTL boundary flips (>= becomes >)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "  const expired = (request, at) => at - request.postedMono >= RESTART_REQUEST_TTL_MS;",
+    "replace": "  const expired = (request, at) => at - request.postedMono > RESTART_REQUEST_TTL_MS;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C16a:"
+  },
+  {
+    "label": "#369 M16b (claim 16): the TTL is 120 s",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "export const RESTART_REQUEST_TTL_MS = 60 * 1000;",
+    "replace": "export const RESTART_REQUEST_TTL_MS = 120 * 1000;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C16a:"
+  },
+  {
+    "label": "#369 M16c (claim 16): take() leaves the request in the mailbox (it re-fires)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "      requests.delete(key);\r\n      return expired(request, now()) ? null : request;",
+    "replace": "      return expired(request, now()) ? null : request;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C16(a|g):"
+  },
+  {
+    "label": "#369 M16d (claim 16): the consumer ignores that the motion leg is no longer wanted",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (!deps.motionLegWanted(cam)) return 'the motion leg is no longer wanted';",
+    "replace": "    // (mutant: wanted not checked)",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C16e: a request whose motion leg"
+  },
+  {
+    "label": "#369 M16e (claim 16): the consumer restarts a publisher whose detector has recovered",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (detectorLegHealthy(health)) return 'the motion detector is receiving frames again';",
+    "replace": "    // (mutant: recovery not checked)",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C16e: a request whose detector has genuinely"
+  },
+  {
+    "label": "#369 M16f (claim 16): v4's bug: a young replacement with no data yet counts as recovered",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (detectorLegHealthy(health)) return 'the motion detector is receiving frames again';",
+    "replace": "    if (detectorLegHealthy(health) || (health?.spawnedMono != null && health.dataAgeMs == null)) return 'the motion detector is receiving frames again';",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C16b:"
+  },
+  {
+    "label": "#369 M16g (claim 16, build note D5): the consumer restarts a publisher the detector no longer reads",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (health?.path != null && health.path !== path) return `the motion detector now reads ${health.path}`;",
+    "replace": "    // (mutant: path not checked)",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C16e: a request whose detector now reads"
+  },
+  {
+    "label": "#369 M16h (claim 16): the sub check takes its request AFTER the disabled early return (it survives the disable)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    const request = takeRequest(cam, 'sub');\r\n    if (cam.disabled || !deps.subConfigured(cam)) {\r\n      subNotReadySince.delete(cam.id);\r\n      return;\r\n    }",
+    "replace": "    if (cam.disabled || !deps.subConfigured(cam)) {\r\n      subNotReadySince.delete(cam.id);\r\n      return;\r\n    }\r\n    const request = takeRequest(cam, 'sub');",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C16e: a request disabled"
+  },
+  {
+    "label": "#369 M16i (claim 16): the main check takes the wrong kind",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    const request = takeRequest(cam, 'main');",
+    "replace": "    const request = takeRequest(cam, 'sub');",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C16d:"
+  },
+  {
+    "label": "#369 M16j (claim 16): the sub request is judged against the MAIN path",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "honourRestartRequest(cam, 'sub', request, deps.subPathName(cam.mediamtx_path),",
+    "replace": "honourRestartRequest(cam, 'sub', request, cam.mediamtx_path,",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C16b:"
+  },
+  {
+    "label": "#369 M16k (claim 16): the consumer's event no longer names the detector watchdog",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "`${what} restarted at the detector watchdog's request (motion detector getting no frames)`",
+    "replace": "'sub-stream force-restarted by watchdog (unready 30s+)'",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C16b:"
+  },
+  {
+    "label": "#369 M16l (claim 16): cancel() leaves a MAIN request behind",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "      requests.delete(keyOf(camId, 'main'));",
+    "replace": "      // (mutant: main not cancelled)",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C16a:"
+  },
+  {
+    "label": "#369 M16m (claim 16): post() no longer sweeps expired requests (a deleted camera's lingers)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "      for (const [key, request] of requests) if (expired(request, at)) requests.delete(key);",
+    "replace": "      // (mutant: no sweep)",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C16a:"
+  },
+  {
+    "label": "#369 M16n (claim 16): a 5 s TTL: the two-watchdog simulation alone must see the request lost",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "export const RESTART_REQUEST_TTL_MS = 60 * 1000;",
+    "replace": "export const RESTART_REQUEST_TTL_MS = 5 * 1000;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C16i"
+  },
+  {
+    "label": "#369 M17a (claim 17): the motion stamp reads the WALL clock",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "      entry.lastDataMono = performance.now();",
+    "replace": "      entry.lastDataMono = Date.now();",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C17a"
+  },
+  {
+    "label": "#369 M17b (claim 17): the motion stamp is the observation clock's receipt (rx.mono)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "      const rx = obs.receipt();\r\n      buf = buf.length",
+    "replace": "      const rx = obs.receipt();\r\n      entry.lastDataMono = rx.mono;\r\n      buf = buf.length",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C17a"
+  },
+  {
+    "label": "#369 M17c (claim 17): a stderr tap record stamps the DATA freshness",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        if (rec?.tap === 'in') entry.lastInputRecordMono = performance.now();",
+    "replace": "        entry.lastDataMono = performance.now();\r\n        if (rec?.tap === 'in') entry.lastInputRecordMono = performance.now();",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C17a"
+  },
+  {
+    "label": "#369 M17d (claim 17): the motion input stamp reads the OUTPUT tap",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "if (rec?.tap === 'in') entry.lastInputRecordMono",
+    "replace": "if (rec?.tap === 'out') entry.lastInputRecordMono",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C17b"
+  },
+  {
+    "label": "#369 M17e (claim 17): any motion tap record sets the input stamp",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "if (rec?.tap === 'in') entry.lastInputRecordMono",
+    "replace": "if (rec) entry.lastInputRecordMono",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C17b"
+  },
+  {
+    "label": "#369 M17f (claim 17): the sound input stamp copies motion's `in` tap (never matches)",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "if (rec?.tap === 'audio') entry.lastInputRecordMono",
+    "replace": "if (rec?.tap === 'in') entry.lastInputRecordMono",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C17c"
+  },
+  {
+    "label": "#369 M17g (claim 17): the sound stamp reads the WALL clock",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "      entry.lastDataMono = performance.now();",
+    "replace": "      entry.lastDataMono = Date.now();",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C17c"
+  },
+  {
+    "label": "#369 M17h (claim 17): the data AGE is the raw stamp",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "    dataAgeMs: entry.lastDataMono == null ? null : now - entry.lastDataMono,",
+    "replace": "    dataAgeMs: entry.lastDataMono == null ? null : entry.lastDataMono,",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C17a"
+  },
+  {
+    "label": "#369 M17i (claim 17): the input-record AGE is the raw stamp",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "    inputRecordAgeMs: entry.lastInputRecordMono == null ? null : now - entry.lastInputRecordMono,",
+    "replace": "    inputRecordAgeMs: entry.lastInputRecordMono == null ? null : entry.lastInputRecordMono,",
+    "expect": "killed",
+    "tests": ["detector-watchdog-levers.test.js"],
+    "namePattern": "^C17b"
+  },
+  {
+    "label": "#369 M18a (claim 18): index.js hands safeInterval the detector watchdog OBJECT",
+    "file": "backend/src/index.js",
+    "find": "createDetectorWatchdog({ restartRequests }).tick);",
+    "replace": "createDetectorWatchdog({ restartRequests }));",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C18b"
+  },
+  {
+    "label": "#369 M18b (claim 18): the detector watchdog gets a mailbox of its own (requests never reach the consumer)",
+    "file": "backend/src/index.js",
+    "find": "createDetectorWatchdog({ restartRequests }).tick);",
+    "replace": "createDetectorWatchdog({ restartRequests: createRestartRequests() }).tick);",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C18b"
+  },
+  {
+    "label": "#369 M18c (claim 18): the camera watchdog is built without the mailbox (nothing consumes requests)",
+    "file": "backend/src/index.js",
+    "find": "createCameraWatchdog({ restartRequests }).tick);",
+    "replace": "createCameraWatchdog().tick);",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C18b"
+  },
+  {
+    "label": "#369 M18d (claim 18): index.js schedules the detector watchdog on another interval constant",
+    "file": "backend/src/index.js",
+    "find": "safeInterval('detector-watchdog', DETECTOR_CHECK_INTERVAL_MS,",
+    "replace": "safeInterval('detector-watchdog', WATCHDOG_INTERVAL_MS,",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C18b"
+  },
+  {
+    "label": "#369 M18e (claim 18): a swapped default binding (sound health reads motion)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "  getSoundDetectorHealth,\r\n  restartMotionDetector,",
+    "replace": "  getSoundDetectorHealth: getMotionDetectorHealth,\r\n  restartMotionDetector,",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C18a"
+  },
+  {
+    "label": "#369 M18f (claim 18): a swapped consumer binding (the consumer reads sound health)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "  getMotionDetectorHealth,\r\n  motionLegWanted,\r\n});",
+    "replace": "  getMotionDetectorHealth: getSoundDetectorHealth,\r\n  motionLegWanted,\r\n});",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C18a"
+  },
+  {
+    "label": "#369 M20a (claim 20): the detector watchdog's deps carry startSubStream",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "  recordCameraEvent,\r\n  now: () => performance.now(),",
+    "replace": "  recordCameraEvent,\r\n  startSubStream,\r\n  now: () => performance.now(),",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C20"
+  },
+  {
+    "label": "#369 M20b (claim 20): the detector watchdog restarts the sub publisher itself",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (requestKind) deps.restartRequests.post(cam.id, requestKind, `${leg} detector on ${path}: ${dark}`);",
+    "replace": "    if (requestKind) startSubStream(cam);",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C20"
+  },
+  {
+    "label": "#369 M20c (claim 20, review fix round): a module-level helper ABOVE the detector watchdog's section names a publisher starter",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "export const DEFAULT_RESTART_REQUEST_CONSUMER_DEPS = Object.freeze({\r\n  getMotionDetectorHealth,\r\n  motionLegWanted,\r\n});",
+    "replace": "export const DEFAULT_RESTART_REQUEST_CONSUMER_DEPS = Object.freeze({\r\n  getMotionDetectorHealth,\r\n  motionLegWanted,\r\n});\r\nfunction kickPublisher(cam) { return startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name); }",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C20",
+    "note": "The marker-to-EOF C20 this replaced passed this (and a variant where the detector watchdog calls the helper): verified by planting it, 2026-09-28."
+  },
+  {
+    "label": "#369 M20d (claim 20, review fix round): the detector watchdog's deps spread the AUDIO watchdog's bindings (startTranscoder rides in)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "  const deps = { ...DEFAULT_DETECTOR_WATCHDOG_DEPS, restartRequests: null, ...overrides };",
+    "replace": "  const deps = { ...DEFAULT_AUDIO_WATCHDOG_DEPS, ...DEFAULT_DETECTOR_WATCHDOG_DEPS, restartRequests: null, ...overrides };",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C20",
+    "note": "No publisher NAME appears in the detector watchdog's code and DEFAULT_DETECTOR_WATCHDOG_DEPS is unchanged, so only C20's reachability walk can see it."
+  },
+  {
+    "label": "#369 M16o (claim 16, review fix round): a MAIN request survives the disabled early return (a lazy take)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "      offlineAlerted.delete(cam.id);\r\n      return;",
+    "replace": "      offlineAlerted.delete(cam.id);\r\n      if (request) deps.restartRequests.post(cam.id, 'main', request.reason); // (mutant: survives the disable)\r\n      return;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C16j: a MAIN request disabled",
+    "note": "M16o-r each make a main request outlive ONE early return, which is what moving checkMain's take into its ready branch does to all four at once (a two-place edit this harness cannot express). That lazy take passed every test before C16j/C16k existed: verified by hand, 2026-09-28."
+  },
+  {
+    "label": "#369 M16p (claim 16, review fix round): a MAIN request survives a SKIPPED check (a lazy take)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (ctx.skipped) return;\r\n    if (unknown) {",
+    "replace": "    if (ctx.skipped) { if (request) deps.restartRequests.post(cam.id, 'main', request.reason); return; } // (mutant)\r\n    if (unknown) {",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C16k:"
+  },
+  {
+    "label": "#369 M16q (claim 16, review fix round): a MAIN request survives an UNKNOWN reading (a lazy take)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "      notReadySince.delete(cam.id);\r\n      return;\r\n    }\r\n    if (status.ready) {",
+    "replace": "      notReadySince.delete(cam.id);\r\n      if (request) deps.restartRequests.post(cam.id, 'main', request.reason); // (mutant: survives an unknown)\r\n      return;\r\n    }\r\n    if (status.ready) {",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C16j: a MAIN request whose path status is UNKNOWN"
+  },
+  {
+    "label": "#369 M16r (claim 16, review fix round): a MAIN request survives a NOT-READY reading (a lazy take)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    const since = notReadySince.get(cam.id);",
+    "replace": "    if (request) deps.restartRequests.post(cam.id, 'main', request.reason); // (mutant: survives a not-ready reading)\r\n    const since = notReadySince.get(cam.id);",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C16j: a MAIN request whose path is not ready"
+  },
+  {
+    "label": "#369 M16s (claim 16, review fix round): after a path flip, the next escalation asks for the publisher of the path the episode REMEMBERS, not the one the detector now reads",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "      requestKind = publisherOf(cam, path);",
+    "replace": "      requestKind = publisherOf(cam, episodes.get(key)?.path ?? path);",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C16l:",
+    "note": "Verified 2026-09-28 by running all of detector-watchdog.test.js with it applied: C16l is the ONLY test that fails."
+  },
+  {
+    "label": "#369 M09h (claim 9, review claim 7): crash-loop escalation also KILLS while the current reading is null or waiting",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    const kill = verdict.entryStalled; // (c) alone never kills: never a young replacement inside its grace",
+    "replace": "    const kill = verdict.entryStalled || verdict.episodeStalled;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C9f:",
+    "note": "Same edit as M05f, scored against the null/waiting case instead of the young replacement. With a null reading the kill throws on the missing spawn token (no kill:motion is recorded), so C9f's no-guard-line assertion is what kills that variant."
+  },
+  {
+    "label": "#369 M09i (claim 9, review claim 7): a null or waiting current reading SUPPRESSES crash-loop escalation (the 'fix' review claim 7 asked about)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (!stallOf(leg, st, health, now)) return;",
+    "replace": "    if (health == null || health.waiting || !stallOf(leg, st, health, now)) return;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C9f:",
+    "note": "C5d and C9b escalate on a tick where a young replacement is the current entry, so neither can see this. Verified 2026-09-28 by running both detector-watchdog files with it applied: only C9f (both cases) and C9g fail."
+  },
+  {
+    "label": "#369 M09j (claim 9, review claim 7): the E5 re-read no longer aborts a crash-loop escalation whose leg recovered during the probe",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (detectorLegHealthy(fresh)) return;",
+    "replace": "    // (mutant: no recovery re-check after the probe)",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C9g:"
+  },
+  {
+    "label": "#369 M-A01 (review fix round): the audio probe's 6 s timeout reads null with no packets, so the AUDIO watchdog never restarts a hung-audio camera",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "    const timer = setTimeout(() => finish(count > 0 ? true : false), PROBE_TIMEOUT_MS);",
+    "replace": "    const timer = setTimeout(() => finish(count > 0 ? true : null), PROBE_TIMEOUT_MS);",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"],
+    "namePattern": "^A5:",
+    "note": "This is the change the #369 review round proposed (Fix 1), held back because it silences the audio watchdog. If it is ever made DELIBERATELY, delete this entry and flip A5 (and A3) in the same commit."
   }
 ]

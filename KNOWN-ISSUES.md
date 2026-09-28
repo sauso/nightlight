@@ -304,6 +304,96 @@ observed it.
 **What to do:** nothing — it is diagnostic. If a camera's line shows a steady non-zero `unknown`, `clamps`
 or `warn`, or `side=unavailable`, include the line when reporting a detection problem.
 
+## A detector was restarted: `[detector-watchdog]` in the log and in Camera history
+
+**What you see:** a `restart` in **Settings → Logs → Camera history** reading *motion detector getting no
+frames (no data for 75s) - motion detector restarted by the detector watchdog* (or the same for *sound … no
+audio data*), and in the log one line like
+
+```
+[WARN] [detector-watchdog] "Nursery Cam" motion on cam_…-sub: no data for 75s; path ready, 2 reader(s), tracks H264+Opus; probe: video packets arriving (packets, not frames); input tap: last record 74s ago; attempt 1; lever: detector
+```
+
+followed by `[INFO] [detect:…] stopped by the detector watchdog (no frames), restarting in 5s`. If it happens
+again soon after, a later line says `lever: detector + sub publisher` (or `main publisher`), and the camera
+watchdog logs `restarting its sub-stream (Low) at the detector watchdog's request`.
+
+**Why:** each camera's motion and sound detectors are small ffmpeg processes reading the camera's stream.
+One can stay alive and connected while receiving nothing at all. That happened on a real install for 4h45
+and 8h43 in one month, silently, until the camera's daily reboot: the stream looked ready, audio kept
+flowing, and nothing else was watching the detector itself (issue #369). The detector watchdog checks every
+15 seconds whether each running detector's ffmpeg has written anything in the last minute. **It watches
+bytes, not movement or sound**: a still, silent room still delivers frames and (silent) audio samples, so a
+quiet night never trips it. When one has gone dark, it:
+
+1. restarts **the detector** (it relaunches 5 s later, re-choosing the Low stream if that is available);
+2. **motion only:** if that detector goes dark again, also asks the camera watchdog to restart **the stream
+   it reads**: the Low sub-stream, or the main stream when the detector reads that (a camera with no
+   sub-stream, or a detector that fell back to the main stream). **A main-stream restart briefly interrupts
+   live view.** A sound detector is only ever restarted itself: its stream's audio is the audio watchdog's.
+   The request is only acted on if the camera is still enabled, detection is still on, the stream is ready
+   and the detector is still getting nothing, and it expires after 60 seconds. It is also dropped if the
+   detector relaunched onto the other stream before the camera watchdog's next 15-second check reached it; if
+   that stream fails too, the request for it comes at the next backoff step in point 3 (2 minutes after a
+   second attempt, doubling to 30), not when the dropped one would have expired;
+3. backs off between attempts: 1, 2, 4, 8, 16, then every 30 minutes, until the detector has been healthy
+   for 5 unbroken minutes.
+
+A detector that has not been started yet, is waiting for its stream to come up, or is between relaunches
+is left alone, and a new one gets 90 seconds to deliver its first frame. A stream that is not ready (the
+camera rebooting, MediaMTX down) is the camera watchdog's job, not this one's.
+
+| Setting (fixed, not configurable) | Default | What it means |
+|---|---|---|
+| Check interval | 15 s | How often each detector is looked at. |
+| Stale after | 60 s | No output for longer than this = dark. A healthy detector writes ~5 times a second. |
+| Startup grace | 90 s | How long a new detector gets for its first output. |
+| Backoff | 1 min doubling, capped at 30 min | Between two actions on the same detector. |
+| Recovered after | 5 min | Unbroken health that forgets the attempt count. |
+| Crash-loop escalation | 3 min | Stream restart asked for when two or more relaunched detectors in a row delivered nothing, with no healthy moment since the last action (the relaunch keeps dying before anyone can judge it). |
+| Request expiry | 60 s | A stream-restart request not acted on by then is dropped. |
+| Worst case to recover | ~90-105 s | From the last frame to fresh frames, for a stuck detector on the Low stream. Up to ~150 s if it was on the main stream, because a relaunched motion detector waits up to 45 s for the Low stream first. A stuck restream takes ~5-6 minutes (detector first, then the stream). |
+
+**Differs from the neighbouring watchdogs**, which are easy to confuse with it in Camera history: the
+**camera watchdog** restarts a stream MediaMTX reports as *not ready* for 30 s; the **audio watchdog**
+restarts a camera whose *main stream's audio* stopped for two checks; the **detector watchdog** restarts a
+*detector* that stopped receiving while its stream looks fine. Only the detector watchdog's rows say
+"detector".
+
+**What a restart resets:** on motion, the alert cooldown (so a motion alert can fire again sooner than the
+cooldown after a restart: the existing behaviour of every detector relaunch, issue #454), a motion run
+that was building up to an alert, and a pending bed-exit or bed-entry candidate. The motion detector's
+belief about whether the child is in bed, and the sound detector's learned ambient level and cooldown, are
+kept. A restarted motion detector also returns to the Low stream if it had fallen back to the main one
+after a blip (#500); this does not help a detector that never goes dark.
+
+**Limits, stated rather than hidden:**
+- **The minutes before the restart are still lost.** The sleep analysis currently counts the dark minutes as
+  observed (issue #508, not fixed here), so a restart shortens a hole in the night; it does not fill it.
+- **The numbers were chosen, not measured on many rooms.** A camera that delivers less than about one frame
+  a minute would be restarted at the backoff cadence (no supported camera does). Nothing assumes a frame
+  rate or 300 frames a minute.
+- **Sound needs audio on the stream to be restarted.** Before restarting a sound detector, the watchdog
+  checks the main stream for audio. A camera that sends no audio at all in a quiet room (G.711 voice
+  activity detection, Opus DTX) is left alone, which is right for it. If the check itself fails twice in a
+  row the detector is restarted anyway, so a broken check cannot switch this recovery off. A DTX camera that
+  sends occasional comfort-noise packets can still pass the check: at most one pointless restart per 30
+  minutes.
+- **A detector that delivers a little in every minute but never five healthy minutes in a row** keeps its
+  attempt count, so it settles at one restart every 30 minutes (one Camera history row each, out of 2,000
+  shared by all cameras) instead of churning.
+- **The stream check in the log line is a diagnosis, never a decision.** "Video packets arriving" means
+  packets reached the stream, not that the detector could decode them, and "no video" cannot be proven by a
+  short probe. Nothing is skipped or done because of what it says.
+- **A stream restart that is already running when a camera is disabled can still finish**: the same, older
+  limit as every other automatic restart (the camera watchdogs, reconcile and the camera settings routes do
+  not yet take turns). The detector watchdog never STARTS one after a camera is disabled, detection is
+  switched off or a sleep-sampling window closes: all three drop its requests.
+
+**What to do:** nothing, it is self-healing. If one camera shows these rows regularly, include the
+`[detector-watchdog]` lines when reporting it: the `path`, `probe` and `input tap` fields say where the
+stream stopped (the detector's side, or the stream it reads), which nothing could tell before.
+
 ---
 
 ## Confirmed bugs (fix pending)

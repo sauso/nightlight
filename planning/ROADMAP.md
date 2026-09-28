@@ -872,8 +872,12 @@ no clock. Every threshold in it came from ONE house's runs (Stage 1: night, over
   calibration basis of every motion threshold, so it needs an A/B on real nights.
 - **#447** activity buckets by observation time instead of flush time; must name sampler or analysis
   coverage and accept FINALIZE_MS (5 s) of latency.
-- **#452** confirmation across an outage (read `restarts`/`gaps`), **#448** the wake watcher, **#369**
-  stale-sampler restarts.
+- **#452** confirmation across an outage (read `restarts`/`gaps`), **#448** the wake watcher.
+- ~~**#369** stale-sampler restarts~~ — built on its own branch (`fix/369-detector-watchdog`, plan v5,
+  2026-09-27) WITHOUT the observation clock, so the #373 gate below does not apply to it: the detector
+  watchdog (`lib/cameraWatchdogs.js`) reads a plain `performance.now()` stamp taken on each stdout `data`
+  event, not `rx.mono` or any `[obs]` output, and it moves no calibrated number (no detection threshold,
+  no stored sleep figure). It only restarts processes. KNOWN-ISSUES.md "A detector was restarted".
 
 **Owed before those, from the #373 plan's Verification section (not done in the build):**
 - the soak-box runs with an image built from the branch: 3 s and 12 s DROPs, a 3 s HOLD and a 3 s Node

@@ -14,7 +14,7 @@ import {
 } from './bedTransitionTracker.js';
 import { childSamplingActiveNow } from './sleepAnalysis.js';
 import { isDemoModeActive } from '../middleware/demoMode.js';
-import { killIfSpawned } from './processGuards.js';
+import { killIfSpawned, detectorHealthOf, killStalledDetector } from './processGuards.js';
 import { buildMotionTaps, createStderrRouter, SIDE_CHANNEL_LOG_ARGS } from './ffmpegSideChannel.js';
 import { openObservation } from './observationClock.js';
 
@@ -28,7 +28,8 @@ import { openObservation } from './observationClock.js';
 // detection_event, at most once per cooldown. This never touches the WebRTC/HLS pipeline —
 // it's a separate, low-cost sampler, mirroring transcoder.js's process supervision.
 
-// camera_id -> { proc, stopped }
+// camera_id -> { proc, stopped, path, spawnedMono, lastDataMono, lastInputRecordMono, watchdogKill }
+// The four #369 fields are the detector watchdog's only view of this leg (getMotionDetectorHealth below).
 const detectors = new Map();
 
 // Cameras with a relaunch SCHEDULED but no process yet — the 5s gap between an ffmpeg exit and the
@@ -178,6 +179,20 @@ export function isDetecting(cameraId) {
   return detectors.has(cameraId);
 }
 
+// #369: this leg's freshness for the detector watchdog, as AGES (see detectorHealthOf in processGuards.js for
+// the shape). isDetecting() alone cannot see the failure #369 is about: an ffmpeg that is alive, connected and
+// delivering nothing keeps its entry, so reconcile skipped it as healthy for 285 and 523 minutes on staging.
+// Test the result with `!= null`, never truthiness.
+export function getMotionDetectorHealth(cameraId) {
+  return detectorHealthOf(detectors.get(cameraId));
+}
+
+// #369: the watchdog's L1 lever. `expect` = the { spawnedMono, lastDataMono } tokens from the health it judged,
+// as { expectSpawn, expectLastData }. Restarts through the exit handler below; see killStalledDetector.
+export function restartMotionDetector(cameraId, expect) {
+  return killStalledDetector(detectors.get(cameraId), expect, FORCE_KILL_TIMEOUT_MS);
+}
+
 // Does this camera run the frame-diff leg to ALERT? Only a 'framediff'-source camera with motion
 // detection on. A camera on the 'mqtt' source detects motion itself (mqttClient.js) and one on the
 // 'onvif' source subscribes to camera events (onvifMotion.js) — both alert elsewhere, so this leg
@@ -257,6 +272,12 @@ export async function startMotionDetector(camera) {
     ];
     const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     entry.proc = proc;
+    // #369: freshness stamps for the detector watchdog, all from performance.now() (monotonic: a wall-clock
+    // step must never make a live leg look stale or a dead one fresh). Per ENTRY, i.e. per ffmpeg process, so a
+    // replacement starts with no data and its own spawn time, and the watchdog can tell generations apart. (Every
+    // launch builds a fresh entry, so lastDataMono/lastInputRecordMono start unset: "nothing yet".)
+    entry.path = path;
+    entry.spawnedMono = performance.now();
     // One observation GENERATION per ffmpeg process (#373, C3): the stdout and stderr handlers below close
     // over this launch's own handle, so a late 'close' or late bytes from an old process can never touch a
     // newer one. The handle is fail-safe: whatever the clock does, it cannot throw into this file.
@@ -435,6 +456,12 @@ export async function startMotionDetector(camera) {
     }
 
     proc.stdout.on('data', (chunk) => {
+      // #369: the leg's freshness signal is "a stdout byte arrived", read straight from performance.now(), once
+      // per event. Deliberately NOT rx.mono: the observation clock can be absent, throwing or test-planted
+      // (openObservation is fail-safe by design), and a watchdog must not go blind when it does. Bytes, not
+      // activity: a still room still delivers frames, so a quiet night never looks stale. Placed before the
+      // receipt so the #373 one-receipt-per-event contract (R1-F8) and its lines are untouched.
+      entry.lastDataMono = performance.now();
       // #373: the receipt time, read ONCE per 'data' event, so a frame split across two reads carries the
       // completing read's time. Two clock reads per event; nothing else of the observation runs before a
       // frame's own decision.
@@ -457,7 +484,14 @@ export async function startMotionDetector(camera) {
     const router = createStderrRouter({
       taps: TAPS.taps,
       forward: (line) => logger.raw(`detect:${path}`, line),
-      onRecord: obs.onRecord,
+      // #369, DIAGNOSIS ONLY: when the INPUT tap (`in`, before fps/scale) last printed a record, so the watchdog's
+      // log line can say whether decoded input frames were still arriving while stdout was silent. Its absence
+      // proves nothing (Astra R2): a SIGSTOPped or decoder-stalled ffmpeg prints no records either, so the
+      // watchdog reports a missing stamp as inconclusive and never acts on it.
+      onRecord: (rec) => {
+        if (rec?.tap === 'in') entry.lastInputRecordMono = performance.now();
+        obs.onRecord(rec);
+      },
       onConfig: obs.onConfig,
       onParseError: obs.onParseError,
     });
@@ -478,7 +512,11 @@ export async function startMotionDetector(camera) {
       if (!entry.stopped && wasTracked) {
         // code 0 = the upstream stream ended (a camera/transcoder blip), not an error — just
         // reconnect quietly, re-picking sub vs main. Only a real failure is logged loudly.
-        if (code === 0) logger.raw(`detect:${path}`, 'stream ended, reconnecting');
+        // #369: a kill by the detector watchdog is a recovery, not a failure, so INFO; it already logged its own
+        // diagnosis line. The phrase "restarting in 5s" is kept on purpose: restart-cancellation.test.js counts
+        // relaunches by it, and a watchdog kill goes through this very relaunch.
+        if (entry.watchdogKill) logger.info(`[detect:${path}] stopped by the detector watchdog (no frames), restarting in 5s`);
+        else if (code === 0) logger.raw(`detect:${path}`, 'stream ended, reconnecting');
         else logger.error(`[detect:${path}] exited (code ${code}), restarting in 5s`);
         pendingRestarts.set(camera.id, setTimeout(() => {
           pendingRestarts.delete(camera.id);

@@ -47,6 +47,22 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   unrecognised output is capped with a one-line summary. Every field is explained in
   [KNOWN-ISSUES.md](KNOWN-ISSUES.md) under "The `[obs]` line".
 
+### Fixed
+- **A motion or sound detector that stops receiving anything is now restarted, instead of staying silent
+  for hours.** A detector's ffmpeg could stay alive and connected while getting no frames at all, and
+  nothing noticed: on one install a motion detector got nothing for 4h45 and 8h43 in the same month, both
+  times ended only by the camera's daily reboot, and the night's sleep timeline had a hole in it (issue
+  #369). A new detector watchdog checks every 15 seconds whether each running detector has written
+  anything in the last minute (a still, silent room still counts as writing, so a quiet night never
+  triggers it). A dark detector is restarted. If a MOTION detector goes dark again, the Low sub-stream it
+  reads is restarted too, or the main stream when it reads that, which briefly interrupts live view (a
+  sound detector is only ever restarted itself: its stream is the audio watchdog's job). Attempts back
+  off from 1 to 30 minutes. A new detector gets 90 seconds to start delivering. Each restart is one row
+  in **Camera history** saying "detector", plus one log line that records where the stream stopped. None
+  of it is configurable. The minutes before a restart are still lost from that night's sleep data (issue
+  #508), and a restart resets the motion alert cooldown, as every detector relaunch already did (#454).
+  Details, defaults and limits: [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "A detector was restarted".
+
 ## [0.33.2] - 2026-09-25
 
 ### Changed
