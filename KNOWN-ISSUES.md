@@ -234,16 +234,18 @@ and, occasionally, `[obs] … WALL-STEP +900ms (host clock stepped; not a gap)` 
 That copy is not a perfect record of time: when a camera stalls, ffmpeg repeats the last picture to keep
 five frames a second going, and Node can receive a burst of samples late. Since issue #373, each detector
 also reads ffmpeg's own per-frame timestamps and works out, for every sample, how it was produced and
-when it was really observed. **Nothing uses this yet.** Motion and sound decisions, alerts, the sleep
-timeline and every stored number are exactly as before; the line only reports. Later changes (listed in
-the roadmap) will each switch one feature over to it, with their own before/after comparison.
+when it was really observed. **One thing uses it so far:** since issue #493, a motion frame it *proves*
+was a repeat is left out of the sleep timeline's per-minute frame count and average movement (see the next
+section). Motion and sound decisions, alerts, bed transitions, the sleep numbers and every stored peak are
+exactly as before. Later changes (listed in the roadmap) will each switch one more feature over to it, with
+their own before/after comparison.
 
 | Field | Meaning |
 |---|---|
 | `gen` / `path` | The detector's current ffmpeg run (a counter that only goes up while the app runs) and the stream it reads (`-sub` = the low-resolution stream). |
 | `samples` | Motion frames or sound windows (0.2 s each) finalised in the last 15 minutes. |
 | `real` | Motion: a genuinely new picture from the camera. |
-| `fpsClone` | Motion: ffmpeg repeated an older picture because nothing new arrived in time (a camera stall). These still reach the motion detector, which sees them as "no movement". |
+| `fpsClone` | Motion: ffmpeg repeated an older picture because nothing new arrived in time (a camera stall). These still reach the motion detector, which sees them as "no movement". Since #493 they are left out of the stored per-minute frame count and averages (next section). |
 | `cfrDup` / `cfrDrop` | Motion: a picture the output stage wrote twice / skipped. Inside a run of identical pictures only the net count is known. Nothing is counted across a lost timestamp line, or for a run counted in `runsCapped`: there the true count is unknown. |
 | `runsCapped` | Motion: runs of identical pictures closed early because more than 64 were open at once, which only happens while pictures are not being matched to their timestamp lines. Their duplicates/drops are left out of `cfrDup`/`cfrDrop` rather than guessed. Normally 0. |
 | `observed` / `silent` | Sound: windows placed on the audio's own clock; `silent` of them were digital silence (sampled, but not analysed). |
@@ -303,6 +305,49 @@ observed it.
 
 **What to do:** nothing — it is diagnostic. If a camera's line shows a steady non-zero `unknown`, `clamps`
 or `warn`, or `side=unavailable`, include the line when reporting a detection problem.
+
+## A stalled camera's repeated pictures are left out of the per-minute motion count
+
+**What you see:** nothing in the app. For each camera and minute, the sleep timeline (`activity_samples`,
+also returned by `GET /api/cameras/:id/activity-history`) stores how many motion frames were analysed
+(`motion_frames`) and the average movement in and outside the bed (`motion_level`, `motion_out_level`).
+Since issue #493, those three leave out every frame the `[obs]` measurement above *proved* was a repeat: an
+`fpsClone`, or a `cfrDup` it could label one by one. No screen shows these three numbers yet. The fix is
+groundwork for later sleep-analysis work (#447).
+
+**Why:** when a camera stalls, ffmpeg keeps five frames a second going by repeating the last picture, and
+the motion detector reads each repeat as a perfectly still room. A 3-second stall makes about 15 of them. A
+camera that is slower than 5 fps makes some every second (2 in every 5 frames at 3 fps). Counting them made
+a minute look more closely watched, and stiller on average, than it really was. Leaving a repeat out can
+only raise a minute's average, never lower it, because a repeat's movement is always exactly zero.
+
+**Differs from the neighbouring numbers** — this is the part that is easy to get wrong:
+
+| Stored or decided | Proven repeats |
+|---|---|
+| `motion_frames`, `motion_level`, `motion_out_level` | Left out |
+| `motion_peak`, `motion_out_peak` (what every sleep threshold reads) | Unchanged. A peak is the minute's largest movement, and a repeat never moves anything |
+| Whether a minute is stored at all, and the live wake check | Unchanged: every analysed frame still counts, as before |
+| Motion alerts, in/out-of-bed transitions | Unchanged: decided the moment a frame arrives, before `[obs]` can judge it (issue #452) |
+
+A minute in which *every* analysed frame was a proven repeat is still stored: `motion_frames` 0 and an
+empty `motion_level`, beside a `motion_peak` of 0, exactly as it was stored before.
+
+**Limits, stated rather than hidden:**
+- **Only proven repeats are left out, never `unknown` frames.** A genuinely still room, or one lost
+  timestamp line, can make a *real* frame `unknown` as well. So when the timestamps are unavailable
+  (`side=unavailable` on the `[obs]` line), nothing is left out and the numbers are what they were before
+  #493.
+- **About 1 in 12 repeats is still counted.** `[obs]` judges a frame about 5 seconds after it arrives, and
+  each minute is written once, at its end. Repeats that arrive in a minute's last ~5 seconds are judged after
+  that minute was stored, so they stay in it. Measured on a steady 3 fps camera: 8.3% of its repeats, which
+  is 5 seconds out of every 60 for any evenly spread repeats. A stall's burst arrives all at once, so it is
+  either left out entirely or, if it lands in a minute's last 5 seconds, counted entirely. A stored minute is
+  never corrected afterwards. Issue #447 (placing each sample by when it was observed) replaces this.
+- **A frame that registered any movement is never left out**, whatever `[obs]` says about it. A true repeat
+  never registers movement, so this only guards against a wrong verdict.
+
+**What to do:** nothing.
 
 ## A detector was restarted: `[detector-watchdog]` in the log and in Camera history
 

@@ -1,12 +1,15 @@
 // The OBSERVATION CLOCK: for every sample the motion and sound detectors analyse, when was it observed,
 // how was it produced, and how much of the timeline was actually covered (issue #373 Stage 2, plan v4).
 //
-// ★ A MEASURING INSTRUMENT ONLY. Nothing downstream reads it yet: detection decisions, activity buckets,
-// alerts and every stored number are exactly what they were (the golden test in
-// detector-observation-wiring.test.js pins them with a working, a throwing and an absent clock). #447
-// (flush-time buckets), #452 (confirmation across an outage), #493 (stop consuming clones), #369 and #448
-// will switch over to it one at a time, each with its own A/B. Until then it reports, once per camera per
-// leg every 15 minutes, an `[obs]` line (see formatSummaryLine and KNOWN-ISSUES.md for every field).
+// ★ A MEASURING INSTRUMENT, with ONE consumer so far. Detection decisions, alerts, bed transitions and every
+// peak are exactly what they were (the golden test in detector-observation-wiring.test.js pins them with a
+// working, a throwing and an absent clock). The one consumer is #493: a motion sample this clock PROVES was
+// a clone (`fps-clone` / `cfr-clone`, never `unknown`) is taken back out of activity_samples'
+// `motion_frames` / `motion_level` / `motion_out_level` (activityTracker.js's clone ledger, wired in
+// motionDetector.js through `onObservation` and the per-sample `token`). #447 (flush-time buckets), #452
+// (confirmation across an outage), #369 and #448 will switch over one at a time, each with its own A/B. It
+// also reports, once per camera per leg every 15 minutes, an `[obs]` line (see formatSummaryLine and
+// KNOWN-ISSUES.md for every field).
 //
 // WHY IT EXISTS. The detectors timestamp each sample with Date.now() when Node happens to read it. Bursts
 // compress time and a late batch lands in the wrong minute. Worse, the motion leg's `fps=5` FABRICATES
@@ -367,8 +370,15 @@ export function getObservationClock(cameraId, leg, { clocks, label, log, onObser
   if (!clock) {
     clock = new ObservationClock(cameraId, leg, { clocks, label, log, onObservation, tombstone: tombstones.get(key) });
     registry.set(key, clock);
-  } else if (label) {
-    clock.label = label;
+  } else {
+    if (label) clock.label = label;
+    // #493: the listener is refreshed exactly like the label, because the clock outlives the launch that
+    // made it (the registry is shared across reconnects, R1-F13). Without this, whichever caller created
+    // the clock first decides forever who hears it: a clock first made with no listener (a caller that
+    // only reads summary()) would never feed the clone ledger. REPLACED, not added: every detector launch
+    // passes a fresh closure, and adding one per reconnect would grow without bound for the life of the
+    // process. Extra, independent listeners use addObservationListener().
+    if (onObservation) clock.onObservation = onObservation;
   }
   return clock;
 }
@@ -421,7 +431,10 @@ export function stopObservationLog() {
 // ⚠️ TEST SEAM, not an API. The golden test must run the REAL detectors with a working, a throwing and no
 // clock, and mocking this module would corrupt coverage for the whole suite (it is in test:core's include
 // list). So the detectors ask openObservation() for their clock, and a test can substitute the factory.
-// `fn(cameraId, leg)` returns a clock-shaped object, or null for "no clock". null restores the default.
+// `fn(cameraId, leg, { onObservation })` returns a clock-shaped object, or null for "no clock". null
+// restores the default. The third argument is the detector's own listener (#493's clone ledger): a
+// factory that builds a real clock must hand it on, or a "working clock" test exercises no correction at
+// all and passes vacuously (found by the #493 plan's second review round).
 export function _setObservationClockFactoryForTests(fn) {
   testFactory = fn;
 }
@@ -441,12 +454,23 @@ export function _resetObservationClocksForTests() {
 // clock's own entry points are guarded too; this is the second layer, and the one that makes a substituted
 // or broken clock safe. It also carries the receipt clock, so a detector reads `rx` once per 'data' event
 // from the SAME time source the clock uses.
-export function openObservation(cameraId, leg, { label, path, fps, windowSeconds } = {}) {
+//
+// #493: `onObservation` is the detector's listener (the motion leg's clone ledger), forwarded to the clock
+// (see getObservationClock for why it is refreshed on reconnect). The handle's `gen` is this generation's
+// id, the same `gen` every observation it produces carries, so a caller can key what it stages by
+// (gen, token) and match it against those observations later. Ids come from generationCounters, which
+// never repeat for the life of the process (not even across an eviction), so a late observation from a
+// torn-down generation can only ever match that generation's own keys, however its tokens restart. `gen`
+// is null whenever there is no working generation (no clock, a throwing one, or a clock-shaped object
+// without a numeric id): the caller then stages nothing, and nothing is ever corrected.
+export function openObservation(cameraId, leg, { label, path, fps, windowSeconds, onObservation } = {}) {
   let gen = null;
+  let genId = null;
   let clockRef = null;
   try {
-    clockRef = testFactory ? testFactory(cameraId, leg) : getObservationClock(cameraId, leg, { label });
+    clockRef = testFactory ? testFactory(cameraId, leg, { onObservation }) : getObservationClock(cameraId, leg, { label, onObservation });
     gen = clockRef ? clockRef.beginGeneration({ path, fps, windowSeconds }) : null;
+    genId = gen && typeof gen.id === 'number' ? gen.id : null;
   } catch {
     handleFailures += 1;
     gen = null;
@@ -460,6 +484,7 @@ export function openObservation(cameraId, leg, { label, path, fps, windowSeconds
     }
   };
   return {
+    gen: genId,
     active: () => gen !== null,
     receipt() {
       try {
@@ -486,7 +511,14 @@ export class ObservationClock {
     this.monoNow = clocks.monoNow || (() => performance.now());
     this.wallNow = clocks.wallNow || (() => Date.now());
     this.log = log || ((line) => logger.info(line));
+    // The clock's OWN listener: the one its creator passed, refreshed by getObservationClock on reconnect.
     this.onObservation = onObservation || null;
+    // #493: further, independent listeners (addObservationListener). Needed because the #373 golden test
+    // captures every observation through a listener of its own while the detector's clone ledger listens
+    // on the same clock; with one slot, whichever registered last would silently unplug the other, and the
+    // golden's "working clock" run would stop checking anything. A Set, so adding the same function twice
+    // (a factory called once per launch) delivers each observation to it once.
+    this.observationListeners = new Set();
     const mono = this.monoNow();
     this.createdMono = mono;
     this.lastActivityMono = mono;
@@ -779,13 +811,25 @@ export class ObservationClock {
     if (obs.compressed) p.compressed += 1;
     if (obs.uncertain) p.uncertain += 1;
     if (obs.obsMono !== null && p.ages.length < AGE_SAMPLES_MAX) p.ages.push(obs.rxMono - obs.obsMono);
-    if (this.onObservation) {
-      try {
-        this.onObservation(obs);
-      } catch {
-        p.warn += 1;
-      }
+    this.notify(this.onObservation, obs);
+    for (const fn of this.observationListeners) this.notify(fn, obs);
+  }
+
+  // Each listener in its OWN guard: one that throws is counted in `warn` and can never stop the others
+  // (or the clock) from seeing the observation.
+  notify(fn, obs) {
+    if (!fn) return;
+    try {
+      fn(obs);
+    } catch {
+      this.period.warn += 1;
     }
+  }
+
+  // #493: an extra listener alongside the clock's own. Returns the unsubscribe.
+  addObservationListener(fn) {
+    this.observationListeners.add(fn);
+    return () => this.observationListeners.delete(fn);
   }
 }
 
@@ -1266,7 +1310,11 @@ class MotionGeneration extends Generation {
     if (this.outs.size > IN_RING_MAX) this.outs.delete(this.outs.keys().next().value);
   }
 
-  onSample(bytes, rxMono, rxWall) {
+  // `token` (#493) is the CALLER's name for this sample, opaque here and handed back verbatim on its
+  // finalized observation. The detector uses it to find the frame it already counted in activity_samples.
+  // Not `idx`: idx is this generation's own count, which a sample lost to a caught throw would shift by one
+  // for the rest of the run, pointing every later correction at the wrong frame.
+  onSample(bytes, rxMono, rxWall, { token = null } = {}) {
     this.guarded(() => {
       if (!this.open) return this.late();
       this.clock.noteReceipt(rxMono, rxWall);
@@ -1274,6 +1322,7 @@ class MotionGeneration extends Generation {
       this.advance(rxMono);
       const s = {
         idx: this.sampleCount,
+        token,
         adler: adler32(bytes),
         bytes,
         rx: rxMono,
@@ -1544,7 +1593,7 @@ class MotionGeneration extends Generation {
 
   finalize(s, now) {
     const obs = {
-      leg: 'motion', gen: this.id, idx: s.idx, baseline: s.idx === 0, cls: 'unknown', reason: null, src: null,
+      leg: 'motion', gen: this.id, idx: s.idx, token: s.token, baseline: s.idx === 0, cls: 'unknown', reason: null, src: null,
       obsMono: null, obsWall: null, bounds: null, rxMono: s.rx, rxWall: s.rxWall, compressed: false,
       uncertain: false, analysed: s.idx !== 0,
     };
