@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-09-28
+
 ### Added
 - **A night's sleep now shows when your child went into bed as well as when they fell asleep, and the
   "Was this right?" screen can record who it really was when you answer "No".** On a night with a
