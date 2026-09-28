@@ -31,6 +31,16 @@ function applyTheme(settings) {
 export function SettingsProvider({ children }) {
   const [settings, setSettings] = useState(DEFAULTS);
   const [loading, setLoading] = useState(true);
+  // Have the SERVER's settings ever arrived (a successful GET, or a commit())? Deliberately NOT the same
+  // thing as `!loading`: `loading` clears when the first request SETTLES, and a failed one leaves DEFAULTS
+  // in place — timezone 'UTC' included. UTC is also a perfectly real configured timezone, so the VALUE
+  // cannot say "this is the placeholder"; this flag can. Once true it stays true, like `loadedOnce` below
+  // (a later failed refresh keeps the good settings, so it keeps this too).
+  // ★ Why it exists (0.34.0 release review, Codex, 2026-09-28): NightReview's "Before bedtime" group
+  // bucketed events against the placeholder UTC, so a real 19:20 Melbourne put-down (09:20 UTC) landed in
+  // it, and its one-tap "None of these" saved that real event as "No" — which stayed saved after the real
+  // zone arrived. A screen that must not act on a guessed timezone gates on this.
+  const [loaded, setLoaded] = useState(false);
   // Optional: tests render this provider outside an AuthProvider, and it must still work there —
   // it then simply never re-fetches, which is the pre-existing mount-only behaviour.
   const { user } = useAuth() || {};
@@ -49,6 +59,7 @@ export function SettingsProvider({ children }) {
       const data = await api.get('/settings');
       if (seq !== reqSeq.current) return;
       loadedOnce.current = true;
+      setLoaded(true);
       setSettings(data);
       applyTheme(data);
     } catch {
@@ -88,6 +99,8 @@ export function SettingsProvider({ children }) {
   function commit(serverSettings) {
     ++reqSeq.current;
     loadedOnce.current = true;
+    // The server's own word, so the settings are real from here on — see `loaded`.
+    setLoaded(true);
     setSettings(serverSettings);
     applyTheme(serverSettings);
     // A commit IS an authoritative load, same as a successful refresh() (see its `finally` above) —
@@ -101,7 +114,7 @@ export function SettingsProvider({ children }) {
   }
 
   return (
-    <SettingsContext.Provider value={{ settings, loading, refresh, commit }}>
+    <SettingsContext.Provider value={{ settings, loading, loaded, refresh, commit }}>
       {children}
     </SettingsContext.Provider>
   );

@@ -26,6 +26,7 @@ function Probe() {
   return (
     <div>
       <span data-testid="loading">{String(ctx.loading)}</span>
+      <span data-testid="loaded">{String(ctx.loaded)}</span>
       <span data-testid="name">{ctx.settings.app_name}</span>
       <span data-testid="unit">{ctx.settings.temp_unit}</span>
       <button onClick={() => ctx.refresh()}>reload</button>
@@ -180,5 +181,50 @@ describe('when the settings request fails', () => {
     renderProvider();
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
     expect(cssVar('--accent')).toBe('#f4c56a');
+  });
+});
+
+// `loaded` — have the SERVER's settings ever arrived? Added after the 0.34.0 release review: NightReview's
+// "Before bedtime" group judged 16:00 in the placeholder 'UTC' and saved a real put-down as "No". The
+// placeholder and a configured UTC are the same value, so only this flag tells them apart — and it must
+// NOT be `!loading`, which also turns true when the first request FAILS and the placeholder stays.
+describe('loaded: whether the settings are the server\'s own, not the placeholder defaults', () => {
+  test('false while the first request is in flight, true once it succeeds', async () => {
+    let release;
+    globalThis.fetch = vi.fn(() => new Promise((resolve) => { release = resolve; }));
+    renderProvider();
+    expect(screen.getByTestId('loaded')).toHaveTextContent('false');
+    await act(async () => {
+      release({ ok: true, status: 200, text: async () => JSON.stringify({ app_name: 'Casa', timezone: 'Australia/Melbourne' }) });
+    });
+    expect(screen.getByTestId('loaded')).toHaveTextContent('true');
+  });
+
+  test('a FAILED first request finishes loading but is NOT loaded — the defaults are still a guess', async () => {
+    // The distinction the flag exists for: `loading` false here, `loaded` false with it.
+    stubFetch(() => ({ status: 500, body: '' }));
+    renderProvider();
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
+    expect(screen.getByTestId('loaded')).toHaveTextContent('false');
+  });
+
+  test('a commit is the server\'s own word, so it counts as loaded even with the first GET still in flight', async () => {
+    globalThis.fetch = vi.fn(() => new Promise(() => {}));
+    renderProvider();
+    expect(screen.getByTestId('loaded')).toHaveTextContent('false');
+    await act(async () => { screen.getByText('commit').click(); });
+    expect(screen.getByTestId('loaded')).toHaveTextContent('true');
+  });
+
+  test('once loaded, a later failed refresh does not un-load it (the good settings are kept)', async () => {
+    let fail = false;
+    stubFetch(() => (fail ? { status: 500, body: '' } : { body: { app_name: 'Casa' } }));
+    renderProvider();
+    await waitFor(() => expect(screen.getByTestId('loaded')).toHaveTextContent('true'));
+    fail = true;
+    await act(async () => { screen.getByText('reload').click(); });
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId('loaded')).toHaveTextContent('true');
+    expect(screen.getByTestId('name')).toHaveTextContent('Casa');
   });
 });
