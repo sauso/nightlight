@@ -193,6 +193,7 @@ db.exec(`
     longest_stretch_minutes INTEGER,
     coverage_minutes INTEGER,
     unknown_minutes INTEGER,
+    in_bed_at TEXT,
     computed_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (child_id, night_date)
   );
@@ -208,6 +209,7 @@ db.exec(`
     camera_id TEXT NOT NULL,
     type TEXT NOT NULL,
     peak REAL,
+    wrong_reason TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_bed_transitions_cam_time ON bed_transitions(camera_id, created_at);
@@ -356,6 +358,18 @@ if (!bedTxColumns.includes('snapshot')) {
 // on a timer would defeat the point of collecting them.
 if (!bedTxColumns.includes('verdict')) {
   db.exec('ALTER TABLE bed_transitions ADD COLUMN verdict TEXT');
+}
+
+// WHO it was, when the verdict is 'wrong': 'adult', 'child_moved' or 'other' (WRONG_REASONS in
+// lib/bedTransitions.js). NULL = not said, and always NULL unless verdict is 'wrong' — the verdict write
+// clears it in the same statement. Why a separate column rather than more verdict values: "wrong" alone
+// cannot tell a parent leaving after a story from a child rolling over, and a rule for telling them
+// apart can be neither designed nor scored until the labels carry it. Replayed 2026-09-25 against 542
+// staging-verdicted exits, the obvious candidate ("movement after they leave = it was the parent")
+// fired on 16% of wrong and 17% of correct exits alike — zero discrimination, measurable only once the
+// labels say who it was. Also in the CREATE TABLE above for fresh installs; this guard is the upgrade.
+if (!bedTxColumns.includes('wrong_reason')) {
+  db.exec('ALTER TABLE bed_transitions ADD COLUMN wrong_reason TEXT');
 }
 
 // Outside-channel evidence (ROADMAP §1.2 item 2). What it means depends on the transition's type:
@@ -807,6 +821,17 @@ if (!sleepNightsColumns.includes('notified_at')) {
 // as 0 via `?? 0`, matching how it already treats a missing awake_minutes.
 if (!sleepNightsColumns.includes('unknown_minutes')) {
   db.exec('ALTER TABLE sleep_nights ADD COLUMN unknown_minutes INTEGER');
+}
+
+// "In bed" — when the child was put down, as distinct from onset_at ("asleep", when the room went
+// quiet). On a bedtime-story night the two are minutes apart, and showing only "asleep" made every such
+// night look wrong to the parent who put them down. The value itself is not new: it is the put-down the
+// analysis already adopts (sleepAnalysis.js's onsetTransitionAt, the into_bed marker on the timeline) —
+// it just never reached a headline field or this table before. NULL when no qualifying put-down was
+// found, and on rows computed before this column existed. Also in the CREATE TABLE above for fresh
+// installs, same as unknown_minutes; this guard is the upgrade path.
+if (!sleepNightsColumns.includes('in_bed_at')) {
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN in_bed_at TEXT');
 }
 
 // Quick-silence: a per-camera temporary mute of ALL alerts (motion/sound/ONVIF/MQTT), for when you're

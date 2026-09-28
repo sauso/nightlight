@@ -1274,6 +1274,38 @@ test('the timeline draws only the two transitions the analysis adopted', () => {
   assert.equal(hhmm(night.transitions[1].at), '05:09', 'the corroborated departure');
 });
 
+test('in_bed_at is the adopted put-down, reported WITHOUT a timeline — the summary card never asks for one', () => {
+  // Issue #501: "in bed" beside "asleep". The value is the same put-down the timeline draws; what is
+  // new is that it reaches the headline, so it must not sit behind the includeTimeline gate. Seconds on
+  // the transition (18:38:41) pin that it is the transition's own timestamp, not minuteTime() of it.
+  layTimelineNight();
+  db.prepare('UPDATE bed_transitions SET created_at = ? WHERE camera_id = ? AND type = ?')
+    .run(sqlTime(at(18, 38, 0, 41)), CAM, 'into_bed');
+
+  const plain = computeNight(CHILD, DATE);
+  assert.equal(plain.transitions, undefined, 'precondition: this really is the no-timeline shape');
+  assert.equal(plain.in_bed_at, sqlTime(at(18, 38, 0, 41)));
+
+  const detailed = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(detailed.in_bed_at, detailed.transitions[0].at, 'the headline and the drawn marker agree');
+});
+
+test('in_bed_at is null on a scored night with no qualifying put-down, and on a night that never scores', () => {
+  // Real nights almost always carry some into_bed, so the null branch is one real data will rarely
+  // exercise. Same quiet-room night as the early-bedtime guard test: onset clamps to the window, and
+  // there is no put-down to call "in bed".
+  laySamples(at(18, 20), at(7, 0, 1), [[at(2, 0, 1), at(2, 8, 1)]]);
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.status, 'ok', 'precondition: a real, scored night');
+  assert.equal(night.in_bed_at, null);
+
+  db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+  const empty = computeNight(CHILD, DATE);
+  assert.equal(empty.status, 'no_data');
+  assert.ok(Object.hasOwn(empty, 'in_bed_at'), 'present as null on an early return, not absent');
+  assert.equal(empty.in_bed_at, null);
+});
+
 test('the timeline is drawn over the sleep, not over the configured window', () => {
   // Bedtimes move nightly and nobody is going to edit the setting each evening, so a night that began
   // before the window must still be shown whole. Raffa, 2026-08-26: put down at 19:11, window opens

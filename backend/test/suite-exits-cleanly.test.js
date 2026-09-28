@@ -169,6 +169,8 @@ const PERIODIC = [
   // Added in #263, not #286: created through `safeInterval`, so the literal-`setInterval` scan that
   // built this list could not see it. Unref'd like the two above, so it never pinned the loop.
   { module: 'src/lib/timelapse.js', start: 'startTimelapseSampler', stop: 'stopTimelapseSampler', pinsLoop: false },
+  // #373: the 15-minute `[obs]` line. Unref'd from the start, so like the three above it never pinned the loop.
+  { module: 'src/lib/observationClock.js', start: 'startObservationLog', stop: 'stopObservationLog', pinsLoop: false },
 ];
 
 describe('shutdown() actually stops the tracker', () => {

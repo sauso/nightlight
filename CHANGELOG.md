@@ -9,6 +9,46 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-09-28
+
+### Added
+- **A night's sleep now shows when your child went into bed as well as when they fell asleep, and the
+  "Was this right?" screen can record who it really was when you answer "No".** On a night with a
+  bedtime story or a slow settle, the sleep card and the night's sleep page now show two times, such
+  as "In bed 19:47 · Asleep 20:04". "In bed" is the moment they were put down, and "Asleep" is the
+  same time the app has always shown, when the room went quiet. The extra time appears only when
+  "In bed" is at least a minute before "Asleep". On other nights, and on any night where you corrected
+  the bedtime, the card shows just the one time as before, because the recorded put-down may no longer
+  match the time you gave.
+  - On the review screen, answering "No" to an event in the full list now offers an optional
+    follow-up: **Me or another adult**, **They moved in bed**, or **Someone walking by / nothing**.
+    This lets later detection work tell a parent leaving the room apart from a child moving, which a
+    plain "No" can't. Changing the answer away from "No" clears the follow-up. The "Quick check-in?"
+    and "Still moving?" cards don't ask it, because their own buttons already say what happened, and
+    neither does the full list for those same events. "That was me" is saved as "Me or another adult"
+    automatically.
+  - Events recorded before **16:00** (in the app's timezone) on the night's date are now grouped at
+    the top of the full list as **Before bedtime (N)**, collapsed. A button there,
+    **None of these were a bedtime event**, marks all of them "No" in one tap. The button works only
+    after you have opened the group once, so a real nap in there can't be marked "No" unseen. It skips
+    any event you have already answered, and any event with its own "Quick check-in?" or "Still
+    moving?" card. You can still change any single answer in the group before saving, for example to
+    mark a real nap as "Yes". The 16:00 cutoff is a first guess, not a measured value. A night with no bedtime
+    information at all shows the list ungrouped, as before.
+- **The server log now says, every 15 minutes, what the motion and sound detectors actually observed.**
+  Each camera gets an `[obs]` line per detector: how many samples were genuine new pictures or sound, how
+  many were repeats ffmpeg made up while a camera stalled, gaps and restarts in what arrived, and how much
+  of the time was covered. Where the evidence cannot tell, for example a timestamp line lost beside a
+  run of identical pictures, the sample is counted as `unknown` rather than guessed, and every list the
+  measurement keeps has a size limit, so a broken stream cannot grow memory. This is a measurement only
+  (issue #373): motion and sound alerts, the sleep timeline and every stored number are unchanged, and
+  nothing reads the new information yet. The
+  detectors' ffmpeg now prints its own per-frame timestamps, which costs about 30-40 parsed and discarded
+  log lines a second per camera and 1-2% more ffmpeg CPU. ffmpeg errors are logged exactly as before,
+  except that a burst of identical errors is collapsed into one line with a repeat count, and a flood of
+  unrecognised output is capped with a one-line summary. Every field is explained in
+  [KNOWN-ISSUES.md](KNOWN-ISSUES.md) under "The `[obs]` line".
+
 ## [0.33.2] - 2026-09-25
 
 ### Changed

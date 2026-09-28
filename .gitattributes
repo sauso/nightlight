@@ -2,3 +2,9 @@
 # A CRLF shebang line silently breaks execution, so pin these regardless of the
 # committer's platform / core.autocrlf setting.
 *.sh text eol=lf
+
+# Captured ffmpeg output for the #373 observation-clock tests (backend/test/fixtures/obs/capture.sh).
+# Byte-exact on purpose: the tests compare Adler-32 checksums of raw gray frames and PCM, and a raw
+# frame that happens to contain no NUL byte looks like text to git, so on a core.autocrlf=true checkout
+# every 0x0A in it would silently become 0x0D 0x0A. No conversion of any kind in this directory.
+backend/test/fixtures/obs/** -text

@@ -218,6 +218,94 @@ the recording it was in the middle of saving. Verify with `docker inspect -f '{{
 
 ---
 
+## The `[obs]` line: what the motion and sound detectors actually observed
+
+**What you see:** every 15 minutes, one line per camera and detector (motion, sound), for example
+
+```
+[obs] "Nursery Cam" motion gen=3 path=cam_…-sub samples=4500 real=4497 fpsClone=1 cfrDup=0 cfrDrop=0 runsCapped=0 unknown=2 ambiguous=0 reordered=0 gaps=0/0.0s restarts=1/64.2s cover=99.9%/99.9% age p50/p99=335/378ms compressed=0 clamps=0 uncertain=0 wallSteps=0 side=ok warn=0 late=0
+[obs] "Nursery Cam" sound gen=2 path=cam_… samples=4500 observed=4500 silent=0 unknown=0 gaps=0/0.0s delayed=1 restarts=0/0.0s cover=99.9%/99.9% age p50/p99=210/260ms compressed=0 clamps=0 uncertain=0 wallSteps=0 side=ok warn=0 late=0
+```
+
+and, occasionally, `[obs] … WALL-STEP +900ms (host clock stepped; not a gap)` or
+`[obs] … side-channel unavailable (no tap records) …`.
+
+**Why:** the detectors read a tiny copy of each camera's stream and judge movement and noise from it.
+That copy is not a perfect record of time: when a camera stalls, ffmpeg repeats the last picture to keep
+five frames a second going, and Node can receive a burst of samples late. Since issue #373, each detector
+also reads ffmpeg's own per-frame timestamps and works out, for every sample, how it was produced and
+when it was really observed. **Nothing uses this yet.** Motion and sound decisions, alerts, the sleep
+timeline and every stored number are exactly as before; the line only reports. Later changes (listed in
+the roadmap) will each switch one feature over to it, with their own before/after comparison.
+
+| Field | Meaning |
+|---|---|
+| `gen` / `path` | The detector's current ffmpeg run (a counter that only goes up while the app runs) and the stream it reads (`-sub` = the low-resolution stream). |
+| `samples` | Motion frames or sound windows (0.2 s each) finalised in the last 15 minutes. |
+| `real` | Motion: a genuinely new picture from the camera. |
+| `fpsClone` | Motion: ffmpeg repeated an older picture because nothing new arrived in time (a camera stall). These still reach the motion detector, which sees them as "no movement". |
+| `cfrDup` / `cfrDrop` | Motion: a picture the output stage wrote twice / skipped. Inside a run of identical pictures only the net count is known. Nothing is counted across a lost timestamp line, or for a run counted in `runsCapped`: there the true count is unknown. |
+| `runsCapped` | Motion: runs of identical pictures closed early because more than 64 were open at once, which only happens while pictures are not being matched to their timestamp lines. Their duplicates/drops are left out of `cfrDup`/`cfrDrop` rather than guessed. Normally 0. |
+| `observed` / `silent` | Sound: windows placed on the audio's own clock; `silent` of them were digital silence (sampled, but not analysed). |
+| `unknown` | Samples the evidence cannot place. This is a normal answer, not an error: it means a timestamp record was lost, the stream ended, or the order is in doubt. A lost timestamp line right before or after a run of identical pictures makes the whole run `unknown`: which picture is which can no longer be told. |
+| `ambiguous` / `reordered` | The two commonest reasons for `unknown` on motion: a run of distinct frames that scaled to the same picture (about 1 in 9,000 measured), and input timestamps that went backwards. |
+| `gaps` | Count / total time of real gaps in what arrived: motion input more than 0.4 s apart (more at a slow frame rate), sound that stayed more than 0.5 s behind its own clock for over a second. A sound gap cannot tell lost audio from audio held back and never caught up, so it is reported as a gap in *observation*, never as "audio lost". |
+| `delayed` | Sound: a clump that fell behind by more than 0.25 s and then caught up. Shows how close this camera's network comes to the gap threshold. |
+| `restarts` | Count / time between one ffmpeg run's last sample and the next run's first. The cameras here reboot daily, which reads as one ~64 s restart. |
+| `cover` | Sampler / analysis coverage of the period: how much of the time was actually observed / actually analysed. |
+| `age p50/p99` | How long after being observed a sample reached the detector. About 330 ms is normal for motion (ffmpeg holds each frame until the next arrives). |
+| `compressed` / `clamps` / `uncertain` | Timestamps that had to be squeezed to stay in order: after a backlog longer than an hour, after an out-of-order stamp, or after the host clock went backwards. A non-zero `clamps` is worth reporting. |
+| `wallSteps` | Times the host clock jumped (NTP). Logged as `WALL-STEP`, never as a gap. UTC for a sample never goes backwards within one run. |
+| `side` | Whether the timestamp evidence could place **any** sample in **this** 15-minute period. It is judged afresh every period, so it goes back to `ok` as soon as samples are placed again. `ok`: at least one sample was placed. `unavailable`: every sample was `unknown`. That happens when ffmpeg's timestamp lines stopped arriving or parsing (for example after an ffmpeg upgrade changes their format), or arrive but cannot be used (for example without the line that gives their time base). It also happens on sound once one timestamp line is lost, because every later window of that ffmpeg run is `unknown`, and on motion when every picture was identical, as from a frozen camera (then `ambiguous` equals `unknown`). `pending`: no sample was finalised this period (`samples=0`), so there is nothing to judge. A *partial* loss leaves `side=ok` and shows in `unknown`. When a run's timestamp lines are unusable from its very start, a one-off `side-channel unavailable` line also says which of the first two causes it is. A failure later in a run shows only here. Detection carries on untouched; the samples are just `unknown`. |
+| `warn` / `late` | Internal errors the observation code caught (should be 0), and data from an ffmpeg run that had already ended (dropped, never mixed into the next run). `warn` stays 0 on a stream that has stopped being usable: nothing threw, so that shows in `side`, not here. |
+
+**Differs from the detectors' other log lines:** the `[sound]` level line and the `[oob]`/`[intobed]` lines
+describe decisions; `[obs]` describes the input those decisions were made from. The two can disagree —
+for example a motion minute full of `fpsClone` samples was "quiet" to the detector because nobody
+observed it.
+
+**Limits, stated rather than hidden:**
+- **Absolute capture lag is unmeasurable.** The server stamps each frame when it *arrives*, so a delay
+  inside the camera looks like a gap followed by a clump, not like late frames.
+- **Every threshold was measured on one house**: two Thingino cameras (10 fps sub stream, 15 fps main,
+  G711 audio), a fake camera and four measurement runs. A camera or network that jitters more will show
+  more `delayed`, `unknown` and `gaps`; AAC audio was only tested with synthetic files. A lost stretch of
+  sound shorter than 0.5 s is absorbed rather than reported.
+- **A long camera stall keeps its evidence.** ffmpeg writes each picture only once the next one exists,
+  so the picture before a stall reaches the detector a whole stall later. Its timestamp line is kept
+  until then, however long the stall, and dropped 30 s after the next line has arrived.
+- **Everything the observation code keeps is capped**, so a broken stream cannot grow memory: 4,000 input
+  and 4,000 output timestamp lines, 256 spans of possibly-lost input frames, 256 out-of-order spans, 256
+  sound gaps not yet settled, 10,000 coverage intervals, 8,192 entries per running minimum. In normal
+  operation none comes near its cap. The one known way to reach them is a frozen picture: every frame
+  identical, as from an encoder stuck on one image, while pictures are not being matched to their
+  timestamp lines. Then about 13 minutes of lines are held at 5 fps, and older samples become `unknown`.
+  Hitting a cap can only turn an answer into `unknown`, never into a wrong one. On sound, windows older
+  than the 256 most recent gaps read `unknown` once that list is full, which only happens when the
+  detector's audio output stalls while the timestamp lines keep coming.
+- **Timing is exact to within stated bounds, not perfectly.** The 60-second minimum that sound gaps are
+  measured against is exact at up to ~136 timestamp lines a second (real cameras send 25-50). The one-hour
+  minimum that anchors all times is capped at 8,192 entries. Under a smooth, steady rise of more than
+  8,192 entries in an hour, such as a backlog growing for an hour at 10+ lines a second, it can read low
+  by the rise between two merged entries, so times come out slightly early, never later than the sample
+  arrived. Coverage joins intervals less than a millionth of a millisecond apart, so it can over-state
+  the truth by at most that much per join: invisible at the 0.1% printed.
+- **A detector process that never finishes** (no known way: Node always reports it) holds back every
+  restart that followed it, as unresolved, until it does. The restarts that observed something are all
+  kept. Past 16, restarts that failed at once are dropped, and only their exit reason is lost.
+- **Cost per camera**: each detector's ffmpeg now prints its timestamps, ~30 lines a second for a 10 fps
+  sub stream and ~40 for 15 fps (about 70 for a 30 fps camera with no sub stream), all parsed and
+  dropped. The ffmpeg side costs 1-2% more CPU.
+- **ffmpeg errors are still logged exactly as before**, with one addition: a burst of identical errors
+  is collapsed into `Last message repeated N times` by Nightlight itself, and if ffmpeg's output ever
+  floods (more than 50 unrecognised lines at once, then 10 a second), the excess is summarised as
+  `[obs] N ffmpeg stderr line(s) not shown (rate limit); last: …`.
+
+**What to do:** nothing — it is diagnostic. If a camera's line shows a steady non-zero `unknown`, `clamps`
+or `warn`, or `side=unavailable`, include the line when reporting a detection problem.
+
+---
+
 ## Confirmed bugs (fix pending)
 
 ### Compatibility (HLS) mode doesn't play when the app is served over plain HTTP

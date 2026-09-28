@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Moon, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
+import { showsInBed } from '../lib/inBed.js';
 
 // Sleep summary in the Child detail hero. Reads the LIVE endpoint: while a night is in progress it shows
 // "Tonight · so far" (recomputed on demand, capped at now — so a morning wake shows within a minute or
@@ -104,11 +105,20 @@ export default function SleepSummaryCard({ childId }) {
     const bits = [range];
     if (night.wake_count != null) bits.push(`${night.wake_count} wake-up${night.wake_count === 1 ? '' : 's'}`);
     if (night.longest_stretch_minutes) bits.push(`longest ${fmtDur(night.longest_stretch_minutes)}`);
+    // A second line, only on a night with a real gap between put-down and sleep (see showsInBed) — a
+    // bedtime story, typically. Still asleep mid-night says "since", matching the line above it.
+    let inBed = null;
+    if (showsInBed(night)) {
+      inBed = tonight && !night.wake_at
+        ? `in bed since ${fmtTime(night.in_bed_at)}`
+        : `In bed ${fmtTime(night.in_bed_at)} · Asleep ${fmtTime(night.onset_at)}`;
+    }
     body = (
       <>
         <div className="night__sleep-head">{head}</div>
         <div className="night__sleep-big">{fmtDur(night.asleep_minutes)} asleep{tonight ? ' so far' : ''}</div>
         <div className="night__soon">{bits.join(' · ')}</div>
+        {inBed && <div className="night__inbed">{inBed}</div>}
         {/* Say plainly when these are the times a PERSON gave us rather than the ones we worked out.
             Without it, a corrected card is indistinguishable from a detector that suddenly got it
             right — and the estimate disclaimer below would be a lie about where the number came from. */}

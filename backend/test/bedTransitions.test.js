@@ -702,6 +702,56 @@ test('a malformed or missing id updates nothing', () => {
   assert.ok(db.prepare('SELECT COUNT(*) n FROM bed_transitions').get().n >= 0, 'table still exists');
 });
 
+// --- who it was, on a 'wrong' answer ------------------------------------------------------------
+
+const reasonOf = (id) => db.prepare('SELECT wrong_reason FROM bed_transitions WHERE id = ?').get(id).wrong_reason;
+
+test('WRONG_REASONS is its own frozen list and shares no value with VERDICTS', () => {
+  // Folding "who" into the verdict would silently change what 'wrong' counts everywhere it is read.
+  assert.deepEqual([...bt.WRONG_REASONS], ['adult', 'child_moved', 'other']);
+  assert.ok(Object.isFrozen(bt.WRONG_REASONS));
+  for (const r of bt.WRONG_REASONS) assert.ok(!bt.VERDICTS.includes(r), `${r} must not double as a verdict`);
+});
+
+test('every reason may be set, changed and cleared', () => {
+  // Pairing a reason with a 'wrong' verdict is applyVerdicts' job (morning-review.test.js pins it);
+  // this is the lib's value validation only.
+  const id = seed('cam-a', 'out_of_bed', '2026-03-01 10:00:00', { verdict: 'wrong' });
+  for (const r of bt.WRONG_REASONS) {
+    assert.equal(bt.setTransitionReason(id, r), true);
+    assert.equal(reasonOf(id), r);
+  }
+  assert.equal(bt.setTransitionReason(id, null), true, 'null clears it again');
+  assert.equal(reasonOf(id), null);
+});
+
+test('an unknown reason or a malformed id is rejected rather than stored', () => {
+  const id = seed('cam-a', 'out_of_bed', '2026-03-01 10:00:00', { verdict: 'wrong' });
+  for (const bad of ['Adult', 'parent', 'wrong', '', 0, {}, []]) {
+    assert.equal(bt.setTransitionReason(id, bad), false, `rejected: ${JSON.stringify(bad)}`);
+  }
+  assert.equal(reasonOf(id), null);
+  for (const badId of ['abc', 0, -1, 1.5, null, undefined]) {
+    assert.equal(bt.setTransitionReason(badId, 'adult'), false);
+  }
+});
+
+test('changing the verdict away from wrong clears the reason in the same write', () => {
+  // The protection an already-open older tab relies on: it never sends `reasons`, so the only thing
+  // standing between its verdict change and a stale 'adult' is this statement.
+  for (const next of ['correct', 'unclear', null]) {
+    const id = seed('cam-a', 'out_of_bed', '2026-03-01 10:00:00', { verdict: 'wrong' });
+    bt.setTransitionReason(id, 'adult');
+    assert.equal(bt.setTransitionVerdict(id, next), true);
+    assert.equal(reasonOf(id), null, `verdict -> ${next} must clear the reason`);
+  }
+  // …and re-affirming 'wrong' must NOT wipe the reason the person already gave.
+  const id = seed('cam-a', 'out_of_bed', '2026-03-01 10:00:00', { verdict: 'wrong' });
+  bt.setTransitionReason(id, 'child_moved');
+  assert.equal(bt.setTransitionVerdict(id, 'wrong'), true);
+  assert.equal(reasonOf(id), 'child_moved');
+});
+
 // --- retention --------------------------------------------------------------------------------
 
 test('the age sweep cuts at 45 days, and snapshots go with the rows', () => {

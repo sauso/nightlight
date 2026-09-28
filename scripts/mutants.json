@@ -2873,5 +2873,1914 @@
     "expect": "killed",
     "tests": ["detection-route.test.js"],
     "namePattern": "password sent on its own replaces"
+  },
+  {
+    "label": "#501 reason: an explicit null verdict falls through to the stored 'wrong' (hasOwn -> ??)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "Object.hasOwn(given, id) ? given[id] : byId.get(String(id)).verdict",
+    "replace": "given[id] ?? byId.get(String(id)).verdict",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"]
+  },
+  {
+    "label": "#501 reason: kept for a verdict that is not 'wrong' after the save",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "if (resulting !== 'wrong') continue;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"]
+  },
+  {
+    "label": "#501 reason: a reasons-only save is short-circuited as empty",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "if (entries.length === 0 && reasonEntries.length === 0)",
+    "replace": "if (entries.length === 0)",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"]
+  },
+  {
+    "label": "#501 reason: an unknown reason value is not refused",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "if (reason != null && !WRONG_REASONS.includes(reason)) return { error: `Not a valid reason for transition ${id}` };",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"]
+  },
+  {
+    "label": "#501 in_bed_at: the review screen's computed block drops it",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "in_bed_at: computed.in_bed_at ?? null,",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"]
+  },
+  {
+    "label": "#501 reason: a verdict other than 'wrong' leaves a stale reason",
+    "file": "backend/src/lib/bedTransitions.js",
+    "find": "verdict === 'wrong' ? setVerdictKeepReasonStmt : setVerdictClearReasonStmt",
+    "replace": "setVerdictKeepReasonStmt",
+    "expect": "killed",
+    "tests": ["bedTransitions.test.js", "morning-review.test.js"]
+  },
+  {
+    "label": "#501 reason: re-affirming 'wrong' wipes the reason already given",
+    "file": "backend/src/lib/bedTransitions.js",
+    "find": "verdict === 'wrong' ? setVerdictKeepReasonStmt : setVerdictClearReasonStmt",
+    "replace": "setVerdictClearReasonStmt",
+    "expect": "killed",
+    "tests": ["bedTransitions.test.js"]
+  },
+  {
+    "label": "#501 reason: the lib stores any reason string",
+    "file": "backend/src/lib/bedTransitions.js",
+    "find": "if (reason != null && !WRONG_REASONS.includes(reason)) return false;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["bedTransitions.test.js"]
+  },
+  {
+    "label": "#501 reason: the review never reads wrong_reason back",
+    "file": "backend/src/lib/bedTransitions.js",
+    "find": "snapshot, verdict, wrong_reason",
+    "replace": "snapshot, verdict",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"]
+  },
+  {
+    "label": "#501 in_bed_at: a recompute keeps a stale put-down (ON CONFLICT forgets it)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": " in_bed_at=excluded.in_bed_at,",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"]
+  },
+  {
+    "label": "#501 in_bed_at: only reported alongside a timeline",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "out.in_bed_at = onsetTransitionAt ?? null;",
+    "replace": "if (includeTimeline) out.in_bed_at = onsetTransitionAt ?? null;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"]
+  },
+  {
+    "label": "#501 in_bed_at: floored to the minute instead of the transition's own second",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "out.in_bed_at = onsetTransitionAt ?? null;",
+    "replace": "out.in_bed_at = onsetTransitionAt ? onsetTransitionAt.slice(0, 17) + '00' : null;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js", "morning-review.test.js"]
+  },
+  {
+    "label": "#501 in_bed_at: no ALTER guard, so an upgraded install never gets the column",
+    "file": "backend/src/db.js",
+    "find": "  db.exec('ALTER TABLE sleep_nights ADD COLUMN in_bed_at TEXT');",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["migrations-atomic.test.js"]
+  },
+  {
+    "label": "#501 reason: no ALTER guard, so an upgraded install never gets the column",
+    "file": "backend/src/db.js",
+    "find": "  db.exec('ALTER TABLE bed_transitions ADD COLUMN wrong_reason TEXT');",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["migrations-atomic.test.js"]
+  },
+  {
+    "label": "#501 in bed: the one-minute gap becomes strictly more than a minute",
+    "file": "frontend/src/lib/inBed.js",
+    "find": ">= 60000",
+    "replace": "> 60000",
+    "expect": "killed",
+    "tests": ["lib-helpers.test.js"]
+  },
+  {
+    "label": "#501 in bed: an absolute difference instead of a one-way one",
+    "file": "frontend/src/lib/inBed.js",
+    "find": "return utcMs(night.onset_at) - utcMs(night.in_bed_at) >= 60000;",
+    "replace": "return Math.abs(utcMs(night.onset_at) - utcMs(night.in_bed_at)) >= 60000;",
+    "expect": "killed",
+    "tests": ["lib-helpers.test.js", "childCards.test.jsx"]
+  },
+  {
+    "label": "#501 in bed: the card shows it whenever it exists",
+    "file": "frontend/src/components/SleepSummaryCard.jsx",
+    "find": "if (showsInBed(night)) {",
+    "replace": "if (night.in_bed_at) {",
+    "expect": "killed",
+    "tests": ["childCards.test.jsx"]
+  },
+  {
+    "label": "#501 in bed: the detail page shows the stat whenever",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "{showsInBed(night) && <Stat label=\"In bed\"",
+    "replace": "{<Stat label=\"In bed\"",
+    "expect": "killed",
+    "tests": ["sleepDetail.test.jsx"]
+  },
+  {
+    "label": "#501 before bedtime: 16:00 itself is grouped",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "hour < EARLY_CUTOFF_HOUR",
+    "replace": "hour <= EARLY_CUTOFF_HOUR",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 before bedtime: next morning's events are grouped too (night date ignored)",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "return localDate === date && hour < EARLY_CUTOFF_HOUR;",
+    "replace": "return hour < EARLY_CUTOFF_HOUR;",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 before bedtime: grouped even with no bedtime anchor",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "data.computed?.in_bed_at || onsetFrame || data.computed?.onset_at || data.review?.true_onset_at",
+    "replace": "true",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 before bedtime: the one-tap answer overwrites answers already given",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "for (const t of bulkable) if (next[t.id] == null) next[t.id] = 'wrong';",
+    "replace": "for (const t of bulkable) next[t.id] = 'wrong';",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 before bedtime: the one-tap answer includes quick check-in events",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "const hasOwnCard = (t) => t.quick_reversal_of != null || t.lingering_motion_minutes != null;",
+    "replace": "const hasOwnCard = (t) => t.lingering_motion_minutes != null;",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 reason chips: leaving 'No' keeps the reason",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "if (next !== 'wrong' && reasons[id] != null) setReasons((r) => ({ ...r, [id]: null }));",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 reason chips: shown under every event, not only a 'No'",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "{verdicts[t.id] === 'wrong' && !hasOwnCard(t) && (",
+    "replace": "{true && !hasOwnCard(t) && (",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 reason chips: reasons never sent",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "        reasons,",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 in_bed_at: the base object's default is deleted, so every early return crashes the store",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    in_bed_at: null,",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["morning-review.test.js", "sleepAnalysis.test.js"]
+  },
+  {
+    "label": "#501 before bedtime: the one-tap answer works without the group ever being opened",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "disabled={!earlyOpened || bulkLeft === 0}",
+    "replace": "disabled={bulkLeft === 0}",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 before bedtime: opening the group never unlocks the one-tap answer",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "onClick={() => { setShowEarly((v) => !v); setEarlyOpened(true); }}",
+    "replace": "onClick={() => setShowEarly((v) => !v)}",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 before bedtime: a typed onset correction is not a bedtime anchor",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": " || data.review?.true_onset_at",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 reason chips: 'That was me' does not record reason 'adult'",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "setReasons((r) => ({ ...r, [oob.id]: 'adult' }));",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 reason chips: un-tapping 'That was me' re-adds 'adult' to a cleared verdict",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "if (key === 'wrong' && verdicts[oob.id] !== 'wrong') {",
+    "replace": "if (key === 'wrong') {",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 reason chips: a second picker under an event that has its own card",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "{verdicts[t.id] === 'wrong' && !hasOwnCard(t) && (",
+    "replace": "{verdicts[t.id] === 'wrong' && (",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "#501 in bed: a corrected onset still shows the computed put-down",
+    "file": "frontend/src/lib/inBed.js",
+    "find": "if (onsetWasCorrected(night)) return false;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["lib-helpers.test.js", "childCards.test.jsx", "sleepDetail.test.jsx"]
+  },
+  {
+    "label": "#501 in bed: ANY correction hides it, even a wake-only one",
+    "file": "frontend/src/lib/inBed.js",
+    "find": "Boolean(night?.corrected) && night.onset_at !== night.algo_onset_at",
+    "replace": "Boolean(night?.corrected)",
+    "expect": "killed",
+    "tests": ["lib-helpers.test.js", "childCards.test.jsx"]
+  },
+  {
+    "label": "#E2 M1: describeDevice mislabels iPhone as iPad",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (/iPhone/.test(userAgent)) os = 'iPhone';",
+    "replace": "  if (/iPhone/.test(userAgent)) os = 'iPad';",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "The iPhone UA case in the device-labels test asserts the exact string \"Safari on iPhone\" — a wrong OS assignment fails it directly."
+  },
+  {
+    "label": "#E2 M2: describeDevice mislabels Edge as Chrome",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (/Edg\\//.test(userAgent)) browser = 'Edge';",
+    "replace": "  if (/Edg\\//.test(userAgent)) browser = 'Chrome';",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "The Edge-on-Windows case uses a real Edge UA (contains \"Chrome/\" and \"Safari/\" too) and asserts \"Edge on Windows\" exactly — losing the Edge branch would read it as Chrome instead."
+  },
+  {
+    "label": "#E2 M3: describeDevice drops the Chromium-vs-Chrome guard",
+    "file": "backend/src/routes/auth.js",
+    "find": "  else if (/CriOS\\//.test(userAgent) || (/Chrome\\//.test(userAgent) && !/Chromium/.test(userAgent))) browser = 'Chrome';",
+    "replace": "  else if (/CriOS\\//.test(userAgent) || (/Chrome\\//.test(userAgent))) browser = 'Chrome';",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "The \"HeadlessRig\" case UA contains both \"Chromium/\" and \"Chrome/\" and asserts the browser stays \"Unknown browser\" — removing this guard would misread it as Chrome."
+  },
+  {
+    "label": "#E2 M4: describeDevice drops the Chrome-vs-Safari guard",
+    "file": "backend/src/routes/auth.js",
+    "find": "  else if (/Safari\\//.test(userAgent) && !/Chrome/.test(userAgent)) browser = 'Safari';",
+    "replace": "  else if (/Safari\\//.test(userAgent)) browser = 'Safari';",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "Same \"HeadlessRig\" case: it contains \"Safari/\" and \"Chrome/\" both. Removing this guard alone would misread it as Safari."
+  },
+  {
+    "label": "#E2 M5: POST /users accepts a sub-8-character password",
+    "file": "backend/src/routes/auth.js",
+    "find": "  const { username, password, role, first_name, last_name } = req.body || {};\r\n  if (!username || !password || password.length < 8) {\r\n    return res.status(400).json({ error: 'Username and an 8+ character password are required' });\r\n  }",
+    "replace": "  const { username, password, role, first_name, last_name } = req.body || {};\r\n  if (!username || !password) {\r\n    return res.status(400).json({ error: 'Username and an 8+ character password are required' });\r\n  }",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "The new \"sub-8-character password is refused\" test creates an account with a 6-character password and asserts 400 — dropping the length check would accept it (201)."
+  },
+  {
+    "label": "#E2 M6: PUT /users/:id swallows a non-LastAdminError instead of rethrowing",
+    "file": "backend/src/routes/auth.js",
+    "find": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n    throw e;\r\n  }\r\n  res.json(toPublicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id)));",
+    "replace": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n  }\r\n  res.json(toPublicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id)));",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "The temp-trigger test aborts the UPDATE and asserts a 500, not 200 — deleting `throw e` falls through to the 200 response below the catch block even though the write never happened."
+  },
+  {
+    "label": "#E2 M7: DELETE /users/:id swallows a non-LastAdminError instead of rethrowing",
+    "file": "backend/src/routes/auth.js",
+    "find": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n    throw e;\r\n  }\r\n  res.status(204).end();",
+    "replace": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n  }\r\n  res.status(204).end();",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "The temp-trigger test aborts the DELETE and asserts a 500, not 204 — deleting `throw e` would falsely report the account removed while it still exists."
+  },
+  {
+    "label": "#E2 M8: appName() fallback string changed",
+    "file": "backend/src/routes/auth.js",
+    "find": "  return db.prepare(\"SELECT app_name FROM settings WHERE id = 'app'\").get()?.app_name || 'Nightlight';",
+    "replace": "  return db.prepare(\"SELECT app_name FROM settings WHERE id = 'app'\").get()?.app_name || 'NightlightFallbackBroken';",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "The blank-app_name test asserts the otpauth_uri contains \"Nightlight\" specifically — a different fallback literal fails it."
+  },
+  {
+    "label": "#E2 M9: demoMaxGuests() nullish-fallback changed from 25 to 30",
+    "file": "backend/src/routes/auth.js",
+    "find": "  const configured = Number(process.env.DEMO_MAX_GUESTS ?? 25);",
+    "replace": "  const configured = Number(process.env.DEMO_MAX_GUESTS ?? 30);",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "With DEMO_MAX_GUESTS unset and exactly 25 active guest sessions seeded, the test asserts demo.full === true. A cap of 30 would leave it not-full, failing the assertion."
+  },
+  {
+    "label": "#E2 M10: demoMaxGuests() invalid-value fallback changed from 25 to 30",
+    "file": "backend/src/routes/auth.js",
+    "find": "  return Number.isSafeInteger(configured) && configured > 0 ? configured : 25;",
+    "replace": "  return Number.isSafeInteger(configured) && configured > 0 ? configured : 30;",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "With DEMO_MAX_GUESTS=\"not-a-number\" and 25 active guest sessions seeded, the test asserts demo.full === true. A fallback of 30 would leave it not-full, failing the assertion."
+  },
+  {
+    "label": "#E2 M11: createSession stores a placeholder string instead of NULL for a missing User-Agent",
+    "file": "backend/src/routes/auth.js",
+    "find": "  db.prepare('INSERT INTO sessions (id, user_id, user_agent) VALUES (?, ?, ?)').run(id, userId, userAgent || null);",
+    "replace": "  db.prepare('INSERT INTO sessions (id, user_id, user_agent) VALUES (?, ?, ?)').run(id, userId, userAgent || 'unknown-ua-placeholder');",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "The empty-User-Agent test asserts the stored user_agent column is exactly NULL — a placeholder string fails that assertion."
+  },
+  {
+    "label": "#E2 M12: demoMaxGuests() nullish-fallback lowered from 25 to 24",
+    "file": "backend/src/routes/auth.js",
+    "find": "  const configured = Number(process.env.DEMO_MAX_GUESTS ?? 25);",
+    "replace": "  const configured = Number(process.env.DEMO_MAX_GUESTS ?? 24);",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "Found by the Codex review 2026-09-25: the first version only checked that 25 sessions are full, which a cap of 24 also satisfies. The test now also asserts 24 sessions are NOT full. (?? 0 is an EQUIVALENT mutant, because 0 fails the > 0 guard and falls back to 25, so 24 is the value that exposes a one-sided check.)"
+  },
+  {
+    "label": "#E2 M13: demoMaxGuests() invalid-value fallback changed from 25 to 0 (a permanently full demo)",
+    "file": "backend/src/routes/auth.js",
+    "find": "  return Number.isSafeInteger(configured) && configured > 0 ? configured : 25;",
+    "replace": "  return Number.isSafeInteger(configured) && configured > 0 ? configured : 0;",
+    "expect": "killed",
+    "tests": [
+      "auth-routes-branches.test.js"
+    ],
+    "note": "Found by the Codex review 2026-09-25: a cap of 0 makes the demo permanently full, and the one-sided 25-is-full check could not see it. The 24-is-NOT-full assertion kills it."
+  },
+  {
+    "label": "#373 M-SC01: Adler-32 initial value 0 -> 1 (zlib's)",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "export const ADLER_INIT = 0;",
+    "replace": "export const ADLER_INIT = 1;",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"],
+    "namePattern": "equals showinfo",
+    "note": "Scored against the capture (showinfo's own out checksums over its own stdout bytes), not the pin of the constant."
+  },
+  {
+    "label": "#373 M-SC02: Adler-32 modulus 65521 -> 65520",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "const ADLER_MOD = 65521;",
+    "replace": "const ADLER_MOD = 65520;",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"],
+    "namePattern": "zlib"
+  },
+  {
+    "label": "#373 M-SC03: the tap map swaps in and out",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "    taps: { [MOTION_TAP_IN]: 'in', [MOTION_TAP_OUT]: 'out' },",
+    "replace": "    taps: { [MOTION_TAP_IN]: 'out', [MOTION_TAP_OUT]: 'in' },",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js", "observation-clock.test.js"],
+    "namePattern": "config lines|lean capture end to end"
+  },
+  {
+    "label": "#373 M-SC04: the lean `in` tap computes its checksum again (the measured cost)",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "    filter: `${MOTION_TAP_IN}=checksum=0,fps=${fps},scale=${width}:${height},format=gray,${MOTION_TAP_OUT}`,",
+    "replace": "    filter: `${MOTION_TAP_IN}=checksum=1,fps=${fps},scale=${width}:${height},format=gray,${MOTION_TAP_OUT}`,",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"],
+    "namePattern": "two named lean taps"
+  },
+  {
+    "label": "#373 M-SC05: level filter widened, WARNING reaches the log",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "const DROPPED_LEVELS = new Set(['quiet', 'warning', 'info', 'verbose', 'debug', 'trace']);",
+    "replace": "const DROPPED_LEVELS = new Set(['quiet', 'info', 'verbose', 'debug', 'trace']);",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"]
+  },
+  {
+    "label": "#373 M-SC06: level filter widened, INFO reaches the log",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "const DROPPED_LEVELS = new Set(['quiet', 'warning', 'info', 'verbose', 'debug', 'trace']);",
+    "replace": "const DROPPED_LEVELS = new Set(['quiet', 'warning', 'verbose', 'debug', 'trace']);",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"]
+  },
+  {
+    "label": "#373 M-SC07: forwarded errors keep their level token (text no longer what -loglevel error printed)",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "  return { kind: level === 'error' ? 'error' : 'fatal', text: contexts + message };",
+    "replace": "  return { kind: level === 'error' ? 'error' : 'fatal', text: line };",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"]
+  },
+  {
+    "label": "#373 M-SC08: showinfo record grammar no longer anchored at its end (prefix match)",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "    String.raw`mean:\\[\\d+(?: \\d+){0,3}\\] stdev:\\[\\d+\\.\\d(?: \\d+\\.\\d){0,3}\\])?\\s*$`",
+    "replace": "    String.raw`mean:\\[\\d+(?: \\d+){0,3}\\] stdev:\\[\\d+\\.\\d(?: \\d+\\.\\d){0,3}\\])?\\s*`",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"],
+    "namePattern": "token boundary"
+  },
+  {
+    "label": "#373 M-SC09: ashowinfo record grammar no longer anchored at its end",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "    String.raw`nb_samples:(\\d+) checksum:([0-9A-F]{8}) plane_checksums: \\[ (?:[0-9A-F]{8} )+\\]\\s*$`",
+    "replace": "    String.raw`nb_samples:(\\d+) checksum:([0-9A-F]{8}) plane_checksums: \\[ (?:[0-9A-F]{8} )+\\]\\s*`",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"],
+    "namePattern": "token boundary"
+  },
+  {
+    "label": "#373 M-SC10: chlayout back to a lazy wildcard (swallowed a glued error)",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "const CHLAYOUT = String.raw`(?:[\\w.()+@-]+|\\d+ channels(?: \\([\\w.+@-]+\\))?)`;",
+    "replace": "const CHLAYOUT = String.raw`.+?`;",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"],
+    "namePattern": "token boundary"
+  },
+  {
+    "label": "#373 M-SC11: Rule B off (an untagged line after a DROPPED one is forwarded)",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "          if (prevForwarded === false) {",
+    "replace": "          if (prevForwarded === 0) {",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"]
+  },
+  {
+    "label": "#373 M-SC12: Node re-collapse of identical forwarded lines off",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "    if (key === lastText) {",
+    "replace": "    if (key === null) {",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"]
+  },
+  {
+    "label": "#373 M-SC13: small bucket burst 50 -> 51",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "export const LOG_FWD_BURST = 50;",
+    "replace": "export const LOG_FWD_BURST = 51;",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"]
+  },
+  {
+    "label": "#373 M-SC14: small bucket burst 50 -> 49",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "export const LOG_FWD_BURST = 50;",
+    "replace": "export const LOG_FWD_BURST = 49;",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"]
+  },
+  {
+    "label": "#373 M-SC15: small bucket rate 10/s -> 11/s",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "export const LOG_FWD_RATE = 10; // lines/s",
+    "replace": "export const LOG_FWD_RATE = 11; // lines/s",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"]
+  },
+  {
+    "label": "#373 M-SC16: small bucket rate 10/s -> 9/s",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "export const LOG_FWD_RATE = 10; // lines/s",
+    "replace": "export const LOG_FWD_RATE = 9; // lines/s",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"]
+  },
+  {
+    "label": "#373 M-SC17: error bucket rate 50/s -> 49/s",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "export const LOG_ERR_RATE = 50; // lines/s",
+    "replace": "export const LOG_ERR_RATE = 49; // lines/s",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"]
+  },
+  {
+    "label": "#373 M-SC18: error bucket rate 50/s -> 51/s",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "export const LOG_ERR_RATE = 50; // lines/s",
+    "replace": "export const LOG_ERR_RATE = 51; // lines/s",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"]
+  },
+  {
+    "label": "#373 M-SC19: error bucket burst 500 -> 501",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "export const LOG_ERR_BURST = 500;",
+    "replace": "export const LOG_ERR_BURST = 501;",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"]
+  },
+  {
+    "label": "#373 M-SC20: error bucket burst 500 -> 499",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "export const LOG_ERR_BURST = 500;",
+    "replace": "export const LOG_ERR_BURST = 499;",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"]
+  },
+  {
+    "label": "#373 M-SC21: fatal/panic no longer exempt from the error bucket",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "          emit(d.text, null);",
+    "replace": "          emit(d.text, 'error');",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"]
+  },
+  {
+    "label": "#373 M-SC22: the classifier guard rethrows into the stderr listener",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "        stats.classifierErrors += 1;",
+    "replace": "        throw new Error('unguarded classifier');",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"]
+  },
+  {
+    "label": "#373 M-SC23: every tap line counts as a harmless field fragment (glued errors dropped)",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "  return tokens.length > 0 && tokens[0] !== '' && tokens.every((t) => FRAGMENT_TOKEN.test(t));",
+    "replace": "  return true;",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"]
+  },
+  {
+    "label": "#373 M-SC24: a malformed record is no longer reported to the clock as lost",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "{ kind: 'unparseable', tap, text: line, lost: true };",
+    "replace": "{ kind: 'unparseable', tap, text: line, lost: false };",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"]
+  },
+  {
+    "label": "#373 M-SC25: the colour-line grammar matched by prefix (drops an error glued into it)",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "    if (COLOR_LINE.test(message) || SIDE_DATA_LINE.test(message) || message.trim() === '') {",
+    "replace": "    if (/^color_range:/.test(message) || SIDE_DATA_LINE.test(message) || message.trim() === '') {",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"]
+  },
+  {
+    "label": "#373 M-OC00: control, a comment edit in observationClock.js must change nothing",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "// One `[obs]` line per camera per leg this often: ~400 lines/day for 2 cameras x 2 legs.",
+    "replace": "// One `[obs]` line per camera per leg this often: ~400 lines/day for 2 cameras x 2 legs. [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC01: R4-1 the EARLIEST frame in the slot is the source",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      if (real === null && r.slot === t) real = r;",
+    "replace": "      if (r.slot === t) real = r;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "R4-1"
+  },
+  {
+    "label": "#373 M-OC02: R4-1 the frame NEAREST the slot time is the source (run E must refute it)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      if (real === null && r.slot === t) real = r;",
+    "replace": "      if (r.slot === t && (real === null || Math.abs(r.pts * this.tbIn.num * this.fps - t * this.tbIn.den) < Math.abs(real.pts * this.tbIn.num * this.fps - t * this.tbIn.den))) real = r;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "run E"
+  },
+  {
+    "label": "#373 M-OC03: R4-2 a backwards input pts is ignored",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      if (r.pts < this.maxRawPts) this.addReorderedSpan(r.slot, this.maxSlotSeen + 1, rx);",
+    "replace": "      if (false) this.addReorderedSpan(r.slot, this.maxSlotSeen + 1, rx);",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "R4-2"
+  },
+  {
+    "label": "#373 M-OC04: R4-2 the reordered span stops at the highest slot seen (drops the +1)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      if (r.pts < this.maxRawPts) this.addReorderedSpan(r.slot, this.maxSlotSeen + 1, rx);",
+    "replace": "      if (r.pts < this.maxRawPts) this.addReorderedSpan(r.slot, this.maxSlotSeen, rx);",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "R4-2"
+  },
+  {
+    "label": "#373 M-OC05: R4-2 the reordered span starts one slot late",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      if (r.pts < this.maxRawPts) this.addReorderedSpan(r.slot, this.maxSlotSeen + 1, rx);",
+    "replace": "      if (r.pts < this.maxRawPts) this.addReorderedSpan(r.slot + 1, this.maxSlotSeen + 1, rx);",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "R4-2"
+  },
+  {
+    "label": "#373 M-OC06: R4-3 no positive evidence needed (a lost final record reads as a clone / a guessed source)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (!after) return { cls: 'unknown', reason: real ? 'source-unproven' : 'clone-unproven' };",
+    "replace": "    if (false) return { cls: 'unknown', reason: real ? 'source-unproven' : 'clone-unproven' };",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "R4-3"
+  },
+  {
+    "label": "#373 M-OC07: R4-4 the ring prunes the current fps source",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      const expired = r.rx < now - IN_RING_MS && r.slot < tMin && r.n !== keepN;",
+    "replace": "      const expired = r.rx < now - IN_RING_MS && r.slot < tMin;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "R4-4"
+  },
+  {
+    "label": "#373 M-OC08: R1-F12 the hole check is skipped",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    for (const h of this.holes) if (t >= h.lo && t <= h.hi) return { cls: 'unknown', reason: 'hole' };",
+    "replace": "    for (const h of this.holes) if (false) return { cls: 'unknown', reason: 'hole' };",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC09: provenance window, the hole's first slot narrowed by one",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "        const lo = r.pts - 1 >= prev.pts + 1 ? this.slotOfIn(prev.pts + 1) : Math.min(prev.slot, r.slot);",
+    "replace": "        const lo = r.pts - 1 >= prev.pts + 1 ? this.slotOfIn(prev.pts + 1) + 1 : Math.min(prev.slot, r.slot);",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC10: provenance window, the hole's last slot narrowed by one",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "        const hi = r.pts - 1 >= prev.pts + 1 ? this.slotOfIn(r.pts - 1) : Math.max(prev.slot, r.slot);",
+    "replace": "        const hi = r.pts - 1 >= prev.pts + 1 ? this.slotOfIn(r.pts - 1) - 1 : Math.max(prev.slot, r.slot);",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC11: provenance window, the hole starts AT the previous frame's pts (one tick wide)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "        const lo = r.pts - 1 >= prev.pts + 1 ? this.slotOfIn(prev.pts + 1) : Math.min(prev.slot, r.slot);",
+    "replace": "        const lo = r.pts - 1 >= prev.pts + 1 ? this.slotOfIn(prev.pts) : Math.min(prev.slot, r.slot);",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC12: provenance window, the hole ends AT the next frame's pts (one tick wide)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "        const hi = r.pts - 1 >= prev.pts + 1 ? this.slotOfIn(r.pts - 1) : Math.max(prev.slot, r.slot);",
+    "replace": "        const hi = r.pts - 1 >= prev.pts + 1 ? this.slotOfIn(r.pts) : Math.max(prev.slot, r.slot);",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC13: slot rounding half DOWN instead of half away from zero",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "  if (num >= 0) return Math.floor((2 * num + den) / (2 * den));",
+    "replace": "  if (num >= 0) return Math.ceil((2 * num - den) / (2 * den));",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC14: R3-3 CLONE-CFR without positive evidence (the next record need not have its own sample)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "        if (next && !next.holeBefore && next.matched && next.matched !== s) {",
+    "replace": "        if (next) {",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC15: PENDING_MS 1000 -> 999",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "export const PENDING_MS = 1000;",
+    "replace": "export const PENDING_MS = 999;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC16: PENDING_MS 1000 -> 1001",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "export const PENDING_MS = 1000;",
+    "replace": "export const PENDING_MS = 1001;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC17: FINALIZE_MS 5000 -> 4999",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "export const FINALIZE_MS = 5000;",
+    "replace": "export const FINALIZE_MS = 4999;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC18: FINALIZE_MS 5000 -> 5001",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "export const FINALIZE_MS = 5000;",
+    "replace": "export const FINALIZE_MS = 5001;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC19: MOTION_GAP_S 0.4 -> 0.401",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "export const MOTION_GAP_S = 0.4;",
+    "replace": "export const MOTION_GAP_S = 0.401;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC20: MOTION_GAP_S 0.4 -> 0.399",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "export const MOTION_GAP_S = 0.4;",
+    "replace": "export const MOTION_GAP_S = 0.399;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC21: GAP_FACTOR 5 -> 5.01",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "export const GAP_FACTOR = 5;",
+    "replace": "export const GAP_FACTOR = 5.01;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC22: GAP_FACTOR 5 -> 4.99",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "export const GAP_FACTOR = 5;",
+    "replace": "export const GAP_FACTOR = 4.99;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC23: gap median pooled over both sides by count (deviation 3: must fail R3-6)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    const med = Math.max(median(before) ?? 0, median(after) ?? 0);",
+    "replace": "    const med = median([...before, ...after]) ?? 0;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "R3-6"
+  },
+  {
+    "label": "#373 M-OC24: a jump EQUAL to the gap threshold counts as a gap",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      if (iv.deltaMs > iv.next.threshold) {",
+    "replace": "      if (iv.deltaMs >= iv.next.threshold) {",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC25: causality clamp off (a stamp may be later than its receipt)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (mono > rx) {",
+    "replace": "    if (false) {",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC26: no-reorder clamp off",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (this.lastStamp !== null && mono < this.lastStamp) {",
+    "replace": "    if (false) {",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js", "observation-clock-sound.test.js"]
+  },
+  {
+    "label": "#373 M-OC27: UTC hold off (UTC may go backwards within a generation)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (this.lastWall !== null && wall < this.lastWall) wall = this.lastWall;",
+    "replace": "    // UTC hold removed",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js", "observation-clock-sound.test.js"]
+  },
+  {
+    "label": "#373 M-OC28: R3-7 UTC from the epoch in force at DELIVERY, not the one containing the observation",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    let wall = mono + this.clock.offsetAt(mono);",
+    "replace": "    let wall = mono + this.clock.lastOffset;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "R3-7"
+  },
+  {
+    "label": "#373 M-OC29: WALL_STEP_MS 50 -> 49",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "export const WALL_STEP_MS = 50;",
+    "replace": "export const WALL_STEP_MS = 49;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC30: WALL_STEP_MS 50 -> 51",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "export const WALL_STEP_MS = 50;",
+    "replace": "export const WALL_STEP_MS = 51;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC31: R3-3' known wall steps are not removed from PTS",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      shift += st.s;",
+    "replace": "      shift += 0;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js", "observation-clock-sound.test.js"]
+  },
+  {
+    "label": "#373 M-OC32: R3-3' the lag-zone side decision inverted",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "          after = dAfter <= dBefore;",
+    "replace": "          after = dAfter > dBefore;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js", "observation-clock-sound.test.js"]
+  },
+  {
+    "label": "#373 M-OC33: ANCHOR_SLEW 0.1 -> 0.11",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "export const ANCHOR_SLEW = 0.1;",
+    "replace": "export const ANCHOR_SLEW = 0.11;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "PAST the 1 h"
+  },
+  {
+    "label": "#373 M-OC34: ANCHOR_SLEW 0.1 -> 0.09",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "export const ANCHOR_SLEW = 0.1;",
+    "replace": "export const ANCHOR_SLEW = 0.09;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "PAST the 1 h"
+  },
+  {
+    "label": "#373 M-OC35: R3-1 the anchor envelope back to a 60 s window",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "export const ANCHOR_WINDOW_MS = 3_600_000;",
+    "replace": "export const ANCHOR_WINDOW_MS = 60_000;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "backlog"
+  },
+  {
+    "label": "#373 M-OC36: CFR drops are not counted",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "          if (!o.run && !o.holeBefore && !found.holeBefore) this.clock.period.cfrDrop += 1;",
+    "replace": "          if (!o.run && !o.holeBefore && !found.holeBefore) this.clock.period.cfrDrop += 0;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC37: an identical run's net dup of +1 is not reported",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (net > 0) this.clock.period.cfrDup += Math.max(0, net - run.labelledDups);",
+    "replace": "    if (net > 1) this.clock.period.cfrDup += Math.max(0, net - run.labelledDups);",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC38: a labelled CFR dup inside a clone run counted twice (labelled AND netted)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (net > 0) this.clock.period.cfrDup += Math.max(0, net - run.labelledDups);",
+    "replace": "    if (net > 0) this.clock.period.cfrDup += net;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC39: R3-2 read literally, every identical run ambiguous (deviation 2: clones would be unreachable)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      const same = !!src && provs.every((p, i) => p.src === src && (i === 0 || p.cls === 'fps-clone'));",
+    "replace": "      const same = false;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC40: R3-2 narrowed too far, distinct-source (static-scene) runs attributed",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      const same = !!src && provs.every((p, i) => p.src === src && (i === 0 || p.cls === 'fps-clone'));",
+    "replace": "      const same = !!src;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC41: a clone run's extra repeat labelled fps-clone instead of CFR dup",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (pos < run.lastN - run.firstN + 1) return { cls: 'fps-clone', src };",
+    "replace": "    if (pos <= run.lastN - run.firstN + 1) return { cls: 'fps-clone', src };",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC42: the idle sweep needs MORE than an hour",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    return !this.gens.some((g) => g.open) && now - this.lastActivityMono >= IDLE_EVICT_MS;",
+    "replace": "    return !this.gens.some((g) => g.open) && now - this.lastActivityMono > IDLE_EVICT_MS;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "R3-5"
+  },
+  {
+    "label": "#373 M-OC43: R3-4 a RESTART is committed while the old generation is still draining",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      if (!priors.every((p) => p.closed)) continue;",
+    "replace": "      // provisional check removed",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "R3-4"
+  },
+  {
+    "label": "#373 M-OC44: the side-channel-unavailable line repeats instead of once per generation",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (this.sideReported || this.finalizedCount < SIDE_CHECK_SAMPLES || this.usable()) return;",
+    "replace": "    if (this.finalizedCount < SIDE_CHECK_SAMPLES || this.usable()) return;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js", "observation-clock-sound.test.js"]
+  },
+  {
+    "label": "#373 M-OC45: C3 a generation stays open after end() (late calls accepted)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      this.open = false;",
+    "replace": "      this.open = true;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-OC46: the detectors' handle rethrows a clock failure",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      handleFailures += 1;",
+    "replace": "      throw new Error('unguarded handle');",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "openObservation"
+  },
+  {
+    "label": "#373 M-OS01: SOUND_GAP_S 0.5 -> 0.501",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "export const SOUND_GAP_S = 0.5;",
+    "replace": "export const SOUND_GAP_S = 0.501;",
+    "expect": "killed",
+    "tests": ["observation-clock-sound.test.js"]
+  },
+  {
+    "label": "#373 M-OS02: SOUND_GAP_S 0.5 -> 0.499",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "export const SOUND_GAP_S = 0.5;",
+    "replace": "export const SOUND_GAP_S = 0.499;",
+    "expect": "killed",
+    "tests": ["observation-clock-sound.test.js"]
+  },
+  {
+    "label": "#373 M-OS03: SOUND_RECOVER_MS 1000 -> 999",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "export const SOUND_RECOVER_MS = 1000;",
+    "replace": "export const SOUND_RECOVER_MS = 999;",
+    "expect": "killed",
+    "tests": ["observation-clock-sound.test.js"]
+  },
+  {
+    "label": "#373 M-OS04: SOUND_RECOVER_MS 1000 -> 1001",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "export const SOUND_RECOVER_MS = 1000;",
+    "replace": "export const SOUND_RECOVER_MS = 1001;",
+    "expect": "killed",
+    "tests": ["observation-clock-sound.test.js"]
+  },
+  {
+    "label": "#373 M-OS05: the `delayed` report threshold at a third of the gap instead of a half",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "const SOUND_DELAY_REPORT_S = SOUND_GAP_S / 2;",
+    "replace": "const SOUND_DELAY_REPORT_S = SOUND_GAP_S / 3;",
+    "expect": "killed",
+    "tests": ["observation-clock-sound.test.js"]
+  },
+  {
+    "label": "#373 M-OS06: a floor rise EQUAL to SOUND_GAP_S is a discontinuity",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "        if (floorAfter - c.ref > SOUND_GAP_S * 1000) {",
+    "replace": "        if (floorAfter - c.ref >= SOUND_GAP_S * 1000) {",
+    "expect": "killed",
+    "tests": ["observation-clock-sound.test.js"]
+  },
+  {
+    "label": "#373 M-OS07: R1-F11 an ashowinfo n-hole is ignored",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "        this.holeAt = this.cum;",
+    "replace": "        this.holeAt = null;",
+    "expect": "killed",
+    "tests": ["observation-clock-sound.test.js"]
+  },
+  {
+    "label": "#373 M-OS08: discontinuities judged past a hole (the phantom gaps the soak replay found)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    return this.holeAt !== null && r.start >= this.holeAt - POS_EPS;",
+    "replace": "    return false;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "SOUND records"
+  },
+  {
+    "label": "#373 M-OS09: a silent window counts as ANALYSED coverage",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "        if (s.analysed) this.clock.addCoverage('analysis', lo, hi);",
+    "replace": "        this.clock.addCoverage('analysis', lo, hi);",
+    "expect": "killed",
+    "tests": ["observation-clock-sound.test.js"]
+  },
+  {
+    "label": "#373 M-W01: motion generation ended on 'exit' instead of 'close' (R1-F7: drained frames lost)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "    proc.once('close', (code, signal) => {",
+    "replace": "    proc.once('exit', (code, signal) => {",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "motion \\(working"
+  },
+  {
+    "label": "#373 M-W02: the motion stdout loop no longer observes its frames",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        obs.onSample(frame, rx.mono, rx.wall);",
+    "replace": "        // observe removed",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "motion \\(working"
+  },
+  {
+    "label": "#373 M-W03: motion stderr bypasses the router (tap records reach the log)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "      if (line.trim()) router.line(line);",
+    "replace": "      if (line.trim()) logger.raw(`detect:${path}`, line);",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "motion \\(none"
+  },
+  {
+    "label": "#373 M-W04: a silent sound window is observed as analysed",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "        obs.onSample(win, rx.mono, rx.wall, { analysed: Number.isFinite(level) });",
+    "replace": "        obs.onSample(win, rx.mono, rx.wall, { analysed: true });",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "sound \\(working"
+  },
+  {
+    "label": "#373 M-W05: deleting a camera leaves its observation clocks and tombstones behind",
+    "file": "backend/src/routes/cameras.js",
+    "find": "  forgetObservationClocks(req.params.id);",
+    "replace": "  // forget removed",
+    "expect": "killed",
+    "tests": ["camera-delete-observation.test.js"]
+  },
+  {
+    "label": "#373 M-W06: shutdown() no longer stops the [obs] timer",
+    "file": "backend/src/index.js",
+    "find": "  stopObservationLog();",
+    "replace": "  // stop removed",
+    "expect": "killed",
+    "tests": ["suite-exits-cleanly.test.js"],
+    "namePattern": "stopObservationLog"
+  },
+  {
+    "label": "#373 M-R1-01: F1 sound records are never trimmed (the append-only leak)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (drop >= 256 || (drop > 0 && drop * 2 >= this.records.length)) {",
+    "replace": "    if (false) {",
+    "expect": "killed",
+    "tests": ["observation-clock-growth.test.js"],
+    "namePattern": "sound, a healthy stream"
+  },
+  {
+    "label": "#373 M-R1-02: F1 the trim also drops the record still to be judged",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    const drop = this.k - this.recBase;",
+    "replace": "    const drop = this.k + 1 - this.recBase;",
+    "expect": "killed",
+    "tests": ["observation-clock-sound.test.js"]
+  },
+  {
+    "label": "#373 M-R1-03: F1 records past a hole are stored (and judged) again",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      if (this.pastHole(r)) {",
+    "replace": "      if (false) {",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "SOUND records"
+  },
+  {
+    "label": "#373 M-R1-04: F1 a candidate whose recover window reaches a hole is judged on partial evidence",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "        if (!complete && this.holeRx !== null && this.holeRx <= c.rec.rx + SOUND_RECOVER_MS) return;",
+    "replace": "        // hole check removed",
+    "expect": "killed",
+    "tests": ["observation-clock-sound.test.js"],
+    "namePattern": "reaches a hole"
+  },
+  {
+    "label": "#373 M-R1-05: F1 old discontinuities are never folded (the list grows)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    while (this.disc.length && this.disc[0].pos < limit) this.discFoldedMs += this.disc.shift().sizeMs;",
+    "replace": "    // fold removed",
+    "expect": "killed",
+    "tests": ["observation-clock-growth.test.js"],
+    "namePattern": "lossless hold"
+  },
+  {
+    "label": "#373 M-R1-06: F1 discontinuities folded too early (a window before a gap picks it up)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    const limit = Math.min(oldestWindow, nextRecord) - POS_EPS;",
+    "replace": "    const limit = Infinity;",
+    "expect": "killed",
+    "tests": ["observation-clock-sound.test.js"]
+  },
+  {
+    "label": "#373 M-R1-07: F1 the window-minimum deque is never coarsened (a rising series keeps 1 h of entries)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (this.keys.length - this.head > DEQUE_MAX) this.coarsen();",
+    "replace": "    // coarsen removed",
+    "expect": "killed",
+    "tests": ["observation-clock-growth.test.js"],
+    "namePattern": "drift"
+  },
+  {
+    "label": "#373 M-R1-08: F1 coarsening keeps the HIGHER value of a pair (the minimum reads too high)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      vals.push(this.vals[i]); // values rise front to back, so vals[i] is the pair's minimum",
+    "replace": "      vals.push(this.vals[i + 1]);",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "never ABOVE"
+  },
+  {
+    "label": "#373 M-R1-09: F1 deque entries expire only when read (a window never read never sheds)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    this.expire(key);",
+    "replace": "    // expire on push removed",
+    "expect": "killed",
+    "tests": ["observation-clock-growth.test.js"],
+    "namePattern": "drift"
+  },
+  {
+    "label": "#373 M-R1-10: F1 coverage interval cap removed (no [obs] timer: unbounded)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (iv.length > INTERVALS_MAX) iv.shift();",
+    "replace": "    // cap removed",
+    "expect": "killed",
+    "tests": ["observation-clock-growth.test.js"],
+    "namePattern": "NO \\[obs\\] timer"
+  },
+  {
+    "label": "#373 M-R1-11: F1 touching coverage intervals split by a float epsilon again",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      if (iv[j][1] + INTERVAL_JOIN_EPS_MS >= iv[j + 1][0]) {",
+    "replace": "      if (iv[j][1] >= iv[j + 1][0]) {",
+    "expect": "killed",
+    "tests": ["observation-clock-growth.test.js"],
+    "namePattern": "25 packets"
+  },
+  {
+    "label": "#373 M-R1-12: F1 reordered spans are not merged (one per record after a pts spike)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (last && lo <= last.hi + 1 && hi >= last.lo - 1) {",
+    "replace": "    if (false) {",
+    "expect": "killed",
+    "tests": ["observation-clock-growth.test.js"],
+    "namePattern": "corrupt pts"
+  },
+  {
+    "label": "#373 M-R1-13: F1 unmatched out records are kept forever (no samples: they pile up)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      if (released === null || released >= now - OUT_RETAIN_MS) break;",
+    "replace": "      break;",
+    "expect": "killed",
+    "tests": ["observation-clock-growth.test.js"],
+    "namePattern": "NO samples \\(stdout"
+  },
+  {
+    "label": "#373 M-R1-14: F1 before the first out record, every in record is needed (ring to the hard cap)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (!this.lastOut) return Infinity;",
+    "replace": "    if (!this.lastOut) return -Infinity;",
+    "expect": "killed",
+    "tests": ["observation-clock-growth.test.js"],
+    "namePattern": "NO `out` records"
+  },
+  {
+    "label": "#373 M-R1-15: F1 the passed-over walk re-marks records already matched (drops over-counted)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "          if (o.n <= this.lastMatchedN) continue;",
+    "replace": "          // already-matched skip removed",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "#373 M-R1-16: F2 empty generations are never pruned (17,000 a day for an offline camera)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    this.pruneEmptyGens();",
+    "replace": "    // prune removed",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "F2"
+  },
+  {
+    "label": "#373 M-R1-17: F2 an empty generation followed by another empty one is kept",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      if (empty(this.gens[i]) && empty(this.gens[i + 1])) this.gens.splice(i, 1);",
+    "replace": "      if (false) this.gens.splice(i, 1);",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "F2"
+  },
+  {
+    "label": "#373 M-R1-18: F2 the Phase A fold rule (front folds only once gens[1] committed): one failed launch stops all folding",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    while (this.gens.length && this.gens[0].closed) this.foldGen(this.gens.shift());",
+    "replace": "    while (this.gens.length > 1 && this.gens[0].closed && this.gens[1].restartCommitted) this.foldGen(this.gens.shift());",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "F2"
+  },
+  {
+    "label": "#373 M-R1-28: F2 a closed front generation is dropped WITHOUT folding its last observation and close reason",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    while (this.gens.length && this.gens[0].closed) this.foldGen(this.gens.shift());",
+    "replace": "    while (this.gens.length && this.gens[0].closed) this.gens.shift();",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "F2"
+  },
+  {
+    "label": "#373 M-R1-29: F2 OPEN generations at the front fold too (a late sample, or a hung process, is lost)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    while (this.gens.length && this.gens[0].closed) this.foldGen(this.gens.shift());",
+    "replace": "    while (this.gens.length > 1) this.foldGen(this.gens.shift());",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "F2"
+  },
+  {
+    "label": "#373 M-R1-30: F2 the tombstone loses the close reason across an idle eviction",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "lastReason: this.prevCloseReason, lastCode: this.prevCloseCode };",
+    "replace": "lastReason: null, lastCode: this.prevCloseCode };",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "R3-5"
+  },
+  {
+    "label": "#373 M-R1-31: F2 the tombstone loses the last observation (no RESTART after an eviction)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    return { lastObsMono: this.prevLastObsMono, lastReason:",
+    "replace": "    return { lastObsMono: null, lastReason:",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "R3-5"
+  },
+  {
+    "label": "#373 M-R1-19: F3 open identical-content runs are not capped",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "        if (this.openRuns.size > OPEN_RUNS_MAX) this.closeRun(this.openRuns.values().next().value, { capped: true });",
+    "replace": "        // cap removed",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "F3"
+  },
+  {
+    "label": "#373 M-R1-20: F3 the cap drops the oldest run from the open set WITHOUT closing it (never closed, never counted as capped)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "        if (this.openRuns.size > OPEN_RUNS_MAX) this.closeRun(this.openRuns.values().next().value, { capped: true });",
+    "replace": "        if (this.openRuns.size > OPEN_RUNS_MAX) this.openRuns.delete(this.openRuns.values().next().value);",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "F3"
+  },
+  {
+    "label": "#373 M-R1-21: F4 the re-collapse compares text only (a [fatal] after an identical [error] is lost)",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "    const key = `${bucket ?? 'fatal'}\\u0000${text}`;",
+    "replace": "    const key = text;",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"],
+    "namePattern": "F4"
+  },
+  {
+    "label": "#373 M-R1-22: F5 a throwing classifier sends [fatal]/[panic] through the small bucket",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "        emit(raw, FATAL_TOKEN.test(raw) ? null : 'small');",
+    "replace": "        emit(raw, 'small');",
+    "expect": "killed",
+    "tests": ["ffmpeg-side-channel.test.js"],
+    "namePattern": "F5"
+  },
+  {
+    "label": "#373 M-R1-23: F6 any record counts as a healthy side channel, usable or not",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    return this.usableIn > 0 && this.usableOut > 0;",
+    "replace": "    return this.recordsSeen > 0;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "F6"
+  },
+  {
+    "label": "#373 M-R1-24: F7 passed wall steps are never folded (the list grows all day)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    while (this.steps.length && rx >= this.steps[0].T + WALL_MATCH_WINDOW_MS + Math.max(0, -this.steps[0].s)) {",
+    "replace": "    while (false) {",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "F7"
+  },
+  {
+    "label": "#373 M-R1-25: F7 a folded step's shift is dropped instead of kept",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      this.stepShift += this.steps.shift().s;",
+    "replace": "      this.steps.shift();",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "F7"
+  },
+  {
+    "label": "#373 M-R1-26: F7 a backward step is folded before its DTS-clamp span ends",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    while (this.steps.length && rx >= this.steps[0].T + WALL_MATCH_WINDOW_MS + Math.max(0, -this.steps[0].s)) {",
+    "replace": "    while (this.steps.length && rx >= this.steps[0].T + WALL_MATCH_WINDOW_MS) {",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "F7"
+  },
+  {
+    "label": "#373 M-R2-01: H1 an out record ages from its own ARRIVAL again (fix round 1: a connected stall over 30 s loses the frame held across it)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      const released = o.run ? o.run.releasedRx : o.releasedRx;",
+    "replace": "      const released = o.rx;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "H1"
+  },
+  {
+    "label": "#373 M-R2-02: H1 a run's records age from their own release, not the run's (a run held across a stall loses its first record)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      const released = o.run ? o.run.releasedRx : o.releasedRx;",
+    "replace": "      const released = o.releasedRx;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "H1"
+  },
+  {
+    "label": "#373 M-R2-03: H1 a record no longer releases the one before it (with no samples, out records pile up to the hard cap)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      prev.releasedRx = rx;",
+    "replace": "      // record release removed",
+    "expect": "killed",
+    "tests": ["observation-clock-growth.test.js"],
+    "namePattern": "NO samples \\(stdout"
+  },
+  {
+    "label": "#373 M-R2-04: H1 a run is never released (runs that keep ending pile up to the hard cap)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "        prev.run.releasedRx = rx;",
+    "replace": "        // run release removed",
+    "expect": "killed",
+    "tests": ["observation-clock-growth.test.js"],
+    "namePattern": "PAIRS"
+  },
+  {
+    "label": "#373 M-R2-05: H1 holes are not capped (a frozen picture with no samples keeps every one)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    while (this.holes.length > HOLES_MAX) this.holesFloor = Math.max(this.holesFloor, this.holes.shift().hi);",
+    "replace": "    // holes cap removed",
+    "expect": "killed",
+    "tests": ["observation-clock-growth.test.js"],
+    "namePattern": "FROZEN"
+  },
+  {
+    "label": "#373 M-R2-06: H1 reordered spans are not capped (a frozen picture with no samples keeps every one)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    while (this.reorderedSpans.length > SPANS_MAX) this.spansFloor = Math.max(this.spansFloor, this.reorderedSpans.shift().hi);",
+    "replace": "    // spans cap removed",
+    "expect": "killed",
+    "tests": ["observation-clock-growth.test.js"],
+    "namePattern": "FROZEN"
+  },
+  {
+    "label": "#373 M-R2-07: H1 a hole dropped by the cap leaves no floor (a lost frame's slot reads as an fps clone)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (t <= this.holesFloor) return { cls: 'unknown', reason: 'hole' };",
+    "replace": "    // holes floor ignored",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "count cap leave a floor"
+  },
+  {
+    "label": "#373 M-R2-08: H1 a reordered span dropped by the cap leaves no floor (a REAL claim inside it survives)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (t <= this.spansFloor) return { cls: 'unknown', reason: 'reordered' };",
+    "replace": "    // spans floor ignored",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "count cap leave a floor"
+  },
+  {
+    "label": "#373 M-R2-09: H1 the holes floor over-reaches past the dropped hole (an answerable slot reads UNKNOWN)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "this.holes.shift().hi);",
+    "replace": "this.holes.shift().hi + 2);",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "count cap leave a floor"
+  },
+  {
+    "label": "#373 M-R2-10: H1 the spans floor over-reaches past the dropped span (an answerable slot reads UNKNOWN)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "this.reorderedSpans.shift().hi);",
+    "replace": "this.reorderedSpans.shift().hi + 2);",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "count cap leave a floor"
+  },
+  {
+    "label": "#373 M-R2-11: H5 a same-source run beside a lost out record is labelled from its record count again (the Phase A rule)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (run.holeBefore || run.holeAfter) return { cls: 'unknown', reason: 'out-hole' };",
+    "replace": "    // hole checks removed",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "H5"
+  },
+  {
+    "label": "#373 M-R2-12: H5 a hole BEFORE the run's first record is ignored (a REAL frame whose record was lost reads as an fps clone)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (run.holeBefore || run.holeAfter) return { cls: 'unknown', reason: 'out-hole' };",
+    "replace": "    if (run.holeAfter) return { cls: 'unknown', reason: 'out-hole' };",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "H5"
+  },
+  {
+    "label": "#373 M-R2-13: H5 a hole AFTER the run is ignored (later identical REAL frames read as CFR repeats, stamped early)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (run.holeBefore || run.holeAfter) return { cls: 'unknown', reason: 'out-hole' };",
+    "replace": "    if (run.holeBefore) return { cls: 'unknown', reason: 'out-hole' };",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "H5"
+  },
+  {
+    "label": "#373 M-R2-14: H5 the hole before a run's successor is never recorded",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "        prev.run.holeAfter = o.holeBefore;",
+    "replace": "        // holeAfter not recorded",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "H5"
+  },
+  {
+    "label": "#373 M-R2-15: H5 the hole before a run's first record is never recorded",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "        holeBefore: prev.holeBefore, holeAfter: false,",
+    "replace": "        holeBefore: false, holeAfter: false,",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "H5"
+  },
+  {
+    "label": "#373 M-R2-16: H5 a sample beyond the record count is a CFR repeat even before the record after the run is known",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (run.releasedRx === null && !this.ending) return { cls: 'unknown', reason: 'pending' };",
+    "replace": "    // pending rule removed",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "H5"
+  },
+  {
+    "label": "#373 M-R2-17: H5 the pending rule also applies once the stream has ended (a real CFR repeat at the end reads UNKNOWN)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (run.releasedRx === null && !this.ending) return { cls: 'unknown', reason: 'pending' };",
+    "replace": "    if (run.releasedRx === null) return { cls: 'unknown', reason: 'pending' };",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "H5"
+  },
+  {
+    "label": "#373 M-R2-18: H5 a run beside a lost record still reports its net dup/drop (unknowable across the hole)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (run.holeBefore || run.holeAfter) return;",
+    "replace": "    // hole-adjacent net counted",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "H5"
+  },
+  {
+    "label": "#373 M-R2-19: H5 a first out record with n > 0 is not marked as following lost records",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      holeBefore: this.outTaint || (prev === null ? rec.n > 0 : rec.n !== prev.n + 1),",
+    "replace": "      holeBefore: this.outTaint || (prev !== null && rec.n !== prev.n + 1),",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "H5"
+  },
+  {
+    "label": "#373 M-R2-20: G1 the GENS_MAX backstop folds the FRONT generation again, open or not (fix round 1's rule)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      const i = this.gens.findIndex(empty);",
+    "replace": "      const i = 0; this.foldGen(this.gens[0]);",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "G1"
+  },
+  {
+    "label": "#373 M-R2-21: G1 the GENS_MAX backstop removed (failed launches behind an open generation pile up)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    while (this.gens.length > GENS_MAX) {",
+    "replace": "    while (false) {",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "G1"
+  },
+  {
+    "label": "#373 M-R2-22: G1 sizes() reports the per-generation maximum again, not the total",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      for (const [k, v] of Object.entries(g.sizes())) out[k] = (out[k] ?? 0) + v;",
+    "replace": "      for (const [k, v] of Object.entries(g.sizes())) out[k] = Math.max(out[k] ?? 0, v);",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "G1"
+  },
+  {
+    "label": "#373 M-R2-23: G1 sizes() misses the generation lastGen still holds after it folds",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    const held = this.lastGen && !this.gens.includes(this.lastGen) ? [...this.gens, this.lastGen] : this.gens;",
+    "replace": "    const held = this.gens;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "G1"
+  },
+  {
+    "label": "#373 M-R2-24: G2 a run closed by the open-run cap counts its net dup/drop again (fix round 1: every record read as a drop)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "this.closeRun(this.openRuns.values().next().value, { capped: true });",
+    "replace": "this.closeRun(this.openRuns.values().next().value);",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "G2"
+  },
+  {
+    "label": "#373 M-R2-25: G2 runs closed by the cap are not counted in runsCapped",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      this.clock.period.runsCapped += 1;",
+    "replace": "      // runsCapped not counted",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "G2"
+  },
+  {
+    "label": "#373 M-R2-26: H2 the window-minimum deques' cap back at 1,024 (a smoothly rising excess coarsens the 60 s sound reference: a phantom discontinuity)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "const DEQUE_MAX = 8192;",
+    "replace": "const DEQUE_MAX = 1024;",
+    "expect": "killed",
+    "tests": ["observation-clock-sound.test.js"],
+    "namePattern": "H2"
+  },
+  {
+    "label": "#373 M-R2-27: H3 the missing-first-record short-circuit removed (a run whose first record is gone is recomputed from records that no longer exist)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (!this.outs.has(run.firstN)) return { cls: 'unknown', reason: 'ambiguous' };",
+    "replace": "    // short-circuit removed",
+    "expect": "killed",
+    "tests": ["observation-clock-growth.test.js"],
+    "namePattern": "wedged"
+  },
+  {
+    "label": "#373 M-R2-28: H3 Phase A's presence check (an array over the WHOLE run, every sample: quadratic for a frozen picture)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (!this.outs.has(run.firstN)) return { cls: 'unknown', reason: 'ambiguous' };",
+    "replace": "    { const recs = []; for (let n = run.firstN; n <= run.lastN; n += 1) recs.push(this.outs.get(n)); if (recs.some((o) => !o)) return { cls: 'unknown', reason: 'ambiguous' }; }",
+    "expect": "killed",
+    "tests": ["observation-clock-growth.test.js"],
+    "namePattern": "wedged"
+  },
+  {
+    "label": "#373 M-R2-29: H3 a run's verdict is never reused (a stall's burst recomputes it for every sample)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (!v || v.epoch !== this.provEpoch || v.lastN !== run.lastN) {",
+    "replace": "    if (true) {",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "H3"
+  },
+  {
+    "label": "#373 M-R2-30: H3 an `in` record does not invalidate the cached verdicts (a stale answer)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    this.provEpoch += 1;",
+    "replace": "    // epoch not bumped",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "H3"
+  },
+  {
+    "label": "#373 M-R2-31: H3 a run that grows keeps its cached verdict (a stale answer)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (!v || v.epoch !== this.provEpoch || v.lastN !== run.lastN) {",
+    "replace": "    if (!v || v.epoch !== this.provEpoch) {",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "H3"
+  },
+  {
+    "label": "#373 M-R2-32: H3 provenanceMany takes the FIRST record of a slot, not the latest (R4-1)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    for (let i = 0; i < R; i += 1) lastAt.set(ring[i].slot, i);",
+    "replace": "    for (let i = R - 1; i >= 0; i -= 1) lastAt.set(ring[i].slot, i);",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "H3"
+  },
+  {
+    "label": "#373 M-R2-33: H3 provenanceMany's interval test misses a hole's or span's upper slot",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "  return lo > 0 && t <= iv[lo - 1][1];",
+    "replace": "  return lo > 0 && t < iv[lo - 1][1];",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "H3"
+  },
+  {
+    "label": "#373 M-R2-34: H3 provenanceMany's pruned-record check (R4-4) off by one slot",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      if (!cand || (this.prunedMaxN > cand.n && this.prunedMaxSlot <= t)) return { cls: 'unknown', reason: 'no-source' };",
+    "replace": "      if (!cand || (this.prunedMaxN > cand.n && this.prunedMaxSlot < t)) return { cls: 'unknown', reason: 'no-source' };",
+    "expect": "equivalent",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "H3",
+    "note": "The R4-4 pruned-record guard never fires, so its boundary cannot change an answer: expiry keeps the newest record below tMin and every record at or above it, the count cap removes the oldest, and tMin never falls, so no pruned record is ever NEWER than a remaining candidate. Checked (fix round 2 builder, scratch r44.mjs): 3,000 fuzzed motion streams, 601 with backwards pts, stalls to 45 s: the guard fired 0 times. Phase A had no mutant on the same guard in provenance()."
+  },
+  {
+    "label": "#373 M-R2-35: G3 the coverage cap evicts BEFORE merging again (an interval the union already covers costs the earliest one)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    const iv = this.iv;",
+    "replace": "    const iv = this.iv; if (iv.length >= INTERVALS_MAX) iv.shift();",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "G3"
+  },
+  {
+    "label": "#373 M-R2-36: G3 the coverage cap evicts at the cap even when the new interval merged",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (iv.length > INTERVALS_MAX) iv.shift();",
+    "replace": "    if (iv.length >= INTERVALS_MAX) iv.shift();",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "G3"
+  },
+  {
+    "label": "#373 M-R2-37: G4 fix round 1's 64-step count backstop is back (it folds a step a record is still before: 900 ms early)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    while (this.steps.length && rx >= this.steps[0].T + WALL_MATCH_WINDOW_MS + Math.max(0, -this.steps[0].s)) {",
+    "replace": "    while (this.steps.length && (this.steps.length > 64 || rx >= this.steps[0].T + WALL_MATCH_WINDOW_MS + Math.max(0, -this.steps[0].s))) {",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "G4"
+  },
+  {
+    "label": "#373 M-R2-38: H4 the sound discontinuity list is not capped (stdout stalled: one entry per discontinuity, forever)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    while (this.disc.length > DISC_MAX) {",
+    "replace": "    while (false) {",
+    "expect": "killed",
+    "tests": ["observation-clock-growth.test.js"],
+    "namePattern": "discontinuity every 250"
+  },
+  {
+    "label": "#373 M-R2-39: H4 a discontinuity folded early leaves no floor (a window before it gets a wrong time)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    else if (start < this.discCapPos - POS_EPS) obs.reason = 'disc-capped';",
+    "replace": "    // floor ignored",
+    "expect": "killed",
+    "tests": ["observation-clock-sound.test.js"],
+    "namePattern": "H4"
+  },
+  {
+    "label": "#373 M-R2-40: H4 the floor over-reaches: a window starting exactly at the folded discontinuity reads UNKNOWN",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    else if (start < this.discCapPos - POS_EPS) obs.reason = 'disc-capped';",
+    "replace": "    else if (start < this.discCapPos + POS_EPS) obs.reason = 'disc-capped';",
+    "expect": "killed",
+    "tests": ["observation-clock-sound.test.js"],
+    "namePattern": "H4"
+  },
+  {
+    "label": "#373 M-R2-41: fix round 3 (a) the final record is docked as unwritten even when the run was fully delivered (phantom cfrDup at generation end)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      if (run.lastN === (this.lastOut && this.lastOut.n) && !this.lastOut.matched && run.samples < run.records) run.records -= 1;",
+    "replace": "      if (run.lastN === (this.lastOut && this.lastOut.n) && !this.lastOut.matched) run.records -= 1;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "phantom dup"
+  },
+  {
+    "label": "#373 M-W07: F8 motion observes a frame BEFORE its decision handler (R1-F8)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        handleFrame(frame);\r\n        // #373: exactly one observation per frame, AFTER its decision handler has returned (plan §D,\r\n        // R1-F8): the handler's inputs are the same bytes in the same order, and its own Date.now() is\r\n        // read before any observation work for this frame. The clock only reads the frame.\r\n        obs.onSample(frame, rx.mono, rx.wall);\r\n",
+    "replace": "        obs.onSample(frame, rx.mono, rx.wall);\r\n        handleFrame(frame);\r\n",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "F8 motion"
+  },
+  {
+    "label": "#373 M-W08: F8 motion reads the receipt clock once per FRAME instead of once per data event",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "      const rx = obs.receipt();\r\n      buf = buf.length ? Buffer.concat([buf, chunk]) : chunk;\r\n      while (buf.length >= FRAME_BYTES) {\r\n",
+    "replace": "      let rx;\r\n      buf = buf.length ? Buffer.concat([buf, chunk]) : chunk;\r\n      while (buf.length >= FRAME_BYTES) {\r\n        rx = obs.receipt();\r\n",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "F8 motion"
+  },
+  {
+    "label": "#373 M-W09: F8 sound observes a window BEFORE its decision handler (R1-F8)",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "        handleReading(level);\r\n        // #373: one observation per window, AFTER its decision handler returned (R1-F8). It runs for every\r\n        // window, silent ones included — the early return inside handleReading cannot skip it — and a\r\n        // silent window counts as SAMPLED but not ANALYSED coverage (C5).\r\n        obs.onSample(win, rx.mono, rx.wall, { analysed: Number.isFinite(level) });\r\n",
+    "replace": "        obs.onSample(win, rx.mono, rx.wall, { analysed: Number.isFinite(level) });\r\n        handleReading(level);\r\n",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "F8 sound"
+  },
+  {
+    "label": "#373 M-W10: F8 sound reads the receipt clock once per WINDOW instead of once per data event",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "      const rx = obs.receipt();\r\n      pcm = pcm.length ? Buffer.concat([pcm, chunk]) : chunk;\r\n      while (pcm.length >= WIN_BYTES) {\r\n",
+    "replace": "      let rx;\r\n      pcm = pcm.length ? Buffer.concat([pcm, chunk]) : chunk;\r\n      while (pcm.length >= WIN_BYTES) {\r\n        rx = obs.receipt();\r\n",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "F8 sound"
+  },
+  {
+    "label": "0.34.0 review F1: Before bedtime groups on the placeholder timezone (the loaded gate removed)",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "  const groupEarly = settingsLoaded && hasBedtime;",
+    "replace": "  const groupEarly = hasBedtime;",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "0.34.0 review F1: NightReview gates on !loading, which a FAILED settings load also satisfies",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "  const { settings, loaded: settingsLoaded } = useSettings();",
+    "replace": "  const { settings, loading } = useSettings();\r\n  const settingsLoaded = !loading;",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"]
+  },
+  {
+    "label": "0.34.0 review F1: SettingsContext starts loaded, so the placeholder passes for real settings",
+    "file": "frontend/src/lib/SettingsContext.jsx",
+    "find": "  const [loaded, setLoaded] = useState(false);",
+    "replace": "  const [loaded, setLoaded] = useState(true);",
+    "expect": "killed",
+    "tests": ["lib/SettingsContext.test.jsx"]
+  },
+  {
+    "label": "0.34.0 review F1: a FAILED first settings request counts as loaded",
+    "file": "frontend/src/lib/SettingsContext.jsx",
+    "find": "      if (seq === reqSeq.current) setLoading(false);",
+    "replace": "      if (seq === reqSeq.current) { setLoading(false); setLoaded(true); }",
+    "expect": "killed",
+    "tests": ["lib/SettingsContext.test.jsx"]
+  },
+  {
+    "label": "0.34.0 review F1: a successful GET never sets loaded",
+    "file": "frontend/src/lib/SettingsContext.jsx",
+    "find": "      loadedOnce.current = true;\r\n      setLoaded(true);\r\n",
+    "replace": "      loadedOnce.current = true;\r\n",
+    "expect": "killed",
+    "tests": ["lib/SettingsContext.test.jsx"]
+  },
+  {
+    "label": "0.34.0 review F1: commit() never sets loaded",
+    "file": "frontend/src/lib/SettingsContext.jsx",
+    "find": "see `loaded`.\r\n    setLoaded(true);\r\n",
+    "replace": "see `loaded`.\r\n",
+    "expect": "killed",
+    "tests": ["lib/SettingsContext.test.jsx"]
+  },
+  {
+    "label": "0.34.0 review F2: side read from the last generation's cumulative usable() again (the pre-fix rule)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      side: this.sideState(),",
+    "replace": "      side: g ? (g.usable() ? 'ok' : g.finalizedCount > 0 ? 'unavailable' : 'pending') : 'none',",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js", "observation-clock-sound.test.js"]
+  },
+  {
+    "label": "0.34.0 review F2: a period where EVERY sample is unknown still reads ok (< flipped to <=)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    return p.unknown < p.samples ? 'ok' : 'unavailable';",
+    "replace": "    return p.unknown <= p.samples ? 'ok' : 'unavailable';",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js", "observation-clock-sound.test.js"]
+  },
+  {
+    "label": "0.34.0 review F2: any unknown at all reads unavailable (a partial loss treated as a dead channel)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    return p.unknown < p.samples ? 'ok' : 'unavailable';",
+    "replace": "    return p.unknown === 0 ? 'ok' : 'unavailable';",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js", "observation-clock-sound.test.js"]
+  },
+  {
+    "label": "0.34.0 review F2: a period with no finalized sample reads ok instead of pending",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (p.samples === 0) return this.lastGen ? 'pending' : 'none';",
+    "replace": "    if (p.samples === 0) return this.lastGen ? 'ok' : 'none';",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "0.34.0 review F2: a clock that never began a generation reads pending instead of none",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (p.samples === 0) return this.lastGen ? 'pending' : 'none';",
+    "replace": "    if (p.samples === 0) return 'pending';",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"]
   }
 ]
