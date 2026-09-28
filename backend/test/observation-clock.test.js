@@ -1221,6 +1221,21 @@ describe('`side` is judged per [obs] period, from what the samples came out as (
     assert.equal(field(p4, 'side'), 'ok', p4);
   });
 
+  test('a frozen picture (new frames, every one identical) reads side=unavailable, and `ambiguous` says why', () => {
+    // As documented in KNOWN-ISSUES.md: the tap lines arrive and parse, but distinct input frames that scale
+    // to the same picture form one identical-content run (R3-2), so nothing can be placed. PLANTED: every
+    // frame's content is the same label; the input records are all distinct, real frames.
+    const r = periodMotion();
+    const g = r.open();
+    feedStream(g, steadyFrames({ fps: 5, count: 300, base: 100_000 }), { content: () => 'FROZEN' }).flush(160_000);
+    const line = r.tick(166_000);
+    const samples = Number(field(line, 'samples'));
+    assert.ok(samples > 250, line);
+    assert.equal(field(line, 'unknown'), String(samples), line);
+    assert.equal(field(line, 'ambiguous'), String(samples), 'the reason is on the line');
+    assert.equal(field(line, 'side'), 'unavailable', line);
+  });
+
   test('a period with records flowing but NO sample finalized reads pending, not ok — there is nothing to judge', () => {
     // The detector's stdout stalled while its stderr tap lines kept coming. The old per-generation answer
     // was `ok` because the records were usable; nothing was placed, and nothing was UNKNOWN either.
