@@ -663,7 +663,7 @@ export class ObservationClock {
   // Every memory-bearing structure's size, for the bounded-growth test (observation-clock-growth.test.js)
   // and for anyone debugging a long-running install. Cheap: counts only. TOTALS over every generation the
   // clock still holds — the list, plus the last one begun, which `lastGen` keeps (for the `[obs]` line's
-  // gen/path/side) after it has folded out of the list. Fix round 1 reported the per-generation maximum and
+  // gen/path) after it has folded out of the list. Fix round 1 reported the per-generation maximum and
   // missed that one (fix round 2, G1, Codex review), so memory held by several generations read as one's.
   sizes() {
     const held = this.lastGen && !this.gens.includes(this.lastGen) ? [...this.gens, this.lastGen] : this.gens;
@@ -719,10 +719,39 @@ export class ObservationClock {
       clamps: p.clamps,
       uncertain: p.uncertain,
       wallSteps: p.wallSteps,
-      side: g ? g.sideState() : 'none',
+      side: this.sideState(),
       warn: p.warn,
       late: p.late,
     };
+  }
+
+  // `side` on the [obs] line: could the timestamp evidence place ANY sample finalized in THIS period?
+  //   ok          — at least one was placed (REAL, a clone, or observed sound);
+  //   unavailable — samples were finalized and EVERY one is UNKNOWN;
+  //   pending     — none was finalized this period (samples=0), so there is nothing to judge;
+  //   none        — this clock has never begun a generation.
+  //
+  // ★ JUDGED PER PERIOD, FROM WHAT HAPPENED TO THE SAMPLES (0.34.0 release review, Codex, 2026-09-28).
+  // It used to be the LAST generation's usable(): "has a usable record EVER arrived in this generation",
+  // which, once true, stayed true for the rest of the run. Two ways that lied, both reproduced by that
+  // review and pinned in observation-clock.test.js / observation-clock-sound.test.js: motion whose tap lines
+  // stopped parsing after a healthy start (samples=250 unknown=250 side=ok), and sound after ONE lost
+  // record — every later window is UNKNOWN by design (R1-F11), while records keep arriving and parsing
+  // (samples=100 unknown=100 side=ok). And live, 2026-09-27: a camera's sound leg read cover=0.0% with
+  // every sample unknown for over 18 hours, and printed side=ok on every one of those lines.
+  // Outcome, not input: "records arrived" is exactly the test that was fooled — the n-hole's records are
+  // perfectly good records — so this counts what the evidence actually PLACED, whatever the cause. That
+  // also flags a frozen picture (every sample `ambiguous`): the lines arrive, but they cannot place
+  // anything either, and the line's `ambiguous` column says that is why.
+  // Deliberately NO threshold between the two: nothing has measured where a "partly unusable" period
+  // starts (the one-house normal is a handful of unknowns in 4,500), so a partial loss stays `ok` and
+  // shows in `unknown`; `unavailable` means none at all, which is what every failure above looked like.
+  // The one-off `side-channel unavailable` line (checkSide) is still per GENERATION, from its start: it
+  // fires only for a run whose records were never usable, and says which way. A later failure shows here.
+  sideState() {
+    const p = this.period;
+    if (p.samples === 0) return this.lastGen ? 'pending' : 'none';
+    return p.unknown < p.samples ? 'ok' : 'unavailable';
   }
 
   resetPeriod(now = this.monoNow()) {
@@ -933,6 +962,9 @@ class Generation {
   // F6 (fix round 1): "healthy" means records the clock can USE, not records that arrived. A motion `in`
   // record without its tap's `config in` time base cannot be placed in a slot, so a stream whose config
   // line was lost used to report side=ok while every sample was UNKNOWN, and never said why.
+  // ⚠️ This one-off line only covers a generation that was NEVER usable (usable() is cumulative, and the
+  // line is written once). The [obs] line's `side` is no longer taken from here: it is judged per period
+  // from what the samples came out as — see ObservationClock.sideState() for why.
   checkSide() {
     if (this.sideReported || this.finalizedCount < SIDE_CHECK_SAMPLES || this.usable()) return;
     this.sideReported = true;
@@ -948,11 +980,6 @@ class Generation {
     return {
       pending: this.pending.length, envelope: this.envelope.size(), rxFloor: this.rxFloor.size(), steps: this.steps.length,
     };
-  }
-
-  sideState() {
-    if (this.usable()) return 'ok';
-    return this.finalizedCount > 0 ? 'unavailable' : 'pending';
   }
 
   end(reason, info = {}) {

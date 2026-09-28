@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { _resetObservationClocksForTests } from '../src/lib/observationClock.js';
+import { _resetObservationClocksForTests, getObservationClock, logObservationSummaries } from '../src/lib/observationClock.js';
 import { makeClock, WALL0 } from './helpers/obsRig.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -292,6 +292,75 @@ describe('what the sound model cannot know, it says (R1-F11, C5)', () => {
     rig.end(120_000);
     assert.ok(rig.obs.every((x) => x.cls === 'unknown'));
     assert.equal(rig.logs.filter((l) => l.includes('side-channel unavailable')).length, 1);
+  });
+
+  test('ONE lost record, then a full period of otherwise-normal audio: side=unavailable, not ok (0.34.0 release review)', () => {
+    // The review's second reproduction (samples=100 unknown=100 side=ok), and the shape of a live sound leg
+    // that read cover=0.0% with every window unknown for over 18 hours while printing side=ok. After an
+    // n-hole every later window of the generation is UNKNOWN by design (R1-F11) — but the records keep
+    // arriving and PARSING, so a "has a usable record arrived" test stays true for the rest of the run.
+    // Driven through the real [obs] timer body, period by period. PLANTED: 8 kHz, 320-sample packets (40 ms,
+    // five to a 200 ms window), received 20 ms after capture; only the ashowinfo LINE of packet 1500 is lost
+    // — its audio still reaches stdout, so the windows keep their pace.
+    const t = { mono: 100_000 };
+    const clocks = { monoNow: () => t.mono, wallNow: () => t.mono + WALL0 };
+    const logs = [];
+    const clock = getObservationClock('cam-side', 'sound', { clocks, label: 'Side Cam', log: (l) => logs.push(l) });
+    const field = (line, name) => new RegExp(` ${name}=(\\S+)`).exec(line)?.[1];
+    const tick = (at) => {
+      t.mono = at;
+      const before = logs.length;
+      logObservationSummaries();
+      const printed = logs.slice(before).filter((l) => l.includes(' samples='));
+      assert.equal(printed.length, 1, 'one [obs] line per tick');
+      return printed[0];
+    };
+    const B = 100_000;
+    const play = (gen, from, to, { base = B, lostLine = -1 } = {}) => {
+      for (let i = from; i < to; i += 1) {
+        const rx = base + i * 40 + 20;
+        t.mono = rx;
+        if (i !== lostLine) gen.onRecord({ tap: 'audio', n: i, pts: i * 320, ptsTime: (i * 320) / 8000, rate: 8000, nbSamples: 320 });
+        if ((i + 1) % 5 === 0) {
+          t.mono = rx + 0.5;
+          gen.onSample(Buffer.alloc(0), rx + 0.5, rx + 0.5 + WALL0, { analysed: true });
+        }
+      }
+    };
+    const gen1 = clock.beginGeneration({ path: 'cam', windowSeconds: 0.2 });
+
+    // Period 1: one clean minute.
+    play(gen1, 0, 1500);
+    const p1 = tick(B + 60_100);
+    assert.equal(field(p1, 'side'), 'ok', p1);
+    assert.equal(field(p1, 'unknown'), '0', p1);
+
+    // Period 2: record 1500 is lost at its start, then normal audio. The clean windows still finalizing
+    // from period 1 were placed, so this period is `ok` (a partial loss, visible in `unknown`).
+    play(gen1, 1500, 3000, { lostLine: 1500 });
+    const p2 = tick(B + 120_100);
+    assert.equal(field(p2, 'side'), 'ok', p2);
+
+    // Period 3: a FULL 15 minutes of normal audio (22,500 records, every one parsed) after that one hole.
+    play(gen1, 3000, 3000 + 22_500);
+    const p3 = tick(B + 120_100 + 900_000);
+    const samples = Number(field(p3, 'samples'));
+    assert.ok(samples > 4000, `a full period of windows: ${p3}`);
+    assert.equal(field(p3, 'unknown'), String(samples), 'every window after the hole is UNKNOWN (R1-F11)');
+    assert.equal(field(p3, 'observed'), '0', p3);
+    assert.equal(field(p3, 'cover'), '0.0%/0.0%');
+    assert.equal(field(p3, 'side'), 'unavailable', `was side=ok here before the fix: ${p3}`);
+    assert.equal(field(p3, 'warn'), '0', 'nothing threw: `warn` counts caught exceptions, not health');
+
+    // Period 4: the detector relaunches (a new generation: the sample index starts again, and the hole with
+    // it). Its windows are placed, and `side` follows.
+    t.mono = B + 1_020_200;
+    gen1.end('exit');
+    const gen2 = clock.beginGeneration({ path: 'cam', windowSeconds: 0.2 });
+    play(gen2, 0, 1500, { base: B + 1_030_000 });
+    const p4 = tick(B + 1_030_000 + 70_000);
+    assert.equal(field(p4, 'side'), 'ok', p4);
+    assert.ok(Number(field(p4, 'observed')) > 0, p4);
   });
 });
 
