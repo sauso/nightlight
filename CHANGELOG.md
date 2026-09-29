@@ -9,6 +9,25 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+- **The morning review can now say "No one was in the bed" for the whole night**, not just correct a
+  time. Previously the only option was to type times, so a night the detector scored as hours of sleep
+  in an empty bed could only be saved with nothing in it. The new option sits next to the usual times on
+  the review screen ("Was this right?") and, once saved, changes the child's card and the sleep detail
+  page to say "You said no one was in the bed" instead of the detector's night — the same way a corrected
+  night already shows your own times instead of the detector's. It is reversible ("Someone was in the
+  bed" undoes it), and per-night: it never assumes a particular child, camera or timezone.
+  - The detector's own answer for that night is kept, never overwritten — a future improvement still has
+    it to compare against, and un-flagging restores it exactly. What is **not** restored is any time you
+    had typed before flagging the night: the flag clears them, so after an undo you may need to re-enter
+    them, and until you do, the morning card shows neither "ask" nor "done" for that night (a stated
+    limit, not a bug).
+  - The night's timelapse and any recorded transition frames are **kept**, unlike a night the detector
+    itself scores empty (which discards its frames) — the flag is reversible and a tap here should never
+    destroy video that undoing it could not bring back.
+  - Excluded from the sleep ↔ temperature insight averages, and its automatic "up at such-and-such" push
+    is skipped — a push already sent cannot be recalled, but no further one goes out for a flagged night.
+
 ### Fixed
 - **A motion or sound detector that stops receiving anything is now restarted, instead of staying silent
   for hours.** A detector's ffmpeg could stay alive and connected while getting no frames at all, and

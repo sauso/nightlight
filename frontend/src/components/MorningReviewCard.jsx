@@ -44,8 +44,17 @@ export default function MorningReviewCard({ childId, fmtTime }) {
   };
 
   if (card.state === 'done') {
+    // `card.nobody_in_bed` comes from reviewCardState, NOT the raw review row — that route already
+    // returns a real boolean (unlike GET /review's raw 0/1 column), so no truthiness cast is needed
+    // here the way NightReview.jsx's seed needs one.
     return (
-      <ReviewReceipt onsetAt={card.true_onset_at} wakeAt={card.true_wake_at} fmtTime={fmtTime} onOpen={open} />
+      <ReviewReceipt
+        onsetAt={card.true_onset_at}
+        wakeAt={card.true_wake_at}
+        nobodyInBed={card.nobody_in_bed}
+        fmtTime={fmtTime}
+        onOpen={open}
+      />
     );
   }
 

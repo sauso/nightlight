@@ -155,6 +155,34 @@ describe('which night it opens on', () => {
     expect(get.mock.calls.map((c) => c[0]).some((p) => p.includes('/review/'))).toBe(false);
   });
 
+  // ★ THE R4 REGRESSION TEST. A flag-only save has NEITHER `true_onset_at` NOR `true_wake_at` — that is
+  // the whole point of the flag, it carries no times — so the original gate
+  // `r?.review?.true_onset_at || r?.review?.true_wake_at` is false here and the receipt shows nothing,
+  // which reads exactly like a failed save (the class of bug the receipt exists to prevent in the first
+  // place). Gating on `nobody_in_bed` too is what this test pins.
+  test('★ arriving from a FLAG-ONLY save still shows the receipt (R4) — a flag carries no times', async () => {
+    const get = vi.fn((path) => {
+      if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'tonight', night: { night_date: '2026-08-30' } });
+      if (path.includes('/sleep/insights')) return Promise.resolve(null);
+      if (path.includes('/review/')) {
+        return Promise.resolve({
+          child_id: 'kid-1',
+          night_date: '2026-08-24',
+          computed: { status: 'ok', onset_at: '2026-08-24 09:28:00', wake_at: '2026-08-24 20:14:00' },
+          review: { true_onset_at: null, true_wake_at: null, nobody_in_bed: 1 },
+          transitions: [],
+        });
+      }
+      if (path.includes('/sleep/')) return Promise.resolve({ ...NIGHT, night_date: '2026-08-24', status: 'empty', corrected: true, nobody_in_bed: true });
+      return Promise.resolve(null);
+    });
+    vi.spyOn(api, 'get').mockImplementation(get);
+    mountAt('/children/kid-1/sleep?date=2026-08-24&saved=1');
+
+    expect(await screen.findByText('Thanks — that’s recorded')).toBeVisible();
+    expect(screen.getByText('You said no one was in the bed. Tap to change it.')).toBeInTheDocument();
+  });
+
   test('★ but never past the newest browsable night', async () => {
     // 2026-09-30 is beyond the live night, so the picker could not reach it. A URL must not either.
     const get = mockSleep({ live: { scope: 'tonight', night: { night_date: '2026-08-30' } } });
@@ -437,6 +465,48 @@ describe('★ the empty states each say a different thing', () => {
       expect(await screen.findByText(pattern)).toBeTruthy();
     });
   }
+
+  // A detector-empty night and a PARENT-flagged one share `status: 'empty'`, but the honest claims they
+  // can make differ (the detector one really did watch the whole window; the flagged one is a parent
+  // overruling the detector, and the cameras may have seen something else entirely) — and only the
+  // flagged one can be undone, so only it may reach the review form at all. `nobody_in_bed: true` is
+  // what a real `asNobodyInBed` overlay carries (sleepReviews.js) — see the next test for why `corrected`
+  // alone is not a safe stand-in for it here.
+  test('a PARENT-flagged empty night says so, and stays reachable to undo — unlike a detector-empty one', async () => {
+    mockSleep({ night: { ...NIGHT, status: 'empty', corrected: true, nobody_in_bed: true, coverage_minutes: 720 } });
+    mount();
+    expect(await screen.findByText('You said no one was in the bed for this night.')).toBeInTheDocument();
+    // The false claim a detector-empty night is allowed to make ("the cameras watched...") must not
+    // survive onto a night that is actually a parent's statement, not a coverage report.
+    expect(screen.queryByText(/cameras watched the whole window/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /change what you told us about this night/i })).toBeInTheDocument();
+  });
+
+  test('a genuine detector-empty night keeps the old copy and gets NO review button', async () => {
+    mockSleep({ night: { ...NIGHT, status: 'empty', coverage_minutes: 720 } });
+    mount();
+    expect(await screen.findByText(/No one in the bed for this night. The cameras watched the whole window/)).toBeInTheDocument();
+    expect(screen.queryByText('You said no one was in the bed for this night.')).not.toBeInTheDocument();
+    // Out of scope here on purpose (the "reverse error" — detector says empty, child was really there —
+    // has no correction path anywhere yet): a detector-empty night must not grow a way into the review
+    // form as a side effect of fixing the flagged case.
+    expect(screen.queryByRole('button', { name: /was this night right/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /change what you told us/i })).not.toBeInTheDocument();
+  });
+
+  // ★ REGRESSION (code-review finding, 2026-09-29): a plain TIME correction on a night that was already
+  // `status: 'empty'` ALSO sets `corrected: true` (sleepReviews.js's OTHER `applyCorrection` branch —
+  // not `asNobodyInBed`, which is the only path that sets `nobody_in_bed`). Keying this copy on
+  // `corrected` alone told a parent who had only typed a time that they had said no one was in the bed
+  // at all — false. `nobody_in_bed` is absent here on purpose, mirroring that branch's real output.
+  test('a TIME correction on an already-empty night is NOT read as "no one was in the bed"', async () => {
+    mockSleep({ night: { ...NIGHT, status: 'empty', corrected: true, coverage_minutes: 720 } });
+    mount();
+    expect(await screen.findByText(/No one in the bed for this night. The cameras watched the whole window/)).toBeInTheDocument();
+    expect(screen.queryByText('You said no one was in the bed for this night.')).not.toBeInTheDocument();
+    // Still reachable to change, same as any other corrected night — only the WORDING was wrong.
+    expect(screen.getByRole('button', { name: /change what you told us about this night/i })).toBeInTheDocument();
+  });
 
   test('a null night reads as no data, not as an error', async () => {
     mockSleep({ night: null });

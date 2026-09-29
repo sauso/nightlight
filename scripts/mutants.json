@@ -6024,5 +6024,363 @@
     "replace": "    if (p.samples === 0) return 'pending';",
     "expect": "killed",
     "tests": ["observation-clock.test.js"]
+  },
+  {
+    "label": "nobody-in-bed: runner control (comment only)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "// date is the one way a still-running night gets into sleep_nights, and it must not slip past R8.",
+    "replace": "// date is the one way a still-running night gets into sleep_nights, and it must not get past R8.",
+    "expect": "survives",
+    "tests": ["nobody-in-bed.test.js"]
+  },
+  {
+    "label": "nobody-in-bed: flip the flag test in the overlay",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  if (r.nobody_in_bed) {",
+    "replace": "  if (!r.nobody_in_bed) {",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js"]
+  },
+  {
+    "label": "nobody-in-bed: re-add the early return (scored against test 2, every read route)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  if (!r) return night;",
+    "replace": "  if (!r || (!r.true_onset_at && !r.true_wake_at)) return night;",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js"],
+    "namePattern": "reaches /sleep"
+  },
+  {
+    "label": "nobody-in-bed: re-add the early return (scored against test 3, stored-row shape)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  if (!r) return night;",
+    "replace": "  if (!r || (!r.true_onset_at && !r.true_wake_at)) return night;",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js"],
+    "namePattern": "reads exactly like a detector-empty row"
+  },
+  {
+    "label": "nobody-in-bed: re-add the early return (scored against test 3, detail shape)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  if (!r) return night;",
+    "replace": "  if (!r || (!r.true_onset_at && !r.true_wake_at)) return night;",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js"],
+    "namePattern": "exactly the keys a detector-empty one has"
+  },
+  {
+    "label": "nobody-in-bed: drop the sleepInsights join",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "AND NOT EXISTS (SELECT 1 FROM sleep_reviews r WHERE r.child_id = n.child_id AND r.night_date = n.night_date AND r.nobody_in_bed = 1)",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js"],
+    "namePattern": "sleepInsights leaves out"
+  },
+  {
+    "label": "nobody-in-bed: sleepInsights excludes every REVIEWED night, not only flagged ones",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "r.night_date = n.night_date AND r.nobody_in_bed = 1)",
+    "replace": "r.night_date = n.night_date)",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js"],
+    "namePattern": "sleepInsights leaves out"
+  },
+  {
+    "label": "nobody-in-bed: drop the done clause",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "(!r.true_onset_at && !r.true_wake_at && !r.nobody_in_bed)",
+    "replace": "(!r.true_onset_at && !r.true_wake_at)",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js"],
+    "namePattern": "the card shows a receipt after the flag"
+  },
+  {
+    "label": "nobody-in-bed R2: the follow-up push ignores the flag",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "          !parentSaidNobodyInBed.get(kid.id, nightDate)",
+    "replace": "          true",
+    "expect": "killed",
+    "tests": ["sleepReportNotify.test.js"],
+    "namePattern": "no one was in the bed"
+  },
+  {
+    "label": "nobody-in-bed R1: a true flag keeps the times it should clear",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "const keepTime = (key, val) => (nobody ? null : pick(key, val));",
+    "replace": "const keepTime = (key, val) => pick(key, val);",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js"],
+    "namePattern": "stores the flag and NULLs every time"
+  },
+  {
+    "label": "nobody-in-bed R1: times sent with the flag omitted leave the flag standing",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "const nobody = flagGiven ? (patch.nobodyInBed ? 1 : 0) : timesGiven ? 0 : (existing.nobody_in_bed ?? 0);",
+    "replace": "const nobody = flagGiven ? (patch.nobodyInBed ? 1 : 0) : (existing.nobody_in_bed ?? 0);",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js"],
+    "namePattern": "times sent WITHOUT the flag clear it"
+  },
+  {
+    "label": "nobody-in-bed R1: an explicit null flag is read as false and clears a stored flag",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "const flagGiven = patch.nobodyInBed != null;",
+    "replace": "const flagGiven = patch.nobodyInBed !== undefined;",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js"],
+    "namePattern": "leave the flag alone"
+  },
+  {
+    "label": "nobody-in-bed R1: an explicit null time is counted as a time",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "    .some((v) => v != null);",
+    "replace": "    .some((v) => v !== undefined);",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js"],
+    "namePattern": "leave the flag alone"
+  },
+  {
+    "label": "nobody-in-bed R1: the route accepts flag plus times (the lib throw then lands after applyVerdicts wrote)",
+    "file": "backend/src/routes/children.js",
+    "find": "  if (nobodyInBed === true && (onset != null || wake != null)) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js"],
+    "namePattern": "refused save writes NOTHING"
+  },
+  {
+    "label": "nobody-in-bed R1: the route accepts a non-boolean flag",
+    "file": "backend/src/routes/children.js",
+    "find": "  if (nobodyInBed != null && typeof nobodyInBed !== 'boolean') {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js"],
+    "namePattern": "non-boolean flag is a 4xx"
+  },
+  {
+    "label": "nobody-in-bed R1: an explicit flag does not un-dismiss the night",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "dismissed: patch.dismissed !== undefined ? (patch.dismissed ? 1 : 0) : flagGiven ? 0 : (existing.dismissed ?? 0),",
+    "replace": "dismissed: patch.dismissed !== undefined ? (patch.dismissed ? 1 : 0) : (existing.dismissed ?? 0),",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js"],
+    "namePattern": "un-dismisses the night"
+  },
+  {
+    "label": "nobody-in-bed R8: the overlay turns an off night into an empty one",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "    if (night.status === 'off' || nightNotOverYet(night)) return night;",
+    "replace": "    if (nightNotOverYet(night)) return night;",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js"],
+    "namePattern": "does not turn an"
+  },
+  {
+    "label": "nobody-in-bed R8: the overlay touches a night still in progress",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "    if (night.status === 'off' || nightNotOverYet(night)) return night;",
+    "replace": "    if (night.status === 'off') return night;",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js"],
+    "namePattern": "does not touch a night still in progress"
+  },
+  {
+    "label": "nobody-in-bed R8: a stored row whose window has not ended is overlaid anyway",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  return Number.isFinite(endMs) && Date.now() < endMs;",
+    "replace": "  return false;",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js"],
+    "namePattern": "whose window has not ended yet"
+  },
+  {
+    "label": "nobody-in-bed R7: a shadow column leaks onto a flagged night",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  'onset_at_shadow', 'wake_at_shadow', 'onset_at_algo', 'wake_at_algo',",
+    "replace": "  'onset_at_shadow', 'onset_at_algo', 'wake_at_algo',",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js"],
+    "namePattern": "reads exactly like a detector-empty row"
+  },
+  {
+    "label": "nobody-in-bed R7: an observation (coverage) is nulled as if it were a claim",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  'asleep_minutes', 'awake_minutes', 'unknown_minutes', 'wake_count', 'longest_stretch_minutes',",
+    "replace": "  'asleep_minutes', 'awake_minutes', 'unknown_minutes', 'wake_count', 'longest_stretch_minutes', 'coverage_minutes',",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js"],
+    "namePattern": "reads exactly like a detector-empty row"
+  },
+  {
+    "label": "nobody-in-bed R7: the scored-only detail extras (timeline, wakes...) are kept",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  for (const k of SCORED_NIGHT_DETAIL) delete out[k];",
+    "replace": "  // mutant: detail extras kept",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js"],
+    "namePattern": "exactly the keys a detector-empty one has"
+  },
+  {
+    "label": "nobody-in-bed R7: the detector's wake is dropped instead of kept as algo_wake_at",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  out.algo_wake_at = night.wake_at ?? null;",
+    "replace": "  out.algo_wake_at = null;",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js"],
+    "namePattern": "reaches /sleep"
+  },
+  {
+    "label": "nobody-in-bed R6: the migration adds a bare INTEGER (existing reviews read NULL)",
+    "file": "backend/src/db.js",
+    "find": "  db.exec('ALTER TABLE sleep_reviews ADD COLUMN nobody_in_bed INTEGER NOT NULL DEFAULT 0');",
+    "replace": "  db.exec('ALTER TABLE sleep_reviews ADD COLUMN nobody_in_bed INTEGER');",
+    "expect": "killed",
+    "tests": ["migrations-atomic.test.js"],
+    "namePattern": "an existing review gains the column"
+  },
+  {
+    "label": "nobody-in-bed item 7: a flagged night's timelapse frames are discarded like a detector-empty one",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "          if (summary.status === 'empty') emptyNights.push({ childId: kid.id, nightDate });",
+    "replace": "          if (summary.status === 'empty' || parentSaidNobodyInBed.get(kid.id, nightDate)) emptyNights.push({ childId: kid.id, nightDate });",
+    "expect": "killed",
+    "tests": ["sleepInsights.test.js"],
+    "namePattern": "still gets its timelapse"
+  },
+  {
+    "label": "nobody-in-bed frontend R4: the receipt gate drops the flag, back to times-only",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "setReceipt(rev && (rev.true_onset_at || rev.true_wake_at || rev.nobody_in_bed) ? rev : null);",
+    "replace": "setReceipt(rev && (rev.true_onset_at || rev.true_wake_at) ? rev : null);",
+    "expect": "killed",
+    "tests": ["sleepDetail.test.jsx"],
+    "namePattern": "FLAG-ONLY save still shows the receipt"
+  },
+  {
+    "label": "nobody-in-bed frontend: SleepDetail drops the frontend `nobody_in_bed` copy split",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "{night.nobody_in_bed\r\n            ? 'You said no one was in the bed for this night.'",
+    "replace": "{false\r\n            ? 'You said no one was in the bed for this night.'",
+    "expect": "killed",
+    "tests": ["sleepDetail.test.jsx"],
+    "namePattern": "empty night says so"
+  },
+  {
+    "label": "nobody-in-bed frontend: SleepDetail's ReviewNightButton gate ignores `corrected`",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "{night.corrected && (",
+    "replace": "{false && (",
+    "expect": "killed",
+    "tests": ["sleepDetail.test.jsx"],
+    "namePattern": "empty night says so"
+  },
+  {
+    "label": "nobody-in-bed frontend: SleepSummaryCard drops the frontend `nobody_in_bed` copy split",
+    "file": "frontend/src/components/SleepSummaryCard.jsx",
+    "find": "{night.nobody_in_bed\r\n            ? 'You said no one was in the bed.'",
+    "replace": "{false\r\n            ? 'You said no one was in the bed.'",
+    "expect": "killed",
+    "tests": ["childCards.test.jsx"],
+    "namePattern": "PARENT-flagged empty night says"
+  },
+  {
+    "label": "nobody-in-bed frontend: ReviewReceipt drops the nobodyInBed branch (reads as \"You said — to —\")",
+    "file": "frontend/src/components/ReviewReceipt.jsx",
+    "find": "{nobodyInBed",
+    "replace": "{false",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx", "sleepDetail.test.jsx"],
+    "namePattern": "no one was in the bed"
+  },
+  {
+    "label": "nobody-in-bed frontend R5: the seed effect ignores the stored flag on reopen",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "if (!nobodyTouched) setNobody(!!data.review?.nobody_in_bed);",
+    "replace": "if (!nobodyTouched) setNobody(false);",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"],
+    "namePattern": "reopening a flagged night seeds the flag view"
+  },
+  {
+    "label": "nobody-in-bed frontend R5: the flag view loses render priority over confirm/edit",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "{nobody ? (",
+    "replace": "{false ? (",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"],
+    "namePattern": "no one was in the bed"
+  },
+  {
+    "label": "nobody-in-bed frontend: saveNobody attaches a stale time alongside the flag",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "await api.put(`/children/${id}/review/${date}`, { nobody_in_bed: flag, note: note.trim() || null });",
+    "replace": "await api.put(`/children/${id}/review/${date}`, { nobody_in_bed: flag, note: note.trim() || null, true_onset_local: onset || null });",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"],
+    "namePattern": "no one was in the bed"
+  },
+  {
+    "label": "nobody-in-bed frontend: NightReview's bottom \"Save review\" reappears while the flag view is showing",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "editing && !nobody ?",
+    "replace": "editing ?",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"],
+    "namePattern": "no one was in the bed"
+  },
+  {
+    "label": "nobody-in-bed frontend R3: RecomputeNight trusts the raw store response again",
+    "file": "frontend/src/components/RecomputeNight.jsx",
+    "find": "      await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1`);\r\n      const overlaid = await api.get(`/children/${childId}/sleep/${date}?detail=1`);\r\n      onRecomputed?.(overlaid);",
+    "replace": "      const result = await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1`);\r\n      onRecomputed?.(result);",
+    "expect": "killed",
+    "tests": ["RecomputeNight.test.jsx"],
+    "namePattern": "OVERLAID night"
+  },
+  {
+    "label": "nobody-in-bed fix round #1: saveNobody claims the flag before the server confirms it",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "  const saveNobody = async (flag) => {\r\n    setBusy(true);",
+    "replace": "  const saveNobody = async (flag) => {\r\n    setNobodyTouched(true);\r\n    setNobody(flag);\r\n    setBusy(true);",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"],
+    "namePattern": "does NOT claim the flag was set"
+  },
+  {
+    "label": "nobody-in-bed fix round #2: SleepDetail keys the empty-night copy on `corrected` again",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "          {night.nobody_in_bed\r\n            ? 'You said no one was in the bed for this night.'",
+    "replace": "          {night.corrected\r\n            ? 'You said no one was in the bed for this night.'",
+    "expect": "killed",
+    "tests": ["sleepDetail.test.jsx"],
+    "namePattern": "TIME correction on an already-empty night"
+  },
+  {
+    "label": "nobody-in-bed fix round #2: SleepSummaryCard keys the empty-night copy on `corrected` again",
+    "file": "frontend/src/components/SleepSummaryCard.jsx",
+    "find": "          {night.nobody_in_bed\r\n            ? 'You said no one was in the bed.'",
+    "replace": "          {night.corrected\r\n            ? 'You said no one was in the bed.'",
+    "expect": "killed",
+    "tests": ["childCards.test.jsx"],
+    "namePattern": "TIME correction on an already-empty night"
+  },
+  {
+    "label": "nobody-in-bed fix round #4: saveNobody drops the typed note again",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "await api.put(`/children/${id}/review/${date}`, { nobody_in_bed: flag, note: note.trim() || null });",
+    "replace": "await api.put(`/children/${id}/review/${date}`, { nobody_in_bed: flag });",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"],
+    "namePattern": "note typed in edit mode is NOT discarded"
+  },
+  {
+    "label": "nobody-in-bed fix round #5: the nobodyTouched guard drops out again (mutation-killing strengthener)",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "if (!nobodyTouched) setNobody(!!data.review?.nobody_in_bed);",
+    "replace": "setNobody(!!data.review?.nobody_in_bed);",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"],
+    "namePattern": "touched flag survives a late reseed"
   }
 ]

@@ -128,6 +128,20 @@ export default function NightReview() {
   // id -> WRONG_REASONS key, or null. Rides on `verdictsTouched`, not a flag of its own: a reason is
   // part of the same answer as its "No", and must survive the same late-timezone reseed a verdict does.
   const [reasons, setReasons] = useState({});
+  // "No one was in the bed" for the whole night — an overlay flag, not a time. Seeded from
+  // `data.review.nobody_in_bed`, which GET /review returns as the RAW stored 0/1 (same column shape as
+  // `dismissed`), never a real boolean — so the seed below reads truthiness, not `=== true`. A strict
+  // equality check would silently treat a genuine `1` as "not flagged" and every reopened flagged night
+  // would render as if nobody had ever answered it.
+  const [nobody, setNobody] = useState(false);
+  // Its OWN guard, deliberately not folded into `touched` (plan review R5). `touched` exists so a tap
+  // stops the onset/wake inputs re-seeding once the real timezone arrives (see the seeding effect's own
+  // comment) — but the flag carries no times and no timezone-dependent value at all, so tying it to the
+  // same flag would only ever cost something: toggling the flag would freeze the (still hidden, still
+  // stale) time inputs out of ever re-seeding into the right zone once they became visible again via
+  // "Someone was in the bed". Kept in the same seeding effect as `touched`/`verdictsTouched` (same
+  // pattern that already protects those two from a late-arriving `tz`), just gated on its own flag.
+  const [nobodyTouched, setNobodyTouched] = useState(false);
   // The "Before bedtime" group inside the full event list starts collapsed, like the list itself.
   const [showEarly, setShowEarly] = useState(false);
   // Has "Before bedtime" been opened at least once this sitting? The one-tap "None of these" stays
@@ -181,7 +195,12 @@ export default function NightReview() {
       setVerdicts(Object.fromEntries((data.transitions || []).filter((t) => t.verdict).map((t) => [t.id, t.verdict])));
       setReasons(Object.fromEntries((data.transitions || []).filter((t) => t.wrong_reason).map((t) => [t.id, t.wrong_reason])));
     }
-  }, [data, tz, touched, verdictsTouched]);
+    // Reopening a flagged night must seed straight into "You said no one was in the bed", not fall
+    // through to the confirm block offering "That's right" for the detector's OWN times (plan review
+    // R5) — `editing` above is seeded from `review.true_onset_at`/`true_wake_at`, which a flag always
+    // clears, so without this the screen would silently misrepresent what the parent actually said.
+    if (!nobodyTouched) setNobody(!!data.review?.nobody_in_bed);
+  }, [data, tz, touched, verdictsTouched, nobodyTouched]);
 
   // Every verdict button on the screen goes through here, because all three places share one map.
   // Tapping the chosen answer again clears it: a mis-tap must be undoable, since a wrong label is worse
@@ -239,6 +258,47 @@ export default function NightReview() {
       // Back to the night just corrected, not the child page. Correcting a backlog of older nights
       // means saving and immediately wanting the next one, and landing on the child screen cost a
       // tab-hop plus a date re-pick every single time.
+      navigate(`/children/${id}/sleep?date=${date}&saved=1`);
+    } catch (e) {
+      setError(e.message || 'Could not save');
+      setBusy(false);
+    }
+  };
+
+  // "No one was in the bed" — a one-tap save, deliberately its OWN network call rather than routed
+  // through `save()` above. It carries no times at all, by design: the flag and a time are mutually
+  // exclusive on the server (a 400, "pick one"), and `save()` defaults times to whatever `onset`/`wake`
+  // still hold — which, once this control replaces the time inputs, can be stale (never cleared, just
+  // hidden). Sending them alongside the flag would either trip that refusal, or — for the UNDO
+  // direction ("Someone was in the bed") — silently attach the detector's guessed times to what is
+  // supposed to be a bare "no answer" undo. That matters because undoing with nothing else entered is a
+  // real, documented path (README): the detector's night comes back, but nothing typed before the flag
+  // was set comes back with it, and this call must not paper over that by inventing an answer.
+  // No confirm modal, unlike a destructive action elsewhere in the app — the flag is reversible (see
+  // `saveNobody(false)`), and the receipt this lands on is what confirms it, same as "That's right".
+  //
+  // The note, if any was typed in edit mode, rides along — `saveNightReview`'s `note` handling is
+  // completely independent of the flag/time mutual-exclusion logic (checked in sleepReviews.js), so
+  // there is no server-side reason to drop it, and the ORIGINAL bug here was that a note typed but not
+  // yet saved (e.g. "he was sick, checked on him twice") vanished the moment this button was tapped
+  // instead of "Save review" — silently, because this call sent nothing but the flag. Per-transition
+  // verdicts/reasons are deliberately NOT included here, unlike the note: unlike a note, which is just
+  // a fact about the night, a verdict is a judgement about a SPECIFIC recorded event, and attaching
+  // whatever happens to be sitting in that in-memory map to a same one-tap "the whole night was empty"
+  // action risks saving half-considered judgements the person never meant to submit yet. They stay
+  // reachable afterwards via "Save just the event answers", unaffected by this call either way.
+  const saveNobody = async (flag) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.put(`/children/${id}/review/${date}`, { nobody_in_bed: flag, note: note.trim() || null });
+      // Only now — confirmed by the server — do we say so. Setting `nobody`/`nobodyTouched` BEFORE this
+      // await (as this used to) meant a failed save left the screen claiming the flag was set (or
+      // cleared) when the server actually still held the OTHER value — and the only button left then
+      // was the one for the OPPOSITE action, applied to a state that was never really reached. Compare
+      // `save()` above, which never mutates an answer before its own await for the same reason.
+      setNobodyTouched(true);
+      setNobody(flag);
       navigate(`/children/${id}/sleep?date=${date}&saved=1`);
     } catch (e) {
       setError(e.message || 'Could not save');
@@ -438,6 +498,22 @@ export default function NightReview() {
         <div className="card">
           <div className="card-title">What we recorded</div>
 
+          {/* "No one was in the bed" takes priority over confirm-or-edit, whatever `editing` says —
+              that is the whole fix for R5: a flag always clears the review's stored times, so `editing`
+              alone would seed straight back into "confirm the detector's guess" and silently misstate
+              what the parent actually answered. Reversible, so no confirm modal — the receipt this
+              lands on (SleepDetail's ReviewReceipt) is what confirms it, same as "That's right" below. */}
+          {nobody ? (
+            <>
+              <div className="camera-tile__sub">You said no one was in the bed.</div>
+              <div className="review-actions">
+                <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => saveNobody(false)}>
+                  {busy ? 'Saving…' : 'Someone was in the bed'}
+                </button>
+              </div>
+            </>
+          ) : (
+          <>
           {/* Confirm-or-correct, deliberately NOT a pre-filled form you can save by reflex. A pre-filled
               form puts the app's own answer one tap from becoming "ground truth" — and that answer is
               sometimes badly wrong (a drifted wake of 08:29 against a real 06:00). Blessing it by
@@ -470,6 +546,9 @@ export default function NightReview() {
                 <button type="button" className="btn btn-secondary" onClick={() => setEditing(true)}>
                   {hasOpinion ? 'Not quite…' : 'Add the times'}
                 </button>
+                <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => saveNobody(true)}>
+                  No one was in the bed
+                </button>
               </div>
             </>
           )}
@@ -498,7 +577,14 @@ export default function NightReview() {
                   onChange={(e) => { setTouched(true); setNote(e.target.value); }}
                 />
               </label>
+              <div className="review-actions">
+                <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => saveNobody(true)}>
+                  No one was in the bed
+                </button>
+              </div>
             </>
+          )}
+          </>
           )}
         </div>
 
@@ -693,7 +779,11 @@ export default function NightReview() {
         </div>
 
         {error && <div className="error-banner">{error}</div>}
-        {editing ? (
+        {/* `&& !nobody`: `editing` can still be stale-true here (e.g. someone typed times, then tapped
+            "No one was in the bed" from inside edit mode) while `saveNobody`'s own PUT is in flight or
+            has just failed — the top card already hid the time inputs in that state, so this button
+            must not reappear offering to save whatever they were last set to. */}
+        {editing && !nobody ? (
           <button type="button" className="btn btn-primary btn-block" disabled={busy} onClick={() => save(true)}>
             {busy ? 'Saving…' : 'Save review'}
           </button>

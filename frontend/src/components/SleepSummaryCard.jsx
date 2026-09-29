@@ -81,11 +81,21 @@ export default function SleepSummaryCard({ childId }) {
   } else if (night.status === 'empty') {
     // Deliberately different from no_data: the cameras watched all night and saw the bed stay empty.
     // Saying "no one in the bed" is the honest answer — the old behaviour invented a full night's sleep.
+    // `nobody_in_bed` splits it again, deliberately NOT `corrected` (code-review finding, 2026-09-29):
+    // that wording claims the CAMERAS watched and saw an empty bed, which is only true for a night the
+    // detector itself scored empty. A night a PARENT flagged instead is a statement about the child,
+    // not the coverage — the cameras may have seen the whole night fine. `corrected` is too broad a
+    // test for that: a plain TIME correction on a night already `status: 'empty'` also sets
+    // `corrected: true` (sleepReviews.js's other `applyCorrection` branch), so it would tell a parent
+    // who had only fixed a time that they had said no one was there — false. `nobody_in_bed` is true
+    // ONLY on the flag path.
     body = (
       <>
         <div className="night__sleep-head">{tonight ? 'Tonight' : `Last night · ${fmtDate(night.night_date)}`}</div>
         <div className="night__soon">
-          {tonight ? 'No one in the bed.' : 'No one in the bed — nothing to report for this night.'}
+          {night.nobody_in_bed
+            ? 'You said no one was in the bed.'
+            : tonight ? 'No one in the bed.' : 'No one in the bed — nothing to report for this night.'}
         </div>
       </>
     );

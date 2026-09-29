@@ -18,6 +18,17 @@ import MorningReviewCard from '../src/components/MorningReviewCard.jsx';
 import NightReview from '../src/pages/NightReview.jsx';
 import { api } from '../src/lib/api.js';
 
+// `useNavigate` is a no-op across this whole file. NightReview navigates away on every successful save
+// (see saveNobody/save), which — under the real router — unmounts the screen the moment a save
+// succeeds. No test here asserts on where navigate actually goes (only on `api.put` calls and on-screen
+// text), so this changes nothing any existing test would notice, and it is what makes the mutant-killing
+// "touched flag survives a late reseed" test below observable at all: without it, the component would be
+// gone before the late reseed it needs to provoke could even run.
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, useNavigate: () => vi.fn() };
+});
+
 const PENDING = {
   state: 'ask',
   night_date: '2026-08-29',
@@ -103,6 +114,24 @@ describe('the card that asks', () => {
     renderAsAdmin(<MorningReviewCard childId="c-1" fmtTime={fmtTime} />);
     expect(await screen.findByText(/that.s recorded/i)).toBeInTheDocument();
     expect(screen.getByText(/Tap to change it/)).toBeInTheDocument();
+  });
+
+  test('"no one was in the bed" gets its own receipt line, not "You said — to —"', async () => {
+    // reviewCardState returns `nobody_in_bed` as a REAL boolean (unlike GET /review's raw 0/1 column),
+    // so `true` here is the actual server shape, not a stand-in. Without ReviewReceipt's own branch for
+    // it, a flag-only night falls into the `fmtTime(undefined) || '—'` path and reads as "You said — to
+    // —" — a blank-looking receipt for what was a complete, deliberate answer.
+    api.get.mockResolvedValue({
+      state: 'done',
+      night_date: '2026-08-29',
+      true_onset_at: null,
+      true_wake_at: null,
+      nobody_in_bed: true,
+    });
+    renderAsAdmin(<MorningReviewCard childId="c-1" fmtTime={fmtTime} />);
+    expect(await screen.findByText(/that.s recorded/i)).toBeInTheDocument();
+    expect(screen.getByText('You said no one was in the bed. Tap to change it.')).toBeInTheDocument();
+    expect(screen.queryByText(/— to —/)).not.toBeInTheDocument();
   });
 
   test('a failed load renders nothing rather than an error', async () => {
@@ -1040,6 +1069,154 @@ describe('the review screen', () => {
       expect(verdicts[62], 'the genuinely early event').toBe('wrong');
       expect(verdicts[61], 'the real put-down').toBeUndefined();
       expect(verdicts[63]).toBeUndefined();
+    });
+  });
+
+  // --- "no one was in the bed" (the nobody-in-bed plan, R5) ---------------------------------------
+
+  describe('"no one was in the bed"', () => {
+    test('a fresh, unflagged night never shows the flag view', async () => {
+      at();
+      await screen.findByRole('button', { name: /That.s right/ });
+      expect(screen.queryByText('You said no one was in the bed.')).not.toBeInTheDocument();
+    });
+
+    test('tapping the button from confirm mode saves the flag alone — no times, nothing else', async () => {
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: /No one was in the bed/ }));
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(api.put.mock.calls[0][0]).toBe('/children/c-1/review/2026-08-29');
+      // Exactly this body — not merely "contains" it — because sending the (unrelated) `onset`/`wake`
+      // state alongside the flag is precisely what would trip the server's "pick one" 400. `note: null`
+      // because nothing was typed here — see the dedicated note test below for the non-empty case.
+      expect(api.put.mock.calls[0][1]).toEqual({ nobody_in_bed: true, note: null });
+    });
+
+    test('tapping it from edit mode abandons whatever was typed IN THE TIME FIELDS rather than sending it alongside the flag', async () => {
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: /Not quite/ }));
+      const wake = await screen.findByLabelText(/Got up for the day/);
+      await user.clear(wake);
+      await user.type(wake, '06:10');
+
+      await user.click(screen.getByRole('button', { name: /No one was in the bed/ }));
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(api.put.mock.calls[0][1]).toEqual({ nobody_in_bed: true, note: null });
+    });
+
+    // Regression (finding #4): saveNobody used to send ONLY `{nobody_in_bed: true}`, so a note typed
+    // in edit mode — directly above this same button, and unrelated to the flag/time exclusion rule
+    // enforced server-side (sleepReviews.js's `pick('note', ...)` is independent of it) — was silently
+    // discarded the instant this button was tapped instead of "Save review". There is no server-side
+    // reason for that: the note describes the NIGHT, not a specific time or event.
+    test('a note typed in edit mode is NOT discarded when the flag is saved instead of "Save review"', async () => {
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: /Not quite/ }));
+      const noteField = await screen.findByLabelText(/worth noting/);
+      await user.type(noteField, 'he was sick, checked on him twice');
+
+      await user.click(screen.getByRole('button', { name: /No one was in the bed/ }));
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(api.put.mock.calls[0][1]).toEqual({
+        nobody_in_bed: true,
+        note: 'he was sick, checked on him twice',
+      });
+    });
+
+    // ★ THE FIX #1 REGRESSION TEST. Before the fix, `nobody`/`nobodyTouched` were set BEFORE the await,
+    // so a failed save left the screen claiming the flag HAD been set even though the server rejected
+    // it — and the only button left was "Someone was in the bed" (the UNDO), which would then fire the
+    // OPPOSITE of what was actually asked for, against a flag that was never really set. Compare `save()`
+    // above (line ~233), which never mutates an answer before its own await for the same reason.
+    test('★ a failed save does NOT claim the flag was set, and a retry sends the ORIGINAL action', async () => {
+      api.put.mockRejectedValueOnce(new Error('offline'));
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: /No one was in the bed/ }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+
+      // The screen must still show the ORIGINAL confirm view — not "You said no one was in the bed.",
+      // which would be a claim about server state that never actually happened.
+      expect(screen.queryByText('You said no one was in the bed.')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Someone was in the bed/ })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /That.s right/ })).toBeInTheDocument();
+      expect(screen.getByText(/Could not save|offline/)).toBeInTheDocument();
+
+      // The retry is the SAME button, sending the SAME (true) intent — not an undo of a flag that was
+      // never actually stored.
+      await user.click(screen.getByRole('button', { name: /No one was in the bed/ }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
+      expect(api.put.mock.calls[1][1]).toEqual({ nobody_in_bed: true, note: null });
+    });
+
+    // ★ THE R5 REGRESSION TEST. Without seeding `nobody` from the flag, `editing` is seeded from
+    // `review.true_onset_at`/`true_wake_at` — which the flag always clears server-side — so the screen
+    // falls through to the confirm block offering "That's right" for the DETECTOR's own 19:33/05:48,
+    // silently misrepresenting what the parent actually said. GET /review returns the flag as the raw
+    // stored column (0/1, same shape as `dismissed`), so this also pins truthiness over `=== true`.
+    test('★ reopening a flagged night seeds the flag view, never "confirm the detector\'s times"', async () => {
+      api.get.mockResolvedValue({ ...NIGHT, review: { nobody_in_bed: 1 } });
+      at();
+      expect(await screen.findByText('You said no one was in the bed.')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Someone was in the bed/ })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /That.s right/ })).not.toBeInTheDocument();
+      expect(screen.queryByText('19:33')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/Fell asleep/)).not.toBeInTheDocument();
+    });
+
+    test('undo ("Someone was in the bed") sends the flag alone — no times attached (README\'s stated limit)', async () => {
+      // Backend behaviour (pinned in backend/test/nobody-in-bed.test.js): un-flagging with nothing else
+      // sent restores the detector's night but does NOT restore whatever was typed before the flag was
+      // set — the times are gone for good, and the morning card then shows neither "ask" nor "done".
+      // That is only true if THIS call sends nothing but the flag; attaching the (stale, hidden)
+      // onset/wake state here would silently confirm the detector's guess instead of leaving it quiet.
+      api.get.mockResolvedValue({ ...NIGHT, review: { nobody_in_bed: 1 } });
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: /Someone was in the bed/ }));
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(api.put.mock.calls[0][1]).toEqual({ nobody_in_bed: false, note: null });
+    });
+
+    test('★ a late-arriving timezone does not clear the seeded flag, nor flash the detector\'s confirm prompt', async () => {
+      api.get.mockResolvedValue({ ...NIGHT, review: { nobody_in_bed: 1 } });
+      const { rerenderWith } = renderAsAdmin(routed, {
+        route: '/children/c-1/review/2026-08-29',
+        kids: [{ id: 'c-1', name: 'Raffa' }],
+        settings: { timezone: 'UTC' }, // as it is for the first moments after a reload
+      });
+      await screen.findByText('You said no one was in the bed.');
+
+      rerenderWith({ settings: { timezone: 'Australia/Melbourne' } });
+      // The seeding effect re-runs (it depends on `tz`) but must reseed the SAME flagged view, not fall
+      // back through to a detector confirm prompt it never showed in the first place.
+      await waitFor(() => expect(screen.getByText('You said no one was in the bed.')).toBeInTheDocument());
+      expect(screen.queryByRole('button', { name: /That.s right/ })).not.toBeInTheDocument();
+    });
+
+    // ★ STRENGTHENS THE ABOVE TEST (review finding, 2026-09-29). The test above seeds the SAME stored
+    // value (`nobody_in_bed: 1`) before AND after the timezone arrives, so removing the `!nobodyTouched`
+    // guard entirely (`if (!nobodyTouched) setNobody(...)` -> unconditional) would not change its
+    // outcome — a mutant that survives. This test starts the flag OFF (a value the reseed WOULD apply if
+    // the guard were gone), has the user turn it ON — a genuine local divergence from the fetched
+    // `data.review.nobody_in_bed`, which never changes after the initial fetch — and only THEN triggers
+    // the tz-driven reseed, so a dropped guard is directly observable: it would flip the screen straight
+    // back to the confirm view. `useNavigate` is mocked to a no-op at the top of this file for exactly
+    // this: a successful save navigates away in the real app (see saveNobody), which would unmount this
+    // screen before the late reseed could even run — the guard is what's under test, not that timing.
+    test('★★ the touched flag survives a late reseed carrying the OLD stored value (kills the dropped-guard mutant)', async () => {
+      api.get.mockResolvedValue({ ...NIGHT, review: { nobody_in_bed: 0 } });
+      const { user, rerenderWith } = renderAsAdmin(routed, {
+        route: '/children/c-1/review/2026-08-29',
+        kids: [{ id: 'c-1', name: 'Raffa' }],
+        settings: { timezone: 'UTC' }, // a genuine value change below, same as the test above
+      });
+      await user.click(await screen.findByRole('button', { name: /No one was in the bed/ }));
+      await waitFor(() => expect(screen.getByText('You said no one was in the bed.')).toBeInTheDocument());
+
+      rerenderWith({ settings: { timezone: 'Australia/Melbourne' } });
+      // Without the guard, this reseed would read `data.review.nobody_in_bed` (still 0 — `data` was
+      // fetched once and never changes) and flip straight back to the confirm view.
+      expect(screen.getByText('You said no one was in the bed.')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /That.s right/ })).not.toBeInTheDocument();
     });
   });
 });
