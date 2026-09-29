@@ -41,13 +41,19 @@
 //     something to work with (and must never leak a record into the log).
 // The level-less captures are no longer what ffmpeg prints; fed raw they are a drifted format, and the
 // router rate-limits them by design (ffmpeg-side-channel.test.js, "drifted-format flood").
+//
+// ★ #493: the working clock now also feeds the motion leg's clone ledger, which takes PROVEN clones back out
+// of activity_samples' motion_frames / motion_level / motion_out_level. The golden stream has no camera stall,
+// so there is nothing to take out: every GOLDEN_* literal still holds, unchanged, in all three variants (and
+// its many `unknown` quiet frames are exactly what the ledger must never touch). Where a stall DOES make
+// clones, the variants must differ in those three columns and nowhere else: the #493 describe below.
 import { test, mock, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { useTempDataDir, cleanupTempDataDirs, makeCamera } from './helpers/harness.js';
-import { zlibAdler0 } from './helpers/obsRig.js';
+import { zlibAdler0, feedStream } from './helpers/obsRig.js';
 // #369 moved the fake ffmpeg and the fake MediaMTX server into this shared helper, unchanged in behaviour, so
 // the detector-watchdog tests drive the very same fake. The goldens, the scenarios and every assertion in this
 // file are untouched.
@@ -243,10 +249,19 @@ function deliverObserved(t, proc, plan, unitBytes, recordsFor, state) {
 // frozen Date against a running performance.now() would read as a host clock stepping every read).
 const dateClocks = { monoNow: () => Date.now(), wallNow: () => Date.now() };
 const throwing = () => { throw new Error('clock failure (planted)'); };
+// #493: the working clock is built the way production builds it, WITH the detector's own listener (the motion
+// leg's clone ledger), which the factory is now handed as its third argument; before #493 the factory
+// dropped it, so this variant would have exercised no correction at all. The test's own capture is a SECOND
+// listener beside it: the one function per variant, so the factory running again for the relaunch still
+// captures each observation once.
 const CLOCK_VARIANTS = {
-  working: (captured) => (cameraId, leg) => {
-    const c = getObservationClock(cameraId, leg, { clocks: dateClocks, label: 'golden', onObservation: (o) => captured.push(o) });
-    return c;
+  working: (captured) => {
+    const capture = (o) => captured.push(o);
+    return (cameraId, leg, { onObservation } = {}) => {
+      const c = getObservationClock(cameraId, leg, { clocks: dateClocks, label: 'golden', onObservation });
+      c.addObservationListener(capture);
+      return c;
+    };
   },
   throwing: () => () => ({
     receipt: throwing,
@@ -561,6 +576,9 @@ describe('detector decisions: the #373 golden, with a working, a throwing and no
         assert.deepEqual(inGen(i).map((o) => o.cls === 'real'), expectReal, `generation ${i + 1}`);
       }
       assert.ok(observations.every((o) => o.cls === 'real' || o.cls === 'unknown'), 'no clone in a stream with no stall');
+      // #493: not vacuous — the detector's clone ledger WAS listening on this clock the whole time.
+      assert.equal(typeof getObservationClock(motionCamera.id, 'motion').onObservation, 'function');
+      assert.ok(observations.some((o) => o.cls === 'unknown' && o.idx > 0), 'unknown frames were there to (wrongly) correct');
       const summary = getObservationClock(motionCamera.id, 'motion').summary();
       assert.equal(summary.warn, 0);
       assert.equal(summary.side, 'ok');
@@ -650,6 +668,414 @@ describe('detector decisions: the #373 golden, with a working, a throwing and no
     assert.deepEqual(withoutCapture(observed, tag, 'mjpeg-error.err'), GOLDEN_SOUND);
   });
   }
+});
+
+// --- #493: a camera stall's clones, through the REAL motion detector -----------------------------------------
+// The #373 soak box's stall, played through the real detector and the real stderr router: 5 fps input, then
+// nothing for 3.06 s after frame 150, then 5 fps again. Each input sits 8,000 ticks (89 ms) into its output
+// slot, so the gap spans 15.3 slots and fps fills slots 151-165 with repeats of frame 150 — the 15-frame burst
+// the soak run showed — delivered to stdout in one clump when frame 151 arrives. The stream is emulated by
+// obsRig's feedStream (vf_fps's documented rule; it only CONSTRUCTS inputs), whose `truth` is the planted
+// oracle for which outputs are repeats. The run is repeated with a WORKING clock, a THROWING one, NO clock,
+// and a working clock whose tap lines stop before the stall (the "side channel lost" case, observation-
+// clock.test.js's F6 family), on a camera WITH a bed zone and one WITHOUT. What must hold:
+//   - bed transitions, alerts and every log line are identical in all four (nothing here feeds a decision);
+//   - no clock, a throwing one and a lost side channel store exactly the same rows: with no proof, nothing is
+//     corrected (a lost side channel makes every later frame `unknown`, which is never corrected);
+//   - the working clock's stall minute stores 16 fewer motion_frames (the 15 fps repeats, and one planted CFR
+//     duplicate, below), and motion_level / motion_out_level are the same sums over 16 fewer frames; its
+//     peaks, and the whole of the next minute, are identical;
+//   - without a bed zone, motion_out_* stay NULL whatever was corrected.
+const STALL_INPUTS = 575; // ~119 s of stream: two flushed minutes, with the stall in the first
+function stallInputs() {
+  const out = [];
+  let pts = 8000;
+  for (let n = 0; n < STALL_INPUTS; n += 1) {
+    if (n > 0) pts += n === 151 ? 275_400 : 18000; // 3.06 s at 90 kHz before frame 151, else 0.2 s
+    out.push({ n, pts, rx: T0 + Math.ceil(pts / 90) + 10 }); // integer ms: the mocked Date is set to it
+  }
+  return out;
+}
+// Every input is a distinct picture: a marker of at most 16 grey levels (under the detector's PIXEL_DELTA
+// of 24, so it never counts as movement) encodes its number in three corner pixels. Without it, the quiet
+// stretches would be identical frames, which the clock rightly calls ambiguous. Movement is planted: the bed
+// lit on alternate frames in three runs (the last one ENDS on frame 150, so the repeated frame is a lit
+// one), the outside in one, both in the second minute.
+function stallPicture(n) {
+  const lit = n % 2 === 0;
+  const bed = lit && ((n >= 40 && n < 60) || (n >= 140 && n <= 150) || (n >= 200 && n < 220) || (n >= 400 && n < 420));
+  const out = lit && ((n >= 70 && n < 80) || (n >= 400 && n < 420));
+  const f = paint({ bed, out });
+  f[FRAME_BYTES - 1] = BASE + (n % 17);
+  f[FRAME_BYTES - 2] = BASE + (Math.floor(n / 17) % 17);
+  f[FRAME_BYTES - 3] = BASE + (Math.floor(n / 289) % 17);
+  return f;
+}
+// Tap lines for any input pts / output slot, laid out exactly as motionRecords() above (which prints only
+// the 1:1 case).
+function inRecordLines(n, pts) {
+  return [
+    `[showinfo@in @ 0x7f00000a0000] [info] n:${String(n).padStart(4)} pts:${String(pts).padStart(7)} pts_time:${ts(pts / 90000)} duration:  18000 duration_time:0.2     fmt:yuv420p cl:left sar:1/1 s:640x360 i:P iskey:0 type:P `,
+    '[showinfo@in @ 0x7f00000a0000] [info] color_range:tv color_space:bt709 color_primaries:bt709 color_trc:bt709',
+  ];
+}
+function outRecordLines(n, slot, frame) {
+  const sum = hex8(zlibAdler0(frame));
+  return [
+    `[showinfo@out @ 0x7f00000b0000] [info] n:${String(n).padStart(4)} pts:${String(slot).padStart(7)} pts_time:${ts(slot * 0.2)} duration:      1 duration_time:0.2     fmt:gray cl:unspecified sar:1/1 s:320x180 i:P iskey:0 type:P checksum:${sum} plane_checksum:[${sum}] mean:[60] stdev:[40.0]`,
+    '[showinfo@out @ 0x7f00000b0000] [info] color_range:pc color_space:unknown color_primaries:unknown color_trc:unknown',
+  ];
+}
+// feedStream, recording what ffmpeg would print and write instead of feeding a clock: per receipt time, the
+// tap lines (the `in` record, then each `out` record fps emits) and the stdout frames the CFR hold releases.
+// PLANTED on top: output 250 (~50 s, well clear of the stall) is written to stdout TWICE, the rawvideo CFR
+// stage's own kind of repeat. The clock proves that one `cfr-clone`, which the detector corrects as well.
+const CFR_DUP_OUTPUT = 250;
+// `dropOut`: output numbers whose `out` tap line is lost (glued or garbled); the frame is still written.
+function stallSchedule({ dropOut = [] } = {}) {
+  const pictures = new Map();
+  const picture = (src) => {
+    if (!pictures.has(src)) pictures.set(src, stallPicture(src));
+    return pictures.get(src);
+  };
+  const groups = new Map();
+  const group = (at) => {
+    const k = Math.floor(at);
+    if (!groups.has(k)) groups.set(k, { lines: [], frames: [] });
+    return groups.get(k);
+  };
+  let written = 0;
+  const recorder = {
+    inRec: (n, pts, at) => group(at).lines.push(...inRecordLines(n, pts)),
+    outRec: (n, slot, src, at) => group(at).lines.push(...outRecordLines(n, slot, picture(src))),
+    sample: (src, at) => {
+      group(at).frames.push(picture(src));
+      if (written === CFR_DUP_OUTPUT) group(at).frames.push(picture(src));
+      written += 1;
+    },
+  };
+  const inputs = stallInputs();
+  const s = feedStream(recorder, inputs, { content: (src) => src, dropOut });
+  s.flush(inputs[inputs.length - 1].rx + 50);
+  return { groups: [...groups.entries()], truth: s.truth };
+}
+
+describe('#493: a stall\'s clones leave motion_frames/motion_level/motion_out_level, and nothing else moves', { concurrency: false }, () => {
+  const STALL_VARIANTS = ['working', 'throwing', 'none', 'side-channel-lost', 'swallows-one-sample'];
+  const FLUSHES = [T0 + 60_000, T0 + 120_000];
+  const LOSE_AT = T0 + 24_000; // tap lines stop ~6 s before the stall (frame 150 arrives at ~30.1 s)
+  const proven = (o) => o.cls === 'fps-clone' || o.cls === 'cfr-clone';
+
+  // Review round 1 (gap 4): a WORKING clock that throws on one sample, as a clock bug would. The handle
+  // catches it and detection carries on, but the clock never counts that sample, so from there on its own
+  // sample number (`idx`) runs one behind the detector's frame number (`token`). In every other fixture the
+  // two are equal, which is why a listener correcting by `idx` survived. The ledger must still correct exactly
+  // what the working clock corrects. (No real clock is known to throw here; the fail-safe exists because a
+  // clock bug must never misdirect anything, and this is what such a bug looks like.)
+  const SWALLOWED_TOKEN = 101; // a quiet frame, 50 frames before the stall
+  function swallowingClock(captured) {
+    const working = CLOCK_VARIANTS.working(captured);
+    return (cameraId, leg, opts) => {
+      const clock = working(cameraId, leg, opts);
+      return {
+        receipt: () => clock.receipt(),
+        beginGeneration: (o) => {
+          const gen = clock.beginGeneration(o);
+          const real = gen.onSample.bind(gen);
+          let calls = 0;
+          gen.onSample = (...args) => {
+            calls += 1;
+            if (calls === SWALLOWED_TOKEN + 1) throw new Error('clock failure on one sample (planted)');
+            return real(...args);
+          };
+          return gen;
+        },
+      };
+    };
+  }
+  const factoryFor = (variant, observations) => {
+    if (variant === 'swallows-one-sample') return swallowingClock(observations);
+    return CLOCK_VARIANTS[variant === 'side-channel-lost' ? 'working' : variant](observations);
+  };
+
+  // `tag` keeps each run's camera (and so its rows) apart; `dropOut` loses those outputs' `out` tap lines;
+  // `inLostFrom` loses every `in` tap line from that time on (the `out` lines keep coming).
+  async function runStall(t, variant, zone, { tag = '', dropOut = [], inLostFrom = Infinity } = {}) {
+    const cam = {
+      ...motionCamera,
+      id: `cam-493-${zone ? 'zone' : 'nozone'}-${variant}${tag}`,
+      name: '493 Stall Cam', // the SAME name in every run, so the log lines can be compared verbatim
+      mediamtx_path: `path_493_${zone ? 'zone' : 'nozone'}_${variant.replace(/-/g, '_')}${tag}`,
+      detect_zone: zone ? motionCamera.detect_zone : null,
+    };
+    makeCamera(db, { id: cam.id, name: cam.name, path: cam.mediamtx_path });
+    logger.clear();
+    _resetObservationClocksForTests();
+    const observations = [];
+    _setObservationClockFactoryForTests(factoryFor(variant, observations));
+    const before = detectorProcs.length;
+    t.mock.timers.setTime(T0 - 1000);
+    await startMotionDetector(cam);
+    await waitFor(() => detectorProcs.length === before + 1, `${cam.id} spawn`);
+    const proc = detectorProcs[before];
+    proc.stderr.emit('data', Buffer.from(`${MOTION_CONFIG.join('\n')}\n`));
+
+    const { groups, truth } = stallSchedule({ dropOut });
+    let fi = 0;
+    const perMinute = [0, 0];
+    for (const [at, g] of groups) {
+      while (fi < FLUSHES.length && at >= FLUSHES[fi]) {
+        t.mock.timers.setTime(FLUSHES[fi]);
+        flushActivity();
+        fi += 1;
+      }
+      t.mock.timers.setTime(at);
+      const lost = variant === 'side-channel-lost' && at >= LOSE_AT;
+      const lines = at >= inLostFrom ? g.lines.filter((l) => !l.startsWith('[showinfo@in ')) : g.lines;
+      if (lines.length && !lost) proc.stderr.emit('data', Buffer.from(`${lines.join('\n')}\n`));
+      if (g.frames.length) proc.stdout.emit('data', Buffer.concat(g.frames));
+      perMinute[fi] += g.frames.length;
+    }
+    for (; fi < FLUSHES.length; fi += 1) {
+      t.mock.timers.setTime(FLUSHES[fi]);
+      flushActivity();
+    }
+    await stopMotionDetector(cam.id);
+    await settle();
+    _setObservationClockFactoryForTests(null);
+    const strip = (rs) => rs.map(({ camera_id: _c, ...r }) => r);
+    return {
+      truth,
+      perMinute,
+      observations,
+      activity: strip(rowsFor('activity_samples', cam.id)),
+      transitions: strip(rowsFor('bed_transitions', cam.id)),
+      events: strip(rowsFor('detection_events', cam.id)),
+      log: logFor(cam.name),
+    };
+  }
+
+  for (const zone of [true, false]) {
+    test(`${zone ? 'with' : 'WITHOUT'} a bed zone: the working clock takes exactly the 15 fps repeats and the CFR duplicate out of the stall minute, and every other variant stores what the code before #493 stored`, async (t) => {
+      t.mock.timers.enable({ apis: ['Date'], now: T0 - 1000 });
+      const run = {};
+      for (const variant of STALL_VARIANTS) run[variant] = await runStall(t, variant, zone);
+      const { truth, perMinute } = run.none;
+
+      // The planted oracle, checked first: the repeats are outputs 151-165, all in the first minute.
+      const clones = truth.filter((x, i) => i > 0 && x.src === truth[i - 1].src).map((x) => x.outN);
+      assert.deepEqual(clones, Array.from({ length: 15 }, (_, i) => 151 + i));
+      assert.ok(perMinute[0] > 200 && perMinute[1] > 200, `two full minutes: ${perMinute}`);
+
+      // Decisions: identical everywhere. The runs really made some (not an empty comparison).
+      assert.ok(run.none.events.length > 0 && run.none.log.length > 0, 'the scene alerted and logged');
+      for (const v of STALL_VARIANTS) {
+        assert.deepEqual(run[v].transitions, run.none.transitions, `${v}: bed transitions`);
+        assert.deepEqual(run[v].events, run.none.events, `${v}: alerts`);
+        assert.deepEqual(run[v].log, run.none.log, `${v}: log lines`);
+      }
+
+      // No proof, no correction: the raw counts, byte for byte. Minute 1's raw count is every frame written
+      // before its flush, less the generation's first (the detector's baseline, never counted).
+      const [raw1, raw2] = run.none.activity;
+      assert.equal(raw1.motion_frames, perMinute[0] - 1);
+      assert.equal(raw2.motion_frames, perMinute[1]);
+      assert.deepEqual(run.throwing.activity, run.none.activity, 'a throwing clock');
+      assert.deepEqual(run['side-channel-lost'].activity, run.none.activity, 'a clock whose tap lines stopped');
+      assert.ok(!run['side-channel-lost'].observations.some((o) => o.cls === 'fps-clone' || o.cls === 'cfr-clone'), 'nothing proven after the loss');
+      assert.ok(run['side-channel-lost'].observations.some((o) => o.cls === 'unknown' && o.idx > 160), 'the burst was there, and came out unknown');
+
+      // The working clock: it proved exactly the planted repeats, by the detector's own frame numbers — a
+      // token is the stdout frame's index, so outputs 151-165 are frames 151-165, and output 250's duplicate
+      // is frame 251.
+      const verdicts = run.working.observations.filter(proven);
+      assert.deepEqual(verdicts.map((o) => [o.token, o.cls]), [...clones.map((k) => [k, 'fps-clone']), [CFR_DUP_OUTPUT + 1, 'cfr-clone']]);
+      // A clock that swallowed one sample proves the same frames, under the same tokens, while its own
+      // sample numbers run one behind (the premise, checked, not assumed) — and stores exactly what the
+      // working clock stores. By `idx`, it would have corrected frame 150 (which moved, so it is not staged)
+      // instead of 151, and frame 250 instead of 251: one correction short.
+      const swallowed = run['swallows-one-sample'].observations.filter(proven);
+      assert.deepEqual(swallowed.map((o) => o.token), verdicts.map((o) => o.token));
+      assert.ok(swallowed.every((o) => o.idx === o.token - 1), 'idx and token really differ here');
+      assert.deepEqual(run['swallows-one-sample'].activity, run.working.activity);
+      const [w1, w2] = run.working.activity;
+      assert.deepEqual(w2, raw2, 'the next minute: untouched');
+      assert.equal(w1.motion_frames, raw1.motion_frames - 16);
+      const rescale = (level) => (level * raw1.motion_frames) / (raw1.motion_frames - 16);
+      assert.ok(raw1.motion_level > 0 && Math.abs(w1.motion_level - rescale(raw1.motion_level)) < 1e-12, `motion_level ${w1.motion_level}`);
+      if (zone) {
+        assert.ok(raw1.motion_out_level > 0 && Math.abs(w1.motion_out_level - rescale(raw1.motion_out_level)) < 1e-12, `motion_out_level ${w1.motion_out_level}`);
+      } else {
+        assert.equal(raw1.motion_out_level, null);
+        assert.equal(w1.motion_out_level, null, 'no bed zone: no out-of-bed channel to correct, and none conjured');
+        assert.equal(w1.motion_out_peak, null);
+      }
+      const { motion_frames: _f, motion_level: _l, motion_out_level: _o, ...rest1 } = w1;
+      const { motion_frames: _rf, motion_level: _rl, motion_out_level: _ro, ...rawRest1 } = raw1;
+      assert.deepEqual(rest1, rawRest1, 'every other column of the stall minute, peaks included');
+      // The lit bed is 1/3 of the zone, or 1/6 of the whole frame without one.
+      assert.ok(raw1.motion_peak > 0.15, `a real peak was measured in the stall minute: ${raw1.motion_peak}`);
+    });
+  }
+
+  // The reconnect race the plan's first review found. A settings change restarts the detector: the old
+  // ffmpeg's 'exit' lets the new launch start while its pipes are still open, and its 'close' — which ends
+  // its generation and delivers its last ~5 s of verdicts, the stall burst's among them — comes only after
+  // the new launch has counted frames of its own, numbered from 0 again. By then the clock's one listener
+  // is the NEW launch's.
+  // ★ The collision has to be REAL for this to test anything (review round 1, gap 5: the first version's new
+  // launch counted frames 0-9 only, so the late verdicts for 151-165 could not meet them, and a ledger key
+  // WITHOUT the generation passed). Here the new launch counts 200 frames, so its own frames 151-165 are in
+  // the ledger when the old launch's verdicts for 151-165 arrive. And the restart ADDS a bed zone: the old
+  // frames were counted in bed only, the new ones in bed AND outside, so a verdict that landed on the wrong
+  // launch's frame shows up as an out-of-bed correction that must not happen.
+  const RELAUNCH_CLOSE_AT = T0 + 78_000; // after the new launch's 200 frames (37 s + 40 s)
+  async function runRelaunch(t, variant) {
+    const withZone = { ...motionCamera, id: `cam-493-relaunch-${variant}`, name: '493 Relaunch Cam', mediamtx_path: `path_493_relaunch_${variant}` };
+    const noZone = { ...withZone, detect_zone: null };
+    makeCamera(db, { id: withZone.id, name: withZone.name, path: withZone.mediamtx_path });
+    logger.clear();
+    _resetObservationClocksForTests();
+    const observations = [];
+    _setObservationClockFactoryForTests(factoryFor(variant, observations));
+    const before = detectorProcs.length;
+    t.mock.timers.setTime(T0 - 1000);
+    await startMotionDetector(noZone);
+    await waitFor(() => detectorProcs.length === before + 1, 'the first launch');
+    const old = detectorProcs[before];
+    old.stderr.emit('data', Buffer.from(`${MOTION_CONFIG.join('\n')}\n`));
+    let oldFrames = 0;
+    for (const [at, g] of stallSchedule().groups) {
+      if (at >= T0 + 36_000) break; // the burst (~33.2 s) is in; its verdicts (~38.2 s) are not yet
+      t.mock.timers.setTime(at);
+      if (g.lines.length) old.stderr.emit('data', Buffer.from(`${g.lines.join('\n')}\n`));
+      if (g.frames.length) old.stdout.emit('data', Buffer.concat(g.frames));
+      oldFrames += g.frames.length;
+    }
+    const earlyVerdicts = observations.filter(proven).length;
+
+    // This ffmpeg exits at once, but its pipes close later: 'close' is emitted by hand, below.
+    old.kill = (signal) => {
+      old.signals.push(signal);
+      old.ended = true;
+      queueMicrotask(() => old.emit('exit', null, signal));
+      return true;
+    };
+    t.mock.timers.setTime(T0 + 36_000);
+    await startMotionDetector(withZone);
+    await waitFor(() => detectorProcs.length === before + 2, 'the relaunch');
+    const next = detectorProcs[before + 1];
+    next.stderr.emit('data', Buffer.from(`${MOTION_CONFIG.join('\n')}\n`));
+    // The new launch's own 200 frames, numbered 0-199: the stall scene's pictures, so frames 152-165 are
+    // still in bed AND outside (staged in both channels) and 151 is still outside only.
+    const fresh = Array.from({ length: 200 }, (_, k) => stallPicture(k));
+    deliverObserved(t, next, single(fresh, T0 + 37_000), FRAME_BYTES, (k) => motionRecords(k, fresh[k]), { bytes: 0, emitted: 0 });
+
+    // Now the old pipes close: the old generation ends and its burst's verdicts arrive.
+    t.mock.timers.setTime(RELAUNCH_CLOSE_AT);
+    old.stdout.emit('end');
+    old.stderr.emit('end');
+    old.emit('close', null, 'SIGTERM');
+    await settle();
+    t.mock.timers.setTime(T0 + 100_000);
+    flushActivity();
+    await stopMotionDetector(withZone.id);
+    await settle();
+    _setObservationClockFactoryForTests(null);
+    return { observations, oldFrames, freshFrames: fresh.length, earlyVerdicts, rows: rowsFor('activity_samples', withZone.id) };
+  }
+
+  test('a verdict that lands AFTER a relaunch still corrects its own launch\'s frame — keyed by the verdict\'s generation, not the listener\'s', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: T0 - 1000 });
+    const w = await runRelaunch(t, 'working');
+    const n = await runRelaunch(t, 'none');
+    assert.equal(w.earlyVerdicts, 0, 'no burst verdict arrived before the relaunch');
+    const oldGen = w.observations[0].gen;
+    assert.deepEqual(w.observations.filter(proven).map((o) => [o.gen, o.token]), Array.from({ length: 15 }, (_, i) => [oldGen, 151 + i]), 'the OLD launch\'s burst, proven after the relaunch');
+    // The premise, checked: the NEW launch had already counted its own frames 151-165 when those verdicts came.
+    const newOwn = w.observations.filter((o) => o.gen !== oldGen && o.token >= 151 && o.token <= 165);
+    assert.equal(newOwn.length, 15);
+    assert.ok(newOwn.every((o) => o.gen > oldGen && o.rxMono < RELAUNCH_CLOSE_AT), 'the collision is real');
+
+    assert.equal(w.rows.length, 1);
+    assert.equal(n.rows.length, 1);
+    const [wr] = w.rows;
+    const [nr] = n.rows;
+    // Each launch's first frame is its baseline, never counted.
+    assert.equal(nr.motion_frames, (w.oldFrames - 1) + (w.freshFrames - 1), 'no clock: every frame of both launches');
+    assert.equal(wr.motion_frames, nr.motion_frames - 15, 'the old launch\'s 15 repeats out');
+    assert.ok(Math.abs(wr.motion_level - (nr.motion_level * nr.motion_frames) / (nr.motion_frames - 15)) < 1e-12);
+    assert.ok(nr.motion_out_level > 0);
+    assert.equal(wr.motion_out_level, nr.motion_out_level, 'the old frames had no out-of-bed reading to undo, and the new launch\'s frames 151-165 keep theirs');
+    assert.deepEqual([wr.motion_peak, wr.motion_out_peak], [nr.motion_peak, nr.motion_out_peak]);
+  });
+
+  test('an `unknown` verdict is never corrected, whatever its reason: out-hole, cfr-unproven, clone-unproven', async (t) => {
+    // Review round 1 (gap 3): the fixtures above produce proven clones plus `unknown` for the ordinary reasons
+    // only (ambiguous, unmatched, source-unproven), so a listener widened to ALSO correct any one of these
+    // reasons survived them. Each is planted here on frames the ledger HAS staged (fraction 0), with its
+    // verdict arriving while the minute is still open, so a widened listener would take them out:
+    //   - out-hole: output 166's `out` line is lost, right after the stall burst. The burst is still repeats
+    //     of frame 150, but beside a lost line its samples could be the lost record's own, so all of them
+    //     are `unknown (out-hole)` and stay counted — uncorrected by design, because unproven;
+    //   - cfr-unproven: output 251's `out` line is lost, right after the planted CFR duplicate of output 250,
+    //     so nothing proves the duplicate is not output 251's own identical picture;
+    //   - clone-unproven: from 110 s every `in` line is lost while the `out` lines keep coming (a tap that
+    //     stopped parsing). Those frames are REAL, but with no later `in` record the clock cannot prove even
+    //     that; correcting them would throw away real observation.
+    t.mock.timers.enable({ apis: ['Date'], now: T0 - 1000 });
+    const opts = { tag: '-reasons', dropOut: [166, CFR_DUP_OUTPUT + 1], inLostFrom: T0 + 110_000 };
+    const w = await runStall(t, 'working', true, opts);
+    const n = await runStall(t, 'none', true, opts);
+    const tokensOf = (reason) => w.observations.filter((o) => o.reason === reason).map((o) => o.token);
+    for (let k = 151; k <= 165; k += 1) assert.ok(tokensOf('out-hole').includes(k), `repeat ${k}: out-hole`);
+    assert.deepEqual(tokensOf('cfr-unproven'), [CFR_DUP_OUTPUT + 1], 'the duplicate: cfr-unproven');
+    // In time to be corrected: received more than FINALIZE_MS (plus one frame) before the 120 s flush.
+    const lateTail = w.observations.filter((o) => o.reason === 'clone-unproven' && o.rxMono + 5_200 < FLUSHES[1]);
+    assert.ok(lateTail.length >= 10, `real frames after the in-tap loss, judged in time: ${lateTail.length}`);
+    assert.ok(!w.observations.some(proven), 'nothing is proven anywhere in this stream');
+    assert.deepEqual(w.activity, n.activity, 'and so nothing is corrected');
+    for (const k of ['transitions', 'events', 'log']) assert.deepEqual(w[k], n[k], k);
+  });
+
+  test('...nor `unknown (no-anchor)`: frames first judged after more than an hour of silence', async (t) => {
+    // A generation's observation times are anchored at its first judgement, on the `in` records of the last
+    // hour. A launch that delivers a second of frames and then nothing, its session still up, for over an
+    // hour, has none left when it finally ends, so every frame it delivered is `unknown (no-anchor)`. Since
+    // #369 the detector watchdog restarts a detector whose output stops for ~75 s, so this is effectively
+    // unreachable in production; it is pinned so a listener widened to this reason is still caught.
+    t.mock.timers.enable({ apis: ['Date'], now: T0 - 1000 });
+    const runSilent = async (variant) => {
+      const cam = { ...motionCamera, id: `cam-493-noanchor-${variant}`, name: '493 Silent Cam', mediamtx_path: `path_493_noanchor_${variant}` };
+      makeCamera(db, { id: cam.id, name: cam.name, path: cam.mediamtx_path });
+      _resetObservationClocksForTests();
+      const observations = [];
+      _setObservationClockFactoryForTests(factoryFor(variant, observations));
+      const before = detectorProcs.length;
+      t.mock.timers.setTime(T0 - 1000);
+      await startMotionDetector(cam);
+      await waitFor(() => detectorProcs.length === before + 1, `${cam.id} spawn`);
+      const proc = detectorProcs[before];
+      proc.stderr.emit('data', Buffer.from(`${MOTION_CONFIG.join('\n')}\n`));
+      for (const [at, g] of stallSchedule().groups) {
+        if (at >= T0 + 1_300) break; // inputs 0-6: stdout frames 0-4, all still pictures
+        t.mock.timers.setTime(at);
+        if (g.lines.length) proc.stderr.emit('data', Buffer.from(`${g.lines.join('\n')}\n`));
+        if (g.frames.length) proc.stdout.emit('data', Buffer.concat(g.frames));
+      }
+      t.mock.timers.setTime(T0 + 3_700_000); // an hour and a bit of silence, then the stop
+      await stopMotionDetector(cam.id);
+      await settle();
+      flushActivity();
+      _setObservationClockFactoryForTests(null);
+      return { observations, rows: rowsFor('activity_samples', cam.id) };
+    };
+    const w = await runSilent('working');
+    const n = await runSilent('none');
+    assert.deepEqual(w.observations.filter((o) => o.reason === 'no-anchor').map((o) => o.token), [0, 1, 2, 3, 4], 'every frame: no-anchor');
+    assert.equal(n.rows[0].motion_frames, 4, 'frames 1-4 counted (0 is the baseline)');
+    assert.deepEqual(w.rows, n.rows.map((r) => ({ ...r, camera_id: w.rows[0].camera_id })), 'nothing corrected');
+  });
 });
 
 // --- #373 wiring beyond the golden ------------------------------------------------------------------------

@@ -43,6 +43,19 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   of it is configurable. The minutes before a restart are still lost from that night's sleep data (issue
   #508), and a restart resets the motion alert cooldown, as every detector relaunch already did (#454).
   Details, defaults and limits: [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "A detector was restarted".
+- **The sleep timeline no longer counts the pictures ffmpeg repeats during a camera stall as watched
+  time.** When a camera stalls, or runs slower than 5 frames a second, the motion detector's ffmpeg
+  repeats the last picture to keep five a second going, and each repeat read as a perfectly still room. A
+  3-second stall made about 15 of them. The `[obs]` measurement added in 0.34.0 can prove which frames were
+  repeats, and those frames are now left out of each minute's stored frame count and average movement
+  (`motion_frames`, `motion_level`, `motion_out_level`), so a minute's average can only go up. The peaks,
+  which every sleep threshold reads, and motion alerts, in/out-of-bed detection and the sleep numbers are
+  all unchanged (issue #493, narrowed: bed transitions and alerts are left to #452). No screen shows these
+  three numbers yet; this is groundwork for #447. Only proven repeats are left out, never frames `[obs]`
+  reports as `unknown`, so when its timestamps are unavailable nothing changes. About 1 in 12 repeats, the
+  ones that arrive in a minute's last ~5 seconds, is still counted. Details and limits:
+  [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "A stalled camera's repeated pictures are left out of the per-minute
+  motion count".
 
 ## [0.34.0] - 2026-09-28
 

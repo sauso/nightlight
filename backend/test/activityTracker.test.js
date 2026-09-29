@@ -14,6 +14,8 @@
 import { test, before, after, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { useTempDataDir, cleanupTempDataDirs, makeCamera } from './helpers/harness.js';
+// No db.js behind this import: the rig takes the tracker's functions as arguments (#493 tests below).
+import { motionRig, feedStream, steadyFrames, withLedger } from './helpers/obsRig.js';
 
 useTempDataDir();
 
@@ -403,4 +405,315 @@ test('startActivityTracker prunes immediately, and a second call starts no secon
   } finally {
     spy.mock.restore();
   }
+});
+
+// --- #493: the clone ledger -------------------------------------------------------------------
+// ffmpeg's fps=5 fills a camera stall with repeats of the last real frame, and the diff detector reads each
+// one as a still room that nobody observed. The observation clock proves which frames were repeats ~5 s
+// after the detector counted them; excludeClone takes those back out of the OBSERVED counts. What the
+// fixtures below are built to catch, each on purpose:
+//   * the peaks, the row-write decision and the minute listener stay on the RAW counts (every fixture
+//     that corrects also checks them);
+//   * a correction lands once, on the frame and channel it names, and only while its minute is open;
+//   * a camera with no bed zone never gets an out-of-bed count, so correcting cannot conjure one;
+//   * the key carries the generation, so two ffmpeg launches whose frame numbers collide stay apart.
+// PLANTED oracle throughout: every fraction, and which frames are repeats, is a fact of the fixture.
+
+const g7 = (token) => ({ gen: 7, token });
+const listenAll = () => { const seen = []; listen((e) => seen.push(e)); return seen; };
+
+test('#493: a proven clone leaves motion_frames and both means; the peaks, the row and the listener stay on the raw count', () => {
+  const seen = listenAll();
+  // Two real frames that moved, then two repeats (fraction exactly 0, in bed and outside).
+  at.recordMotion('cam-1', 0.4, g7(1));
+  at.recordMotionOut('cam-1', 0.3, g7(1));
+  for (const tok of [2, 3]) {
+    at.recordMotion('cam-1', 0, g7(tok));
+    at.recordMotionOut('cam-1', 0, g7(tok));
+  }
+  at.recordMotion('cam-1', 0.2, g7(4));
+  at.recordMotionOut('cam-1', 0.1, g7(4));
+  assert.equal(at.excludeClone('cam-1', 7, 2), true);
+  assert.equal(at.excludeClone('cam-1', 7, 3), true);
+  assert.equal(at.flushActivity(), 1);
+  const r = rowFor('cam-1');
+  assert.equal(r.motion_frames, 2, 'four counted, two proven repeats');
+  assert.ok(Math.abs(r.motion_level - 0.3) < 1e-12, `mean over the two observed frames (0.6 / 2), not over four (0.15): ${r.motion_level}`);
+  assert.ok(Math.abs(r.motion_out_level - 0.2) < 1e-12, `out-of-bed mean over two (0.4 / 2): ${r.motion_out_level}`);
+  assert.equal(r.motion_peak, 0.4, 'peaks are maxima: a repeat can never have set one');
+  assert.equal(r.motion_out_peak, 0.3);
+  assert.equal(seen.at(-1).motionPeak, 0.4);
+});
+
+test('#493: a correction happens once — a repeated verdict for the same frame is a no-op', () => {
+  for (const tok of [1, 2, 3]) at.recordMotion('cam-1', 0, g7(tok));
+  assert.equal(at.excludeClone('cam-1', 7, 2), true);
+  assert.equal(at.excludeClone('cam-1', 7, 2), false, 'the second verdict finds nothing to undo');
+  at.flushActivity();
+  assert.equal(rowFor('cam-1').motion_frames, 2, 'three counted, one repeat, taken out ONCE');
+});
+
+test('#493: a frame that is never classified stays counted, byte for byte what an unstaged frame gives', () => {
+  // The failure mode of a clock that throws, or whose side channel was lost (every verdict `unknown`, which
+  // the detector never forwards): no verdict ever arrives. cam-1 is staged, cam-2 is not; same frames.
+  for (const [tok, f, fo] of [[1, 0.4, 0.3], [2, 0, 0], [3, 0, 0], [4, 0.2, 0]]) {
+    at.recordMotion('cam-1', f, g7(tok));
+    at.recordMotionOut('cam-1', fo, g7(tok));
+    at.recordMotion('cam-2', f);
+    at.recordMotionOut('cam-2', fo);
+  }
+  assert.equal(at.flushActivity(), 2);
+  // created_at is SQLite's own clock: the two inserts can straddle a second.
+  const { camera_id: _a, id: _i1, created_at: _c1, ...staged } = rowFor('cam-1');
+  const { camera_id: _b, id: _i2, created_at: _c2, ...plain } = rowFor('cam-2');
+  assert.deepEqual(staged, plain);
+  assert.equal(staged.motion_frames, 4);
+});
+
+test('#493: a verdict that arrives after its minute was flushed changes nothing, and the ledger empties at every flush', () => {
+  at.recordMotion('cam-1', 0, g7(1));
+  at.recordMotion('cam-1', 0.5, g7(2)); // it moved: counted, never staged
+  assert.equal(at.cloneLedgerSize(), 1, 'only the zero-fraction frame is staged');
+  at.flushActivity();
+  assert.equal(at.cloneLedgerSize(), 0, 'the minute closed and took its staged frames with it');
+  // The next minute: a frame of the SAME launch.
+  at.recordMotion('cam-1', 0, g7(3));
+  assert.equal(at.excludeClone('cam-1', 7, 1), false, 'the late verdict for token 1 finds nothing');
+  at.flushActivity();
+  const inOrder = db.prepare('SELECT motion_frames FROM activity_samples ORDER BY id').all();
+  assert.deepEqual(inOrder.map((r) => r.motion_frames), [2, 1], 'neither the flushed minute nor the next one moved');
+});
+
+test('#493: the ledger is bounded by one open minute — 300 staged frames, all gone at the flush', () => {
+  for (let tok = 1; tok <= 300; tok += 1) at.recordMotion('cam-1', 0, g7(tok));
+  at.recordMotion('cam-1', 0); // no clock for this one: never staged
+  assert.equal(at.cloneLedgerSize(), 300);
+  at.excludeClone('cam-1', 7, 150);
+  assert.equal(at.cloneLedgerSize(), 299, 'a resolved frame leaves the ledger');
+  at.flushActivity();
+  assert.equal(at.cloneLedgerSize(), 0);
+  assert.equal(rowFor('cam-1').motion_frames, 300, '301 counted, one repeat');
+});
+
+test('#493: two ffmpeg launches whose frame numbers collide are corrected independently — the key carries the generation', () => {
+  // A reconnect restarts the detector's frame numbers at 0, so launch 1's frame 5 and launch 2's frame 5
+  // share a token. Launch 1 ran with no bed zone (in-bed count only); launch 2 with one (both counts).
+  at.recordMotion('cam-1', 0.5);
+  at.recordMotionOut('cam-1', 0.5);
+  at.recordMotion('cam-1', 0, { gen: 1, token: 5 });
+  at.recordMotion('cam-1', 0, { gen: 2, token: 5 });
+  at.recordMotionOut('cam-1', 0, { gen: 2, token: 5 });
+  assert.equal(at.excludeClone('cam-1', 3, 5), false, 'a third launch\'s frame 5 was never staged');
+  assert.equal(at.excludeClone('cam-1', 1, 5), true);
+  assert.equal(at.excludeClone('cam-1', 2, 5), true);
+  at.flushActivity();
+  const r = rowFor('cam-1');
+  assert.equal(r.motion_frames, 1, 'three counted, BOTH repeats out');
+  assert.equal(r.motion_level, 0.5);
+  assert.equal(r.motion_out_level, 0.5, 'two out-of-bed frames counted, only launch 2\'s repeat out');
+});
+
+test('#493: a camera with no bed zone — a clone never drives the out-of-bed count below zero, and motion_out_* stay NULL', () => {
+  // The detector never calls recordMotionOut without a bed zone. A ledger that undid an out-of-bed count
+  // it never made would leave -1, which is TRUTHY: motion_out_level would become 0 instead of NULL.
+  at.recordMotion('cam-1', 0.2);
+  at.recordMotion('cam-1', 0, g7(1));
+  assert.equal(at.excludeClone('cam-1', 7, 1), true);
+  at.flushActivity();
+  const r = rowFor('cam-1');
+  assert.equal(r.motion_frames, 1);
+  assert.equal(r.motion_out_level, null, 'no zone painted means no out-of-bed channel, corrected or not');
+  assert.equal(r.motion_out_peak, null);
+});
+
+test('#493: a frame that REGISTERED movement is never taken out, whatever the verdict says — only its zero channel is', () => {
+  // A true repeat is byte-identical to the frame before it, so both its fractions are exactly 0. A frame
+  // whose in-bed fraction is not 0 keeps its in-bed count: removing it while its 0.3 stayed in the sum would
+  // RAISE the mean for movement that was really measured.
+  at.recordMotion('cam-1', 0.3, g7(1));
+  at.recordMotionOut('cam-1', 0, g7(1));
+  assert.equal(at.excludeClone('cam-1', 7, 1), true, 'its out-of-bed channel was staged');
+  at.flushActivity();
+  const r = rowFor('cam-1');
+  assert.equal(r.motion_frames, 1, 'the in-bed frame stays');
+  assert.equal(r.motion_level, 0.3);
+  assert.equal(r.motion_out_level, null, 'the out-of-bed channel observed nothing');
+  assert.equal(r.motion_out_peak, 0, 'but it WAS sampled, so its peak is 0, not NULL — the raw count decides');
+});
+
+test('#493: ...and the mirror — still in bed but moving outside loses only its in-bed count', () => {
+  // Review round 1 (gap 1): the test above plants movement only IN bed, so a guard that checked only the
+  // in-bed fraction and staged every out-of-bed reading survived it.
+  at.recordMotion('cam-1', 0, g7(1));
+  at.recordMotionOut('cam-1', 0.3, g7(1));
+  assert.equal(at.excludeClone('cam-1', 7, 1), true, 'its in-bed channel was staged');
+  at.flushActivity();
+  const r = rowFor('cam-1');
+  assert.equal(r.motion_frames, 0, 'the in-bed channel observed nothing');
+  assert.equal(r.motion_level, null);
+  assert.equal(r.motion_peak, 0);
+  assert.equal(r.motion_out_level, 0.3, 'the outside reading that moved stays');
+  assert.equal(r.motion_out_peak, 0.3);
+});
+
+test('#493: the guard is EXACT zero — the smallest reading the detector can make, and a small one, are never staged in either channel', () => {
+  // Review round 1 (gap 2): with only 0 and 0.2-0.4 planted, a guard of `> 0.25` or `> 1e-3` passed too.
+  // 1/57,600 is one changed pixel of a whole 320x180 frame: the smallest non-zero fraction there is (a bed
+  // zone has fewer pixels, so its smallest is larger).
+  for (const f of [1 / 57_600, 0.05]) {
+    at.recordMotion('cam-1', f, g7(2));
+    at.recordMotionOut('cam-1', f, g7(2));
+    assert.equal(at.cloneLedgerSize(), 0, `${f}: nothing staged`);
+    assert.equal(at.excludeClone('cam-1', 7, 2), false, `${f}: a verdict finds nothing to undo`);
+    at.flushActivity();
+    const r = rowFor('cam-1');
+    assert.deepEqual([r.motion_frames, r.motion_level, r.motion_out_level], [1, f, f], `${f}: counted and kept`);
+    db.prepare('DELETE FROM activity_samples').run();
+  }
+});
+
+test('#493: a minute of nothing but proven clones is still written, with the same peaks as before (0, not NULL); only the frame count and means say so', () => {
+  // The plan's second review round: with ONE counter, this bucket skipped its row (no motion, no sound) or
+  // NULLed its peaks. The raw count keeps both exactly as the code before #493 wrote them.
+  const seen = listenAll();
+  for (const tok of [1, 2, 3]) {
+    at.recordMotion('cam-1', 0, g7(tok));
+    at.recordMotionOut('cam-1', 0, g7(tok));
+  }
+  for (const tok of [1, 2, 3]) at.excludeClone('cam-1', 7, tok);
+  assert.equal(at.flushActivity(), 1, 'the row is written: the raw count says frames were analysed');
+  const r = rowFor('cam-1');
+  assert.equal(r.motion_frames, 0);
+  assert.equal(r.motion_level, null, 'nothing was observed, so there is no mean');
+  assert.equal(r.motion_out_level, null);
+  assert.equal(r.motion_peak, 0, 'what the raw count gives: frames were analysed and none moved');
+  assert.equal(r.motion_out_peak, 0);
+  assert.equal(r.sound_peak, null);
+  assert.equal(seen.at(-1).motionPeak, 0, 'the listener (wakeWatcher) sees what it saw before #493');
+});
+
+// --- #493 with the real observation clock (obsRig; no ffmpeg) -----------------------------------
+// The detector's wiring around a real ObservationClock: count the frame, then show it to the clock with the
+// same token, and send each PROVEN clone verdict to excludeClone. The oracle is feedStream's planted truth
+// ({ outN, slot, src } per output): output k repeats the frame before it exactly when its src is the same.
+// Planted movement: a quarter of the real frames are still (fraction exactly 0, so they ARE staged and must
+// survive their `real` verdict), the rest move by 0.02-0.10.
+const movement = (content) => {
+  const src = Number(String(content).slice(1));
+  return src % 4 === 0 ? 0 : 0.02 * (1 + (src % 5));
+};
+const truthClones = (truth) => truth.filter((x, i) => i > 0 && x.src === truth[i - 1].src).map((x) => x.outN);
+
+// Feed `frames`, end the generation, flush once: every verdict has landed before the flush.
+function throughClock(frames, opts = {}) {
+  const rig = motionRig();
+  const w = withLedger(rig, at, { cameraId: 'cam-1', movement, ...opts });
+  const s = feedStream(w, frames);
+  const last = frames[frames.length - 1].rx;
+  s.flush(last + 300);
+  w.end(last + 400);
+  at.flushActivity();
+  const sum = w.counted.reduce((a, c) => a + c.fraction, 0);
+  const peak = Math.max(...w.counted.map((c) => c.fraction));
+  return { rig, w, s, counted: w.counted.length, sum, peak };
+}
+
+// The #373 soak box's stall, rebuilt at 5 fps: frames 0-150, nothing for 3.06 s, then 5 fps again. Each frame
+// sits 8,000 ticks (89 ms) into its output slot, so the gap spans 15.3 slots and fps fills slots 151-165 with
+// repeats of frame 150: the 15-frame burst the soak run showed. rx = when it reached the server.
+function soakStall(after = 150) {
+  const frames = [];
+  for (let n = 0; n <= 150; n += 1) {
+    const pts = n * 18000 + 8000;
+    frames.push({ n, pts, rx: 100_000 + Math.ceil(pts / 90) + 10 });
+  }
+  const resume = 150 * 18000 + 8000 + 275_400; // + 3.06 s at 90 kHz
+  for (let n = 151; n <= 150 + after; n += 1) {
+    const pts = resume + (n - 151) * 18000;
+    frames.push({ n, pts, rx: 100_000 + Math.ceil(pts / 90) + 10 });
+  }
+  return frames;
+}
+
+test('#493 AC4, the soak-box shape: a 3.06 s stall is a burst of 15 fps clones, and exactly those 15 leave the minute\'s motion_frames and means', () => {
+  const r = throughClock(soakStall());
+  const clones = truthClones(r.s.truth);
+  assert.deepEqual(clones, Array.from({ length: 15 }, (_, i) => 151 + i), 'the planted truth: repeats of frame 150 in slots 151-165');
+  // Each output is exactly one stdout sample, in order, so a sample's token IS its output number.
+  assert.deepEqual(r.w.verdicts.map((v) => v.token), clones, 'the clock proved exactly those, and nothing else');
+  const row = rowFor('cam-1');
+  assert.equal(row.motion_frames, r.counted - 15, `${r.counted} counted, the 15 repeats out`);
+  assert.ok(Math.abs(row.motion_level - r.sum / (r.counted - 15)) < 1e-12, `level ${row.motion_level}`);
+  assert.ok(Math.abs(row.motion_out_level - r.sum / (r.counted - 15)) < 1e-12, `out level ${row.motion_out_level}`);
+  assert.ok(row.motion_level > r.sum / r.counted, 'taking out zero-valued repeats can only RAISE a mean');
+  assert.equal(row.motion_peak, r.peak, 'the peak is the real frames\' maximum, untouched');
+  assert.equal(row.motion_out_peak, r.peak);
+});
+
+for (const fps of [2, 3, 4.5]) {
+  test(`#493: a camera genuinely slower than 5 fps (${fps} fps) — fps pads every second with repeats, and exactly those leave the counts`, () => {
+    const r = throughClock(steadyFrames({ fps, count: Math.round(fps * 60) }));
+    const clones = truthClones(r.s.truth);
+    // Planted: at f fps, 5 - f of every 5 output slots per second have no input.
+    assert.ok(Math.abs(clones.length / r.s.truth.length - (5 - fps) / 5) < 0.02, `${clones.length} of ${r.s.truth.length}`);
+    assert.deepEqual(r.w.verdicts.map((v) => v.token), clones);
+    const row = rowFor('cam-1');
+    assert.equal(row.motion_frames, r.counted - clones.length);
+    assert.ok(Math.abs(row.motion_level - r.sum / (r.counted - clones.length)) < 1e-12);
+    assert.ok(Math.abs(row.motion_out_level - r.sum / (r.counted - clones.length)) < 1e-12);
+    assert.equal(row.motion_peak, r.peak);
+    assert.equal(row.motion_out_peak, r.peak);
+  });
+}
+
+test('#493: the soak-box stall on a camera with NO bed zone — the repeats leave the in-bed count, and there is still no out-of-bed channel', () => {
+  const r = throughClock(soakStall(), { out: false });
+  assert.equal(r.w.verdicts.length, 15);
+  const row = rowFor('cam-1');
+  assert.equal(row.motion_frames, r.counted - 15);
+  assert.equal(row.motion_out_level, null);
+  assert.equal(row.motion_out_peak, null);
+});
+
+test('#493 KNOWN LIMIT: a repeat whose verdict lands after its minute was flushed stays counted — about 8% of a 3 fps camera\'s', () => {
+  // A verdict arrives FINALIZE_MS (5 s) after its frame, and the minute is flushed every 60 s, so repeats
+  // counted in a minute's last ~5 s are classified after it closed: 5/60 = 8.3% of evenly spread repeats.
+  // Accepted and documented (KNOWN-ISSUES.md, "The `[obs]` line"); #447's flush-time buckets supersede it.
+  // Every row is checked against its own accounting: counted in the minute, minus the repeats whose verdict
+  // reached the ledger BEFORE that minute's flush.
+  const rig = motionRig();
+  const w = withLedger(rig, at, { cameraId: 'cam-1', movement, flushEveryMs: 60_000, flushFrom: 160_000 });
+  const frames = steadyFrames({ fps: 3, count: 3 * 600 }); // 10 minutes
+  const s = feedStream(w, frames);
+  const last = frames[frames.length - 1].rx;
+  s.flush(last + 300);
+  w.end(last + 400);
+  at.flushActivity(); // the last, partial minute: every verdict is in by now
+  const bounds = [...w.flushes, Infinity];
+  const bucketOf = (t) => bounds.findIndex((b) => t < b);
+  const verdictAt = new Map(w.verdicts.map((v) => [v.token, v.at]));
+  const buckets = bounds.map(() => ({ counted: 0, frames: 0, sum: 0 }));
+  let missed = 0;
+  for (const c of w.counted) {
+    const b = bucketOf(c.at);
+    const v = verdictAt.get(c.token);
+    const corrected = v !== undefined && v < bounds[b];
+    if (v !== undefined && !corrected) missed += 1;
+    buckets[b].counted += 1;
+    if (!corrected) buckets[b].frames += 1;
+    buckets[b].sum += c.fraction;
+  }
+  // A minute in which nothing was counted writes no row (the stream can end on a boundary).
+  const expected = buckets.filter((b) => b.counted > 0);
+  const got = rows().sort((a, b) => a.id - b.id);
+  assert.ok(expected.length >= 10, `ten minutes of stream: ${expected.length}`);
+  assert.equal(got.length, expected.length, 'one row per minute that counted anything');
+  got.forEach((row, i) => {
+    assert.equal(row.motion_frames, expected[i].frames, `minute ${i}`);
+    assert.ok(Math.abs(row.motion_level - expected[i].sum / expected[i].frames) < 1e-12, `minute ${i} level`);
+  });
+  assert.equal(w.verdicts.length, truthClones(s.truth).length, 'every repeat was proven — the misses are timing, not classification');
+  const share = missed / w.verdicts.length;
+  assert.ok(missed > 0, 'the residual is real: some verdicts DO land after their minute closed');
+  assert.ok(Math.abs(share - 5 / 60) < 0.01, `missed ${missed} of ${w.verdicts.length} (${(share * 100).toFixed(1)}%), expected ~8.3%`);
 });

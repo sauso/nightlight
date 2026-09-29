@@ -6382,5 +6382,428 @@
     "expect": "killed",
     "tests": ["MorningReview.test.jsx"],
     "namePattern": "touched flag survives a late reseed"
+  },
+  {
+    "label": "#493 L00: control, a comment edit in activityTracker.js must change nothing",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "// How many frames are staged and not yet resolved or pruned.",
+    "replace": "// How many frames are staged and not yet resolved or pruned. [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 L01: the stored motion_frames reads the RAW count (no correction reaches the row)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "        s.observedMotionFrames,",
+    "replace": "        s.motionFrames,",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 L02: motion_level averages over the RAW count",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "        s.observedMotionFrames ? s.motionSum / s.observedMotionFrames : null,",
+    "replace": "        s.motionFrames ? s.motionSum / s.motionFrames : null,",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 L03: motion_out_level averages over the RAW out-of-bed count",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "        s.observedMotionOutFrames ? s.motionOutSum / s.observedMotionOutFrames : null,",
+    "replace": "        s.motionOutFrames ? s.motionOutSum / s.motionOutFrames : null,",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 L04: the row-write decision reads the OBSERVED count (an all-clone minute skips its row)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "    if (s.motionFrames === 0 && s.soundWindows === 0) continue;",
+    "replace": "    if (s.observedMotionFrames === 0 && s.soundWindows === 0) continue;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 L05: motion_peak NULLs on the OBSERVED count",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "        s.motionFrames ? s.motionPeak : null,",
+    "replace": "        s.observedMotionFrames ? s.motionPeak : null,",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 L06: motion_out_peak NULLs on the OBSERVED out-of-bed count",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "        s.motionOutFrames ? s.motionOutPeak : null,",
+    "replace": "        s.observedMotionOutFrames ? s.motionOutPeak : null,",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 L07: the minute listener's motionPeak NULLs on the OBSERVED count",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "          motionPeak: s.motionFrames ? s.motionPeak : null,",
+    "replace": "          motionPeak: s.observedMotionFrames ? s.motionPeak : null,",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 L08: the ledger key drops the generation (the reconnect race)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "const ledgerKey = (cameraId, gen, token) => `${cameraId}:${gen}:${token}`;",
+    "replace": "const ledgerKey = (cameraId, gen, token) => `${cameraId}:${token}`;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 L09: a correction undoes an out-of-bed count the frame never made (no-bed-zone camera goes negative)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  if (entry.out) entry.bucket.observedMotionOutFrames--;",
+    "replace": "  entry.bucket.observedMotionOutFrames--;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 L10: a correction undoes an in-bed count the frame was not staged in",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  if (entry.motion) entry.bucket.observedMotionFrames--;",
+    "replace": "  entry.bucket.observedMotionFrames--;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 L11: a correction decrements the RAW count instead of the observed one",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  if (entry.motion) entry.bucket.observedMotionFrames--;",
+    "replace": "  if (entry.motion) entry.bucket.motionFrames--;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 L12: a frame that registered movement is staged too",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  if (!sample || fraction !== 0) return;",
+    "replace": "  if (!sample) return;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 L13: the ledger is never pruned at a flush (unbounded)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  cloneLedger.clear();",
+    "replace": "  void cloneLedger;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 L14: a resolved frame stays in the ledger (a repeated verdict corrects twice)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  cloneLedger.delete(key);",
+    "replace": "  void key;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 C01: the finalized observation drops the caller's token",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "idx: s.idx, token: s.token, baseline",
+    "replace": "idx: s.idx, token: null, baseline",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 C02: the observation names its own idx instead of the caller's token",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "idx: s.idx, token: s.token, baseline",
+    "replace": "idx: s.idx, token: s.idx, baseline",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 C03: the motion generation never reads the token it is given",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "  onSample(bytes, rxMono, rxWall, { token = null } = {}) {",
+    "replace": "  onSample(bytes, rxMono, rxWall, { tokenIgnored: token = null } = {}) {",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 C04: openObservation does not hand its listener to the clock it creates (the pre-#493 behaviour)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "getObservationClock(cameraId, leg, { label, onObservation })",
+    "replace": "getObservationClock(cameraId, leg, { label })",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 C05: the test factory is not handed the listener (unit test)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "testFactory(cameraId, leg, { onObservation })",
+    "replace": "testFactory(cameraId, leg)",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 C06: the test factory is not handed the listener (the stall scenario must notice, or the golden's working clock is vacuous)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "testFactory(cameraId, leg, { onObservation })",
+    "replace": "testFactory(cameraId, leg)",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 C07: an existing clock's listener is never refreshed",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (onObservation) clock.onObservation = onObservation;",
+    "replace": "    void onObservation;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 C08: a launch that passes no listener unplugs the existing one",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    if (onObservation) clock.onObservation = onObservation;",
+    "replace": "    clock.onObservation = onObservation;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 C09: extra listeners are never called",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    for (const fn of this.observationListeners) this.notify(fn, obs);",
+    "replace": "    void obs;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 C10: a throwing listener is not guarded (it stops the listeners after it)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "  notify(fn, obs) {",
+    "replace": "  notify(fn, obs) { if (fn) return fn(obs);",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 C11: the handle's generation id is always null (nothing is ever staged)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    gen: genId,",
+    "replace": "    gen: null,",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 C12: the handle's generation id accepts a missing or non-numeric id",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "    genId = gen && typeof gen.id === 'number' ? gen.id : null;",
+    "replace": "    genId = gen ? gen.id : null;",
+    "expect": "killed",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 D00: control, a comment edit in motionDetector.js must change nothing",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "    // #493: what the clone ledger needs to find this frame again, or null (no working clock).",
+    "replace": "    // #493: what the clone ledger needs to find this frame again, or null (no working clock). [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 D01: `unknown` verdicts are corrected too (a lost side channel would empty real minutes)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        if (o.cls === 'fps-clone' || o.cls === 'cfr-clone') excludeClone(camera.id, o.gen, o.token);",
+    "replace": "        if (o.cls !== 'real') excludeClone(camera.id, o.gen, o.token);",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 D02: `real` verdicts are corrected too",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        if (o.cls === 'fps-clone' || o.cls === 'cfr-clone') excludeClone(camera.id, o.gen, o.token);",
+    "replace": "        if (o.cls !== 'unknown') excludeClone(camera.id, o.gen, o.token);",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 D03: `cfr-clone` verdicts are not corrected",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        if (o.cls === 'fps-clone' || o.cls === 'cfr-clone') excludeClone(camera.id, o.gen, o.token);",
+    "replace": "        if (o.cls === 'fps-clone') excludeClone(camera.id, o.gen, o.token);",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 D04: `fps-clone` verdicts are not corrected",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        if (o.cls === 'fps-clone' || o.cls === 'cfr-clone') excludeClone(camera.id, o.gen, o.token);",
+    "replace": "        if (o.cls === 'cfr-clone') excludeClone(camera.id, o.gen, o.token);",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 D05: the listener keys by ITS launch's generation, not the verdict's (the reconnect race)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        if (o.cls === 'fps-clone' || o.cls === 'cfr-clone') excludeClone(camera.id, o.gen, o.token);",
+    "replace": "        if (o.cls === 'fps-clone' || o.cls === 'cfr-clone') excludeClone(camera.id, obsGen, o.token);",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 D06: the clock is not given the frame's token",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        obs.onSample(frame, rx.mono, rx.wall, { token });",
+    "replace": "        obs.onSample(frame, rx.mono, rx.wall);",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 D07: the ledger and the clock number a frame differently (off by one)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        handleFrame(frame, token);",
+    "replace": "        handleFrame(frame, token + 1);",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 D08: no frame is ever staged",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        const sample = obsGen === null ? null : { gen: obsGen, token };",
+    "replace": "        const sample = null;",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 D09: the out-of-bed channel is never staged",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "          recordMotionOut(camera.id, outFraction, sample);",
+    "replace": "          recordMotionOut(camera.id, outFraction);",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "#493"
+  },
+  {
+    "label": "#493 L15: an out-of-bed reading that MOVED is staged anyway (review round 1, gap 1)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  stageFrame(cameraId, s, sample, fraction, 'out');",
+    "replace": "  stageFrame(cameraId, s, sample, 0, 'out');",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "the mirror"
+  },
+  {
+    "label": "#493 L16: an in-bed reading that MOVED is staged anyway (review round 1, gap 1, the reverse)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  stageFrame(cameraId, s, sample, fraction, 'motion');",
+    "replace": "  stageFrame(cameraId, s, sample, 0, 'motion');",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "REGISTERED movement"
+  },
+  {
+    "label": "#493 L17: the zero guard loosened to a coarse threshold, 0.25 (review round 1, gap 2)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  if (!sample || fraction !== 0) return;",
+    "replace": "  if (!sample || fraction > 0.25) return;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "EXACT zero"
+  },
+  {
+    "label": "#493 L18: the zero guard loosened to a fine threshold, 1e-3 (review round 1, gap 2)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  if (!sample || fraction !== 0) return;",
+    "replace": "  if (!sample || fraction > 1e-3) return;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "EXACT zero"
+  },
+  {
+    "label": "#493 D10: `unknown (clone-unproven)` verdicts are corrected too (review round 1, gap 3)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        if (o.cls === 'fps-clone' || o.cls === 'cfr-clone') excludeClone(camera.id, o.gen, o.token);",
+    "replace": "        if (o.cls === 'fps-clone' || o.cls === 'cfr-clone' || o.reason === 'clone-unproven') excludeClone(camera.id, o.gen, o.token);",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "whatever its reason"
+  },
+  {
+    "label": "#493 D11: `unknown (out-hole)` verdicts are corrected too (review round 1, gap 3)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        if (o.cls === 'fps-clone' || o.cls === 'cfr-clone') excludeClone(camera.id, o.gen, o.token);",
+    "replace": "        if (o.cls === 'fps-clone' || o.cls === 'cfr-clone' || o.reason === 'out-hole') excludeClone(camera.id, o.gen, o.token);",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "whatever its reason"
+  },
+  {
+    "label": "#493 D12: `unknown (cfr-unproven)` verdicts are corrected too (review round 1, gap 3)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        if (o.cls === 'fps-clone' || o.cls === 'cfr-clone') excludeClone(camera.id, o.gen, o.token);",
+    "replace": "        if (o.cls === 'fps-clone' || o.cls === 'cfr-clone' || o.reason === 'cfr-unproven') excludeClone(camera.id, o.gen, o.token);",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "whatever its reason"
+  },
+  {
+    "label": "#493 D13: `unknown (no-anchor)` verdicts are corrected too (review round 1, gap 3)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        if (o.cls === 'fps-clone' || o.cls === 'cfr-clone') excludeClone(camera.id, o.gen, o.token);",
+    "replace": "        if (o.cls === 'fps-clone' || o.cls === 'cfr-clone' || o.reason === 'no-anchor') excludeClone(camera.id, o.gen, o.token);",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "no-anchor"
+  },
+  {
+    "label": "#493 D14: the listener corrects by the clock's own sample count (idx), not the detector's token (review round 1, gap 4)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        if (o.cls === 'fps-clone' || o.cls === 'cfr-clone') excludeClone(camera.id, o.gen, o.token);",
+    "replace": "        if (o.cls === 'fps-clone' || o.cls === 'cfr-clone') excludeClone(camera.id, o.gen, o.idx);",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "a bed zone: the working clock"
+  },
+  {
+    "label": "#493 L08b: the ledger key drops the generation — must be killed by the detector relaunch test ALONE (review round 1, gap 5)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "const ledgerKey = (cameraId, gen, token) => `${cameraId}:${gen}:${token}`;",
+    "replace": "const ledgerKey = (cameraId, gen, token) => `${cameraId}:${token}`;",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "AFTER a relaunch"
   }
 ]
