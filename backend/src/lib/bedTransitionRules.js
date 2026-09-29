@@ -165,19 +165,22 @@ export const LINGERING_WINDOW_MS = 60 * 60 * 1000;
 // report a distribution across 1/2/3/4+, so 4 is the bucket that measurement happened to report, not a
 // threshold independently shown to separate two populations the way OOB_SLOW_OUT_MIN was. Reusing it
 // anyway because it's the only real number on record, and because a single-minute threshold is worse
-// for a documented, independent reason: activityTracker.js's minute flush is not phase-aligned to
-// wall-clock minutes (a plain 60s setInterval from process start), so a departure's own motion lands in
-// the bucket immediately AFTER the exit's own minute for roughly HALF of all exits — near-deterministic
-// on the flush phase, not occasional — which would defeat the "exclude the exit's own minute" guard
-// below by itself. Requiring 4+ DISTINCT minutes (see findLingeringBedMotion's own de-duplication
-// comment — activity_samples has no uniqueness constraint on camera_id+bucket_start, so "distinct"
-// matters, not just "4+ rows") means neither one stray flush-lagged bucket, nor several duplicate rows
-// for it, can ever trigger a flag alone. If this number is ever re-measured (e.g. via the yield/false-
-// positive measurement this ships needing — see bedTransitions.js), move it here, not a new literal.
+// for a documented, independent reason: a departure's own motion spills into the bucket immediately
+// AFTER the exit's own minute for a large share of exits, which would defeat the "exclude the exit's own
+// minute" guard below by itself. When this was written the cause was activityTracker.js's flush phase (a
+// plain 60 s setInterval from process start, not aligned to wall-clock minutes), which moved a
+// departure's motion into the next bucket for roughly HALF of all exits. Since #447 a bucket is the
+// minute its samples were RECEIVED, so that lottery is gone, but the spill is not: an exit confirmed late
+// in its minute still has its departure movement (the seconds after the confirming frame) in the next
+// one. Requiring 4+ DISTINCT minutes (see findLingeringBedMotion's own de-duplication comment —
+// activity_samples has no uniqueness constraint on camera_id+bucket_start, so "distinct" matters, not
+// just "4+ rows") means neither one spilled bucket, nor several duplicate rows for it, can ever trigger
+// a flag alone. If this number is ever re-measured (e.g. via the yield/false-positive measurement this
+// ships needing — see bedTransitions.js), move it here, not a new literal.
 export const LINGERING_MIN_ACTIVE_MINUTES = 4;
 
-// activity_samples.bucket_start is always the exact minute (activityTracker.js's minuteBucketUtc), but
-// bed_transitions.created_at carries the real second. Floor a transition's timestamp to its own minute
+// activity_samples.bucket_start is always the exact minute (activityTracker.js's minuteBucketUtc; since #447
+// the minute the samples were received in), but bed_transitions.created_at carries the real second. Floor a transition's timestamp to its own minute
 // before comparing it to a bucket, or a same-minute bucket can misread relative to the transition
 // depending on the transition's own seconds — see findLingeringBedMotion's own comment for exactly where
 // this matters and where it doesn't.
@@ -233,7 +236,7 @@ export function findLingeringBedMotion(
   // Collapse consecutive same-bucket_start rows into ONE minute, OR-merged (qualifies if ANY row for
   // that minute does) — the same convention sleepAnalysis.js itself already uses for duplicate buckets
   // (state[i] = state[i] === null ? active : state[i] || active), not a new rule invented here. Without
-  // this, several duplicate rows for a single flush-lagged minute would satisfy the 4-minute threshold
+  // this, several duplicate rows for a single spilled minute would satisfy the 4-minute threshold
   // alone — silently defeating the exact guarantee that threshold exists to provide (found in review,
   // 2026-09-14, citing sleepAnalysis.test.js's own "a duplicate activity_samples row for the same
   // minute must not erase real movement" fixture as proof duplicates are real, not hypothetical).

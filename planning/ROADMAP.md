@@ -871,7 +871,14 @@ no clock. Every threshold in it came from ONE house's runs (Stage 1: night, over
 - **#493** stop consuming fabricated frames (fps clones, CFR dups) in the motion detector. Changes the
   calibration basis of every motion threshold, so it needs an A/B on real nights.
 - **#447** activity buckets by observation time instead of flush time; must name sampler or analysis
-  coverage and accept FINALIZE_MS (5 s) of latency.
+  coverage and accept FINALIZE_MS (5 s) of latency. **Stage A built (branch
+  `fix/447-observation-minute-buckets`, plan v3, 2026-09-29):** rows keyed by each stdout event's RECEIPT
+  minute (`rx.wall`), closed on a 1 s tick (listeners at the minute's end, the row 7 s = FINALIZE_MS + 2 s
+  later). ⚠️ It reads NO sampler or analysis coverage — the "must name coverage" requirement above is
+  DEFERRED with Stage B (keying by the PTS-derived observation time, which needs samples held for
+  FINALIZE_MS and a sound-leg hook that does not exist). Its second acceptance criterion ("wake-clip
+  timestamps line up") is deferred to #412: the wake anchor stays at the minute's END so the 23-63 s ring
+  holds it. KNOWN-ISSUES.md "The sleep timeline's minutes are the minutes the samples arrived in".
 - **#452** confirmation across an outage (read `restarts`/`gaps`), **#448** the wake watcher.
 - ~~**#369** stale-sampler restarts~~ — built on its own branch (`fix/369-detector-watchdog`, plan v5,
   2026-09-27) WITHOUT the observation clock, so the #373 gate below does not apply to it: the detector

@@ -183,7 +183,10 @@ export async function startSoundDetector(camera) {
     let lastLevelLog = Date.now();
     const LEVEL_LOG_MS = 15000;
 
-    function handleReading(rms) {
+    // `atMs` = the receipt time of the stdout event that delivered this window (`rx.wall`, #447): every window
+    // of one event is filed under the same minute. `now` below stays this handler's own Date.now(), which the
+    // baseline and the alert rules read exactly as before.
+    function handleReading(rms, atMs) {
       if (!Number.isFinite(rms)) return; // -inf / nan (true digital silence) — ignore
       sawReading = true;
       const now = Date.now();
@@ -201,7 +204,7 @@ export async function startSoundDetector(camera) {
       }
 
       const r = analyser.push(rms, now);
-      if (r.recordDb !== null) recordSound(camera.id, r.recordDb);
+      if (r.recordDb !== null) recordSound(camera.id, r.recordDb, atMs);
       if (r.confirmed && r.over > windowMaxOver) windowMaxOver = r.over;
       // The analyser reports that the ALERT RULES are satisfied; the quiet-hours schedule is this
       // layer's business. `markAlerted` only runs when a notification actually went out, so the
@@ -216,7 +219,8 @@ export async function startSoundDetector(camera) {
       // #369: "a stdout byte arrived", from performance.now() directly, once per event, before the #373 receipt
       // (see motionDetector.js for why it is not rx.mono).
       entry.lastDataMono = performance.now();
-      // #373: the receipt time, once per 'data' event (see motionDetector.js).
+      // #373: the receipt time, once per 'data' event (see motionDetector.js). #447: also the minute every
+      // window of this event is filed under in activity_samples.
       const rx = obs.receipt();
       pcm = pcm.length ? Buffer.concat([pcm, chunk]) : chunk;
       while (pcm.length >= WIN_BYTES) {
@@ -230,7 +234,7 @@ export async function startSoundDetector(camera) {
         const rms = Math.sqrt(sumSq / WIN_SAMPLES);
         // dBFS: 0 dB = full scale (32768). True silence (rms 0) -> -Infinity, ignored upstream.
         const level = rms > 0 ? 20 * Math.log10(rms / 32768) : -Infinity;
-        handleReading(level);
+        handleReading(level, rx.wall);
         // #373: one observation per window, AFTER its decision handler returned (R1-F8). It runs for every
         // window, silent ones included — the early return inside handleReading cannot skip it — and a
         // silent window counts as SAMPLED but not ANALYSED coverage (C5).

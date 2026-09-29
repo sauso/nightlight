@@ -47,7 +47,15 @@
 // so there is nothing to take out: every GOLDEN_* literal still holds, unchanged, in all three variants (and
 // its many `unknown` quiet frames are exactly what the ledger must never touch). Where a stall DOES make
 // clones, the variants must differ in those three columns and nowhere else: the #493 describe below.
-import { test, mock, after, describe } from 'node:test';
+//
+// ★ #447: activity_samples rows are now labelled with the minute their samples were RECEIVED, and written a
+// grace (7 s) after that minute ends, instead of being labelled with the flush time. That moves the golden's
+// activity rows, and ONLY those: they were re-derived BY HAND from the pre-#447 recording and the planted
+// frames (see GOLDEN_MOTION below), never re-recorded from the new code. Every other literal is untouched.
+// The flushes became ticks of the tracker at each minute's end + PAST_GRACE_MS, the time a real tick would
+// write it. The golden's three variants all read ONE mocked clock, so they cannot tell a receipt time from a
+// per-call Date.now(); the #447 describe at the end plants a receipt on the other side of a minute boundary.
+import { test, mock, after, beforeEach, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -90,7 +98,7 @@ mock.module('node:child_process', {
 
 const { default: db } = await import('../src/db.js');
 const { logger } = await import('../src/lib/logger.js');
-const { flushActivity } = await import('../src/lib/activityTracker.js');
+const { flushActivity, _resetActivityTrackerForTests } = await import('../src/lib/activityTracker.js');
 const { startMotionDetector, stopMotionDetector } = await import('../src/lib/motionDetector.js');
 const { startSoundDetector, stopSoundDetector } = await import('../src/lib/soundDetector.js');
 const {
@@ -101,6 +109,14 @@ after(async () => {
   await mediamtx.close();
   cleanupTempDataDirs();
 });
+// #447: the tracker remembers, per camera, the last minute it closed, and the golden runs the SAME camera at the
+// SAME planted times three times over: without this, the second variant's 12:00 samples would be filed in the
+// minute after the first variant's last one.
+beforeEach(() => _resetActivityTrackerForTests());
+
+// #447: a tick this long after a minute's end writes it: past activityTracker's 7 s GRACE_MS, which its own
+// tests pin with literal times either side. The flushes below pass it explicitly and never move the mocked clock.
+const PAST_GRACE_MS = 8_000;
 
 // --- helpers ------------------------------------------------------------------------------------------
 
@@ -410,9 +426,11 @@ makeCamera(db, { id: soundCamera.id, name: soundCamera.name, path: soundCamera.m
 
 // --- the goldens (recorded on dev db46da1, unmodified detectors) --------------------------------------
 // Read these as today's behaviour, including the parts that look odd, because pinning them is the job:
-//   - a bucket is labelled with the FLUSH time, not the time its samples were observed (#447);
+//   - #447: a bucket is labelled with the minute its samples were RECEIVED (the activity rows below were
+//     re-derived by hand when that changed; the pre-#447 recording, labelled with the FLUSH time, is kept);
 //   - the first frame of every generation is a baseline with no diff (299 of 300 frames in minute 1,
-//     69 of 70 in generation 2), and the frame delivered after 'exit' is still analysed (301);
+//     69 of 70 in generation 2), and the frame delivered after 'exit' is still analysed (it now sits with
+//     generation 2's frames in 12:02, the minute it arrived in);
 //   - the alert cooldown resets on a relaunch (generation 2 alerts at 126 s, 53 s after the 73 s alert,
 //     inside the 60 s cooldown), while the in/out-of-bed BELIEF survives it (the "flagged impossible"
 //     line);
@@ -420,11 +438,44 @@ makeCamera(db, { id: soundCamera.id, name: soundCamera.name, path: soundCamera.m
 //     lines and the stored sound_* numbers.
 // Log lines that are verbatim forwards of a stderr capture are NOT in these literals: they are checked
 // against the capture itself, which is an oracle this code did not produce.
+// The pre-#447 activity rows, AS RECORDED on db46da1 (flush-time labels, flushes at 60 s, 120 s, 180 s). Kept
+// verbatim: they are the oracle the #447 rows below are derived from, and not produced by the #447 code.
+const PRE447_MOTION_ROWS = [
+  { camera_id: 'cam-golden-motion', bucket_start: '2026-09-25 12:01:00', motion_level: 0.05667038275733944, motion_peak: 0.3333333333333333, sound_level: null, sound_peak: null, motion_frames: 299, sound_windows: 0, motion_out_level: 0.014864362690449651, motion_out_peak: 0.2222222222222222, sound_p75: null, sound_p90: null, sound_sd: null },
+  { camera_id: 'cam-golden-motion', bucket_start: '2026-09-25 12:02:00', motion_level: 0.033776301218161796, motion_peak: 0.3333333333333333, sound_level: null, sound_peak: null, motion_frames: 301, sound_windows: 0, motion_out_level: 0, motion_out_peak: 0, sound_p75: null, sound_p90: null, sound_sd: null },
+  { camera_id: 'cam-golden-motion', bucket_start: '2026-09-25 12:03:00', motion_level: 0.09661835748792268, motion_peak: 0.3333333333333333, sound_level: null, sound_peak: null, motion_frames: 69, sound_windows: 0, motion_out_level: 0.02898550724637682, motion_out_peak: 0.2222222222222222, sound_p75: null, sound_p90: null, sound_sd: null },
+];
+// ★ #447: THE ACTIVITY ROWS, RE-DERIVED BY HAND — NOT RE-RECORDED (plan round 2, B). A golden recorded from the
+// new code agrees with whatever it does; this one is worked out from where each planted frame ARRIVED:
+//   - minute 1's 300 frames arrive at 0-59.8 s: 12:00 holds exactly what the old 12:01 row held (299 diffs),
+//     summed in the same order, so it is that row, relabelled, to the last bit;
+//   - minute 2's 300 frames arrive at 60-119.8 s: 12:01. The old 12:02 row ALSO held the frame drained after
+//     'exit' (delivered at 120 s), which now belongs to 12:02, with generation 2's 69 diffs (121-134.8 s);
+//   - the per-frame fractions come from the painted regions (`paint` above; zone = the left 28,800 px): the
+//     flicker band 800 px in the zone = 1/36, the lit bed 9,600 px = 1/3, the lit outside 6,400 of the 28,800 px
+//     outside it = 2/9. MOTION_MIN2, after MIN1's last frame (k = 168 of `flickerEvery: 7`, a flicker frame):
+//     segment A {50, flickerEvery 9} changes on k = 1, 9-10, 18-19, 27-28, 36-37, 45-46 = 11 flicker diffs;
+//     segment B {26, bed} changes on all 26 frames (each lit/unlit vs the one before) = 26 x 1/3; segment C
+//     {224, flickerEvery 11} has flicker frames at k = 0, 11, ..., 220 (21), each changing twice = 42 diffs.
+//     No outside movement. The drained frame (a flicker) after C's last frame (k = 223, unlit, no flicker) =
+//     1/36 in the zone, 0 outside. Generation 2: MOTION_GEN2's first frame is its baseline; the out run's
+//     9 diffs = 9 x 2/9 outside, the bed run's 20 (including the first lit frame after the unlit out frame)
+//     = 20 x 1/3 in the zone, and its quiet tail changes nothing.
+// The derivation is CHECKED against the pre-#447 recording before it is used (the motion test below asserts
+// that 301 frames of MIN2 + the drained one, and 69 of generation 2, reproduce the recorded levels), so a
+// slip in it fails loudly instead of quietly redefining the golden. Levels are compared within 1e-12: the
+// detector sums frame by frame, and a hand total re-associates the same additions.
+const FLICKER = 1 / 36;
+const LIT_BED = 1 / 3;
+const LIT_OUT = 2 / 9;
+const MIN2_SUM = (11 + 42) * FLICKER + 26 * LIT_BED; // 365/36
+const GEN2_SUM = 20 * LIT_BED;
+const GEN2_OUT_SUM = 9 * LIT_OUT;
 const GOLDEN_MOTION = {
   activity: [
-    { camera_id: 'cam-golden-motion', bucket_start: '2026-09-25 12:01:00', motion_level: 0.05667038275733944, motion_peak: 0.3333333333333333, sound_level: null, sound_peak: null, motion_frames: 299, sound_windows: 0, motion_out_level: 0.014864362690449651, motion_out_peak: 0.2222222222222222, sound_p75: null, sound_p90: null, sound_sd: null },
-    { camera_id: 'cam-golden-motion', bucket_start: '2026-09-25 12:02:00', motion_level: 0.033776301218161796, motion_peak: 0.3333333333333333, sound_level: null, sound_peak: null, motion_frames: 301, sound_windows: 0, motion_out_level: 0, motion_out_peak: 0, sound_p75: null, sound_p90: null, sound_sd: null },
-    { camera_id: 'cam-golden-motion', bucket_start: '2026-09-25 12:03:00', motion_level: 0.09661835748792268, motion_peak: 0.3333333333333333, sound_level: null, sound_peak: null, motion_frames: 69, sound_windows: 0, motion_out_level: 0.02898550724637682, motion_out_peak: 0.2222222222222222, sound_p75: null, sound_p90: null, sound_sd: null },
+    { ...PRE447_MOTION_ROWS[0], bucket_start: '2026-09-25 12:00:00' },
+    { ...PRE447_MOTION_ROWS[1], bucket_start: '2026-09-25 12:01:00', motion_frames: 300, motion_level: MIN2_SUM / 300 },
+    { ...PRE447_MOTION_ROWS[2], bucket_start: '2026-09-25 12:02:00', motion_frames: 70, motion_level: (FLICKER + GEN2_SUM) / 70, motion_out_level: GEN2_OUT_SUM / 70 },
   ],
   // ⚠️ `wrong_reason: null` was added by the #373 build, and it is NOT a re-recording: dev b379737 (#504,
   // this branch's base) added the `bed_transitions.wrong_reason` column AFTER this golden was recorded on
@@ -466,10 +517,13 @@ const GOLDEN_MOTION = {
     '[INFO] [detect] no snapshot for "Golden Motion Cam" (grab failed/timed out) — feed/alert without image',
   ],
 };
+// ★ #447, derived by hand as for motion: SOUND_MIN1's windows all arrive at 0-59.8 s and SOUND_MIN2's at
+// 60-119.8 s, exactly the two pre-#447 flush intervals, so each recorded row (labelled 12:01 and 12:02, the
+// flush times) is the same row, to the last bit, under the minute its windows arrived in: 12:00 and 12:01.
 const GOLDEN_SOUND = {
   activity: [
-    { camera_id: 'cam-golden-sound', bucket_start: '2026-09-25 12:01:00', motion_level: null, motion_peak: null, sound_level: 1.26657393446471, sound_peak: 24.081866239790152, motion_frames: 0, sound_windows: 274, motion_out_level: null, motion_out_peak: null, sound_p75: 0, sound_p90: 0, sound_sd: 5.263784232701136 },
-    { camera_id: 'cam-golden-sound', bucket_start: '2026-09-25 12:02:00', motion_level: null, motion_peak: null, sound_level: 1.1519717499111992, sound_peak: 23.9812664492313, motion_frames: 0, sound_windows: 300, motion_out_level: null, motion_out_peak: null, sound_p75: 0, sound_p90: 0, sound_sd: 5.022056490207111 },
+    { camera_id: 'cam-golden-sound', bucket_start: '2026-09-25 12:00:00', motion_level: null, motion_peak: null, sound_level: 1.26657393446471, sound_peak: 24.081866239790152, motion_frames: 0, sound_windows: 274, motion_out_level: null, motion_out_peak: null, sound_p75: 0, sound_p90: 0, sound_sd: 5.263784232701136 },
+    { camera_id: 'cam-golden-sound', bucket_start: '2026-09-25 12:01:00', motion_level: null, motion_peak: null, sound_level: 1.1519717499111992, sound_peak: 23.9812664492313, motion_frames: 0, sound_windows: 300, motion_out_level: null, motion_out_peak: null, sound_p75: 0, sound_p90: 0, sound_sd: 5.022056490207111 },
   ],
   events: [
     { camera_id: 'cam-golden-sound', camera_name: 'Golden Sound Cam', type: 'sound', detail: '+12 dB over ambient', snapshot: 0, clip_status: null, clip_path: null, clip_duration_s: null, clip_bytes: null },
@@ -492,6 +546,23 @@ const GOLDEN_SOUND = {
 function withoutCapture(observed, tag, capture) {
   const forwarded = new Set(captureLines(capture).map((l) => `${tag} ${l}`));
   return { ...observed, log: observed.log.filter((l) => !forwarded.has(l)) };
+}
+
+// #447: the golden, with the two MEANS of the hand-derived rows compared within 1e-12 (see GOLDEN_MOTION on
+// why) and every other column, and everything else in `observed`, compared exactly.
+const MEANS = new Set(['motion_level', 'motion_out_level']);
+function assertGolden(observed, golden) {
+  const { activity, ...rest } = observed;
+  const { activity: want, ...wantRest } = golden;
+  assert.equal(activity.length, want.length, `${activity.length} activity rows`);
+  activity.forEach((row, i) => {
+    assert.deepEqual(Object.keys(row), Object.keys(want[i]), `row ${i}: the same columns`);
+    for (const [col, v] of Object.entries(want[i])) {
+      if (MEANS.has(col) && typeof v === 'number') assert.ok(Math.abs(row[col] - v) < 1e-12, `row ${i} ${col}: ${row[col]}, want ${v}`);
+      else assert.deepEqual(row[col], v, `row ${i} ${col}`);
+    }
+  });
+  assert.deepEqual(rest, wantRest);
 }
 
 describe('detector decisions: the #373 golden, with a working, a throwing and no observation clock', { concurrency: false }, () => {
@@ -521,7 +592,7 @@ describe('detector decisions: the #373 golden, with a working, a throwing and no
     const st1 = { bytes: 0, emitted: 0 };
     deliverObserved(t, gen1, single(MOTION_MIN1, T0), FRAME_BYTES, rec1, st1);
     t.mock.timers.setTime(T0 + 60_000);
-    flushActivity();
+    flushActivity(T0 + 60_000 + PAST_GRACE_MS); // #447: 12:00's row, as the tick after its grace writes it
 
     const min2 = T0 + 60_000;
     deliverObserved(t, gen1, burst(MOTION_MIN2.slice(0, 150), min2, 3), FRAME_BYTES, rec1, st1);
@@ -545,7 +616,9 @@ describe('detector decisions: the #373 golden, with a working, a throwing and no
     gen1.stderr.emit('end');
     gen1.emit('close', 0, null);
     await settle();
-    flushActivity(); // bucket labelled at the flush time: 12:02:00
+    // #447: 12:01's row. The frame drained after 'exit' arrived at 12:02:00, so it waits in 12:02 (it was in
+    // the pre-#447 12:02 row, labelled with this flush's time).
+    flushActivity(T0 + 120_000 + PAST_GRACE_MS);
 
     // The real 5 s relaunch (RESTART_DELAY_MS), then generation 2.
     await waitFor(() => detectorProcs.length === before + 2, 'the relaunched motion ffmpeg');
@@ -553,7 +626,7 @@ describe('detector decisions: the #373 golden, with a working, a throwing and no
     gen2.stderr.emit('data', Buffer.from(`${MOTION_CONFIG.join('\n')}\n`));
     deliverObserved(t, gen2, single(MOTION_GEN2, T0 + 121_000), FRAME_BYTES, (k) => motionRecords(k, MOTION_GEN2[k]), { bytes: 0, emitted: 0 });
     t.mock.timers.setTime(T0 + 180_000);
-    flushActivity();
+    flushActivity(T0 + 180_000 + PAST_GRACE_MS);
 
     await stopMotionDetector(motionCamera.id);
     assert.deepEqual(gen2.signals, ['SIGTERM'], 'the stop must terminate generation 2');
@@ -602,7 +675,12 @@ describe('detector decisions: the #373 golden, with a working, a throwing and no
     assert.ok(captured.length > 50, 'the capture must be the real repeated-error run, not an empty file');
     assert.deepEqual(forwarded.slice(0, captured.length), captured);
 
-    assert.deepEqual(withoutCapture(observed, tag, 'loglevel-error.err'), GOLDEN_MOTION);
+    // #447: the hand derivation, checked against the pre-#447 RECORDING before it is trusted (GOLDEN_MOTION's
+    // comment): MIN2's 300 frames plus the drained one made the old 12:02 row, generation 2's 69 the old 12:03.
+    assert.ok(Math.abs((MIN2_SUM + FLICKER) / 301 - PRE447_MOTION_ROWS[1].motion_level) < 1e-12, 'the MIN2 + drained-frame derivation');
+    assert.ok(Math.abs(GEN2_SUM / 69 - PRE447_MOTION_ROWS[2].motion_level) < 1e-12, 'the generation 2 derivation');
+    assert.ok(Math.abs(GEN2_OUT_SUM / 69 - PRE447_MOTION_ROWS[2].motion_out_level) < 1e-12, 'the generation 2 outside derivation');
+    assertGolden(withoutCapture(observed, tag, 'loglevel-error.err'), GOLDEN_MOTION);
   });
 
   test(`sound (${variant} clock): activity, alerts, level lines and forwarded stderr`, async (t) => {
@@ -629,11 +707,11 @@ describe('detector decisions: the #373 golden, with a working, a throwing and no
     deliverObserved(t, gen1, split(SOUND_MIN1.slice(100, 200), T0 + 100 * STEP_MS, 5_000), WIN_BYTES, soundRecords, st);
     deliverObserved(t, gen1, burst(SOUND_MIN1.slice(200), T0 + 200 * STEP_MS, 4), WIN_BYTES, soundRecords, st);
     t.mock.timers.setTime(T0 + 60_000);
-    flushActivity();
+    flushActivity(T0 + 60_000 + PAST_GRACE_MS); // #447: 12:00's row
 
     deliverObserved(t, gen1, single(SOUND_MIN2, T0 + 60_000), WIN_BYTES, soundRecords, st);
     t.mock.timers.setTime(T0 + 120_000);
-    flushActivity();
+    flushActivity(T0 + 120_000 + PAST_GRACE_MS); // #447: 12:01's row
 
     // Real captured stderr with fftools' double-prefixed lines, split mid-line — as the new flag prints it.
     emitSplit(gen1.stderr, levelled('mjpeg-error.err', 'mjpeg-rel.err'), 700);
@@ -665,7 +743,7 @@ describe('detector decisions: the #373 golden, with a working, a throwing and no
     assert.ok(captured.length > 10, 'the capture must be the real fftools error run, not an empty file');
     assert.deepEqual(forwarded, captured);
 
-    assert.deepEqual(withoutCapture(observed, tag, 'mjpeg-error.err'), GOLDEN_SOUND);
+    assertGolden(withoutCapture(observed, tag, 'mjpeg-error.err'), GOLDEN_SOUND);
   });
   }
 });
@@ -686,13 +764,14 @@ describe('detector decisions: the #373 golden, with a working, a throwing and no
 //     duplicate, below), and motion_level / motion_out_level are the same sums over 16 fewer frames; its
 //     peaks, and the whole of the next minute, are identical;
 //   - without a bed zone, motion_out_* stay NULL whatever was corrected.
-const STALL_INPUTS = 575; // ~119 s of stream: two flushed minutes, with the stall in the first
-function stallInputs() {
+const STALL_INPUTS = 575; // ~119 s of stream: two stored minutes, with the stall in the first
+// `base` = the receipt time of stream time 0 (#447's relaunch test shifts it so the collision sits in one minute).
+function stallInputs(base = T0) {
   const out = [];
   let pts = 8000;
   for (let n = 0; n < STALL_INPUTS; n += 1) {
     if (n > 0) pts += n === 151 ? 275_400 : 18000; // 3.06 s at 90 kHz before frame 151, else 0.2 s
-    out.push({ n, pts, rx: T0 + Math.ceil(pts / 90) + 10 }); // integer ms: the mocked Date is set to it
+    out.push({ n, pts, rx: base + Math.ceil(pts / 90) + 10 }); // integer ms: the mocked Date is set to it
   }
   return out;
 }
@@ -732,7 +811,7 @@ function outRecordLines(n, slot, frame) {
 // stage's own kind of repeat. The clock proves that one `cfr-clone`, which the detector corrects as well.
 const CFR_DUP_OUTPUT = 250;
 // `dropOut`: output numbers whose `out` tap line is lost (glued or garbled); the frame is still written.
-function stallSchedule({ dropOut = [] } = {}) {
+function stallSchedule({ dropOut = [], base = T0 } = {}) {
   const pictures = new Map();
   const picture = (src) => {
     if (!pictures.has(src)) pictures.set(src, stallPicture(src));
@@ -754,7 +833,7 @@ function stallSchedule({ dropOut = [] } = {}) {
       written += 1;
     },
   };
-  const inputs = stallInputs();
+  const inputs = stallInputs(base);
   const s = feedStream(recorder, inputs, { content: (src) => src, dropOut });
   s.flush(inputs[inputs.length - 1].rx + 50);
   return { groups: [...groups.entries()], truth: s.truth };
@@ -762,7 +841,10 @@ function stallSchedule({ dropOut = [] } = {}) {
 
 describe('#493: a stall\'s clones leave motion_frames/motion_level/motion_out_level, and nothing else moves', { concurrency: false }, () => {
   const STALL_VARIANTS = ['working', 'throwing', 'none', 'side-channel-lost', 'swallows-one-sample'];
-  const FLUSHES = [T0 + 60_000, T0 + 120_000];
+  // #447: when the tracker writes each minute's row — its end plus a tick past the grace — and not, as before,
+  // a flush AT each minute boundary. Frames are counted per minute of RECEIPT (perMinute below). The stall's
+  // clones are proven at ~38 s and the CFR duplicate at ~55 s, so the grace changes nothing in this stream.
+  const WRITES = [T0 + 60_000 + PAST_GRACE_MS, T0 + 120_000 + PAST_GRACE_MS];
   const LOSE_AT = T0 + 24_000; // tap lines stop ~6 s before the stall (frame 150 arrives at ~30.1 s)
   const proven = (o) => o.cls === 'fps-clone' || o.cls === 'cfr-clone';
 
@@ -824,9 +906,8 @@ describe('#493: a stall\'s clones leave motion_frames/motion_level/motion_out_le
     let fi = 0;
     const perMinute = [0, 0];
     for (const [at, g] of groups) {
-      while (fi < FLUSHES.length && at >= FLUSHES[fi]) {
-        t.mock.timers.setTime(FLUSHES[fi]);
-        flushActivity();
+      while (fi < WRITES.length && at >= WRITES[fi]) {
+        flushActivity(WRITES[fi]);
         fi += 1;
       }
       t.mock.timers.setTime(at);
@@ -834,12 +915,9 @@ describe('#493: a stall\'s clones leave motion_frames/motion_level/motion_out_le
       const lines = at >= inLostFrom ? g.lines.filter((l) => !l.startsWith('[showinfo@in ')) : g.lines;
       if (lines.length && !lost) proc.stderr.emit('data', Buffer.from(`${lines.join('\n')}\n`));
       if (g.frames.length) proc.stdout.emit('data', Buffer.concat(g.frames));
-      perMinute[fi] += g.frames.length;
+      perMinute[Math.floor((at - T0) / 60_000)] += g.frames.length;
     }
-    for (; fi < FLUSHES.length; fi += 1) {
-      t.mock.timers.setTime(FLUSHES[fi]);
-      flushActivity();
-    }
+    for (; fi < WRITES.length; fi += 1) flushActivity(WRITES[fi]);
     await stopMotionDetector(cam.id);
     await settle();
     _setObservationClockFactoryForTests(null);
@@ -929,7 +1007,15 @@ describe('#493: a stall\'s clones leave motion_frames/motion_level/motion_out_le
   // the ledger when the old launch's verdicts for 151-165 arrive. And the restart ADDS a bed zone: the old
   // frames were counted in bed only, the new ones in bed AND outside, so a verdict that landed on the wrong
   // launch's frame shows up as an out-of-bed correction that must not happen.
-  const RELAUNCH_CLOSE_AT = T0 + 78_000; // after the new launch's 200 frames (37 s + 40 s)
+  // ★ #447 REWROTE THE TIMELINE, NOT THE CLAIM (plan round 2, E). The old launch's burst (~33 s into its stream)
+  // is proven only when its pipes close, after the new launch's 200 frames: ~45 s later. The #493 version ran
+  // the whole thing from 12:00:00, so the burst's minute had ENDED 18 s before its verdicts came; it passed only
+  // because nothing wrote that minute until one flush at the very end, which the 1 s tick now does at 12:01:07.
+  // Here the old stream starts 30 s before a minute boundary, so the burst, the new launch's colliding frames
+  // 151-165 and the late verdicts all fall inside the ONE minute 12:00, still open, while the tracker ticks every
+  // second as it really does. Two rows: 11:59 (the old launch's first 30 s) and 12:00.
+  const RELAUNCH_BASE = T0 - 30_000; // stream time 0 of the old launch
+  const RELAUNCH_CLOSE_AT = RELAUNCH_BASE + 78_000; // 12:00:48, after the new launch's 200 frames (37 s + 40 s)
   async function runRelaunch(t, variant) {
     const withZone = { ...motionCamera, id: `cam-493-relaunch-${variant}`, name: '493 Relaunch Cam', mediamtx_path: `path_493_relaunch_${variant}` };
     const noZone = { ...withZone, detect_zone: null };
@@ -938,15 +1024,19 @@ describe('#493: a stall\'s clones leave motion_frames/motion_level/motion_out_le
     _resetObservationClocksForTests();
     const observations = [];
     _setObservationClockFactoryForTests(factoryFor(variant, observations));
+    // The tracker's 1 s timer, emulated on the planted clock: every tick up to `ms`, before the event at `ms`.
+    let nextTick = RELAUNCH_BASE;
+    const tickTo = (ms) => { for (; nextTick <= ms; nextTick += 1000) flushActivity(nextTick); };
     const before = detectorProcs.length;
-    t.mock.timers.setTime(T0 - 1000);
+    t.mock.timers.setTime(RELAUNCH_BASE - 1000);
     await startMotionDetector(noZone);
     await waitFor(() => detectorProcs.length === before + 1, 'the first launch');
     const old = detectorProcs[before];
     old.stderr.emit('data', Buffer.from(`${MOTION_CONFIG.join('\n')}\n`));
     let oldFrames = 0;
-    for (const [at, g] of stallSchedule().groups) {
-      if (at >= T0 + 36_000) break; // the burst (~33.2 s) is in; its verdicts (~38.2 s) are not yet
+    for (const [at, g] of stallSchedule({ base: RELAUNCH_BASE }).groups) {
+      if (at >= RELAUNCH_BASE + 36_000) break; // the burst (~33.2 s) is in; its verdicts (~38.2 s) are not yet
+      tickTo(at);
       t.mock.timers.setTime(at);
       if (g.lines.length) old.stderr.emit('data', Buffer.from(`${g.lines.join('\n')}\n`));
       if (g.frames.length) old.stdout.emit('data', Buffer.concat(g.frames));
@@ -961,7 +1051,8 @@ describe('#493: a stall\'s clones leave motion_frames/motion_level/motion_out_le
       queueMicrotask(() => old.emit('exit', null, signal));
       return true;
     };
-    t.mock.timers.setTime(T0 + 36_000);
+    tickTo(RELAUNCH_BASE + 36_000);
+    t.mock.timers.setTime(RELAUNCH_BASE + 36_000);
     await startMotionDetector(withZone);
     await waitFor(() => detectorProcs.length === before + 2, 'the relaunch');
     const next = detectorProcs[before + 1];
@@ -969,40 +1060,51 @@ describe('#493: a stall\'s clones leave motion_frames/motion_level/motion_out_le
     // The new launch's own 200 frames, numbered 0-199: the stall scene's pictures, so frames 152-165 are
     // still in bed AND outside (staged in both channels) and 151 is still outside only.
     const fresh = Array.from({ length: 200 }, (_, k) => stallPicture(k));
-    deliverObserved(t, next, single(fresh, T0 + 37_000), FRAME_BYTES, (k) => motionRecords(k, fresh[k]), { bytes: 0, emitted: 0 });
+    const st = { bytes: 0, emitted: 0 };
+    for (const step of single(fresh, RELAUNCH_BASE + 37_000)) {
+      tickTo(step[0]);
+      deliverObserved(t, next, [step], FRAME_BYTES, (k) => motionRecords(k, fresh[k]), st);
+    }
 
-    // Now the old pipes close: the old generation ends and its burst's verdicts arrive.
+    // Now the old pipes close: the old generation ends and its burst's verdicts arrive, 12:00 still open.
+    tickTo(RELAUNCH_CLOSE_AT);
     t.mock.timers.setTime(RELAUNCH_CLOSE_AT);
     old.stdout.emit('end');
     old.stderr.emit('end');
     old.emit('close', null, 'SIGTERM');
     await settle();
-    t.mock.timers.setTime(T0 + 100_000);
-    flushActivity();
+    tickTo(T0 + 60_000 + PAST_GRACE_MS); // 12:00 is written at 12:01:07
+    const closedAt = nextTick - 1000;
     await stopMotionDetector(withZone.id);
     await settle();
     _setObservationClockFactoryForTests(null);
-    return { observations, oldFrames, freshFrames: fresh.length, earlyVerdicts, rows: rowsFor('activity_samples', withZone.id) };
+    return { observations, oldFrames, freshFrames: fresh.length, earlyVerdicts, closedAt, rows: rowsFor('activity_samples', withZone.id) };
   }
 
   test('a verdict that lands AFTER a relaunch still corrects its own launch\'s frame — keyed by the verdict\'s generation, not the listener\'s', async (t) => {
-    t.mock.timers.enable({ apis: ['Date'], now: T0 - 1000 });
+    t.mock.timers.enable({ apis: ['Date'], now: RELAUNCH_BASE - 1000 });
     const w = await runRelaunch(t, 'working');
     const n = await runRelaunch(t, 'none');
     assert.equal(w.earlyVerdicts, 0, 'no burst verdict arrived before the relaunch');
     const oldGen = w.observations[0].gen;
     assert.deepEqual(w.observations.filter(proven).map((o) => [o.gen, o.token]), Array.from({ length: 15 }, (_, i) => [oldGen, 151 + i]), 'the OLD launch\'s burst, proven after the relaunch');
-    // The premise, checked: the NEW launch had already counted its own frames 151-165 when those verdicts came.
+    // The premise, checked: the NEW launch had already counted its own frames 151-165 when those verdicts came,
+    // and all of it (the burst, the collision, the verdicts) happened inside the still-open minute 12:00.
     const newOwn = w.observations.filter((o) => o.gen !== oldGen && o.token >= 151 && o.token <= 165);
     assert.equal(newOwn.length, 15);
     assert.ok(newOwn.every((o) => o.gen > oldGen && o.rxMono < RELAUNCH_CLOSE_AT), 'the collision is real');
+    const burst = w.observations.filter((o) => o.gen === oldGen && o.token >= 151 && o.token <= 165);
+    assert.ok(burst.every((o) => o.rxMono >= T0 && o.rxMono < T0 + 60_000), 'the burst was received in 12:00');
+    assert.ok(RELAUNCH_CLOSE_AT < T0 + 60_000, 'its verdicts came while 12:00 was still receiving');
+    assert.ok(w.closedAt >= T0 + 67_000, 'and the tracker really ticked every second up to 12:00\'s write');
 
-    assert.equal(w.rows.length, 1);
-    assert.equal(n.rows.length, 1);
-    const [wr] = w.rows;
-    const [nr] = n.rows;
+    assert.deepEqual(w.rows.map((r) => r.bucket_start), ['2026-09-25 11:59:00', '2026-09-25 12:00:00']);
+    assert.deepEqual(n.rows.map((r) => r.bucket_start), ['2026-09-25 11:59:00', '2026-09-25 12:00:00']);
+    const [w1159, wr] = w.rows;
+    const [n1159, nr] = n.rows;
     // Each launch's first frame is its baseline, never counted.
-    assert.equal(nr.motion_frames, (w.oldFrames - 1) + (w.freshFrames - 1), 'no clock: every frame of both launches');
+    assert.equal(n1159.motion_frames + nr.motion_frames, (w.oldFrames - 1) + (w.freshFrames - 1), 'no clock: every frame of both launches');
+    assert.deepEqual({ ...w1159, camera_id: null }, { ...n1159, camera_id: null }, '11:59, before the burst: nothing to correct');
     assert.equal(wr.motion_frames, nr.motion_frames - 15, 'the old launch\'s 15 repeats out');
     assert.ok(Math.abs(wr.motion_level - (nr.motion_level * nr.motion_frames) / (nr.motion_frames - 15)) < 1e-12);
     assert.ok(nr.motion_out_level > 0);
@@ -1030,8 +1132,9 @@ describe('#493: a stall\'s clones leave motion_frames/motion_level/motion_out_le
     const tokensOf = (reason) => w.observations.filter((o) => o.reason === reason).map((o) => o.token);
     for (let k = 151; k <= 165; k += 1) assert.ok(tokensOf('out-hole').includes(k), `repeat ${k}: out-hole`);
     assert.deepEqual(tokensOf('cfr-unproven'), [CFR_DUP_OUTPUT + 1], 'the duplicate: cfr-unproven');
-    // In time to be corrected: received more than FINALIZE_MS (plus one frame) before the 120 s flush.
-    const lateTail = w.observations.filter((o) => o.reason === 'clone-unproven' && o.rxMono + 5_200 < FLUSHES[1]);
+    // In time to be corrected: received more than FINALIZE_MS (plus one frame) before the stream ends at ~120 s,
+    // so judged while frames were still arriving, well before the 12:01 row is written.
+    const lateTail = w.observations.filter((o) => o.reason === 'clone-unproven' && o.rxMono + 5_200 < T0 + 120_000);
     assert.ok(lateTail.length >= 10, `real frames after the in-tap loss, judged in time: ${lateTail.length}`);
     assert.ok(!w.observations.some(proven), 'nothing is proven anywhere in this stream');
     assert.deepEqual(w.activity, n.activity, 'and so nothing is corrected');
@@ -1201,5 +1304,59 @@ describe('#373 wiring on a live detector', { concurrency: false }, () => {
     await settle();
     assert.equal(seen.receipts, 1);
     assert.deepEqual(seen.samples, [true, true], 'window 1 was observed after its handler wrote the level line');
+  });
+});
+
+// --- #447: every sample is filed under its stdout event's RECEIPT minute ----------------------------------
+// The golden's variants all read one mocked clock, so a detector that ignored `rx.wall` and read Date.now() per
+// call would still pass them (plan round 2, E). Here a stub clock's receipt says 11:59:59.900 while the mocked
+// Date says 12:00:00.100, the two sides of a minute boundary: every sample of the event must be filed under
+// 11:59 — both channels of a frame (or the out-of-bed one would be dropped with no in-bed partner, the KNOWN GAP
+// in activityTracker.test.js), and every window of a chunk.
+describe('#447: activity is filed under the receipt minute of the stdout event that delivered it', { concurrency: false }, () => {
+  const RECEIVED = T0 - 100; // 11:59:59.900
+  const NOW = T0 + 100; // 12:00:00.100, what every Date.now() in the detector reads
+  function plantedReceipt(t) {
+    t.mock.timers.enable({ apis: ['Date'], now: NOW });
+    logger.clear();
+    // No numeric generation id: nothing is staged, so this is purely about WHEN, not about clones.
+    _setObservationClockFactoryForTests(() => ({
+      receipt: () => ({ mono: Date.now(), wall: RECEIVED }),
+      beginGeneration: () => ({ onRecord() {}, onConfig() {}, onParseError() {}, onSample() {}, end() {} }),
+    }));
+    t.after(() => _setObservationClockFactoryForTests(null));
+  }
+
+  test('motion: a frame\'s in-bed and out-of-bed readings both land in the receipt minute, not the clock\'s', async (t) => {
+    plantedReceipt(t);
+    const cam = { ...motionCamera, id: 'cam-447-rx', name: '447 Receipt Cam', mediamtx_path: 'path_447_rx' };
+    makeCamera(db, { id: cam.id, name: cam.name, path: cam.mediamtx_path });
+    const before = detectorProcs.length;
+    await startMotionDetector(cam);
+    await waitFor(() => detectorProcs.length === before + 1, 'spawn');
+    // The baseline, then a frame with the bed AND the outside lit, both in ONE read.
+    detectorProcs[before].stdout.emit('data', Buffer.concat([paint({}), paint({ bed: true, out: true })]));
+    await stopMotionDetector(cam.id);
+    await settle();
+    flushActivity(NOW + 3 * 60_000);
+    assert.deepEqual(rowsFor('activity_samples', cam.id).map((r) => [r.bucket_start, r.motion_frames, r.motion_peak, r.motion_out_peak]),
+      [['2026-09-25 11:59:00', 1, 1 / 3, 2 / 9]]);
+  });
+
+  test('sound: every window of one read lands in the receipt minute, not the clock\'s', async (t) => {
+    plantedReceipt(t);
+    const cam = { ...soundCamera, id: 'cam-447-rx-s', name: '447 Receipt Sound', mediamtx_path: 'path_447_rx_s' };
+    makeCamera(db, { id: cam.id, name: cam.name, path: cam.mediamtx_path });
+    const before = detectorProcs.length;
+    await startSoundDetector(cam);
+    await waitFor(() => detectorProcs.length === before + 1, 'spawn');
+    // 30 windows in ONE read: the analyser seeds its ambient floor on the first 25 (soundBaseline.js SEED_WINDOWS)
+    // and records the other 5.
+    detectorProcs[before].stdout.emit('data', Buffer.concat(pcm([{ n: 30, amp: 1000 }])));
+    await stopSoundDetector(cam.id);
+    await settle();
+    flushActivity(NOW + 3 * 60_000);
+    assert.deepEqual(rowsFor('activity_samples', cam.id).map((r) => [r.bucket_start, r.sound_windows]),
+      [['2026-09-25 11:59:00', 5]]);
   });
 });

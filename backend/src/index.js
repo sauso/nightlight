@@ -561,6 +561,10 @@ async function shutdown() {
   // already lost to `process.exit(0)` before this line existed, so writing one here would be a new
   // behaviour smuggled in under a bug fix — see issue #278. If that minute turns out to matter,
   // it is its own change with its own test.
+  // #447 (its own change, with its own tests in activityTracker.test.js): it DOES now write the minutes
+  // that have already ENDED and were only waiting out the clone-verdict grace (GRACE_MS, 7 s), because
+  // those are complete and no later process can write them again. It needs the DB open, and it is: nothing
+  // in shutdown closes the database before `process.exit` below. The minute still receiving is still lost.
   stopActivityTracker();
   // The other periodic jobs, stopped for the same reason and grouped with it (issue #286). All are
   // cheap synchronous clearInterval calls; none writes anything on the way out, so their order

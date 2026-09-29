@@ -111,8 +111,11 @@ export function feedStream(rig, frames, { content = (src) => `S${src}`, outN0 = 
 // to excludeClone. `tracker` is INJECTED ({ recordMotion, recordMotionOut, excludeClone, flushActivity })
 // so this file never imports db.js. PLANTED, not asked of the module: a sample byte-identical to the one
 // before it has fraction 0 (what the detector's diff sees); any other sample has `movement(content)`.
-// `flushEveryMs` flushes the tracker the way its 60 s timer does: at the boundary, BEFORE any event at or
-// after it, so a verdict that lands after a flush finds its bucket gone (the documented residual).
+// #447: each sample is recorded with its WALL receipt time (the rig's mono time + its wall offset), as the
+// detector passes `rx.wall`, so it is filed under the minute it arrived in. `flushEveryMs` ticks the tracker
+// the way its timer does (a 1 s interval since #447), with the WALL time the tick would read, at each tick
+// BEFORE any event at or after it: a verdict that lands after its minute's row was written finds its slot
+// gone (the documented residual). `flushes` lists the tick times (mono).
 // `out: false` is a camera with no bed zone: recordMotionOut is never called.
 export function withLedger(rig, tracker, { cameraId, movement = () => 0, out = true, flushEveryMs = null, flushFrom = null } = {}) {
   const gen = rig.gen.id;
@@ -120,8 +123,9 @@ export function withLedger(rig, tracker, { cameraId, movement = () => 0, out = t
   let prevContent = null;
   let nextFlush = flushEveryMs ? flushFrom : Infinity;
   const flushes = [];
-  const verdicts = []; // { token, cls, at } for every clone verdict, and when it reached the ledger
-  const counted = []; // { token, at, fraction } for every sample counted into the tracker
+  const verdicts = []; // { token, cls, at } for every clone verdict, and when (mono) it reached the ledger
+  const counted = []; // { token, at, fraction } for every sample counted into the tracker (at = mono)
+  const wallOf = (at) => (at === undefined ? rig.t.mono : at) + rig.t.wallOffset;
   rig.clock.addObservationListener((o) => {
     if (o.cls !== 'fps-clone' && o.cls !== 'cfr-clone') return;
     verdicts.push({ token: o.token, cls: o.cls, at: rig.t.mono });
@@ -129,7 +133,7 @@ export function withLedger(rig, tracker, { cameraId, movement = () => 0, out = t
   });
   const tick = (at) => {
     while (at !== undefined && at >= nextFlush) {
-      tracker.flushActivity();
+      tracker.flushActivity(nextFlush + rig.t.wallOffset);
       flushes.push(nextFlush);
       nextFlush += flushEveryMs;
     }
@@ -147,14 +151,16 @@ export function withLedger(rig, tracker, { cameraId, movement = () => 0, out = t
       token += 1;
       if (prevContent !== null) {
         const fraction = content === prevContent ? 0 : movement(content);
-        tracker.recordMotion(cameraId, fraction, { gen, token: t });
-        if (out) tracker.recordMotionOut(cameraId, fraction, { gen, token: t });
+        tracker.recordMotion(cameraId, fraction, { gen, token: t }, wallOf(at));
+        if (out) tracker.recordMotionOut(cameraId, fraction, { gen, token: t }, wallOf(at));
         counted.push({ token: t, at, fraction });
       }
       prevContent = content;
       rig.sample(content, at, { token: t });
     },
     end(at, reason) { tick(at); rig.end(at, reason); },
+    // #447: run the tracker's ticks up to `at` (mono) with no event, as the timer would after a stream ends.
+    tickTo(at) { tick(at); },
   };
 }
 
