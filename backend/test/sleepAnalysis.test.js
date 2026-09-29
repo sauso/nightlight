@@ -499,11 +499,13 @@ describe('★ departure confirmation waits for real elapsed time, not just calen
       [at(23, 0), at(23, 6)],
       [at(6, 49, 1), at(6, 59, 1)], // stirs, then gets out right at window end
     ]);
-    // Two consecutive minutes of REAL movement, each recorded as TWO rows for the same bucket — a
-    // forced flush catching real motion mid-minute, then the regular interval flush writing a
-    // near-zero remainder once the accumulator was already cleared (activityTracker.flushActivity is
-    // "exported for tests / forced flushes"; activity_samples has no uniqueness constraint on
-    // (camera_id, bucket_start) — see db.js). The active row is chronologically first (lower rowid),
+    // Two consecutive minutes of REAL movement, each recorded as TWO rows for the same bucket.
+    // activity_samples has no uniqueness constraint on (camera_id, bucket_start) — see db.js — and the
+    // rows are real: before #447 a forced flush could catch real motion mid-minute and the regular
+    // interval flush then write a near-zero remainder under the same flush-time label; since #447 the
+    // tracker writes each minute once, but a wall clock that steps back more than two minutes makes it
+    // re-baseline and write the repeated minutes' labels again (activityTracker.test.js, "steps back an
+    // HOUR"), and pre-#447 rows stay for the table's 30-day retention. The active row is first (lower rowid),
     // the quiet row second — exactly the ordering that would let a last-write-wins implementation
     // silently erase the real movement this test plants, which is what happened before this fix
     // (found by adversarial review, not by this suite).

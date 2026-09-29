@@ -6,8 +6,10 @@
 // working, a throwing and an absent clock). The one consumer is #493: a motion sample this clock PROVES was
 // a clone (`fps-clone` / `cfr-clone`, never `unknown`) is taken back out of activity_samples'
 // `motion_frames` / `motion_level` / `motion_out_level` (activityTracker.js's clone ledger, wired in
-// motionDetector.js through `onObservation` and the per-sample `token`). #447 (flush-time buckets), #452
-// (confirmation across an outage), #369 and #448 will switch over one at a time, each with its own A/B. It
+// motionDetector.js through `onObservation` and the per-sample `token`). #447's Stage A files activity by
+// each stdout event's RECEIPT minute (`rx.wall`, from this module's receipt clock) and reads nothing else of
+// it; keying by the observation time proper is its deferred Stage B. #452 (confirmation across an outage),
+// #369 and #448 will switch over one at a time, each with its own A/B. It
 // also reports, once per camera per leg every 15 minutes, an `[obs]` line (see formatSummaryLine and
 // KNOWN-ISSUES.md for every field).
 //

@@ -333,7 +333,10 @@ export async function startMotionDetector(camera) {
 
     const outPixels = mask ? FRAME_BYTES - zonePixels : 0; // area outside the bed zone (0 = whole frame)
 
-    function handleFrame(frame, token) {
+    // `atMs` = the wall time the stdout event that COMPLETED this frame was received (`rx.wall`): the minute
+    // activityTracker files the frame under (#447). One value per frame, passed to BOTH channels, so a frame
+    // can never be split across two minutes (a clone verdict for it would then undo a count in the wrong one).
+    function handleFrame(frame, token, atMs) {
       if (prev) {
         let changed = 0;
         let changedOut = 0;
@@ -358,12 +361,15 @@ export async function startMotionDetector(camera) {
         // Feed the raw per-frame movement into the per-minute activity timeline (independent of the
         // alert threshold/cooldown below), so sleep tracking sees continuous motion, not just alerts.
         // Still counted HERE, synchronously, whatever the clock later says: see openObservation above.
-        recordMotion(camera.id, fraction, sample);
+        // Filed under the RECEIPT minute (#447), not `now`: `now` is this handler's own Date.now(), which the
+        // decisions below keep using exactly as before, but a per-call clock read would let the two channels
+        // of one frame, or the frames of one read, land either side of a minute boundary.
+        recordMotion(camera.id, fraction, sample, atMs);
         // Outside-bed movement (only meaningful when a bed zone carves out an "outside") — a separate
         // channel so sleep tracking can flag someone in the room vs stirring in the bed.
         if (outPixels > 0) {
           const outFraction = changedOut / outPixels;
-          recordMotionOut(camera.id, outFraction, sample);
+          recordMotionOut(camera.id, outFraction, sample, atMs);
           // --- "Out of bed" / "into bed" classification. Runs whether the leg is alerting or
           // activity-only (a distinct, low-rate signal, not raw motion). The candidate state machine
           // itself lives in bedTransitionTracker.js (extracted 2026-09-18, see its header); this block
@@ -489,12 +495,15 @@ export async function startMotionDetector(camera) {
       // #373: the receipt time, read ONCE per 'data' event, so a frame split across two reads carries the
       // completing read's time. Two clock reads per event; nothing else of the observation runs before a
       // frame's own decision.
+      // #447: `rx.wall` is also the minute activity_samples files every frame of this event under. The
+      // handle's receipt() never throws and falls back to Date.now() (read once, here) without a working
+      // clock, so an absent or broken clock still files frames by when they arrived.
       const rx = obs.receipt();
       buf = buf.length ? Buffer.concat([buf, chunk]) : chunk;
       while (buf.length >= FRAME_BYTES) {
         const frame = Buffer.from(buf.subarray(0, FRAME_BYTES));
         const token = frameSeq++;
-        handleFrame(frame, token);
+        handleFrame(frame, token, rx.wall);
         // #373: exactly one observation per frame, AFTER its decision handler has returned (plan §D,
         // R1-F8): the handler's inputs are the same bytes in the same order, and its own Date.now() is
         // read before any observation work for this frame. The clock only reads the frame.

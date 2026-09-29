@@ -313,7 +313,7 @@ also returned by `GET /api/cameras/:id/activity-history`) stores how many motion
 (`motion_frames`) and the average movement in and outside the bed (`motion_level`, `motion_out_level`).
 Since issue #493, those three leave out every frame the `[obs]` measurement above *proved* was a repeat: an
 `fpsClone`, or a `cfrDup` it could label one by one. No screen shows these three numbers yet. The fix is
-groundwork for later sleep-analysis work (#447).
+groundwork for later sleep-analysis work.
 
 **Why:** when a camera stalls, ffmpeg keeps five frames a second going by repeating the last picture, and
 the motion detector reads each repeat as a perfectly still room. A 3-second stall makes about 15 of them. A
@@ -338,16 +338,93 @@ empty `motion_level`, beside a `motion_peak` of 0, exactly as it was stored befo
   timestamp line, can make a *real* frame `unknown` as well. So when the timestamps are unavailable
   (`side=unavailable` on the `[obs]` line), nothing is left out and the numbers are what they were before
   #493.
-- **About 1 in 12 repeats is still counted.** `[obs]` judges a frame about 5 seconds after it arrives, and
-  each minute is written once, at its end. Repeats that arrive in a minute's last ~5 seconds are judged after
-  that minute was stored, so they stay in it. Measured on a steady 3 fps camera: 8.3% of its repeats, which
-  is 5 seconds out of every 60 for any evenly spread repeats. A stall's burst arrives all at once, so it is
-  either left out entirely or, if it lands in a minute's last 5 seconds, counted entirely. A stored minute is
-  never corrected afterwards. Issue #447 (placing each sample by when it was observed) replaces this.
+- **A camera that keeps stalling can still leave some repeats counted.** `[obs]` judges a frame about 5
+  seconds after it arrives, but only once more video has arrived after it. Since issue #447 each minute is
+  stored 7 seconds after it ends (next section), so on a camera that keeps delivering video every repeat is
+  judged in time: none of a steady 3 fps camera's repeats stay counted, where 8.3% (the ones in a minute's
+  last 5 seconds) did before #447. A camera that stalls, sends a second or two of video and then stalls
+  again is judged only when its video comes back: in the tested case (a 3-second stall, 1.5 seconds of video,
+  a 20-second stall) the first stall's 15 repeats were judged 21 seconds late, after their minute was stored.
+  Those stay counted, and the `[activity]` log line counts them (next section). A stored minute is never
+  corrected afterwards.
 - **A frame that registered any movement is never left out**, whatever `[obs]` says about it. A true repeat
   never registers movement, so this only guards against a wrong verdict.
 
 **What to do:** nothing.
+
+## The sleep timeline's minutes are the minutes the samples arrived in
+
+**What you see:** usually nothing. The sleep timeline (`activity_samples`, also returned by
+`GET /api/cameras/:id/activity-history`) stores one row per camera per minute of motion and sound. Since
+issue #447 a row labelled 19:01 holds exactly what that camera's motion and sound detectors received from
+19:01:00 to 19:01:59, and it is stored about 7 seconds after 19:02:00. The labels are UTC minutes, like every
+other time in the database, whatever timezone the app is set to. In the log, at most once per camera every
+15 minutes and only when there is something to count, a line like
+
+```
+[INFO] [activity] cam_…: 3 clone verdict(s) arrived after their minute was stored (left counted), 0 sample(s) moved to the next minute after a small clock step
+```
+
+and, only if the server's clock jumps, a `[WARN] [activity] …` line saying so.
+
+**Why:** before #447 the rows were written by a timer that fired once a minute, counted from whenever
+Nightlight started, and each row was labelled with the minute the timer fired in. That second-within-the-
+minute changed on every restart, so a row labelled 19:01 held 19:00:35 to 19:01:35 on one boot and 19:00:10
+to 19:01:10 on the next, and a late timer blended a longer stretch into one row. Now each sample is filed by
+when its video or audio reached Nightlight, read once per chunk, so a frame's in-bed and out-of-bed readings,
+and all the sound readings from one chunk, always land in the same minute.
+
+**Differs from before** — the part that is easy to get wrong:
+
+| | Since #447 | Before |
+|---|---|---|
+| A row's minute (`bucket_start`) | The UTC minute its samples arrived in | The minute a timer fired in, 0-60 s after the samples, different after every restart |
+| When the row is stored | 7 s after the minute ends: the `[obs]` measurement needs 5 s to judge a minute's last frames, plus 2 s of margin | Once a minute, at the timer |
+| When the live wake check hears a minute | Within 1 s of the minute ending | 0-60 s after it |
+| Where a wake clip starts | 3 s before the END of the wake's first active minute | 3 s before the old row label: a restart-dependent point inside that minute, on average 30 s earlier |
+| Thresholds, peaks, what counts as active | Unchanged | |
+
+The wake-clip anchor is deliberate. The recording ring a clip is cut from is only as deep as the clip
+settings make it: 63 seconds with on-demand Record on, 38 with it off, 23 at the smallest clip settings.
+Anchoring on the true start of the minute would ask the ring for footage a minute older than it keeps, and
+lose the clip's opening on the smaller rings. Starting the clip at the first moving frame instead is issue
+#412.
+
+**Sleep numbers can move on a borderline night.** Each row moves by less than a minute, but the sleep rules
+have sharp edges (15 quiet minutes to fall asleep, 20 minutes away from the bed to be up for the morning), so
+the same movement cut into minutes differently can move a computed bedtime or wake time by much more than a
+minute on a night that was already borderline. Nights already stored keep the times computed before the
+update, and a night recomputed later reads whatever rows it has: rows written before the update keep their
+old labels until the 30-day retention removes them.
+
+**Limits, stated rather than hidden:**
+- **A restart loses the minute being received**, up to 60 seconds, as before. A minute that had ended and was
+  waiting its 7 seconds is now stored on the way out instead of being lost with it.
+- **The server's clock stepping back.** After a small step back (an NTP correction, a resumed virtual
+  machine), samples that would fall in a minute already handed on go into the minute still being received
+  instead, and the `[activity]` line counts them as moved. That minute then holds everything received until
+  the clock reaches its end. "Small" means a step of at most 2 minutes plus however far into the current
+  minute it happens (so 2 to 3 minutes), and one row then holds at most about 4 minutes of samples (measured:
+  3.9 minutes at worst, across steps of 5 seconds to 5 minutes made at every point in a minute). A bigger
+  step is not lumped: it is taken as given, the minutes the clock passes through again are stored a second
+  time (two rows for the same camera and minute, which the sleep analysis merges), and a warning is logged,
+  either `the wall clock went back …` or, for a step of roughly 2 to 3 minutes, `activity was filed under
+  minutes ahead of the clock …`. While the server keeps running, a second row for a minute is written only
+  after one of those two warnings (a clock that went back while Nightlight was restarting leaves no warning,
+  as before). A minute already handed to the wake check is never added to afterwards: if the clock walks back
+  into it, it is stored as it stood and the repeat gets a row of its own, which the wake check hears too.
+- **The server's clock jumping ahead and back.** Minutes read while the clock was ahead are stored under
+  those future labels. They are written as soon as the clock comes back, not an hour later.
+- **Measured on one house.** The 7-second wait fits cameras whose low-resolution stream runs at 10 to 15
+  frames a second, because `[obs]` judges a frame once the next one arrives. A much slower camera, or one that
+  keeps stalling, will show late clone verdicts on the `[activity]` line (previous section). The wake-clip
+  anchor fits the ring depths above.
+- **A minute is when the data arrived, not when the camera captured it.** The two are normally a fraction of
+  a second apart, but a stalled camera delivers a burst late. Filing by capture time is deferred (issue #447,
+  Stage B).
+
+**What to do:** nothing. If one camera's `[activity]` line reports late clone verdicts every 15 minutes, its
+stream keeps stalling: check the same camera's `[obs]` line.
 
 ## A detector was restarted: `[detector-watchdog]` in the log and in Camera history
 
