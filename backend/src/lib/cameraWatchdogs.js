@@ -712,8 +712,9 @@ export function createDetectorWatchdog(overrides = {}) {
       // watchdog independently restarts the transcoder on its own ~60-120s cadence (createAudioWatchdog above).
       // Corrected 2026-09-28 (#369 review fix round): this used to say a timeout-hang was INCONCLUSIVE and
       // "cost at most one extra tick" - traced and found wrong (a test proved changing probeAudioFlowing to
-      // resolve `null` on that path breaks createAudioWatchdog's only real detection signal). Only a genuine
-      // probe failure (ffprobe missing / spawn error, resolved `null` directly) is inconclusive here.
+      // resolve `null` on that path breaks createAudioWatchdog's only real detection signal). Only a probe that
+      // could not give a reading is inconclusive here: ffprobe missing / a spawn error, and (#515) a run that
+      // exited non-zero or was killed from outside, all resolved `null`.
       if (probe === false) {
         inconclusiveProbe.delete(key);
         return;

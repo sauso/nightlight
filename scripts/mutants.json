@@ -4763,16 +4763,16 @@
   {
     "label": "#369 M-V08 (claim 19): a non-zero exit is classified from what it printed",
     "file": "backend/src/lib/audioLiveness.js",
-    "find": "if (code !== 0) return finish(null);",
-    "replace": "if (false) return finish(null);",
+    "find": "      partial = '';\r\n      if (code !== 0) return finish(null);",
+    "replace": "      partial = '';\r\n      if (false) return finish(null);",
     "expect": "killed",
     "tests": ["audio-liveness.test.js"]
   },
   {
     "label": "#369 M-V09 (claim 19): classified on 'exit', so packets drained after it are lost",
     "file": "backend/src/lib/audioLiveness.js",
-    "find": "proc.on('close', (code) => {",
-    "replace": "proc.on('exit', (code) => {",
+    "find": "proc.on('close', (code) => {\r\n      count(partial);",
+    "replace": "proc.on('exit', (code) => {\r\n      count(partial);",
     "expect": "killed",
     "tests": ["audio-liveness.test.js"]
   },
@@ -7579,5 +7579,61 @@
     "expect": "killed",
     "tests": ["recompute-night.test.js"],
     "namePattern": "#508 T11b"
+  },
+  {
+    "label": "#515 A00: control, a comment edit in the audio probe's exit handler must change nothing",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "// Exited on its own before the timeout (#515). Two rules,",
+    "replace": "// Exited on its own before the timeout (#515). Two rules [CONTROL MUTANT],",
+    "expect": "survives",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#515 A01: the audio probe classifies on 'exit' again, so packets drained after it are lost",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "proc.on('close', (code) => {\r\n      if (code !== 0) return finish(null);\r\n      finish(count > 0);",
+    "replace": "proc.on('exit', (code) => {\r\n      if (code !== 0) return finish(null);\r\n      finish(count > 0);",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#515 A02: the audio probe ignores its exit code again (a failed run is read from what it printed)",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "      if (code !== 0) return finish(null);\r\n      finish(count > 0);",
+    "replace": "      if (false) return finish(null);\r\n      finish(count > 0);",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#515 A03: only a positive exit code is a failure (a child killed from outside, code null, is read from its output)",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "      if (code !== 0) return finish(null);\r\n      finish(count > 0);",
+    "replace": "      if (code > 0) return finish(null);\r\n      finish(count > 0);",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#515 A04: a failed audio probe reads as `false` (confirmed no audio) instead of inconclusive",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "      if (code !== 0) return finish(null);\r\n      finish(count > 0);",
+    "replace": "      if (code !== 0) return finish(false);\r\n      finish(count > 0);",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#515 A05: a clean audio probe run needs three packets, so the verified one-packet behaviour is lost",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "      if (code !== 0) return finish(null);\r\n      finish(count > 0);",
+    "replace": "      if (code !== 0) return finish(null);\r\n      finish(count >= 3);",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
+  },
+  {
+    "label": "#515 A06: a clean audio probe run with no packets reads as flowing",
+    "file": "backend/src/lib/audioLiveness.js",
+    "find": "      if (code !== 0) return finish(null);\r\n      finish(count > 0);",
+    "replace": "      if (code !== 0) return finish(null);\r\n      finish(true);",
+    "expect": "killed",
+    "tests": ["audio-liveness.test.js"]
   }
 ]
