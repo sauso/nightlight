@@ -3,8 +3,10 @@ import { killIfSpawned } from './processGuards.js';
 
 // How long to wait for audio packets before giving up on a probe.
 const PROBE_TIMEOUT_MS = 6000;
-// Fewer than this many audio packets within the window = treat the audio as stalled. A healthy
-// stream delivers dozens per second, so this is comfortably above any single-packet jitter.
+// This many audio packets end the probe EARLY as flowing. A healthy stream delivers dozens per second, so
+// this is comfortably above any single-packet jitter. It is not a threshold for a run that ends by itself:
+// one or two packets before a clean exit or the timeout still count as flowing (A2/A8), and only NO packets
+// is a stall.
 const MIN_AUDIO_PACKETS = 3;
 
 // MediaMTX track names that are audio (used to skip the check for cameras with no audio at all -
@@ -22,7 +24,10 @@ export function tracksHaveAudio(tracks) {
 // VLC, i.e. a fresh connection, but not in the app). Resolves:
 //   true  - audio packets arrived (flowing)
 //   false - no audio packets within the window (stalled)
-//   null  - couldn't run ffprobe at all (inconclusive - caller should not act on this)
+//   null  - couldn't run ffprobe, or it ran and FAILED (non-zero exit, or killed from outside)
+//           (inconclusive: not a reading either way. The two callers treat it differently on purpose:
+//           createAudioWatchdog resets its stall count; the detector watchdog's sound leg acts on the second
+//           consecutive one, exactly as it does for a spawn failure)
 export function probeAudioFlowing(mediamtxPath) {
   return new Promise((resolve) => {
     const args = [
@@ -56,8 +61,31 @@ export function probeAudioFlowing(mediamtxPath) {
       count += chunk.toString().split('\n').filter((l) => l.trim().length > 0).length;
       if (count >= MIN_AUDIO_PACKETS) finish(true); // enough packets - definitely flowing
     });
-    // Exited on its own before the timeout: flowing if we saw packets, stalled if we saw none.
-    proc.on('exit', () => finish(count >= MIN_AUDIO_PACKETS ? true : count > 0 ? true : false));
+    // Exited on its own before the timeout (#515). Two rules, both taken from probeVideoFlowing below:
+    //  * 'close', not 'exit': stdout can still drain AFTER 'exit' (processOutput.js) and a block-buffered
+    //    ffprobe writes everything at the very end, so classifying on 'exit' counted packets that had not
+    //    arrived yet and could read a healthy stream as `false`.
+    //  * a non-zero exit is `null`, not `false`: a failed run prints nothing, and "could not probe" is not
+    //    "confirmed no audio". Consequence that made it worth fixing: createAudioWatchdog restarts a camera's
+    //    TRANSCODER after two `false` in a row (`null` resets its count), so a failed run could count toward a
+    //    restart of a healthy transcoder. HOW OFTEN a run fails is limited, and stated plainly (#515 review): the
+    //    probe reads the LOCAL MediaMTX (127.0.0.1:8554, no authentication) and only runs on a path the API has
+    //    just reported ready, so a refused connection or wrong credentials cannot happen here; a failure needs
+    //    the path to drop between that status read and the probe, twice in a row. The late-drain fix above is
+    //    plausibly the more common effect. Not verified (no ffprobe on the build machine): whether ffprobe exits
+    //    non-zero when a session drops AFTER setup; if it exits 0 with no packets that still reads `false`.
+    //    An external kill (code null) lands here too: also not a reading.
+    // A clean exit: flowing if we saw any packets, stalled if we saw none. One packet is enough (A2): the
+    // three-packet bar above only ends the probe EARLY, it is not a threshold for a run that ended by itself.
+    // NOT changed: a probe that never exits (live RTSP does not end) is still classified by the 6 s timer below,
+    // and "no packets by the deadline" stays `false`, the audio watchdog's one real stall signal (A5). The timer
+    // is only cleared by finish(), so an 'exit' landing within microseconds of that deadline, before 'close', can
+    // still be classified by the timer from an incomplete count: accepted, because the timer is also the only
+    // backstop for a child whose stdout never closes.
+    proc.on('close', (code) => {
+      if (code !== 0) return finish(null);
+      finish(count > 0);
+    });
     proc.on('error', () => finish(null)); // ffprobe missing / couldn't spawn
     const timer = setTimeout(() => finish(count > 0 ? true : false), PROBE_TIMEOUT_MS);
   });

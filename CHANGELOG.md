@@ -29,6 +29,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
     is skipped — a push already sent cannot be recalled, but no further one goes out for a flagged night.
 
 ### Fixed
+- **The audio-liveness check no longer reads a failed run as "no audio"** (issue #515). The check that
+  decides whether a camera's audio is really flowing counted its probe's output before the output had
+  finished arriving, and read a probe that failed to run as "confirmed no audio"; two of those in a row
+  restart the camera's transcoder. It now waits for the probe to finish before counting, and a failed run is
+  "could not tell", which resets the count. This is a correctness fix for a rare case: the probe reads the
+  local MediaMTX and only runs on a stream that was just reported ready, so a failure needs the stream to drop
+  in between. A real audio stall, where the stream stays up but carries no audio packets for 6 seconds, is
+  caught exactly as before. One visible side effect: when a camera's sound detector has gone quiet and that
+  same check keeps failing, the detector watchdog can now restart the sound detector on its usual backoff
+  (it appears in the camera's history), where before it left the case to the audio watchdog.
 - **A motion or sound detector that stops receiving anything is now restarted, instead of staying silent
   for hours.** A detector's ffmpeg could stay alive and connected while getting no frames at all, and
   nothing noticed: on one install a motion detector got nothing for 4h45 and 8h43 in the same month, both

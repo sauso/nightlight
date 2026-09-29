@@ -543,6 +543,14 @@ quiet night never trips it. When one has gone dark, it:
 3. backs off between attempts: 1, 2, 4, 8, 16, then every 30 minutes, until the detector has been healthy
    for 5 unbroken minutes.
 
+For a **sound** detector, the watchdog first checks whether audio is arriving on the stream. "No audio on the
+stream" leaves the case to the audio watchdog. An inconclusive check (it could not run, or it failed; a failed
+run counted as "no audio" before issue #515) is acted on at the second consecutive check, after which the
+usual backoff above applies, so a check that keeps failing can cost a sound-detector restart at 1, 2, 4, 8 and
+16 minutes and then every 30. The check reads the local MediaMTX and only runs on a stream just reported ready,
+so it fails only when the stream drops in between; whether ffprobe exits non-zero when a session drops after
+setup, rather than exiting 0 with no packets, has not been verified.
+
 A detector that has not been started yet, is waiting for its stream to come up, or is between relaunches
 is left alone, and a new one gets 90 seconds to deliver its first frame. A stream that is not ready (the
 camera rebooting, MediaMTX down) is the camera watchdog's job, not this one's.
