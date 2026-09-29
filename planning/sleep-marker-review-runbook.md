@@ -34,7 +34,13 @@ staging query returns empty, first suspect a prod ID pasted by mistake.
   `onset_at`, `wake_at`, `onset_at_shadow`, `wake_at_shadow`, `wake_count`,
   `asleep_minutes`, `awake_minutes`, `longest_stretch_minutes`, `coverage_minutes`,
   `avg_temperature`, `avg_humidity`, `computed_at`.
-  (NOT `camera_id`, NOT `date`, NOT `total_wakes`.)
+  (NOT `camera_id`, NOT `date`, NOT `total_wakes`.) Also `unknown_minutes` (#442) and
+  `in_bed_at`.
+- **`coverage_minutes` counts WATCHED window minutes, not rows.** Since #508 a row with
+  `motion_frames = 0` (sound kept writing while the video was dead, or #493 clone-only) is
+  NOT coverage and its minute is unknown. When you count a night's `activity_samples` to
+  compare with the analysis, add `AND motion_frames > 0`, or a video stall will look covered.
+  A stored night computed before #508 still carries the old, row-based figure until recomputed.
 - **`bed_transitions`**: `camera_id`, `type` (`out_of_bed` | `into_bed`), `peak`
   (0–1 fraction, i.e. 0.2 = 20%), `created_at`.
 - **All timestamps are UTC text** `"YYYY-MM-DD HH:MM:SS"`. **Melbourne = UTC+10** — add

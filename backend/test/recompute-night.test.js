@@ -19,8 +19,9 @@ import { useTempDataDir, cleanupTempDataDirs, makeUser, makeSession, signToken, 
 useTempDataDir();
 
 const { default: db } = await import('../src/db.js');
-const { computeAndStoreNight } = await import('../src/lib/sleepAnalysis.js');
+const { computeAndStoreNight, runNightlySleepJob } = await import('../src/lib/sleepAnalysis.js');
 const { default: childrenRouter } = await import('../src/routes/children.js');
+const { logger } = await import('../src/lib/logger.js');
 
 const CHILD = 'rc-child';
 const CAM = 'rc-cam';
@@ -192,7 +193,162 @@ test('a refused recompute answers 4xx with a readable reason', async () => {
   const res = await call(`${server.url}/api/children/${CHILD}/sleep/${DATE}?store=1`, { token: adminToken });
   assert.equal(res.status, 409);
   assert.match(res.body.error, /aged out/i, 'the message has to say WHY');
+  // #508: with nothing left to read (coverage 0) the reason IS aging out, and the machine-readable field
+  // says so. Pinned so the coverage wording below can never become the only message.
+  assert.equal(res.body.reason, 'aged_out');
+  assert.equal(res.body.coverage_minutes, 0);
+  assert.match(res.body.error, /data has aged out \(kept 30 days\)/);
   assert.equal(db.prepare('SELECT status FROM sleep_nights WHERE child_id = ?').get(CHILD).status, 'ok');
+});
+
+// --- #508: a refusal because too little was WATCHED, not because the data aged out ---------------------
+//
+// Since #508 a minute the video never saw (motion_frames 0: the sound detector kept writing while the
+// motion detector delivered nothing) is not coverage. A night stored `ok` before #508 whose video stalled
+// for over half the window now computes `no_data`, and the allowDowngrade guard refuses it — deliberately
+// kept (see computeAndStoreNight). What must not happen is the refusal claiming the data "aged out": it
+// is right there.
+
+// Turn the stored night's video off for everything from 21:00 on (430 of the 690 window minutes), leaving
+// the rows themselves in place, exactly as a sound-only stall stores them.
+function stallVideoFrom2100() {
+  db.prepare('UPDATE activity_samples SET motion_frames = 0, motion_peak = NULL WHERE bucket_start >= ?')
+    .run(sqlTime(at(21, 0)));
+}
+
+test('#508 T11a: a refused recompute of a mostly-unwatched night says so, and does not claim the data aged out', async () => {
+  laySamples();
+  computeAndStoreNight(CHILD, DATE);
+  stallVideoFrom2100();
+
+  const res = await call(`${server.url}/api/children/${CHILD}/sleep/${DATE}?store=1`, { token: adminToken });
+  assert.equal(res.status, 409);
+  assert.equal(res.body.reason, 'too_little_watched');
+  assert.equal(res.body.coverage_minutes, 90, 'the 19:30-21:00 minutes were watched');
+  assert.match(res.body.error, /video was only seen for 90 minutes/);
+  assert.doesNotMatch(res.body.error, /data has aged out \(kept 30 days\)/, 'the data is right there; "aged out" would be false');
+  assert.match(res.body.error, /left as it is/, 'still says nothing was changed (the e2e spec matches on this)');
+  assert.equal(res.body.status, 'no_data', 'the refused status is returned too');
+  assert.equal(db.prepare('SELECT status FROM sleep_nights WHERE child_id = ?').get(CHILD).status, 'ok');
+});
+
+// The refusal has THREE causes, and the route must branch on the refused STATUS, not on coverage alone
+// (#508 code review, both reviewers): the first version of the split said "the video was only seen for 690
+// minutes... missing for the rest" about a FULLY watched night that was refused for a different reason.
+// Each test below fails under "branch on coverage only" and under "always aged out".
+
+test('#508 T11a2: a refused recompute of a FULLY watched night that now reads no_sleep blames neither missing video nor age', async () => {
+  laySamples();
+  computeAndStoreNight(CHILD, DATE);
+  // Every minute now moves: the night is fully watched (coverage 690) and has no quiet run to fall asleep
+  // in, so it computes `no_sleep`, which the guard refuses over the stored `ok`.
+  db.prepare('UPDATE activity_samples SET motion_peak = 0.4, motion_level = 0.4').run();
+
+  const res = await call(`${server.url}/api/children/${CHILD}/sleep/${DATE}?store=1`, { token: adminToken });
+  assert.equal(res.status, 409);
+  assert.equal(res.body.status, 'no_sleep', 'sanity: this is the not-no_data refusal');
+  assert.equal(res.body.coverage_minutes, 690, 'sanity: every window minute was watched');
+  assert.equal(res.body.reason, 'no_longer_scored');
+  assert.doesNotMatch(res.body.error, /video was only seen|missing for the rest/, 'nothing was missing');
+  assert.doesNotMatch(res.body.error, /data has aged out \(kept 30 days\)/, 'and nothing aged out');
+  assert.match(res.body.error, /no clear sleep/);
+  assert.match(res.body.error, /left as it is/);
+  assert.equal(db.prepare('SELECT status FROM sleep_nights WHERE child_id = ?').get(CHILD).status, 'ok');
+});
+
+test('#508 T11a3: a refused recompute of a stored EMPTY night that the 90% rule now makes no_data names the 90% line', async () => {
+  // A quiet, empty-bed night, fully watched: stored `empty`. Then the video is dead from 05:15 (105 of
+  // 690 minutes), leaving 585 watched (84.8%): above the 50% no_data gate, below the 90% `empty` line,
+  // so it now computes `no_data` and is refused. "Too few to score" alone would be false here: 585
+  // minutes is plenty to score a night that had a child in it.
+  for (let t = at(18, 20); t < at(7, 0, 1); t = new Date(t.getTime() + 60000)) {
+    insertSample.run(CAM, sqlTime(t), 0.0002, 0.0002);
+  }
+  assert.equal(computeAndStoreNight(CHILD, DATE).status, 'empty', 'sanity: stored as "no one in the bed"');
+  db.prepare('UPDATE activity_samples SET motion_frames = 0, motion_peak = NULL WHERE bucket_start >= ?')
+    .run(sqlTime(at(5, 15, 1)));
+
+  const res = await call(`${server.url}/api/children/${CHILD}/sleep/${DATE}?store=1`, { token: adminToken });
+  assert.equal(res.status, 409);
+  assert.equal(res.body.status, 'no_data');
+  assert.equal(res.body.coverage_minutes, 585);
+  assert.equal(res.body.reason, 'too_little_watched');
+  assert.match(res.body.error, /video was only seen for 585 minutes/);
+  assert.match(res.body.error, /90% before it can be called "no one in the bed"/, 'the line this night actually missed');
+  assert.match(res.body.error, /at least 50% of its window watched to be scored at all/);
+  assert.doesNotMatch(res.body.error, /data has aged out \(kept 30 days\)/);
+  assert.equal(db.prepare('SELECT status FROM sleep_nights WHERE child_id = ?').get(CHILD).status, 'empty');
+});
+
+test('#508 T11a4: a refused recompute with ONE watched minute is still "too little watched", not "aged out"', async () => {
+  // The boundary of the coverage split: 1 is the smallest non-zero coverage, so `> 0` and `> 1` differ here.
+  laySamples();
+  computeAndStoreNight(CHILD, DATE);
+  db.prepare('UPDATE activity_samples SET motion_frames = 0, motion_peak = NULL WHERE bucket_start != ?')
+    .run(sqlTime(at(23, 0)));
+
+  const res = await call(`${server.url}/api/children/${CHILD}/sleep/${DATE}?store=1`, { token: adminToken });
+  assert.equal(res.status, 409);
+  assert.equal(res.body.coverage_minutes, 1, 'sanity: exactly one watched window minute');
+  assert.equal(res.body.reason, 'too_little_watched');
+  assert.match(res.body.error, /video was only seen for 1 minute of it/);
+});
+
+test('#508 T11b: the nightly job retries a refused downgrade each tick, but only until the next night closes', (t) => {
+  // TRACED, not assumed: a refusal writes nothing, so `computed_at` stays before the evidence horizon and
+  // runNightlySleepJob recomputes the night on its next tick too. That is bounded because the job only
+  // ever visits lastCompletedNightDate. This pins both halves: it IS retried while it is "last night"
+  // (so a recovery would be picked up), and it is never visited again once the next night has closed.
+  t.mock.timers.enable({ apis: ['Date'], now: at(7, 5, 1).getTime() });
+  laySamples();
+  computeAndStoreNight(CHILD, DATE); // stored `ok` at 07:05 local, as the job's first pass would
+  const stored = db.prepare('SELECT status, computed_at, asleep_minutes FROM sleep_nights WHERE child_id = ? AND night_date = ?');
+  const first = stored.get(CHILD, DATE);
+  assert.equal(first.status, 'ok');
+  stallVideoFrom2100();
+
+  // Two ticks inside the evidence window: each recomputes (no_data) and is refused — nothing written.
+  // "Nothing written" alone cannot tell a refused recompute from a SKIPPED one (#508 code review, Codex:
+  // a job that skipped stored nights until the evidence horizon passed this loop, and the later recovery
+  // below still caught it). So each tick must also show the compute HAPPENED: the job's own
+  // "Computed N sleep summary(ies)" line counts every computeAndStoreNight call, refused or not, and this
+  // file has exactly one child. Observed through the logger rather than a hook in production code.
+  const info = t.mock.method(logger, 'info', () => {});
+  for (const minutes of [30, 30]) {
+    const seen = info.mock.callCount();
+    t.mock.timers.tick(minutes * 60000);
+    runNightlySleepJob();
+    const lines = info.mock.calls.slice(seen).map((c) => String(c.arguments[0]));
+    assert.ok(
+      lines.some((l) => /\[sleep\] Computed 1 sleep summary/.test(l)),
+      `the tick must RECOMPUTE the night (and be refused), not skip it; logged: ${JSON.stringify(lines)}`
+    );
+    assert.deepEqual(stored.get(CHILD, DATE), first, 'a refused downgrade leaves the stored night untouched');
+  }
+  info.mock.restore();
+
+  // Still "last night" two hours later, past the 3 h horizon: the pre-horizon computed_at means it is
+  // STILL recomputed. Proven by giving it something it WILL store: the video comes back.
+  db.prepare('UPDATE activity_samples SET motion_frames = 1, motion_peak = motion_level').run();
+  t.mock.timers.tick(3 * 60 * 60000);
+  runNightlySleepJob();
+  const recovered = stored.get(CHILD, DATE);
+  assert.notEqual(recovered.computed_at, first.computed_at, 'while it is last night, the refused night is retried');
+
+  // ...so put it back into the refused state with a fresh pre-horizon stamp, and move past the NEXT night's
+  // window close. The job now visits 2026-07-02; DATE must never be recomputed again, even though a
+  // recompute would now succeed and change the row (the video is back, the sentinel below is stale).
+  db.prepare("UPDATE sleep_nights SET computed_at = '2026-07-01 21:05:00', asleep_minutes = 1 WHERE child_id = ? AND night_date = ?")
+    .run(CHILD, DATE);
+  t.mock.timers.tick(at(7, 5, 2).getTime() - Date.now());
+  runNightlySleepJob();
+  const after = stored.get(CHILD, DATE);
+  assert.equal(after.computed_at, '2026-07-01 21:05:00', 'the retry is bounded: once the next night closes, this one is never visited');
+  assert.equal(after.asleep_minutes, 1);
+  assert.ok(
+    db.prepare("SELECT 1 FROM sleep_nights WHERE child_id = ? AND night_date = '2026-07-02'").get(CHILD),
+    'sanity: the job did run, and moved on to the next night'
+  );
 });
 
 test('reading a night without store=1 never writes anything', async () => {
