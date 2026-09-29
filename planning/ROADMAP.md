@@ -880,6 +880,15 @@ no clock. Every threshold in it came from ONE house's runs (Stage 1: night, over
   timestamps line up") is deferred to #412: the wake anchor stays at the minute's END so the 23-63 s ring
   holds it. KNOWN-ISSUES.md "The sleep timeline's minutes are the minutes the samples arrived in".
 - **#452** confirmation across an outage (read `restarts`/`gaps`), **#448** the wake watcher.
+- **#508** sleep analysis stops counting zero-frame minutes as watched — built on branch
+  `fix/508-zero-frame-minutes` (plan v2, 2026-09-30). Read-time only: `motionSeen(r) = motion_frames > 0`
+  in all three `activity_samples` readers of `sleepAnalysis.js`; an unwatched minute is `null` (sound not
+  used); `empty` now needs `EMPTY_MIN_COVERAGE_FRAC` (0.9, unmeasured) of the window watched; the Recompute
+  409 (API-only) says which reason applied (`aged_out` / `too_little_watched` / `no_longer_scored`). Uses #493's observed frame count, not the `[obs]` line itself. **Follow-ups
+  it deliberately leaves:** `bedTransitions.getActivitySamples`/`bedTransitionRules` and the live
+  `wakeWatcher` still read `motion_peak` alone; `applyCorrection` subtracts the aggregate unknown count; a
+  sparse-minute threshold and a frozen-picture (encoder wedge) detector both need data first.
+  KNOWN-ISSUES.md "Minutes with no video are unknown in the sleep numbers".
 - ~~**#369** stale-sampler restarts~~ — built on its own branch (`fix/369-detector-watchdog`, plan v5,
   2026-09-27) WITHOUT the observation clock, so the #373 gate below does not apply to it: the detector
   watchdog (`lib/cameraWatchdogs.js`) reads a plain `performance.now()` stamp taken on each stdout `data`

@@ -53,7 +53,73 @@ export const SLEEP_THRESHOLDS = Object.freeze({
   WAKE_GAP_MIN,
 });
 
-const MIN_COVERAGE_FRAC = 0.5; // need activity samples for at least this fraction of the window, else no_data
+// Exported (with EMPTY_MIN_COVERAGE_FRAC) only so the Recompute refusal in routes/children.js can quote the
+// real lines to a person instead of a copy of them that could drift (issue #508 code review).
+export const MIN_COVERAGE_FRAC = 0.5; // need WATCHED minutes (see motionSeen) for at least this fraction of the window, else no_data
+// `empty` ("no one was in the bed") needs MORE of the window watched than `no_data` does, and the gap
+// between the two matters because `empty` is not a harmless label: it sends the "no one was in the bed"
+// report and QUEUES THE NIGHT'S RAW TIMELAPSE FRAMES FOR DELETION (runNightlySleepJob -> emptyNights ->
+// discardTimelapseFrames), irreversibly. At MIN_COVERAGE_FRAC alone, a night exactly half watched (quiet)
+// and half unwatched passed the no_data gate and could read `empty` from the quiet half — "we saw nobody"
+// said about a night we could not see half of (found by plan review of issue #508, Codex; reachable before
+// #508 too, from a plain row gap). Below this fraction the night is `no_data`, never `empty`; an `ok` night
+// is unaffected (a night with real movement in it was not empty, however much of it we missed). A fraction
+// of the window minutes ELAPSED so far (the whole window once it closes), never counting the lookbehind:
+// the same basis as MIN_COVERAGE_FRAC (see the guard itself for why an open night keeps that basis).
+//
+// ⚠️ 0.9 IS AN UNMEASURED HYPOTHESIS, not a calibrated threshold. It was chosen so that the ~64 s daily
+// camera reboot and scattered dropped minutes can never block a genuinely empty, otherwise-watched night,
+// while anything missing more than about an hour of a 12-hour window cannot. No stored `empty` night had
+// been checked against it when it was written; the pre-merge A/B for #508 checks every stored `empty`
+// night's coverage against it on prod and staging. Default 0.9; any value in (MIN_COVERAGE_FRAC, 1] is
+// coherent (at MIN_COVERAGE_FRAC this guard does nothing, above 1 nothing could ever be `empty`). A
+// constant, not a setting — documented in README "Sleep tracking" and KNOWN-ISSUES alongside #508.
+export const EMPTY_MIN_COVERAGE_FRAC = 0.9;
+// WAS THIS MINUTE WATCHED? (issue #508) — true only when the motion detector actually analysed at least
+// one real frame in it. The ONE definition every `activity_samples` reader in this file uses (the main
+// timeline, the departure scan's extRows, the metrics extension's extraRows), so the three can never
+// disagree about the same minute — the same reason isActiveRow is shared.
+//
+// Why it exists: a row existing used to mean "observed". But the SOUND detector keeps writing rows when
+// the VIDEO has died (issue #369: the motion sampler delivered nothing while audio kept flowing), and every
+// such row read as a watched, quiet minute. Measured on staging (A/B on a copy of its database, 2026-09-30):
+// two stalls, 522 dead-video minutes ending 2026-09-17 10:00 and 284 ending 2026-09-27 10:00, read as covered
+// and quiet. Only the part inside the 19:00-07:00 window changes a night: 342 minutes of the first (night
+// 2026-09-16: coverage 720 -> 378, `unknown_minutes` 0 -> 342) and 104 of the second (night 2026-09-26:
+// coverage 720 -> 616; `unknown_minutes` stays 0 because that stall lies after the analysed sleep span). #442 already made a minute with NO row unknown; a row with no frames
+// is the same absence, and now reads the same way (the whole minute becomes `null`, reusing #442's gap
+// handling end to end: onset, wake runs, metrics, the timeline's `gap`).
+//
+// Why ZERO and not a frame-rate threshold: `motion_frames` counts OBSERVED frames (activityTracker's
+// writeMinute; #493 subtracts proven ffmpeg clones), so 0 means "no video evidence at all" on every
+// camera whatever its frame rate — nothing here assumes 5 fps or 300 frames a minute, so it is per-install
+// safe by construction. Both dead-video shapes the writer can produce store 0: a sound-only minute
+// (motion_peak NULL) and a clone-only minute (#493: motion_peak 0). A LOW but non-zero count is still
+// watched — a daily camera reboot leaves short low-frame runs (measured on staging over 30 days: 36 runs,
+// 22 on one camera and 14 on the other, every one a SINGLE minute, 30 of them starting at the 10:00
+// reboot, so almost none fall inside a night's window; issue #508 said 21, that did not hold; the count
+// on any other install is unknown), and there is no evidence yet that a sparse minute misleads (a peak is a MAXIMUM, so a few real
+// frames still see real movement). A sparse-minute rule needs its own data first.
+//
+// A cost of deciding per WHOLE minute, named (traced in fix round 1): `motion_frames` is the IN-BED
+// channel's observed count, and #493 corrects the two channels separately, so a minute whose every frame
+// the observation clock called a repeat, yet whose picture changed OUTSIDE the bed, stores frames 0 with a
+// real `motion_out_peak` (activityTracker.test.js "#493: ...and the mirror"). This rule discards that
+// out-of-bed movement with the rest of the minute. A true repeat cannot change the picture, so it needs
+// the clock and the pixels to disagree for a whole minute; how often that happens is unmeasured. Left as
+// an owner decision, not changed silently (pinned by the #508 test T9b).
+//
+// Why sound is NOT used in an unwatched minute, even a loud one: a bedroom mic hears the whole house (see
+// ONSET_SOUND_MOTION_WITHIN_MIN), and keeping a loud unwatched minute as `active` breaks two things the
+// plan review traced — the onset view turns it into CONFIRMED QUIET (unwitnessed sound is discounted), and
+// the metrics count a non-wake active minute as ASLEEP. The cost, named: a child crying through a video
+// stall is not shown as awake from the noise alone. Sound alerts are a separate path and still fire.
+//
+// Known limit: a FROZEN picture (an encoder wedge delivering many real, identical frames) has frames > 0
+// and zero movement, so it still reads as a watched, still room. Neither zero nor any frame threshold
+// can catch that. `motion_frames` is `NOT NULL DEFAULT 0` and has been written since the original sampler
+// (#77), so no stored row lacks it.
+const motionSeen = (r) => r.motion_frames > 0;
 // How far PAST the window end to keep looking for the morning "out of bed" — a child can sleep past the
 // window edge, so the terminal exit that marks "up for the day" may fall a couple hours later. The
 // movement-only wake still stops at the window; the transition-derived departure uses this lookahead.
@@ -606,15 +672,16 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
 
   const rows = db
     .prepare(
-      `SELECT bucket_start AS t, motion_peak, sound_peak, motion_out_peak FROM activity_samples
+      `SELECT bucket_start AS t, motion_peak, sound_peak, motion_out_peak, motion_frames FROM activity_samples
          WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
     )
     .all(...scoreCams, analysisStartSql, asOfSql);
 
-  // Per-minute state over the whole timeline: null = no sample (gap), false = quiet, true = active. A
-  // minute is active if the main camera saw in-bed movement, a clear noise, OR movement outside the bed
-  // (someone in the room / the child out of bed). outAt[] marks the outside-bed minutes so the timeline
-  // can surface them as room activity distinct from stirring in the bed.
+  // Per-minute state over the whole timeline: null = not watched (no row, or only rows with no video —
+  // see motionSeen), false = quiet, true = active. A minute is active if the main camera saw in-bed
+  // movement, a clear noise, OR movement outside the bed (someone in the room / the child out of bed).
+  // outAt[] marks the outside-bed minutes so the timeline can surface them as room activity distinct
+  // from stirring in the bed.
   //
   // One camera, so one row per minute and nothing to combine. This used to OR across cameras; that OR
   // is exactly how a second camera could add activity the child never produced (see scoreCams above).
@@ -645,6 +712,12 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   for (const r of rows) {
     const i = idxOf(r.t);
     if (i < 0 || i >= totalMin) continue;
+    // An unwatched row contributes NOTHING — not to state, and not to outAt/motionAt/soundAt/bedPeakAt/
+    // maxBedPeak either (issue #508). Skipped, not merged: `activity_samples` can hold two rows for one
+    // minute (see the OR-merge note in the departure scan below), and merging an unwatched twin as `null`
+    // would erase a watched row's verdict (`false || null` is `null`). A minute is therefore exactly as
+    // watched as its best row, and a minute with no watched row at all stays `null` (unknown).
+    if (!motionSeen(r)) continue;
     const out = r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE;
     const moved = (r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) || out;
     const heard = r.sound_peak != null && r.sound_peak > SOUND_ACTIVE;
@@ -657,7 +730,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     if (r.motion_peak != null && r.motion_peak > bedPeakAt[i]) bedPeakAt[i] = r.motion_peak;
   }
   // Coverage is a statement about the configured window ("did we watch the night"), so it counts only
-  // window minutes — the lookbehind must never inflate or dilute it.
+  // window minutes — the lookbehind must never inflate or dilute it. "Watched" is literal since #508: a
+  // row with no video (motionSeen) left state[i] null above, so it is not coverage either.
   let coverage = 0;
   for (let i = preMin; i < totalMin; i++) if (state[i] !== null) coverage++;
   const result = { ...base, coverage_minutes: coverage };
@@ -751,6 +825,16 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // or a bedtime close to the morning) is not evidence of an empty bed. That is the safe direction: this
   // guard only ever REJECTS an onset, so failing open leaves today's behaviour untouched rather than
   // inventing a later bedtime from missing data.
+  //
+  // ⚠️ A VIDEO STALL IS NOW A GAP HERE TOO (issue #508), and that changes one real outcome, traced and
+  // kept deliberately. Before #508 a stall's sound-only rows were non-null with an in-bed peak of 0, so a
+  // put-down followed within 150 minutes by a stall read as "watched, and the bed never moved" and this
+  // guard REJECTED the put-down's onset. Now those minutes are unknown, the loop below meets a `null`
+  // and fails open, and the put-down's onset is ACCEPTED (pinned by the #508 test "a stall longer than
+  // the occupancy window after a put-down"). That is the same answer a plain row outage (#442) already
+  // gets, and the old rejection rested on "no movement" readings nobody took. The residual risk, named:
+  // a FALSE put-down over an empty bed followed at once by a stall is no longer caught by this guard. It
+  // still has to pass every other onset guard, and the stall itself is reported as unknown minutes.
   const bedOccupiedAfter = (from) => {
     const to = from + OCCUPANCY_WITNESS_MIN;
     if (to > totalMin) return true; // not enough timeline left to judge
@@ -917,7 +1001,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     totalMinExt = Math.max(totalMin, Math.round((evidenceCutoffMs - analysisStartUtc.getTime()) / 60000));
     const extRows = db
       .prepare(
-        `SELECT bucket_start AS t, motion_peak FROM activity_samples
+        `SELECT bucket_start AS t, motion_peak, motion_frames FROM activity_samples
            WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
       )
       .all(...scoreCams, analysisStartSql, txEndSql);
@@ -934,8 +1018,15 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     for (const r of extRows) {
       const i = idxOf(r.t);
       if (i < 0 || i >= totalMinExt) continue;
-      // A real row sets true OR false — it is evidence either way. Only the absence of any row at all
-      // leaves an index at its null default now.
+      // Only a WATCHED row is evidence here (issue #508, see motionSeen). A clone-only minute (#493:
+      // frames 0, motion_peak 0) used to pass the `motion_peak != null` test below as CONFIRMED QUIET
+      // and not-occupied — proof the bed was empty, from a camera that saw nothing: #350's failure mode
+      // arriving through a dead camera. (A sound-only row has motion_peak NULL and was already skipped
+      // below; this is what catches the clone.) Skipped before the merge, for the same reason as the main
+      // loop: an unwatched twin must never merge over a watched row's verdict.
+      if (!motionSeen(r)) continue;
+      // A real watched row sets true OR false — it is evidence either way. Only the absence of any
+      // watched row at all leaves an index at its null default now.
       //
       // ⚠️ OR-MERGE, NOT LAST-WRITE-WINS (found by adversarial review of #350's own fix).
       // `activity_samples` has no uniqueness constraint on (camera_id, bucket_start), and a SECOND row
@@ -1365,6 +1456,22 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // however still a sleeper — stirs: the quietest occupied night on record still peaked at 0.2883 with
   // 1 awakening and 10 awake minutes.
   if (maxBedPeak < EMPTY_BED_MAX_PEAK && wakeCount === 0 && awake === 0) {
+    // ...but only on a night we actually WATCHED almost all of (see EMPTY_MIN_COVERAGE_FRAC for why this
+    // is stricter than the no_data gate, and why 0.9 is a hypothesis). A night that looks empty in the
+    // part we saw, with too much of it unseen, is "we could not see", never "no one was there".
+    //
+    // `coverage` counts WINDOW minutes only (never the lookbehind, see above), and `winMin` is the ELAPSED
+    // part of the window: the whole window once it has closed, "so far" on a night in progress. That is
+    // the same basis as the no_data gate, kept deliberately after a trace (#508 fix round 1): nothing ACTS
+    // on an in-progress `empty`. Only runNightlySleepJob sends the "no one was in the bed" report or
+    // discards frames, and it only ever computes lastCompletedNightDate, a closed window; RecomputeNight
+    // hides itself while `in_progress`. An in-progress `empty` is DISPLAYED ("Tonight"), and it is
+    // re-decided against the full window once the night closes. The only paths that STORE an open night
+    // are the demo seed and a hand-made admin `?store=1` API call (the UI never makes it); neither sends
+    // a report or discards frames. (A stored open night of ANY status can then be protected by the
+    // downgrade guard when it closes: pre-existing, not specific to `empty` or to #508.) Pinned by the
+    // #508 tests T6g/T6h.
+    if (coverage < winMin * EMPTY_MIN_COVERAGE_FRAC) return { ...result, status: 'no_data' };
     return {
       ...result,
       status: 'empty',
@@ -1390,7 +1497,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       // quiet here too; see the now-rewritten test in sleepAnalysis.test.js).
       const extraRows = db
         .prepare(
-          `SELECT bucket_start AS t, motion_peak, sound_peak, motion_out_peak FROM activity_samples
+          `SELECT bucket_start AS t, motion_peak, sound_peak, motion_out_peak, motion_frames FROM activity_samples
              WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
         )
         .all(...scoreCams, minuteTime(totalMin), minuteTime(metricsEnd));
@@ -1399,6 +1506,9 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       for (const r of extraRows) {
         const i = idxOf(r.t);
         if (i < totalMin || i >= metricsEnd) continue;
+        // The same rule as the main loop (issue #508): an unwatched row is skipped, never merged, so a
+        // post-window stall between window end and the departure counts as unknown, not asleep.
+        if (!motionSeen(r)) continue;
         const rowActive = isActiveRow(r);
         if (rowActive) activeMetrics[i] = true;
         // OR-merge, matching the main population loop's own rule for `state` (line ~646) — TWO rows for
@@ -1771,7 +1881,20 @@ const SCORED = new Set(['ok', 'empty']);
 // no longer exist.
 //
 // So a recompute may improve a night, or re-score it differently, but it may never turn a night that
-// WAS scored into one that isn't. The guard lives here rather than in the route so it protects every
+// WAS scored into one that isn't.
+//
+// ⚠️ Since issue #508 there is a SECOND way to reach this refusal, and the guard is kept for it on
+// purpose: a night stored `ok` before #508 whose video had stalled for more than half the window now
+// computes `no_data` (those minutes are unwatched), so a recompute is refused and the stored `ok` stays
+// until the guard is revisited. The admin route tells the cases apart by the refused summary's `status`
+// first (anything but `no_data`, e.g. a fully watched `ok` that now reads `no_sleep`, is neither "aged
+// out" nor "too little watched") and only then by `coverage_minutes` (0 = nothing left to read, i.e. aged
+// out; > 0 = data present, too little of it watched). In runNightlySleepJob a refusal leaves `computed_at` untouched, so the night is retried on
+// every 30-minute tick — TRACED for #508: bounded, because the job only ever visits
+// lastCompletedNightDate, which moves on when the next night's window closes (at most ~48 ticks, each
+// one computeNight and no write, no notification, no timelapse action). Pinned by the #508 multi-pass
+// test in recompute-night.test.js. Not new with #508: any refused downgrade (a camera deleted mid-window)
+// already behaved this way. The guard lives here rather than in the route so it protects every
 // caller — including `runNightlySleepJob` itself, which passes `allowDowngrade: false` explicitly (found
 // missing by adversarial review of issue #351's own fix). Two DIFFERENT protections are in play and it
 // is easy to conflate them: within a SINGLE computeNight call, status is decided from window-bounded

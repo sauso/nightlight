@@ -420,7 +420,11 @@ measurement**, and (like everything here) never a safety device — see the warn
   **It can never make a night worse:** the minute-by-minute data behind a night is only kept for 30
   days — the same span the date picker offers — so the oldest night you can browse sits right on that
   edge. If its data has aged out, the recompute is refused and the saved summary is left alone, rather
-  than being replaced with "no data".
+  than being replaced with "no data". The same refusal protects a night saved before a detection change
+  that would now come out "no data" for another reason — for example most of it had sound but no video.
+  (The page only offers Recompute on a night that still scores, so in practice that refusal is only seen
+  through the API; its 409 says which reason applied — `reason`, `status`, `coverage_minutes` — see
+  [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "Minutes with no video are unknown in the sleep numbers".)
 - **In bed, then asleep.** On a night where your child was put down a while before they fell asleep
   (a bedtime story, a slow settle), the card and the detail page show both: **In bed** is the
   put-down the camera recorded, and **Asleep** is when the room went quiet. That's the same time the
@@ -449,7 +453,17 @@ measurement**, and (like everything here) never a safety device — see the warn
   rather than being folded into asleep or awake; it isn't counted toward the reported sleep
   duration either, and a night with a long enough gap can come back with less sleep counted, or
   occasionally no clear sleep detected, than the raw hours between bedtime and waking would
-  suggest.
+  suggest. **A stretch with sound but no video counts as "No data" too:** a minute is only
+  counted as watched if the camera's video actually delivered a picture in it (at least one real
+  frame — any frame rate), and the sound of an unwatched minute is not used, because a bedroom
+  microphone hears the whole house. So if the video stalls over bedtime, the reported bedtime is
+  the first quiet minute after the video came back, and a cry during a stall is not shown as a
+  wake-up from the noise alone. A night more than half unwatched is "no data", and a night is only
+  ever reported as **"no one was in the bed"** when at least **90%** of it was watched (a fixed
+  first estimate, not a setting; on a night still in progress, 90% of the part so far), because
+  that answer also discards the night's timelapse. A
+  frozen picture still counts as watched — see
+  [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "Minutes with no video are unknown in the sleep numbers".
 - **Room temperature (optional).** If a camera reports temperature/humidity over **MQTT** (set
   up under **Settings → MQTT**, e.g. via Zigbee2MQTT — the readings also show on the camera
   tile), the sleep detail overlays the night's room temperature beneath the timeline, aligned to

@@ -7264,5 +7264,320 @@
     "expect": "killed",
     "tests": ["activityTracker.test.js"],
     "namePattern": "opened out of order"
+  },
+  {
+    "label": "#508 A00: control, a comment edit in sleepAnalysis.js must change nothing",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "// WAS THIS MINUTE WATCHED? (issue #508)",
+    "replace": "// WAS THIS MINUTE WATCHED? (issue #508) [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508"
+  },
+  {
+    "label": "#508 A01: the main timeline reads unwatched rows again (gate dropped)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    if (!motionSeen(r)) continue;\r\n    const out = r.motion_out_peak",
+    "replace": "    const out = r.motion_out_peak",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508"
+  },
+  {
+    "label": "#508 A02: the departure scan (extRows) reads unwatched rows again (gate dropped)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "      if (!motionSeen(r)) continue;\r\n      // A real watched row sets",
+    "replace": "      // A real watched row sets",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508"
+  },
+  {
+    "label": "#508 A03: the metrics extension (extraRows) reads unwatched rows again (gate dropped)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "        if (!motionSeen(r)) continue;\r\n        const rowActive",
+    "replace": "        const rowActive",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508"
+  },
+  {
+    "label": "#508 A04: a row with zero frames counts as watched (> 0 becomes >= 0)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const motionSeen = (r) => r.motion_frames > 0;",
+    "replace": "const motionSeen = (r) => r.motion_frames >= 0;",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508"
+  },
+  {
+    "label": "#508 A05: a one-frame minute counts as unwatched (> 0 becomes > 1)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const motionSeen = (r) => r.motion_frames > 0;",
+    "replace": "const motionSeen = (r) => r.motion_frames > 1;",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T5|#508 T8"
+  },
+  {
+    "label": "#508 A06: a sparse minute counts as unwatched (a 10-frame threshold)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const motionSeen = (r) => r.motion_frames > 0;",
+    "replace": "const motionSeen = (r) => r.motion_frames >= 10;",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T5"
+  },
+  {
+    "label": "#508 A07: an unwatched minute reads confirmed QUIET (false) instead of unknown (null)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    if (!motionSeen(r)) continue;\r\n    const out = r.motion_out_peak",
+    "replace": "    if (!motionSeen(r)) { if (state[i] === null) state[i] = false; continue; }\r\n    const out = r.motion_out_peak",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508"
+  },
+  {
+    "label": "#508 A08: an unwatched twin is MERGED as null instead of skipped (false || null erases a watched quiet minute)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    if (!motionSeen(r)) continue;\r\n    const out = r.motion_out_peak",
+    "replace": "    if (!motionSeen(r)) { state[i] = state[i] || null; continue; }\r\n    const out = r.motion_out_peak",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T7"
+  },
+  {
+    "label": "#508 A09: only the minute's STATE is gated; every other channel of an unwatched row leaks",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    if (!motionSeen(r)) continue;\r\n    const out = r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE;\r\n    const moved = (r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) || out;\r\n    const heard = r.sound_peak != null && r.sound_peak > SOUND_ACTIVE;\r\n    const active = isActiveRow(r);\r\n    state[i] = state[i] === null ? active : state[i] || active;",
+    "replace": "    const out = r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE;\r\n    const moved = (r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) || out;\r\n    const heard = r.sound_peak != null && r.sound_peak > SOUND_ACTIVE;\r\n    const active = isActiveRow(r);\r\n    if (motionSeen(r)) state[i] = state[i] === null ? active : state[i] || active;",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T9"
+  },
+  {
+    "label": "#508 A10: an unwatched row's in-bed peak leaks into maxBedPeak alone",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    if (!motionSeen(r)) continue;\r\n    const out = r.motion_out_peak",
+    "replace": "    if (i >= preMin && r.motion_peak != null && r.motion_peak > maxBedPeak) maxBedPeak = r.motion_peak;\r\n    if (!motionSeen(r)) continue;\r\n    const out = r.motion_out_peak",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T9"
+  },
+  {
+    "label": "#508 A11: an unwatched row's in-bed peak leaks into bedPeakAt alone",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    if (!motionSeen(r)) continue;\r\n    const out = r.motion_out_peak",
+    "replace": "    if (r.motion_peak != null && r.motion_peak > bedPeakAt[i]) bedPeakAt[i] = r.motion_peak;\r\n    if (!motionSeen(r)) continue;\r\n    const out = r.motion_out_peak",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T9"
+  },
+  {
+    "label": "#508 A12: an unwatched row's outside-the-bed peak leaks into outAt alone",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    if (!motionSeen(r)) continue;\r\n    const out = r.motion_out_peak",
+    "replace": "    if (r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE) outAt[i] = true;\r\n    if (!motionSeen(r)) continue;\r\n    const out = r.motion_out_peak",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T9"
+  },
+  {
+    "label": "#508 A13: an unwatched row's movement leaks into motionAt alone",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    if (!motionSeen(r)) continue;\r\n    const out = r.motion_out_peak",
+    "replace": "    if (r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) motionAt[i] = true;\r\n    if (!motionSeen(r)) continue;\r\n    const out = r.motion_out_peak",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T9"
+  },
+  {
+    "label": "#508 A14: an unwatched row's sound leaks into soundAt alone",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    if (!motionSeen(r)) continue;\r\n    const out = r.motion_out_peak",
+    "replace": "    if (r.sound_peak != null && r.sound_peak > SOUND_ACTIVE) soundAt[i] = true;\r\n    if (!motionSeen(r)) continue;\r\n    const out = r.motion_out_peak",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T9"
+  },
+  {
+    "label": "#508 A15: the metrics extension reads an unwatched minute as confirmed quiet (false) instead of unknown",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "        if (!motionSeen(r)) continue;\r\n        const rowActive",
+    "replace": "        if (!motionSeen(r)) { if (stateMetrics[i] === null) stateMetrics[i] = false; continue; }\r\n        const rowActive",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T4"
+  },
+  {
+    "label": "#508 A16: the empty guard is removed (a half-watched quiet night reads \"no one in the bed\" again)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    if (coverage < winMin * EMPTY_MIN_COVERAGE_FRAC) return { ...result, status: 'no_data' };\r\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T6"
+  },
+  {
+    "label": "#508 A17: the empty line drops to the no_data line (0.9 becomes 0.5)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const EMPTY_MIN_COVERAGE_FRAC = 0.9;",
+    "replace": "const EMPTY_MIN_COVERAGE_FRAC = 0.5;",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T6"
+  },
+  {
+    "label": "#508 A18: the empty line moves up (0.9 becomes 0.91)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const EMPTY_MIN_COVERAGE_FRAC = 0.9;",
+    "replace": "const EMPTY_MIN_COVERAGE_FRAC = 0.91;",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T6"
+  },
+  {
+    "label": "#508 A19: the empty line moves down (0.9 becomes 0.89)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const EMPTY_MIN_COVERAGE_FRAC = 0.9;",
+    "replace": "const EMPTY_MIN_COVERAGE_FRAC = 0.89;",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T6"
+  },
+  {
+    "label": "#508 A20: the empty guard's boundary flips (< becomes <=)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    if (coverage < winMin * EMPTY_MIN_COVERAGE_FRAC) return",
+    "replace": "    if (coverage <= winMin * EMPTY_MIN_COVERAGE_FRAC) return",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T6"
+  },
+  {
+    "label": "#508 A21: the Recompute refusal always gives the coverage message for no_data (claims data is there when it aged out)",
+    "file": "backend/src/routes/children.js",
+    "find": "    const watchedSome = summary.coverage_minutes > 0;",
+    "replace": "    const watchedSome = true;",
+    "expect": "killed",
+    "tests": ["recompute-night.test.js"],
+    "namePattern": "refused recompute"
+  },
+  {
+    "label": "#508 A22: the Recompute refusal always says the data aged out for no_data (the pre-#508 message)",
+    "file": "backend/src/routes/children.js",
+    "find": "    const watchedSome = summary.coverage_minutes > 0;",
+    "replace": "    const watchedSome = false;",
+    "expect": "killed",
+    "tests": ["recompute-night.test.js"],
+    "namePattern": "refused recompute"
+  },
+  {
+    "label": "#508 A23: the Recompute refusal branches on coverage only (a fully watched no_sleep night is told its video was missing)",
+    "file": "backend/src/routes/children.js",
+    "find": "summary.status !== 'no_data' ? 'no_longer_scored' : watchedSome",
+    "replace": "watchedSome",
+    "expect": "killed",
+    "tests": ["recompute-night.test.js"],
+    "namePattern": "#508 T11a2"
+  },
+  {
+    "label": "#508 A24: the too-little-watched message only names the no_data line (a stored empty night at 85% is told 'too few to score')",
+    "file": "backend/src/routes/children.js",
+    "find": "        + `${pct(MIN_COVERAGE_FRAC)}% of its window watched to be scored at all, and ${pct(EMPTY_MIN_COVERAGE_FRAC)}% `\r\n        + 'before it can be called \"no one in the bed\"); the video",
+    "replace": "        + `${pct(MIN_COVERAGE_FRAC)}% of its window watched to be scored at all); the video",
+    "expect": "killed",
+    "tests": ["recompute-night.test.js"],
+    "namePattern": "#508 T11a3"
+  },
+  {
+    "label": "#508 A25: every Recompute refusal says the data aged out (the pre-#508 route)",
+    "file": "backend/src/routes/children.js",
+    "find": "    const reason = summary.status !== 'no_data' ? 'no_longer_scored' : watchedSome ? 'too_little_watched' : 'aged_out';",
+    "replace": "    const reason = 'aged_out';",
+    "expect": "killed",
+    "tests": ["recompute-night.test.js"],
+    "namePattern": "#508 T11a"
+  },
+  {
+    "label": "#508 A26: one watched minute reads as aged out (> 0 becomes > 1)",
+    "file": "backend/src/routes/children.js",
+    "find": "    const watchedSome = summary.coverage_minutes > 0;",
+    "replace": "    const watchedSome = summary.coverage_minutes > 1;",
+    "expect": "killed",
+    "tests": ["recompute-night.test.js"],
+    "namePattern": "#508 T11a4"
+  },
+  {
+    "label": "#508 A27: the metrics extension skips an unwatched row for stateMetrics but lets its SOUND mark the minute active",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "        if (!motionSeen(r)) continue;\r\n        const rowActive",
+    "replace": "        if (!motionSeen(r)) { if (isActiveRow(r)) activeMetrics[i] = true; continue; }\r\n        const rowActive",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T4b"
+  },
+  {
+    "label": "#508 A28: the departure scan (extRows) MERGES an unwatched twin as null (false || null erases a watched quiet minute)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "      if (!motionSeen(r)) continue;\r\n      // A real watched row sets",
+    "replace": "      if (!motionSeen(r)) { cribActExt[i] = cribActExt[i] || null; cribOccExt[i] = cribOccExt[i] || null; continue; }\r\n      // A real watched row sets",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T7b"
+  },
+  {
+    "label": "#508 A29: the metrics extension (extraRows) MERGES an unwatched twin as null (false || null erases a watched quiet minute)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "        if (!motionSeen(r)) continue;\r\n        const rowActive",
+    "replace": "        if (!motionSeen(r)) { stateMetrics[i] = stateMetrics[i] || null; continue; }\r\n        const rowActive",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T7c"
+  },
+  {
+    "label": "#508 A30: the empty guard counts watched LOOKBEHIND minutes toward the 90%",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    if (coverage < winMin * EMPTY_MIN_COVERAGE_FRAC) return",
+    "replace": "    if (state.filter((s) => s !== null).length < winMin * EMPTY_MIN_COVERAGE_FRAC) return",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T6g"
+  },
+  {
+    "label": "#508 A31: the empty guard on an open night uses the FULL configured window instead of the elapsed part",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    if (coverage < winMin * EMPTY_MIN_COVERAGE_FRAC) return",
+    "replace": "    if (coverage < Math.round((endUtc.getTime() - startUtc.getTime()) / 60000) * EMPTY_MIN_COVERAGE_FRAC) return",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T6h"
+  },
+  {
+    "label": "#508 A32: the empty line moves down a hair (0.9 becomes 0.899; same integer line as 0.9 on a 690-minute window)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const EMPTY_MIN_COVERAGE_FRAC = 0.9;",
+    "replace": "const EMPTY_MIN_COVERAGE_FRAC = 0.899;",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T6i"
+  },
+  {
+    "label": "#508 A33: the empty line moves up a hair (0.9 becomes 0.901)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const EMPTY_MIN_COVERAGE_FRAC = 0.9;",
+    "replace": "const EMPTY_MIN_COVERAGE_FRAC = 0.901;",
+    "expect": "killed",
+    "tests": ["sleep-zero-frame-minutes.test.js"],
+    "namePattern": "#508 T6i"
+  },
+  {
+    "label": "#508 A34: the nightly job skips a stored night until its evidence horizon (a refused downgrade is not retried inside the window)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "        if (existing && isEvidenceFinal(existing.window_end, new Date(existing.computed_at.replace(' ', 'T') + 'Z').getTime())) continue;",
+    "replace": "        if (existing && (isEvidenceFinal(existing.window_end, new Date(existing.computed_at.replace(' ', 'T') + 'Z').getTime()) || !isEvidenceFinal(existing.window_end, now))) continue;",
+    "expect": "killed",
+    "tests": ["recompute-night.test.js"],
+    "namePattern": "#508 T11b"
   }
 ]
