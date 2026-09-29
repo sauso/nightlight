@@ -137,3 +137,41 @@ test('a recorded night can be corrected again — a mistake is not final', async
   await expect(page.getByText(/You said 19:45 to 5:30/)).toBeVisible();
   await expect(page.getByText(/You said 20:15 to 6:05/)).toHaveCount(0);
 });
+
+// ⚠️ ADDED IN THE nobody-in-bed FIX ROUND (2026-09-29) — the plan required e2e coverage for the "No one
+// was in the bed" happy path and it had not been added when the feature first shipped. Same reasoning
+// as the rest of this file: a unit test fakes the server and would agree with itself by construction,
+// so only this layer proves the flag survives the client/server round trip the way the times above do.
+//
+// NOT RUN as part of this fix — this environment has no built `:dev` image / running MediaMTX+backend
+// stack to execute Playwright against (see the file header: "Build :dev FIRST — e2e runs the image").
+// Written to match the file's existing patterns and reviewed by hand against NightReview.jsx,
+// ReviewReceipt.jsx and SleepDetail.jsx's actual copy/selectors, but it has NOT been confirmed to
+// actually pass. Run it for real before relying on it.
+test('"no one was in the bed" replaces the correction, and undoing it restores the detector\'s night', async ({ page }) => {
+  await page.goto(childPage);
+  await page.getByText(/You said 19:45 to 5:30/).click();
+  await expect(page.getByText('What we recorded')).toBeVisible();
+
+  // Already-answered, so this opens straight into edit mode with the previous times filled in — the
+  // flag button sits under the note field there too, not just in the fresh confirm-mode view.
+  await page.getByRole('button', { name: 'No one was in the bed' }).click();
+
+  await expect(page).toHaveURL(/\/sleep\?date=.*saved=1/);
+  await expect(page.getByText('Thanks — that’s recorded')).toBeVisible();
+  await expect(page.getByText('You said no one was in the bed. Tap to change it.')).toBeVisible();
+  // The times just corrected are gone — the flag nulls them server-side, by design (README's stated
+  // limit: undoing brings the detector's night back, not whatever was typed before the flag was set).
+  await expect(page.getByText(/You said 19:45 to 5:30/)).toHaveCount(0);
+
+  // Reload — the assertion that matters. Everything above could pass on client-side state alone; only
+  // a fresh load proves the flag reached the server and is what is now being read back.
+  await page.goto(childPage);
+  await expect(page.getByText('You said no one was in the bed. Tap to change it.')).toBeVisible();
+
+  // Reversible: undoing brings the DETECTOR's own night back, not 19:45/05:30.
+  await page.getByText('You said no one was in the bed. Tap to change it.').click();
+  await expect(page.getByText('You said no one was in the bed.')).toBeVisible();
+  await page.getByRole('button', { name: 'Someone was in the bed' }).click();
+  await expect(page).toHaveURL(/\/sleep\?date=.*saved=1/);
+});

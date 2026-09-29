@@ -53,8 +53,17 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
     setBusy(true);
     setError(null);
     try {
-      const result = await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1`);
-      onRecomputed?.(result);
+      // ⚠️ `?store=1` is RAW BY DESIGN (see the route's own comment in children.js): it reports what the
+      // detector just saved to sleep_nights, not what the page should show. A parent's correction — a
+      // typed time, or "no one was in the bed" — lives in sleep_reviews and is laid over every NORMAL
+      // read of a night. Passing the store response straight to `onRecomputed` used to repaint the
+      // screen with the detector's raw answer the instant you recomputed, silently undoing whatever
+      // correction was showing a moment before — true for a time correction already, and it would have
+      // been just as true for the new flag if this had not been fixed (plan review R3). Re-fetching the
+      // normal route after the write is what keeps the overlay in force.
+      await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1`);
+      const overlaid = await api.get(`/children/${childId}/sleep/${date}?detail=1`);
+      onRecomputed?.(overlaid);
       setOpen(false);
       setStored(undefined); // force a fresh look next time
     } catch (e) {

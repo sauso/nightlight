@@ -26,10 +26,11 @@ const getReviewStmt = db.prepare('SELECT * FROM sleep_reviews WHERE child_id = ?
 const upsertReviewStmt = db.prepare(
   `INSERT INTO sleep_reviews
      (child_id, night_date, true_onset_at, true_wake_at, true_onset_transition_id,
-      true_wake_transition_id, computed_onset_at, computed_wake_at, note, dismissed, reviewed_at)
+      true_wake_transition_id, computed_onset_at, computed_wake_at, note, dismissed, nobody_in_bed,
+      reviewed_at)
    VALUES (@child_id, @night_date, @true_onset_at, @true_wake_at, @true_onset_transition_id,
            @true_wake_transition_id, @computed_onset_at, @computed_wake_at, @note, @dismissed,
-           datetime('now'))
+           @nobody_in_bed, datetime('now'))
    ON CONFLICT(child_id, night_date) DO UPDATE SET
      true_onset_at            = excluded.true_onset_at,
      true_wake_at             = excluded.true_wake_at,
@@ -39,6 +40,7 @@ const upsertReviewStmt = db.prepare(
      computed_wake_at         = excluded.computed_wake_at,
      note                     = excluded.note,
      dismissed                = excluded.dismissed,
+     nobody_in_bed            = excluded.nobody_in_bed,
      reviewed_at              = datetime('now')`
 );
 
@@ -214,20 +216,48 @@ export function getNightReview(childId, nightDate) {
 // Only keys actually supplied are written; anything left `undefined` keeps its stored value. Without
 // that, a stale card on a second device sending `{dismissed:true}` would blank the times and note a
 // parent had carefully entered on the first — the two-phones case this app is built for.
+//
+// `nobodyInBed` — "no one was in the bed" — and the four true_* fields are MUTUALLY EXCLUSIVE, and this
+// is where that is enforced for every caller, not only the route (plan review R1, both reviewers):
+//   - A true flag NULLS all four true_* columns. A row saying both "nobody slept here" and "they slept
+//     19:40-06:10" would be a contradiction applyCorrection can only resolve by silently ignoring half
+//     of it.
+//   - A true flag together with a real time is refused with a throw. The route refuses it first with a
+//     400, so reaching this throw means a caller skipped validation — a bug, not a user mistake.
+//   - A real time with the flag OMITTED clears the flag: the newest answer wins. Without this, an older
+//     open page (or a second phone) that has never heard of the flag could save times over a flagged
+//     night and have them stored-but-invisible, because the flag would still win at display time.
+//   - `null` counts as "not answering", for the flag and the times alike — the current client sends
+//     explicit nulls for fields it isn't answering (NightReview.jsx's save), so null must not clear a
+//     stored answer any more than `undefined` does.
+//   - Explicitly saving the flag (either way) also resets `dismissed` to 0, unless this same save says
+//     otherwise: the parent has now answered, and reviewCardState reads a dismissal before anything
+//     else, so a dismissed-then-flagged night would never show its receipt.
 export function saveNightReview(childId, nightDate, patch = {}) {
   const existing = getReviewStmt.get(childId, nightDate) || {};
   const pick = (key, val) => (val === undefined ? (existing[key] ?? null) : (val ?? null));
+  const flagGiven = patch.nobodyInBed != null;
+  const timesGiven = [patch.trueOnsetAt, patch.trueWakeAt, patch.trueOnsetTransitionId, patch.trueWakeTransitionId]
+    .some((v) => v != null);
+  if (flagGiven && patch.nobodyInBed && timesGiven) {
+    throw new Error('nobody_in_bed cannot be saved together with a true time or event — pick one');
+  }
+  const nobody = flagGiven ? (patch.nobodyInBed ? 1 : 0) : timesGiven ? 0 : (existing.nobody_in_bed ?? 0);
+  // Applied on EVERY save while the flag stands, not only the one that sets it, so no path through this
+  // function can leave a flagged row carrying a time.
+  const keepTime = (key, val) => (nobody ? null : pick(key, val));
   upsertReviewStmt.run({
     child_id: childId,
     night_date: nightDate,
-    true_onset_at: pick('true_onset_at', patch.trueOnsetAt),
-    true_wake_at: pick('true_wake_at', patch.trueWakeAt),
-    true_onset_transition_id: pick('true_onset_transition_id', patch.trueOnsetTransitionId),
-    true_wake_transition_id: pick('true_wake_transition_id', patch.trueWakeTransitionId),
+    true_onset_at: keepTime('true_onset_at', patch.trueOnsetAt),
+    true_wake_at: keepTime('true_wake_at', patch.trueWakeAt),
+    true_onset_transition_id: keepTime('true_onset_transition_id', patch.trueOnsetTransitionId),
+    true_wake_transition_id: keepTime('true_wake_transition_id', patch.trueWakeTransitionId),
     computed_onset_at: pick('computed_onset_at', patch.computedOnsetAt),
     computed_wake_at: pick('computed_wake_at', patch.computedWakeAt),
     note: pick('note', patch.note),
-    dismissed: patch.dismissed === undefined ? (existing.dismissed ?? 0) : (patch.dismissed ? 1 : 0),
+    dismissed: patch.dismissed !== undefined ? (patch.dismissed ? 1 : 0) : flagGiven ? 0 : (existing.dismissed ?? 0),
+    nobody_in_bed: nobody,
   });
   return getReviewStmt.get(childId, nightDate);
 }
@@ -324,10 +354,24 @@ export function applyVerdicts(childId, nightDate, verdicts, reasons) {
 // A precise fix needs the actual unobserved MINUTE RANGES persisted, not one aggregate count, and a
 // real recompute against them — a materially bigger change than this fix's scope. Not attempted here.
 // The result is floored at zero.
+//
+// "NO ONE WAS IN THE BED" (sleep_reviews.nobody_in_bed) is checked BEFORE the times. It carries no
+// times at all — saving it nulls them — so the old "no true_onset_at and no true_wake_at, so nothing to
+// do" early return would have swallowed it whole and the flag would have done nothing anywhere (plan
+// review; the tests pin this). See asNobodyInBed for what the night becomes.
 export function applyCorrection(childId, night) {
   if (!night || !night.night_date) return night;
   const r = getReviewStmt.get(childId, night.night_date);
-  if (!r || (!r.true_onset_at && !r.true_wake_at)) return night;
+  if (!r) return night;
+  if (r.nobody_in_bed) {
+    // Plan review R8. An `off` night had tracking disabled: nothing was measured, so there is no
+    // detector claim to overrule, and turning "we weren't watching" into "we watched and nobody was
+    // there" would invent an observation. A night still IN PROGRESS is the live "tonight so far" view,
+    // which must show what the cameras see right now — the flag takes effect once the night is over.
+    if (night.status === 'off' || nightNotOverYet(night)) return night;
+    return asNobodyInBed(night);
+  }
+  if (!r.true_onset_at && !r.true_wake_at) return night;
 
   const onset = r.true_onset_at || night.onset_at;
   const wake = r.true_wake_at || night.wake_at;
@@ -348,6 +392,69 @@ export function applyCorrection(childId, night) {
 
 export function applyCorrections(childId, nights) {
   return (nights || []).map((n) => applyCorrection(childId, n));
+}
+
+// The sleep CLAIMS a detector-`empty` night carries as null. They are exactly the fields computeNight's
+// EMPTY BED early return leaves at `base`'s null defaults (sleepAnalysis.js), and so exactly the columns
+// upsertNight stores as NULL for such a night, including the shadow and algo figures (plan review R7).
+// Everything NOT listed is an OBSERVATION about the night and is kept as measured: its window, how many
+// minutes the camera actually saw (coverage_minutes), the room's temperature, which camera scored it, and
+// what the parent was already notified. "Nobody was in the bed" is a statement about the child. It says
+// nothing about whether the camera was watching, and a detector-empty night keeps all of those too.
+//
+// ⚠️ A sleep claim or detail-only field added to sleep_nights or computeNight later must be listed here,
+// or it leaks onto a night the parent said was empty. The shape tests in nobody-in-bed.test.js exist to
+// catch that, and they read the schema (PRAGMA) and a real detector-empty computeNight output rather than
+// a list: a new sleep_nights column fails them until it is classified, and a new computeNight key fails
+// them if it leaks (as long as the test's `ok` night gives it a value). A new OBSERVATION key on
+// computeNight's `base` is kept automatically, which is the right default for those.
+const EMPTY_NIGHT_NULLS = [
+  'onset_at', 'wake_at', 'in_bed_at',
+  'onset_at_shadow', 'wake_at_shadow', 'onset_at_algo', 'wake_at_algo',
+  'asleep_minutes', 'awake_minutes', 'unknown_minutes', 'wake_count', 'longest_stretch_minutes',
+];
+// The detail view's per-minute extras (`?detail=1`). computeNight builds these only AFTER it has decided
+// the night is `ok`, so a detector-empty night never has them. Removed rather than nulled, so a flagged
+// night's response has the same keys as a detector-empty one, not the same keys with nulls in them.
+const SCORED_NIGHT_DETAIL = [
+  'transitions', 'timeline', 'wakes', 'visits', 'segments', 'display_start', 'display_end', 'alerts', 'wakeClips',
+];
+
+// The night exactly as a detector-`empty` night of the same window would read, plus what the parent
+// overruled. `corrected: true` is what tells the UI this came from a parent and not the cameras, so its
+// copy can say "you said" instead of claiming the cameras "saw no one sleeping here". `algo_status`,
+// `algo_onset_at` and `algo_wake_at` keep the detector's own answer visible alongside, the same way a
+// time correction keeps `algo_*`, and `sleep_nights` itself is never touched, so un-flagging restores
+// the detector's night exactly.
+//
+// Applied whatever the stored status was (`ok`, `no_sleep`, `no_data`, or already `empty`). The UI
+// attributes it to the parent, so it stays honest either way.
+//
+// `nobody_in_bed: true` is its OWN field, separate from `corrected` (code-review finding, 2026-09-29):
+// a time correction on a night already `status:'empty'` ALSO sets `corrected: true` (see the branch
+// below), so a frontend that keyed its "you said no one was in the bed" copy on `corrected` alone would
+// mislabel a night where a parent had only fixed a time. This field is the one thing that's true only
+// on THIS path.
+function asNobodyInBed(night) {
+  const out = { ...night };
+  for (const k of EMPTY_NIGHT_NULLS) out[k] = null;
+  for (const k of SCORED_NIGHT_DETAIL) delete out[k];
+  out.status = 'empty';
+  out.corrected = true;
+  out.nobody_in_bed = true;
+  out.algo_status = night.status ?? null;
+  out.algo_onset_at = night.onset_at ?? null;
+  out.algo_wake_at = night.wake_at ?? null;
+  return out;
+}
+
+// Is this night's window still open? computeNight's output says so directly (`in_progress`). A STORED
+// row has no such column, so for those it is read off window_end. An admin `?store=1` for tonight's
+// date is the one way a still-running night gets into sleep_nights, and it must not slip past R8.
+function nightNotOverYet(night) {
+  if (typeof night.in_progress === 'boolean') return night.in_progress;
+  const endMs = night.window_end ? Date.parse(`${night.window_end.replace(' ', 'T')}Z`) : NaN;
+  return Number.isFinite(endMs) && Date.now() < endMs;
 }
 
 // Is last night waiting to be reviewed? Drives the card on the child's page.
@@ -405,13 +512,19 @@ export function reviewCardState(childId) {
   if (!nightDate) return { state: 'none', pending: null };
   const r = getReviewStmt.get(childId, nightDate);
   // A dismissal is not an answer: there is nothing to confirm back, and re-showing it would defeat
-  // the dismissal.
-  if (!r || r.dismissed || (!r.true_onset_at && !r.true_wake_at)) return { state: 'none', pending: null };
+  // the dismissal. "No one was in the bed" IS an answer even though it carries no times. Without it
+  // here, a parent who flagged last night would see the card simply vanish, which is the "did it
+  // save?" failure this state exists to prevent.
+  if (!r || r.dismissed || (!r.true_onset_at && !r.true_wake_at && !r.nobody_in_bed)) return { state: 'none', pending: null };
   return {
     state: 'done',
     pending: null,
     night_date: nightDate,
     true_onset_at: r.true_onset_at,
     true_wake_at: r.true_wake_at,
+    // Additive (never break open clients). A page loaded before this existed ignores the field and,
+    // finding no times, renders its receipt as "You said — to —" (ReviewReceipt.jsx's '—' fallback).
+    // That is still a visible "recorded" with a way back in, and it lasts only until that page reloads.
+    nobody_in_bed: !!r.nobody_in_bed,
   };
 }

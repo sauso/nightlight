@@ -156,6 +156,29 @@ describe('SleepSummaryCard', () => {
     expect(await screen.findByText('No one in the bed.')).toBeInTheDocument();
   });
 
+  test('a PARENT-flagged empty night says "You said", not the detector-empty wording', async () => {
+    // `nobody_in_bed` distinguishes them, deliberately NOT `corrected` (code-review finding, see the
+    // next test): the detector-empty wording is a coverage claim ("the cameras watched...", implied by
+    // "No one in the bed"), which is honest for a night the DETECTOR scored empty but not for one a
+    // parent flagged after the detector said something else entirely. `nobody_in_bed: true` is what a
+    // real `asNobodyInBed` overlay carries (sleepReviews.js).
+    live({ scope: 'last_night', night: { status: 'empty', corrected: true, nobody_in_bed: true, night_date: '2026-09-01' } });
+    show();
+    expect(await screen.findByText('You said no one was in the bed.')).toBeInTheDocument();
+    expect(screen.queryByText(/nothing to report for this night/)).not.toBeInTheDocument();
+  });
+
+  // ★ REGRESSION (code-review finding, 2026-09-29): a plain TIME correction on a night that was already
+  // `status: 'empty'` also sets `corrected: true` (sleepReviews.js's OTHER `applyCorrection` branch —
+  // not `asNobodyInBed`, the only path that sets `nobody_in_bed`). Keying this copy on `corrected` alone
+  // told a parent who had only typed a time that they had said no one was in the bed at all — false.
+  test('a TIME correction on an already-empty night is NOT read as "no one was in the bed"', async () => {
+    live({ scope: 'last_night', night: { status: 'empty', corrected: true, night_date: '2026-09-01' } });
+    show();
+    expect(await screen.findByText('No one in the bed — nothing to report for this night.')).toBeInTheDocument();
+    expect(screen.queryByText('You said no one was in the bed.')).not.toBeInTheDocument();
+  });
+
   test('no clear sleep reads as "not asleep yet" tonight and "none detected" afterwards', async () => {
     live({ scope: 'tonight', night: { status: 'no_sleep' } });
     const { unmount } = show();

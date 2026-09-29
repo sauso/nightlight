@@ -177,7 +177,10 @@ db.exec(`
   -- child's cameras' activity_samples over the configured night window, infers asleep/awake per minute,
   -- and stores the derived metrics here so the app shows "last night" without recomputing. night_date is
   -- the LOCAL calendar date the night started (its evening). UNIQUE(child_id, night_date) so a recompute
-  -- (after tuning) overwrites rather than duplicates. Times are UTC; status: ok | no_sleep | no_data.
+  -- (after tuning) overwrites rather than duplicates. Times are UTC; status: ok | no_sleep | no_data |
+  -- empty (watched all night, nobody in the bed) | off (tracking disabled). A parent's "no one was in the
+  -- bed" (sleep_reviews.nobody_in_bed) is NOT written here — this row stays the detector's own answer and
+  -- the correction is overlaid at read time (lib/sleepReviews.js applyCorrection).
   CREATE TABLE IF NOT EXISTS sleep_nights (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     child_id TEXT NOT NULL,
@@ -223,6 +226,10 @@ db.exec(`
   -- course of one morning as ordinary daytime activity accumulated inside the analysis lookahead. A
   -- ground-truth row that stored only the true time would silently re-score itself against a different
   -- answer later, and "we were right about this night" would quietly become true or false on its own.
+  --
+  -- nobody_in_bed (0/1, default 0): the parent's "no one was in the bed" for the WHOLE night. Mutually
+  -- exclusive with the true_* columns — saveNightReview nulls them when it is set, and a time saved
+  -- later clears it — so a row can never claim both "nobody slept here" and "they slept 19:40-06:10".
   CREATE TABLE IF NOT EXISTS sleep_reviews (
     child_id TEXT NOT NULL,
     night_date TEXT NOT NULL,
@@ -234,6 +241,7 @@ db.exec(`
     computed_wake_at TEXT,
     note TEXT,
     dismissed INTEGER NOT NULL DEFAULT 0,
+    nobody_in_bed INTEGER NOT NULL DEFAULT 0,
     reviewed_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (child_id, night_date)
   );
@@ -397,6 +405,19 @@ if (!bedTxColumns.includes('out_frames')) {
 const sleepReviewColumns = db.prepare('PRAGMA table_info(sleep_reviews)').all().map((c) => c.name);
 for (const col of ['true_onset_transition_id', 'true_wake_transition_id']) {
   if (!sleepReviewColumns.includes(col)) db.exec(`ALTER TABLE sleep_reviews ADD COLUMN ${col} INTEGER`);
+}
+
+// "No one was in the bed" — a parent saying the detector's whole night was about an empty bed (added
+// 2026-09-29, after a night the detector scored as 628 minutes asleep in a bed nobody slept in, with no
+// way to say so). Also in the CREATE TABLE above for fresh installs; this guard is the upgrade path.
+//
+// ⚠️ Its OWN statement, deliberately NOT a third entry in the loop above (plan review R6). That loop
+// emits a bare `INTEGER`, which leaves every EXISTING review NULL — a third state ("never asked") that
+// every reader would have to remember to coalesce, and `r.nobody_in_bed = 0` in SQL silently does not
+// match NULL. `NOT NULL DEFAULT 0` backfills every existing row to "not said" in the same statement;
+// SQLite accepts ADD COLUMN ... NOT NULL only when a non-null default is given, which this is.
+if (!sleepReviewColumns.includes('nobody_in_bed')) {
+  db.exec('ALTER TABLE sleep_reviews ADD COLUMN nobody_in_bed INTEGER NOT NULL DEFAULT 0');
 }
 
 const settingsColumns = db.prepare('PRAGMA table_info(settings)').all().map((c) => c.name);

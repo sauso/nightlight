@@ -7,6 +7,10 @@ backend/node_modules/
 frontend/dist/
 backend/public/
 
+# vitest 5's --reporter=json writes here instead of stdout (breaks scripts/mutate.mjs's frontend
+# runner — see that finding, filed separately). Not build output worth keeping either way.
+frontend/.vitest/
+
 # Local data (SQLite DB, logs, MediaMTX runtime config) - never commit this
 data/
 

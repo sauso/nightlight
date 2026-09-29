@@ -361,6 +361,16 @@ report (the child's sleep card and detail page) keeps catching up, not another p
 never resolves at all within that window, there is no follow-up to send — the original
 report, with no wake time listed, is what you get.
 
+**Marking a night "No one was in the bed" stops its follow-up.** Once you have said nobody slept there
+(in the morning review, for that child and that night), Nightlight will not send a "Sleep report
+updated" telling you when they got up. What it will **not** do is take back the report that already
+went out: a delivered notification can't be recalled, so that one still describes the night as the
+cameras read it. The same applies if you mark the night *before* the first report is sent (possible in
+the first half-hour or so after the window closes): the report still describes the cameras' version.
+Take the mark back within about 3 hours of the window closing and the follow-up can still arrive (once a
+wake time is known, including one worked out while the mark was on), because the app is showing the
+cameras' version of the night again. After those 3 hours, nothing more is sent either way.
+
 ## Troubleshooting
 
 - **"Send test" says it timed out after 10s.** Nightlight gives any notification provider **10
