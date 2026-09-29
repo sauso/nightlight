@@ -21,9 +21,10 @@ import { captureWakeClip, pruneWakeClips, getWakeClipSettings } from './recordin
 //     WAKE_ACTIVE_MIN active minutes;
 //   * anything shorter is a stir and is deliberately NOT recorded (owner's call, 2026-08-26).
 //
-// The ring is the reason this can work at all. It is only ~63s deep, but a wake needs several minutes
-// to qualify, so the moment we see the FIRST active minute we hold the ring at that point. If the run
-// turns out to be a stir we release it and nothing is written. See clipRecorder.holdRing.
+// The ring is the reason this can work at all. It is only 23-63 s deep (depending on the clip settings,
+// see handleMinute), but a wake needs several minutes to qualify, so the moment we see the FIRST active
+// minute we hold the ring at that point. If the run turns out to be a stir we release it and nothing is
+// written. See clipRecorder.holdRing.
 
 const { MOTION_ACTIVE, SOUND_ACTIVE, ONSET_QUIET_MIN, WAKE_ACTIVE_MIN, WAKE_GAP_MIN } = SLEEP_THRESHOLDS;
 
@@ -74,7 +75,7 @@ function reset(cameraId, st) {
 
 const cameraQ = db.prepare('SELECT id, name, child_id, disabled FROM cameras WHERE id = ?');
 
-// 'YYYY-MM-DD HH:MM:00' (UTC, from activityTracker) -> epoch ms.
+// 'YYYY-MM-DD HH:MM:00' (UTC, from activityTracker) -> epoch ms of the minute's START.
 function bucketMs(bucketStart) {
   return Date.parse(`${bucketStart.replace(' ', 'T')}Z`);
 }
@@ -91,7 +92,20 @@ export function handleMinute({ cameraId, bucketStart, motionPeak, soundPeak }) {
     return null;
   }
 
-  const at = bucketMs(bucketStart);
+  // ★ THE MINUTE'S END, NOT ITS START (#447). activityTracker now labels a minute by when its samples
+  // arrived and hands it over at that minute's END. Before #447 the label was the FLUSH time floored to
+  // the minute, which fell at a boot-dependent point INSIDE the 60 s of samples it held, and the minute was
+  // handed over 0-60 s after that label. The true start would move the hold point a full minute back from
+  // the moment it is taken, and the ring may not reach it: the ring is 63 s deep only with on-demand Record
+  // on, 38 s with it off and 23 s at the smallest clip settings (clipRecorder.ringDepthMsFor; nothing sizes
+  // it for wake clips). Plan review round 2 measured the true start losing the lead-in of 100% of wake clips
+  // on a 38 s ring and failing 96% on a 23 s one. The end keeps the hold point at most HOLD_LEAD_MS + one
+  // tracker tick old when it is taken, on every ring size (wake-watcher.test.js pins it) — never older than
+  // before #447, when it was HOLD_LEAD_MS + 0-60 s old.
+  // ⚠️ The price, stated: the clip now always starts at the END of the wake's first active minute, where
+  // before it started at that boot-dependent point inside it (on average 30 s earlier in the activity).
+  // Anchoring on the first active FRAME, with a ring sized for wake clips, is issue #412.
+  const at = bucketMs(bucketStart) + MINUTE_MS;
   if (!Number.isFinite(at)) return null;
 
   const active =

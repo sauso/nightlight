@@ -25,8 +25,9 @@ process.env.PATH = emptyBinDir;
 
 const { default: db } = await import('../src/db.js');
 const { SLEEP_THRESHOLDS } = await import('../src/lib/sleepAnalysis.js');
-const { startSegmenter, stopAllSegmenters, isSegmenterRunning } = await import('../src/lib/clipRecorder.js');
-const { holdOwners, RING_OWNER } = await import('../src/lib/ringHolds.js');
+const { startSegmenter, stopAllSegmenters, isSegmenterRunning, ringDepthMs } = await import('../src/lib/clipRecorder.js');
+const { holdOwners, effectiveHold, RING_OWNER } = await import('../src/lib/ringHolds.js');
+const activity = await import('../src/lib/activityTracker.js');
 const { handleMinute, startWakeWatcher, stopWakeWatcher, sweepStaleRuns, _state } =
   await import('../src/lib/wakeWatcher.js');
 
@@ -300,6 +301,57 @@ describe('★ #446 — a WAKE hold is gated on wake clips actually being enabled
 
     assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE], 'a WAKE hold should have been taken');
   });
+});
+
+describe('★ #447 — the WAKE hold is taken young enough for every ring size the settings allow', () => {
+  // activityTracker labels a minute by when its samples ARRIVED and hands it over at the minute's END, on a
+  // 1 s tick. handleMinute anchors the run at that END and holds the ring HOLD_LEAD_MS (15 s) before it. The
+  // ring is only as deep as the clip settings make it (clipRecorder.ringDepthMsFor, nothing sizes it for wake
+  // clips): 63 s with on-demand Record on, 38 s with it off, 23 s at the smallest clip settings. A hold point
+  // older than the ring when it is taken protects nothing: the lead-in is already gone.
+  // This drives the REAL chain — samples into the tracker, its ticks, its listener into handleMinute, the hold —
+  // so it fails both on a minute delivered late (at +GRACE, 22.9 s old here) and on a hold anchored at the
+  // minute's START (75.9 s old here: past every ring). Before #447 the hold was 15 s + the flush phase (0-60 s)
+  // old; ≤ 16 s is never worse than the best case that had.
+  for (const { preRollSec, postRollSec, ring, why } of [
+    { preRollSec: 30, postRollSec: 15, ring: 63_000, why: 'on-demand Record on (its 30 s pre-roll)' },
+    { preRollSec: 5, postRollSec: 15, ring: 38_000, why: 'Record off, default clip settings' },
+    { preRollSec: 0, postRollSec: 5, ring: 23_000, why: 'the smallest clip settings allowed' },
+  ]) {
+    test(`${ring / 1000} s ring (${why}): the hold point is at most 16 s old when it is taken, and at least 15 s`, () => {
+      db.prepare("UPDATE settings SET wake_clips_enabled = 1 WHERE id = 'app'").run();
+      const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(CAM);
+      startSegmenter(CAM, camera.mediamtx_path, { preRollSec, postRollSec });
+      assert.equal(ringDepthMs(CAM), ring, 'precondition: the ring this case is about');
+      settle();
+      activity._resetActivityTrackerForTests();
+      const off = activity.onMinuteFlushed(handleMinute);
+      try {
+        // The last whole minute: inside the child's window, which is built around the real clock.
+        const M = Math.floor(Date.now() / 60_000) * 60_000 - 60_000;
+        activity.recordMotion(CAM, MOTION_ACTIVE + 0.05, null, M + 20_000); // the wake's first active minute
+        let takenAt = null;
+        // The tracker's 1 s timer on a .9 s phase: the worst case, the minute ends just after a tick.
+        for (let t = M + 900; t < M + 3 * 60_000 && takenAt === null; t += 1000) {
+          activity.flushActivity(t);
+          if (effectiveHold(CAM) !== null) takenAt = t;
+        }
+        assert.ok(takenAt !== null, 'a WAKE hold was taken');
+        assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE]);
+        const age = takenAt - effectiveHold(CAM);
+        assert.ok(age <= ring, `the hold point was ${age} ms old against a ${ring} ms ring: the lead-in is gone`);
+        assert.ok(age <= 16_000, `the hold point was ${age} ms old: more than HOLD_LEAD_MS + one tick`);
+        // ...and from BELOW (#447 fix round 1: with only the upper bound, an anchor a minute or 30 s LATER than the
+        // minute's end passed, because a hold point in the future has a negative age). The listener hears a minute
+        // at or after its end, so an anchor at the end is never later than the tick that took the hold, and the
+        // hold sits HOLD_LEAD_MS (15 s, wakeWatcher.js, not exported) before that anchor: at least 15 s old. Less
+        // means the anchor is a moment that had not happened yet, and the clip would open after the movement.
+        assert.ok(age >= 15_000, `the hold point was ${age} ms old: younger than HOLD_LEAD_MS, so anchored in the future`);
+      } finally {
+        off();
+      }
+    });
+  }
 });
 
 // -------------------------------------------------------------------------------------------

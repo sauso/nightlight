@@ -583,7 +583,9 @@ router.get('/:id/sensor-history', requireAuth, (req, res) => {
 
 // Per-minute motion/sound activity timeline for one camera (the raw signal sleep tracking is built
 // on). Any signed-in user. `hours` (default 24, capped at 7 days); ascending by minute. Empty until
-// the camera has run a detector for a while.
+// the camera has run a detector for a while. `t` is the UTC minute the samples ARRIVED in (#447; before
+// it, the minute a flush timer fired in), and the latest minute appears ~7 s after it ends. Two rows can
+// share a `t` after a big backward clock step (KNOWN-ISSUES.md, "The sleep timeline's minutes...").
 router.get('/:id/activity-history', requireAuth, (req, res) => {
   const hours = Math.min(168, Math.max(1, parseInt(req.query.hours, 10) || 24));
   const rows = db

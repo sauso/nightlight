@@ -938,10 +938,11 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       // leaves an index at its null default now.
       //
       // ⚠️ OR-MERGE, NOT LAST-WRITE-WINS (found by adversarial review of #350's own fix).
-      // `activity_samples` has no uniqueness constraint on (camera_id, bucket_start) —
-      // `flushActivity` is explicitly "exported for tests / forced flushes", so a forced flush
-      // landing in the same minute as the interval-driven one can legitimately write a SECOND row
-      // for that bucket. The query above has no ORDER BY, so which row lands last in the loop is
+      // `activity_samples` has no uniqueness constraint on (camera_id, bucket_start), and a SECOND row
+      // for a bucket is real: rows written before #447 were labelled with a flush time, which a forced
+      // flush or a clock step could repeat, and since #447 a wall clock that steps back by more than two
+      // minutes makes activityTracker re-baseline and write the repeated minutes' labels again (its
+      // minuteFor). The query above has no ORDER BY, so which row lands last in the loop is
       // arbitrary. A plain assignment let a later quiet duplicate silently overwrite an earlier
       // active one — manufacturing confirmed-quiet evidence for a minute that had real movement,
       // exactly the failure mode this tri-state conversion exists to prevent. `state[]`'s main
@@ -1400,11 +1401,12 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
         if (i < totalMin || i >= metricsEnd) continue;
         const rowActive = isActiveRow(r);
         if (rowActive) activeMetrics[i] = true;
-        // OR-merge, matching the main population loop's own rule for `state` (line ~646) — a forced
-        // flush can write TWO rows for one minute (activity_samples has no uniqueness constraint on
-        // camera_id+bucket_start), and last-write-wins here could let a quiet duplicate silently
-        // downgrade a minute activeMetrics already correctly marked active, disagreeing about the
-        // same minute for no real reason (issue #442, found by adversarial review).
+        // OR-merge, matching the main population loop's own rule for `state` (line ~646) — TWO rows for
+        // one minute are real (activity_samples has no uniqueness constraint on camera_id+bucket_start:
+        // pre-#447 flush-time labels could repeat, and since #447 a big backward clock step re-writes
+        // labels — see the cribActExt comment above), and last-write-wins here could let a quiet
+        // duplicate silently downgrade a minute activeMetrics already correctly marked active,
+        // disagreeing about the same minute for no real reason (issue #442, found by adversarial review).
         stateMetrics[i] = stateMetrics[i] === null ? rowActive : stateMetrics[i] || rowActive;
       }
       metricsState = stateMetrics;

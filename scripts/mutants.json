@@ -3981,7 +3981,7 @@
   {
     "label": "#373 M-W02: the motion stdout loop no longer observes its frames",
     "file": "backend/src/lib/motionDetector.js",
-    "find": "        obs.onSample(frame, rx.mono, rx.wall);",
+    "find": "        obs.onSample(frame, rx.mono, rx.wall, { token });",
     "replace": "        // observe removed",
     "expect": "killed",
     "tests": ["detector-observation-wiring.test.js"],
@@ -4662,8 +4662,8 @@
   {
     "label": "#373 M-W07: F8 motion observes a frame BEFORE its decision handler (R1-F8)",
     "file": "backend/src/lib/motionDetector.js",
-    "find": "        handleFrame(frame);\r\n        // #373: exactly one observation per frame, AFTER its decision handler has returned (plan §D,\r\n        // R1-F8): the handler's inputs are the same bytes in the same order, and its own Date.now() is\r\n        // read before any observation work for this frame. The clock only reads the frame.\r\n        obs.onSample(frame, rx.mono, rx.wall);\r\n",
-    "replace": "        obs.onSample(frame, rx.mono, rx.wall);\r\n        handleFrame(frame);\r\n",
+    "find": "        handleFrame(frame, token, rx.wall);\r\n        // #373: exactly one observation per frame, AFTER its decision handler has returned (plan §D,\r\n        // R1-F8): the handler's inputs are the same bytes in the same order, and its own Date.now() is\r\n        // read before any observation work for this frame. The clock only reads the frame.\r\n        // #493: the same token, so the verdict on this frame finds the counts handleFrame just staged.\r\n        obs.onSample(frame, rx.mono, rx.wall, { token });\r\n",
+    "replace": "        obs.onSample(frame, rx.mono, rx.wall, { token });\r\n        handleFrame(frame, token, rx.wall);\r\n",
     "expect": "killed",
     "tests": ["detector-observation-wiring.test.js"],
     "namePattern": "F8 motion"
@@ -4680,8 +4680,8 @@
   {
     "label": "#373 M-W09: F8 sound observes a window BEFORE its decision handler (R1-F8)",
     "file": "backend/src/lib/soundDetector.js",
-    "find": "        handleReading(level);\r\n        // #373: one observation per window, AFTER its decision handler returned (R1-F8). It runs for every\r\n        // window, silent ones included — the early return inside handleReading cannot skip it — and a\r\n        // silent window counts as SAMPLED but not ANALYSED coverage (C5).\r\n        obs.onSample(win, rx.mono, rx.wall, { analysed: Number.isFinite(level) });\r\n",
-    "replace": "        obs.onSample(win, rx.mono, rx.wall, { analysed: Number.isFinite(level) });\r\n        handleReading(level);\r\n",
+    "find": "        handleReading(level, rx.wall);\r\n        // #373: one observation per window, AFTER its decision handler returned (R1-F8). It runs for every\r\n        // window, silent ones included — the early return inside handleReading cannot skip it — and a\r\n        // silent window counts as SAMPLED but not ANALYSED coverage (C5).\r\n        obs.onSample(win, rx.mono, rx.wall, { analysed: Number.isFinite(level) });\r\n",
+    "replace": "        obs.onSample(win, rx.mono, rx.wall, { analysed: Number.isFinite(level) });\r\n        handleReading(level, rx.wall);\r\n",
     "expect": "killed",
     "tests": ["detector-observation-wiring.test.js"],
     "namePattern": "F8 sound"
@@ -6395,8 +6395,8 @@
   {
     "label": "#493 L01: the stored motion_frames reads the RAW count (no correction reaches the row)",
     "file": "backend/src/lib/activityTracker.js",
-    "find": "        s.observedMotionFrames,",
-    "replace": "        s.motionFrames,",
+    "find": "      s.observedMotionFrames,",
+    "replace": "      s.motionFrames,",
     "expect": "killed",
     "tests": ["activityTracker.test.js"],
     "namePattern": "#493"
@@ -6404,8 +6404,8 @@
   {
     "label": "#493 L02: motion_level averages over the RAW count",
     "file": "backend/src/lib/activityTracker.js",
-    "find": "        s.observedMotionFrames ? s.motionSum / s.observedMotionFrames : null,",
-    "replace": "        s.motionFrames ? s.motionSum / s.motionFrames : null,",
+    "find": "      s.observedMotionFrames ? s.motionSum / s.observedMotionFrames : null,",
+    "replace": "      s.motionFrames ? s.motionSum / s.motionFrames : null,",
     "expect": "killed",
     "tests": ["activityTracker.test.js"],
     "namePattern": "#493"
@@ -6413,8 +6413,8 @@
   {
     "label": "#493 L03: motion_out_level averages over the RAW out-of-bed count",
     "file": "backend/src/lib/activityTracker.js",
-    "find": "        s.observedMotionOutFrames ? s.motionOutSum / s.observedMotionOutFrames : null,",
-    "replace": "        s.motionOutFrames ? s.motionOutSum / s.motionOutFrames : null,",
+    "find": "      s.observedMotionOutFrames ? s.motionOutSum / s.observedMotionOutFrames : null,",
+    "replace": "      s.motionOutFrames ? s.motionOutSum / s.motionOutFrames : null,",
     "expect": "killed",
     "tests": ["activityTracker.test.js"],
     "namePattern": "#493"
@@ -6422,8 +6422,8 @@
   {
     "label": "#493 L04: the row-write decision reads the OBSERVED count (an all-clone minute skips its row)",
     "file": "backend/src/lib/activityTracker.js",
-    "find": "    if (s.motionFrames === 0 && s.soundWindows === 0) continue;",
-    "replace": "    if (s.observedMotionFrames === 0 && s.soundWindows === 0) continue;",
+    "find": "  return s.motionFrames > 0 || s.soundWindows > 0;",
+    "replace": "  return s.observedMotionFrames > 0 || s.soundWindows > 0;",
     "expect": "killed",
     "tests": ["activityTracker.test.js"],
     "namePattern": "#493"
@@ -6431,8 +6431,8 @@
   {
     "label": "#493 L05: motion_peak NULLs on the OBSERVED count",
     "file": "backend/src/lib/activityTracker.js",
-    "find": "        s.motionFrames ? s.motionPeak : null,",
-    "replace": "        s.observedMotionFrames ? s.motionPeak : null,",
+    "find": "      s.motionFrames ? s.motionPeak : null,",
+    "replace": "      s.observedMotionFrames ? s.motionPeak : null,",
     "expect": "killed",
     "tests": ["activityTracker.test.js"],
     "namePattern": "#493"
@@ -6440,8 +6440,8 @@
   {
     "label": "#493 L06: motion_out_peak NULLs on the OBSERVED out-of-bed count",
     "file": "backend/src/lib/activityTracker.js",
-    "find": "        s.motionOutFrames ? s.motionOutPeak : null,",
-    "replace": "        s.observedMotionOutFrames ? s.motionOutPeak : null,",
+    "find": "      s.motionOutFrames ? s.motionOutPeak : null,",
+    "replace": "      s.observedMotionOutFrames ? s.motionOutPeak : null,",
     "expect": "killed",
     "tests": ["activityTracker.test.js"],
     "namePattern": "#493"
@@ -6449,8 +6449,8 @@
   {
     "label": "#493 L07: the minute listener's motionPeak NULLs on the OBSERVED count",
     "file": "backend/src/lib/activityTracker.js",
-    "find": "          motionPeak: s.motionFrames ? s.motionPeak : null,",
-    "replace": "          motionPeak: s.observedMotionFrames ? s.motionPeak : null,",
+    "find": "        motionPeak: s.motionFrames ? s.motionPeak : null,",
+    "replace": "        motionPeak: s.observedMotionFrames ? s.motionPeak : null,",
     "expect": "killed",
     "tests": ["activityTracker.test.js"],
     "namePattern": "#493"
@@ -6501,10 +6501,10 @@
     "namePattern": "#493"
   },
   {
-    "label": "#493 L13: the ledger is never pruned at a flush (unbounded)",
+    "label": "#493 L13 (re-homed by #447: the ledger is pruned per written minute, not cleared per flush): a written minute's staged frames are never pruned (unbounded)",
     "file": "backend/src/lib/activityTracker.js",
-    "find": "  cloneLedger.clear();",
-    "replace": "  void cloneLedger;",
+    "find": "  for (const key of s.keys) cloneLedger.delete(key);",
+    "replace": "  void s.keys;",
     "expect": "killed",
     "tests": ["activityTracker.test.js"],
     "namePattern": "#493"
@@ -6692,8 +6692,8 @@
   {
     "label": "#493 D07: the ledger and the clock number a frame differently (off by one)",
     "file": "backend/src/lib/motionDetector.js",
-    "find": "        handleFrame(frame, token);",
-    "replace": "        handleFrame(frame, token + 1);",
+    "find": "        handleFrame(frame, token, rx.wall);",
+    "replace": "        handleFrame(frame, token + 1, rx.wall);",
     "expect": "killed",
     "tests": ["detector-observation-wiring.test.js"],
     "namePattern": "#493"
@@ -6710,8 +6710,8 @@
   {
     "label": "#493 D09: the out-of-bed channel is never staged",
     "file": "backend/src/lib/motionDetector.js",
-    "find": "          recordMotionOut(camera.id, outFraction, sample);",
-    "replace": "          recordMotionOut(camera.id, outFraction);",
+    "find": "          recordMotionOut(camera.id, outFraction, sample, atMs);",
+    "replace": "          recordMotionOut(camera.id, outFraction, null, atMs);",
     "expect": "killed",
     "tests": ["detector-observation-wiring.test.js"],
     "namePattern": "#493"
@@ -6805,5 +6805,464 @@
     "expect": "killed",
     "tests": ["detector-observation-wiring.test.js"],
     "namePattern": "AFTER a relaunch"
+  },
+  {
+    "label": "#447 A00: control, a comment edit in activityTracker.js must change nothing",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "// Whether a minute has anything to store (and so anything to tell a listener).",
+    "replace": "// Whether a minute has anything to store (and so anything to tell a listener). [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#447"
+  },
+  {
+    "label": "#447 A01: the row is labelled with the time it is written (the pre-#447 flush-time label)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "      minuteBucketUtc(new Date(s.minuteMs)),",
+    "replace": "      minuteBucketUtc(new Date()),",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#447"
+  },
+  {
+    "label": "#447 A02: the listener is told the time it is called, not the minute it is about",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  const bucketStart = minuteBucketUtc(new Date(s.minuteMs));",
+    "replace": "  const bucketStart = minuteBucketUtc(new Date());",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#447"
+  },
+  {
+    "label": "#447 A03: no grace, the row is written at the minute's end (verdicts for its last 5 s are lost again)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "export const GRACE_MS = FINALIZE_MS + 2000;",
+    "replace": "export const GRACE_MS = 0;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "GRACE is 7 s"
+  },
+  {
+    "label": "#447 A04: the grace is FINALIZE_MS alone (5 s), with no margin for delivery",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "export const GRACE_MS = FINALIZE_MS + 2000;",
+    "replace": "export const GRACE_MS = FINALIZE_MS;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "GRACE is 7 s"
+  },
+  {
+    "label": "#447 A05: the grace is 8 s, not 7",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "export const GRACE_MS = FINALIZE_MS + 2000;",
+    "replace": "export const GRACE_MS = FINALIZE_MS + 3000;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "GRACE is 7 s"
+  },
+  {
+    "label": "#447 A06: the tick is 2 s, not 1 s (the wake watcher hears a minute up to 2 s late)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "const FLUSH_TICK_MS = 1000;",
+    "replace": "const FLUSH_TICK_MS = 2000;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "ticks every second"
+  },
+  {
+    "label": "#447 A07: the tick is the pre-#447 60 s",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "const FLUSH_TICK_MS = 1000;",
+    "replace": "const FLUSH_TICK_MS = 60 * 1000;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "ticks every second"
+  },
+  {
+    "label": "#447 A08: the listener is told at +GRACE, with the row, not at the minute's end",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "      if (!s.notified && (all || future || end <= now)) closeMinute(cameraId, s);",
+    "replace": "      if (!s.notified && (all || future || end + GRACE_MS <= now)) closeMinute(cameraId, s);",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "reaches its listener at its END"
+  },
+  {
+    "label": "#447 A08b: the listener is told at +GRACE — must be killed by the wake-watcher ring-depth test ALONE (delivery time x ring depth, plan round 1)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "      if (!s.notified && (all || future || end <= now)) closeMinute(cameraId, s);",
+    "replace": "      if (!s.notified && (all || future || end + GRACE_MS <= now)) closeMinute(cameraId, s);",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "hold point is at most 16 s"
+  },
+  {
+    "label": "#447 A09: no clamp, a small backward clock step re-baselines instead",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  if (last - minute <= STEP_CLAMP_MS) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "steps back 90 s"
+  },
+  {
+    "label": "#447 A10: a closed minute is re-opened by a sample stamped inside it (listener payload no longer equals the row)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  if (last === undefined || minute > last) return minute;",
+    "replace": "  return minute;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#447"
+  },
+  {
+    "label": "#447 A11: STEP_CLAMP_MS 0 (every backward step re-baselines)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "const STEP_CLAMP_MS = 2 * MINUTE_MS;",
+    "replace": "const STEP_CLAMP_MS = 0;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#447"
+  },
+  {
+    "label": "#447 A12: STEP_CLAMP_MS two hours (an hour-long step is lumped into one row)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "const STEP_CLAMP_MS = 2 * MINUTE_MS;",
+    "replace": "const STEP_CLAMP_MS = 120 * MINUTE_MS;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "steps back an HOUR"
+  },
+  {
+    "label": "#447 A13: a non-finite receipt time is used as given (a NaN minute is never closed)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  const at = Number.isFinite(atMs) ? atMs : Date.now();",
+    "replace": "  const at = atMs;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "not a finite number"
+  },
+  {
+    "label": "#447 A14: a minute ahead of the clock is never closed early (stranded until the clock catches up)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "      const future = s.minuteMs - now > STEP_CLAMP_MS;",
+    "replace": "      const future = false;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#447"
+  },
+  {
+    "label": "#447 A15: closing a future minute does not re-baseline the camera (the next present sample is read as another big step)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "      lastClosed.set(cameraId, Math.floor(now / MINUTE_MS) * MINUTE_MS - MINUTE_MS);",
+    "replace": "      void lastClosed;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "forward excursion"
+  },
+  {
+    "label": "#447 A16: writing a minute clears the WHOLE ledger (the #493 rule), losing the next minute's staged frames",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  for (const key of s.keys) cloneLedger.delete(key);",
+    "replace": "  cloneLedger.clear();",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "two minutes live side by side"
+  },
+  {
+    "label": "#447 A17: pruned keys never reach the late ring (lateVerdicts always 0)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  ring.push(s.keys);",
+    "replace": "  void ring;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#447"
+  },
+  {
+    "label": "#447 A18: the late ring is never trimmed (unbounded)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  while (ring.length > LATE_RING_MINUTES) ring.shift();",
+    "replace": "  void LATE_RING_MINUTES;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "memory stays bounded"
+  },
+  {
+    "label": "#447 A19: the late ring is 2 minutes deep, not >= 3",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "const LATE_RING_MINUTES = 3;",
+    "replace": "const LATE_RING_MINUTES = 2;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "memory stays bounded"
+  },
+  {
+    "label": "#447 A20: a repeated late verdict is counted again",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "      if (keys.delete(key)) {",
+    "replace": "      if (keys.has(key)) {",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "arrives after its minute was written"
+  },
+  {
+    "label": "#447 A21: a frame's second channel is staged against a minute it was not counted in",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  if (entry.bucket !== s) return;",
+    "replace": "  void s;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "two channels given receipt times"
+  },
+  {
+    "label": "#447 A22: a stop writes nothing (a minute in its grace is lost)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "      if (!s.notified && s.minuteMs + MINUTE_MS > nowMs) continue; // still receiving: never written here",
+    "replace": "      continue;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "a stop writes"
+  },
+  {
+    "label": "#447 A23: a stop writes the minute still receiving too (a same-minute restart would store it twice)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "      if (!s.notified && s.minuteMs + MINUTE_MS > nowMs) continue; // still receiving: never written here",
+    "replace": "      if (false) continue;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "a stop writes"
+  },
+  {
+    "label": "#447 A24: a stop tells the listeners (the wake watcher could start a capture during shutdown)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "      if (!s.notified) closeMinute(cameraId, s, false);",
+    "replace": "      if (!s.notified) closeMinute(cameraId, s);",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "a stop writes"
+  },
+  {
+    "label": "#447 A25: the [activity] counters line is not rate-limited",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "    if ((late === 0 && clamped === 0) || now - r.at < REPORT_MS) continue;",
+    "replace": "    if (late === 0 && clamped === 0) continue;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "GRACE is 7 s"
+  },
+  {
+    "label": "#447 A30: motion files a frame by a per-call Date.now(), not its event's receipt",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        handleFrame(frame, token, rx.wall);",
+    "replace": "        handleFrame(frame, token, Date.now());",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "receipt minute"
+  },
+  {
+    "label": "#447 A31: the out-of-bed channel reads its own clock (a frame's two channels can straddle a minute)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "          recordMotionOut(camera.id, outFraction, sample, atMs);",
+    "replace": "          recordMotionOut(camera.id, outFraction, sample);",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "receipt minute"
+  },
+  {
+    "label": "#447 A32: the in-bed channel reads its own clock",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        recordMotion(camera.id, fraction, sample, atMs);",
+    "replace": "        recordMotion(camera.id, fraction, sample);",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "receipt minute"
+  },
+  {
+    "label": "#447 A33: sound files a window by a per-call Date.now(), not its event's receipt",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "        handleReading(level, rx.wall);",
+    "replace": "        handleReading(level, Date.now());",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "receipt minute"
+  },
+  {
+    "label": "#447 A34: recordSound is not given the receipt time",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "      if (r.recordDb !== null) recordSound(camera.id, r.recordDb, atMs);",
+    "replace": "      if (r.recordDb !== null) recordSound(camera.id, r.recordDb);",
+    "expect": "killed",
+    "tests": ["detector-observation-wiring.test.js"],
+    "namePattern": "receipt minute"
+  },
+  {
+    "label": "#447 A40: the wake run is anchored at the minute's START (the hold point is a minute older than the ring may reach)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "  const at = bucketMs(bucketStart) + MINUTE_MS;",
+    "replace": "  const at = bucketMs(bucketStart);",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "hold point is at most 16 s"
+  },
+  {
+    "label": "#447 A50 (fix round 1): a sample may join a minute already told to the listeners (a backward step re-lives it: the row and the payload disagree)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  if (told?.notified) writeMinute(cameraId, told);",
+    "replace": "  void told;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#447 FIX"
+  },
+  {
+    "label": "#447 A51 (fix round 1): STEP_CLAMP_MS 1 minute",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "const STEP_CLAMP_MS = 2 * MINUTE_MS;",
+    "replace": "const STEP_CLAMP_MS = 1 * MINUTE_MS;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "exactly STEP_CLAMP_MS"
+  },
+  {
+    "label": "#447 A52 (fix round 1): STEP_CLAMP_MS 3 minutes",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "const STEP_CLAMP_MS = 2 * MINUTE_MS;",
+    "replace": "const STEP_CLAMP_MS = 3 * MINUTE_MS;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "exactly STEP_CLAMP_MS"
+  },
+  {
+    "label": "#447 A53 (fix round 1): STEP_CLAMP_MS 10 minutes",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "const STEP_CLAMP_MS = 2 * MINUTE_MS;",
+    "replace": "const STEP_CLAMP_MS = 10 * MINUTE_MS;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "exactly STEP_CLAMP_MS"
+  },
+  {
+    "label": "#447 A54 (fix round 1): STEP_CLAMP_MS 30 minutes",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "const STEP_CLAMP_MS = 2 * MINUTE_MS;",
+    "replace": "const STEP_CLAMP_MS = 30 * MINUTE_MS;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "exactly STEP_CLAMP_MS"
+  },
+  {
+    "label": "#447 A55 (fix round 1): the clamp window excludes its edge (a minute exactly 2 minutes back re-baselines)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  if (last - minute <= STEP_CLAMP_MS) {",
+    "replace": "  if (last - minute < STEP_CLAMP_MS) {",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "exactly STEP_CLAMP_MS"
+  },
+  {
+    "label": "#447 A56 (fix round 1): a minute exactly 2 minutes ahead of the tick is already closed early",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "      const future = s.minuteMs - now > STEP_CLAMP_MS;",
+    "replace": "      const future = s.minuteMs - now >= STEP_CLAMP_MS;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "exactly STEP_CLAMP_MS"
+  },
+  {
+    "label": "#447 A57 (fix round 1): the grace is FINALIZE_MS alone (5 s) — killed by the 3 fps stream tests, not only the planted-time one",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "export const GRACE_MS = FINALIZE_MS + 2000;",
+    "replace": "export const GRACE_MS = FINALIZE_MS;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "ticked every second"
+  },
+  {
+    "label": "#447 A58 (fix round 1): the grace is 6 s — killed by the 3 fps hiccup stream",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "export const GRACE_MS = FINALIZE_MS + 2000;",
+    "replace": "export const GRACE_MS = FINALIZE_MS + 1000;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "ticked every second"
+  },
+  {
+    "label": "#447 A59 (fix round 1): the wake run is anchored a minute AFTER the minute's end (a hold point in the future)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "  const at = bucketMs(bucketStart) + MINUTE_MS;",
+    "replace": "  const at = bucketMs(bucketStart) + 2 * MINUTE_MS;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "hold point is at most 16 s"
+  },
+  {
+    "label": "#447 A60 (fix round 1): the wake run is anchored 30 s after the minute's end",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "  const at = bucketMs(bucketStart) + MINUTE_MS;",
+    "replace": "  const at = bucketMs(bucketStart) + MINUTE_MS + 30000;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "hold point is at most 16 s"
+  },
+  {
+    "label": "#447 A61 (fix round 1): a re-baseline closes the step's OWN minute (every later sample of it is clamped into the next)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  lastClosed.set(cameraId, minute - MINUTE_MS);",
+    "replace": "  lastClosed.set(cameraId, minute);",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "steps back an HOUR"
+  },
+  {
+    "label": "#447 A62 (fix round 1): the late ring is 4 minutes deep, not 3",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "const LATE_RING_MINUTES = 3;",
+    "replace": "const LATE_RING_MINUTES = 4;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "late ring is exactly"
+  },
+  {
+    "label": "#447 A63 (fix round 1): the late ring is 6 minutes deep, not 3",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "const LATE_RING_MINUTES = 3;",
+    "replace": "const LATE_RING_MINUTES = 6;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "late ring is exactly"
+  },
+  {
+    "label": "#447 A64 (fix round 1, Codex): a resolved key stays in its slot's keys (a repeat after the write is counted late)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  entry.bucket.keys.delete(key);",
+    "replace": "  void entry;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "applied in the grace"
+  },
+  {
+    "label": "#447 A65 (fix round 1): a stop exactly at a minute's end treats that minute as still receiving and drops it",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "      if (!s.notified && s.minuteMs + MINUTE_MS > nowMs) continue; // still receiving: never written here",
+    "replace": "      if (!s.notified && s.minuteMs + MINUTE_MS >= nowMs) continue; // still receiving: never written here",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "a stop writes"
+  },
+  {
+    "label": "#447 A66 (fix round 1): the [activity] line ignores clamped samples",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "    if ((late === 0 && clamped === 0) || now - r.at < REPORT_MS) continue;",
+    "replace": "    if (late === 0 || now - r.at < REPORT_MS) continue;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "steps back 90 s"
+  },
+  {
+    "label": "#447 A67 (fix round 1): the tick closes a camera's minutes in insertion order, not oldest first",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "    for (const s of [...slots.values()].sort((a, b) => a.minuteMs - b.minuteMs)) {\r\n      const end = s.minuteMs + MINUTE_MS;",
+    "replace": "    for (const s of [...slots.values()]) {\r\n      const end = s.minuteMs + MINUTE_MS;",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "opened out of order"
   }
 ]

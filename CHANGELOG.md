@@ -51,11 +51,26 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   (`motion_frames`, `motion_level`, `motion_out_level`), so a minute's average can only go up. The peaks,
   which every sleep threshold reads, and motion alerts, in/out-of-bed detection and the sleep numbers are
   all unchanged (issue #493, narrowed: bed transitions and alerts are left to #452). No screen shows these
-  three numbers yet; this is groundwork for #447. Only proven repeats are left out, never frames `[obs]`
-  reports as `unknown`, so when its timestamps are unavailable nothing changes. About 1 in 12 repeats, the
-  ones that arrive in a minute's last ~5 seconds, is still counted. Details and limits:
-  [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "A stalled camera's repeated pictures are left out of the per-minute
-  motion count".
+  three numbers yet; this is groundwork for later sleep-analysis work. Only proven repeats are left out,
+  never frames `[obs]` reports as `unknown`, so when its timestamps are unavailable nothing changes. Repeats
+  judged after their minute was stored stay counted; since #447 (next entry) that happens only on a camera
+  that keeps stalling. Details and limits: [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "A stalled camera's repeated
+  pictures are left out of the per-minute motion count".
+- **Each minute of the sleep timeline now holds the samples that arrived in that minute.** The per-minute
+  motion and sound rows (`activity_samples`) were labelled with the minute a once-a-minute timer fired in,
+  and that timer's second depended on when Nightlight started, so a row labelled 19:01 held 19:00:35 to
+  19:01:35 on one boot and 19:00:10 to 19:01:10 on the next (issue #447). A row now holds exactly what
+  arrived in its UTC minute, and is stored 7 seconds after that minute ends. That wait also lets the stall
+  repeats of a minute's last seconds be left out in time: none of a steady camera's stay counted now, where
+  about 1 in 12 did. The live wake check hears each minute within a second of its end instead of up to a
+  minute later. Each row moves by less than a minute, but on a borderline night a computed bedtime or wake
+  time can move by more; nights already stored are not recomputed. Wake clips still start just before the
+  end of the wake's first active minute, which keeps them inside the recording ring on every clip setting
+  (starting them at the first moving frame is #412). A restart still loses only the minute being received,
+  as before: a minute still waiting its 7 seconds is stored on the way out. A new `[activity]` log line
+  reports repeats judged too late and clock steps.
+  Details and limits (clock steps, stalling cameras, what a restart loses): [KNOWN-ISSUES.md](KNOWN-ISSUES.md),
+  "The sleep timeline's minutes are the minutes the samples arrived in".
 
 ## [0.34.0] - 2026-09-28
 
