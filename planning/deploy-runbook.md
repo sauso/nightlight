@@ -40,9 +40,9 @@ the authority is `grep -n '^COPY' Dockerfile`, never memory. A change confined t
 
 Say which rule you applied, either way. **Never deploy silently and never skip silently.**
 
-⚠️ `backend/test/**` **does** ship inside the image, so a test-only change is still a staging deploy
-(a stale image means a stale suite) — but it is **not** a production concern, because the runtime stage
-does not copy it.
+⚠️ `backend/test/**` does **not** ship in the runtime image (no `COPY` in the runtime stage takes it —
+check with `grep -n '^COPY' Dockerfile`), so a test-only change **cannot change the running app** and
+needs no staging deploy — apply the rule above and say so.
 
 ### 1.2 Wait for the image
 A merge does not build anything you can deploy. Wait for `docker-publish.yml` to publish `:dev` **for
