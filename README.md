@@ -373,6 +373,25 @@ measurement**, and (like everything here) never a safety device — see the warn
     detector: correcting records what *you* know, recomputing re-asks the *app*.
   - **The detector's own answer is kept underneath, not overwritten.** That is deliberate — it is what
     a future improvement gets scored against. Nothing you enter here changes how sleep is detected.
+  - **"No one was in the bed" says the whole night was wrong, not just a time.** Next to the usual times
+    is a button for the case those don't fit at all — a night the detector scored as sleep, or as a wake
+    or two, when nobody was actually there. It changes the child's card and the sleep detail page to say
+    "You said no one was in the bed", the same way a time correction already shows your own times
+    instead of the detector's, and it is per night and per child — there's no house- or timezone-specific
+    assumption in it. **Someone was in the bed** undoes it and brings the detector's own night back.
+    - **What does and doesn't come back.** Undoing restores the detector's answer, but **not** any time
+      you had typed before you flagged the night — flagging clears those, and they are gone for good.
+      If you undo without typing anything new, the morning card then shows neither "ask" nor "done" for
+      that night: this is a known limit of the undo, not a bug, and the way past it is to type the real
+      times in again.
+    - **Unlike a night the detector itself scores empty, nothing is deleted.** That night's timelapse and
+      any recorded transition frames are kept exactly as they would be for any other night. The flag is
+      reversible, and a tap on this screen should never destroy video that undoing the tap could not
+      bring back.
+    - **Excluded from the sleep ↔ temperature averages** on the sleep detail page, so a night that never
+      happened can't drag those numbers around. A push notification already sent before you flag the
+      night cannot be recalled, but the automatic follow-up telling you when they got up is skipped once
+      you have.
   - **The card confirms it.** After you answer, the prompt becomes a short receipt showing what you
     recorded, and tapping it lets you change your mind.
   - **Any night can be reviewed, not just last night.** The sleep detail page has **Was this night

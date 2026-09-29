@@ -505,6 +505,32 @@ test('★ a no_data first pass must not waste a timelapse assembly — it waits 
   assert.equal(assembleCalls.mock.callCount(), 1, 'a provisional refresh of an already-scored night must not trigger a second pass');
 });
 
+test('a night a parent marked "no one was in the bed" still gets its timelapse — the mark deletes nothing', async (t) => {
+  // docs/recording.md states the difference from a detector-`empty` night: those frames are discarded,
+  // a parent-flagged night's are not, because the mark is reversible and a tap should never destroy
+  // video that taking it back could not restore. The job never reads sleep_reviews for this decision
+  // today, so this pins that against a future change that "helpfully" treats the flag as empty here.
+  // Flagged BEFORE the job's first scored pass, which is the only moment the flag could possibly matter:
+  // after that pass the timelapse decision has already been made.
+  layNight3([[at3(19, 0), at3(19, 10)], [at3(23, 0), at3(23, 6)], [at3(1, 0, 1), at3(1, 9, 1)]], at3(7, 0, 1));
+  const assembleCalls = t.mock.fn();
+  const discardCalls = t.mock.fn();
+  t.mock.module('../src/lib/timelapse.js', {
+    namedExports: { assembleTimelapse: assembleCalls, discardTimelapseFrames: discardCalls },
+  });
+  t.after(() => db.prepare('DELETE FROM sleep_reviews WHERE child_id = ?').run(KID));
+  const flush = () => new Promise((r) => setImmediate(r));
+
+  t.mock.timers.enable({ apis: ['Date'], now: at3(7, 5, 1).getTime() });
+  db.prepare('INSERT INTO sleep_reviews (child_id, night_date, nobody_in_bed) VALUES (?, ?, 1)').run(KID, NIGHT_DATE);
+  runNightlySleepJob();
+  await flush();
+  assert.equal(db.prepare('SELECT status FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(KID, NIGHT_DATE).status,
+    'ok', 'precondition: the detector scored it as sleep');
+  assert.equal(assembleCalls.mock.callCount(), 1, 'its timelapse is assembled like any other night');
+  assert.equal(discardCalls.mock.callCount(), 0, 'and its frames are not thrown away');
+});
+
 test('a night stays exactly as finalized across repeated runs (e.g. a process restart)', (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: at3(10, 30, 1).getTime() }); // safely past the 3h evidence horizon
   runNightlySleepJob();

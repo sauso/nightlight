@@ -30,6 +30,7 @@ const { default: db } = await import('../src/db.js');
 const { initPush } = await import('../src/lib/push.js');
 const { notifySleepReportUpdates } = await import('../src/lib/sleepReportAlert.js');
 const { runNightlySleepJob, lastCompletedNightDate, computeAndStoreNight } = await import('../src/lib/sleepAnalysis.js');
+const { saveNightReview } = await import('../src/lib/sleepReviews.js');
 
 const KID = 'notify-kid';
 const KID2 = 'notify-kid-2';
@@ -83,6 +84,7 @@ before(async () => {
 
 beforeEach(() => {
   db.prepare('DELETE FROM sleep_nights').run();
+  db.prepare('DELETE FROM sleep_reviews').run();
   db.prepare('DELETE FROM children WHERE id = ?').run(KID2);
   db.prepare('UPDATE children SET track_sleep = 1 WHERE id = ?').run(KID);
   db.prepare('DELETE FROM activity_samples').run();
@@ -124,6 +126,37 @@ test('a follow-up fires with the corrected wake time, and both messages carry th
 
   row = db.prepare('SELECT wake_at, notified_wake_at FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(KID, nightDate);
   assert.equal(row.notified_wake_at, row.wake_at, 'the ledger must match what is actually stored');
+});
+
+test('★ no follow-up after a parent said "no one was in the bed" — and it still goes out if they take it back', async (t) => {
+  // Plan review R2. The job keeps recomputing a night for ~3h after its window closes and never reads
+  // sleep_reviews, so without its own check a parent could flag the night at 07:30 and be pushed the
+  // detector's "up 07:20" at 08:00, for a child they have just said was never there. Same night as the
+  // first test above, so the follow-up is known to fire when nothing stops it.
+  layNight(CAM, [[at(19, 0), at(19, 10)], [at(23, 0), at(23, 6)], [at(7, 10, 1), at(7, 20, 1)]], at(7, 45, 1));
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(7, 20, 1, 30)));
+
+  t.mock.timers.enable({ apis: ['Date'], now: at(7, 2, 1).getTime() });
+  runNightlySleepJob();
+  assert.equal(sendEach.mock.callCount(), 1, 'the original report went out, wake unknown');
+  const nightDate = lastCompletedNightDate(KID);
+
+  saveNightReview(KID, nightDate, { nobodyInBed: true });
+  sendEach.mock.resetCalls();
+  t.mock.timers.tick(at(8, 0, 1).getTime() - at(7, 2, 1).getTime());
+  runNightlySleepJob();
+  assert.equal(sendEach.mock.callCount(), 0, 'no "Sleep report updated" for a night the parent said was empty');
+  let row = db.prepare('SELECT wake_at, notified_wake_at FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(KID, nightDate);
+  assert.ok(row.wake_at, 'precondition: the wake time DID resolve — the flag, not missing data, is what held it back');
+  assert.equal(row.notified_wake_at, null, 'nothing was sent, so nothing is recorded as told');
+
+  // Taken back inside the evidence window: the detector's night is what the app shows again, so its
+  // resolved wake time is worth sending after all.
+  saveNightReview(KID, nightDate, { nobodyInBed: false });
+  t.mock.timers.tick(30 * 60 * 1000);
+  runNightlySleepJob();
+  assert.equal(sendEach.mock.callCount(), 1, 'the follow-up goes out once the flag is withdrawn');
+  assert.equal(sendEach.mock.calls[0].arguments[0][0].notification.title, 'Sleep report updated — Notify Kid');
 });
 
 test('the original also carries a tag when it is a single-child report, matching what a later follow-up would use', async (t) => {

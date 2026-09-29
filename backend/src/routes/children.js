@@ -161,6 +161,12 @@ router.get('/:id/sleep/:date', (req, res) => {
   // two recomputes of the same night in this repo (see lib/sleepReviews.js), and corroborated by the
   // 2026-09-09 holdout scoring. That drift is why `computeAndStoreNight` has an `allowDowngrade`
   // guard: re-scoring is not a neutral operation and can make a night WORSE.
+  //
+  // ⚠️ RAW ON PURPOSE: no applyCorrection here, unlike every other read of a night in this file. Its
+  // only caller is RecomputeNight's stored-vs-fresh comparison, which is a question about what the
+  // DETECTOR saved. A parent's correction (typed times, or "no one was in the bed") lives in
+  // sleep_reviews and is laid over the night on every normal read. Overlaying it here would make a
+  // flagged night's "before" read empty, when the saved row the recompute would replace says otherwise.
   if (req.query.stored === '1') {
     const row = db
       .prepare('SELECT * FROM sleep_nights WHERE child_id = ? AND night_date = ?')
@@ -195,6 +201,9 @@ router.get('/:id/sleep/:date', (req, res) => {
         + 'cleared it back to unknown, so nothing was saved — the existing wake time has been left as it is.',
     });
   }
+  // The raw recompute, not overlaid, like ?stored=1 above: it reports what the detector just SAVED. A
+  // parent's correction is untouched by this write (it lives in sleep_reviews) and still applies on the
+  // next normal read of this night.
   res.json(summary);
 });
 
@@ -219,8 +228,10 @@ router.get('/:id/review/:date', (req, res) => {
   res.json(getNightReview(req.params.id, req.params.date));
 });
 
-// Save the night's true times, any per-transition verdicts, and/or a dismissal. Every field is
-// optional: dismissing is just a save with nothing else in it, which is why one route covers both.
+// Save the night's true times (or "no one was in the bed" instead of them), any per-transition
+// verdicts, and/or a dismissal. Every field is optional: dismissing is just a save with nothing else in
+// it, which is why one route covers both. Any signed-in user may save, caregivers included, the same
+// as every other part of a review.
 router.put('/:id/review/:date', (req, res) => {
   const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
@@ -264,6 +275,30 @@ router.put('/:id/review/:date', (req, res) => {
     }
   }
 
+  // "No one was in the bed" for the whole night. Additive: an older open page never sends it, and
+  // `undefined` or `null` both mean "not answering this, keep what is stored" (the current client sends
+  // explicit nulls for fields it is not answering).
+  //
+  // A strict boolean, deliberately stricter than `dismissed`'s truthiness. This flag hides the
+  // detector's entire night, so a "false" string or a stray 1 from some other client must be refused,
+  // not read as a yes.
+  const nobodyInBed = body.nobody_in_bed;
+  if (nobodyInBed != null && typeof nobodyInBed !== 'boolean') {
+    return res.status(400).json({ error: 'nobody_in_bed must be true or false' });
+  }
+  // Both at once is a contradiction, and guessing which one the person meant would store a claim they
+  // did not make (plan review R1). `onset`/`wake` are the RESOLVED times, so an explicit null or an
+  // empty field is not a time and does not trip this — which matters, because the review page sends
+  // explicit nulls for the times it is not answering (NightReview.jsx's save), and must be able to send
+  // them alongside the flag. saveNightReview refuses the same combination on its own, for any caller
+  // that skips this route.
+  if (nobodyInBed === true && (onset != null || wake != null)) {
+    return res.status(400).json({ error: 'Choose either "no one was in the bed" or the times, not both' });
+  }
+
+  // ⚠️ Every refusal above this line must stay above it. applyVerdicts WRITES, so a 400 after it
+  // would leave the verdicts saved while the person is told the save failed.
+  //
   // Verdicts (and the reasons paired with them) are scoped to THIS child and THIS night inside
   // applyVerdicts, and rejected as a batch — except a reason for a non-'wrong' verdict, which it drops.
   const check = applyVerdicts(req.params.id, req.params.date, verdicts, reasons);
@@ -284,6 +319,9 @@ router.put('/:id/review/:date', (req, res) => {
     computedWakeAt: body.computed_wake_at,
     note,
     dismissed,
+    // saveNightReview owns the rest of the rule: true nulls the times, and a real time sent with the
+    // flag omitted clears it (the newest answer wins). See its comment.
+    nobodyInBed,
   });
   res.json({ review, verdicts_applied: check.applied, reasons_applied: check.reasons_applied });
 });

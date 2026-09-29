@@ -13,7 +13,14 @@ import { Check } from 'lucide-react';
 // vanished on save, which is indistinguishable from having failed — the owner's report was "it then
 // disappeared and the card didn't update". A confirmation that names the times back, with a way to
 // correct them, is what makes a success visible and a mistake fixable.
-export default function ReviewReceipt({ onsetAt, wakeAt, fmtTime, onOpen }) {
+//
+// `nobodyInBed`: "no one was in the bed" carries no times at all, so it needs its own line rather than
+// falling into the `fmtTime(onsetAt) || '—'` branch below, which would read as "You said — to —" — a
+// blank-looking receipt for what was actually a complete, deliberate answer (issue: the "no one was in
+// the bed" plan, R4/R9 — this is also what an OLDER client, which has never heard of the flag, falls
+// back to when reading a flagged reviewCardState response; additive fields degrade gracefully to that,
+// not to nothing).
+export default function ReviewReceipt({ onsetAt, wakeAt, nobodyInBed, fmtTime, onOpen }) {
   return (
     <div className="card review-card review-card--done">
       <button type="button" className="review-card__body" onClick={onOpen}>
@@ -21,7 +28,9 @@ export default function ReviewReceipt({ onsetAt, wakeAt, fmtTime, onOpen }) {
         <span className="review-card__text">
           <span className="card-title">Thanks — that’s recorded</span>
           <span className="camera-tile__sub">
-            You said {fmtTime(onsetAt) || '—'} to {fmtTime(wakeAt) || '—'}. Tap to change it.
+            {nobodyInBed
+              ? 'You said no one was in the bed. Tap to change it.'
+              : <>You said {fmtTime(onsetAt) || '—'} to {fmtTime(wakeAt) || '—'}. Tap to change it.</>}
           </span>
         </span>
         <span className="review-card__go" aria-hidden="true">›</span>

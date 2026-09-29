@@ -107,6 +107,9 @@ They exist so that a sleep timeline which looks wrong can be *looked at* rather 
   kept indefinitely.* A frame somebody has looked at and labelled is the scarce thing here; deleting
   one on a timer would throw away the only record of what the camera actually saw. Unjudged frames
   still age out, so the folder stays bounded in normal use.
+- **Marking a night "No one was in the bed"** in the morning review changes nothing here. That night's
+  frames age out, or are kept once judged, exactly like any other night's. The mark hides the
+  detector's version of the night; it does not delete anything, so taking it back loses nothing.
 - **Stored in `transition-snapshots/` in your data directory**, named by the transition's id. Deleting
   the folder is safe — the app recreates it and simply has no pictures for older transitions.
 
@@ -265,6 +268,15 @@ Each kind ages out differently — this is the part most worth reading twice:
   it to **0** to keep them forever. Deleting one removes only the video; the wake-up itself stays on the
   sleep timeline.
 - **On-demand recordings are never swept.** They persist until you delete them from the child's page.
+- **Nightly timelapses** (the sped-up "memories" video of each night): each child keeps their **30 most
+  recent**, and older ones are deleted automatically (not configurable). ⚠️ Two kinds of "nobody was in
+  the bed" night are treated **differently**:
+  - A night the **detector** scores as *no one in the bed* gets no timelapse. The frames sampled
+    overnight show an empty room, so they are thrown away when the night is first scored.
+  - A night **you** mark *No one was in the bed* in the morning review keeps its timelapse. It is made
+    and kept like any other night's, and marking the night deletes nothing. This is deliberate: the mark
+    can be taken back, and a tap in a review should never destroy video that taking it back could not
+    restore. If you don't want that night's timelapse, an admin can delete it from the child's page.
 
 There is also a **minimum-free-space guard** across all three: if the volume is nearly full, new video
 is skipped, so recording can never be the thing that fills your disk.

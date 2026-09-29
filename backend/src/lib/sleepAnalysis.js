@@ -1748,6 +1748,11 @@ const recordFirstNotified = db.prepare(
 const recordFollowupNotified = db.prepare(
   'UPDATE sleep_nights SET notified_wake_at = ? WHERE child_id = ? AND night_date = ?'
 );
+// Has a parent said "no one was in the bed" for this night? (sleep_reviews.nobody_in_bed, set from the
+// morning review.) Read directly rather than through sleepReviews.js, which imports this module.
+const parentSaidNobodyInBed = db.prepare(
+  'SELECT 1 FROM sleep_reviews WHERE child_id = ? AND night_date = ? AND nobody_in_bed = 1'
+);
 
 // A night that was actually scored. Anything else is an absence of data, not a measurement.
 const SCORED = new Set(['ok', 'empty']);
@@ -1844,15 +1849,23 @@ const mean = (a) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : null);
 // the nights at the median temperature into a warmer half and a cooler half and compares wake-ups + sleep
 // duration, and reports a Pearson r for temp↔wakes. All temperatures are Celsius (the client converts to
 // the user's unit). Returns { status }: 'off' | 'insufficient' | 'ok'. The client renders the wording.
+//
+// ⚠️ A night a parent marked "no one was in the bed" is EXCLUDED, even though its stored row still
+// says 'ok'. This reads sleep_nights directly rather than through applyCorrection, so the overlay never
+// reaches it. Without the NOT EXISTS below, a night the detector scored as sleep in an empty bed would
+// keep its invented wake count and duration in these averages after the parent has said it never
+// happened. Time corrections are NOT applied here (pre-existing: the stored detector figures are used),
+// which is a smaller error of degree, not a whole fictional night.
 export function sleepInsights(childId, { nights = 30 } = {}) {
   if (!childTracksSleep(childId)) return { status: 'off' };
   const rows = db
     .prepare(
-      `SELECT night_date, wake_count, asleep_minutes, avg_temperature, avg_humidity
-         FROM sleep_nights
-         WHERE child_id = ? AND status = 'ok' AND avg_temperature IS NOT NULL
-           AND wake_count IS NOT NULL AND asleep_minutes IS NOT NULL
-         ORDER BY night_date DESC LIMIT ?`
+      `SELECT n.night_date, n.wake_count, n.asleep_minutes, n.avg_temperature, n.avg_humidity
+         FROM sleep_nights n
+         WHERE n.child_id = ? AND n.status = 'ok' AND n.avg_temperature IS NOT NULL
+           AND n.wake_count IS NOT NULL AND n.asleep_minutes IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM sleep_reviews r WHERE r.child_id = n.child_id AND r.night_date = n.night_date AND r.nobody_in_bed = 1)
+         ORDER BY n.night_date DESC LIMIT ?`
     )
     .all(childId, Math.min(60, Math.max(1, nights)));
 
@@ -2001,7 +2014,16 @@ export function runNightlySleepJob() {
           canNotify &&
           existing.notified_at != null &&
           existing.notified_wake_at == null &&
-          summary.wake_at != null
+          summary.wake_at != null &&
+          // ⚠️ Not after a parent has said "no one was in the bed" (plan review R2). This job keeps
+          // recomputing a night for ~3h after its window closes and never reads sleep_reviews, so the
+          // follow-up would otherwise push the detector's "up 07:20" for a child the parent has just said
+          // was never there. Skipped WITHOUT recording notified_wake_at: nothing was sent, so recording
+          // it would claim otherwise and arm computeAndStoreNight's `would_blank_notified_wake` guard on
+          // a value nobody was told. The follow-up therefore still goes out if the flag is taken back
+          // inside the window, which is right, because the detector's night is being shown again.
+          // The FIRST report is not recalled; it has already been sent (docs/notifications.md).
+          !parentSaidNobodyInBed.get(kid.id, nightDate)
         ) {
           // Push into `followups` is CONDITIONAL on the write succeeding — the opposite of the
           // first-notify path above, which pushes into `fresh` unconditionally. (Both sends actually

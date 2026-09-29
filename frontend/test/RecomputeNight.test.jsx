@@ -1,6 +1,6 @@
 // The admin "Recompute this night" control.
 //
-// Three things are worth testing here and none is cosmetic:
+// Four things are worth testing here and none is cosmetic:
 //   1. THE BASELINE IS THE STORED ROW. The first cut of this component compared the page's `night` —
 //      which is already a fresh recompute — against another fresh recompute. The two sides were the
 //      same computation, so the dialog always said "exactly the same numbers" while the child's card
@@ -8,6 +8,11 @@
 //   2. ROLE GATING — a caregiver must not be able to rewrite stored sleep history. The failure mode is
 //      silent, which is the shape of bug this project has shipped before.
 //   3. It PREVIEWS before it writes, because the write is irreversible.
+//   4. THE "AFTER" PICTURE IS THE OVERLAID NIGHT, NOT THE RAW STORE RESPONSE (plan review R3). `?store=1`
+//      answers "what did the detector just save", not "what should the parent see" — a corrected or
+//      flagged night's normal read differs from that raw row. Trusting the store response directly
+//      would repaint the page with the detector's raw answer the instant you recompute, silently
+//      undoing whatever correction was showing. The fix re-fetches the normal route after storing.
 
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
@@ -38,10 +43,15 @@ const STORED = {
 const fmtTime = (utc) => (utc ? String(utc).slice(11, 16) : '');
 
 // api.get is called with different URLs for different things; route by query string.
-function mockApi({ stored = STORED, onStore = FRESH } = {}) {
+// `overlaid` defaults to FRESH so tests that don't care about R3 keep working unchanged; the R3-specific
+// tests below override it to something DIFFERENT from `onStore`, which is what makes the assertion
+// discriminating rather than vacuous (see the ⚠️ on the regression test itself).
+function mockApi({ stored = STORED, onStore = FRESH, overlaid = FRESH } = {}) {
   vi.spyOn(api, 'get').mockImplementation((url) => {
     if (url.includes('stored=1')) return Promise.resolve({ night: stored });
+    // Checked before the plain `detail=1` branch: `?store=1&detail=1` contains both substrings.
     if (url.includes('store=1')) return Promise.resolve(onStore);
+    if (url.includes('detail=1')) return Promise.resolve(overlaid);
     return Promise.reject(new Error(`unexpected call: ${url}`));
   });
 }
@@ -148,7 +158,31 @@ describe('writing', () => {
 
     await user.click(screen.getByRole('button', { name: /save the new numbers/i }));
     await waitFor(() => expect(onRecomputed).toHaveBeenCalledWith(FRESH));
-    expect(api.get.mock.calls.at(-1)[0]).toMatch(/store=1/);
+    // Both the write AND the re-fetch happened, in that order — storing alone is not enough (R3).
+    const urls = api.get.mock.calls.map(([u]) => u);
+    expect(urls.some((u) => /[?&]store=1/.test(u))).toBe(true);
+    expect(urls.at(-1)).toMatch(/detail=1/);
+    expect(urls.at(-1)).not.toMatch(/store=1/);
+  });
+
+  // ★ THE REGRESSION TEST FOR R3. `onStore` (what `?store=1` answers) and `overlaid` (what the NORMAL
+  // route answers right after) are deliberately DIFFERENT values here — `night__marker` only exists on
+  // the overlaid one. Passing the raw store response straight to `onRecomputed`, the pre-fix shape,
+  // would report `onStore` and this fails; only re-fetching the normal route reports `overlaid`. A
+  // fixture where the two happened to be equal (as in the test above, and in the rest of this file)
+  // could not tell the two code paths apart — this is the one test in the file that can.
+  test('★ the "after" picture is the OVERLAID night (a fresh normal read), not the raw store response', async () => {
+    const onRecomputed = vi.fn();
+    const overlaid = { ...FRESH, corrected: true, night__marker: 'overlay' };
+    mockApi({ overlaid });
+    const { user } = setup(renderAsAdmin, { onRecomputed });
+    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await waitFor(() => expect(screen.getByText(/no longer matches/i)).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /save the new numbers/i }));
+    await waitFor(() => expect(onRecomputed).toHaveBeenCalled());
+    expect(onRecomputed).toHaveBeenCalledWith(overlaid);
+    expect(onRecomputed).not.toHaveBeenCalledWith(FRESH);
   });
 
   test('cancelling closes the dialog and stores nothing', async () => {
