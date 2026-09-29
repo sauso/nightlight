@@ -71,6 +71,28 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   reports repeats judged too late and clock steps.
   Details and limits (clock steps, stalling cameras, what a restart loses): [KNOWN-ISSUES.md](KNOWN-ISSUES.md),
   "The sleep timeline's minutes are the minutes the samples arrived in".
+- **Minutes where the camera's video stalled but its sound kept running are now "no data" in the sleep
+  numbers, instead of counted as quiet sleep.** When the motion detector stopped receiving video, the sound
+  detector kept writing a row every minute, and every one of those minutes counted as watched and still:
+  on one install two stalls (522 and 284 minutes) reported full coverage and hours of sleep nobody saw
+  (issue #508; on that install's real nights the change touches only the part of a stall inside the 19:00
+  to 07:00 window). A minute now counts as watched only
+  if the motion detector analysed at least one real frame in it, whatever the camera's frame rate; a
+  minute with no video is treated exactly like a minute with no data at all, and its sound is not used
+  (a bedroom mic hears the whole house). What changes on a night with a stall: lower coverage, more
+  unknown minutes and less sleep counted; the timeline shows the stall as "No data"; a cry during the
+  stall is no longer shown as a wake-up from the noise alone; if the stall covers bedtime, the reported
+  bedtime moves to the first quiet minute after the video came back; a night more than half unwatched is
+  "no data". **"No one was in the bed" now needs at least 90% of the window watched** (below that the
+  night is "no data"), because that answer also discards the night's timelapse frames; this also applies
+  to nights with ordinary gaps in the data. The 90% is a first estimate, not a measured value. Nights
+  already stored change only when recomputed, and **Recompute** still never turns a scored night into
+  "no data": a night stored before this update whose video stalled for most of it keeps its old numbers.
+  That refusal is only reachable through the API (the page offers Recompute only on a night that still
+  scores); its 409 now says which reason applied instead of always claiming the data aged out, and adds
+  `reason`, `status` and `coverage_minutes`. Known limits (a
+  frozen picture still reads as a still room; the live wake watcher and bed-transition rules do not use
+  this yet): [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "Minutes with no video are unknown in the sleep numbers".
 
 ## [0.34.0] - 2026-09-28
 

@@ -340,12 +340,19 @@ describe('★★ missing data is never counted as confirmed sleep (issue #442)',
     // Window is 690 minutes (19:30-07:00); MIN_COVERAGE_FRAC = 0.5 ⇒ the boundary is 345 minutes. The
     // existing 'a night with too few samples is no_data' test sits well clear of this line (90 min of
     // 690) — this is the boundary itself, both sides.
-    laySamples(at(19, 30), at(1, 14, 1), []); // 344 real minutes — one short
+    //
+    // Both sides carry a real settle (19:30-19:35). They used to be all-quiet, and the 345 side then
+    // "cleared the gate" by reading `empty` — the only non-no_data answer an all-quiet night has. Since
+    // #508 a night watched below EMPTY_MIN_COVERAGE_FRAC (0.9) can never be `empty` (it is `no_data`),
+    // so an all-quiet fixture could no longer tell "cleared the coverage gate" from "stopped by the empty
+    // guard". With movement in it the night scores `ok` once it clears the gate, which is what this
+    // boundary is about. The empty-side boundary is pinned in sleep-zero-frame-minutes.test.js (T6*).
+    laySamples(at(19, 30), at(1, 14, 1), [[at(19, 30), at(19, 35)]]); // 344 real minutes — one short
     assert.equal(computeNight(CHILD, DATE).status, 'no_data', '344/690 must still be no_data');
   });
 
   test('...and 345 real minutes clears the coverage gate', () => {
-    laySamples(at(19, 30), at(1, 15, 1), []); // 345 real minutes — exactly the boundary
+    laySamples(at(19, 30), at(1, 15, 1), [[at(19, 30), at(19, 35)]]); // 345 real minutes — exactly the boundary
     const night = computeNight(CHILD, DATE);
     assert.equal(night.coverage_minutes, 345);
     assert.notEqual(night.status, 'no_data', '345/690 must clear the coverage gate');

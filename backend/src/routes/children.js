@@ -3,7 +3,10 @@ import { v4 as uuid } from 'uuid';
 import db from '../db.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { normalizePhoto } from '../lib/photo.js';
-import { getStoredNights, computeNight, computeAndStoreNight, currentNightDate, childTracksSleep, sleepInsights } from '../lib/sleepAnalysis.js';
+import {
+  getStoredNights, computeNight, computeAndStoreNight, currentNightDate, childTracksSleep, sleepInsights,
+  MIN_COVERAGE_FRAC, EMPTY_MIN_COVERAGE_FRAC,
+} from '../lib/sleepAnalysis.js';
 import { startMotionDetector } from '../lib/motionDetector.js';
 import { reconcileClipRing } from '../lib/clipCapture.js';
 import { deleteRecording } from '../lib/recordings.js';
@@ -180,14 +183,66 @@ router.get('/:id/sleep/:date', (req, res) => {
     })));
   }
   // Storing a recompute can only ever improve or re-score a night, never un-score one — see the
-  // allowDowngrade guard in computeAndStoreNight. A refusal is the user's fault only in the sense that
-  // the night is too old, so it is a 4xx with a readable reason: a 5xx would have its body stripped by
-  // Cloudflare and the user would see nothing at all.
+  // allowDowngrade guard in computeAndStoreNight. A refusal is not a server fault (the night is too old,
+  // too little of it was watched, or it no longer scores — below), so it is a 4xx with a readable reason:
+  // a 5xx would have its body stripped by Cloudflare and the user would see nothing at all.
   const summary = computeAndStoreNight(req.params.id, req.params.date, { allowDowngrade: false });
   if (summary.refused === 'would_downgrade') {
+    // THREE different things reach this refusal, and the message must not claim the wrong one (issue #508;
+    // the first version of this split branched on coverage alone and got the third case wrong, found by
+    // the #508 code review). The guard refuses ANY scored -> unscored change (SCORED is ok + empty), so the
+    // refused summary's STATUS decides the case, and coverage only splits the no_data one:
+    //   * `no_data`, coverage 0 -> nothing left to read for the window, which on a browsable night means
+    //     its samples have aged out. `aged_out`, the pre-#508 wording, unchanged.
+    //   * `no_data`, coverage > 0 -> minutes ARE there, but too few were WATCHED (since #508 a minute the
+    //     video never saw is not coverage: a stalled camera whose sound kept running). That covers two
+    //     different lines, and the wording has to be true for both: under half the window watched (the
+    //     no_data gate), OR a quiet night watched for half to 90% of it, which #508's `empty` guard turns
+    //     from "no one in the bed" into no_data. So it names both thresholds instead of claiming one.
+    //     It also names aging out, because a night on the retention edge can be PARTLY aged out, which
+    //     reads the same from here. `too_little_watched`.
+    //   * anything else (`no_sleep`, `off`): the night was watched well enough, but re-scored now it no
+    //     longer counts as a scored night — e.g. a stored `ok` that the current rules read as "no clear
+    //     sleep". Nothing is missing, so saying the video was missing or the data aged out would be false.
+    //     `no_longer_scored`.
+    // Telling a user "aged out" about last week's night, or "the video was missing" about a fully watched
+    // one, is simply false — the same class of defect #508 exists to remove from the numbers.
+    //
+    // ⚠️ API-ONLY TODAY: SleepDetail returns early for a fresh `no_data` / `no_sleep` / `empty` night
+    // before it ever renders RecomputeNight, so the browser cannot reach this refusal (the e2e spec
+    // `08-recompute-night` says so and drives it through this route). The wording is still written for a
+    // person, because RecomputeNight shows `error` verbatim if it ever does arrive.
+    //
+    // ADDED to the response shape, never removed (a running SPA is a deployed client): `error` keeps its
+    // meaning and its closing sentence (the e2e spec matches /aged out|left as it is/); `reason`,
+    // `status` (what the recompute came out as) and `coverage_minutes` are new, for any client that wants
+    // to branch on the case rather than parse prose. Known imprecision, pre-existing: a night whose camera
+    // was since unassigned also computes coverage 0 and still gets the "aged out" wording.
+    //
+    // The two lines are quoted from sleepAnalysis.js's own constants, so the prose cannot drift from them.
+    const pct = (frac) => Math.round(frac * 100);
+    const watchedSome = summary.coverage_minutes > 0;
+    const reason = summary.status !== 'no_data' ? 'no_longer_scored' : watchedSome ? 'too_little_watched' : 'aged_out';
+    const READS_AS = { no_sleep: 'no clear sleep', off: 'sleep tracking is off for this child' };
+    const MESSAGES = {
+      aged_out: "This night can't be re-scored: its minute-by-minute data has aged out (kept 30 days). ",
+      too_little_watched:
+        `This night can't be re-scored: the camera's video was only seen for ${summary.coverage_minutes} `
+        + `minute${summary.coverage_minutes === 1 ? '' : 's'} of it. `
+        + 'That is too little to score it the way it now reads (a night needs at least '
+        + `${pct(MIN_COVERAGE_FRAC)}% of its window watched to be scored at all, and ${pct(EMPTY_MIN_COVERAGE_FRAC)}% `
+        + 'before it can be called "no one in the bed"); the video was missing for the rest, or that part of '
+        + 'the data has aged out. ',
+      no_longer_scored:
+        "This night can't be re-scored: re-scored with the current rules it no longer counts as a scored "
+        + `night (it now reads "${READS_AS[summary.status] || summary.status}"). `
+        + 'This is not because data is missing or has aged out. ',
+    };
     return res.status(409).json({
-      error: "This night can't be re-scored: its minute-by-minute data has aged out (kept 30 days). "
-        + 'The saved summary has been left as it is.',
+      error: MESSAGES[reason] + 'The saved summary has been left as it is.',
+      reason,
+      status: summary.status,
+      coverage_minutes: summary.coverage_minutes,
     });
   }
   // ROADMAP §1.6: a follow-up notification already told the parent a specific wake time — refusing to

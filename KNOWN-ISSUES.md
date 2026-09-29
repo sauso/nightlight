@@ -312,8 +312,9 @@ or `warn`, or `side=unavailable`, include the line when reporting a detection pr
 also returned by `GET /api/cameras/:id/activity-history`) stores how many motion frames were analysed
 (`motion_frames`) and the average movement in and outside the bed (`motion_level`, `motion_out_level`).
 Since issue #493, those three leave out every frame the `[obs]` measurement above *proved* was a repeat: an
-`fpsClone`, or a `cfrDup` it could label one by one. No screen shows these three numbers yet. The fix is
-groundwork for later sleep-analysis work.
+`fpsClone`, or a `cfrDup` it could label one by one. No screen shows these three numbers directly. Since
+issue #508 the sleep numbers read `motion_frames` to decide whether a minute was watched at all (see "Minutes
+with no video are unknown in the sleep numbers").
 
 **Why:** when a camera stalls, ffmpeg keeps five frames a second going by repeating the last picture, and
 the motion detector reads each repeat as a perfectly still room. A 3-second stall makes about 15 of them. A
@@ -331,7 +332,8 @@ only raise a minute's average, never lower it, because a repeat's movement is al
 | Motion alerts, in/out-of-bed transitions | Unchanged: decided the moment a frame arrives, before `[obs]` can judge it (issue #452) |
 
 A minute in which *every* analysed frame was a proven repeat is still stored: `motion_frames` 0 and an
-empty `motion_level`, beside a `motion_peak` of 0, exactly as it was stored before.
+empty `motion_level`, beside a `motion_peak` of 0, exactly as it was stored before. Since issue #508 the sleep
+numbers treat such a minute as **unwatched** (unknown), not as a still room.
 
 **Limits, stated rather than hidden:**
 - **Only proven repeats are left out, never `unknown` frames.** A genuinely still room, or one lost
@@ -426,6 +428,86 @@ old labels until the 30-day retention removes them.
 **What to do:** nothing. If one camera's `[activity]` line reports late clone verdicts every 15 minutes, its
 stream keeps stalling: check the same camera's `[obs]` line.
 
+## Minutes with no video are unknown in the sleep numbers
+
+**What you see:** on a night where the camera's video stalled but its sound kept running, the sleep detail
+shows the stall as a striped **"No data"** stretch, the night's coverage is lower, and the sleep counted is
+less than the hours between bedtime and waking. A night that is mostly stalled reads "no data".
+
+**Why:** the motion and sound detectors are separate processes. When the motion detector stops receiving
+video (issue #369), the sound detector keeps writing a row for every minute. Before issue #508 every such
+row counted as a watched, quiet minute: on staging, stalls of 522 minutes (ending 2026-09-17 10:00) and 284 (ending 2026-09-27 10:00) reported
+full coverage and zero unknown minutes. Measured by replaying every stored staging night with the old and the
+new code (2026-09-30): 88 of 90 nights are identical, and the two that change are exactly the two stalls, by
+the part inside the 19:00-07:00 window (342 and 104 minutes; the second changes only `coverage_minutes`,
+because that stall lies after the analysed sleep span). Production was not measured. Now a minute
+counts as watched only if the motion detector analysed at least one real frame in it (`motion_frames > 0`;
+since #493 that count leaves out ffmpeg's proven repeated frames, so a minute of nothing but repeats is
+unwatched too). An unwatched minute is handled exactly like a minute with no row at all (issue #442).
+
+**Differs from the neighbouring rules** — the part that is easy to get wrong:
+
+| | Minute with video (1 frame or more) | Minute with no video (0 frames) |
+|---|---|---|
+| Coverage, and the "no data" line (half the window) | Counts | Does not count |
+| Asleep / awake / longest stretch | Counted normally | Unknown: not asleep, not awake, breaks the stretch |
+| Its sound (a cry, household noise) | Used as before | **Not used**, even a loud minute |
+| Its movement readings | Used as before | Not used (a stalled minute's readings are empty or repeats) |
+| Bedtime search | Normal | Cannot be the bedtime; a stall over bedtime moves bedtime to the first quiet minute after the video returns |
+| "No one was in the bed" | Needs at least **90%** of the window watched (default 0.9, `EMPTY_MIN_COVERAGE_FRAC`; a constant, not a setting; any value above the 0.5 "no data" line and up to 1 is coherent). Window minutes only, never the 3 hours before it; on a night still in progress, 90% of the part elapsed so far, the same basis as the "no data" line | Counts against that 90%; below it the night is "no data" |
+
+**Why sound is not used in an unwatched minute:** a bedroom microphone hears the whole house, and a
+noise nobody saw cannot be told apart from a sibling next door. The cost, stated: a child crying through a
+video stall is not shown as awake from the noise alone. Sound **alerts** are a separate path and still fire.
+
+**Why "no one was in the bed" needs 90%:** that answer sends the "no one was in the bed" report and
+**deletes the night's timelapse frames**. Before #508 a night watched for exactly half the window, quiet in
+that half, could read empty. 90% is a first estimate chosen so the ~1-minute daily camera reboot and
+scattered dropped minutes can never block a genuinely empty night, while missing more than about an hour of
+a 12-hour window does. It was not measured against stored nights when chosen. On a night still in progress
+("Tonight") it applies to the part of the window elapsed so far, so the live card can say "no one in the
+bed" early in the evening; that is only a display. The report and the frame deletion come only from the
+nightly job, which only ever scores a night whose window has closed, against the whole window.
+
+**Nights already stored** change only when recomputed (the nightly job's own passes in the ~3 hours after
+the window closes, or **Recompute this night**). Recompute never turns a scored night into "no data", so a
+night stored before this update whose video stalled for most of it keeps its old numbers. The refusal is
+**API-only today**: the Sleep detail page shows no Recompute button on a night that now reads "no data" or
+"no clear sleep", so no parent sees it. From the API (`GET /api/children/:id/sleep/:date?store=1`, admin),
+the 409 no longer claims the data aged out when it did not: it adds `reason` (`aged_out` when nothing is
+left to read; `too_little_watched` when the video was seen for too few minutes to score the night, or to
+call it empty, and says how many; `no_longer_scored` when the night was watched but now reads, for example,
+"no clear sleep"), `status` (what the recompute came out as) and `coverage_minutes`. `error` keeps its
+closing sentence.
+
+**Limits, stated rather than hidden:**
+- **A frozen picture is still a watched, still room.** A camera whose encoder wedges keeps delivering many
+  real, identical frames: frames above zero, no movement. Neither this rule nor any frame-count threshold
+  can catch it.
+- **Only zero frames counts as unwatched.** A minute with a handful of frames is watched, because a peak is
+  the minute's largest movement and a few real frames still see real movement, and because the daily camera
+  reboot leaves short runs of sparse minutes (measured on staging over 30 days: 36 runs, all a single minute,
+  30 of them starting at the 10:00 reboot, so they fall outside a night's window; issue #508 said 21, which did
+  not hold; the number on another install is unknown) that must not lose coverage.
+  Whether sparse minutes mislead is not measured yet.
+- **A minute is decided as a whole, from the in-bed frame count.** In a rare case a minute can store zero
+  in-bed frames (every frame proven a repeat) while its movement *outside* the bed was real (the two are
+  corrected separately, issue #493). That out-of-bed movement is then discarded with the rest of the minute.
+  It needs the observation clock to call every frame of the minute a repeat while the picture outside the bed
+  changed, which a true repeat cannot do, so it would take a clock misclassification. Measured on staging
+  (2026-09-30): 0 such rows, but only about 14 hours of data exist since #493's clone correction reached it, so
+  this is "not seen yet", not "cannot happen". If it ever shows up, a minute with any non-zero motion peak
+  should count as watched (a repeat's change is exactly 0, so a non-zero peak proves a real frame).
+- **Not yet applied to the live wake watcher or the bed-transition rules.** The live "is the child awake"
+  check and the bed in/out rules still read the movement peak alone, so during a stall the live watcher can
+  still call the room settled. Follow-up issues.
+- **A parent's corrected night** subtracts the night's stored unknown minutes from the corrected span as
+  one total (an existing limit of corrections). A recompute that adds many unknown minutes to a corrected
+  night can therefore shrink its displayed sleep more than the stall alone explains.
+
+**What to do:** nothing. If a night shows a long "No data" stretch while the camera was plainly on, check
+the Camera history for a `[detector-watchdog]` restart (next section) around that time.
+
 ## A detector was restarted: `[detector-watchdog]` in the log and in Camera history
 
 **What you see:** a `restart` in **Settings → Logs → Camera history** reading *motion detector getting no
@@ -490,8 +572,9 @@ kept. A restarted motion detector also returns to the Low stream if it had falle
 after a blip (#500); this does not help a detector that never goes dark.
 
 **Limits, stated rather than hidden:**
-- **The minutes before the restart are still lost.** The sleep analysis currently counts the dark minutes as
-  observed (issue #508, not fixed here), so a restart shortens a hole in the night; it does not fill it.
+- **The minutes before the restart are still lost.** Since issue #508 the sleep numbers report those dark
+  minutes as unknown ("No data") rather than as quiet sleep (previous section), so a restart shortens a hole
+  in the night; it does not fill it.
 - **The numbers were chosen, not measured on many rooms.** A camera that delivers less than about one frame
   a minute would be restarted at the backoff cadence (no supported camera does). Nothing assumes a frame
   rate or 300 frames a minute.
