@@ -584,10 +584,17 @@ describe('planted motion streams (plan §Tests 3)', () => {
   test('R3-2: a 10 s identical (static) run with a dup at second 6 — nothing finalized at second 5 is revised', () => {
     const rig = motionRig();
     const B = 100_000;
-    const seen = new Map();
+    // Record, never assert, inside the hook: record() hands each observation to notify(), whose try/catch
+    // swallows any throw and only bumps period.warn — so an assert.ok in here can never fail the test directly (#514;
+    // it was inert since #373). Assert after rig.end() instead, the same pattern as "Recorded, not asserted
+    // inside the stub" in detector-observation-wiring.test.js:1151. `first` is deliberately not overwritten
+    // on a repeat: keeping the FIRST value is what lets `dups` show was-vs-now (a revision), rather than a
+    // map that always agrees with itself.
+    const first = new Map();
+    const dups = [];
     rig.clock.onObservation = (x) => {
-      assert.ok(!seen.has(x.idx), `sample ${x.idx} observed twice`);
-      seen.set(x.idx, { cls: x.cls, reason: x.reason, at: rig.t.mono });
+      if (first.has(x.idx)) dups.push({ idx: x.idx, was: first.get(x.idx), now: { cls: x.cls, reason: x.reason } });
+      else first.set(x.idx, { cls: x.cls, reason: x.reason, at: rig.t.mono });
     };
     // 60 inputs at 5 fps; outputs 1..50 are the same static picture; a CFR dup of output 30 (second 6).
     for (let n = 0; n < 60; n += 1) {
@@ -596,10 +603,20 @@ describe('planted motion streams (plan §Tests 3)', () => {
       if (n >= 2) rig.sample(n - 2 >= 1 && n - 2 <= 50 ? 'STILL' : `S${n - 2}`, B + n * 200 + 0.2);
       if (n === 32) rig.sample('STILL', B + n * 200 + 0.3);
     }
-    const beforeDup = [...seen.entries()].filter(([, v]) => v.at < B + 6400 + 5000).map(([k, v]) => [k, v.cls, v.reason]);
+    const beforeDup = [...first.entries()].filter(([, v]) => v.at < B + 6400 + 5000).map(([k, v]) => [k, v.cls, v.reason]);
     rig.end(B + 30_000);
-    for (const [k, cls, reason] of beforeDup) assert.deepEqual([seen.get(k).cls, seen.get(k).reason], [cls, reason]);
+    // No sample is observed twice — in particular nothing finalized before the dup is revised once it lands.
+    assert.deepEqual(dups, [], 'an observation was emitted twice');
+    // notify() also counts a throwing listener as a warn; none of the run's warn sites should fire here.
+    assert.equal(rig.clock.summary().warn, 0);
     assert.ok(beforeDup.some(([k]) => k >= 1 && k <= 20), 'some of the run WAS finalized before the dup');
+    // The R3-2 property that makes "nothing needs revising" true: a static run of DISTINCT
+    // sources is ambiguous from the moment it is finalized, so the late dup has no already-emitted REAL to
+    // contradict. (Not true of a same-source run of fps clones, which reads REAL + clone — not this fixture.)
+    // 1..29 is exactly what beforeDup holds of the run: idx 30 finalizes after the cutoff, idx 0 is not static.
+    for (const [k, cls, reason] of beforeDup.filter(([k]) => k >= 1 && k <= 29)) {
+      assert.deepEqual([cls, reason], ['unknown', 'ambiguous'], `sample ${k} finalized as ${cls}/${reason}`);
+    }
     assert.equal(rig.clock.summary().cfrDup, 1, 'the run reports its net dup once it closes');
   });
 
