@@ -1,0 +1,126 @@
+# Architecture
+
+A developer-facing description of how the pieces fit together. It used to live in `CLAUDE.md`, where it was
+loaded on every change; it moved here because most changes touch none of it. `CLAUDE.md` keeps the
+**invariants** that must not be broken and points here for the explanation. Update this file when you change
+a subsystem it describes.
+
+**Everything ships as one Docker image, one container** — no multi-container orchestration to
+reason about. The container needs its own routable LAN IP so WebRTC has no NAT/ICE problems
+(MediaMTX advertises that IP to browsers). There are two supported ways to give it one: **host
+networking** (the README quick-start default — the container shares the host's IP), or an
+**ipvlan network with a dedicated IP**. The Unraid prod + staging deployments both use the latter
+(both on `br0.10` — see Branching and deploy pipeline in `CLAUDE.md`); the host-networking path is what an
+out-of-the-box `docker run` uses.
+
+## The video pipeline (the core thing to understand before touching camera code)
+
+RTSP cannot be played directly in a browser, and many IP cameras send audio as G711 (a codec
+HLS can't carry at all — WebRTC can). This drives a specific pipeline, in order:
+
+1. **FFmpeg** (`backend/src/lib/transcoder.js`, one process per camera) pulls each camera's
+   RTSP feed, copies video untouched, and produces **two audio tracks**: track 0 copied as-is
+   (for WebRTC, which can't decode AAC), track 1 transcoded to AAC (for HLS, which can't carry
+   the original codec). It publishes the result into MediaMTX via RTSP on `127.0.0.1:8554`.
+2. **MediaMTX** (`backend/src/lib/mediamtxProcess.js`, spawned as a child process, config baked
+   into the image at `mediamtx/mediamtx.yml`) re-publishes that stream as WebRTC (WHEP) and HLS.
+   Each camera's path has no pull source configured — it's publisher-only; FFmpeg pushes into
+   it rather than MediaMTX pulling the camera directly (`backend/src/lib/mediamtx.js`).
+3. **Backend** (`backend/src/index.js`) reverse-proxies `/live` (WHEP) and `/hls` to MediaMTX's
+   local ports, and serves the built frontend + REST API on the single public port (4000).
+4. **Frontend** picks WebRTC (`WhepPlayer.jsx`, "Low latency") or HLS (`HlsPlayer.jsx`,
+   "Compatibility") per camera tile, toggled by the user.
+
+## ONVIF, PTZ, and camera credentials (`backend/src/lib/onvif.js`, `rtspProbe.js`)
+
+Cameras are added/edited by **components** (IP / port / path / username / password), not a
+raw RTSP URL. The route layer (`routes/cameras.js`) assembles those into the stored
+`rtsp_url` that the transcoder uses, and splits an existing `rtsp_url` back into fields for
+the edit form. **The password is never returned to the client** — GET responses carry the
+address in fields plus a credential-free display URL and a `rtsp_has_password` flag; on edit,
+a blank password means "keep the existing one." Keep that invariant.
+
+- **`lib/onvif.js`** — `onvif@0.8.1` client, deliberately resilient to minimal ONVIF servers
+  (the sonoff-hack Sonoff faults on `GetCapabilities`/`GetServices`): it tries the normal
+  connect, then falls back to hitting the media service directly at known paths, and
+  reconstructs the RTSP URL from the connect host + user's creds + the discovered path (never
+  the host/creds the camera returns — often empty/bogus). `probeOnvifCamera()` powers
+  add-by-IP (`POST /api/cameras/onvif-probe`) and also reports two-way-audio (`getAudioOutput-
+  Configurations`) and PTZ capability. **Discovery is add-by-IP, not multicast** — WS-Discovery
+  doesn't cross VLANs.
+- **PTZ** — `ptzNudge()` does start → hold `PTZ_NUDGE_MS` → stop in one call, so each press
+  moves a fixed distance regardless of tap/network timing (`POST /api/cameras/:id/ptz/nudge`;
+  the tile sends one per tap and repeats while held). ONVIF creds for control are the same
+  single credential set stored with the camera; capability/creds/profile-token are captured
+  at add time (`ptz_supported`, `onvif_*` columns) so control reconnects without re-querying.
+- **`lib/rtspProbe.js`** — `validateRtspStream()` (ffprobe over TCP) runs on add/edit so a
+  camera that can't be reached (bad creds/path/IP) isn't silently saved; the UI can override
+  with `force` for a camera that's just momentarily offline.
+
+## Self-healing / reconciliation (`backend/src/index.js`)
+
+MediaMTX only learns about a camera when it's added/edited through the API, or via periodic
+reconciliation. Three independent mechanisms keep the pipeline alive without manual restarts:
+- `reconcileCameraPaths()` runs at startup and every 5 minutes: re-creates any MediaMTX path
+  that's missing/misconfigured and restarts any camera whose transcoder isn't running. It only
+  *writes* to MediaMTX when something is actually wrong, since every write forces a path reload
+  that disconnects the current publisher.
+- A watchdog (15s interval) tracks how long each camera's MediaMTX path has been "not ready"
+  and force-restarts that camera's transcoder past a 30s threshold — a second, independent
+  layer of defense beyond FFmpeg's own stream error handling.
+- FFmpeg and MediaMTX processes both auto-restart on unexpected exit (`transcoder.js`,
+  `mediamtxProcess.js`), and `transcoder.js` also watches for a specific known bad-camera
+  symptom ("DTS discontinuity") and proactively restarts rather than let a session run poisoned.
+
+When editing this area, preserve the "only write when actually broken" invariant — an
+unconditional reconcile-on-every-tick would cause constant disconnects.
+
+## Auth (`backend/src/middleware/auth.js`, `backend/src/routes/auth.js`)
+
+JWT-based, but a valid JWT alone isn't sufficient — every request also checks a `sessions` row
+in SQLite still exists (`backend/src/db.js`). This is what makes "sign out this device" and
+"delete this caregiver" take effect immediately rather than waiting for token expiry. Two auth
+middlewares exist: `requireAuth` (Bearer header) and `requireAuthQueryOrHeader` (also accepts
+`?token=`, needed because Safari's native `<video>` fetches HLS segments itself with no way to
+attach headers). Roles are `admin` / `caregiver`; `requireAdmin` gates account/settings management.
+
+The JWT signing secret is auto-generated and persisted to `DATA_DIR/.jwt_secret` if
+`JWT_SECRET` isn't set — deliberately avoiding a hardcoded fallback, since this image is
+publicly distributed and a baked-in secret would be a shared key across every install.
+
+## Data layer (`backend/src/db.js`)
+
+better-sqlite3, single file in `DATA_DIR` (default `/app/data`). Schema is created with
+`CREATE TABLE IF NOT EXISTS`, and columns added after initial release are migrated by hand at
+the bottom of `db.js` (`PRAGMA table_info` + conditional `ALTER TABLE`) — there is no migration
+framework. Follow this same pattern for new columns: check `table_info`, `ALTER TABLE` if
+missing, keep it idempotent.
+
+## Runtime identity (`backend/entrypoint.sh`, `Dockerfile`)
+
+Container starts as root, remaps a pre-baked user to `PUID`/`PGID` (default 99/100, Unraid's
+"nobody"/"users" convention) via `usermod`/`groupmod`, `chown`s the data dir, then execs the
+app via `su-exec` — the app process itself never runs as root. `tini` is PID 1 to reap zombies
+from the MediaMTX + per-camera-FFmpeg child process tree and forward signals correctly.
+
+## Frontend structure (`frontend/src/`)
+
+React + react-router, no Redux/state library — three context providers (`AuthContext`,
+`SettingsContext`, `CamerasContext` in `lib/`) cover global state. `LiveMonitor.jsx` is the
+main dashboard; `pages/` holds the four management screens (Children, Cameras, Account,
+Settings). The Settings **hub itself is reachable by caregivers** — its route carries no admin
+guard (`App.jsx`) — but it's role-aware internally: admin-only rows are hidden for a caregiver,
+and every Settings *sub*-route (general, camera, recording, mqtt, push providers, users, logs,
+clips) is individually `AdminProtected`. `lib/api.js` is a thin fetch wrapper that attaches the
+JWT and redirects to `#/login` on a 401.
+
+## CSP is enforced — keep it that way
+
+`backend/src/index.js` serves an **enforcing** Content-Security-Policy via helmet (it was
+deliberately disabled until 2026-08-24, when it was rolled out report-only across every feature
+first, then switched to enforcing). The directives are tuned to this app and the reasoning is in
+the inline comment above the policy — read it before changing anything there. Two things that
+bite: hls.js needs `worker-src blob:` + `media-src blob:`, and WebRTC's STUN server is gated by
+`connect-src`. Never add `unsafe-inline`/`unsafe-eval` to `script-src`; theming is safe because it
+uses CSSOM `setProperty`, which CSP doesn't police. Violations are logged to the container log via
+`POST /api/csp-report`, so check there if a new dependency breaks.
