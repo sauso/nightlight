@@ -202,11 +202,12 @@ See the workspace `CLAUDE.md` for the branch model. In short: work on `dev`, rel
   prod's), separate data dir (`/mnt/user/appdata/nightlight-dev`), container name `nightlight-dev`,
   runs `sauso/nightlight:dev`. Test dev builds here.
 
-Deploys/log-checks are done over SSH to the Unraid host, using the guard script (see the workspace
-`CLAUDE.md`). The actual host/container IP addresses are kept out of this repo — they live in the
+Deploys/log-checks are done over SSH to the Unraid host, using the guard script documented in
+`planning/deploy-runbook.md`. The actual host/container IP addresses are kept out of this repo — they live in the
 agent's private deployment notes, not in version control.
 
 Deploys are **not** automated — after CI publishes an image, pull it and recreate the relevant
 container on Unraid (prod pulls `:latest`, staging pulls `:dev`). A push/merge does NOT mean the
 change is live. Verify via the Actions tab / Docker Hub tag, then the running container's
-`org.opencontainers.image.revision` label.
+`NIGHTLIGHT_GIT_SHA` environment variable (`docker inspect`). Not the
+`org.opencontainers.image.revision` label: it exists only on CI-built images.
