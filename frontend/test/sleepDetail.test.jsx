@@ -74,6 +74,22 @@ const lastNightPath = (get) =>
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe('which night it opens on', () => {
+  // ⚠️ THE CLOCK IS PINNED FOR THIS WHOLE GROUP (#534, 2026-10-02: CI had been red on every PR since
+  // 2026-10-01). The newest night the screen allows is the later of the live night and YESTERDAY by the
+  // real clock, so a fixture that names a fixed "future" date stops being in the future the day the real
+  // date reaches it. `never past the newest browsable night` asked for 2026-09-30 against a live night of
+  // 2026-08-30 and began returning 09-30 once yesterday WAS 09-30. Nothing in the app was wrong; the
+  // fixture had a shelf life. The `moving between nights` group below was fixed the same way on 2026-09-29.
+  //
+  // Same instant as that group, for the same reason (NIGHT's times assume Melbourne's +10, which changes
+  // in October, so a derived date would exercise a different offset by season): 02:00Z on the 31st is noon
+  // there, so yesterday is 2026-08-30 and the newest browsable night is exactly the live night. Only `Date`
+  // is faked, so waitFor keeps working; the afterEach at the top of the file restores it.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-08-31T02:00:00Z'));
+  });
+
   test('the night the server calls live', async () => {
     const get = mockSleep({ live: { scope: 'tonight', night: { night_date: '2026-08-30' } } });
     mount();
@@ -184,9 +200,20 @@ describe('which night it opens on', () => {
   });
 
   test('★ but never past the newest browsable night', async () => {
-    // 2026-09-30 is beyond the live night, so the picker could not reach it. A URL must not either.
+    // With the clock pinned (above) the newest night is 2026-08-30, so 08-31 is exactly ONE day past it:
+    // the picker could not reach it, and a URL must not either. One day, not a month, so a clamp widened
+    // by a day fails here. (#534 — the old fixture asked for 2026-09-30 and went stale with the real clock.)
     const get = mockSleep({ live: { scope: 'tonight', night: { night_date: '2026-08-30' } } });
-    mountAt('/children/kid-1/sleep?date=2026-09-30');
+    mountAt('/children/kid-1/sleep?date=2026-08-31');
+    await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-30?detail=1'));
+  });
+
+  // The other side of the same boundary: the newest night itself IS allowed. Without it, a clamp that
+  // became `<` instead of `<=` would pass the test above. The live night is set a day EARLIER than the
+  // newest browsable night so the answer cannot be the live-night fallback by coincidence.
+  test('★ and the newest browsable night itself is honoured', async () => {
+    const get = mockSleep({ live: { scope: 'tonight', night: { night_date: '2026-08-29' } } });
+    mountAt('/children/kid-1/sleep?date=2026-08-30');
     await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-30?detail=1'));
   });
 
