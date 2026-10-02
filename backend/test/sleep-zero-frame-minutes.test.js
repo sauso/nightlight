@@ -608,3 +608,61 @@ describe('#508 onset across a stall', () => {
     assert.equal(night.unknown_minutes, 185, 'the stall itself is reported as unknown, not as sleep');
   });
 });
+
+// Issue #453: a digitally silent microphone (all-zero audio windows) now stores what a quiet one stores. Before
+// #453 such a window was thrown away, so a silent minute stored NULL sound, and a silent minute with no video
+// stored no row at all; since #453 it stores sound_peak 0 with its windows counted, and a silent minute with no
+// video writes a row. The sleep numbers must read both exactly as before: 0 is never a "heard" minute
+// (SOUND_ACTIVE is 6 dB), and a row with no video is unwatched (#508) whatever its sound column says. These pass
+// on the code before #453 too: they pin that the stored change cannot move a sleep number.
+describe('#453 C3: a minute heard as digital silence (sound_peak 0) reads exactly like one with no sound reading', () => {
+  const insertFull = db.prepare(
+    `INSERT INTO activity_samples (camera_id, bucket_start, motion_level, motion_peak, sound_level, sound_peak,
+       motion_frames, sound_windows, motion_out_level, motion_out_peak, sound_p75, sound_p90, sound_sd)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  // The sound columns as the writer stores them: `silent` = since #453 (300 windows, every one 0);
+  // otherwise = before #453 (no sound window counted, every sound column NULL).
+  const sound = (silent) => (silent
+    ? { level: 0, peak: 0, windows: 300, p75: 0, p90: 0, sd: 0 }
+    : { level: null, peak: null, windows: 0, p75: null, p90: null, sd: null });
+  const MOVES = [[at(19, 30), at(19, 40)], [at(1, 0, 1), at(1, 9, 1)]]; // the settle, and a real wake
+  function watchedRow(t, silent) {
+    const peak = within(t, MOVES) ? 0.4 : STILL_OCCUPIED;
+    const s = sound(silent);
+    insertFull.run(CAM, sqlTime(t), peak, peak, s.level, s.peak, 1, s.windows, 0, 0.0004, s.p75, s.p90, s.sd);
+  }
+  function noVideoSilentRow(t) {
+    const s = sound(true);
+    insertFull.run(CAM, sqlTime(t), null, null, s.level, s.peak, 0, s.windows, null, null, s.p75, s.p90, s.sd);
+  }
+
+  test('#453 C3: a watched night whose every minute stored sound_peak 0 is the same night as with sound NULL', () => {
+    for (let t = at(19, 30); t < at(7, 0, 1); t = addMin(t, 1)) watchedRow(t, false);
+    const before = computeNight(CHILD, DATE, { includeTimeline: true });
+    db.prepare('DELETE FROM activity_samples').run();
+    for (let t = at(19, 30); t < at(7, 0, 1); t = addMin(t, 1)) watchedRow(t, true);
+    const after = computeNight(CHILD, DATE, { includeTimeline: true });
+    assert.equal(before.status, 'ok', 'sanity: a real, scored night');
+    assert.ok(before.wake_count >= 1, 'sanity: the night has a wake for a stray "heard" minute to disturb');
+    assert.deepEqual(after, before);
+  });
+
+  test('#453 C3: silent minutes with NO video (rows that exist only since #453) give the same night as no rows', () => {
+    // A two-hour video outage (03:00-05:00) during which the microphone heard only digital silence: before #453
+    // those minutes stored no row; now each stores frames 0 and sound_peak 0. Both must be unknown, not asleep.
+    const lay = (withSilentRows) => {
+      for (let t = at(19, 30); t < at(7, 0, 1); t = addMin(t, 1)) {
+        if (!within(t, [[at(3, 0, 1), at(5, 0, 1)]])) watchedRow(t, false);
+        else if (withSilentRows) noVideoSilentRow(t);
+      }
+    };
+    lay(false);
+    const before = computeNight(CHILD, DATE, { includeTimeline: true });
+    db.prepare('DELETE FROM activity_samples').run();
+    lay(true);
+    const after = computeNight(CHILD, DATE, { includeTimeline: true });
+    assert.equal(before.unknown_minutes, 120, 'sanity: the outage is unknown');
+    assert.deepEqual(after, before);
+  });
+});

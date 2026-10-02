@@ -648,6 +648,15 @@ the fixed `/activity-history` SELECT does not expose these diagnostics. Only the
 the recorded p75/p90/sd will be available for that comparison. A different, unrecorded percentile cannot
 be recovered from these summaries and would require a fresh collection window.
 
+**Data cutoff (issue #453):** digitally silent windows (every sample zero) used to be DROPPED; from the first
+release after 0.34.0 (the one whose CHANGELOG lists #453) each is stored as an excursion of 0. So for a camera
+that delivers digital silence, `sound_level`, `sound_p75`, `sound_p90`, `sound_sd` and `sound_windows` from
+before and after that release are different populations, and a minute of nothing but silence that stored no
+sound (NULL, or no row at all) now stores `sound_peak` 0. Do not mix the two sides of that release in the
+Phase 2 analysis. (`sound_peak` itself only changes from NULL to 0, which no `SOUND_ACTIVE` comparison can
+tell apart.) On the cameras measured so far (G711 A-law) digital silence does not occur, so their rows are
+unaffected; check `[obs] silent=` per camera before relying on that.
+
 **Prerequisite, and it is now DONE**: `soundDetector.js` was untestable (`handleReading` was a closure
 inside `launch()` inside `startSoundDetector`). The reading pipeline was extracted behind an injectable
 clock as `lib/soundBaseline.js`, which is in the `test:core` include list at 100% lines. The

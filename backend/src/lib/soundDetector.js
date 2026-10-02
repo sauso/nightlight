@@ -87,8 +87,9 @@ export function isSoundDetecting(cameraId) {
 }
 
 // #369: this leg's freshness for the detector watchdog, as AGES (processGuards.js detectorHealthOf). Bytes, not
-// readings: a digitally silent window never sets `sawReading`, but its PCM bytes still arrive, so a silent room
-// reads as fresh. Test the result with `!= null`, never truthiness.
+// readings: the stamp is taken on every stdout 'data' event before any window is decoded, so a silent room (all-zero
+// PCM) reads as fresh whatever the analysis makes of it. (Since #453 a silent window is also a READING, which sets
+// `sawReading`; the watchdog never looked at that.) Test the result with `!= null`, never truthiness.
 export function getSoundDetectorHealth(cameraId) {
   return detectorHealthOf(detectors.get(cameraId));
 }
@@ -187,10 +188,23 @@ export async function startSoundDetector(camera) {
     // of one event is filed under the same minute. `now` below stays this handler's own Date.now(), which the
     // baseline and the alert rules read exactly as before.
     function handleReading(rms, atMs) {
-      if (!Number.isFinite(rms)) return; // -inf / nan (true digital silence) — ignore
+      // ★ #453: -Infinity is DIGITAL SILENCE (an all-zero window), and it is an observation, not a missing one:
+      // the stream delivered real bytes and the room was heard. It used to be dropped right here, before
+      // `sawReading`, the analyser and recordSound, so a muted or gated microphone stored no sound at all,
+      // counted toward "does this camera have a microphone?", and was invisible to the confirm window (which
+      // let separate sounds with silence between them add up to an alert). It now takes the SAME path as any
+      // reading: the analyser decides what silence means (a reading at the ambient: soundBaseline.js) and its
+      // `recordDb` is the ONE source of what is stored. Do not call recordSound(…, 0, …) for silence here: that
+      // would bypass the analyser's own silent branch (and its seeding rule) and make it unreachable again.
+      // Anything else non-finite (NaN, +Infinity) is not something 16-bit PCM can produce; ignored as before.
+      if (rms !== -Infinity && !Number.isFinite(rms)) return;
       sawReading = true;
       const now = Date.now();
+      // A silent window never sets the peak (-Infinity is not greater than anything), so the level line's
+      // `peak=` stays the loudest AUDIBLE window, and reads `?` when every window since the last line was silent.
       if (rms > windowPeak) windowPeak = rms;
+      // The level line runs for silent windows too, so a muted microphone still logs `ambient=… peak=?` every
+      // 15 s instead of going quiet in the log as if the detector had stopped.
       if (now - lastLevelLog >= LEVEL_LOG_MS) {
         const b = analyser.baseline;
         logger.info(
@@ -232,12 +246,15 @@ export async function startSoundDetector(camera) {
           sumSq += s * s;
         }
         const rms = Math.sqrt(sumSq / WIN_SAMPLES);
-        // dBFS: 0 dB = full scale (32768). True silence (rms 0) -> -Infinity, ignored upstream.
+        // dBFS: 0 dB = full scale (32768). True digital silence (rms 0) -> -Infinity, which handleReading
+        // records as a quiet reading at the ambient (#453).
         const level = rms > 0 ? 20 * Math.log10(rms / 32768) : -Infinity;
         handleReading(level, rx.wall);
         // #373: one observation per window, AFTER its decision handler returned (R1-F8). It runs for every
-        // window, silent ones included — the early return inside handleReading cannot skip it — and a
-        // silent window counts as SAMPLED but not ANALYSED coverage (C5).
+        // window, silent ones included, whatever handleReading did with it — and a silent window counts as
+        // SAMPLED but not ANALYSED coverage (C5). ANALYSED is the observation clock's own sense (it had a
+        // measurable loudness); #453 left it alone on purpose, so the `[obs]` line's `silent=` and `cover=`
+        // mean what KNOWN-ISSUES.md documents even though the window is now recorded as quiet.
         obs.onSample(win, rx.mono, rx.wall, { analysed: Number.isFinite(level) });
       }
     });
@@ -276,7 +293,9 @@ export async function startSoundDetector(camera) {
         // stalled leg killed three times could be declared "no microphone" and stopped for good (Astra R2).
         noAudioStrikes = 0;
       } else if (!sawReading && Date.now() - startedAt < 10000) {
-        // A quick exit with no readings ever = almost certainly no audio track on this camera.
+        // A quick exit with no readings ever = almost certainly no audio track on this camera. A digitally
+        // silent window IS a reading (#453): a muted or gated microphone delivers real zero bytes, so its quick
+        // exits are ordinary reconnects, never a strike. Only a leg that delivered no complete window strikes.
         noAudioStrikes += 1;
         if (noAudioStrikes >= NO_AUDIO_MAX_STRIKES) {
           logger.error(`[sound:${path}] no audio readings after ${noAudioStrikes} tries — does this camera have a microphone? Sound detection stopped.`);

@@ -195,7 +195,7 @@ describe('the stamps and the lever guards', { concurrency: false }, () => {
     assert.equal(h0.dataAgeMs, null);
     assert.equal(h0.inputRecordAgeMs, null, 'a line that is not the sound tap set the input stamp');
     const before = performance.now();
-    proc.stdout.emit('data', Buffer.alloc(3200)); // one 200 ms window of s16le zeros: no reading at all
+    proc.stdout.emit('data', Buffer.alloc(3200)); // one 200 ms window of s16le zeros: digital silence (a quiet reading since #453; the stamp is bytes either way)
     const h1 = sound.getSoundDetectorHealth(cam.id);
     assert.ok(h1.lastDataMono >= before && h1.lastDataMono <= performance.now(), 'a silent window did not stamp the leg as fresh');
     stderr(proc, SOUND_RECORD);
