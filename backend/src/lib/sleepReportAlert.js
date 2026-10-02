@@ -107,7 +107,9 @@ export function notifySleepReports(reports) {
 
 // ROADMAP §1.6: a LATER recompute resolved a wake time that was still unknown when the parent was first
 // told. Capped by the caller (runNightlySleepJob — notified_wake_at's own nullness is the one-shot cap,
-// no separate counter); this function fires unconditionally for whatever it's given, same fire-and-forget
+// no separate counter), and time-limited by it too: nothing is queued later than one job tick past the
+// night's evidence horizon (FOLLOWUP_FRESH_MS, fix round 2, 2026-09-30), and nothing for a night a parent
+// has corrected. This function fires unconditionally for whatever it's given, same fire-and-forget
 // contract as notifySleepReports. Reuses lineFor() as-is: the null->real transition already changes the
 // rendered string shape correctly (the "up HH:MM" clause appears), which is exactly what needs conveying.
 export function notifySleepReportUpdates(reports) {

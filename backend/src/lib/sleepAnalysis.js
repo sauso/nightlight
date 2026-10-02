@@ -382,6 +382,27 @@ function windowBoundsUtc(nightDate, tz, startHM, endHM) {
   return { startUtc, endUtc };
 }
 
+// The span of instants computeNight can REPORT an asleep or wake time in, for this child's night: the night's
+// own window (the child's start/end in the app timezone, exactly as computeNight derives it), opened
+// ONSET_LOOKBEHIND_MS early and closed WAKE_LOOKAHEAD_MS late. Half-open, like the window: the earliest
+// asleep time is the first minute of the lookbehind (minute index 0), and the latest departure is strictly
+// before the end of the lookahead (getBedTransitions reads `created_at < ?`, and a movement-only wake stops
+// at the window end). Derived from these constants and helpers, never a copy of them, so the span moves
+// with them.
+//
+// Why it exists (fix round 4, 2026-10-02, Opus #1 + Codex #1, both reproduced by a test): the morning review
+// trusts the client's echo of what the page showed only for a time the detector could have shown for THIS
+// night (sleepReviews.localHmToUtcSql). Fix round 3 bounded it by calendar day instead, which was wrong both
+// ways: too narrow for a window opening 00:00-02:59, whose lookbehind reaches the PREVIOUS date (the app's
+// own asleep time was refused), and too wide for a hand-made echo, which could put a typed time on the
+// following evening. Every child gets its own window, in whatever timezone the install is set to.
+export function reportableSpanMs(childId, nightDate) {
+  const tz = appSettings().timezone || 'UTC';
+  const cfg = childSleepConfig(childId);
+  const { startUtc, endUtc } = windowBoundsUtc(nightDate, tz, cfg.start, cfg.end);
+  return { fromMs: startUtc.getTime() - ONSET_LOOKBEHIND_MS, toMs: endUtc.getTime() + WAKE_LOOKAHEAD_MS };
+}
+
 // A night's departure evidence is FINAL once real time has caught up to the same horizon the
 // departure scan itself is bounded by (WAKE_LOOKAHEAD_MS past window_end) — see computeNight's
 // evidenceCutoffMs. Derived from window_end alone, which every sleep_nights row (old and new) already
@@ -1860,14 +1881,75 @@ const recordFirstNotified = db.prepare(
 const recordFollowupNotified = db.prepare(
   'UPDATE sleep_nights SET notified_wake_at = ? WHERE child_id = ? AND night_date = ?'
 );
-// Has a parent said "no one was in the bed" for this night? (sleep_reviews.nobody_in_bed, set from the
-// morning review.) Read directly rather than through sleepReviews.js, which imports this module.
-const parentSaidNobodyInBed = db.prepare(
-  'SELECT 1 FROM sleep_reviews WHERE child_id = ? AND night_date = ? AND nobody_in_bed = 1'
-);
-
 // A night that was actually scored. Anything else is an absence of data, not a measurement.
 const SCORED = new Set(['ok', 'empty']);
+
+// ★ HAS A PARENT CORRECTED THIS NIGHT? One definition, used by every lock and gate below.
+//
+// A review row CORRECTS a night when it carries any of the four things applyCorrection (sleepReviews.js)
+// lays over the detector's answer: "no one was in the bed", or a true asleep, wake or in-bed time. It is
+// NOT "a review row exists": a dismissal, a note, or a save of per-event verdicts alone all write a row
+// with none of those, and none of them change what the night shows, so none of them may lock it.
+// `dismissed` is deliberately absent for the same reason (the overlay ignores it).
+//
+// ⚠️ This SQL and sleepReviews.js's `reviewCorrectsNight` are two spellings of ONE rule and must never
+// drift: a column the overlay starts reading but this ignores would leave a corrected night unlocked, and
+// the reverse would freeze a night whose display nothing changed. The PRAGMA-driven test in
+// review-in-bed-and-lock.test.js plants each sleep_reviews column on its own and fails if the two
+// disagree about any of them. Read directly here rather than through sleepReviews.js, which imports this
+// module.
+//
+// The two read the same VALUES the same way too, not just the same columns (fix round, 2026-09-30): the
+// flag counts only when it is exactly 1 (`saidNobody` in JS), and a time only when it is a non-empty
+// string. `IS NOT NULL` alone read '' as a correction that the overlay (where '' is falsy) ignores, so a
+// row could lock a night whose display nothing had changed. The same test plants '' and 0 / -1 as well.
+const CORRECTED_REVIEW_SQL =
+  "r.nobody_in_bed = 1 OR COALESCE(r.true_onset_at, '') <> '' OR COALESCE(r.true_wake_at, '') <> '' "
+  + "OR COALESCE(r.true_in_bed_at, '') <> ''";
+const parentCorrectedNight = db.prepare(
+  `SELECT 1 FROM sleep_reviews r WHERE r.child_id = ? AND r.night_date = ? AND (${CORRECTED_REVIEW_SQL})`
+);
+
+// ★ THE LOCK: a night a parent has corrected is complete, and nothing recomputes its stored row again.
+//
+// Why (owner's rule, 2026-09-30): a child's wake was corrected to 06:10 on staging, and a couple of hours
+// later the night "recalculated" after the bed was changed. runNightlySleepJob keeps re-storing a night for
+// ~3h after its window closes (issue #351) and never read sleep_reviews, and applyCorrection derives the
+// corrected night's asleep minutes and wake count from whatever that stored row says at read time, so a
+// later pass could change a night the parent had already put right. "Once a parent has corrected a night
+// it is complete and must not be overridden." Nothing here is specific to that house: it is per child
+// and per night, it reads no clock but the row's own, and every install gets the same rule.
+//
+// Locked = the correction above AND a stored row that is SCORED (ok/empty) AND was computed at or after
+// its own window closed. Each extra condition is there for a reason:
+//   - SCORED: a correction on a `no_data` (or missing) row must not freeze it unscored. The job keeps
+//     refining such a night until it scores, which also keeps its timelapse (made on the first SCORED
+//     pass, see the gate at the end of runNightlySleepJob), and the lock takes hold from that pass on.
+//     ⚠️ KNOWN LIMIT (documented in the README): that first scored pass is what locks. If it scores
+//     `empty` where a later pass would have found the child (`ok`, the empty->ok case of #419), the night
+//     stays `empty` under the parent's times, because the later pass never runs. Removing the correction
+//     unlocks it while it is still the last completed night.
+//   - `computed_at >= window_end`: a row written while its window was still open is a snapshot of a night
+//     in progress (only an admin `?store=1` for tonight, or the demo seed, writes one). It is never "the
+//     night as the parent judged it", so it must not freeze. This is plan review R9 ("a nobody flag on an
+//     in-progress night does not lock"; the overlay ignores it there too), done from the row's OWN columns
+//     rather than the wall clock, so it cannot drift into the #351 "gate on now" bug. Both are
+//     'YYYY-MM-DD HH:MM:SS' UTC text, so the string comparison is a time comparison.
+const nightLockedStmt = db.prepare(
+  `SELECT 1 FROM sleep_nights n
+     JOIN sleep_reviews r ON r.child_id = n.child_id AND r.night_date = n.night_date
+    WHERE n.child_id = ? AND n.night_date = ?
+      AND n.status IN (${[...SCORED].map((s) => `'${s}'`).join(', ')})
+      AND n.computed_at >= n.window_end
+      AND (${CORRECTED_REVIEW_SQL})`
+);
+
+// Is this child-night locked against recomputation? Exported for the route's `?stored=1` answer, so the
+// UI keys on the server's own verdict rather than re-deriving it from `night.corrected` (a corrected night
+// whose stored row is missing or `no_data` is NOT locked, and Recompute is its only fix).
+export function nightIsLocked(childId, nightDate) {
+  return !!nightLockedStmt.get(childId, nightDate);
+}
 
 // Compute a night and store it, upserting over whatever was there.
 //
@@ -1905,6 +1987,16 @@ const SCORED = new Set(['ok', 'empty']);
 // computing `no_data` where the first call saw `ok`. `allowDowngrade: false` is what actually stops that
 // from overwriting a good row — the single-call ordering guarantee above does not reach across two
 // separate job passes at all.
+//
+// ⚠️ A THIRD REFUSAL, `reviewed` (2026-09-30): a night a parent has corrected is never re-stored — see
+// nightIsLocked above for why and for exactly what "corrected" and "locked" mean. It lives in the SAME
+// `!allowDowngrade` path as the other two, so it covers every production caller (the job, the admin
+// `?store=1` route and the demo seed all pass `allowDowngrade: false`), and it is checked FIRST, before
+// `would_downgrade`, so a locked night is never told its data aged out when the real reason is the
+// parent's correction. `allowDowngrade: true` (only tests use it) skips all three. This makes
+// computeAndStoreNight the only writer of the computed summary that the lock has to guard; the
+// notification-ledger updates (recordFirstNotified / recordFollowupNotified) and deleting a child touch
+// sleep_nights separately and are unaffected.
 export function computeAndStoreNight(childId, nightDate, { allowDowngrade = true } = {}) {
   const summary = computeNight(childId, nightDate);
   if (!allowDowngrade) {
@@ -1912,6 +2004,9 @@ export function computeAndStoreNight(childId, nightDate, { allowDowngrade = true
       .prepare('SELECT status, notified_wake_at FROM sleep_nights WHERE child_id = ? AND night_date = ?')
       .get(childId, nightDate);
     if (existing) {
+      if (nightIsLocked(childId, nightDate)) {
+        return { ...summary, stored: false, refused: 'reviewed' };
+      }
       if (!SCORED.has(summary.status) && SCORED.has(existing.status)) {
         return { ...summary, stored: false, refused: 'would_downgrade', stored_status: existing.status };
       }
@@ -1939,6 +2034,71 @@ export function computeAndStoreNight(childId, nightDate, { allowDowngrade = true
     computed_at: toSqlUtc(new Date()),
   });
   return { ...summary, stored: true };
+}
+
+// The refresh the nightly job still owes a night, done NOW, because a parent is about to lock it by
+// saving a correction. Called on EVERY save that leaves the review correcting the night, BEFORE anything of
+// that save is written: by the review route (routes/children.js) after its last refusal and before
+// applyVerdicts writes the event answers, and by saveNightReview itself for any other caller (the route
+// passes `storeFirst: false` so it is not run twice; wording corrected in fix round 3, Opus #4). For the
+// FIRST correction the lock is not yet in force, so computeAndStoreNight lets the store through once; for
+// every later save (a re-edit, a note, a verdict) the night is already locked, and the first check below
+// returns before any compute (see there).
+//
+// Why (both plan reviewers, 2026-09-30): the morning card is offered on the FIRST stored row, and that
+// row stays provisional for ~3h after the window closes (#351) while the job keeps refining it. Locking
+// at review time without this would freeze most corrected nights at their first rough pass, and a plain
+// "That's right" confirmation locks too. So the night is re-stored from a fresh computeNight at the
+// moment of the save, and it is THAT row the lock keeps.
+//
+// ⚠️ KNOWN LIMIT: "fresh at the moment of the save" is not always what the parent was looking at. A page
+// left open shows the night as it was computed when the page loaded, and a completed night's wake keeps
+// drifting until ~10:00 as daytime activity fills the lookahead (measured 2026-08-29: 05:51 at 08:16,
+// 08:31 at 09:50). The row stored and locked here is the SAVE-time compute. The review row still records
+// what was on screen (computed_onset_at / computed_wake_at), so the difference stays visible. README.
+//
+// ⚠️ DELIBERATELY NARROWER than "store on every correction", and each skip is a case where storing would
+// do harm or add nothing:
+//   - already LOCKED: a later save on a night the parent has already corrected. The store would be refused
+//     (`reviewed`) anyway, but only AFTER a full computeNight: every re-edit, note or verdict on a corrected
+//     night paid for one, and a compute that threw would have 500'd a save after applyVerdicts had written
+//     (both reviewers, fix round 2026-09-30). Checked first, before anything else is read.
+//   - no row, or an unscored one (`no_data`/`no_sleep`/`off`): the lock does not hold on those anyway,
+//     and creating or upgrading the row here would take the night's FIRST scored pass away from the job.
+//     That pass is the only one that assembles the night's timelapse (or discards an empty night's
+//     frames), and it sends the first sleep report. The frames directory has no other sweep, so a night
+//     scored here would keep its raw frames on disk forever with no timelapse. The job scores such a
+//     night on its next tick (with its report and timelapse as usual) and the lock takes hold from then.
+//     ⚠️ OWNER DECISION (2026-09-30, fix round 2, raised by both code reviewers): kept this way knowing
+//     its cost. The lock then holds whatever that first scored pass stored, so a corrected night whose
+//     first pass has no wake yet (a departure still being confirmed) keeps that blank wake until the parent
+//     adds one to the review, or removes the correction while it is still the last night. Storing here
+//     instead would cost the timelapse and the first report, which is worse. README, "Known limits".
+//   - not the child's LAST COMPLETED night: the job only ever visits that one night, so it owes no other
+//     night anything. ⚠️ The finality check below cannot stand in for this (found in fix-round review,
+//     2026-09-30): rows written before #351 (0.31.0) were written once and never finalised, and a locked
+//     row's computed_at stays early for good, so an old night's OWN computed_at can still read
+//     "provisional" weeks later. Without this, any signed-in user saving a correction on a ten-day-old
+//     night re-scored it with today's detector.
+//   - the window has not closed yet: storing now would write a night in progress.
+//   - the row is already FINAL: computed at or after its evidence horizon, judged on the row's OWN
+//     computed_at exactly as the job's gate does. ⚠️ NOT on the current time: that is the #351 bug. Between
+//     the horizon and the job's next 30-minute tick, a row last written BEFORE the horizon is still owed
+//     one pass (the one that can see the whole lookahead); judged on "now" it would look final, this
+//     would skip, and the lock would then freeze that early row forever. Re-scoring a truly final row
+//     would also let a caregiver re-score with today's detector, which is what the admin Recompute is for.
+// So this only ever does what the job itself would have done on its next tick, earlier.
+export function storeNightBeforeCorrection(childId, nightDate, nowMs = Date.now()) {
+  if (nightIsLocked(childId, nightDate)) return { stored: false, skipped: 'locked' };
+  const row = db
+    .prepare('SELECT status, window_end, computed_at FROM sleep_nights WHERE child_id = ? AND night_date = ?')
+    .get(childId, nightDate);
+  if (!row || !SCORED.has(row.status)) return { stored: false, skipped: 'unscored' };
+  if (nightDate !== lastCompletedNightDate(childId)) return { stored: false, skipped: 'not_last_night' };
+  const utcMs = (s) => new Date(`${s.replace(' ', 'T')}Z`).getTime();
+  if (nowMs < utcMs(row.window_end)) return { stored: false, skipped: 'in_progress' };
+  if (isEvidenceFinal(row.window_end, utcMs(row.computed_at))) return { stored: false, skipped: 'final' };
+  return computeAndStoreNight(childId, nightDate, { allowDowngrade: false });
 }
 
 export function getStoredNights(childId, limit = 14) {
@@ -2045,6 +2205,15 @@ export function sleepInsights(childId, { nights = 30 } = {}) {
   };
 }
 
+// How often startSleepJob runs the job. Named because the follow-up's freshness limit below is built on it.
+const SLEEP_JOB_INTERVAL_MS = 30 * 60 * 1000;
+// The latest a "Sleep report updated" follow-up may go out, counted from the window's end: the evidence
+// horizon (WAKE_LOOKAHEAD_MS) plus ONE job tick. That last tick is the only pass that can see a departure
+// confirmed in the final minutes before the horizon (the #351 gate in runNightlySleepJob), so its follow-up
+// is still "within about 3 hours" (docs/notifications.md). Anything later is not news (fix round 2,
+// 2026-09-30): see the gate where the follow-up is decided.
+const FOLLOWUP_FRESH_MS = WAKE_LOOKAHEAD_MS + SLEEP_JOB_INTERVAL_MS;
+
 // Compute + store the most recent completed night for every child, if not already stored. Called from
 // the scheduler (and once at startup) so "last night" is ready without an on-request compute.
 export function runNightlySleepJob() {
@@ -2103,6 +2272,16 @@ export function runNightlySleepJob() {
         // horizon like every other pass) — and only once a write has itself already happened at or after
         // the horizon does every future tick skip for good.
         if (existing && isEvidenceFinal(existing.window_end, new Date(existing.computed_at.replace(' ', 'T') + 'Z').getTime())) continue;
+        // ⚠️ A NIGHT A PARENT HAS CORRECTED IS LEFT ALONE (the lock, see nightIsLocked; a child's night on
+        // staging, 2026-09-30, "recalculated" hours after its wake was corrected). Checked HERE, before
+        // computeNight, and not only inside computeAndStoreNight: that refusal would still cost a full
+        // computeNight every 30-minute tick for as long as the night stays the last completed one (~21h).
+        // Skipped quietly, WITHOUT touching `computed_at`. That is what makes un-locking work: if the
+        // parent later removes their last correction, the gate above still reads the row's own, older
+        // `computed_at`, so a row last written before the evidence horizon is owed one more pass and gets
+        // it on the next tick, even hours after the horizon, for as long as it is still the last completed
+        // night. Gating un-lock on the current time instead would be the #351 bug again.
+        if (existing && nightIsLocked(kid.id, nightDate)) continue;
         // ⚠️ `allowDowngrade: false` (found by adversarial review). Before issue #351, a row was only ever
         // written ONCE, so this call could never see an `existing` scored row and the downgrade guard was
         // moot here. Now that a provisional row can be recomputed several times over its 3h window, a
@@ -2140,15 +2319,29 @@ export function runNightlySleepJob() {
           existing.notified_at != null &&
           existing.notified_wake_at == null &&
           summary.wake_at != null &&
-          // ⚠️ Not after a parent has said "no one was in the bed" (plan review R2). This job keeps
-          // recomputing a night for ~3h after its window closes and never reads sleep_reviews, so the
-          // follow-up would otherwise push the detector's "up 07:20" for a child the parent has just said
-          // was never there. Skipped WITHOUT recording notified_wake_at: nothing was sent, so recording
-          // it would claim otherwise and arm computeAndStoreNight's `would_blank_notified_wake` guard on
-          // a value nobody was told. The follow-up therefore still goes out if the flag is taken back
-          // inside the window, which is right, because the detector's night is being shown again.
+          // ⚠️ ...and only while it is still news: no later than one job tick past the evidence horizon
+          // (FOLLOWUP_FRESH_MS). Fix round 2, 2026-09-30, Opus #3, verified. The follow-up had no time limit
+          // of its own; it relied on the job never recomputing a night past the horizon. Un-locking breaks
+          // that on purpose (plan review R7): a correction removed at 13:00 lets the owed pass run at 13:30,
+          // and it pushed "Sleep report updated" six and a half hours after the window closed. A container
+          // that was down across the morning did the same on its first tick back. Judged on the CURRENT time
+          // on purpose, unlike the #351 gate above: this decides only whether to SEND, never whether to
+          // recompute or store, so the owed pass still stores the night exactly as before. Skipped WITHOUT
+          // recording notified_wake_at, like the correction gate below: nothing was sent.
+          now - new Date(existing.window_end.replace(' ', 'T') + 'Z').getTime() <= FOLLOWUP_FRESH_MS &&
+          // ⚠️ Not after a parent has CORRECTED the night in any way (plan review R2 for "no one was in
+          // the bed", widened 2026-09-30 to every correction). The follow-up exists to tell a parent the
+          // detector's wake time; a parent who has typed the wake themselves, or said nobody was there,
+          // must not be pushed the detector's "up 07:20" over their own answer. Most corrected nights
+          // never reach here at all (the lock above skips a corrected SCORED row before computing); this
+          // gate is what covers a corrected night whose stored row was still `no_data`, which the lock
+          // deliberately leaves running until it scores.
+          // Skipped WITHOUT recording notified_wake_at: nothing was sent, so recording it would claim
+          // otherwise and arm computeAndStoreNight's `would_blank_notified_wake` guard on a value nobody
+          // was told. The follow-up therefore still goes out if the correction is taken back inside the
+          // window, which is right, because the detector's night is being shown again.
           // The FIRST report is not recalled; it has already been sent (docs/notifications.md).
-          !parentSaidNobodyInBed.get(kid.id, nightDate)
+          !parentCorrectedNight.get(kid.id, nightDate)
         ) {
           // Push into `followups` is CONDITIONAL on the write succeeding — the opposite of the
           // first-notify path above, which pushes into `fresh` unconditionally. (Both sends actually
@@ -2210,7 +2403,7 @@ let jobTimer = null;
 export function startSleepJob() {
   if (jobTimer) return;
   runNightlySleepJob(); // backfill the last completed night on boot
-  jobTimer = setInterval(runNightlySleepJob, 30 * 60 * 1000); // and catch the window closing within 30 min
+  jobTimer = setInterval(runNightlySleepJob, SLEEP_JOB_INTERVAL_MS); // and catch the window closing within 30 min
   logger.info('[sleep] Nightly sleep computation scheduled (every 30 min; last completed night).');
 }
 

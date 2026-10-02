@@ -5,14 +5,15 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { normalizePhoto } from '../lib/photo.js';
 import {
   getStoredNights, computeNight, computeAndStoreNight, currentNightDate, childTracksSleep, sleepInsights,
-  MIN_COVERAGE_FRAC, EMPTY_MIN_COVERAGE_FRAC,
+  nightIsLocked, storeNightBeforeCorrection, reportableSpanMs, MIN_COVERAGE_FRAC, EMPTY_MIN_COVERAGE_FRAC,
 } from '../lib/sleepAnalysis.js';
 import { startMotionDetector } from '../lib/motionDetector.js';
 import { reconcileClipRing } from '../lib/clipCapture.js';
 import { deleteRecording } from '../lib/recordings.js';
 import { deleteTimelapse, discardAllTimelapseFrames } from '../lib/timelapse.js';
-import { getNightReview, saveNightReview, reviewCardState, localHmToUtcSql, applyVerdicts,
-  applyCorrection, applyCorrections, transitionInstant } from '../lib/sleepReviews.js';
+import { TRANSITION } from '../lib/bedTransitions.js';
+import { getNightReview, saveNightReview, previewNightReview, inBedAfterOnset, asleepAfterWake, reviewCorrectsNight,
+  reviewCardState, localHmToUtcSql, applyVerdicts, applyCorrection, applyCorrections, transitionInstant } from '../lib/sleepReviews.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -170,11 +171,16 @@ router.get('/:id/sleep/:date', (req, res) => {
   // DETECTOR saved. A parent's correction (typed times, or "no one was in the bed") lives in
   // sleep_reviews and is laid over the night on every normal read. Overlaying it here would make a
   // flagged night's "before" read empty, when the saved row the recompute would replace says otherwise.
+  //
+  // `locked` (added 2026-09-30, additive): whether this night is locked against recomputation because a
+  // parent corrected it, decided HERE by the same function the refusal uses (nightIsLocked). The UI keys
+  // on this rather than on `night.corrected` (plan review R8): a corrected night whose saved row is
+  // missing or unscored is NOT locked, and Recompute is exactly how that one gets fixed.
   if (req.query.stored === '1') {
     const row = db
       .prepare('SELECT * FROM sleep_nights WHERE child_id = ? AND night_date = ?')
       .get(req.params.id, req.params.date);
-    return res.json({ night: row || null });
+    return res.json({ night: row || null, locked: nightIsLocked(req.params.id, req.params.date) });
   }
   const wantStore = req.query.store === '1' && req.user?.role === 'admin';
   if (!wantStore) {
@@ -187,6 +193,19 @@ router.get('/:id/sleep/:date', (req, res) => {
   // too little of it was watched, or it no longer scores — below), so it is a 4xx with a readable reason:
   // a 5xx would have its body stripped by Cloudflare and the user would see nothing at all.
   const summary = computeAndStoreNight(req.params.id, req.params.date, { allowDowngrade: false });
+  // A night a parent has corrected is locked (see nightIsLocked in sleepAnalysis.js): it is kept as it was
+  // when they corrected it, and the owner's rule is that nothing, this button included, re-scores it after
+  // that. A 409 with a readable reason, like the other refusals below, because a 5xx body would be
+  // stripped by Cloudflare. Checked before `would_downgrade` inside computeAndStoreNight, so a locked night
+  // is never told its data "aged out".
+  if (summary.refused === 'reviewed') {
+    return res.status(409).json({
+      error: "This night can't be recomputed: it was corrected in the morning review, and a corrected night "
+        + 'is locked. To change it, change or remove the correction ("Change what you told us about this '
+        + 'night"). The saved summary has been left as it is.',
+      reason: 'reviewed',
+    });
+  }
   if (summary.refused === 'would_downgrade') {
     // THREE different things reach this refusal, and the message must not claim the wrong one (issue #508;
     // the first version of this split branched on coverage alone and got the third case wrong, found by
@@ -296,38 +315,63 @@ router.put('/:id/review/:date', (req, res) => {
   // `reasons` is additive: an older open tab never sends it, and `undefined` means "unchanged", exactly
   // like `verdicts`. A stale reason cannot survive that tab changing a verdict — the verdict write
   // itself clears it (setTransitionVerdict).
-  const { true_onset_local: onsetHm, true_wake_local: wakeHm, note, dismissed, verdicts, reasons } = body;
+  // `true_in_bed_local` / `true_in_bed_transition_id` (2026-09-30) are additive like `reasons`: a page
+  // loaded before them never sends them, `undefined` keeps what is stored, and such a page's old "Put
+  // down here" still sends its frame as `true_onset_transition_id` and saves exactly as it always did.
+  const {
+    true_onset_local: onsetHm, true_wake_local: wakeHm, true_in_bed_local: inBedHm, note, dismissed, verdicts, reasons,
+  } = body;
+
+  // Anything not a string reaches better-sqlite3 as an unbindable value and comes back as a 500 whose
+  // body Cloudflare strips — the user would see nothing at all. Same reasoning as the verdict check.
+  // ⚠️ `typeof` first, not `UTC_TIMESTAMP.test(String(v))` (fix round 3, 2026-10-02, Opus #3 / Codex #2,
+  // reproduced by a test): the String of a one-element array is its element, so ['2026-07-02 09:00:00']
+  // passed, and the array failed only in the final upsert, a 500 AFTER the verdicts had been written. Checked
+  // here, before the typed times below, because those now read the echo (see localHmToUtcSql).
+  for (const [label, v] of [['computed_onset_at', body.computed_onset_at], ['computed_wake_at', body.computed_wake_at]]) {
+    if (v != null && (typeof v !== 'string' || !UTC_TIMESTAMP.test(v))) {
+      return res.status(400).json({ error: `${label} must be 'YYYY-MM-DD HH:MM:SS' in UTC` });
+    }
+  }
 
   // The client sends what the person typed — a wall-clock 'HH:MM' — and the server resolves it against
   // the app's configured timezone and the night's date. `undefined` back from localHmToUtcSql means the
   // value was malformed, which is NOT the same as `null` (nothing recorded) and must not be stored as
   // if it were, or a garbled entry would silently become "no ground truth for this night".
-  const onsetHm2 = localHmToUtcSql(req.params.date, onsetHm);
-  const wakeHm2 = localHmToUtcSql(req.params.date, wakeHm);
-  for (const [label, v] of [['true_onset_local', onsetHm2], ['true_wake_local', wakeHm2]]) {
+  // The asleep and wake times also pass what the page SHOWED for them (the computed_* echo), so a time saved
+  // exactly as shown is saved as the instant shown rather than dated by the noon rule (fix round 3, Opus #1:
+  // a detected wake after local noon was refused as "before the asleep time"). See localHmToUtcSql. Nothing is
+  // echoed for "in bed", which keeps the noon rule. The echo counts only inside the span this child's detector
+  // can report for the night (fix round 4, Opus #1 + Codex #1: a calendar-day bound was wrong both ways).
+  const echoSpan = reportableSpanMs(req.params.id, req.params.date);
+  const onsetHm2 = localHmToUtcSql(req.params.date, onsetHm, body.computed_onset_at, echoSpan);
+  const wakeHm2 = localHmToUtcSql(req.params.date, wakeHm, body.computed_wake_at, echoSpan);
+  const inBedHm2 = localHmToUtcSql(req.params.date, inBedHm);
+  for (const [label, v] of [['true_onset_local', onsetHm2], ['true_wake_local', wakeHm2], ['true_in_bed_local', inBedHm2]]) {
     if (v === undefined) return res.status(400).json({ error: `${label} must be a time like 19:33` });
   }
 
   // Naming a recorded frame beats typing a time: it is second-accurate rather than rounded from
   // memory, and it records WHICH picture means "they got up". So when a frame is named it WINS over
   // any typed value — the client clears the id the moment somebody edits the time by hand, which keeps
-  // exactly one source of truth for each of the two moments.
+  // exactly one source of truth for each of the moments.
   const onsetFromFrame = transitionInstant(req.params.id, req.params.date, body.true_onset_transition_id);
   const wakeFromFrame = transitionInstant(req.params.id, req.params.date, body.true_wake_transition_id);
   for (const [label, v] of [['true_onset_transition_id', onsetFromFrame], ['true_wake_transition_id', wakeFromFrame]]) {
     if (v === undefined) return res.status(400).json({ error: `${label} is not an event of this night` });
   }
+  // The put-down frame must be a GOT-INTO-BED event of this night: "they went into bed" cannot be read
+  // off a got-out-of-bed frame. New with this field only; the onset and wake ids keep their old,
+  // untyped check (see transitionInstant) so an already-open page cannot start failing.
+  const inBedFromFrame = transitionInstant(req.params.id, req.params.date, body.true_in_bed_transition_id, TRANSITION.INTO_BED);
+  if (inBedFromFrame === undefined) {
+    return res.status(400).json({ error: 'true_in_bed_transition_id is not a got-into-bed event of this night' });
+  }
   const onset = onsetFromFrame ?? onsetHm2;
   const wake = wakeFromFrame ?? wakeHm2;
+  const inBed = inBedFromFrame ?? inBedHm2;
   if (note != null && typeof note !== 'string') {
     return res.status(400).json({ error: 'note must be text' });
-  }
-  // Anything not a string reaches better-sqlite3 as an unbindable value and comes back as a 500 whose
-  // body Cloudflare strips — the user would see nothing at all. Same reasoning as the verdict check.
-  for (const [label, v] of [['computed_onset_at', body.computed_onset_at], ['computed_wake_at', body.computed_wake_at]]) {
-    if (v != null && !UTC_TIMESTAMP.test(String(v))) {
-      return res.status(400).json({ error: `${label} must be 'YYYY-MM-DD HH:MM:SS' in UTC` });
-    }
   }
 
   // "No one was in the bed" for the whole night. Additive: an older open page never sends it, and
@@ -346,28 +390,26 @@ router.put('/:id/review/:date', (req, res) => {
   // empty field is not a time and does not trip this — which matters, because the review page sends
   // explicit nulls for the times it is not answering (NightReview.jsx's save), and must be able to send
   // them alongside the flag. saveNightReview refuses the same combination on its own, for any caller
-  // that skips this route.
-  if (nobodyInBed === true && (onset != null || wake != null)) {
+  // that skips this route. The in-bed time is one of "the times" for this rule (2026-09-30).
+  if (nobodyInBed === true && (onset != null || wake != null || inBed != null)) {
     return res.status(400).json({ error: 'Choose either "no one was in the bed" or the times, not both' });
   }
 
-  // ⚠️ Every refusal above this line must stay above it. applyVerdicts WRITES, so a 400 after it
-  // would leave the verdicts saved while the person is told the save failed.
-  //
-  // Verdicts (and the reasons paired with them) are scoped to THIS child and THIS night inside
-  // applyVerdicts, and rejected as a batch — except a reason for a non-'wrong' verdict, which it drops.
-  const check = applyVerdicts(req.params.id, req.params.date, verdicts, reasons);
-  if (check.error) return res.status(400).json({ error: check.error });
-
-  const review = saveNightReview(req.params.id, req.params.date, {
+  // A frame id as the patch stores it: `undefined` (not sent) keeps what is stored, and null or '' is "no
+  // frame", exactly as transitionInstant reads them. '' used to become Number('') = 0 here, which
+  // saveNightReview reads as a frame: sent beside "no one was in the bed" it tripped the flag-plus-times throw,
+  // a 500 whose body Cloudflare strips, and without the flag it stored a frame id of 0 (fix round 2,
+  // 2026-09-30). Anything else was already checked by transitionInstant above.
+  const frameId = (v) => (v === undefined ? undefined : (v == null || v === '' ? null : Number(v)));
+  const patch = {
     // `undefined` means "not supplied, keep what is stored" — a stale card on a second phone sending
     // only `{dismissed:true}` must not blank times a parent entered on the first.
     trueOnsetAt: onsetHm === undefined && body.true_onset_transition_id === undefined ? undefined : onset,
     trueWakeAt: wakeHm === undefined && body.true_wake_transition_id === undefined ? undefined : wake,
-    trueOnsetTransitionId: body.true_onset_transition_id === undefined
-      ? undefined : (body.true_onset_transition_id == null ? null : Number(body.true_onset_transition_id)),
-    trueWakeTransitionId: body.true_wake_transition_id === undefined
-      ? undefined : (body.true_wake_transition_id == null ? null : Number(body.true_wake_transition_id)),
+    trueOnsetTransitionId: frameId(body.true_onset_transition_id),
+    trueWakeTransitionId: frameId(body.true_wake_transition_id),
+    trueInBedAt: inBedHm === undefined && body.true_in_bed_transition_id === undefined ? undefined : inBed,
+    trueInBedTransitionId: frameId(body.true_in_bed_transition_id),
     // What the person was LOOKING at when they judged, echoed back from the GET. Deliberately not
     // recomputed here — see saveNightReview.
     computedOnsetAt: body.computed_onset_at,
@@ -377,7 +419,108 @@ router.put('/:id/review/:date', (req, res) => {
     // saveNightReview owns the rest of the rule: true nulls the times, and a real time sent with the
     // flag omitted clears it (the newest answer wins). See its comment.
     nobodyInBed,
-  });
+  };
+
+  // The review this save WOULD leave: its values over whatever is already stored. Every ordering rule below
+  // is judged on this, never on the request alone: a put-down saved today has to be checked against an
+  // asleep time saved yesterday, or two individually valid saves would store "in bed 19:30, asleep 19:13"
+  // between them.
+  const merged = previewNightReview(req.params.id, req.params.date, patch);
+
+  // "In bed" after "asleep" is a contradiction (plan review R2). One minute of slack for a frame's seconds
+  // against a typed minute; see inBedAfterOnset.
+  // ⚠️ KNOWN LIMIT, deploy window only (README): a page loaded before this field existed has no In bed
+  // input. If it saves an asleep time earlier than an in-bed time a newer page already stored, it gets this
+  // 400 about a field it cannot show or change, until it is reloaded.
+  if (inBedAfterOnset(merged)) {
+    return res.status(400).json({
+      error: '"In bed" can\'t be after "Fell asleep" — they go into bed first. Check both times.',
+    });
+  }
+  // "Asleep" after "up for the day" (fix round 2, 2026-09-30, Opus #4): the same kind of contradiction, with
+  // the same minute of slack; see asleepAfterWake. A typed time before 12:00 is the morning after (see
+  // localHmToUtcSql), so this is also what a mistyped "07:30" asleep beside a "06:30" wake meets.
+  if (asleepAfterWake(merged)) {
+    return res.status(400).json({
+      error: '"Fell asleep" can\'t be after "Got up for the day". Check both times.',
+    });
+  }
+  // THE STORED NIGHT FILLS IN WHAT THE REVIEW LEAVES OUT, so the two ordering rules above are also checked
+  // against it. A time the review does not hold is shown from the night's STORED row (applyCorrection lays
+  // the parent's times over it), so a review time can contradict a stored one on the card as surely as one
+  // of its own. The same minute of slack, the same rules (inBedAfterOnset / asleepAfterWake).
+  //
+  // ⚠️ ONLY FOR A SAVE THAT TOUCHES THE TIME BEING JUDGED. These validate what is being saved now, so a later
+  // note, event answer or dismissal is never refused over a stored night that has moved since (a review saved
+  // before the night's first scored summary is laid over whatever that summary later says). A test pins this.
+  //
+  // ⚠️ KNOWN LIMIT, documented, not fixed (fix round 3, Codex #3, owner-settled): both read the night as
+  // stored BEFORE the store-first step below, which can re-store a still-provisional night. Its times rarely
+  // move once the window has closed, but if that pass moves the stored asleep time EARLIER than an in-bed time
+  // that passed here (or the stored wake earlier than an asleep time), the card hides the put-down (or shows
+  // asleep after up) all the same. The checks are not moved after the store, on purpose: the store must stay
+  // after every refusal (see below). README, "Known limits".
+  const storedNight = () => db
+    .prepare('SELECT onset_at, wake_at FROM sleep_nights WHERE child_id = ? AND night_date = ?')
+    .get(req.params.id, req.params.date);
+
+  // In bed against the STORED asleep time, when the review has no asleep time of its own. showsInBed
+  // (frontend/src/lib/inBed.js) shows a put-down only when it is at least a minute before the asleep time
+  // beside it, so unchecked, a put-down after the stored asleep time saved "fine" and was then silently never
+  // shown (fix round 2, Opus #4).
+  // Run for a save that GIVES an in-bed time, and (fix round 3, Opus #2 + Codex #1, reproduced by a test) for
+  // one that CLEARS the asleep time (`=== null`: `undefined` is "not sent"): a review holding in bed 19:30 and
+  // asleep 19:45 is consistent, but clearing the asleep time left in bed 19:30 beside a stored 19:13, hidden.
+  // Who reaches it: an old page never sends true_in_bed_*, but it can clear the asleep time over an in-bed
+  // time a newer page stored, and gets this 400. The current edit card always sends its asleep field, so it
+  // reaches this whenever that field is empty: a night with no detected asleep time, or a parent who emptied
+  // it. No stored night (or none with an asleep time): nothing to check against.
+  if ((patch.trueInBedAt != null || patch.trueOnsetAt === null) && !merged.true_onset_at) {
+    if (inBedAfterOnset({ true_in_bed_at: merged.true_in_bed_at, true_onset_at: storedNight()?.onset_at })) {
+      return res.status(400).json({
+        error: '"In bed" can\'t be after the time they fell asleep — they go into bed first. Check "In bed", '
+          + 'or give "Fell asleep" too.',
+      });
+    }
+  }
+  // Asleep against the STORED wake, when the review has no wake time of its own (fix round 3, Codex #1,
+  // reproduced by a test): asleep "07:30" (by the noon rule, the morning after) saved fine beside a stored
+  // 06:30 wake, and every screen then showed a night ending before it began, its total floored to 0. Only for
+  // a save that GIVES an asleep time. No stored night, or no stored wake yet: nothing to check against.
+  // NOT checked: a wake saved while the review has no asleep time, against the stored asleep time (the other
+  // way round), and an API save that ONLY clears the wake beside an asleep time in the review (the edit card
+  // always resends its asleep field with it, so from the screen that save is checked here). Neither was in the
+  // round-3 findings; README, "Known limits".
+  if (patch.trueOnsetAt != null && !merged.true_wake_at) {
+    if (asleepAfterWake({ true_onset_at: merged.true_onset_at, true_wake_at: storedNight()?.wake_at })) {
+      return res.status(400).json({
+        error: '"Fell asleep" can\'t be after the time they got up for the day. Check "Fell asleep", '
+          + 'or give "Got up for the day" too.',
+      });
+    }
+  }
+
+  // ⚠️ Every refusal above this line must stay above it, and so must the store-first step just below.
+  // applyVerdicts WRITES, so a 400 after it would leave the verdicts saved while the person is told the
+  // save failed.
+  //
+  // A save that corrects the night also LOCKS it, so a still-provisional night is first re-stored from a
+  // fresh compute and the lock then keeps THAT (see storeNightBeforeCorrection / nightIsLocked). It runs
+  // HERE, after every refusal and before applyVerdicts, because it runs a full computeNight: done inside
+  // saveNightReview (after the verdicts had been written) a compute that threw 500'd a save that had already
+  // written its verdicts (fix round 2, 2026-09-30, Opus #6). Now a throw is a 500 with nothing written.
+  // applyVerdicts' own refusal of a bad id or label (an API-only mistake: the screen only sends this night's
+  // events) comes after it, which is harmless: the store writes no answer and no lock, only the pass the
+  // nightly job owes the night anyway (see storeNightBeforeCorrection).
+  if (reviewCorrectsNight(merged)) storeNightBeforeCorrection(req.params.id, req.params.date);
+
+  // Verdicts (and the reasons paired with them) are scoped to THIS child and THIS night inside
+  // applyVerdicts, and rejected as a batch — except a reason for a non-'wrong' verdict, which it drops.
+  const check = applyVerdicts(req.params.id, req.params.date, verdicts, reasons);
+  if (check.error) return res.status(400).json({ error: check.error });
+
+  // `storeFirst: false`: done above already, and a second store would compute the night again.
+  const review = saveNightReview(req.params.id, req.params.date, patch, { storeFirst: false });
   res.json({ review, verdicts_applied: check.applied, reasons_applied: check.reasons_applied });
 });
 

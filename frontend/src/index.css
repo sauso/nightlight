@@ -2767,6 +2767,9 @@ input[type='range'] {
 .review-event__reasons { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .review-event__reasons-label { font-size: 12px; color: var(--text-secondary); margin-right: 2px; }
 
+/* The one line of help above the open event list: what "Put down here" and "Asleep here" each record. */
+.review-events__help { margin: 6px 0 8px; font-size: 12px; line-height: 1.5; color: var(--text-secondary); }
+
 /* "Before bedtime (N)" — early-afternoon events grouped at the top of the full list. */
 .review-early { border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 4px; }
 .review-early__bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 6px; }

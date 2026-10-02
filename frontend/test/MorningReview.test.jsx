@@ -134,6 +134,25 @@ describe('the card that asks', () => {
     expect(screen.queryByText(/— to —/)).not.toBeInTheDocument();
   });
 
+  test('★ an in-bed answer reads back as "in bed, asleep … to …", with the resolved times', async () => {
+    // reviewCardState's done state since 2026-09-30: `onset_at`/`wake_at` are RESOLVED (the parent's where
+    // they gave one, otherwise the stored detector time), `true_in_bed_at` is the put-down they gave. An
+    // in-bed-only answer has no true_onset_at or true_wake_at at all, so reading those would say "— to —".
+    api.get.mockResolvedValue({
+      state: 'done',
+      night_date: '2026-08-29',
+      true_onset_at: null,
+      true_wake_at: null,
+      nobody_in_bed: false,
+      true_in_bed_at: '2026-08-29 08:49:00',
+      onset_at: '2026-08-29 09:13:00',
+      wake_at: '2026-08-29 20:37:00',
+    });
+    renderAsAdmin(<MorningReviewCard childId="c-1" fmtTime={fmtTime} />);
+    expect(await screen.findByText('You said in bed 08:49, asleep 09:13 to 20:37. Tap to change it.')).toBeInTheDocument();
+    expect(screen.queryByText(/— to —/)).not.toBeInTheDocument();
+  });
+
   test('a failed load renders nothing rather than an error', async () => {
     // The card is an invitation, not a feature. It must never be the reason a child's page looks broken.
     api.get.mockRejectedValue(new Error('offline'));
@@ -613,14 +632,354 @@ describe('the review screen', () => {
     expect(body.true_wake_transition_id).toBeUndefined();
   });
 
-  test('a put-down frame fills the bedtime, an exit fills the wake', async () => {
-    const { user } = at();
-    await openEvents(user);
-    await user.click(screen.getByRole('button', { name: /Put down here/ }));
-    expect(screen.getByLabelText(/Fell asleep/)).toHaveValue('05:47');
+  // --- "in bed" is not "asleep" (2026-09-30) -----------------------------------------------------------
+  //
+  // Rewritten from "a put-down frame fills the bedtime", which pinned the bug itself: on the night of
+  // 2026-09-29 the detector had a child asleep at 19:13 (right), they had been put down at 18:49 for a bedtime
+  // story, and "Put down here" wrote 18:49 into "Fell asleep". Night of 2026-08-29, Melbourne (+10).
+  const STORY_NIGHT = {
+    ...NIGHT,
+    computed: { status: 'ok', in_bed_at: '2026-08-29 09:10:00', onset_at: '2026-08-29 09:13:00', wake_at: '2026-08-29 20:37:00' },
+    transitions: [
+      { id: 31, type: 'into_bed', created_at: '2026-08-29 08:49:20', snapshot: 1, verdict: null, camera_name: 'Bedroom A' }, // 18:49:20
+      { id: 32, type: 'into_bed', created_at: '2026-08-29 09:13:05', snapshot: 1, verdict: null, camera_name: 'Bedroom A' }, // 19:13:05
+      { id: 33, type: 'out_of_bed', created_at: '2026-08-29 20:37:40', snapshot: 1, verdict: null, camera_name: 'Bedroom A' }, // 06:37:40
+    ],
+  };
+  const storyRow = (id) => document.querySelector(`.review-event img[src*="/bed-transitions/${id}/"]`)?.closest('.review-event');
+  const saveReview = async (user) => {
     await user.click(screen.getByRole('button', { name: /Save review/ }));
     await waitFor(() => expect(api.put).toHaveBeenCalled());
-    expect(api.put.mock.calls[0][1]).toMatchObject({ true_onset_transition_id: 12 });
+    return api.put.mock.calls[0][1];
+  };
+
+  test('a got-into-bed row offers TWO moments, "Put down here" and "Asleep here"; a got-out-of-bed row one', async () => {
+    api.get.mockResolvedValue(STORY_NIGHT);
+    const { user } = at();
+    await openEvents(user);
+    await waitFor(() => expect(storyRow(31)).toBeTruthy());
+    for (const id of [31, 32]) {
+      expect(within(storyRow(id)).getByRole('button', { name: /Put down here/ })).toBeInTheDocument();
+      expect(within(storyRow(id)).getByRole('button', { name: /Asleep here/ })).toBeInTheDocument();
+      expect(within(storyRow(id)).queryByRole('button', { name: /Up for the day here/ })).toBeNull();
+    }
+    const exit = storyRow(33);
+    expect(within(exit).getByRole('button', { name: /Up for the day here/ })).toBeInTheDocument();
+    expect(within(exit).queryByRole('button', { name: /Put down here|Asleep here/ })).toBeNull();
+  });
+
+  test('★ "Put down here" fills IN BED and leaves "Fell asleep" alone — the put-down night', async () => {
+    api.get.mockResolvedValue(STORY_NIGHT);
+    const { user } = at();
+    await openEvents(user);
+    await waitFor(() => expect(storyRow(31)).toBeTruthy());
+    await user.click(within(storyRow(31)).getByRole('button', { name: /Put down here/ }));
+
+    expect(screen.getByLabelText(/In bed/)).toHaveValue('18:49');
+    expect(screen.getByLabelText(/Fell asleep/)).toHaveValue('19:13'); // the detector's, which was right
+    expect(within(storyRow(31)).getByRole('button', { name: /Put down here/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(storyRow(31)).getByRole('button', { name: /Asleep here/ })).toHaveAttribute('aria-pressed', 'false');
+
+    const body = await saveReview(user);
+    expect(body.true_in_bed_transition_id).toBe(31);
+    expect(body.true_in_bed_local).toBe('18:49');
+    expect(body.true_onset_transition_id).toBeNull(); // no asleep FRAME was named
+    expect(body.true_onset_local).toBe('19:13');
+  });
+
+  test('"Asleep here" fills "Fell asleep" and sends nothing about in bed', async () => {
+    api.get.mockResolvedValue(STORY_NIGHT);
+    const { user } = at();
+    await openEvents(user);
+    await waitFor(() => expect(storyRow(32)).toBeTruthy());
+    await user.click(within(storyRow(31)).getByRole('button', { name: /Asleep here/ }));
+    expect(screen.getByLabelText(/Fell asleep/)).toHaveValue('18:49');
+    expect(screen.getByLabelText(/In bed/)).toHaveValue('');
+
+    const body = await saveReview(user);
+    expect(body.true_onset_transition_id).toBe(31);
+    expect(body.true_in_bed_local).toBeUndefined();
+    expect(body.true_in_bed_transition_id).toBeUndefined();
+  });
+
+  test('marking both on a story night sends both, each from its own frame', async () => {
+    api.get.mockResolvedValue(STORY_NIGHT);
+    const { user } = at();
+    await openEvents(user);
+    await waitFor(() => expect(storyRow(31)).toBeTruthy());
+    await user.click(within(storyRow(31)).getByRole('button', { name: /Put down here/ }));
+    await user.click(within(storyRow(32)).getByRole('button', { name: /Asleep here/ }));
+    const body = await saveReview(user);
+    expect(body).toMatchObject({ true_in_bed_transition_id: 31, true_onset_transition_id: 32 });
+  });
+
+  test('typing "In bed" by hand clears the picked put-down frame; tapping the frame again un-picks it', async () => {
+    api.get.mockResolvedValue(STORY_NIGHT);
+    const { user } = at();
+    await openEvents(user);
+    await waitFor(() => expect(storyRow(31)).toBeTruthy());
+    const putDown = within(storyRow(31)).getByRole('button', { name: /Put down here/ });
+    await user.click(putDown);
+    await user.click(putDown);
+    expect(putDown).toHaveAttribute('aria-pressed', 'false');
+    await user.click(putDown);
+
+    const inBed = screen.getByLabelText(/In bed/);
+    await user.clear(inBed);
+    await user.type(inBed, '18:50');
+    expect(putDown).toHaveAttribute('aria-pressed', 'false');
+    const body = await saveReview(user);
+    expect(body.true_in_bed_transition_id).toBeNull();
+    expect(body.true_in_bed_local).toBe('18:50');
+  });
+
+  // --- un-picking a frame undoes the pick (fix round, item 4) -------------------------------------------
+  // A second tap on a pressed moment chip used to drop only the frame id: the frame's time stayed in the
+  // field and was saved as if typed. For "In bed" that recorded a put-down the parent had just taken back.
+  test('★ picking then un-picking "Put down here" sends NOTHING about in bed', async () => {
+    api.get.mockResolvedValue(STORY_NIGHT);
+    const { user } = at();
+    await openEvents(user);
+    await waitFor(() => expect(storyRow(31)).toBeTruthy());
+    const putDown = within(storyRow(31)).getByRole('button', { name: /Put down here/ });
+    await user.click(putDown);
+    expect(screen.getByLabelText(/In bed/)).toHaveValue('18:49');
+    await user.click(putDown);
+    expect(putDown).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByLabelText(/In bed/)).toHaveValue('');
+    const body = await saveReview(user);
+    expect(body.true_in_bed_local).toBeUndefined();
+    expect(body.true_in_bed_transition_id).toBeUndefined();
+    expect(body.true_onset_local).toBe('19:13');
+  });
+
+  test('un-picking puts back what was TYPED before the pick, and sends that', async () => {
+    api.get.mockResolvedValue(STORY_NIGHT);
+    const { user } = at();
+    await user.click(await screen.findByRole('button', { name: /Not quite/ }));
+    await user.type(screen.getByLabelText(/In bed/), '18:45');
+    await openEvents(user);
+    await waitFor(() => expect(storyRow(31)).toBeTruthy());
+    const putDown = within(storyRow(31)).getByRole('button', { name: /Put down here/ });
+    await user.click(putDown);
+    await user.click(putDown);
+    expect(screen.getByLabelText(/In bed/)).toHaveValue('18:45');
+    const body = await saveReview(user);
+    expect(body.true_in_bed_local).toBe('18:45');
+    expect(body.true_in_bed_transition_id).toBeNull();
+  });
+
+  test('un-pressing a put-down already ON RECORD removes it (and says so to the server)', async () => {
+    api.get.mockResolvedValue({
+      ...STORY_NIGHT,
+      review: { true_in_bed_at: '2026-08-29 08:49:20', true_in_bed_transition_id: 31, true_onset_at: null, true_wake_at: null },
+    });
+    const { user } = at();
+    await openEvents(user);
+    await waitFor(() => expect(storyRow(31)).toBeTruthy());
+    const putDown = within(storyRow(31)).getByRole('button', { name: /Put down here/ });
+    expect(putDown).toHaveAttribute('aria-pressed', 'true');
+    await user.click(putDown);
+    expect(screen.getByLabelText(/In bed/)).toHaveValue('');
+    const body = await saveReview(user);
+    expect(body.true_in_bed_local).toBeNull();
+    expect(body.true_in_bed_transition_id).toBeNull();
+  });
+
+  test('"Asleep here" and "Up for the day here" un-picked put their fields back too', async () => {
+    // The same bug, found checking the other two moments: an un-picked frame's time stayed as the answer.
+    // Frame 34 (06:50) is an exit AFTER the detector's 06:37 wake, so a leftover would be visible.
+    api.get.mockResolvedValue({
+      ...STORY_NIGHT,
+      transitions: [...STORY_NIGHT.transitions,
+        { id: 34, type: 'out_of_bed', created_at: '2026-08-29 20:50:10', snapshot: 1, verdict: null, camera_name: 'Bedroom A' }],
+    });
+    const { user } = at();
+    await openEvents(user);
+    await waitFor(() => expect(storyRow(34)).toBeTruthy());
+    const asleep = within(storyRow(31)).getByRole('button', { name: /Asleep here/ });
+    const up = within(storyRow(34)).getByRole('button', { name: /Up for the day here/ });
+    await user.click(asleep);
+    await user.click(up);
+    expect(screen.getByLabelText(/Fell asleep/)).toHaveValue('18:49');
+    expect(screen.getByLabelText(/Got up for the day/)).toHaveValue('06:50');
+    await user.click(asleep);
+    await user.click(up);
+    expect(screen.getByLabelText(/Fell asleep/)).toHaveValue('19:13');
+    expect(screen.getByLabelText(/Got up for the day/)).toHaveValue('06:37');
+    const body = await saveReview(user);
+    expect(body).toMatchObject({ true_onset_local: '19:13', true_onset_transition_id: null, true_wake_transition_id: null });
+  });
+
+  test('★ In bed keeps re-seeding into the real timezone until IT is touched, even after another time was (Fc)', async () => {
+    // Its own touched flag, not the shared one: correcting the asleep time before /settings resolves must
+    // not freeze a stored put-down in the placeholder zone (18:49 Melbourne shown as 08:49).
+    api.get.mockResolvedValue({
+      ...STORY_NIGHT,
+      review: { true_in_bed_at: '2026-08-29 08:49:20', true_in_bed_transition_id: 31, true_onset_at: null, true_wake_at: null },
+    });
+    const { user, rerenderWith } = renderAsAdmin(routed, {
+      route: '/children/c-1/review/2026-08-29', kids: [{ id: 'c-1', name: 'Child A' }], settings: { timezone: 'UTC' },
+    });
+    await waitFor(() => expect(screen.getByLabelText(/In bed/)).toHaveValue('08:49'));
+    const asleep = screen.getByLabelText(/Fell asleep/);
+    await user.clear(asleep);
+    await user.type(asleep, '09:20');
+    rerenderWith({ settings: { timezone: 'Australia/Melbourne' } });
+    await waitFor(() => expect(screen.getByLabelText(/In bed/)).toHaveValue('18:49'));
+    expect(screen.getByLabelText(/Fell asleep/)).toHaveValue('09:20');
+  });
+
+  // --- no time is ever sent in the placeholder timezone (fix round 2, 2026-09-30, Codex P1) --------------
+  //
+  // SettingsContext starts at the placeholder 'UTC' and replaces it when /settings resolves (or never, if
+  // that request fails). "Fell asleep" and "Got up for the day" are seeded from UTC instants shown in the
+  // zone, so until then the story night's 19:13 / 06:37 read 09:13 / 20:37. A chip tap set `touched`, which
+  // stopped the seed re-running when the real zone arrived, and Save then sent 09:13 / 20:37: a wake before
+  // the asleep time, asleep 0. `settingsLoaded: false` with `loading: false` is also what a FAILED first
+  // /settings request leaves, so a gate on `loading` fails these too.
+  const beforeZone = (night = STORY_NIGHT) => {
+    api.get.mockResolvedValue(night);
+    return renderAsAdmin(routed, {
+      route: '/children/c-1/review/2026-08-29',
+      kids: [{ id: 'c-1', name: 'Child A' }],
+      settings: { timezone: 'UTC' }, // SettingsContext's placeholder, not a configured zone
+      loading: false,
+      settingsLoaded: false,
+    });
+  };
+  const zoneArrives = (rerenderWith) =>
+    rerenderWith({ settings: { timezone: 'Australia/Melbourne' }, settingsLoaded: true });
+
+  test('★ a chip tapped before the real timezone arrives cannot freeze asleep/wake in the placeholder zone (Codex P1)', async () => {
+    const { user, rerenderWith } = beforeZone();
+    await openEvents(user);
+    await waitFor(() => expect(storyRow(31)).toBeTruthy());
+    // The reviewer's repro, step for step, with whatever the screen offers at each moment (the next test
+    // pins that it offers no chip yet): "Put down here" while the zone is still the placeholder...
+    await user.click(within(storyRow(31)).getByRole('button', { name: /Put down here/ }));
+    // ...then /settings resolves...
+    zoneArrives(rerenderWith);
+    await waitFor(() => expect(storyRow(31).querySelector('.review-event__when').textContent).toMatch(/^18:49/));
+    // ...then the put-down is marked (again, if the first tap could not be) and the review saved.
+    if (!screen.queryByRole('button', { name: /Save review/ })) {
+      await user.click(screen.getByRole('button', { name: /Not quite/ }));
+    }
+    const putDown = within(storyRow(31)).getByRole('button', { name: /Put down here/ });
+    if (putDown.getAttribute('aria-pressed') !== 'true') await user.click(putDown);
+    const body = await saveReview(user);
+    expect(body.true_in_bed_transition_id).toBe(31);
+    expect(body.true_onset_local, 'asleep in the REAL zone, not the placeholder 09:13').toBe('19:13');
+    expect(body.true_wake_local, 'wake in the REAL zone, not the placeholder 20:37').toBe('06:37');
+  });
+
+  test('until the real timezone arrives nothing that sends a time can be used; verdicts and the flag still can', async () => {
+    const { user, rerenderWith } = beforeZone();
+    const thatsRight = await screen.findByRole('button', { name: /That.s right/ });
+    expect(thatsRight).toBeDisabled();
+    // Tapped anyway: nothing is sent. Before the fix it sent the placeholder 09:13 / 20:37 at once.
+    await user.click(thatsRight);
+    expect(api.put).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /Not quite/ })).toBeDisabled();
+    expect(screen.getByText(/Waiting for the app.s timezone setting/)).toBeInTheDocument();
+    // Nothing here carries a time, so none of it waits (and it is all that works if /settings failed).
+    expect(screen.getByRole('button', { name: /No one was in the bed/ })).toBeEnabled();
+    await openEvents(user);
+    await waitFor(() => expect(storyRow(31)).toBeTruthy());
+    expect(within(storyRow(31)).getByRole('button', { name: /Put down here/ })).toBeDisabled();
+    expect(within(storyRow(31)).getByRole('button', { name: /Asleep here/ })).toBeDisabled();
+    expect(within(storyRow(33)).getByRole('button', { name: /Up for the day here/ })).toBeDisabled();
+    await user.click(within(storyRow(31)).getByRole('button', { name: 'Yes', exact: true }));
+    expect(within(storyRow(31)).getByRole('button', { name: 'Yes', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /Save just the event answers/ })).toBeEnabled();
+
+    zoneArrives(rerenderWith);
+    await waitFor(() => expect(screen.getByRole('button', { name: /That.s right/ })).toBeEnabled());
+    expect(screen.queryByText(/Waiting for the app.s timezone setting/)).toBeNull();
+    expect(within(storyRow(31)).getByRole('button', { name: /Put down here/ })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: /That.s right/ }));
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    expect(api.put.mock.calls[0][1]).toMatchObject({ true_onset_local: '19:13', true_wake_local: '06:37' });
+  });
+
+  test('a night reopened into its times waits too: its fields and Save review stay disabled until the zone is known', async () => {
+    // The edit card is open from the first paint on a night already answered, so its fields are there to
+    // type into before /settings resolves. A keystroke there (the note included) set `touched` too.
+    const { user, rerenderWith } = beforeZone({
+      ...STORY_NIGHT,
+      review: { true_onset_at: '2026-08-29 09:15:00', true_wake_at: null, true_in_bed_at: null, note: 'a cold' },
+    });
+    await waitFor(() => expect(screen.getByLabelText(/Fell asleep/)).toBeInTheDocument());
+    for (const label of [/In bed/, /Fell asleep/, /Got up for the day/, /Anything else worth noting/]) {
+      expect(screen.getByLabelText(label)).toBeDisabled();
+    }
+    expect(screen.getByRole('button', { name: /Save review/ })).toBeDisabled();
+
+    zoneArrives(rerenderWith);
+    await waitFor(() => expect(screen.getByLabelText(/Fell asleep/)).toHaveValue('19:15'));
+    await user.type(screen.getByLabelText(/Anything else worth noting/), ', slept badly');
+    const body = await saveReview(user);
+    expect(body).toMatchObject({ true_onset_local: '19:15', true_wake_local: '06:37', note: 'a cold, slept badly' });
+  });
+
+  test('★ correcting only the asleep time sends NOTHING about in bed — the field is never seeded from the detector', async () => {
+    // Plan review R3. `computed.in_bed_at` is 19:10 here. Seeded from it, every save would store the
+    // detector's put-down as the parent's own answer.
+    api.get.mockResolvedValue(STORY_NIGHT);
+    const { user } = at();
+    await user.click(await screen.findByRole('button', { name: /Not quite/ }));
+    expect(screen.getByLabelText(/In bed/)).toHaveValue('');
+    const asleep = screen.getByLabelText(/Fell asleep/);
+    await user.clear(asleep);
+    await user.type(asleep, '19:20');
+    const body = await saveReview(user);
+    expect(body.true_onset_local).toBe('19:20');
+    expect(body).not.toHaveProperty('true_in_bed_local', expect.anything());
+    expect(body.true_in_bed_local).toBeUndefined();
+    expect(body.true_in_bed_transition_id).toBeUndefined();
+  });
+
+  test('a stored in-bed answer seeds the field and its frame, and reopens straight into the times', async () => {
+    api.get.mockResolvedValue({
+      ...STORY_NIGHT,
+      review: { true_in_bed_at: '2026-08-29 08:49:20', true_in_bed_transition_id: 31, true_onset_at: null, true_wake_at: null },
+    });
+    const { user } = at();
+    await waitFor(() => expect(screen.getByLabelText(/In bed/)).toHaveValue('18:49'));
+    await openEvents(user);
+    await waitFor(() => expect(storyRow(31)).toBeTruthy());
+    expect(within(storyRow(31)).getByRole('button', { name: /Put down here/ })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('"What we recorded" shows the detector\'s In bed beside its asleep and wake times', async () => {
+    api.get.mockResolvedValue(STORY_NIGHT);
+    at();
+    await screen.findByRole('button', { name: /That.s right/ });
+    const shown = document.querySelector('.review-shown');
+    expect(within(shown).getByText('In bed')).toBeInTheDocument();
+    expect(within(shown).getByText('19:10')).toBeInTheDocument();
+    expect(within(shown).getByText('19:13')).toBeInTheDocument();
+  });
+
+  test('"That\'s right" confirms asleep and wake only — never the detector\'s put-down', async () => {
+    api.get.mockResolvedValue(STORY_NIGHT);
+    const { user } = at();
+    await user.click(await screen.findByRole('button', { name: /That.s right/ }));
+    await waitFor(() => expect(api.put).toHaveBeenCalled());
+    const body = api.put.mock.calls[0][1];
+    expect(body).toMatchObject({ true_onset_local: '19:13', true_wake_local: '06:37' });
+    expect(body.true_in_bed_local).toBeUndefined();
+  });
+
+  test('the help line says what each button records, once, above the list', async () => {
+    api.get.mockResolvedValue(STORY_NIGHT);
+    const { user } = at();
+    await openEvents(user);
+    const help = await screen.findAllByText(/they went into bed/);
+    expect(help).toHaveLength(1);
+    expect(help[0].closest('.review-events__help')).toHaveTextContent(
+      'Put down here = they went into bed. Asleep here = they fell asleep. Reading a story first? Mark both.'
+    );
   });
 
   test('typing a time by hand clears the named frame, so only one of them is the answer', async () => {
@@ -962,10 +1321,27 @@ describe('the review screen', () => {
       // Typed, no frame named: nothing else here is a bedtime — no computed times, no onsetFrame.
       ['a correction the person typed, with no frame named', { status: 'no_data', onset_at: null, in_bed_at: null, wake_at: null },
         { true_onset_at: '2026-08-29 09:20:00', true_onset_transition_id: null, true_wake_at: null }],
+      // The parent's own put-down ("In bed", 2026-09-30) is a bedtime too, with no asleep time at all (Fe).
+      ['an in-bed time the person gave, and nothing else', { status: 'no_data', onset_at: null, in_bed_at: null, wake_at: null },
+        { true_in_bed_at: '2026-08-29 09:20:00', true_in_bed_transition_id: null, true_onset_at: null, true_wake_at: null }],
     ])('groups once the night has a bedtime — from %s alone', async (_what, computed, review) => {
       api.get.mockResolvedValue({ ...EARLY_NIGHT, computed, review });
       const { user } = at();
       await openEvents(user);
+      expect(await screen.findByRole('button', { name: /Before bedtime/ })).toBeInTheDocument();
+    });
+
+    test('...and from a put-down FRAME picked on this screen (Fe)', async () => {
+      // "Put down here" used to set the onset frame, which was an anchor. It now sets the in-bed frame, and
+      // that must anchor the grouping just the same, or picking the put-down stops the list grouping.
+      api.get.mockResolvedValue({
+        ...EARLY_NIGHT, computed: { status: 'no_data', onset_at: null, in_bed_at: null, wake_at: null }, review: null,
+      });
+      const { user } = at();
+      await openEvents(user);
+      await waitFor(() => expect(rowOf(55)).toBeTruthy());
+      expect(screen.queryByRole('button', { name: /Before bedtime/ }), 'no anchor yet').toBeNull();
+      await user.click(within(rowOf(55)).getByRole('button', { name: /Put down here/ }));
       expect(await screen.findByRole('button', { name: /Before bedtime/ })).toBeInTheDocument();
     });
 

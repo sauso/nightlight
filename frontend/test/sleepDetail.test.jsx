@@ -199,6 +199,31 @@ describe('which night it opens on', () => {
     expect(screen.getByText('You said no one was in the bed. Tap to change it.')).toBeInTheDocument();
   });
 
+  // ★ Plan review R1 (2026-09-30). An in-bed-only save has neither true_onset_at nor true_wake_at, so the
+  // old gate showed no receipt at all, and reading the raw times would have said "asleep — to —". It must
+  // read back the put-down they gave, with the detector's asleep and wake times from the same response.
+  test('★ arriving from an IN-BED-ONLY save shows "in bed …, asleep … to …" with the resolved times', async () => {
+    const get = vi.fn((path) => {
+      if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'tonight', night: { night_date: '2026-08-30' } });
+      if (path.includes('/sleep/insights')) return Promise.resolve(null);
+      if (path.includes('/review/')) {
+        return Promise.resolve({
+          ...REVIEW_RESPONSE,
+          review: { true_onset_at: null, true_wake_at: null, true_in_bed_at: '2026-08-24 08:49:00', nobody_in_bed: 0 },
+        });
+      }
+      if (path.includes('/sleep/')) return Promise.resolve(NIGHT);
+      return Promise.resolve(null);
+    });
+    vi.spyOn(api, 'get').mockImplementation(get);
+    mountAt('/children/kid-1/sleep?date=2026-08-24&saved=1');
+
+    expect(await screen.findByText('Thanks — that’s recorded')).toBeVisible();
+    // 08:49Z / 09:28Z / 20:14Z are 6:49 pm, 7:28 pm and 6:14 am in Melbourne (the locale is pinned to
+    // en-AU in test/setup.js, so this exact string is deterministic).
+    expect(screen.getByText('You said in bed 6:49 pm, asleep 7:28 pm to 6:14 am. Tap to change it.')).toBeInTheDocument();
+  });
+
   test('★ but never past the newest browsable night', async () => {
     // With the clock pinned (above) the newest night is 2026-08-30, so 08-31 is exactly ONE day past it:
     // the picker could not reach it, and a URL must not either. One day, not a month, so a clamp widened

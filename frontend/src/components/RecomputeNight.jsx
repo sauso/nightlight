@@ -30,9 +30,16 @@ function fmtDur(min) {
 // turns an irreversible write into something you can read and judge first, and it is how an improvement
 // to the sleep algorithm becomes visible instead of theoretical. The write itself refuses to downgrade
 // a scored night (see computeAndStoreNight), so the worst case here is "nothing changed".
+//
+// ⚠️ A NIGHT A PARENT CORRECTED IS LOCKED (2026-09-30, the owner's rule: once corrected, a night is
+// complete and nothing re-scores it). The server refuses the write, and `?stored=1` says so up front as
+// `locked`, so the dialog opens on "this night is locked" instead of offering numbers that could never
+// be saved. It keys on the server's `locked`, deliberately NOT on `night.corrected` (plan review R8): a
+// corrected night whose saved row is missing or unscored is not locked, and this button is its only fix.
 export default function RecomputeNight({ childId, date, night, fmtTime, onRecomputed }) {
   const { user } = useAuth();
   const [stored, setStored] = useState(undefined); // the saved row: undefined = not looked yet, null = none
+  const [locked, setLocked] = useState(false);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -46,8 +53,8 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
     ['Awake', fmtDur(stored.awake_minutes), fmtDur(night.awake_minutes)],
     ['Wake-ups', String(stored.wake_count ?? 0), String(night.wake_count ?? 0)],
   ] : [];
-  const changed = rows.some(([, before, after]) => before !== after);
-  const nothingSaved = open && stored === null;
+  const changed = !locked && rows.some(([, before, after]) => before !== after);
+  const nothingSaved = !locked && open && stored === null;
 
   const save = async () => {
     setBusy(true);
@@ -85,6 +92,8 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
           try {
             const r = await api.get(`/children/${childId}/sleep/${date}?stored=1`);
             setStored(r?.night ?? null);
+            // Strictly `true`: a server from before this field sends nothing, which must read as unlocked.
+            setLocked(r?.locked === true);
             setOpen(true);
           } catch (e) {
             setError(e?.message || 'Could not read the saved summary for this night.');
@@ -96,21 +105,28 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
         <RefreshCw size={16} aria-hidden="true" /> Recompute this night
       </button>
       {error && !open && <div className="sleep-detail__recompute-error">{error}</div>}
-      {/* A corrected night shows the person's times, not ours, so recomputing appears to do nothing —
-          it changes the detector's answer underneath while the display keeps their correction. Say so,
-          because otherwise the button looks broken. The owner pressed it expecting a wrong time to be
-          replaced, and nothing visible happened. */}
+      {/* A corrected night shows the person's times, not ours, so the button can look broken: the owner
+          pressed it expecting a wrong time to be replaced, and nothing visible happened. Say where the
+          times come from and where to change them. It used to add that recomputing "will not change what
+          is shown", which read as harmless; since the lock a corrected night is usually not recomputed at
+          all, and the dialog says so when it is locked. This line only makes claims true of every
+          corrected night: recomputing never replaces a person's own times. */}
       {night?.corrected && (
         <div className="sleep-detail__recompute-note">
-          These times are the ones you told us. Recomputing re-runs the detector underneath — it will
-          not change what is shown here. To change these, use <strong>Change what you told us about
-          this night</strong>.
+          These times are the ones you told us, and recomputing never replaces them. To change them, use{' '}
+          <strong>Change what you told us about this night</strong>.
         </div>
       )}
 
       {open && (
         <Modal title="Recompute this night" onClose={() => !busy && setOpen(false)}>
-          {nothingSaved ? (
+          {locked ? (
+            <p style={{ marginTop: 0 }}>
+              This night is locked because you corrected it, so it won’t be recomputed, here or overnight.
+              To change it, use <strong>Change what you told us about this night</strong>. Removing your
+              correction unlocks it.
+            </p>
+          ) : nothingSaved ? (
             <p style={{ marginTop: 0 }}>
               Nothing is saved for this night yet, so there is no summary on the child’s page to correct.
               Saving now records the night as it is shown here.

@@ -503,7 +503,10 @@ closing sentence.
   still call the room settled. Follow-up issues.
 - **A parent's corrected night** subtracts the night's stored unknown minutes from the corrected span as
   one total (an existing limit of corrections). A recompute that adds many unknown minutes to a corrected
-  night can therefore shrink its displayed sleep more than the stall alone explains.
+  night can therefore shrink its displayed sleep more than the stall alone explains. Since a corrected
+  night's saved summary is locked (README, "A night you have corrected is locked"), that no longer happens
+  to the child's card after the correction is saved; the figure stops changing but is not made exact. The
+  sleep detail page works the night out fresh each time, so it can still show it.
 
 **What to do:** nothing. If a night shows a long "No data" stretch while the camera was plainly on, check
 the Camera history for a `[detector-watchdog]` restart (next section) around that time.

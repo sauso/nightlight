@@ -23,6 +23,12 @@
 // put-down still belongs to the same story as the onset and keeps showing. The one case this reads as
 // "not corrected" is a person typing exactly the computed onset — where the computed put-down is still
 // coherent with it, so showing it is right.
+//
+// ⚠️ ...UNLESS THE PERSON GAVE THE PUT-DOWN TOO (`in_bed_corrected`, 2026-09-30). Then `in_bed_at` is
+// THEIR time, not the estimate they rejected, so the reason for hiding it is gone: on a bedtime-story
+// night (2026-09-29: put down 18:49, asleep 19:13) "In bed 18:49 · Asleep 19:13" is exactly what
+// they told us. The one-minute gap rule below still applies, so a put-down they gave that is not a real
+// minute before sleep still reads as one time.
 const utcMs = (utc) => Date.parse(`${String(utc).replace(' ', 'T')}Z`);
 
 export function onsetWasCorrected(night) {
@@ -31,6 +37,6 @@ export function onsetWasCorrected(night) {
 
 export function showsInBed(night) {
   if (!night?.in_bed_at || !night?.onset_at) return false;
-  if (onsetWasCorrected(night)) return false;
+  if (onsetWasCorrected(night) && !night.in_bed_corrected) return false;
   return utcMs(night.onset_at) - utcMs(night.in_bed_at) >= 60000;
 }

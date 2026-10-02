@@ -46,9 +46,11 @@ const fmtTime = (utc) => (utc ? String(utc).slice(11, 16) : '');
 // `overlaid` defaults to FRESH so tests that don't care about R3 keep working unchanged; the R3-specific
 // tests below override it to something DIFFERENT from `onStore`, which is what makes the assertion
 // discriminating rather than vacuous (see the ⚠️ on the regression test itself).
-function mockApi({ stored = STORED, onStore = FRESH, overlaid = FRESH } = {}) {
+// `locked` is what `?stored=1` says since 2026-09-30 (a parent corrected the night, so the server will not
+// re-store it). `undefined` by default: the shape a server from before the field answers with.
+function mockApi({ stored = STORED, onStore = FRESH, overlaid = FRESH, locked } = {}) {
   vi.spyOn(api, 'get').mockImplementation((url) => {
-    if (url.includes('stored=1')) return Promise.resolve({ night: stored });
+    if (url.includes('stored=1')) return Promise.resolve(locked === undefined ? { night: stored } : { night: stored, locked });
     // Checked before the plain `detail=1` branch: `?store=1&detail=1` contains both substrings.
     if (url.includes('store=1')) return Promise.resolve(onStore);
     if (url.includes('detail=1')) return Promise.resolve(overlaid);
@@ -66,17 +68,57 @@ beforeEach(() => mockApi());
 afterEach(() => vi.restoreAllMocks());
 
 describe('a night the person has corrected', () => {
-  test('says why recomputing will not change what is shown', async () => {
-    // A corrected night displays the person's times, so recompute changes the detector's answer
-    // underneath while the display keeps the correction — the button looks broken otherwise. The owner
-    // pressed it expecting a wrong time to be replaced and nothing visible happened.
+  // Rewritten 2026-09-30. The note used to say recomputing "will not change what is shown", which read as
+  // "harmless, go ahead". Since the lock a corrected night is usually not recomputed at all, so the note
+  // now only says what is true of EVERY corrected night, and the dialog says when it is locked.
+  test('says the times are theirs and where to change them, without calling a recompute harmless', async () => {
+    // The owner pressed the button on a corrected night expecting a wrong time to be replaced, and
+    // nothing visible happened. The note is what explains that.
     setup(renderAsAdmin, { night: { ...FRESH, corrected: true } });
-    expect(await screen.findByText(/will\s+not change what is shown/)).toBeInTheDocument();
+    expect(await screen.findByText(/These times are the ones you told us, and recomputing never replaces them/)).toBeInTheDocument();
+    expect(screen.queryByText(/not change what is shown/)).not.toBeInTheDocument();
   });
 
   test('and says nothing of the sort on an ordinary night', () => {
     setup(renderAsAdmin);
-    expect(screen.queryByText(/not change what is shown/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/ones you told us/)).not.toBeInTheDocument();
+  });
+});
+
+describe('a LOCKED night (the server says so in ?stored=1)', () => {
+  test('★ opens on "locked because you corrected it", offers no save, and never stores', async () => {
+    // The saved row differs from the fresh one, so without the lock this dialog WOULD offer "Save the new
+    // numbers" (the tests below prove it does). Locked, it must not: the server would refuse the write.
+    mockApi({ locked: true });
+    const { user } = setup(renderAsAdmin, { night: { ...FRESH, corrected: true } });
+    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+
+    expect(await screen.findByText(/This night is locked because you corrected it/)).toBeInTheDocument();
+    expect(screen.getByText(/Removing your correction unlocks it/)).toBeInTheDocument();
+    expect(screen.queryByText(/no longer matches/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^cancel$/i })).not.toBeInTheDocument(); // nothing to cancel
+    expect(screen.getAllByRole('button', { name: /^close$/i }).length).toBeGreaterThan(0);
+    expect(api.get.mock.calls.filter(([u]) => /[?&]store=1/.test(u))).toHaveLength(0);
+  });
+
+  test('★ keys on the SERVER\'s `locked`, not on `night.corrected`: a corrected night the server calls unlocked can still be fixed', async () => {
+    // A corrected night whose saved row is missing (or unscored) is NOT locked, and Recompute is the only
+    // way to get it saved (plan review R8). Keying on `corrected` would hide that fix.
+    mockApi({ stored: null, locked: false });
+    const { user } = setup(renderAsAdmin, { night: { ...FRESH, corrected: true } });
+    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await waitFor(() => expect(screen.getByText(/nothing is saved for this night yet/i)).toBeInTheDocument());
+    expect(screen.queryByText(/locked/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /save this night/i })).toBeInTheDocument();
+  });
+
+  test('a server that does not send `locked` at all reads as unlocked (an older backend)', async () => {
+    mockApi(); // `{ night }` only
+    const { user } = setup(renderAsAdmin);
+    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await waitFor(() => expect(screen.getByText(/no longer matches/i)).toBeInTheDocument());
+    expect(screen.queryByText(/locked/)).not.toBeInTheDocument();
   });
 });
 
