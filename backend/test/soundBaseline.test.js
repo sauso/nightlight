@@ -27,6 +27,12 @@
 //     cannot be `confirmed` and necessarily takes the `else` branch, which zeroes `loudSince` anyway.
 //     The line is kept as defence in depth: it stops being redundant the moment anyone touches the
 //     window reset beside it.
+//
+// ★ #453 (digital silence), 2026-10-02: `#453 M1`-`M14` in scripts/mutants.json, all killed (the analyser
+// ones by this file alone, `--test-name-pattern "#453"`). Two of them — silence resetting `loudSince`, and
+// silence resetting `frozenSince` — are killed ONLY by the at-ambient equivalence test below, so a change
+// that weakens that test's fixture (fewer silent windows above the margin or inside the dead band) has to
+// re-run them.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -139,24 +145,258 @@ test('KNOWN LIMIT: a stream that is loud for MOST of the seed still seeds high',
   // detector comes up in the middle of a long cry, more than half the seed is the cry and the floor
   // is set at cry level — the exact failure the seeding change is aimed at, merely made much less
   // likely. Written down here because the commit message for that change overstated it, and because
-  // silence about a limit is the thing this repo's rules forbid. Bounded: the EMA drags the floor
-  // back down within ~20 s once the room quietens, which is why it is a limit and not a defect.
+  // silence about a limit is the thing this repo's rules forbid. Bounded ONLY BY A REAL QUIET FLOOR: the
+  // EMA drags the floor back down once the room quietens to a measurable, non-zero level, which is why
+  // it is a limit and not a defect. ⚠️ Digital silence (an all-zero window) does NOT drag it down: since
+  // #453 a silent window is a reading AT the ambient, which holds the floor exactly where it is. See the
+  // #453 KNOWN LIMIT test below for the silent-room version of this limit.
   const a = analyser();
   const rows = drive(a, [...rep(15, -20), ...rep(10, QUIET)]);
   assert.equal(rows[SEED_WINDOWS - 1].baseline, -20);
 });
 
-test('true digital silence (-Infinity) neither seeds nor moves the baseline', () => {
+// ---------------------------------------------------------------------------------------------
+// #453: digital silence is an OBSERVATION — a reading at the ambient, not a missing reading
+// ---------------------------------------------------------------------------------------------
+// An all-zero 200 ms window has rms 0, so its level is -Infinity. Before #453 the detector threw such a
+// window away before it reached this analyser, and the analyser's own guard dropped it too. That made a
+// muted or gated microphone look like no microphone at all (no per-minute sound row, a "no microphone?"
+// strike on a quick exit), and — the part that decided the design — it made silence INVISIBLE to the
+// trailing confirm window, so separate sounds with silence between them read as one continuous loud run
+// and could alert (the C1a repro below, demonstrated on dev e9e5d83 before the fix).
+// The design (plan v2): a silent window, once there is an ambient, runs the normal path as a reading
+// EXACTLY AT the ambient. Rejected, so nobody re-proposes them: a floor value (-90.3 dBFS) fed into the
+// baseline (a silent night drags the ambient to the floor and the next ordinary household noise reads
+// +30 dB), and "silence touches nothing" (fixes the counters, keeps the pulse alert). No constant here was
+// added or changed.
+
+test('#453 C1: while seeding, silence records 0 (heard, nothing above ambient) and never joins the seed', () => {
   const a = analyser();
   const rows = drive(a, [...rep(SEED_WINDOWS, -Infinity), ...rep(SEED_WINDOWS, QUIET)]);
-  // If -Infinity counted toward the seed the baseline would exist (and be -Infinity) by reading 25.
-  assert.equal(rows[SEED_WINDOWS - 1].baseline, null, 'silence does not count toward the seed');
-  assert.equal(rows[2 * SEED_WINDOWS - 1].baseline, QUIET);
+  for (let i = 0; i < SEED_WINDOWS; i++) {
+    // If -Infinity counted toward the seed the baseline would exist (and be -Infinity) by reading 25.
+    assert.equal(rows[i].baseline, null, `silence is not evidence of the ambient (reading ${i})`);
+    assert.equal(rows[i].recordDb, 0, `a silent window is a quiet observation, recorded as 0 (reading ${i})`);
+    assert.equal(rows[i].silent, true);
+    assert.equal(rows[i].over, null, 'no ambient yet, so no trailing average to report');
+    assert.equal(rows[i].confirmed, false);
+    assert.equal(rows[i].wouldAlert, false);
+  }
+  // The seed is 25 AUDIBLE readings: the first 24 of them still report nothing at all.
+  for (let i = SEED_WINDOWS; i < 2 * SEED_WINDOWS - 1; i++) {
+    assert.equal(rows[i].baseline, null, `still seeding at reading ${i}`);
+    assert.equal(rows[i].recordDb, null, 'an audible window records nothing until there is an ambient (the documented asymmetry)');
+    assert.equal(rows[i].silent, false);
+  }
+  assert.equal(rows[2 * SEED_WINDOWS - 1].baseline, QUIET, 'seeded on the 25th audible reading');
+});
 
-  const after = a.push(-Infinity, T0 + 10 * 60000);
-  assert.equal(after.baseline, QUIET, 'and it does not disturb a settled baseline');
-  assert.equal(after.recordDb, null, 'nor does it record a spurious excursion');
-  assert.equal(after.wouldAlert, false);
+test('#453 C1: a silent window inside a partly-filled seed neither joins it nor clears it', () => {
+  // 10 audible, one silent, 15 audible = 25 audible readings: seeded on the 26th push and not one sooner
+  // (silence joined the seed: seeded on the 25th push) or later (silence cleared it: 15 short at the end).
+  const a = analyser();
+  const rows = drive(a, [...rep(10, -70), -Infinity, ...rep(SEED_WINDOWS - 10, QUIET)]);
+  for (let i = 0; i < SEED_WINDOWS; i++) assert.equal(rows[i].baseline, null, `still seeding at reading ${i}`);
+  assert.equal(rows[10].recordDb, 0, 'the silent window itself is recorded as quiet');
+  // The median of 10 x -70 and 15 x -60 is -60.
+  assert.equal(rows[SEED_WINDOWS].baseline, QUIET, 'seeded on exactly the 25th audible reading');
+});
+
+test('#453 C1: silence longer than the trailing window, in the middle of the seed, is a hole like an outage', () => {
+  // While there is no ambient a silent window does not advance the stream clock (it is not part of the
+  // seed, so it is not part of the contiguous 5 s the seed is meant to be). A long silence mid-seed is
+  // therefore treated as the staleness rule treats an outage: the partial seed is dropped and the seed
+  // restarts from the next audible reading. Identical to dev, where the silence never reached the analyser.
+  const a = analyser();
+  const first = drive(a, rep(10, -70));
+  const quiet = drive(a, rep(secs(10), -Infinity), first[first.length - 1].t + READING_MS);
+  const rest = drive(a, rep(SEED_WINDOWS, QUIET), quiet[quiet.length - 1].t + READING_MS);
+  assert.equal(rest[SEED_WINDOWS - 2].baseline, null, 'the 10 readings before the silence were dropped');
+  assert.equal(rest[SEED_WINDOWS - 1].baseline, QUIET, 'and the seed is 25 fresh readings');
+});
+
+test('#453 C1: a silent window on a settled analyser is EXACTLY a reading at the ambient', () => {
+  // A full, quiet trailing window (20 x -60 against a -60 floor), then one silent window, contiguously.
+  // The window it joins is still all ambient, so `over` is exactly 0 and the window stays confirmed.
+  const a = settled();
+  const r = a.push(-Infinity, START);
+  assert.deepEqual(r, { baseline: QUIET, over: 0, confirmed: true, recordDb: 0, wouldAlert: false, silent: true });
+  assert.equal(a.baseline, QUIET, 'a reading at the ambient moves nothing: the EMA step is exactly zero');
+  // An audible reading reports `silent: false`, so a caller can always tell the two apart.
+  assert.equal(a.push(QUIET, START + READING_MS).silent, false);
+});
+
+test('#453: a silent window is indistinguishable from a reading AT THE CURRENT AMBIENT, across alerts, the absorb and the dead-band escape', () => {
+  // The design claim itself, checked as an equivalence rather than by example: two analysers, same
+  // history, one given -Infinity and the other given its own `baseline` at that moment. Every field of
+  // every result must agree except `silent`. The fixture visits every rule a silent window could reach:
+  // an alert and its cooldown, the 45 s absorb, the dead band and its 5-minute escape, sparse pulses, a
+  // long silence and a cry after it. Any special-casing of silence beyond "rms = baseline" shows up here
+  // as a field that differs: resetting loudSince / frozenSince / the trailing window, consuming the
+  // cooldown, a floor value, a stale `over`.
+  const S = null; // a silent window
+  const every = (n, k, lvl) => Array.from({ length: n }, (_, i) => (i % k === k - 1 ? S : lvl));
+  const DEAD_BAND_END = secs(70) + secs(180) + secs(6 * 60) - 1; // the last reading of the dead-band phase
+  const seq = [
+    ...every(secs(70), 8, QUIET + 15), //  above the margin, silence every 8th: alerts, then absorbed at 45 s
+    ...every(secs(180), 6, QUIET), //      back to quiet: the EMA tracks the floor down again
+    ...every(secs(6 * 60), 25, QUIET + 9), // the dead band, silence every 25th: frozen, escapes at 5 min
+    ...rep(secs(2 * 60), QUIET + 9),
+    ...Array.from({ length: secs(80) }, (_, i) => (i % 10 === 0 ? QUIET + 15 : S)), // sparse pulses, silence between
+    ...rep(secs(10 * 60), S), //           ten minutes of silence
+    ...every(secs(40), 12, QUIET + 30), // a cry with dropouts
+  ];
+  const a = settled();
+  const b = settled();
+  let t = START;
+  const seen = { alerts: 0, silentAboveMargin: 0, silentInBand: 0, absorbs: 0 };
+  for (const [i, lvl] of seq.entries()) {
+    const before = a.baseline;
+    const ra = a.push(lvl === S ? -Infinity : lvl, t);
+    const rb = b.push(lvl === S ? b.baseline : lvl, t);
+    const { silent: sa, ...fa } = ra;
+    const { silent: sb, ...fb } = rb;
+    assert.deepEqual(fa, fb, `reading ${i} (${lvl === S ? 'silent' : lvl}): the silent analyser diverged from the at-ambient one`);
+    assert.equal(sa, lvl === S, `reading ${i}: silent flag`);
+    assert.equal(sb, false);
+    if (lvl === S && ra.confirmed && ra.over >= MARGIN) seen.silentAboveMargin++;
+    if (lvl === S && ra.confirmed && ra.over >= MARGIN * 0.5 && ra.over < MARGIN) seen.silentInBand++;
+    if (ra.baseline - before > 1) seen.absorbs++;
+    if (ra.wouldAlert) {
+      seen.alerts++;
+      a.markAlerted(t);
+      b.markAlerted(t);
+    }
+    // The dead-band escape really ran: the pre-freeze leak alone lifts the floor only ~1.2 dB (the 4-minute
+    // test above), so a floor more than 5 dB up after 6 minutes of +9 has been tracking again.
+    if (i === DEAD_BAND_END) assert.ok(a.baseline > QUIET + 5, `the dead band never escaped (floor ${a.baseline})`);
+    t += READING_MS;
+  }
+  // Not vacuous: the fixture really reached each rule WITH silent windows inside it.
+  assert.ok(seen.alerts >= 2, `alerts: ${seen.alerts}`);
+  assert.ok(seen.absorbs >= 1, 'the 45 s absorb never ran');
+  assert.ok(seen.silentAboveMargin > 5, `silent windows above the margin: ${seen.silentAboveMargin}`);
+  assert.ok(seen.silentInBand > 5, `silent windows inside the dead band: ${seen.silentInBand}`);
+});
+
+test('#453 C1a: separate sounds with digital silence between them do NOT add up to an alert', () => {
+  // ★ THE REPRO THAT DECIDED THE DESIGN (plan v2, Opus finding 1, verified by running it). Settled at -60,
+  // then a -45 window every 2 s and digital silence in between. On dev e9e5d83 the silence never reached
+  // the analyser, so its trailing window held only the pulses: it alerted at reading 160 (~32 s) and then
+  // absorbed the ambient to -45.0 in one step. With the same pulses separated by real -60 readings it
+  // never alerts (the control below). Silence must behave like the control: it dilutes the window.
+  const pulses = (between) => Array.from({ length: 400 }, (_, i) => (i % 10 === 0 ? QUIET + 15 : between));
+
+  const a = settled();
+  const rows = drive(a, pulses(-Infinity), START);
+  assert.equal(rows.filter((r) => r.wouldAlert).length, 0, 'pulses separated by silence alerted');
+  for (let i = 1; i < rows.length; i++) {
+    assert.ok(Math.abs(rows[i].baseline - rows[i - 1].baseline) < 1, `the floor stepped at reading ${i} (an absorb)`);
+  }
+  // The floor moved ONLY by the ordinary EMA: each of the 40 pulses closes BASELINE_ALPHA of its gap, and
+  // each silent window, a reading exactly at the ambient, moves it by exactly zero. So it lands on the
+  // closed form, not on -60 and not on -45. ⚠️ Stated, not hidden: nothing pulls it back DOWN between the
+  // pulses (a silent window holds the floor), so over a long run of sparse sub-margin pulses with silence
+  // between them the floor creeps toward the pulse level at the EMA's ordinary rate. That is exactly what
+  // a room whose quiet readings sat precisely at the ambient would do (KNOWN-ISSUES.md, #453 limits).
+  const expected = QUIET + 15 - 15 * (1 - BASELINE_ALPHA) ** 40;
+  assert.ok(Math.abs(a.baseline - expected) < 1e-9, `floor ${a.baseline}, expected the EMA-only ${expected}`);
+
+  // Control: the same pulses with a real -60 between them never alerted on dev either.
+  const c = settled();
+  const control = drive(c, pulses(QUIET), START);
+  assert.equal(control.filter((r) => r.wouldAlert).length, 0);
+  assert.ok(c.baseline < QUIET + 2, `the control floor stays near quiet, got ${c.baseline}`);
+});
+
+test('#453 C1b: ten minutes of silence do not blind the detector — a real cry afterwards still alerts', () => {
+  const a = settled();
+  const silence = drive(a, rep(secs(10 * 60), -Infinity), START);
+  assert.equal(silence[silence.length - 1].baseline, QUIET, 'silence held the ambient exactly');
+  assert.ok(silence.every((r) => !r.wouldAlert), 'silence never alerts');
+  const cry = drive(a, rep(secs(30), QUIET + 15), silence[silence.length - 1].t + READING_MS);
+  // A silent window that consumed the cooldown would hold this off for 120 s.
+  assert.ok(cry.some((r) => r.wouldAlert), 'a cry after a silent stretch must alert');
+});
+
+test('#453 C1b: ...and silence does not drag the ambient down to a floor: a sound 4 dB over it stays quiet', () => {
+  // Settled at -64, ten minutes of silence, then a sustained -60 (household noise, +4 dB) for 30 s: 150
+  // readings, so the trailing window is CONFIRMED and the alert rule really runs. A floor value fed into
+  // the baseline during the silence would have dragged the ambient to ~-90 and made this read +30 dB.
+  const a = analyser();
+  drive(a, rep((START - T0) / READING_MS, QUIET - 4));
+  const silence = drive(a, rep(secs(10 * 60), -Infinity), START);
+  assert.equal(silence[silence.length - 1].baseline, QUIET - 4);
+  const noise = drive(a, rep(secs(30), QUIET), silence[silence.length - 1].t + READING_MS);
+  assert.ok(noise.filter((r) => r.confirmed).length >= 100, 'the alert rule must actually have been evaluated');
+  assert.equal(noise.filter((r) => r.wouldAlert).length, 0, 'household noise 4 dB over the real ambient alerted');
+  assert.ok(Math.abs(noise[0].recordDb - 4) < 1e-9, `scored against the real ambient, got ${noise[0].recordDb}`);
+});
+
+// Two halves of a cry with two seconds of silence between them: shorter than the 4 s trailing window, so
+// the silence is NOT a hole in the stream (no staleness reset). `first` ends above the margin, with
+// `loudSince` running.
+function cryWithAGap() {
+  const a = settled();
+  const first = drive(a, rep(secs(20), QUIET + 15), START);
+  assert.ok(first[first.length - 1].confirmed && first[first.length - 1].over >= MARGIN, 'precondition: above the margin');
+  const gap = drive(a, rep(secs(2), -Infinity), first[first.length - 1].t + READING_MS);
+  const second = drive(a, rep(secs(60), QUIET + 15), gap[gap.length - 1].t + READING_MS);
+  return { gap, second };
+}
+
+test('#453 C1c: silence between two halves of a cry dilutes the trailing window instead of leaving the first half in it', () => {
+  const { gap, second } = cryWithAGap();
+  const floor = gap[gap.length - 1].baseline;
+  // The first reading back: 9 cry readings left from the first half, the 10 silent windows (each at the
+  // ambient, which the dead band held still through the gap), and this one. On dev the silence was never
+  // pushed, so this window held 20 cry readings and read ~14 dB over: a stale run carried across the gap.
+  assert.ok(Math.abs(second[0].over - (QUIET + 15 - floor) / 2) < 1e-9, `over ${second[0].over}, floor ${floor}`);
+  assert.equal(second[0].confirmed, true);
+  assert.ok(gap.every((r) => r.confirmed), 'silence kept the window full (no staleness reset)');
+});
+
+test('#453 C1c: ...and does not carry the first half\'s elevation into the 45 s absorb', () => {
+  const { second } = cryWithAGap();
+  // `loudSince` restarted in the gap (the diluted window fell below the margin), so the second half must
+  // serve its own 45 s: absorbed exactly 45 s after IT crosses the margin, not 45 s after the first half did.
+  const crossIdx = second.findIndex((r) => r.confirmed && r.over >= MARGIN);
+  const absorbIdx = second.findIndex((r, i) => i > 0 && r.baseline - second[i - 1].baseline > 1);
+  assert.ok(crossIdx > 0 && absorbIdx > crossIdx, `cross ${crossIdx}, absorb ${absorbIdx}`);
+  assert.equal(second[absorbIdx].t - second[crossIdx].t, 45000, 'absorbed 45 s after the SECOND half crossed');
+});
+
+test('#453 C1d: NaN and +Infinity are invalid input, not silence — dropped, touching nothing', () => {
+  // 16-bit PCM can only ever produce a finite level or -Infinity; the analyser is a public module, and a
+  // NaN fed into the baseline would poison it permanently.
+  const dropped = (baseline) => ({ baseline, over: null, confirmed: false, recordDb: null, wouldAlert: false, silent: false });
+  const a = settled();
+  assert.deepEqual(a.push(NaN, START), dropped(QUIET));
+  assert.deepEqual(a.push(Infinity, START + READING_MS), dropped(QUIET));
+  assert.equal(a.baseline, QUIET);
+  const fresh = analyser();
+  assert.deepEqual(fresh.push(NaN, T0), dropped(null));
+  const rows = drive(fresh, rep(SEED_WINDOWS, QUIET), T0 + READING_MS);
+  assert.equal(rows[SEED_WINDOWS - 2].baseline, null, 'a NaN did not count toward the seed');
+  assert.equal(rows[SEED_WINDOWS - 1].baseline, QUIET);
+});
+
+test('#453 KNOWN LIMIT: a detector that has only ever heard silence has no ambient, so the first real sound seeds it — even a cry', () => {
+  // Stated in KNOWN-ISSUES.md, not fixable without inventing a floor (the rejected design). A muted mic
+  // that is then un-muted into a sustained cry seeds the ambient AT cry level from its first 25 audible
+  // windows (the KNOWN LIMIT above), so that first event is not alerted; and silence afterwards never
+  // brings the ambient back down, because a silent window is a reading at the ambient. Only a real,
+  // quieter reading lowers it.
+  const a = analyser();
+  const silence = drive(a, rep(secs(10 * 60), -Infinity));
+  assert.ok(silence.every((r) => r.baseline === null && r.recordDb === 0 && !r.wouldAlert));
+  const cry = drive(a, rep(secs(30), QUIET + 40), silence[silence.length - 1].t + READING_MS);
+  assert.equal(cry[SEED_WINDOWS - 1].baseline, QUIET + 40, 'seeded at the cry');
+  assert.equal(cry.filter((r) => r.wouldAlert).length, 0, 'so that first cry is not alerted');
+  const after = drive(a, rep(secs(10 * 60), -Infinity), cry[cry.length - 1].t + READING_MS);
+  assert.equal(after[after.length - 1].baseline, QUIET + 40, 'silence holds the ambient where it is');
+  const quietAgain = drive(a, rep(secs(60), QUIET), after[after.length - 1].t + READING_MS);
+  assert.ok(quietAgain[quietAgain.length - 1].baseline < QUIET + 40 - 10, 'a real quiet floor still pulls it down');
 });
 
 // ---------------------------------------------------------------------------------------------

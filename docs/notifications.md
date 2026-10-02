@@ -325,6 +325,16 @@ within the times in the table above. If it sits at *exactly* the same value for 
 `maxAvgOver` stays between half and all of the "fires at" figure, you are running a version from
 before that fix.
 
+**A muted microphone still prints this line, and differs in two ways.** A microphone that delivers
+*digital silence* (every audio sample exactly zero: muted, gated, or a codec that encodes silence that way)
+gives `peak=?dB` whenever every window since the last line was silent, and `ambient=?dB` until it has
+heard about 5 seconds of real sound to learn the room from. Silence is treated as a moment exactly at the
+room's ambient level: on its own it never alerts, it is recorded as quiet (0 over ambient) in the sleep
+data, and it breaks up separate noises rather than letting them add up to an alert. Unlike real quiet, it cannot lower
+the ambient level, so `ambient=` holds still through a silent stretch; that is expected, not the freeze
+described above. Limits are in [KNOWN-ISSUES.md](../KNOWN-ISSUES.md), "A muted or digitally silent
+microphone is recorded as a quiet room".
+
 This line reports what the sound detector *decided from*; a separate `[obs]` line every 15 minutes reports
 what it actually *received*: how much of the time was covered, gaps and restarts, and sound that arrived
 late and caught up. It changes nothing about alerts. Every field is explained in

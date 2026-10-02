@@ -248,7 +248,7 @@ their own before/after comparison.
 | `fpsClone` | Motion: ffmpeg repeated an older picture because nothing new arrived in time (a camera stall). These still reach the motion detector, which sees them as "no movement". Since #493 they are left out of the stored per-minute frame count and averages (next section). |
 | `cfrDup` / `cfrDrop` | Motion: a picture the output stage wrote twice / skipped. Inside a run of identical pictures only the net count is known. Nothing is counted across a lost timestamp line, or for a run counted in `runsCapped`: there the true count is unknown. |
 | `runsCapped` | Motion: runs of identical pictures closed early because more than 64 were open at once, which only happens while pictures are not being matched to their timestamp lines. Their duplicates/drops are left out of `cfrDup`/`cfrDrop` rather than guessed. Normally 0. |
-| `observed` / `silent` | Sound: windows placed on the audio's own clock; `silent` of them were digital silence (sampled, but not analysed). |
+| `observed` / `silent` | Sound: windows placed on the audio's own clock; `silent` of them were digital silence (sampled, but with no loudness to analyse). Since issue #453 those windows are still recorded in the per-minute sound history, as quiet (0 over ambient): see "A muted or digitally silent microphone is recorded as a quiet room". Do not compare `silent` with a minute's sound-window count: `silent` counts windows the audio clock could place in the 15-minute period (it is 0 whenever that clock is unavailable), the history counts every window by the minute it arrived in. |
 | `unknown` | Samples the evidence cannot place. This is a normal answer, not an error: it means a timestamp record was lost, the stream ended, or the order is in doubt. A lost timestamp line right before or after a run of identical pictures makes the whole run `unknown`: which picture is which can no longer be told. |
 | `ambiguous` / `reordered` | The two commonest reasons for `unknown` on motion: a run of distinct frames that scaled to the same picture (about 1 in 9,000 measured), and input timestamps that went backwards. |
 | `gaps` | Count / total time of real gaps in what arrived: motion input more than 0.4 s apart (more at a slow frame rate), sound that stayed more than 0.5 s behind its own clock for over a second. A sound gap cannot tell lost audio from audio held back and never caught up, so it is reported as a gap in *observation*, never as "audio lost". |
@@ -510,6 +510,62 @@ closing sentence.
 
 **What to do:** nothing. If a night shows a long "No data" stretch while the camera was plainly on, check
 the Camera history for a `[detector-watchdog]` restart (next section) around that time.
+
+## A muted or digitally silent microphone is recorded as a quiet room
+
+**What you see:** for a camera whose microphone delivers *digital silence* (every audio sample exactly zero),
+the per-minute sound history (`activity_samples`) shows those minutes as quiet, 0 dB over ambient, instead of
+having no sound at all, and the `[sound]` level line keeps printing every 15 seconds with `peak=?dB` (and
+`ambient=?dB` until the camera has heard some real sound). Silence on its own never sets off a sound alert.
+
+**Why:** each 200 ms window of audio is turned into a loudness level. A window of exact zeros has no
+loudness at all (minus infinity in dB), and until issue #453 the sound detector threw such a window away as
+if nothing had arrived. That made a muted or gated microphone look like no microphone: those minutes stored
+no sound, a detector reconnecting during the silence could be stopped as "does this camera have a
+microphone?", and, worst, the silence between separate noises was skipped, so a few short noises seconds
+apart averaged out as one long loud sound and could send an alert (measured in a replay: a sound every 2
+seconds with silence between alerted after ~32 seconds; the same sounds with ordinary quiet between them never
+did). Now a silent window counts as **heard, and exactly at the room's learned ambient level**: the same as a
+moment of perfect quiet. No setting or threshold was added or changed.
+
+**Differs from the neighbouring cases** — the part that is easy to get wrong:
+
+| | Digital silence (every sample 0) | A quiet room (real, faint sound) | No audio arriving at all |
+|---|---|---|---|
+| Per-minute history | Sound 0, every window counted; a row is written even with no movement | A small excursion around 0, every window counted | Nothing from sound (no row unless there was movement) |
+| Alerts | Never on its own (it counts as quiet in the 4-second average) | When a noise rises past the margin | Never |
+| Learns the room's ambient level | **No** (there is nothing to learn from) | Yes, continuously | No |
+| A quick reconnect ("does this camera have a microphone?") | Not counted | Not counted | Counted; three in a row stop sound detection |
+| Sleep numbers | Quiet, like a quiet room | Quiet unless a noise passes 6 dB over ambient | Decided by the video alone |
+
+In every column a minute with no video is unknown in the sleep numbers, whatever its sound (previous
+section).
+
+**Limits, stated rather than hidden:**
+- **Silence cannot teach the app the room's ambient level.** A detector that has only ever heard silence has
+  nothing to measure against, so the first ~5 seconds of real sound it hears become the ambient level. If
+  that first sound is a sustained cry (a microphone un-muted into a crying room), the cry *is* the ambient
+  and that first cry is not alerted. Fixing it would mean guessing a floor level, which was rejected: a
+  guessed floor makes every ordinary household noise after a silent spell read as loud.
+- **Silence holds the ambient level where it is; it never brings it down.** Only real, quieter sound lowers
+  it. And sounds heard between stretches of silence can raise it slowly through the ordinary ~20-second
+  tracking: a sound too faint to alert, repeated with silence between, creeps the ambient toward its own
+  level, as it would in a room whose quiet moments sat exactly at the ambient.
+- **While the ambient is still being learned** (about the first 5 seconds after a start with no learned
+  level), an audible window records nothing, but a silent one records 0.
+- **Stored minutes before and after this change differ.** Before it, a minute of silence stored no sound
+  (NULL) and a minute with some silence averaged only its audible windows; from the first release after
+  0.34.0 a silent window is stored as 0 and included in the minute's sound average, `sound_p75`, `sound_p90`
+  and `sound_sd`. Nights already stored are not changed. Anything that compares those columns across time
+  (the planned sound-statistics work, ROADMAP §1.4 Phase 2) must not mix rows from before and after that
+  release for a camera that delivers silence.
+- **How often it happens depends on the camera.** On the install it was developed on, G711 A-law audio was
+  never digitally silent in about 1.5 million windows (A-law cannot decode to exact zero), so there it
+  changes nothing. Muted or gated microphones, and codecs that encode silence as zeros, can. The `[obs]` line's
+  `silent=` count shows whether a camera does.
+
+**What to do:** nothing. If a camera's history shows long stretches of exactly 0 sound and its level line
+says `peak=?dB`, its microphone is delivering silence: check whether it is muted in the camera's own settings.
 
 ## A detector was restarted: `[detector-watchdog]` in the log and in Camera history
 

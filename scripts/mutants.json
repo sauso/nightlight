@@ -4680,7 +4680,7 @@
   {
     "label": "#373 M-W09: F8 sound observes a window BEFORE its decision handler (R1-F8)",
     "file": "backend/src/lib/soundDetector.js",
-    "find": "        handleReading(level, rx.wall);\r\n        // #373: one observation per window, AFTER its decision handler returned (R1-F8). It runs for every\r\n        // window, silent ones included — the early return inside handleReading cannot skip it — and a\r\n        // silent window counts as SAMPLED but not ANALYSED coverage (C5).\r\n        obs.onSample(win, rx.mono, rx.wall, { analysed: Number.isFinite(level) });\r\n",
+    "find": "        handleReading(level, rx.wall);\r\n        // #373: one observation per window, AFTER its decision handler returned (R1-F8). It runs for every\r\n        // window, silent ones included, whatever handleReading did with it — and a silent window counts as\r\n        // SAMPLED but not ANALYSED coverage (C5). ANALYSED is the observation clock's own sense (it had a\r\n        // measurable loudness); #453 left it alone on purpose, so the `[obs]` line's `silent=` and `cover=`\r\n        // mean what KNOWN-ISSUES.md documents even though the window is now recorded as quiet.\r\n        obs.onSample(win, rx.mono, rx.wall, { analysed: Number.isFinite(level) });\r\n",
     "replace": "        obs.onSample(win, rx.mono, rx.wall, { analysed: Number.isFinite(level) });\r\n        handleReading(level, rx.wall);\r\n",
     "expect": "killed",
     "tests": ["detector-observation-wiring.test.js"],
@@ -8709,5 +8709,167 @@
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
     "namePattern": "fix round 5, 3"
+  },
+  {
+    "label": "#453 M0 (control): a comment edit in soundBaseline.js must change nothing",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "// ★★ #453: DIGITAL SILENCE IS AN OBSERVATION, AND IT IS A READING AT THE AMBIENT.",
+    "replace": "// ★★ #453: DIGITAL SILENCE IS AN OBSERVATION, AND IT IS A READING AT THE AMBIENT. [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 M1: a silent window feeds a FLOOR value (-90.3 dBFS) into the analyser instead of the ambient",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "      rms = baseline;\r\n    } else if (!Number.isFinite(rms)) {",
+    "replace": "      rms = -90.3;\r\n    } else if (!Number.isFinite(rms)) {",
+    "expect": "killed",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 M2a: a silent window before the ambient is learned records nothing (recordDb null, not 0)",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "recordDb: 0, wouldAlert: false, silent };",
+    "replace": "recordDb: null, wouldAlert: false, silent };",
+    "expect": "killed",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 M2b: a silent window on a settled analyser records nothing (recordDb null, not 0)",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "    const recordDb = Math.max(0, rms - baseline);",
+    "replace": "    const recordDb = silent ? null : Math.max(0, rms - baseline);",
+    "expect": "killed",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 M3: silence skips the normal path (plan v1: records 0, touches nothing, does not advance lastPush)",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "      rms = baseline;\r\n    } else if (!Number.isFinite(rms)) {",
+    "replace": "      return { baseline, over: null, confirmed: false, recordDb: 0, wouldAlert: false, silent };\r\n    } else if (!Number.isFinite(rms)) {",
+    "expect": "killed",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 M4: a silent window joins the seed",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "      if (baseline === null) return { baseline: null, over: null, confirmed: false, recordDb: 0, wouldAlert: false, silent };",
+    "replace": "      if (baseline === null) { seed.push(rms); return { baseline: null, over: null, confirmed: false, recordDb: 0, wouldAlert: false, silent }; }",
+    "expect": "killed",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 M5a: a silent window resets loudSince unconditionally",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "      rms = baseline;\r\n    } else if (!Number.isFinite(rms)) {",
+    "replace": "      rms = baseline;\r\n      loudSince = 0;\r\n    } else if (!Number.isFinite(rms)) {",
+    "expect": "killed",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 M5b: a silent window clears the trailing window unconditionally",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "      rms = baseline;\r\n    } else if (!Number.isFinite(rms)) {",
+    "replace": "      rms = baseline;\r\n      recent.length = 0;\r\n    } else if (!Number.isFinite(rms)) {",
+    "expect": "killed",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 M6: a silent window clears a partly-filled seed",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "      if (baseline === null) return { baseline: null, over: null, confirmed: false, recordDb: 0, wouldAlert: false, silent };",
+    "replace": "      if (baseline === null) { seed.length = 0; return { baseline: null, over: null, confirmed: false, recordDb: 0, wouldAlert: false, silent }; }",
+    "expect": "killed",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 M7: a silent window resets the dead-band freeze clock (frozenSince)",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "      rms = baseline;\r\n    } else if (!Number.isFinite(rms)) {",
+    "replace": "      rms = baseline;\r\n      frozenSince = 0;\r\n    } else if (!Number.isFinite(rms)) {",
+    "expect": "killed",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 M8: a silent window consumes the alert cooldown (lastAlert)",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "      rms = baseline;\r\n    } else if (!Number.isFinite(rms)) {",
+    "replace": "      rms = baseline;\r\n      lastAlert = now;\r\n    } else if (!Number.isFinite(rms)) {",
+    "expect": "killed",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 M9: a silent window does not set sawReading (silent quick exits strike again)",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "      sawReading = true;",
+    "replace": "      if (rms !== -Infinity) sawReading = true;",
+    "expect": "killed",
+    "tests": ["sound-digital-silence.test.js"],
+    "namePattern": "C2b"
+  },
+  {
+    "label": "#453 M10: the detector records a silent window only once the ambient is learned",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "      if (r.recordDb !== null) recordSound(camera.id, r.recordDb, atMs);",
+    "replace": "      if (r.recordDb !== null && r.baseline !== null) recordSound(camera.id, r.recordDb, atMs);",
+    "expect": "killed",
+    "tests": ["sound-digital-silence.test.js"],
+    "namePattern": "#453 C2:"
+  },
+  {
+    "label": "#453 M11: a silent window is filed by the detector's own Date.now(), not its event's receipt time",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "      if (r.recordDb !== null) recordSound(camera.id, r.recordDb, atMs);",
+    "replace": "      if (r.recordDb !== null) recordSound(camera.id, r.recordDb, r.silent ? Date.now() : atMs);",
+    "expect": "killed",
+    "tests": ["sound-digital-silence.test.js"],
+    "namePattern": "#453 C2:"
+  },
+  {
+    "label": "#453 M12: the level line is skipped for silent windows",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "      if (now - lastLevelLog >= LEVEL_LOG_MS) {",
+    "replace": "      if (rms !== -Infinity && now - lastLevelLog >= LEVEL_LOG_MS) {",
+    "expect": "killed",
+    "tests": ["sound-digital-silence.test.js", "detector-observation-wiring.test.js"],
+    "namePattern": "#453 C2:|sound \\(working"
+  },
+  {
+    "label": "#453 M13: a silent window leaves the trailing window stale (not pushed), so over/confirmed are the previous window's",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "    recent.push(rms);",
+    "replace": "    if (!silent) recent.push(rms);",
+    "expect": "killed",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 M14: NaN is treated as silence (recorded as quiet) instead of dropped as invalid",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "    const silent = rms === -Infinity;",
+    "replace": "    const silent = rms === -Infinity || Number.isNaN(rms);",
+    "expect": "killed",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 M15: the detector drops digital silence again (dev e9e5d83's guard): the detector tests must see the whole fix",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "      if (rms !== -Infinity && !Number.isFinite(rms)) return;",
+    "replace": "      if (!Number.isFinite(rms)) return;",
+    "expect": "killed",
+    "tests": ["sound-digital-silence.test.js"],
+    "namePattern": "#453 C(2:|3b)"
   }
 ]

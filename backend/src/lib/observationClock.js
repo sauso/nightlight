@@ -2073,8 +2073,10 @@ class SoundGeneration extends Generation {
         const hi = this.pts0Ms + this.mediaBefore(points[i + 1]) + shift;
         obs.spans.push([lo, hi]);
         this.clock.addCoverage('sampler', lo, hi);
-        // Sampler vs analysis coverage (C5): a digitally silent window was SAMPLED but never analysed
-        // (soundDetector.js ignores a non-finite level), so it counts only for the first.
+        // Sampler vs analysis coverage (C5): a digitally silent window was SAMPLED but has no measurable
+        // loudness to analyse (soundDetector.js passes `analysed: false` for a non-finite level), so it counts
+        // only for the first. Since #453 the detector records such a window as a quiet reading at the ambient
+        // rather than ignoring it; this coverage keeps its documented meaning ("had a loudness") regardless.
         if (s.analysed) this.clock.addCoverage('analysis', lo, hi);
       }
       this.noteStamp(st.mono);
