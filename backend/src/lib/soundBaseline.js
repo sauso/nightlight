@@ -67,10 +67,12 @@ export function marginDb(sensitivity) {
  * @param {number} opts.readingMs how far apart readings arrive (200 ms for a 1600-sample window at
  *   8 kHz). Used ONLY to recognise a gap in the stream — see the staleness reset in `push`.
  *
- * `push(rms, now)` returns, for one loudness window:
- *   { baseline, over, confirmed, recordDb, wouldAlert }
- * where `recordDb` is the excursion to feed the activity timeline (null while seeding), `over` is the
- * trailing average minus the ambient baseline, and `wouldAlert` says the alert rules are satisfied.
+ * `push(rms, now)` takes one loudness window in dBFS and returns:
+ *   { baseline, over, confirmed, recordDb, wouldAlert, silent }
+ * where `recordDb` is the excursion to feed the activity timeline (null = record nothing: an AUDIBLE
+ * reading while the ambient is still being seeded, or invalid input), `over` is the trailing average
+ * minus the ambient baseline, `wouldAlert` says the alert rules are satisfied, and `silent` is true for
+ * a digitally silent window (`rms` = -Infinity; see #453 in `push`).
  * The CALLER decides whether an alert actually fires (it also has to be inside the quiet-hours
  * schedule) and calls `markAlerted(now)` if it did — the cooldown must only start when a notification
  * really went out, not when one was merely eligible.
@@ -112,10 +114,44 @@ export function createSoundAnalyser({ margin, trailN, cooldownMs, readingMs = 20
   let lastAlert = 0;
 
   function push(rms, now) {
-    // Defence in depth: `soundDetector.handleReading` already drops non-finite readings (true digital
-    // silence gives -Infinity) before calling in here, so in production this is unreachable. Kept
-    // because the analyser is a public module now and a NaN would poison the baseline permanently.
-    if (!Number.isFinite(rms)) return { baseline, over: null, confirmed: false, recordDb: null, wouldAlert: false };
+    // ★★ #453: DIGITAL SILENCE IS AN OBSERVATION, AND IT IS A READING AT THE AMBIENT. An all-zero window
+    // (rms 0, so -Infinity dBFS) is what a muted, gated or genuinely silent microphone delivers: the stream
+    // is up and the room was heard. It used to be dropped before it reached here, and that did three wrong
+    // things: the minute stored no sound at all, the detector's "no microphone?" strike counted it as no
+    // reading, and — the one that decided this design — silence was INVISIBLE to the trailing window, so
+    // separate sounds with silence between them averaged as one continuous loud run and alerted
+    // (soundBaseline.test.js C1a: settled at -60, a -45 window every 2 s with silence between alerted at
+    // ~32 s and absorbed the ambient to -45; the same pulses with real -60 readings between them did not).
+    //
+    // So, once there is an ambient, a silent window runs the NORMAL path below with `rms` set to the
+    // baseline. "Observed, nothing above ambient" is exactly a reading at the ambient: it records 0, it
+    // dilutes the trailing average like any quiet reading, it keeps the stream clock live (no staleness
+    // reset), the EMA step and the dead-band escape step are both exactly zero, and `loudSince` /
+    // `frozenSince` follow the same rules as for any real reading. The floor can still move on a silent
+    // window only through the existing absorb (`baseline += over`, after 45 s above the margin), the same
+    // bounded rule every real reading is under. No constant was added or changed.
+    // Rejected, so they are not re-proposed: a floor value (e.g. -90.3 dBFS) instead of the baseline — a
+    // silent night would drag the ambient to the floor, and the next ordinary -60 household noise would read
+    // +30 dB and alert; and "silence touches nothing" — it fixes the stored counts but keeps the pulse alert.
+    // ⚠️ KNOWN LIMITS (KNOWN-ISSUES.md, "A muted or digitally silent microphone is recorded as a quiet room"):
+    // silence never brings the ambient DOWN (only a real quieter reading does), and while there is no ambient
+    // yet it cannot seed one.
+    const silent = rms === -Infinity;
+    if (silent) {
+      // No ambient yet (still seeding, or never seeded): record the window as quiet, but keep it OUT of the
+      // seed — a zero is no evidence of what the room's floor is, and a median taken over zeros would put the
+      // floor at -Infinity. It does not advance `lastPush` either: the seed is meant to be ~5 s of contiguous
+      // AUDIBLE readings, so a silence longer than the trailing window in the middle of the seed is a hole,
+      // exactly as an outage is. This is the one documented asymmetry: until the ambient is learned an
+      // audible window records nothing (there is nothing to measure it against) but a silent one records 0.
+      if (baseline === null) return { baseline: null, over: null, confirmed: false, recordDb: 0, wouldAlert: false, silent };
+      rms = baseline;
+    } else if (!Number.isFinite(rms)) {
+      // NaN (or +Infinity) is INVALID input, not silence: 16-bit PCM can only produce a finite level or
+      // -Infinity, so this is unreachable from soundDetector.js. Kept because the analyser is a public module
+      // and a NaN fed into the baseline would poison it permanently. Touches nothing, records nothing.
+      return { baseline, over: null, confirmed: false, recordDb: null, wouldAlert: false, silent };
+    }
 
     // A hole in the stream — see `staleMs`. Everything time- or position-dependent goes; the floor stays.
     if (lastPush && now - lastPush > staleMs) {
@@ -128,16 +164,17 @@ export function createSoundAnalyser({ margin, trailN, cooldownMs, readingMs = 20
 
     if (baseline === null) {
       seed.push(rms);
-      if (seed.length < SEED_WINDOWS) return { baseline: null, over: null, confirmed: false, recordDb: null, wouldAlert: false };
+      if (seed.length < SEED_WINDOWS) return { baseline: null, over: null, confirmed: false, recordDb: null, wouldAlert: false, silent };
       const sorted = [...seed].sort((a, b) => a - b);
       baseline = sorted[Math.floor(sorted.length / 2)];
       seed.length = 0;
-      return { baseline, over: null, confirmed: false, recordDb: null, wouldAlert: false };
+      return { baseline, over: null, confirmed: false, recordDb: null, wouldAlert: false, silent };
     }
 
     // Feed loudness-above-ambient into the per-minute activity timeline (independent of the alert
     // margin/cooldown), so sleep tracking sees continuous noise level, not just cry alerts. Measured
-    // against the baseline as it stood BEFORE this reading, so a reading never scores itself.
+    // against the baseline as it stood BEFORE this reading, so a reading never scores itself. A silent
+    // window (#453, above) scores exactly 0 here: "heard, nothing above ambient".
     const recordDb = Math.max(0, rms - baseline);
 
     // Trailing average over the confirm window. A cry is loud ON AVERAGE across those seconds even as
@@ -156,7 +193,7 @@ export function createSoundAnalyser({ margin, trailN, cooldownMs, readingMs = 20
         loudSince = 0;
         frozenSince = 0;
         recent.length = 0;
-        return { baseline, over, confirmed, recordDb, wouldAlert: false };
+        return { baseline, over, confirmed, recordDb, wouldAlert: false, silent };
       }
       if (now - lastAlert >= cooldownMs) wouldAlert = true;
     } else {
@@ -180,7 +217,7 @@ export function createSoundAnalyser({ margin, trailN, cooldownMs, readingMs = 20
         if (now - frozenSince >= DEAD_BAND_MAX_MS) baseline += BASELINE_ALPHA * (rms - baseline);
       }
     }
-    return { baseline, over, confirmed, recordDb, wouldAlert };
+    return { baseline, over, confirmed, recordDb, wouldAlert, silent };
   }
 
   return {

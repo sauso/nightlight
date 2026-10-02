@@ -396,7 +396,7 @@ function pcm(script) {
 const SOUND_MIN1 = pcm([
   { n: 25, amp: 1000 }, //  0-5 s   the 25 seed windows: the ambient baseline is their median
   { n: 50, amp: 1000 }, //  5-15 s  ambient
-  { n: 1, amp: 0 }, //      digital silence: rms 0 -> -Infinity, which handleReading ignores
+  { n: 1, amp: 0 }, //      digital silence: rms 0 -> -Infinity, recorded as a quiet reading at the ambient since #453
   { n: 15, amp: 16000 }, // 15-18 s  loud: alerts
   { n: 209, amp: 1000 }, // to 60 s
 ]);
@@ -520,9 +520,26 @@ const GOLDEN_MOTION = {
 // ★ #447, derived by hand as for motion: SOUND_MIN1's windows all arrive at 0-59.8 s and SOUND_MIN2's at
 // 60-119.8 s, exactly the two pre-#447 flush intervals, so each recorded row (labelled 12:01 and 12:02, the
 // flush times) is the same row, to the last bit, under the minute its windows arrived in: 12:00 and 12:01.
+// ★ #453: THE 12:00 ROW, RE-DERIVED BY HAND FROM THE db46da1 RECORDING — NOT RE-RECORDED. SOUND_MIN1's one
+// digitally silent window (k = 75) used to be dropped before the analyser; it is now a reading AT the ambient,
+// so it records an excursion of exactly 0 and is counted. Nothing else about the run moves: just before it the
+// trailing window held 20 ambient readings and the floor sat exactly on them (identical windows, so every EMA
+// step was 0), so pushing one more ambient-valued reading leaves the window, the floor, `loudSince` and
+// `frozenSince` exactly as they were, and the loud run that follows meets the same state as before (same alert,
+// same excursions). So 12:00 gains one window of 0: the SUM and the SUM OF SQUARES of its excursions are
+// unchanged and only the count goes 274 -> 275. The mean and the population sd are recomputed from those two
+// sums (sd = sqrt(sumSq / n - mean^2), activityTracker.js), so the mean shrinks by 274/275 and so does the sd.
+// ⚠️ The two sums are recovered from the recorded mean and sd, which carry the last-bit rounding of the
+// detector's own summation order, so these two values hold to ~1e-15, not bit for bit: they join the MEANS
+// tolerance set below for exactly that reason. p75/p90 stay 0 (one more 0 in a minute that was already mostly
+// 0) and the peak is untouched. The 12:01 row has no silent window and is unchanged.
+const PRE453_SOUND_1200 = { sound_level: 1.26657393446471, sound_windows: 274, sound_sd: 5.263784232701136 };
+const SUM_1200 = PRE453_SOUND_1200.sound_level * PRE453_SOUND_1200.sound_windows;
+const SUMSQ_1200 = PRE453_SOUND_1200.sound_windows * (PRE453_SOUND_1200.sound_sd ** 2 + PRE453_SOUND_1200.sound_level ** 2);
+const MEAN_1200 = SUM_1200 / 275;
 const GOLDEN_SOUND = {
   activity: [
-    { camera_id: 'cam-golden-sound', bucket_start: '2026-09-25 12:00:00', motion_level: null, motion_peak: null, sound_level: 1.26657393446471, sound_peak: 24.081866239790152, motion_frames: 0, sound_windows: 274, motion_out_level: null, motion_out_peak: null, sound_p75: 0, sound_p90: 0, sound_sd: 5.263784232701136 },
+    { camera_id: 'cam-golden-sound', bucket_start: '2026-09-25 12:00:00', motion_level: null, motion_peak: null, sound_level: MEAN_1200, sound_peak: 24.081866239790152, motion_frames: 0, sound_windows: 275, motion_out_level: null, motion_out_peak: null, sound_p75: 0, sound_p90: 0, sound_sd: Math.sqrt(SUMSQ_1200 / 275 - MEAN_1200 ** 2) },
     { camera_id: 'cam-golden-sound', bucket_start: '2026-09-25 12:01:00', motion_level: null, motion_peak: null, sound_level: 1.1519717499111992, sound_peak: 23.9812664492313, motion_frames: 0, sound_windows: 300, motion_out_level: null, motion_out_peak: null, sound_p75: 0, sound_p90: 0, sound_sd: 5.022056490207111 },
   ],
   events: [
@@ -530,7 +547,13 @@ const GOLDEN_SOUND = {
   ],
   log: [
     '[INFO] [sound] watching "Golden Sound Cam" — fires at +11 dB over ambient, sustained 4s',
-    '[INFO] [sound] "Golden Sound Cam" ambient=-33.3dB peak=-9.2dB maxAvgOver=+0.0 (fires at +11)',
+    // ★ #453, hand-derived: the silent window k = 75 arrives at exactly 15 s, the first level-log boundary, and
+    // now reaches the level check, so line 1 is written AT it (it used to be written one window later, by the
+    // first loud window, whose -9.2 dB it printed). Its peak is therefore the ambient windows' -33.3 dB (a silent
+    // window never sets the peak). Every later level line is unchanged: line 2's boundary moves 200 ms earlier,
+    // to 30.0 s, but windows 100-199 are re-cut into 5,000-byte reads and the first window handled at or after
+    // 30.0 s is window 150 at 30.2 s, the one that wrote it before; from there on the times are identical.
+    '[INFO] [sound] "Golden Sound Cam" ambient=-33.3dB peak=-33.3dB maxAvgOver=+0.0 (fires at +11)',
     '[INFO] [detect] sound on "Golden Sound Cam" (+12 dB over ambient)',
     '[INFO] [sound] "Golden Sound Cam" ambient=-32.6dB peak=-9.2dB maxAvgOver=+16.9 (fires at +11)',
     '[INFO] [sound] "Golden Sound Cam" ambient=-33.0dB peak=-33.3dB maxAvgOver=+-0.4 (fires at +11)',
@@ -550,7 +573,8 @@ function withoutCapture(observed, tag, capture) {
 
 // #447: the golden, with the two MEANS of the hand-derived rows compared within 1e-12 (see GOLDEN_MOTION on
 // why) and every other column, and everything else in `observed`, compared exactly.
-const MEANS = new Set(['motion_level', 'motion_out_level']);
+// #453: sound_level and sound_sd join them, for the hand-derived 12:00 sound row (see GOLDEN_SOUND on why).
+const MEANS = new Set(['motion_level', 'motion_out_level', 'sound_level', 'sound_sd']);
 function assertGolden(observed, golden) {
   const { activity, ...rest } = observed;
   const { activity: want, ...wantRest } = golden;
@@ -722,7 +746,8 @@ describe('detector decisions: the #373 golden, with a working, a throwing and no
 
     assert.deepEqual(logger.getRecent().filter((l) => /ashowinfo|\bn:\d+ pts:/.test(l)), []);
     if (variant === 'working') {
-      // 600 windows, the one digitally silent window among them sampled but not analysed (C5).
+      // 600 windows, the one digitally silent window among them sampled but not analysed (C5): the clock's own
+      // sense, "had a measurable loudness". The detector records it as a quiet reading since #453 (GOLDEN_SOUND).
       assert.equal(observations.length, 600);
       assert.equal(observations.filter((o) => o.cls === 'observed').length, 600);
       assert.equal(observations.filter((o) => !o.analysed).length, 1);
