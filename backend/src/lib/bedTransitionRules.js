@@ -382,3 +382,138 @@ export function trimOutSamples(samples, nowMs, windowMs) {
 export function evidenceFromSamples(samples) {
   return samples.reduce((e, s) => accumulateOutEvidence(e, s.fraction, s.active), EMPTY_EVIDENCE);
 }
+
+// --- Frame-arrival gaps: a confirmation must not span a sampling outage (issue #452) -----------------
+//
+// Both confirmations (a motion ALERT after `detect_confirm_s`, and a bed transition after its 6 s of
+// quiet) used to measure ELAPSED WALL-CLOCK TIME since a candidate began, never how much video was
+// actually received in that time. Two acceptance criteria came out of that:
+//   (a) active frame, long pause, active frame is NOT proof of motion sustained through the pause;
+//   (b) one quiet frame right after a long gap cannot by itself prove several seconds of quiet.
+// Verified by running the tracker before the fix: 5.8 s of quiet, a 60 s hole, then ONE quiet frame
+// confirmed an exit.
+//
+// What a stall looks like to the detector (KNOWN-ISSUES.md, "A stalled camera's repeated pictures"): the
+// motion leg's `fps=5` repeats the last picture to fill a stall, and ffmpeg only writes a picture once
+// the NEXT one exists, so Node sees NO stdout frames for N seconds and then a CLUMP of frames that share
+// one receipt time. The clump's first frame is the held pre-stall picture; the next new picture is the
+// one that differs across the outage. This helper tells the caller "the frame you just got arrived after
+// a gap", and the caller restarts whatever it was timing. It is a pure, stateful, synchronous closure
+// (the same shape as soundBaseline.js's analyser) and does not read the observation clock: that clock
+// proves clones ~5 s after the frame (inside the 6 s bed window) and is documented as absent or
+// throwing-safe, so a decision that must hold for everyone cannot wait on it.
+//
+// ★ THE BOUND IS ADAPTIVE WITH A FLOOR: gapBoundMs = max(floorMs, factor x typicalIntervalMs).
+//   - `floorMs` (the caller passes ACTIVE_GRACE_MS, 1500 ms): the repo already defines "a motion run has
+//     not ended" as gaps no longer than that, so a normal camera gets no new number.
+//   - Why not the floor alone (plan review round 1, Opus, HIGH): a camera slower than ~0.67 fps delivers
+//     its frames in bursts more than 1.5 s apart, so EVERY burst would count as a gap and a motion alert
+//     (confirm > 0) or a bed transition could never confirm at all, a regression from the code before this
+//     one, where such a stream works. At 5 fps (200 ms) the bound stays at the 1500 ms floor
+//     (5 x 200 = 1000), so this house is unchanged; at 0.5 fps (2 s) it is 10 s, so a real 20 s stall still
+//     counts and a 6 s hole does not.
+//   - `typicalIntervalMs` is taken from the last `windowN` (16) inter-frame deltas that exceed `minDeltaMs`
+//     (50). Deltas inside a clump are ~0 and would drag the typical interval to nothing (and the bound
+//     back to the floor on exactly the camera that needs the wider one), so they are not recorded.
+//     ★ It is 0 (so the floor ALONE governs) until the window holds K = floor(windowN / 2) + 1 = 9 recorded
+//     deltas, and from then on it is the K-th LARGEST recorded delta. For a full window of 16 that IS the
+//     lower median (sorted[7]); for 9 to 15 held it is sorted[n - 9], i.e. at least 9 recorded deltas must
+//     be at least that long, so FEWER THAN 9 LONG DELTAS (a stall, or a few) CAN NEVER LIFT THE BOUND.
+//     K is derived from windowN, not typed in. Why not simply the median of whatever the window holds
+//     (code review round 1, Codex and Opus, VERIFIED BY RUNNING): right after a launch the window holds one
+//     or two deltas, so ONE stall IS the median and widens the bound for the very next frame. Frames at
+//     0 / 20 s / 50 s: the 20 s delta became the median, the 30 s delta was judged against a 100 s bound, and
+//     a single quiet frame after a 30 s outage confirmed an exit; a motion alert run active at 200 ms,
+//     2200 ms and 9200 ms alerted once. Reading nothing until K deltas are held closes that.
+//     ★ A delta that WAS a gap IS recorded (a build-time deviation from plan v2, which excluded it so that
+//     "a stall cannot inflate its own bound"): excluded, the window could never learn a slow camera. A
+//     camera that starts at 2 s per burst, or slows from 15 fps to 2 fps, has every one of its deltas flagged
+//     as a gap against the 1500 ms floor, so none would ever be recorded and every burst would restart every
+//     confirmation for the life of the stream, the starvation this adaptive bound exists to prevent. The
+//     protection against a stall inflating its own bound is the K threshold above instead.
+//     COST, reasoned and NOT measured (simulated with realistic clumps in review round 2): a cold slow camera
+//     (2 s cadence from the first frame of a detector launch) needs ~9 slow intervals before the bound widens,
+//     so its first ~9 bursts each restart a pending confirmation or motion run. A candidate pending in the
+//     first ~18 s after the (re)launch therefore confirms at about LAUNCH + 24 s whatever its own open time
+//     (open at 4 s: 20 s later, 7 restarts; 10 s: 14 s, 4; 16 s: 8 s, 1; 20 s or later: 6 s, none), and
+//     sustained motion on such a camera alerts at ~24 s instead of 6 s. It still confirms eventually, and
+//     once the window has learned the camera it behaves as before.
+//     ★ THE MIRROR IMAGE (known limit, pinned by a test, reasoned not measured, an owner design call): after a
+//     slow phase (>= 9 recorded long deltas of S) the bound stays ~5 x S until 8 fast frames have arrived
+//     (~1.6 s at 5 fps), because 9 of the last 16 deltas must be long. A stall up to 5 x S in that window is
+//     NOT seen as a gap, and a quiet frame after it can confirm (13 x 5 s, 3 fast frames, a 20 s stall passes).
+//     Shortening it would re-open the starvation of a slow camera. It applies equally to the motion alert.
+//   - `factor` 5 mirrors observationClock.js GAP_FACTOR ("a rate change is not a run of gaps"; measured
+//     worst ratio there 3.95).
+// ⚠️ HONEST LIMITS: the floor, the factor, the 16-sample window and the 50 ms minimum are CHOSEN, NOT
+// MEASURED. No per-gap data exists: `[obs]` measures input-PTS jumps, not Node receipt gaps. The only
+// evidence is staging `[obs]` lines (428 of ~455 motion periods had no gap over 0.5 s; the bad periods had
+// 7-49 gaps per 15 minutes averaging 0.6-2.1 s, in one camera's wake window), which says the rule WILL fire
+// in production exactly when exits are pending. It makes a confirmation slower on a gappy camera, never
+// earlier PER CANDIDATE (per stored row it can differ: a delayed confirmation can escape the wall-clock
+// cooldown that would have suppressed the next one; 2 of 12,000 simulated gappy comparisons confirmed a
+// second exit earlier than before, and the new rule never confirmed MORE transitions). ⚠️ It CAN make one
+// impossible in practice: gaps that recur more often than once per ~6 s of received video mean a pending
+// candidate rarely gets a full quiet window, and NO restart cap exists (a design decision, filed as a
+// follow-up issue). For random gaps of 2-3 s arriving at lambda per second of received video the expected
+// wait is (e^(6 lambda) - 1) / lambda SECONDS OF RECEIVED VIDEO: about 7 s at 3.3 gaps a minute, 38 s at 30
+// a minute, 400 s at 60 a minute (wall time, which also holds the gaps: ~8 s, ~75-90 s, ~1100-1400 s). For
+// another install these are a hypothesis (KNOWN-ISSUES.md).
+//
+// ★ A stall that ffmpeg fills with repeats AS THEY HAPPEN (arrival continuous) is NOT caught here; that
+// needs the observation clock's proven clones (a separate follow-up). And this leans on #369: a clump of
+// repeats drains in well under 6 s only because the detector watchdog caps a connected stall at about 75 s
+// (60 s stale + a 15 s check, roughly 375 repeats).
+export const FRAME_GAP_FACTOR = 5;
+export const FRAME_DELTA_MIN_MS = 50;
+export const FRAME_GAP_WINDOW_N = 16;
+
+/**
+ * `observe(now)` returns `null` when the frame arrived in time (or is the first one seen), otherwise
+ * `{ gapMs: now - previous }`. A BACKWARD wall-clock step (`now < previous`) ALWAYS counts as a gap and
+ * `gapMs` is then negative: that is conservative (the caller restarts a confirmation once and never
+ * confirms early), and a caller can say "clock stepped back" from the sign. Throws if `floorMs` is not > 0,
+ * so an omitted value is a caller bug and not a silently disabled fix.
+ */
+export function createFrameGapDetector({
+  floorMs,
+  factor = FRAME_GAP_FACTOR,
+  minDeltaMs = FRAME_DELTA_MIN_MS,
+  windowN = FRAME_GAP_WINDOW_N,
+} = {}) {
+  if (!(floorMs > 0)) {
+    throw new Error('createFrameGapDetector requires floorMs > 0 (motionDetector.js passes its ACTIVE_GRACE_MS)');
+  }
+  let prev = null;
+  const deltas = []; // the last windowN inter-frame deltas above minDeltaMs (clump noise left out, gaps IN)
+  // How many recorded deltas must be held before they say anything about the camera's normal spacing: a strict
+  // majority of the window (9 of 16). See the comment above: fewer than this and one stall would be "typical".
+  const minHeld = Math.floor(windowN / 2) + 1;
+
+  function typicalIntervalMs() {
+    if (deltas.length < minHeld) return 0; // too few to trust: the floor alone governs
+    const sorted = deltas.slice().sort((a, b) => a - b);
+    // The minHeld-th LARGEST. A full window gives the lower median; a part-full one needs minHeld deltas at
+    // least this long, so fewer long deltas than that can never lift the bound.
+    return sorted[sorted.length - minHeld];
+  }
+
+  function observe(now) {
+    if (prev === null) { // the first frame has nothing before it to be late after
+      prev = now;
+      return null;
+    }
+    const delta = now - prev;
+    prev = now;
+    const bound = Math.max(floorMs, factor * typicalIntervalMs());
+    // Judged against the bound as it stood BEFORE this delta joins the window, then recorded either way.
+    const isGap = delta < 0 || delta > bound;
+    if (delta > minDeltaMs) {
+      deltas.push(delta);
+      if (deltas.length > windowN) deltas.shift();
+    }
+    return isGap ? { gapMs: delta } : null;
+  }
+
+  return { observe };
+}

@@ -888,7 +888,27 @@ no clock. Every threshold in it came from ONE house's runs (Stage 1: night, over
   FINALIZE_MS and a sound-leg hook that does not exist). Its second acceptance criterion ("wake-clip
   timestamps line up") is deferred to #412: the wake anchor stays at the minute's END so the 23-63 s ring
   holds it. KNOWN-ISSUES.md "The sleep timeline's minutes are the minutes the samples arrived in".
-- **#452** confirmation across an outage (read `restarts`/`gaps`), **#448** the wake watcher.
+- **#452** confirmation across an outage — **BUILT** on branch `fix/452-confirmation-across-outage` (T2, plan v2,
+  2026-10-03). Scope A only: a frame that arrives after a GAP (`createFrameGapDetector` in `bedTransitionRules.js`:
+  floor 1500 ms = `ACTIVE_GRACE_MS`, x5 the 9th-longest of the last 16 intervals once 9 are held, all chosen not measured) restarts a
+  motion alert's run and a pending exit/entry's 6 s of quiet (reset, not cancel, not suspend). Candidate opening and the
+  links still bridge a gap on purpose. It does NOT read the observation clock (so a stall ffmpeg fills with repeats as it
+  happens is not caught: scope B, a follow-up), and does not touch sound (`soundBaseline.js` already guards a gap longer
+  than its window). Build-time deviation from the plan: a delta that was itself a gap IS recorded in the window
+  (else a slow camera never learns its bound); code review round 1 then found that ONE stall right after a launch
+  widened the bound (frames 0 / 20 s / 50 s), so the window is read only once K = floor(windowN/2)+1 = 9 deltas are
+  held (a cold 2 s-cadence camera pays ~9 restarts per detector launch: a candidate pending in the first ~18 s
+  confirms at ~launch+24 s, sustained motion alerts at ~24 s instead of 6 s; round 2 corrected the earlier claim that
+  its alert was already broken). "Never impossible" was also wrong: gaps more
+  often than once per ~6 s of received video starve a pending candidate, and there is NO restart cap (expected wait
+  (e^(6L)-1)/L SECONDS OF RECEIVED VIDEO for Poisson gaps of 2-3 s: ~7 s at 3.3 gaps/min, ~38 s at 30, ~400 s at
+  60; wall time ~8 s, ~75-90 s, ~1100-1400 s). After a slow phase the bound also lingers until 8 fast frames have
+  arrived (pinned by a test, an owner design call). "Never earlier than before" holds per candidate, not per stored
+  row. Follow-ups to file: scope B (clone-gated
+  confirmation), #500 pending-candidate refusal, backward-step cooldown clamp, a restart cap / max wait for
+  chronic gaps. Evidence once on staging: count `confirmation restarted` /
+  `motion run restarted` lines per night. KNOWN-ISSUES.md "A motion alert or a bed exit/entry is not confirmed across a
+  gap in the video". **#448** the wake watcher is still open (the same "active, outage, active" shape).
 - **#508** sleep analysis stops counting zero-frame minutes as watched — built on branch
   `fix/508-zero-frame-minutes` (plan v2, 2026-09-30). Read-time only: `motionSeen(r) = motion_frames > 0`
   in all three `activity_samples` readers of `sleepAnalysis.js`; an unwatched minute is `null` (sound not

@@ -18,9 +18,22 @@ import assert from 'node:assert/strict';
 import { createBedTransitionTracker, OOB_CONFIRM_QUIET_MS, OOB_COOLDOWN_MS, IB_CONFIRM_QUIET_MS, IB_COOLDOWN_MS, CO_ACTIVE_LOG_COOLDOWN_MS } from '../src/lib/bedTransitionTracker.js';
 
 const ACTIVE_GRACE_MS = 1500; // mirrors motionDetector.js's own constant, which the tracker never defines itself
+// #452: mirrors motionDetector.js's FRAME_GAP_MS (= ACTIVE_GRACE_MS). Passed as its own option so a test can tell
+// the two apart (see "the tracker's gap floor is maxFrameGapMs, not activeGraceMs" below).
+const MAX_FRAME_GAP_MS = 1500;
 
 function makeTracker(overrides = {}) {
-  return createBedTransitionTracker({ activeGraceMs: ACTIVE_GRACE_MS, ...overrides });
+  return createBedTransitionTracker({ activeGraceMs: ACTIVE_GRACE_MS, maxFrameGapMs: MAX_FRAME_GAP_MS, ...overrides });
+}
+
+// #452: frames from `from` to `to` INCLUSIVE, `step` ms apart (200 = the real 5 fps), each carrying `flags`.
+// A pending exit/entry now confirms only after a quiet window of RECEIVED frames, so the confirm tests below feed
+// every frame the window is made of; before #452 they confirmed on one sparse frame 5.8 s after the last, which is
+// exactly the defect (a single quiet frame after a hole "proved" six seconds of quiet).
+function dense(from, to, flags = {}, step = 200) {
+  const out = [];
+  for (let t = from; t <= to; t += step) out.push({ t, cribActive: false, outActive: false, ...flags });
+  return out;
 }
 
 // Drives a sequence of frames through the tracker, threading `believedOccupied` from call to call the
@@ -138,10 +151,11 @@ test('OOB confirm: bed stays quiet for the whole confirm window, and the evidenc
     { t: 0, cribActive: true, outActive: false, fraction: 0.15 },
     { t: 200, cribActive: false, outActive: true, outFraction: 0.06 }, // opens; oobEvidence: peak=0.06 frames=1
     { t: 400, cribActive: false, outActive: true, outFraction: 0.09 }, // still pending; peak=0.09 frames=2
-    { t: 200 + OOB_CONFIRM_QUIET_MS, cribActive: false, outActive: false }, // quiet, exactly at the boundary
+    ...dense(600, 200 + OOB_CONFIRM_QUIET_MS), // quiet 5 fps frames up to exactly the boundary (#452: every frame of the window)
   ], true /* believed in bed going in */);
   const confirmed = events.find((e) => e.type === 'oob-confirmed');
   assert.ok(confirmed, 'expected an oob-confirmed event');
+  assert.equal(confirmed.t, BASE_T + 200 + OOB_CONFIRM_QUIET_MS, 'on the boundary frame, not before');
   // For out_of_bed, peak and outPeak are the SAME quantity by design (db.js: "peak for out_of_bed IS
   // the outside peak") — pinned separately anyway so a future change to that equivalence goes red here.
   assert.equal(confirmed.peak, 0.09);
@@ -156,7 +170,7 @@ test('OOB impossible-flag: confirms anyway (log-only), per item 1\'s own rejecte
   const { events, believedOccupied } = runFrames(tracker, [
     { t: 0, cribActive: true, outActive: false, fraction: 0.15 },
     { t: 200, cribActive: false, outActive: true, outFraction: 0.06 },
-    { t: 200 + OOB_CONFIRM_QUIET_MS, cribActive: false, outActive: false },
+    ...dense(400, 200 + OOB_CONFIRM_QUIET_MS),
   ], false /* already believed OUT of bed — an exit now is "impossible" */);
   assert.ok(events.some((e) => e.type === 'oob-impossible-flag'));
   assert.ok(events.some((e) => e.type === 'oob-confirmed'), 'must still confirm — log-only means it flags, never suppresses');
@@ -168,11 +182,11 @@ test('OOB cooldown: a suppressed confirm still resets the pending state (a third
   const { events } = runFrames(tracker, [
     { t: 0, cribActive: true, outActive: false, fraction: 0.15 },
     { t: 200, cribActive: false, outActive: true, outFraction: 0.06 },
-    { t: 200 + OOB_CONFIRM_QUIET_MS, cribActive: false, outActive: false }, // cycle 1: confirms
+    ...dense(400, 200 + OOB_CONFIRM_QUIET_MS), // cycle 1: confirms on its last frame
     // cycle 2, still inside OOB_COOLDOWN_MS (120s) of cycle 1 — its confirm is SUPPRESSED
     { t: 10000, cribActive: true, outActive: false, fraction: 0.15 },
     { t: 10200, cribActive: false, outActive: true, outFraction: 0.06 },
-    { t: 10200 + OOB_CONFIRM_QUIET_MS, cribActive: false, outActive: false },
+    ...dense(10400, 10200 + OOB_CONFIRM_QUIET_MS),
     // cycle 3, right after cycle 2's SUPPRESSED confirm — this can only open at all if the suppressed
     // confirm still reset oobPendingAt/oobEvidence; if the reset were moved inside the cooldown-gated
     // branch, oobPendingAt would stay set forever and this candidate would never open.
@@ -282,10 +296,11 @@ test('IB confirm: outside stays quiet for the whole confirm window, and peak/out
     { t: 0, cribActive: false, outActive: true, outFraction: 0.2 }, // lead-up sample: outside peak 0.2
     { t: 200, cribActive: true, outActive: false, fraction: 0.06 }, // opens; ibPeakCrib=0.06
     { t: 400, cribActive: true, outActive: false, fraction: 0.09 }, // still pending; ibPeakCrib rises to 0.09
-    { t: 200 + IB_CONFIRM_QUIET_MS, cribActive: true, outActive: false, fraction: 0.02 }, // confirm boundary
+    ...dense(600, 200 + IB_CONFIRM_QUIET_MS, { cribActive: true, fraction: 0.02 }), // outside quiet 5 fps frames to the boundary (#452)
   ], false);
   const confirmed = events.find((e) => e.type === 'ib-confirmed');
   assert.ok(confirmed, 'expected an ib-confirmed event');
+  assert.equal(confirmed.t, BASE_T + 200 + IB_CONFIRM_QUIET_MS, 'on the boundary frame, not before');
   assert.equal(confirmed.peak, 0.09, 'bed-channel peak — the highest fraction seen while pending');
   assert.equal(confirmed.outPeak, 0.2, 'outside-channel LEAD-UP peak, frozen at open time — NOT the bed value');
   assert.equal(confirmed.outFrames, 1, 'exactly one active outside sample in the frozen lead-up window');
@@ -297,10 +312,10 @@ test('IB cooldown: a second confirm inside the cooldown window is suppressed', (
   const { events } = runFrames(tracker, [
     { t: 0, cribActive: false, outActive: true, outFraction: 0.2 },
     { t: 200, cribActive: true, outActive: false, fraction: 0.06 },
-    { t: 200 + IB_CONFIRM_QUIET_MS, cribActive: true, outActive: false, fraction: 0.02 },
+    ...dense(400, 200 + IB_CONFIRM_QUIET_MS, { cribActive: true, fraction: 0.02 }),
     { t: 10000, cribActive: false, outActive: true, outFraction: 0.2 },
     { t: 10200, cribActive: true, outActive: false, fraction: 0.06 },
-    { t: 10200 + IB_CONFIRM_QUIET_MS, cribActive: true, outActive: false, fraction: 0.02 },
+    ...dense(10400, 10200 + IB_CONFIRM_QUIET_MS, { cribActive: true, fraction: 0.02 }),
   ]);
   assert.equal(events.filter((e) => e.type === 'ib-confirmed').length, 1);
 });
@@ -408,7 +423,7 @@ test('config: oobConfirmQuietMs and ibConfirmQuietMs are not interchangeable', (
   const { events } = runFrames(tracker, [
     { t: 0, cribActive: true, outActive: false, fraction: 0.15 },
     { t: 200, cribActive: false, outActive: true, outFraction: 0.06 }, // OOB opens
-    { t: 200 + 3000, cribActive: false, outActive: false }, // OOB's OWN (shorter) window has elapsed
+    ...dense(400, 200 + 3000), // OOB's OWN (shorter) window has elapsed (#452: as a run of received frames)
   ]);
   assert.equal(events.filter((e) => e.type === 'oob-confirmed').length, 1, 'OOB must confirm on its own 3000ms window, not IB\'s 9000ms one');
 });
@@ -418,9 +433,19 @@ test('config: an IB candidate does NOT confirm early on OOB\'s (shorter) window'
   const { events } = runFrames(tracker, [
     { t: 0, cribActive: false, outActive: true, outFraction: 0.2 },
     { t: 200, cribActive: true, outActive: false, fraction: 0.06 }, // IB opens
-    { t: 200 + 3000, cribActive: true, outActive: false, fraction: 0.02 }, // only OOB's window has elapsed, not IB's
+    // #452: dense frames, so this is a real 3 s of received quiet. (Before #452 a single sparse frame at 3200
+    // stood in for it; that frame would now be a GAP and restart the window, which would make the assertion
+    // below pass for the wrong reason, so the stream is made continuous to keep it testing the window itself.)
+    ...dense(400, 200 + 3000, { cribActive: true, fraction: 0.02 }), // only OOB's window has elapsed, not IB's
   ]);
   assert.equal(events.filter((e) => e.type === 'ib-confirmed').length, 0, 'IB must wait for its OWN 9000ms window');
+  // ...and it does confirm on that window, so the assertion above is not vacuous.
+  const later = runFrames(makeTracker({ oobConfirmQuietMs: 3000, ibConfirmQuietMs: 9000 }), [
+    { t: 0, cribActive: false, outActive: true, outFraction: 0.2 },
+    { t: 200, cribActive: true, outActive: false, fraction: 0.06 },
+    ...dense(400, 200 + 9000, { cribActive: true, fraction: 0.02 }),
+  ]);
+  assert.equal(later.events.find((e) => e.type === 'ib-confirmed')?.t, BASE_T + 200 + 9000);
 });
 
 // --- Config validation -------------------------------------------------------------------------
@@ -428,4 +453,294 @@ test('config: an IB candidate does NOT confirm early on OOB\'s (shorter) window'
 test('createBedTransitionTracker requires activeGraceMs', () => {
   assert.throws(() => createBedTransitionTracker({}), /activeGraceMs/);
   assert.throws(() => createBedTransitionTracker(), /activeGraceMs/);
+});
+
+test('#452: createBedTransitionTracker requires maxFrameGapMs (an omitted value is a caller bug, not a disabled fix)', () => {
+  assert.throws(() => createBedTransitionTracker({ activeGraceMs: ACTIVE_GRACE_MS }), /maxFrameGapMs/);
+  assert.throws(() => createBedTransitionTracker({ activeGraceMs: ACTIVE_GRACE_MS, maxFrameGapMs: 0 }), /maxFrameGapMs/);
+});
+
+// --- #452: a pending exit/entry does not confirm across a sampling outage ---------------------------------------
+//
+// Acceptance criterion (b): a single quiet frame right after a long gap cannot by itself prove several seconds of
+// observed quiet. The rule under test: a frame that arrives after a gap (createFrameGapDetector, bedTransitionRules.js)
+// RESTARTS a pending candidate's quiet clock ("reset", not suspend, not cancel), and a candidate confirms only after
+// the full confirm window of frames RECEIVED since. Candidate OPENING and the links are deliberately unchanged.
+// Everything runs once per side, because the two sides are separate branches with separate state (oobQuietFrom /
+// ibQuietFrom) and a fix to one is invisible from the other.
+const quietFrame = (t) => ({ t, cribActive: false, outActive: false });
+const ofType = (events, type) => events.filter((e) => e.type === type);
+const SIDES = [
+  {
+    name: 'OOB', pre: 'oob', ms: OOB_CONFIRM_QUIET_MS, option: 'oobConfirmQuietMs',
+    // the bed moves (t 0), then the outside bursts (t 200): the candidate opens at 200
+    open: [{ t: 0, cribActive: true, outActive: false, fraction: 0.15 }, { t: 200, cribActive: false, outActive: true, outFraction: 0.06 }],
+    cancel: (t) => ({ t, cribActive: true, outActive: false, fraction: 0.1 }), // the bed moves again: OOB's cancel
+    reopen: (t) => ({ t, cribActive: false, outActive: true, outFraction: 0.06 }),
+    reopenAt: 31_600, // 10.2 s after the cancel: OOB's SLOW link (60 s) at 6%
+  },
+  {
+    name: 'IB', pre: 'ib', ms: IB_CONFIRM_QUIET_MS, option: 'ibConfirmQuietMs',
+    // the outside moves (t 0), then the bed (t 200): the candidate opens at 200
+    open: [{ t: 0, cribActive: false, outActive: true, outFraction: 0.2 }, { t: 200, cribActive: true, outActive: false, fraction: 0.06 }],
+    cancel: (t) => ({ t, cribActive: false, outActive: true, outFraction: 0.1 }), // the outside moves again: IB's cancel
+    reopen: (t) => ({ t, cribActive: true, outActive: false, fraction: 0.06 }),
+    reopenAt: 27_200, // 5.8 s after the cancel: inside IB's only (8 s) link
+  },
+];
+
+for (const side of SIDES) {
+  const type = (name) => `${side.pre}-${name}`;
+
+  test(`#452 ${side.name} (b): ONE quiet frame after a 20 s gap cannot confirm a pending candidate, and the restart is reported with its length`, () => {
+    const { events } = runFrames(makeTracker(), [...side.open, ...dense(400, 1200), quietFrame(21_200)]);
+    assert.equal(ofType(events, type('confirmed')).length, 0, '21 s since it opened, but only one frame received after the hole');
+    const restarts = ofType(events, type('confirm-restarted'));
+    assert.equal(restarts.length, 1);
+    assert.equal(restarts[0].gapMs, 20_000);
+    assert.equal(restarts[0].t, BASE_T + 21_200);
+  });
+
+  test(`#452 ${side.name}: the restart needs the FULL window of frames received AFTER the gap (reset, not cancel: it then confirms)`, () => {
+    const { events } = runFrames(makeTracker(), [...side.open, ...dense(400, 1200), ...dense(21_200, 21_200 + side.ms)]);
+    // Exactly one confirm, on the frame `ms` after the gap frame: not at +ms-200 (a suspend or a gap that credits
+    // itself), and not never (a restart that cancels the candidate, which would lose a real exit).
+    assert.deepEqual(ofType(events, type('confirmed')).map((e) => e.t), [BASE_T + 21_200 + side.ms]);
+  });
+
+  test(`#452 ${side.name}: a clump of frames sharing the gap frame's receipt time credits nothing`, () => {
+    // After an outage ffmpeg releases a clump of frames in ONE read, all with the same receipt time. 50 of them
+    // are still only the gap frame's instant: the window starts there and needs `ms` of RECEIVED time.
+    const clump = Array.from({ length: 50 }, () => quietFrame(21_200));
+    const { events } = runFrames(makeTracker(), [...side.open, ...dense(400, 1200), ...clump, ...dense(21_400, 21_200 + side.ms)]);
+    assert.equal(ofType(events, type('confirm-restarted')).length, 1, 'only the first frame of the clump is late; the rest are the same instant');
+    assert.deepEqual(ofType(events, type('confirmed')).map((e) => e.t), [BASE_T + 21_200 + side.ms]);
+  });
+
+  test(`#452 ${side.name}: NOT suspend. Almost a full window of quiet, a hole, one quiet frame: no confirm`, () => {
+    // 5.8 s of quiet banked, then a 60 s hole. A suspend (keep the 5.8 s, resume after) would confirm on the next
+    // frame; a reset credits none of it.
+    const { events } = runFrames(makeTracker(), [...side.open, ...dense(400, side.ms), quietFrame(66_000)]);
+    assert.equal(ofType(events, type('confirmed')).length, 0);
+    assert.equal(ofType(events, type('confirm-restarted')).length, 1);
+  });
+
+  test(`#452 ${side.name}: the gap floor is exact. A 1500 ms spacing is continuous (confirms on time), 1501 ms is a gap`, () => {
+    const onTime = runFrames(makeTracker(), [...side.open, quietFrame(200 + 1500), quietFrame(1800), ...dense(2000, 200 + side.ms)]);
+    assert.equal(ofType(onTime.events, type('confirm-restarted')).length, 0, '1500 ms: not a gap');
+    assert.deepEqual(ofType(onTime.events, type('confirmed')).map((e) => e.t), [BASE_T + 200 + side.ms], 'confirmed on its own window');
+    const late = runFrames(makeTracker(), [...side.open, quietFrame(200 + 1501)]);
+    assert.deepEqual(ofType(late.events, type('confirm-restarted')).map((e) => e.gapMs), [1501], '1501 ms: a gap');
+  });
+
+  test(`#452 ${side.name}: activity still cancels on a frame that arrives after a gap (and pendingForMs stays wall time)`, () => {
+    // The gap frame ITSELF is the active one: a cancel needs no continuity, so it must not become a restart.
+    const onGap = runFrames(makeTracker(), [...side.open, ...dense(400, 1200), side.cancel(21_200)]);
+    assert.deepEqual(onGap.events.filter((e) => e.type.startsWith(`${side.pre}-`)).map((e) => e.type), [type('candidate-open'), type('cancelled')]);
+    assert.equal(ofType(onGap.events, type('cancelled'))[0].pendingForMs, 21_000, 'wall time since it opened');
+    // A restart first, a cancel after it: pendingForMs is still counted from the OPEN, not from the restart.
+    const after = runFrames(makeTracker(), [...side.open, ...dense(400, 1200), quietFrame(21_200), side.cancel(21_400)]);
+    assert.equal(ofType(after.events, type('confirm-restarted')).length, 1);
+    assert.equal(ofType(after.events, type('cancelled'))[0].pendingForMs, 21_400 - 200);
+  });
+
+  test(`#452 ${side.name}: a restart does not leak into the NEXT candidate, which confirms at exactly its own open + window`, () => {
+    // Candidate 1 restarts at 21200 and is cancelled at 21400; the stream then idles (quiet, continuous) until
+    // candidate 2 opens. Candidate 2 has to confirm `ms` after ITS open: not early (a stale quiet clock from
+    // candidate 1) and not late (a gap detector that only sees frames while something is pending would call the
+    // idle stretch since the last pending frame a gap and restart candidate 2 on its first frame).
+    const { events } = runFrames(makeTracker(), [
+      ...side.open, ...dense(400, 1200), quietFrame(21_200), side.cancel(21_400),
+      ...dense(21_600, side.reopenAt - 200),
+      side.reopen(side.reopenAt),
+      ...dense(side.reopenAt + 200, side.reopenAt + side.ms),
+    ]);
+    assert.equal(ofType(events, type('candidate-open')).length, 2);
+    assert.equal(ofType(events, type('confirm-restarted')).length, 1, 'only candidate 1 restarted');
+    assert.deepEqual(ofType(events, type('confirmed')).map((e) => e.t), [BASE_T + side.reopenAt + side.ms]);
+  });
+
+  test(`#452 ${side.name}: a backward wall-clock step while pending is a gap (negative gapMs): it restarts once, never confirms early`, () => {
+    const { events } = runFrames(makeTracker(), [...side.open, ...dense(400, 1200), quietFrame(800), ...dense(1000, 800 + side.ms)]);
+    assert.deepEqual(ofType(events, type('confirm-restarted')).map((e) => e.gapMs), [-400]);
+    assert.deepEqual(ofType(events, type('confirmed')).map((e) => e.t), [BASE_T + 800 + side.ms], 'a window counted from the stepped-back time');
+  });
+
+  test(`#452 ${side.name}: candidate OPENING across a gap is unchanged (the gap frame opens it, and it confirms at exactly open + window)`, () => {
+    // Deliberately NOT changed: a real exit/entry during an outage is the case worth keeping. The bed (or outside)
+    // moves at 0, the stream is quiet and continuous to 1000, then a 2 s hole (a gap), and the OTHER channel moves on
+    // the first frame back. Also kills a gap detector that is only updated while something is pending.
+    const gapFrame = { ...side.open[1], t: 3000 };
+    const { events } = runFrames(makeTracker(), [side.open[0], ...dense(200, 1000), gapFrame, ...dense(3200, 3000 + side.ms)]);
+    assert.deepEqual(ofType(events, type('candidate-open')).map((e) => e.t), [BASE_T + 3000]);
+    assert.equal(ofType(events, type('confirm-restarted')).length, 0, 'the frame that OPENED it is not also a restart');
+    assert.deepEqual(ofType(events, type('confirmed')).map((e) => e.t), [BASE_T + 3000 + side.ms]);
+  });
+
+  test(`#452 ${side.name}: a gap while NOTHING is pending produces no event at all`, () => {
+    const { events } = runFrames(makeTracker(), [quietFrame(0), quietFrame(200), quietFrame(60_000), quietFrame(60_200)]);
+    assert.deepEqual(events, [], 'a healthy or idle stream gains no noise');
+  });
+
+  test(`#452 ${side.name}: steady-state is unchanged: continuous and jittery (under 1.5 s) streams confirm at the first frame at or after open + window, with no restart`, () => {
+    // 200 ms steps; and a jittery cadence whose every delta is at or under the floor.
+    for (const deltas of [[200], [200, 120, 900, 1400, 40, 200, 700]]) {
+      const frames = [...side.open];
+      let t = 200;
+      let expected = null;
+      for (let i = 0; expected === null; i += 1) {
+        t += deltas[i % deltas.length];
+        frames.push(quietFrame(t));
+        if (t >= 200 + side.ms) expected = t;
+      }
+      const { events } = runFrames(makeTracker(), frames);
+      assert.equal(ofType(events, type('confirm-restarted')).length, 0, `deltas ${deltas}`);
+      assert.deepEqual(ofType(events, type('confirmed')).map((e) => e.t), [BASE_T + expected], `deltas ${deltas}`);
+    }
+  });
+
+  test(`#452 ${side.name}: the tracker's gap floor is maxFrameGapMs, NOT activeGraceMs`, () => {
+    // The two answer different questions and only happen to be equal today. A 3000 ms hole is a gap on a floor of
+    // 1500 but not on 5000; a 1200 ms one is a gap on a floor of 1000 but not on the default 1500.
+    const wide = runFrames(makeTracker({ activeGraceMs: 1500, maxFrameGapMs: 5000 }), [...side.open, ...dense(400, 1000), quietFrame(4000), ...dense(4200, 200 + side.ms)]);
+    assert.equal(ofType(wide.events, type('confirm-restarted')).length, 0, 'under maxFrameGapMs 5000 a 3 s hole is continuous');
+    assert.deepEqual(ofType(wide.events, type('confirmed')).map((e) => e.t), [BASE_T + 200 + side.ms]);
+    const narrow = runFrames(makeTracker({ activeGraceMs: 1500, maxFrameGapMs: 1000 }), [...side.open, ...dense(400, 1000), quietFrame(2200)]);
+    assert.deepEqual(ofType(narrow.events, type('confirm-restarted')).map((e) => e.gapMs), [1200], 'over maxFrameGapMs 1000 a 1.2 s hole is a gap');
+  });
+
+  test(`#452 ${side.name}: a slow camera (2 s bursts) still confirms, after ~9 warm-up restarts: the bound adapts, a real stall in it is still a gap`, () => {
+    // Bursts of 5 frames sharing one receipt time, one burst every 2 s (0.5 fps). Against the 1500 ms floor alone
+    // EVERY burst would be a gap and nothing could ever confirm. The detector reads nothing until its window holds 9
+    // deltas (round-1 fix: one stall right after a launch must not be "typical"), so the first 9 intervals are judged
+    // against the floor and each RESTARTS the pending confirmation; after that the bound is 5 x 2 s.
+    // The candidate opens at 200 (the open frames contribute one 200 ms delta to the window), then bursts arrive at
+    // 2200, 4200, ... Burst j (1-based) is judged with j deltas held. Bursts 1 to 8 are gaps (fewer than 9 held);
+    // burst 9 is a gap too: 9 are held ([200, 2000 x 8]) but only 8 are long, so the 9th largest is the 200 ms
+    // delta and the bound is still the floor; from burst 10 ([200, 2000 x 9]) the 9th largest is 2000: no gap.
+    // So 9 restarts, the last at 18200, and an exit confirms at 18200 + 6000 = 24200 (this FIXTURE's own number: it
+    // opens at 200 ms; on a real camera the confirm lands near launch + 24 s whatever the open time, KNOWN-ISSUES.md).
+    // The plain median of what the window held used to cost 2 restarts, which is exactly the defect, see the next test.
+    const burstsTo = (end) => {
+      const out = [];
+      for (let t = 2200; t <= end; t += 2000) for (let i = 0; i < 5; i += 1) out.push(quietFrame(t));
+      return out;
+    };
+    const warmup = Array.from({ length: 9 }, (_, i) => BASE_T + 2200 + i * 2000); // 2200, 4200, ... 18200
+    const ok = runFrames(makeTracker(), [...side.open, ...burstsTo(40_200)]);
+    assert.deepEqual(ofType(ok.events, type('confirm-restarted')).map((e) => e.t), warmup, 'only the 9 learning bursts restart');
+    // The last restart was at 18200, so it confirms on the first burst at or after 18200 + window: it DOES confirm.
+    const firstBurstAfter = 18_200 + Math.ceil(side.ms / 2000) * 2000;
+    assert.deepEqual(ofType(ok.events, type('confirmed')).map((e) => e.t), [BASE_T + firstBurstAfter]);
+    // A 6 s hole in that cadence is not a gap (inside the learnt 10 s bound); a 20 s stall is. Both after burst 10.
+    const hole = runFrames(makeTracker(), [...side.open, ...burstsTo(20_200), quietFrame(26_200)]);
+    assert.equal(ofType(hole.events, type('confirm-restarted')).length, 9, 'no new restart: only the nine learning bursts');
+    const stall = runFrames(makeTracker(), [...side.open, ...burstsTo(20_200), quietFrame(40_200)]);
+    assert.equal(ofType(stall.events, type('confirm-restarted')).length, 10, 'a 20 s stall is a gap even at 0.5 fps');
+    assert.equal(ofType(stall.events, type('confirmed')).length, 0, 'and one frame after it still confirms nothing');
+  });
+
+  // ★ REGRESSION (#452 code review round 1, verified by running): the first stall after a launch used to BE the median
+  // and widen the bound for the next frame, so one quiet frame after a 30 s outage confirmed a candidate. The
+  // candidate opens on a frame that follows a wide spacing (OOB's 60 s slow link, IB's 8 s link), the stream then has
+  // ONE long delta in its window, and a 30 s hole follows.
+  test(`#452 ${side.name}: a lone stall after a launch does not widen the bound, so ONE quiet frame after a 30 s outage cannot confirm`, () => {
+    const openAt = side.name === 'OOB' ? 20_000 : 7_000; // the delta into the open frame is the window's only entry
+    const frames = [{ ...side.open[0], t: 0 }, { ...side.open[1], t: openAt }, quietFrame(openAt + 30_000)];
+    const { events } = runFrames(makeTracker(), frames);
+    assert.deepEqual(ofType(events, type('candidate-open')).map((e) => e.t), [BASE_T + openAt], 'it opened across the first wide spacing');
+    assert.equal(ofType(events, type('confirmed')).length, 0, '30 s since it opened, one frame received after the hole');
+    assert.deepEqual(ofType(events, type('confirm-restarted')).map((e) => e.gapMs), [30_000], 'a restart, judged against the floor');
+  });
+
+  // Kills a QuietFrom offset of 1 to 199 ms at the restart AND at the open (a confirm test of `now - quietFrom >= ms`
+  // with `quietFrom = now - d` confirms d ms early; the other tests feed 200 ms steps, which hide any d under 200
+  // because the first frame at or after the earlier time is the same one). Frames at +5800, +5801, +5900, +5999 are
+  // all received and must credit nothing; the frame at exactly +ms confirms.
+  test(`#452 ${side.name}: the quiet clock credits EXACTLY 0 ms at the open and at a restart (no confirm at +${side.ms - 1}, confirm at +${side.ms})`, () => {
+    const fine = (g) => [
+      ...dense(g + 200, g + side.ms - 200),
+      quietFrame(g + side.ms - 199), quietFrame(g + side.ms - 100), quietFrame(g + side.ms - 1),
+    ];
+    // (1) at the open: the candidate opens at 200, then a continuous stream with the probe frames.
+    const atOpen = runFrames(makeTracker(), [...side.open, ...fine(200), quietFrame(200 + side.ms)]);
+    assert.equal(ofType(atOpen.events, type('confirm-restarted')).length, 0, 'continuous: no restart');
+    assert.deepEqual(ofType(atOpen.events, type('confirmed')).map((e) => e.t), [BASE_T + 200 + side.ms], 'exactly open + window');
+    // (2) at a restart: a 20 s hole, the gap frame at 21200, then the same probes from there.
+    const atRestart = runFrames(makeTracker(), [...side.open, ...dense(400, 1200), quietFrame(21_200), ...fine(21_200), quietFrame(21_200 + side.ms)]);
+    assert.equal(ofType(atRestart.events, type('confirm-restarted')).length, 1, 'only the hole restarts it');
+    assert.deepEqual(ofType(atRestart.events, type('confirmed')).map((e) => e.t), [BASE_T + 21_200 + side.ms], 'exactly gap frame + window');
+  });
+}
+
+// --- #452 round 2: a gap frame that is ACTIVE on the other channel, and the detector's own parameters, as the tracker builds it ---
+//
+// The gap branch sits after the cancel check, so it must also handle a gap frame that is active on the channel that does NOT
+// cancel (the outside for a pending exit, the bed for a pending entry: the normal state while an entry is pending). Before
+// this round only quiet gap frames were tested, so a gap branch conditional on "the other channel is quiet" survived.
+test('#452 OOB: a gap frame that is ACTIVE OUTSIDE restarts the pending exit (it neither confirms nor cancels it)', () => {
+  const outFrame = (t) => ({ t, cribActive: false, outActive: true, outFraction: 0.06 });
+  const { events } = runFrames(makeTracker(), [...SIDES[0].open, ...dense(400, 1200), outFrame(21_200), ...dense(21_400, 21_200 + OOB_CONFIRM_QUIET_MS)]);
+  assert.deepEqual(ofType(events, 'oob-confirm-restarted').map((e) => [e.t, e.gapMs]), [[BASE_T + 21_200, 20_000]]);
+  assert.equal(ofType(events, 'oob-cancelled').length, 0, 'outside activity does not cancel an exit');
+  assert.deepEqual(ofType(events, 'oob-confirmed').map((e) => e.t), [BASE_T + 21_200 + OOB_CONFIRM_QUIET_MS], 'a full window of received quiet after the gap frame');
+});
+
+test('#452 IB: a gap frame with the BED ACTIVE restarts the pending entry (it neither confirms nor cancels it)', () => {
+  const bed = { cribActive: true, fraction: 0.02 };
+  const { events } = runFrames(makeTracker(), [
+    ...SIDES[1].open, ...dense(400, 1200, bed), { t: 21_200, cribActive: true, outActive: false, fraction: 0.02 },
+    ...dense(21_400, 21_200 + IB_CONFIRM_QUIET_MS, bed),
+  ]);
+  assert.deepEqual(ofType(events, 'ib-confirm-restarted').map((e) => [e.t, e.gapMs]), [[BASE_T + 21_200, 20_000]]);
+  assert.equal(ofType(events, 'ib-cancelled').length, 0, 'bed activity does not cancel an entry');
+  assert.deepEqual(ofType(events, 'ib-confirmed').map((e) => e.t), [BASE_T + 21_200 + IB_CONFIRM_QUIET_MS]);
+});
+
+// The detector the tracker BUILDS uses the default factor (5), minDeltaMs (50) and windowN (16). The rules tests pin those
+// defaults on the helper itself; these pin that the tracker does not override them. A 2 s cadence camera, 10 deltas held (bound
+// 5 x 2 s = 10 s), a candidate that opens late (a bed frame, then the outside 2 s after it), then a hole.
+const slowQuiet = (n) => Array.from({ length: n }, (_, i) => quietFrame(i * 2000));
+const lateExit = (hole) => [
+  ...slowQuiet(11), // 0 ... 20000
+  { t: 22_000, cribActive: true, outActive: false, fraction: 0.15 },
+  { t: 24_000, cribActive: false, outActive: true, outFraction: 0.06 }, // opens (fast link, 2000 ms)
+  quietFrame(24_000 + hole),
+];
+
+test('#452 tracker: its detector has factor 5, not 4 (a 9.5 s hole in a 2 s cadence is continuous: the pending exit confirms)', () => {
+  const { events } = runFrames(makeTracker(), lateExit(9500));
+  assert.equal(ofType(events, 'oob-confirm-restarted').length, 0, 'inside 5 x 2 s: not a gap');
+  assert.deepEqual(ofType(events, 'oob-confirmed').map((e) => e.t), [BASE_T + 24_000 + 9500]);
+});
+
+test('#452 tracker: its detector has factor 5, not 6 (a 10.001 s hole in a 2 s cadence is a gap: it restarts, it does not confirm)', () => {
+  const { events } = runFrames(makeTracker(), lateExit(10_001));
+  assert.deepEqual(ofType(events, 'oob-confirm-restarted').map((e) => e.gapMs), [10_001]);
+  assert.equal(ofType(events, 'oob-confirmed').length, 0);
+});
+
+test('#452 tracker: its detector ignores deltas of 1-5 ms (frames drained a few ms apart are one arrival, not intervals)', () => {
+  // Bursts of 5 frames 1 ms apart, one burst every 2 s. Recorded (minDeltaMs 0), the 1 ms deltas would be 4 of every 5 in the
+  // window, drag the 9th largest to 1 ms and make the 6 s hole below a gap. Ignored, the window holds only the ~2 s deltas.
+  const frames = [];
+  for (let b = 0; b <= 11; b += 1) for (let i = 0; i < 5; i += 1) frames.push(quietFrame(b * 2000 + i));
+  frames.push({ t: 24_000, cribActive: true, outActive: false, fraction: 0.15 }, { t: 24_001, cribActive: false, outActive: true, outFraction: 0.06 });
+  for (let t = 24_002; t <= 24_004; t += 1) frames.push(quietFrame(t));
+  frames.push(quietFrame(24_004 + 6000)); // 6003 ms after the exit opened
+  const { events } = runFrames(makeTracker(), frames);
+  assert.equal(ofType(events, 'oob-confirm-restarted').length, 0, 'a 6 s hole in a 2 s cadence is not a gap');
+  assert.deepEqual(ofType(events, 'oob-confirmed').map((e) => e.t), [BASE_T + 24_004 + 6000]);
+});
+
+test('#452 tracker: its detector window is 16 deltas, not 17 (9 long + 8 short: the oldest long delta has been pushed out)', () => {
+  // 9 deltas of 5 s, then 8 of 200 ms (the bed frame, the outside frame that opens the exit, and 6 quiet ones), then a 20 s hole.
+  // Window 16: 8 long held, the floor governs, the hole is a gap. A window of 17 holds all 9 long ones: a 25 s bound, no gap.
+  const frames = [...Array.from({ length: 10 }, (_, i) => quietFrame(i * 5000))]; // 0 ... 45000
+  frames.push({ t: 45_200, cribActive: true, outActive: false, fraction: 0.15 }, { t: 45_400, cribActive: false, outActive: true, outFraction: 0.06 });
+  for (let t = 45_600; t <= 46_600; t += 200) frames.push(quietFrame(t));
+  frames.push(quietFrame(46_600 + 20_000));
+  const { events } = runFrames(makeTracker(), frames);
+  assert.deepEqual(ofType(events, 'oob-confirm-restarted').map((e) => e.gapMs), [20_000]);
+  assert.equal(ofType(events, 'oob-confirmed').length, 0);
 });
