@@ -425,7 +425,7 @@ export function createAudioWatchdog(overrides = {}) {
 // camera reboot, not by anything here. The same camera's SOUND detector kept working, camera_events recorded
 // nothing, and PROD's instance reading the same physical camera had no such run in 30 days, so the fault is
 // inside our pipeline, not the camera. Which layer (restream or detector) and which path (sub, or main
-// after the #500 sticky fallback) is UNKNOWN: the container logs of that night were destroyed by a redeploy.
+// after the fallback that #500 has since made temporary) is UNKNOWN: the container logs of that night were destroyed by a redeploy.
 // Nothing above could see it. The camera watchdog reads the PATH (ready, and it was), the audio watchdog
 // reads AUDIO on the main path (flowing, and it was), and reconcile skips any detector that has an entry
 // (an alive ffmpeg keeps its entry). A night with no motion data cost a real wake.
@@ -725,7 +725,8 @@ export function createDetectorWatchdog(overrides = {}) {
       }
     } else if (attempts >= 1 && deps.restartRequests) {
       // L2: this leg has already been restarted and is dark again. `main` when the detector reads the main path
-      // (a camera with no sub, or the #500 sticky fallback): that costs the live view a brief interruption.
+      // (a camera with no sub, or a fallback while the sub is down, which #500 now ends by itself once the sub is
+      // up and the room quiet): that costs the live view a brief interruption.
       requestKind = publisherOf(cam, path);
     }
     if (!kill && !requestKind) return;
