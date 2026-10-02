@@ -143,7 +143,7 @@ export const SUB_STABLE_CHECKS = 3;
 // frame that arrives after a gap restarts that 6 s of quiet (createFrameGapDetector), so on a camera whose main
 // stream keeps stalling an exit can take longer than the 24 s margin above, and a return-to-sub relaunch in that
 // time could still lose a pending exit. Not handled here (refusing the return while a candidate is pending is a
-// follow-up issue); the quiet gate normally keeps a stalling stream from reaching this far. Suspected, not measured.
+// follow-up issue). Suspected, not measured.
 // ⚠️ What this does NOT prevent: the new tracker also forgets the 120 s pause (OOB_COOLDOWN_MS / IB_COOLDOWN_MS)
 // after a logged exit or entry, longer than this quiet period, so a second exit or entry ~100 s after a first
 // can be recorded that an uninterrupted tracker would have suppressed (verified by running the real tracker in
@@ -551,8 +551,8 @@ export async function startMotionDetector(camera) {
                 logger.info(`[oob] "${camera.name}" candidate cancelled — bed re-active after ${ev.pendingForMs}ms`);
                 break;
               case 'oob-confirm-restarted':
-                // #452: info, and only emitted when a candidate was actually pending, so a healthy stream
-                // gains no noise. These lines are also the staging evidence for how often the rule fires.
+                // #452: info, and only emitted when a candidate was actually pending, so a healthy camera
+                // at its normal rate gains no noise (a cold slow camera logs a few while its window warms up). These lines are also the staging evidence for how often the rule fires.
                 logger.info(
                   `[oob] "${camera.name}" confirmation restarted — ${gapText(ev.gapMs)} (needs ${OOB_CONFIRM_QUIET_MS}ms of received quiet from here)`
                 );

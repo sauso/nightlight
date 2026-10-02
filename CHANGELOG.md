@@ -67,12 +67,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   bed/outside links, the alert cooldown, sound alerts, stored counts and peaks are unchanged, and a stored
   `out_of_bed`/`into_bed` after a gap is stamped later, with a `peak` and `out_frames` that can differ. The
   numbers (1.5 s, factor 5, 16 intervals, 9 held) are chosen, not measured. A camera that keeps stalling confirms
-  more slowly (about 7 s for the 6 s exit with 3.3 gaps a minute, 38 s at 30 a minute, 400 s at 60 a minute),
-  and gaps more frequent than once per 6 s of received video mean a pending exit never confirms: there is no
-  cap on restarts (a follow-up decision). A cold camera slower than 0.67 frames a second restarts a pending exit
-  about 9 times before its bound has learnt (an exit confirms about 24 s after opening at 2 s per frame); the
-  motion alert on such a camera already produced no alerts before this change. A stall ffmpeg fills with repeats
-  as it happens is not caught. Details and limits: [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "A motion alert or a bed
+  more slowly (expected wait, in seconds of received video, about 7 s for the 6 s exit with 3.3 gaps a minute,
+  38 s at 30 a minute, 400 s at 60 a minute, assuming random gaps of 2-3 s; in wall time roughly 8 s, 75-90 s and
+  1100-1400 s), and gaps more frequent than once per 6 s of received video starve a pending exit: there is no
+  cap on restarts (a follow-up decision). A healthy camera at its normal rate never prints the restart lines. A
+  cold camera that delivers every 2 s restarts a pending exit or a motion run about 9 times before its bound has
+  learnt: a candidate pending in the first ~18 s after a detector (re)launch confirms at about launch + 24 s, and
+  sustained motion alerts at about 24 s instead of 6 s (up to ~18 s later than before; a warm camera is
+  unchanged, intermittent motion is unaffected). After a slow phase the bound also stays wide until 8 fast
+  frames have arrived, so a stall shorter than 5 times the old interval in that window is not seen. Per
+  candidate a confirmation is never earlier than before (per stored row it can differ). A stall ffmpeg fills with
+  repeats as it happens is not caught. Details and limits: [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "A motion alert or a bed
   exit/entry is not confirmed across a gap in the video".
 - **Motion detection now goes back to the Low stream after an outage, instead of staying on the main stream
   until it next restarted** (issue #500). A motion detector waits up to 45 seconds for the camera's Low

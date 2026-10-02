@@ -431,10 +431,18 @@ export function evidenceFromSamples(samples) {
 //     as a gap against the 1500 ms floor, so none would ever be recorded and every burst would restart every
 //     confirmation for the life of the stream, the starvation this adaptive bound exists to prevent. The
 //     protection against a stall inflating its own bound is the K threshold above instead.
-//     COST, reasoned and NOT measured: a cold slow camera (2 s bursts from the first frame) needs ~9 slow
-//     intervals before the bound widens, so its first ~9 bursts each restart a pending confirmation, and an
-//     exit on such a camera confirms about open + 24 s (9 restarts of 2 s bursts, then a 6 s window) instead
-//     of the 2 restarts a plain median of the held deltas would have cost. It still confirms eventually.
+//     COST, reasoned and NOT measured (simulated with realistic clumps in review round 2): a cold slow camera
+//     (2 s cadence from the first frame of a detector launch) needs ~9 slow intervals before the bound widens,
+//     so its first ~9 bursts each restart a pending confirmation or motion run. A candidate pending in the
+//     first ~18 s after the (re)launch therefore confirms at about LAUNCH + 24 s whatever its own open time
+//     (open at 4 s: 20 s later, 7 restarts; 10 s: 14 s, 4; 16 s: 8 s, 1; 20 s or later: 6 s, none), and
+//     sustained motion on such a camera alerts at ~24 s instead of 6 s. It still confirms eventually, and
+//     once the window has learned the camera it behaves as before.
+//     ★ THE MIRROR IMAGE (known limit, pinned by a test, reasoned not measured, an owner design call): after a
+//     slow phase (>= 9 recorded long deltas of S) the bound stays ~5 x S until 8 fast frames have arrived
+//     (~1.6 s at 5 fps), because 9 of the last 16 deltas must be long. A stall up to 5 x S in that window is
+//     NOT seen as a gap, and a quiet frame after it can confirm (13 x 5 s, 3 fast frames, a 20 s stall passes).
+//     Shortening it would re-open the starvation of a slow camera. It applies equally to the motion alert.
 //   - `factor` 5 mirrors observationClock.js GAP_FACTOR ("a rate change is not a run of gaps"; measured
 //     worst ratio there 3.95).
 // ⚠️ HONEST LIMITS: the floor, the factor, the 16-sample window and the 50 ms minimum are CHOSEN, NOT
@@ -442,11 +450,15 @@ export function evidenceFromSamples(samples) {
 // evidence is staging `[obs]` lines (428 of ~455 motion periods had no gap over 0.5 s; the bad periods had
 // 7-49 gaps per 15 minutes averaging 0.6-2.1 s, in one camera's wake window), which says the rule WILL fire
 // in production exactly when exits are pending. It makes a confirmation slower on a gappy camera, never
-// earlier. ⚠️ It CAN make one impossible: gaps that recur more often than once per ~6 s of received video
-// mean a pending candidate never gets a full quiet window, and NO restart cap exists (a design decision,
-// filed as a follow-up issue). The expected wait for gaps arriving at lambda per second is
-// (e^(6 lambda) - 1) / lambda seconds: about 7 s at 3.3 gaps a minute, 38 s at 30 a minute, 400 s at 60 a
-// minute. For another install these are a hypothesis (KNOWN-ISSUES.md).
+// earlier PER CANDIDATE (per stored row it can differ: a delayed confirmation can escape the wall-clock
+// cooldown that would have suppressed the next one; 2 of 12,000 simulated gappy comparisons confirmed a
+// second exit earlier than before, and the new rule never confirmed MORE transitions). ⚠️ It CAN make one
+// impossible in practice: gaps that recur more often than once per ~6 s of received video mean a pending
+// candidate rarely gets a full quiet window, and NO restart cap exists (a design decision, filed as a
+// follow-up issue). For random gaps of 2-3 s arriving at lambda per second of received video the expected
+// wait is (e^(6 lambda) - 1) / lambda SECONDS OF RECEIVED VIDEO: about 7 s at 3.3 gaps a minute, 38 s at 30
+// a minute, 400 s at 60 a minute (wall time, which also holds the gaps: ~8 s, ~75-90 s, ~1100-1400 s). For
+// another install these are a hypothesis (KNOWN-ISSUES.md).
 //
 // ★ A stall that ffmpeg fills with repeats AS THEY HAPPEN (arrival continuous) is NOT caught here; that
 // needs the observation clock's proven clones (a separate follow-up). And this leans on #369: a clump of

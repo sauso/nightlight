@@ -281,6 +281,56 @@ describe('#452 motion alert: a run is not confirmed across a gap in the frames',
     assert.equal(g.restarts().length, 9, 'a 6 s hole in a 2 s cadence is not a gap');
     assert.equal(await g.alerts(), 1, 'the run is 8 s old (since frame 10): it alerts');
   });
+
+  // The ALERT's own detector is built with the defaults (factor 5, minDeltaMs 50, windowN 16), like the tracker's. The rules tests
+  // pin those on the helper; these pin that motionDetector.js does not override them. A 2 s cadence, 11 frames: 9 restarts while
+  // the window warms up, then the bound is 5 x 2 s = 10 s.
+  const slowRun = async (t, id) => {
+    const g = await rig(t, camera(id));
+    g.baseline();
+    run(T0 + 2000, T0 + 22_000, g.active, 2000);
+    assert.equal(g.restarts().length, 9, 'precondition: the warm-up restarts');
+    return g;
+  };
+
+  test('the alert detector has factor 5, not 4 (a 9.5 s hole in a 2 s cadence continues the run, which alerts)', async (t) => {
+    const g = await slowRun(t, 'f4');
+    g.active(T0 + 22_000 + 9500);
+    assert.equal(g.restarts().length, 9, 'inside 5 x 2 s: not a gap');
+    assert.equal(await g.alerts(), 1, 'the run since frame 10 is 11.5 s old');
+  });
+
+  test('the alert detector has factor 5, not 6 (a 10.001 s hole in a 2 s cadence is a gap: the run restarts, no alert)', async (t) => {
+    const g = await slowRun(t, 'f6');
+    g.active(T0 + 22_000 + 10_001);
+    assert.equal(g.restarts().length, 10);
+    assert.equal(await g.alerts(), 0);
+  });
+
+  test('the alert detector ignores deltas of 1-4 ms (frames drained a few ms apart are one arrival, not intervals)', async (t) => {
+    // Bursts of one active frame and four repeats 1 ms apart, every 2 s. Recorded (minDeltaMs 0), the 1 ms deltas would drag
+    // the 9th largest to 1 ms: the window would never widen, and the 9 warm-up restarts below would be 10 (every burst a gap).
+    const g = await rig(t, camera('clump'));
+    g.baseline();
+    for (let b = 1; b <= 11; b += 1) {
+      g.active(T0 + 2000 * b);
+      for (let i = 1; i <= 4; i += 1) g.quiet(T0 + 2000 * b + i);
+    }
+    assert.equal(g.restarts().length, 9, 'bursts 2 to 10 restart while 9 deltas are collected; burst 11 does not');
+    g.active(T0 + 22_004 + 6000);
+    assert.equal(g.restarts().length, 9, 'a 6 s hole in a 2 s cadence is not a gap');
+  });
+
+  test('the alert detector window is 16 deltas, not 17 (9 long + 8 short: the oldest long delta has been pushed out)', async (t) => {
+    const g = await rig(t, camera('w17'));
+    g.baseline();
+    let at = T0;
+    for (let i = 0; i < 10; i += 1) { at += 5000; g.active(at); } // 9 deltas of 5 s: 9 restarts
+    for (let i = 0; i < 8; i += 1) { at += 200; g.active(at); } // 8 deltas of 200 ms
+    assert.equal(g.restarts().length, 9, 'precondition');
+    g.active(at + 20_000);
+    assert.equal(g.restarts().length, 10, 'window 16: 8 long held, the floor governs, a 20 s hole is a gap (a window of 17 holds 9: a 25 s bound)');
+  });
 });
 
 describe('#452 bed transitions through the real detector: a pending exit/entry is not confirmed by a quiet frame after a hole', { concurrency: false }, () => {

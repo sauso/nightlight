@@ -643,3 +643,45 @@ test('#452 frame gap: factor and windowN are injectable (minDeltaMs is pinned by
   assert.deepEqual(observeAll([...fastAfterSlow, 18_200 + 3000], { windowN: 1 }).at(-1), { gapMs: 3000 });
   assert.equal(observeAll([...fastAfterSlow, 18_200 + 3000]).at(-1), null, 'default window: the slow median still holds');
 });
+
+// A frame stream whose successive inter-frame deltas are exactly `deltas` (the first frame at 0).
+const fromDeltas = (deltas) => deltas.reduce((acc, d) => [...acc, acc[acc.length - 1] + d], [0]);
+const LONG = 5000; // a "slow phase" interval: bound 5 x 5000 = 25 s once it is the typical one
+const SHORT = 200; // a normal 5 fps interval
+const rep = (n, v) => Array.from({ length: n }, () => v);
+
+// The window is EXACTLY windowN (16) deltas. With K = 9, the bound is wide iff at least 9 of the LAST 16 recorded deltas
+// are long, so 9 long deltas followed by s short ones stay wide for s <= 7 (16 held, 9 long) and fall to the floor at
+// s = 8 (the oldest long delta is pushed out). A probe 20 s after the last frame is inside a 25 s bound and outside the floor.
+test('#452 frame gap: the window is exactly 16 deltas (9 long + 7 short is still wide, + 8 short has pushed the oldest long out)', () => {
+  const probe = (s) => {
+    const stream = fromDeltas([...rep(9, LONG), ...rep(s, SHORT)]);
+    return observeAll([...stream, stream.at(-1) + 20_000]).at(-1);
+  };
+  assert.equal(probe(7), null, '16 held, 9 of them long: the 9th largest is long, a 20 s hole is inside 5 x 5 s');
+  assert.deepEqual(probe(8), { gapMs: 20_000 }, 'the 17th delta evicted the oldest long one: only 8 long held, the floor governs');
+  // Pins the trim itself (a trim at length >= 16 would hold 15 and make probe(7) a gap; a window of 17 would make probe(8) wide).
+});
+
+// The same boundary, from the other side: an OLD short delta that is still inside the window must count. 1 short, then
+// 8 long, then 7 short = exactly 16 held with 8 long: the 9th largest is short (floor, a gap). A window of 15 would drop the
+// oldest (short) one, leave 8 long of 15 and, with its K of 8, read the long one: wide.
+test('#452 frame gap: the oldest of the 16 held deltas still counts (a window of 15 would drop it)', () => {
+  const stream = fromDeltas([SHORT, ...rep(8, LONG), ...rep(7, SHORT)]);
+  assert.deepEqual(observeAll([...stream, stream.at(-1) + 20_000]).at(-1), { gapMs: 20_000 });
+});
+
+// ★ A DELIBERATE, DOCUMENTED LIMIT (code review round 2, Codex and Opus, both verified by running): after a slow phase
+// the bound stays wide for the first few fast frames, because it needs 9 of the last 16 deltas to be long. 13 long deltas
+// then k fast ones: 13 - max(0, 13 + k - 16) long remain = 16 - k, still >= 9 while k <= 7. So a stall up to 5 x the slow
+// interval arriving inside that window (about 1.6 s at 5 fps) is NOT seen as a gap, and a quiet frame after it could confirm.
+// Shortening it would re-open the starvation of a slow camera (KNOWN-ISSUES.md). If this test fails, the limit moved:
+// that is a design decision, update KNOWN-ISSUES.md with it.
+test('#452 frame gap: KNOWN LIMIT, a stall right after a slow phase passes unseen for 7 fast frames and is a gap from the 8th', () => {
+  const probe = (k) => {
+    const stream = fromDeltas([...rep(13, LONG), ...rep(k, SHORT)]);
+    return observeAll([...stream, stream.at(-1) + 20_000]).at(-1);
+  };
+  for (const k of [3, 7]) assert.equal(probe(k), null, `${k} fast frames: 16 - ${k} long deltas still held (>= 9), the bound is 25 s`);
+  assert.deepEqual(probe(8), { gapMs: 20_000 }, '8 fast frames: only 8 long left, the floor governs again');
+});

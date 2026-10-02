@@ -618,8 +618,9 @@ for (const side of SIDES) {
     // 2200, 4200, ... Burst j (1-based) is judged with j deltas held. Bursts 1 to 8 are gaps (fewer than 9 held);
     // burst 9 is a gap too: 9 are held ([200, 2000 x 8]) but only 8 are long, so the 9th largest is the 200 ms
     // delta and the bound is still the floor; from burst 10 ([200, 2000 x 9]) the 9th largest is 2000: no gap.
-    // So 9 restarts, the last at 18200, and an exit confirms at 18200 + 6000 = 24200 = open + 24 s (the plain median
-    // of what the window held used to cost 2 restarts, which is exactly the defect, see the next test).
+    // So 9 restarts, the last at 18200, and an exit confirms at 18200 + 6000 = 24200 (this FIXTURE's own number: it
+    // opens at 200 ms; on a real camera the confirm lands near launch + 24 s whatever the open time, KNOWN-ISSUES.md).
+    // The plain median of what the window held used to cost 2 restarts, which is exactly the defect, see the next test.
     const burstsTo = (end) => {
       const out = [];
       for (let t = 2200; t <= end; t += 2000) for (let i = 0; i < 5; i += 1) out.push(quietFrame(t));
@@ -671,3 +672,75 @@ for (const side of SIDES) {
     assert.deepEqual(ofType(atRestart.events, type('confirmed')).map((e) => e.t), [BASE_T + 21_200 + side.ms], 'exactly gap frame + window');
   });
 }
+
+// --- #452 round 2: a gap frame that is ACTIVE on the other channel, and the detector's own parameters, as the tracker builds it ---
+//
+// The gap branch sits after the cancel check, so it must also handle a gap frame that is active on the channel that does NOT
+// cancel (the outside for a pending exit, the bed for a pending entry: the normal state while an entry is pending). Before
+// this round only quiet gap frames were tested, so a gap branch conditional on "the other channel is quiet" survived.
+test('#452 OOB: a gap frame that is ACTIVE OUTSIDE restarts the pending exit (it neither confirms nor cancels it)', () => {
+  const outFrame = (t) => ({ t, cribActive: false, outActive: true, outFraction: 0.06 });
+  const { events } = runFrames(makeTracker(), [...SIDES[0].open, ...dense(400, 1200), outFrame(21_200), ...dense(21_400, 21_200 + OOB_CONFIRM_QUIET_MS)]);
+  assert.deepEqual(ofType(events, 'oob-confirm-restarted').map((e) => [e.t, e.gapMs]), [[BASE_T + 21_200, 20_000]]);
+  assert.equal(ofType(events, 'oob-cancelled').length, 0, 'outside activity does not cancel an exit');
+  assert.deepEqual(ofType(events, 'oob-confirmed').map((e) => e.t), [BASE_T + 21_200 + OOB_CONFIRM_QUIET_MS], 'a full window of received quiet after the gap frame');
+});
+
+test('#452 IB: a gap frame with the BED ACTIVE restarts the pending entry (it neither confirms nor cancels it)', () => {
+  const bed = { cribActive: true, fraction: 0.02 };
+  const { events } = runFrames(makeTracker(), [
+    ...SIDES[1].open, ...dense(400, 1200, bed), { t: 21_200, cribActive: true, outActive: false, fraction: 0.02 },
+    ...dense(21_400, 21_200 + IB_CONFIRM_QUIET_MS, bed),
+  ]);
+  assert.deepEqual(ofType(events, 'ib-confirm-restarted').map((e) => [e.t, e.gapMs]), [[BASE_T + 21_200, 20_000]]);
+  assert.equal(ofType(events, 'ib-cancelled').length, 0, 'bed activity does not cancel an entry');
+  assert.deepEqual(ofType(events, 'ib-confirmed').map((e) => e.t), [BASE_T + 21_200 + IB_CONFIRM_QUIET_MS]);
+});
+
+// The detector the tracker BUILDS uses the default factor (5), minDeltaMs (50) and windowN (16). The rules tests pin those
+// defaults on the helper itself; these pin that the tracker does not override them. A 2 s cadence camera, 10 deltas held (bound
+// 5 x 2 s = 10 s), a candidate that opens late (a bed frame, then the outside 2 s after it), then a hole.
+const slowQuiet = (n) => Array.from({ length: n }, (_, i) => quietFrame(i * 2000));
+const lateExit = (hole) => [
+  ...slowQuiet(11), // 0 ... 20000
+  { t: 22_000, cribActive: true, outActive: false, fraction: 0.15 },
+  { t: 24_000, cribActive: false, outActive: true, outFraction: 0.06 }, // opens (fast link, 2000 ms)
+  quietFrame(24_000 + hole),
+];
+
+test('#452 tracker: its detector has factor 5, not 4 (a 9.5 s hole in a 2 s cadence is continuous: the pending exit confirms)', () => {
+  const { events } = runFrames(makeTracker(), lateExit(9500));
+  assert.equal(ofType(events, 'oob-confirm-restarted').length, 0, 'inside 5 x 2 s: not a gap');
+  assert.deepEqual(ofType(events, 'oob-confirmed').map((e) => e.t), [BASE_T + 24_000 + 9500]);
+});
+
+test('#452 tracker: its detector has factor 5, not 6 (a 10.001 s hole in a 2 s cadence is a gap: it restarts, it does not confirm)', () => {
+  const { events } = runFrames(makeTracker(), lateExit(10_001));
+  assert.deepEqual(ofType(events, 'oob-confirm-restarted').map((e) => e.gapMs), [10_001]);
+  assert.equal(ofType(events, 'oob-confirmed').length, 0);
+});
+
+test('#452 tracker: its detector ignores deltas of 1-5 ms (frames drained a few ms apart are one arrival, not intervals)', () => {
+  // Bursts of 5 frames 1 ms apart, one burst every 2 s. Recorded (minDeltaMs 0), the 1 ms deltas would be 4 of every 5 in the
+  // window, drag the 9th largest to 1 ms and make the 6 s hole below a gap. Ignored, the window holds only the ~2 s deltas.
+  const frames = [];
+  for (let b = 0; b <= 11; b += 1) for (let i = 0; i < 5; i += 1) frames.push(quietFrame(b * 2000 + i));
+  frames.push({ t: 24_000, cribActive: true, outActive: false, fraction: 0.15 }, { t: 24_001, cribActive: false, outActive: true, outFraction: 0.06 });
+  for (let t = 24_002; t <= 24_004; t += 1) frames.push(quietFrame(t));
+  frames.push(quietFrame(24_004 + 6000)); // 6003 ms after the exit opened
+  const { events } = runFrames(makeTracker(), frames);
+  assert.equal(ofType(events, 'oob-confirm-restarted').length, 0, 'a 6 s hole in a 2 s cadence is not a gap');
+  assert.deepEqual(ofType(events, 'oob-confirmed').map((e) => e.t), [BASE_T + 24_004 + 6000]);
+});
+
+test('#452 tracker: its detector window is 16 deltas, not 17 (9 long + 8 short: the oldest long delta has been pushed out)', () => {
+  // 9 deltas of 5 s, then 8 of 200 ms (the bed frame, the outside frame that opens the exit, and 6 quiet ones), then a 20 s hole.
+  // Window 16: 8 long held, the floor governs, the hole is a gap. A window of 17 holds all 9 long ones: a 25 s bound, no gap.
+  const frames = [...Array.from({ length: 10 }, (_, i) => quietFrame(i * 5000))]; // 0 ... 45000
+  frames.push({ t: 45_200, cribActive: true, outActive: false, fraction: 0.15 }, { t: 45_400, cribActive: false, outActive: true, outFraction: 0.06 });
+  for (let t = 45_600; t <= 46_600; t += 200) frames.push(quietFrame(t));
+  frames.push(quietFrame(46_600 + 20_000));
+  const { events } = runFrames(makeTracker(), frames);
+  assert.deepEqual(ofType(events, 'oob-confirm-restarted').map((e) => e.gapMs), [20_000]);
+  assert.equal(ofType(events, 'oob-confirmed').length, 0);
+});

@@ -9774,5 +9774,118 @@
     "replace": "const frameGap = createFrameGapDetector({ floorMs: FRAME_GAP_MS, factor: 1 });",
     "expect": "killed",
     "tests": ["motion-frame-gap.test.js"]
+  },
+  {
+    "label": "#452 M42: OOB's gap branch applies only when the outside is quiet (a gap frame that is active outside falls through and confirms)",
+    "file": "backend/src/lib/bedTransitionTracker.js",
+    "find": "} else if (gap) {\r\n        // ★ #452: this quiet frame",
+    "replace": "} else if (gap && !outActive) {\r\n        // ★ #452: this quiet frame",
+    "expect": "killed",
+    "tests": ["bedTransitionTracker.test.js"],
+    "namePattern": "#452"
+  },
+  {
+    "label": "#452 M43: IB's gap branch applies only when the bed is quiet (a gap frame with the bed active falls through and confirms)",
+    "file": "backend/src/lib/bedTransitionTracker.js",
+    "find": "} else if (gap) {\r\n        // #452, mirror of the OOB side",
+    "replace": "} else if (gap && !cribActive) {\r\n        // #452, mirror of the OOB side",
+    "expect": "killed",
+    "tests": ["bedTransitionTracker.test.js"],
+    "namePattern": "#452"
+  },
+  {
+    "label": "#452 M44: the delta window is trimmed at windowN instead of above it (it holds 15, not 16)",
+    "file": "backend/src/lib/bedTransitionRules.js",
+    "find": "if (deltas.length > windowN) deltas.shift();",
+    "replace": "if (deltas.length >= windowN) deltas.shift();",
+    "expect": "killed",
+    "tests": ["bedTransitionLink.test.js"],
+    "namePattern": "#452"
+  },
+  {
+    "label": "#452 M45: the delta window is 17 instead of 16 (K stays 9: the oldest long delta is evicted one frame late)",
+    "file": "backend/src/lib/bedTransitionRules.js",
+    "find": "export const FRAME_GAP_WINDOW_N = 16;",
+    "replace": "export const FRAME_GAP_WINDOW_N = 17;",
+    "expect": "killed",
+    "tests": ["bedTransitionLink.test.js", "bedTransitionTracker.test.js", "motion-frame-gap.test.js"],
+    "namePattern": "#452"
+  },
+  {
+    "label": "#452 M46: the delta window is 15 instead of 16 (K becomes 8: the oldest of 16 held deltas is dropped)",
+    "file": "backend/src/lib/bedTransitionRules.js",
+    "find": "export const FRAME_GAP_WINDOW_N = 16;",
+    "replace": "export const FRAME_GAP_WINDOW_N = 15;",
+    "expect": "killed",
+    "tests": ["bedTransitionLink.test.js"],
+    "namePattern": "#452"
+  },
+  {
+    "label": "#452 M47: the tracker's own gap detector is built with factor 4",
+    "file": "backend/src/lib/bedTransitionTracker.js",
+    "find": "createFrameGapDetector({ floorMs: maxFrameGapMs })",
+    "replace": "createFrameGapDetector({ floorMs: maxFrameGapMs, factor: 4 })",
+    "expect": "killed",
+    "tests": ["bedTransitionTracker.test.js"],
+    "namePattern": "#452"
+  },
+  {
+    "label": "#452 M47b: the tracker's own gap detector is built with factor 6",
+    "file": "backend/src/lib/bedTransitionTracker.js",
+    "find": "createFrameGapDetector({ floorMs: maxFrameGapMs })",
+    "replace": "createFrameGapDetector({ floorMs: maxFrameGapMs, factor: 6 })",
+    "expect": "killed",
+    "tests": ["bedTransitionTracker.test.js"],
+    "namePattern": "#452"
+  },
+  {
+    "label": "#452 M48: the tracker's own gap detector records deltas of 1-50 ms (minDeltaMs 0)",
+    "file": "backend/src/lib/bedTransitionTracker.js",
+    "find": "createFrameGapDetector({ floorMs: maxFrameGapMs })",
+    "replace": "createFrameGapDetector({ floorMs: maxFrameGapMs, minDeltaMs: 0 })",
+    "expect": "killed",
+    "tests": ["bedTransitionTracker.test.js"],
+    "namePattern": "#452"
+  },
+  {
+    "label": "#452 M49: the tracker's own gap detector has a window of 17",
+    "file": "backend/src/lib/bedTransitionTracker.js",
+    "find": "createFrameGapDetector({ floorMs: maxFrameGapMs })",
+    "replace": "createFrameGapDetector({ floorMs: maxFrameGapMs, windowN: 17 })",
+    "expect": "killed",
+    "tests": ["bedTransitionTracker.test.js"],
+    "namePattern": "#452"
+  },
+  {
+    "label": "#452 M50: the motion alert's own gap detector is built with factor 4",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "const frameGap = createFrameGapDetector({ floorMs: FRAME_GAP_MS });",
+    "replace": "const frameGap = createFrameGapDetector({ floorMs: FRAME_GAP_MS, factor: 4 });",
+    "expect": "killed",
+    "tests": ["motion-frame-gap.test.js"]
+  },
+  {
+    "label": "#452 M50b: the motion alert's own gap detector is built with factor 6",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "const frameGap = createFrameGapDetector({ floorMs: FRAME_GAP_MS });",
+    "replace": "const frameGap = createFrameGapDetector({ floorMs: FRAME_GAP_MS, factor: 6 });",
+    "expect": "killed",
+    "tests": ["motion-frame-gap.test.js"]
+  },
+  {
+    "label": "#452 M51: the motion alert's own gap detector records deltas of 1-50 ms (minDeltaMs 0)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "const frameGap = createFrameGapDetector({ floorMs: FRAME_GAP_MS });",
+    "replace": "const frameGap = createFrameGapDetector({ floorMs: FRAME_GAP_MS, minDeltaMs: 0 });",
+    "expect": "killed",
+    "tests": ["motion-frame-gap.test.js"]
+  },
+  {
+    "label": "#452 M52: the motion alert's own gap detector has a window of 17",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "const frameGap = createFrameGapDetector({ floorMs: FRAME_GAP_MS });",
+    "replace": "const frameGap = createFrameGapDetector({ floorMs: FRAME_GAP_MS, windowN: 17 });",
+    "expect": "killed",
+    "tests": ["motion-frame-gap.test.js"]
   }
 ]

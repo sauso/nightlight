@@ -897,9 +897,14 @@ no clock. Every threshold in it came from ONE house's runs (Stage 1: night, over
   than its window). Build-time deviation from the plan: a delta that was itself a gap IS recorded in the window
   (else a slow camera never learns its bound); code review round 1 then found that ONE stall right after a launch
   widened the bound (frames 0 / 20 s / 50 s), so the window is read only once K = floor(windowN/2)+1 = 9 deltas are
-  held (a cold 2 s-burst camera pays ~9 restarts, an exit ~open+24 s). "Never impossible" was also wrong: gaps more
+  held (a cold 2 s-cadence camera pays ~9 restarts per detector launch: a candidate pending in the first ~18 s
+  confirms at ~launch+24 s, sustained motion alerts at ~24 s instead of 6 s; round 2 corrected the earlier claim that
+  its alert was already broken). "Never impossible" was also wrong: gaps more
   often than once per ~6 s of received video starve a pending candidate, and there is NO restart cap (expected wait
-  (e^(6L)-1)/L s: ~7 s at 3.3 gaps/min, ~38 s at 30, ~400 s at 60). Follow-ups to file: scope B (clone-gated
+  (e^(6L)-1)/L SECONDS OF RECEIVED VIDEO for Poisson gaps of 2-3 s: ~7 s at 3.3 gaps/min, ~38 s at 30, ~400 s at
+  60; wall time ~8 s, ~75-90 s, ~1100-1400 s). After a slow phase the bound also lingers until 8 fast frames have
+  arrived (pinned by a test, an owner design call). "Never earlier than before" holds per candidate, not per stored
+  row. Follow-ups to file: scope B (clone-gated
   confirmation), #500 pending-candidate refusal, backward-step cooldown clamp, a restart cap / max wait for
   chronic gaps. Evidence once on staging: count `confirmation restarted` /
   `motion run restarted` lines per night. KNOWN-ISSUES.md "A motion alert or a bed exit/entry is not confirmed across a
