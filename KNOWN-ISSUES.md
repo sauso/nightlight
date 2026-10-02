@@ -388,13 +388,20 @@ confirmation then needs its full time of frames received *after* the gap.
 | A stored `out_of_bed` / `into_bed` row | Its time is the moment it was **confirmed**, so after a gap it is later than before. Its `peak`, `out_peak` and `out_frames` can differ, because a restarted wait collects more evidence. The sleep numbers do not read those three fields |
 
 **What counts as a gap:** the time between two consecutive frames' arrival is longer than the larger of 1.5 s
-(the same grace that already says a motion run has not ended) and 5 times the camera's typical frame interval
-(the median of its last 16 intervals longer than 50 ms; frames delivered together are one arrival and are not
-intervals). At 5 frames a second the bound is the 1.5 s floor. A camera slower than about 0.67 frames a second
-delivers its frames in bursts further apart than that, so the bound widens with it (10 s at 0.5 frames a
-second, learnt from its first intervals) instead of treating every burst as a gap and never confirming
-anything. A camera that slows down mid-stream is treated as gappy for about 9 of its slow intervals until the
-median catches up.
+(the same grace that already says a motion run has not ended) and 5 times the camera's typical frame interval.
+The typical interval is read from the camera's last 16 intervals longer than 50 ms (frames delivered together
+are one arrival and are not intervals), **but only once at least 9 of them are held**: until then the 1.5 s floor
+alone counts, and from then on it is the 9th longest of the held intervals (with all 16 held, their median).
+So fewer than 9 long intervals can never widen the bound. That is deliberate: right after a start-up one stall
+would otherwise be the whole window, and widen the bound for the very next frame (found in code review: frames
+at 0 s, 20 s and 50 s let a single quiet frame after a 30 s outage confirm a bed exit, and a motion run active
+at 0.2 s, 2.2 s and 9.2 s alerted). At 5 frames a second the bound is the 1.5 s floor. A camera slower than
+about 0.67 frames a second delivers its frames in bursts further apart than that, so the bound widens with it
+(10 s at 0.5 frames a second) instead of treating every burst as a gap and never confirming anything.
+**The cost of a cold slow camera:** until 9 of its slow intervals are held every burst is a gap, so a pending
+bed exit restarts about 9 times and confirms about 24 s after it opens (9 bursts of 2 s, then its 6 s) instead
+of 6 s later. That figure is reasoned, not measured. A camera that slows down mid-stream is treated as gappy
+for about 9 of its slow intervals in the same way, until the window has caught up.
 
 **Limits, stated rather than hidden:**
 - **The numbers were chosen, not measured.** 1.5 s, the factor 5, the 16-interval window and the 50 ms minimum
@@ -403,9 +410,20 @@ median catches up.
   hypothesis. The only evidence is one house's saved staging logs: 428 of about 455 motion periods had no gap over
   0.5 s, and the bad ones had 7 to 49 gaps per 15 minutes averaging 0.6 to 2.1 s (two mornings, one camera, the
   wake window), so the rule **will fire in production exactly when exits are pending**.
-- **It makes confirmation slower on a gappy camera, never earlier and never impossible.** On such a camera
-  (about 3.3 gaps a minute) a 6 s bed confirmation waits about 7 s on average, and a 30 s *Motion confirm* (the
-  setting's maximum) about 76 s. A stored exit or entry after a gap is stamped later.
+- **It makes confirmation slower on a gappy camera, never earlier. On a badly gappy one a pending exit or entry
+  can never confirm.** Gaps that recur more often than once per about 6 s of received video mean the pending
+  candidate never gets its full 6 s of quiet, and **no cap on restarts exists** (a design decision, filed as a
+  follow-up issue). With gaps arriving at a rate of L per second the expected wait is (e^(6L) − 1) / L seconds:
+  about 7 s at 3.3 gaps a minute (the evidence above), about 38 s at 30 gaps a minute and about 400 s at 60 gaps a
+  minute. A 30 s *Motion confirm* (the setting's maximum) waits about 76 s on a camera with 3.3 gaps a minute.
+  A stored exit or entry after a gap is stamped later.
+- **A slow camera keeps working for bed exits and entries only.** Before this change a camera delivering in 2 s
+  bursts could still confirm one (elapsed time did not care how the frames arrived), and with the adaptive bound
+  it still does, after the warm-up restarts described above. The motion **alert** was never in that position: at
+  about 2 s per frame it already produced no alerts before this change (found in review, not re-measured on a
+  real camera): the existing 1.5 s grace ends a run at the first quiet frame that arrives more than 1.5 s after
+  an active one. This change does not fix that (and adds the same warm-up restarts on top for a stream that
+  does alert).
 - **A stall that ffmpeg fills with repeats as it happens is not caught.** The rule looks at when frames
   arrive. When the camera stalls, ffmpeg normally holds back and then releases a clump of repeats at once (a gap,
   caught); a stall filled continuously keeps frames arriving and passes. Gating confirmations on the `[obs]`

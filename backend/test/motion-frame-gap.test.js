@@ -234,6 +234,53 @@ describe('#452 motion alert: a run is not confirmed across a gap in the frames',
     assert.equal(g.restarts().length, 1, 'the open run was restarted');
     assert.equal(await g.alerts(), 2, '...and the post-gap active frame still alerts at once');
   });
+
+  // ★ REGRESSION (#452 code review round 1, verified by running): the first stall after a launch used to BE the typical
+  // interval and widen the bound for the next frame. active@200, active@2200, active@9200: the 2 s delta was the
+  // window's only entry, the 7 s hole was judged against a 10 s bound, and `now - activeSince` (7 s) alerted ONCE on
+  // frames that were never 3 s of observed motion. With fewer than 9 deltas held the floor alone governs: both are gaps.
+  test('a lone stall right after a launch cannot widen the bound: active@200, @2200, @9200 does not alert', async (t) => {
+    const cam = camera('lone');
+    const g = await rig(t, cam);
+    g.baseline();
+    g.active(T0 + 200);
+    g.active(T0 + 2200);
+    g.active(T0 + 9200);
+    assert.equal(await g.alerts(), 0, 'no alert: the run restarted at 9200 and has lasted 0 ms');
+    assert.deepEqual(
+      g.restarts(),
+      [`[INFO] [detect] "${cam.name}" motion run restarted — no frames for 2000ms`, `[INFO] [detect] "${cam.name}" motion run restarted — no frames for 7000ms`],
+    );
+  });
+
+  // A QUIET frame after a hole ends the run too, and says so. (Kills a reset that is conditional on the gap frame being
+  // active: the pre-existing grace branch would still clear the run, silently, so only the log line tells them apart.)
+  test('a QUIET frame after a hole also restarts the run and logs it', async (t) => {
+    const cam = camera('quietgap');
+    const g = await rig(t, cam);
+    g.baseline();
+    run(T0 + 200, T0 + 1000, g.active);
+    g.quiet(T0 + 21_000); // the room is still, 20 s later
+    assert.deepEqual(g.restarts(), [`[INFO] [detect] "${cam.name}" motion run restarted — no frames for 20000ms`]);
+    run(T0 + 21_200, T0 + 23_800, g.active); // a run starting here has not lasted 3 s yet
+    assert.equal(await g.alerts(), 0);
+  });
+
+  // The ALERT's own detector must use the default factor 5, like the tracker's: with a factor of 1 the bound is the typical
+  // interval itself (2 s here), so a 6 s hole in a 0.5 fps stream, which the 10 s bound lets through, would restart a run.
+  // Also pins the cold-camera cost: a stream at 2 s per frame is a run of gaps until 9 deltas are held (9 restarts, at
+  // frames 2 to 10 of the run), and only then can a 3 s confirmation complete.
+  test('a slow (2 s) stream learns its bound after 9 restarts; a 6 s hole in it is then NOT a gap (factor 5, not 1)', async (t) => {
+    const cam = camera('slow');
+    const g = await rig(t, cam);
+    g.baseline();
+    run(T0 + 2000, T0 + 22_000, g.active, 2000); // frames 1 to 11 of the run
+    assert.equal(g.restarts().length, 9, 'frames 2 to 10 are judged against the floor (fewer than 9 deltas held); frame 11 is not');
+    assert.equal(await g.alerts(), 0, 'the run restarted at frame 10 (T0 + 20 s): frame 11 is only 2 s into it');
+    g.active(T0 + 28_000); // 6 s after frame 11: inside the learnt 5 x 2 s bound
+    assert.equal(g.restarts().length, 9, 'a 6 s hole in a 2 s cadence is not a gap');
+    assert.equal(await g.alerts(), 1, 'the run is 8 s old (since frame 10): it alerts');
+  });
 });
 
 describe('#452 bed transitions through the real detector: a pending exit/entry is not confirmed by a quiet frame after a hole', { concurrency: false }, () => {

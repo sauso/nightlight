@@ -9564,9 +9564,9 @@
     "namePattern": "#452"
   },
   {
-    "label": "#452 M21: the typical interval is the MEAN of the window instead of its median (one stall inflates the bound)",
+    "label": "#452 M21: the typical interval is the MEAN of the window instead of its K-th largest (one stall inflates the bound)",
     "file": "backend/src/lib/bedTransitionRules.js",
-    "find": "return sorted[(sorted.length - 1) >> 1];",
+    "find": "return sorted[sorted.length - minHeld];",
     "replace": "return sorted.reduce((a, b) => a + b, 0) / sorted.length;",
     "expect": "killed",
     "tests": ["bedTransitionLink.test.js"],
@@ -9591,19 +9591,19 @@
     "namePattern": "#452"
   },
   {
-    "label": "#452 M23: the typical interval is the MAX of the window instead of its median",
+    "label": "#452 M23: the typical interval is the MAX of the window instead of its K-th largest",
     "file": "backend/src/lib/bedTransitionRules.js",
-    "find": "return sorted[(sorted.length - 1) >> 1];",
+    "find": "return sorted[sorted.length - minHeld];",
     "replace": "return sorted[sorted.length - 1];",
     "expect": "killed",
     "tests": ["bedTransitionLink.test.js"],
     "namePattern": "#452"
   },
   {
-    "label": "#452 M24: the typical interval is the UPPER median (a stall met right after the second frame lifts the bound)",
+    "label": "#452 M24: the typical interval is the (K-1)-th largest, the UPPER median of a full window (a camera slowing to 2 s bursts widens its bound one interval early)",
     "file": "backend/src/lib/bedTransitionRules.js",
-    "find": "return sorted[(sorted.length - 1) >> 1];",
-    "replace": "return sorted[sorted.length >> 1];",
+    "find": "return sorted[sorted.length - minHeld];",
+    "replace": "return sorted[sorted.length - minHeld + 1];",
     "expect": "killed",
     "tests": ["bedTransitionLink.test.js"],
     "namePattern": "#452"
@@ -9648,6 +9648,130 @@
     "file": "backend/src/lib/motionDetector.js",
     "find": "(gapMs < 0 ? `system clock stepped back",
     "replace": "(gapMs > 0 ? `system clock stepped back",
+    "expect": "killed",
+    "tests": ["motion-frame-gap.test.js"]
+  },
+  {
+    "label": "#452 M30: the detector reads the window one delta early (K-1 held instead of K: 8 of 16)",
+    "file": "backend/src/lib/bedTransitionRules.js",
+    "find": "if (deltas.length < minHeld) return 0;",
+    "replace": "if (deltas.length < minHeld - 1) return 0;",
+    "expect": "killed",
+    "tests": ["bedTransitionLink.test.js"],
+    "namePattern": "#452"
+  },
+  {
+    "label": "#452 M31: the detector reads the window one delta late (K+1 held instead of K: 10 of 16)",
+    "file": "backend/src/lib/bedTransitionRules.js",
+    "find": "if (deltas.length < minHeld) return 0;",
+    "replace": "if (deltas.length <= minHeld) return 0;",
+    "expect": "killed",
+    "tests": ["bedTransitionLink.test.js"],
+    "namePattern": "#452"
+  },
+  {
+    "label": "#452 M32: the typical interval is the lower median of WHAT IS HELD once K are held (fewer than K long deltas can lift the bound)",
+    "file": "backend/src/lib/bedTransitionRules.js",
+    "find": "return sorted[sorted.length - minHeld];",
+    "replace": "return sorted[(sorted.length - 1) >> 1];",
+    "expect": "killed",
+    "tests": ["bedTransitionLink.test.js", "bedTransitionTracker.test.js"],
+    "namePattern": "#452"
+  },
+  {
+    "label": "#452 M33: K is the literal 9, not derived from windowN",
+    "file": "backend/src/lib/bedTransitionRules.js",
+    "find": "const minHeld = Math.floor(windowN / 2) + 1;",
+    "replace": "const minHeld = 9;",
+    "expect": "killed",
+    "tests": ["bedTransitionLink.test.js"],
+    "namePattern": "#452"
+  },
+  {
+    "label": "#452 M34: K is floor(windowN / 2) (8 of 16), not a strict majority",
+    "file": "backend/src/lib/bedTransitionRules.js",
+    "find": "const minHeld = Math.floor(windowN / 2) + 1;",
+    "replace": "const minHeld = Math.floor(windowN / 2);",
+    "expect": "killed",
+    "tests": ["bedTransitionLink.test.js"],
+    "namePattern": "#452"
+  },
+  {
+    "label": "#452 M35: the PRE-FIX rule restored (the lower median of whatever is held: one stall right after a launch becomes the typical interval)",
+    "file": "backend/src/lib/bedTransitionRules.js",
+    "find": "if (deltas.length < minHeld) return 0;",
+    "replace": "if (!deltas.length) return 0; { const s = deltas.slice().sort((a, b) => a - b); return s[(s.length - 1) >> 1]; }",
+    "expect": "killed",
+    "tests": ["bedTransitionLink.test.js", "bedTransitionTracker.test.js", "motion-frame-gap.test.js"],
+    "namePattern": "#452"
+  },
+  {
+    "label": "#452 M36: the bound factor is 4 instead of 5 (a 9.5 s hole in a 2 s cadence becomes a gap)",
+    "file": "backend/src/lib/bedTransitionRules.js",
+    "find": "export const FRAME_GAP_FACTOR = 5;",
+    "replace": "export const FRAME_GAP_FACTOR = 4;",
+    "expect": "killed",
+    "tests": ["bedTransitionLink.test.js"],
+    "namePattern": "#452"
+  },
+  {
+    "label": "#452 M37: the bound factor is 6 instead of 5 (a 10.001 s hole in a 2 s cadence is no longer a gap)",
+    "file": "backend/src/lib/bedTransitionRules.js",
+    "find": "export const FRAME_GAP_FACTOR = 5;",
+    "replace": "export const FRAME_GAP_FACTOR = 6;",
+    "expect": "killed",
+    "tests": ["bedTransitionLink.test.js"],
+    "namePattern": "#452"
+  },
+  {
+    "label": "#452 M38: OOB's restart credits 100 ms of quiet to the gap frame (quietFrom = now - 100)",
+    "file": "backend/src/lib/bedTransitionTracker.js",
+    "find": "oobQuietFrom = now;\r\n        events.push({ type: 'oob-confirm-restarted'",
+    "replace": "oobQuietFrom = now - 100;\r\n        events.push({ type: 'oob-confirm-restarted'",
+    "expect": "killed",
+    "tests": ["bedTransitionTracker.test.js"],
+    "namePattern": "#452"
+  },
+  {
+    "label": "#452 M38b: IB's restart credits 199 ms of quiet to the gap frame (quietFrom = now - 199)",
+    "file": "backend/src/lib/bedTransitionTracker.js",
+    "find": "ibQuietFrom = now;\r\n        events.push({ type: 'ib-confirm-restarted'",
+    "replace": "ibQuietFrom = now - 199;\r\n        events.push({ type: 'ib-confirm-restarted'",
+    "expect": "killed",
+    "tests": ["bedTransitionTracker.test.js"],
+    "namePattern": "#452"
+  },
+  {
+    "label": "#452 M39: OOB's candidate opens with 100 ms of quiet already credited (quietFrom = now - 100 at the open)",
+    "file": "backend/src/lib/bedTransitionTracker.js",
+    "find": "oobQuietFrom = now; // #452: set at every open",
+    "replace": "oobQuietFrom = now - 100; // #452: set at every open",
+    "expect": "killed",
+    "tests": ["bedTransitionTracker.test.js"],
+    "namePattern": "#452"
+  },
+  {
+    "label": "#452 M39b: IB's candidate opens with 199 ms of quiet already credited (quietFrom = now - 199 at the open)",
+    "file": "backend/src/lib/bedTransitionTracker.js",
+    "find": "ibQuietFrom = now; // #452: see oobQuietFrom",
+    "replace": "ibQuietFrom = now - 199; // #452: see oobQuietFrom",
+    "expect": "killed",
+    "tests": ["bedTransitionTracker.test.js"],
+    "namePattern": "#452"
+  },
+  {
+    "label": "#452 M40: the motion run is reset only when the gap frame is itself active (the quiet-frame reset and its log line are lost)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "if (gap && activeSince) {",
+    "replace": "if (gap && activeSince && fraction >= threshold) {",
+    "expect": "killed",
+    "tests": ["motion-frame-gap.test.js"]
+  },
+  {
+    "label": "#452 M41: the motion alert's own gap detector is built with factor 1 (a 6 s hole in a 2 s cadence restarts a run)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "const frameGap = createFrameGapDetector({ floorMs: FRAME_GAP_MS });",
+    "replace": "const frameGap = createFrameGapDetector({ floorMs: FRAME_GAP_MS, factor: 1 });",
     "expect": "killed",
     "tests": ["motion-frame-gap.test.js"]
   }

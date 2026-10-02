@@ -136,8 +136,8 @@ export function createBedTransitionTracker({
   if (!(maxFrameGapMs > 0)) {
     throw new Error('createBedTransitionTracker requires maxFrameGapMs (the #452 frame-gap floor; motionDetector.js\'s FRAME_GAP_MS)');
   }
-  // Owned by the tracker and fed on EVERY pushFrame (not only while a candidate is pending): the median that
-  // makes the bound adaptive needs the stream's normal spacing, and a gap that happens just before a
+  // Owned by the tracker and fed on EVERY pushFrame (not only while a candidate is pending): the window of
+  // intervals that makes the bound adaptive needs the stream's normal spacing, and a gap that happens just before a
   // candidate opens must already be known to the detector, not discovered one frame late.
   const gapDetector = createFrameGapDetector({ floorMs: maxFrameGapMs });
 

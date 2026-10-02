@@ -609,28 +609,65 @@ for (const side of SIDES) {
     assert.deepEqual(ofType(narrow.events, type('confirm-restarted')).map((e) => e.gapMs), [1200], 'over maxFrameGapMs 1000 a 1.2 s hole is a gap');
   });
 
-  test(`#452 ${side.name}: a slow camera (2 s bursts) still confirms: the bound adapts, a real stall in it is still a gap`, () => {
+  test(`#452 ${side.name}: a slow camera (2 s bursts) still confirms, after ~9 warm-up restarts: the bound adapts, a real stall in it is still a gap`, () => {
     // Bursts of 5 frames sharing one receipt time, one burst every 2 s (0.5 fps). Against the 1500 ms floor alone
-    // EVERY burst would be a gap and nothing could ever confirm. The first intervals are judged against the floor
-    // (restarts, while the bound has little to learn from); after that the bound is 5 x 2 s.
-    // The candidate opens at 200 (the open frames, whose one 200 ms delta is also in the window), then bursts arrive
-    // at 2200, 4200, ... Bursts 1 and 2 are gaps: after the first the window is [200, 2000] and its LOWER median is
-    // still 200, so the bound stays at the floor; after the second ([200, 2000, 2000]) the median is 2000.
+    // EVERY burst would be a gap and nothing could ever confirm. The detector reads nothing until its window holds 9
+    // deltas (round-1 fix: one stall right after a launch must not be "typical"), so the first 9 intervals are judged
+    // against the floor and each RESTARTS the pending confirmation; after that the bound is 5 x 2 s.
+    // The candidate opens at 200 (the open frames contribute one 200 ms delta to the window), then bursts arrive at
+    // 2200, 4200, ... Burst j (1-based) is judged with j deltas held. Bursts 1 to 8 are gaps (fewer than 9 held);
+    // burst 9 is a gap too: 9 are held ([200, 2000 x 8]) but only 8 are long, so the 9th largest is the 200 ms
+    // delta and the bound is still the floor; from burst 10 ([200, 2000 x 9]) the 9th largest is 2000: no gap.
+    // So 9 restarts, the last at 18200, and an exit confirms at 18200 + 6000 = 24200 = open + 24 s (the plain median
+    // of what the window held used to cost 2 restarts, which is exactly the defect, see the next test).
     const burstsTo = (end) => {
       const out = [];
       for (let t = 2200; t <= end; t += 2000) for (let i = 0; i < 5; i += 1) out.push(quietFrame(t));
       return out;
     };
-    const ok = runFrames(makeTracker(), [...side.open, ...burstsTo(24_200)]);
-    assert.deepEqual(ofType(ok.events, type('confirm-restarted')).map((e) => e.t), [BASE_T + 2200, BASE_T + 4200], 'only the learning bursts restart');
-    // The last restart was at 4200, so it confirms on the first burst at or after 4200 + window: it DOES confirm.
-    const firstBurstAfter = 4200 + Math.ceil(side.ms / 2000) * 2000;
+    const warmup = Array.from({ length: 9 }, (_, i) => BASE_T + 2200 + i * 2000); // 2200, 4200, ... 18200
+    const ok = runFrames(makeTracker(), [...side.open, ...burstsTo(40_200)]);
+    assert.deepEqual(ofType(ok.events, type('confirm-restarted')).map((e) => e.t), warmup, 'only the 9 learning bursts restart');
+    // The last restart was at 18200, so it confirms on the first burst at or after 18200 + window: it DOES confirm.
+    const firstBurstAfter = 18_200 + Math.ceil(side.ms / 2000) * 2000;
     assert.deepEqual(ofType(ok.events, type('confirmed')).map((e) => e.t), [BASE_T + firstBurstAfter]);
-    // A 6 s hole in that cadence is not a gap (inside the learnt 10 s bound); a 20 s stall is.
-    const hole = runFrames(makeTracker(), [...side.open, ...burstsTo(8200), quietFrame(14_200)]);
-    assert.equal(ofType(hole.events, type('confirm-restarted')).length, 2, 'no new restart: only the two learning bursts');
-    const stall = runFrames(makeTracker(), [...side.open, ...burstsTo(8200), quietFrame(28_200)]);
-    assert.equal(ofType(stall.events, type('confirm-restarted')).length, 3, 'a 20 s stall is a gap even at 0.5 fps');
+    // A 6 s hole in that cadence is not a gap (inside the learnt 10 s bound); a 20 s stall is. Both after burst 10.
+    const hole = runFrames(makeTracker(), [...side.open, ...burstsTo(20_200), quietFrame(26_200)]);
+    assert.equal(ofType(hole.events, type('confirm-restarted')).length, 9, 'no new restart: only the nine learning bursts');
+    const stall = runFrames(makeTracker(), [...side.open, ...burstsTo(20_200), quietFrame(40_200)]);
+    assert.equal(ofType(stall.events, type('confirm-restarted')).length, 10, 'a 20 s stall is a gap even at 0.5 fps');
     assert.equal(ofType(stall.events, type('confirmed')).length, 0, 'and one frame after it still confirms nothing');
+  });
+
+  // ★ REGRESSION (#452 code review round 1, verified by running): the first stall after a launch used to BE the median
+  // and widen the bound for the next frame, so one quiet frame after a 30 s outage confirmed a candidate. The
+  // candidate opens on a frame that follows a wide spacing (OOB's 60 s slow link, IB's 8 s link), the stream then has
+  // ONE long delta in its window, and a 30 s hole follows.
+  test(`#452 ${side.name}: a lone stall after a launch does not widen the bound, so ONE quiet frame after a 30 s outage cannot confirm`, () => {
+    const openAt = side.name === 'OOB' ? 20_000 : 7_000; // the delta into the open frame is the window's only entry
+    const frames = [{ ...side.open[0], t: 0 }, { ...side.open[1], t: openAt }, quietFrame(openAt + 30_000)];
+    const { events } = runFrames(makeTracker(), frames);
+    assert.deepEqual(ofType(events, type('candidate-open')).map((e) => e.t), [BASE_T + openAt], 'it opened across the first wide spacing');
+    assert.equal(ofType(events, type('confirmed')).length, 0, '30 s since it opened, one frame received after the hole');
+    assert.deepEqual(ofType(events, type('confirm-restarted')).map((e) => e.gapMs), [30_000], 'a restart, judged against the floor');
+  });
+
+  // Kills a QuietFrom offset of 1 to 199 ms at the restart AND at the open (a confirm test of `now - quietFrom >= ms`
+  // with `quietFrom = now - d` confirms d ms early; the other tests feed 200 ms steps, which hide any d under 200
+  // because the first frame at or after the earlier time is the same one). Frames at +5800, +5801, +5900, +5999 are
+  // all received and must credit nothing; the frame at exactly +ms confirms.
+  test(`#452 ${side.name}: the quiet clock credits EXACTLY 0 ms at the open and at a restart (no confirm at +${side.ms - 1}, confirm at +${side.ms})`, () => {
+    const fine = (g) => [
+      ...dense(g + 200, g + side.ms - 200),
+      quietFrame(g + side.ms - 199), quietFrame(g + side.ms - 100), quietFrame(g + side.ms - 1),
+    ];
+    // (1) at the open: the candidate opens at 200, then a continuous stream with the probe frames.
+    const atOpen = runFrames(makeTracker(), [...side.open, ...fine(200), quietFrame(200 + side.ms)]);
+    assert.equal(ofType(atOpen.events, type('confirm-restarted')).length, 0, 'continuous: no restart');
+    assert.deepEqual(ofType(atOpen.events, type('confirmed')).map((e) => e.t), [BASE_T + 200 + side.ms], 'exactly open + window');
+    // (2) at a restart: a 20 s hole, the gap frame at 21200, then the same probes from there.
+    const atRestart = runFrames(makeTracker(), [...side.open, ...dense(400, 1200), quietFrame(21_200), ...fine(21_200), quietFrame(21_200 + side.ms)]);
+    assert.equal(ofType(atRestart.events, type('confirm-restarted')).length, 1, 'only the hole restarts it');
+    assert.deepEqual(ofType(atRestart.events, type('confirmed')).map((e) => e.t), [BASE_T + 21_200 + side.ms], 'exactly gap frame + window');
   });
 }

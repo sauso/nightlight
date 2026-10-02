@@ -412,20 +412,29 @@ export function evidenceFromSamples(samples) {
 //     one, where such a stream works. At 5 fps (200 ms) the bound stays at the 1500 ms floor
 //     (5 x 200 = 1000), so this house is unchanged; at 0.5 fps (2 s) it is 10 s, so a real 20 s stall still
 //     counts and a 6 s hole does not.
-//   - `typicalIntervalMs` = the LOWER MEDIAN of the last `windowN` (16) inter-frame deltas that exceed
-//     `minDeltaMs` (50). Deltas inside a clump are ~0 and would drag the median to nothing (and the bound
+//   - `typicalIntervalMs` is taken from the last `windowN` (16) inter-frame deltas that exceed `minDeltaMs`
+//     (50). Deltas inside a clump are ~0 and would drag the typical interval to nothing (and the bound
 //     back to the floor on exactly the camera that needs the wider one), so they are not recorded.
+//     ★ It is 0 (so the floor ALONE governs) until the window holds K = floor(windowN / 2) + 1 = 9 recorded
+//     deltas, and from then on it is the K-th LARGEST recorded delta. For a full window of 16 that IS the
+//     lower median (sorted[7]); for 9 to 15 held it is sorted[n - 9], i.e. at least 9 recorded deltas must
+//     be at least that long, so FEWER THAN 9 LONG DELTAS (a stall, or a few) CAN NEVER LIFT THE BOUND.
+//     K is derived from windowN, not typed in. Why not simply the median of whatever the window holds
+//     (code review round 1, Codex and Opus, VERIFIED BY RUNNING): right after a launch the window holds one
+//     or two deltas, so ONE stall IS the median and widens the bound for the very next frame. Frames at
+//     0 / 20 s / 50 s: the 20 s delta became the median, the 30 s delta was judged against a 100 s bound, and
+//     a single quiet frame after a 30 s outage confirmed an exit; a motion alert run active at 200 ms,
+//     2200 ms and 9200 ms alerted once. Reading nothing until K deltas are held closes that.
 //     ★ A delta that WAS a gap IS recorded (a build-time deviation from plan v2, which excluded it so that
-//     "a stall cannot inflate its own bound"): excluded, the median could never learn a slow camera. A
+//     "a stall cannot inflate its own bound"): excluded, the window could never learn a slow camera. A
 //     camera that starts at 2 s per burst, or slows from 15 fps to 2 fps, has every one of its deltas flagged
 //     as a gap against the 1500 ms floor, so none would ever be recorded and every burst would restart every
 //     confirmation for the life of the stream, the starvation this adaptive bound exists to prevent. The
-//     protection against a stall inflating its own bound is the MEDIAN instead: one stall among the window
-//     moves nothing, and the LOWER median (not the mean of the middle two) keeps even a stall met right after
-//     the first normal frame (window of two) from lifting the bound. It takes more than half of the window
-//     (9 of 16) being long deltas, about 18 s of a camera's 2 s bursts, before the bound widens, which is a
-//     camera that really is that slow. The cost is that those first ~9 slow deltas each restart a pending
-//     confirmation. Reasoned, not measured.
+//     protection against a stall inflating its own bound is the K threshold above instead.
+//     COST, reasoned and NOT measured: a cold slow camera (2 s bursts from the first frame) needs ~9 slow
+//     intervals before the bound widens, so its first ~9 bursts each restart a pending confirmation, and an
+//     exit on such a camera confirms about open + 24 s (9 restarts of 2 s bursts, then a 6 s window) instead
+//     of the 2 restarts a plain median of the held deltas would have cost. It still confirms eventually.
 //   - `factor` 5 mirrors observationClock.js GAP_FACTOR ("a rate change is not a run of gaps"; measured
 //     worst ratio there 3.95).
 // ⚠️ HONEST LIMITS: the floor, the factor, the 16-sample window and the 50 ms minimum are CHOSEN, NOT
@@ -433,7 +442,11 @@ export function evidenceFromSamples(samples) {
 // evidence is staging `[obs]` lines (428 of ~455 motion periods had no gap over 0.5 s; the bad periods had
 // 7-49 gaps per 15 minutes averaging 0.6-2.1 s, in one camera's wake window), which says the rule WILL fire
 // in production exactly when exits are pending. It makes a confirmation slower on a gappy camera, never
-// earlier and never impossible. For another install these are a hypothesis (KNOWN-ISSUES.md).
+// earlier. ⚠️ It CAN make one impossible: gaps that recur more often than once per ~6 s of received video
+// mean a pending candidate never gets a full quiet window, and NO restart cap exists (a design decision,
+// filed as a follow-up issue). The expected wait for gaps arriving at lambda per second is
+// (e^(6 lambda) - 1) / lambda seconds: about 7 s at 3.3 gaps a minute, 38 s at 30 a minute, 400 s at 60 a
+// minute. For another install these are a hypothesis (KNOWN-ISSUES.md).
 //
 // ★ A stall that ffmpeg fills with repeats AS THEY HAPPEN (arrival continuous) is NOT caught here; that
 // needs the observation clock's proven clones (a separate follow-up). And this leans on #369: a clump of
@@ -461,11 +474,16 @@ export function createFrameGapDetector({
   }
   let prev = null;
   const deltas = []; // the last windowN inter-frame deltas above minDeltaMs (clump noise left out, gaps IN)
+  // How many recorded deltas must be held before they say anything about the camera's normal spacing: a strict
+  // majority of the window (9 of 16). See the comment above: fewer than this and one stall would be "typical".
+  const minHeld = Math.floor(windowN / 2) + 1;
 
   function typicalIntervalMs() {
-    if (!deltas.length) return 0; // no samples yet: the floor alone governs
+    if (deltas.length < minHeld) return 0; // too few to trust: the floor alone governs
     const sorted = deltas.slice().sort((a, b) => a - b);
-    return sorted[(sorted.length - 1) >> 1]; // the LOWER median: see the comment above on why not the mean
+    // The minHeld-th LARGEST. A full window gives the lower median; a part-full one needs minHeld deltas at
+    // least this long, so fewer long deltas than that can never lift the bound.
+    return sorted[sorted.length - minHeld];
   }
 
   function observe(now) {

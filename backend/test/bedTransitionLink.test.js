@@ -541,21 +541,69 @@ test('#452 frame gap: one 20 s stall does not widen the bound for the frame afte
   assert.deepEqual(out.slice(-2), [{ gapMs: 20_000 }, { gapMs: 1600 }]);
 });
 
-test('#452 frame gap: a stall met right after the second frame cannot lift the bound either (the LOWER median)', () => {
-  // Window of one 200 ms delta, then a 20 s stall: a window of two. The mean of the middle two (10.1 s) would
-  // make the bound 50 s; the lower median stays 200 ms, so the frame 1600 ms later is still a gap.
+test('#452 frame gap: a stall met right after the second frame cannot lift the bound either (too few deltas held)', () => {
+  // Window of one 200 ms delta, then a 20 s stall: two held, fewer than the 9 needed, so the floor alone governs and
+  // the frame 1600 ms later is still a gap. (A mean of the two, 10.1 s, would have made the bound 50 s.)
   assert.deepEqual(observeAll([0, 200, 20_200, 21_800]).slice(-2), [{ gapMs: 20_000 }, { gapMs: 1600 }]);
 });
 
-test('#452 frame gap: a slow camera (a 2 s burst cadence) learns its own bound; a real 20 s stall in it is still a gap', () => {
+// ★ REGRESSION (#452 code review round 1, found by Codex and Opus by running it): with the typical interval taken as
+// the median of WHATEVER the window held, the first stall after a launch WAS the median and widened the bound for the
+// next frame. Each test below fails on that code and passes on the K-th-largest rule (K = floor(windowN / 2) + 1).
+test('#452 frame gap: a lone stall right after a launch cannot widen the bound (frames at 0 / 20 s / 50 s)', () => {
+  // The 20 s delta is the only one held. Judged as the median it made the bound 100 s, so the 30 s delta passed
+  // and a single quiet frame after a 30 s outage confirmed an exit. Held-count 1 < 9: the floor governs, a gap.
+  assert.deepEqual(observeAll([0, 20_000, 50_000]), [null, { gapMs: 20_000 }, { gapMs: 30_000 }]);
+  // Same shape with the motion alert's cadence: active at 200, 2200, 9200 (a 2 s then a 7 s delta, 2 held).
+  assert.deepEqual(observeAll([200, 2200, 9200]).slice(1), [{ gapMs: 2000 }, { gapMs: 7000 }]);
+});
+
+test('#452 frame gap: the held-count threshold is derived from windowN (K = floor(windowN / 2) + 1), not a literal 9', () => {
+  // windowN 2 -> K 2: ONE held delta says nothing, so 0 / 20 s / 50 s is still two gaps.
+  assert.deepEqual(observeAll([0, 20_000, 50_000], { windowN: 2 }).slice(1), [{ gapMs: 20_000 }, { gapMs: 30_000 }]);
+  // windowN 4 -> K 3, on a 2 s cadence: with 2 deltas held a 6 s hole is a gap, with 3 held it is not (bound 10 s).
+  // A literal 9 would call both of them gaps, a K of floor(windowN / 2) would let the first one through.
+  assert.deepEqual(observeAll([0, 2000, 4000, 10_000], { windowN: 4 }).at(-1), { gapMs: 6000 }, '2 deltas held: not enough');
+  assert.equal(observeAll([0, 2000, 4000, 6000, 12_000], { windowN: 4 }).at(-1), null, '3 deltas held: the bound is 5 x 2000');
+});
+
+test('#452 frame gap: the bound widens at exactly 9 held deltas, not 8 (windowN 16)', () => {
+  // A 2 s cadence, then a 6 s hole. 8 recorded 2 s deltas: still only the floor (a gap). 9: bound 5 x 2 s = 10 s.
+  const eight = spaced(0, 9, 2000); // 9 frames = 8 deltas, the last frame at 16000
+  assert.deepEqual(observeAll([...eight, 16_000 + 6000]).at(-1), { gapMs: 6000 }, '8 deltas held: the floor alone');
+  const nine = spaced(0, 10, 2000); // 10 frames = 9 deltas, the last frame at 18000
+  assert.equal(observeAll([...nine, 18_000 + 6000]).at(-1), null, '9 deltas held: the bound is 10 s');
+});
+
+test('#452 frame gap: the factor is exactly 5 (a 9.5 s hole and a 10 s hole in a 2 s cadence are not gaps, 10.001 s is)', () => {
+  // 9 deltas of 2 s held: bound 5 x 2000 = 10000. Factor 4 (bound 8 s) would call 9.5 s and 10 s gaps, factor 6
+  // (12 s) would let 10.001 s through, and `>=` instead of `>` would call 10 s a gap.
+  const nine = spaced(0, 10, 2000); // the last frame at 18000
+  assert.equal(observeAll([...nine, 18_000 + 9500]).at(-1), null, '9.5 s: inside 5 x 2 s');
+  assert.equal(observeAll([...nine, 18_000 + 10_000]).at(-1), null, '10 s: exactly the bound is not a gap');
+  assert.deepEqual(observeAll([...nine, 18_000 + 10_001]).at(-1), { gapMs: 10_001 }, '10.001 s: a gap');
+});
+
+test('#452 frame gap: fewer than 9 LONG deltas can never lift the bound, even with 9 held (the K-th largest, not the median of the held)', () => {
+  // One normal 200 ms delta then eight 2 s deltas: 9 held, 8 of them long. The 9th largest is the 200 ms one, so the
+  // bound stays at the floor and a 6 s hole is a gap. The lower median of the 9 held would be 2 s (bound 10 s).
+  const stream = [0, 200, ...spaced(2200, 8, 2000)]; // the last frame at 2200 + 7 x 2000 = 16200
+  assert.deepEqual(observeAll([...stream, 16_200 + 6000]).at(-1), { gapMs: 6000 });
+  // A ninth long delta makes 9 long ones: now the 9th largest is 2 s and the bound is 10 s.
+  assert.equal(observeAll([...stream, 18_200, 18_200 + 6000]).at(-1), null);
+});
+
+test('#452 frame gap: a slow camera (a 2 s burst cadence) learns its own bound after ~9 slow intervals; a real 20 s stall in it is still a gap', () => {
   // 0.5 fps delivered in 5-frame bursts, one burst every 2 s: slower than 1/1.5 s, so against the floor alone EVERY
-  // burst would be a gap and nothing could ever confirm. Cold start: the very first interval is judged against the
-  // floor (a gap, once) and is recorded; from then on the median is 2000 ms and the bound 10 s.
+  // burst would be a gap and nothing could ever confirm. Cold start: the window must hold 9 deltas before it says
+  // anything, so the first 9 burst intervals are all judged against the floor (9 gaps, at the first frame of bursts 1
+  // to 9, i.e. indexes 5, 10, ..., 45) and are recorded; from the 10th the typical interval is 2000 ms and the bound
+  // 10 s. (Before the round-1 fix the bound widened after the second burst: that is the defect, not the goal.)
   const bursts = [];
   for (let i = 0; i < 20; i += 1) for (let k = 0; k < 5; k += 1) bursts.push(i * 2000);
   const out = observeAll(bursts);
   const gaps = out.map((r, i) => (r ? i : -1)).filter((i) => i >= 0);
-  assert.deepEqual(gaps, [5], 'exactly one gap: the first burst, before the bound has anything to learn from');
+  assert.deepEqual(gaps, [5, 10, 15, 20, 25, 30, 35, 40, 45], 'nine gaps while the window learns, none after');
   // After learning: a 6 s hole is not a gap, a 20 s stall is.
   const d = createFrameGapDetector({ floorMs: FLOOR });
   for (const t of bursts) d.observe(t);
