@@ -77,9 +77,17 @@ const { OOB_LINK_SLOW_MS } = await import('../src/lib/bedTransitionRules.js');
 // No observation clock: this file is about which stream is read, not about what the taps say.
 _setObservationClockFactoryForTests(() => null);
 
+// The monotonic clock the detector and the watchdog lever read, shifted by an offset that only grows, so the one
+// case that needs a process "older than MIN_KILL_AGE_MS" (the lever refuses a younger one) need not wait 10 s
+// (the detector-watchdog-levers.test.js technique). The test's own waits use the NATIVE clock.
+const nativeNow = performance.now.bind(performance);
+let monoOffset = 0;
+performance.now = () => nativeNow() + monoOffset;
+
 after(async () => {
   await motion.stopAllMotionDetectors();
   _resetObservationClocksForTests();
+  delete performance.now; // back to Performance.prototype.now
   await mediamtx.close();
   cleanupTempDataDirs();
 });
@@ -90,7 +98,7 @@ afterEach(async () => {
 });
 
 // --- helpers ------------------------------------------------------------------------------------------------
-const realNow = () => performance.now();
+const realNow = () => nativeNow();
 async function waitFor(pred, what, capMs = 6_000) {
   const deadline = realNow() + capMs;
   while (!pred()) {
@@ -156,9 +164,10 @@ async function startOnMain(cam) {
 // frame differ from the one before it.
 const FW = 320; const FH = 180; const FRAME_BYTES = FW * FH;
 const BASE = 60; const LIT = 200;
-function paint({ bed = false, out = false }) {
+function paint({ bed = false, out = false, all = false }) {
   const f = Buffer.alloc(FRAME_BYTES, BASE);
   const fill = (x0, x1, y0, y1) => { for (let y = y0; y < y1; y++) f.fill(LIT, y * FW + x0, y * FW + x1); };
+  if (all) fill(0, FW, 0, FH); // the whole frame: what an UNZONED camera sees as motion
   if (bed) fill(0, 160, 0, 60);
   if (out) fill(160, 320, 0, 40);
   return f;
@@ -254,6 +263,17 @@ describe('#500: returning from main to the sub', { concurrency: false }, () => {
     await waitFor(() => onMain.signals.includes('SIGTERM'), 'a prompt ready sample did not switch');
   });
 
+  test('#500 R3c: a skipped tick breaks a run that was ALREADY under way, not only a fresh one', async () => {
+    fast({ stableChecks: 2 });
+    const cam = camera('r3c');
+    const onMain = await startOnMain(cam);
+    // ready (run 1), then a ready answer that takes 150 ms and overlaps three ticks (so it is discarded), then a
+    // ready. Honouring the slow one would make 2 and switch; discarding it leaves the last ready at 1.
+    subAnswers(cam.id).queue = [true, { ready: true, delayMs: 150 }, true];
+    await sleep(600);
+    assert.deepEqual(onMain.signals, [], 'a skipped tick left an existing run intact');
+  });
+
   test('#500 R4: a second return waits out the 10-minute gap (here 600 ms); the first one is not held back by it', async () => {
     fast({ stableChecks: 1, quietMs: 0, minGapMs: 600 });
     const cam = camera('r4');
@@ -323,6 +343,8 @@ describe('#500: returning from main to the sub', { concurrency: false }, () => {
     assert.equal(motion._returnTimerCountForTests(), 0);
     await waitFor(() => wedgedProc.ended, 'the stop to SIGKILL it', 5_000);
     await stopped;
+    // The return's SIGTERM, the stop's own SIGTERM, the stop's SIGKILL: no fourth signal, and no second SIGKILL timer.
+    assert.deepEqual(wedgedProc.signals, ['SIGTERM', 'SIGTERM', 'SIGKILL']);
     // (b) inside the relaunch gap.
     const b = camera('r6d');
     const onMain = await startOnMain(b);
@@ -333,6 +355,41 @@ describe('#500: returning from main to the sub', { concurrency: false }, () => {
     await sleep(700);
     assert.equal(procsFor(SUB(a.id)).length, 0, 'a stop inside the SIGTERM window did not cancel the relaunch');
     assert.equal(procsFor(SUB(b.id)).length, 0, 'a stop inside the relaunch gap did not cancel the relaunch');
+  });
+
+  test('#500 R6d: the watchdog killed it FIRST: the return check neither signals again nor leaves a timer behind', async () => {
+    fast({ stableChecks: 1, quietMs: 0, minGapMs: 0 });
+    const cam = camera('r6g');
+    wedged.add(urlOf(MAIN(cam.id))); // ignores SIGTERM, so it stays "killed but alive" for 3 s
+    const proc = await startOnMain(cam);
+    const h = motion.getMotionDetectorHealth(cam.id);
+    monoOffset += 11_000; // older than the lever's 10 s minimum
+    assert.equal(motion.restartMotionDetector(cam.id, { expectSpawn: h.spawnedMono, expectLastData: h.lastDataMono }), true,
+      'premise: the watchdog lever should kill an old, dark detector');
+    assert.deepEqual(proc.signals, ['SIGTERM']);
+    subAnswers(cam.id).dflt = true; // the sub is up and the room quiet: a return would now be due
+    await sleep(300);
+    assert.deepEqual(proc.signals, ['SIGTERM'], 'the return check signalled a process the watchdog was already killing');
+    assert.equal(linesFor('returning the motion detector from main to sub').filter((l) => l.includes(cam.name)).length, 0,
+      'it announced a switch on a process the watchdog was killing');
+    // The watchdog's kill does not clear our timer itself: the tick's own guard must, well before the 3 s exit.
+    assert.equal(motion._returnTimerCountForTests(), 0, 'the return timer outlived the watchdog kill');
+  });
+
+  test('#500 R6e: a stop() while the sub check is awaiting wins: the answer that lands afterwards does not switch', async () => {
+    fast({ stableChecks: 1, quietMs: 0, minGapMs: 0 });
+    const cam = camera('r6h');
+    const proc = await startOnMain(cam);
+    // The next check's answer is ready but takes 150 ms; stop() lands while it is in flight.
+    subAnswers(cam.id).queue = [{ ready: true, delayMs: 150 }];
+    await waitFor(() => requests.filter((r) => r === SUB(cam.id)).length >= 1 && subAnswers(cam.id).queue.length === 0, 'the slow check to start');
+    await motion.stopMotionDetector(cam.id);
+    assert.deepEqual(proc.signals, ['SIGTERM'], 'premise: only the stop signalled it');
+    await sleep(300); // the answer lands
+    assert.deepEqual(proc.signals, ['SIGTERM'], 'an answer that landed after the stop signalled the stopped process again');
+    assert.equal(linesFor('returning the motion detector from main to sub').filter((l) => l.includes(cam.name)).length, 0);
+    assert.equal(procsFor(SUB(cam.id)).length, 0);
+    assert.equal(motion._returnTimerCountForTests(), 0);
   });
 
   test('#500 R6b: a switch arms exactly ONE SIGTERM and ONE SIGKILL on a wedged process, and the watchdog lever refuses an entry that is returning', async () => {
@@ -443,6 +500,29 @@ describe('#500: returning from main to the sub', { concurrency: false }, () => {
     assert.ok(onMain.signals.includes('SIGTERM'), 'frames that are not active kept deferring the switch');
   });
 
+  test('#500 R2d: an UNZONED camera (no outside channel): whole-frame motion defers the switch too', async () => {
+    fast({ quietMs: 500, minGapMs: 0 });
+    // framediff + no zone: `outPixels` is 0, so the in-zone fraction (the whole frame) is the only channel.
+    const cam = camera('r2d');
+    const onMain = await startOnMain(cam);
+    subAnswers(cam.id).dflt = true;
+    const lastFrame = await moveFor(onMain, 900, { all: true });
+    assert.deepEqual(onMain.signals, [], 'it switched during whole-frame motion on an unzoned camera');
+    await waitFor(() => onMain.signals.includes('SIGTERM'), 'the switch once the room went quiet', 4_000);
+    assert.ok(realNow() - lastFrame >= 450, 'it did not wait for the quiet gate');
+  });
+
+  test('#500 R2e: with no active frame at all, quiet is counted from the process start, not from "forever"', async () => {
+    fast({ quietMs: 400, minGapMs: 0 });
+    const cam = camera('r2e');
+    const onMain = await startOnMain(cam);
+    const spawnedAt = realNow();
+    subAnswers(cam.id).dflt = true; // ready from the very first check; only the quiet gate can hold it back
+    await waitFor(() => onMain.signals.includes('SIGTERM'), 'the switch', 4_000);
+    assert.ok(realNow() - spawnedAt >= 350,
+      `it switched ${Math.round(realNow() - spawnedAt)} ms after the spawn: a fresh process was treated as already quiet for 400 ms`);
+  });
+
   test('#500 R2c: premise: a relaunch loses a slow-link exit that the un-relaunched tracker confirms, and SUB_QUIET_MS outlasts that window', () => {
     // Bed active for the first second, quiet, then a 12% outside burst at 45 s: oobLinkKind's SLOW link (60 s).
     const frame = (t, { crib = false, out = false }) => ({
@@ -530,6 +610,19 @@ describe('#500: the pure decisions, against the production defaults (no seam)', 
     assert.equal(motion.SUB_STABLE_CHECKS, 3);
     assert.equal(motion.SUB_QUIET_MS, 90_000);
     assert.equal(motion.SUB_SWITCH_MIN_GAP_MS, 600_000);
+  });
+
+  test('#500 R8: the timings production RUNS with are the documented ones (every behavioural case shrinks them)', () => {
+    // Literals on purpose: a value computed from the module's own constants follows a mutated one.
+    assert.deepEqual({ ...motion._productionTimingForTests() }, {
+      subGraceMs: 45_000, // the grace before settling for main (and the "~5 s" of the log line is restartDelayMs)
+      readyPollMs: 2_000,
+      restartDelayMs: 5_000,
+      recheckMs: 20_000, // the check interval KNOWN-ISSUES promises
+      stableChecks: 3,
+      quietMs: 90_000,
+      minGapMs: 600_000,
+    });
   });
 
   test('#500 R3: nextReadyRun: only a confirmed ready extends the run (not ready, unknown, no answer all reset it)', () => {

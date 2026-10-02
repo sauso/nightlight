@@ -127,6 +127,10 @@ export const SUB_STABLE_CHECKS = 3;
 // outside burst at 45 s, a relaunch at 36 s of quiet -> the exit was gone), and an exit sets the reported wake
 // time. So the room must have been quiet for longer than both, plus a margin. If either constant changes
 // this follows (motion-return-to-sub.test.js pins the inequality).
+// ⚠️ What this does NOT prevent: the new tracker also forgets the 120 s pause (OOB_COOLDOWN_MS / IB_COOLDOWN_MS)
+// after a logged exit or entry, longer than this quiet period, so a second exit or entry ~100 s after a first
+// can be recorded that an uninterrupted tracker would have suppressed (verified by running the real tracker in
+// #500's code review). A duplicate, not a lost transition; documented in KNOWN-ISSUES.
 export const SUB_QUIET_MS = OOB_LINK_SLOW_MS + OOB_CONFIRM_QUIET_MS + 24 * 1000;
 // A sub that flaps ready/not-ready must not cost a relaunch per outage blip: at most one switch per this long
 // per startMotionDetector call (a fresh start, e.g. a settings save, forgets it: a small accepted hole).
@@ -149,6 +153,10 @@ export function _setReturnTimingForTests(overrides) {
 }
 export function _resetReturnTimingForTests() {
   timing = PRODUCTION_TIMING;
+}
+// What production runs with, for a test that pins every value (the behavioural tests all shrink them).
+export function _productionTimingForTests() {
+  return PRODUCTION_TIMING;
 }
 
 // Every live return-check timer. Only so a test can see that none survives stop / exit / error / a replaced
@@ -648,7 +656,7 @@ export async function startMotionDetector(camera) {
         disarmReturnCheck(entry);
         lastSwitchMono = nowMono;
         logger.info(
-          `[detect:${path}] "${camera.name}": sub stream ${subPath} ready again (${readyRun} checks, quiet ${Math.round(quietMs / 1000)}s), returning the motion detector from main to sub (a relaunch: ~${Math.round(timing.restartDelayMs / 1000)}s gap; an open bed-transition candidate and the alert cooldown reset)`
+          `[detect:${path}] "${camera.name}": sub stream ${subPath} ready again (${readyRun} checks, quiet ${Math.round(quietMs / 1000)}s), returning the motion detector from main to sub (a relaunch: ~${Math.round(timing.restartDelayMs / 1000)}s gap; bed-transition and alert-cooldown state reset)`
         );
         // The same SIGKILL fallback stopMotionDetector and killStalledDetector use, cleared when SIGTERM works.
         const force = setTimeout(() => killIfSpawned(proc, 'SIGKILL'), FORCE_KILL_TIMEOUT_MS);

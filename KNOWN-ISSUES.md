@@ -708,7 +708,7 @@ reboot, a Wi-Fi drop, a server restart):
 
 ```
 [WARN] [detect:cam_…] "Nursery Cam": sub stream cam_…-sub not ready, reading the MAIN stream (more CPU; the motion thresholds were calibrated on the sub); will return to the sub once it is ready
-[INFO] [detect:cam_…] "Nursery Cam": sub stream cam_…-sub ready again (3 checks, quiet 95s), returning the motion detector from main to sub (a relaunch: ~5s gap; an open bed-transition candidate and the alert cooldown reset)
+[INFO] [detect:cam_…] "Nursery Cam": sub stream cam_…-sub ready again (3 checks, quiet 95s), returning the motion detector from main to sub (a relaunch: ~5s gap; bed-transition and alert-cooldown state reset)
 ```
 
 **Which stream motion detection reads:** the camera's **Low (sub) stream** when it has one and it is up,
@@ -735,7 +735,9 @@ calibrated on) and costs more CPU.
 The switch is a **normal detector relaunch** (the same one a dropped stream causes): about 5 seconds with no
 motion samples, which the sleep numbers show as "No data" for those minutes like any other gap. The bed
 transition rules start afresh (a half-seen bed exit or entry is forgotten, and so are "when the bed last
-moved" and the 2-minute pause after a logged exit or entry), and the alert cooldown resets, so a motion alert can fire again sooner than the cooldown after a
+moved" and the 2-minute pause after a logged exit or entry, so an exit or entry that happens within 2
+minutes of one logged just before the switch can be recorded where an uninterrupted detector would have
+suppressed it), and the alert cooldown resets, so a motion alert can fire again sooner than the cooldown after a
 switch (the same as every relaunch, issue #454). The detector's belief about whether the child is in bed is
 kept. The relaunch follows the same stop rules as any other: switching detection off, or disabling or
 deleting the camera, cancels it.
@@ -745,6 +747,10 @@ deleting the camera, cancels it.
   for 90 seconds (a quiet period longer than the 60 s the exit rules look back for a bed that has just moved,
   plus the 6 s they need to confirm an exit, plus a margin), so a relaunch cannot lose a bed exit. A room
   that never goes quiet (a child playing, a TV in shot) stays on the main stream, as it did before.
+- **A half-seen bed exit is not carried over if the camera stops sending frames.** An exit is confirmed by
+  the next quiet frame, so a detector that receives nothing for 90 seconds could be switched with one still
+  open. A detector that receives nothing is restarted by the detector watchdog (previous section) after 60
+  seconds anyway, which discards the same state; this has not been measured on a real stall.
 - **The numbers were chosen, not measured.** 20 s, 3 checks and 10 minutes were picked from one house's 64
   second daily camera reboot; for another install they are a hypothesis. None of them is a detection
   threshold, and none changes a number computed on a given stream.

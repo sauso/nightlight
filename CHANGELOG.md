@@ -61,8 +61,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   fell back now says so in the log (`reading the MAIN stream`) and, once the Low stream has been ready on 3
   checks 20 seconds apart **and** neither the bed nor the area outside it has moved for 90 seconds, relaunches
   itself onto the Low stream (`returning the motion detector from main to sub`), at most once per 10 minutes.
-  The switch is an ordinary detector relaunch: about 5 seconds with no motion samples, a half-seen bed exit
-  or entry and the alert cooldown start afresh, and the belief about whether the child is in bed is kept.
+  The switch is an ordinary detector relaunch: about 5 seconds with no motion samples, the bed-transition
+  rules (a half-seen exit or entry, and the 2-minute pause after a logged one) and the alert cooldown start
+  afresh, and the belief about whether the child is in bed is kept.
   The 90-second quiet period is derived from the bed-exit rules so a switch cannot lose an exit. The numbers
   are fixed, not settings, and were chosen rather than measured. A camera with no Low stream, and the sound
   detector, are unchanged. See KNOWN-ISSUES for the limits.

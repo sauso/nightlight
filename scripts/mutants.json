@@ -9195,8 +9195,8 @@
     "find": "  if (!entry || entry.watchdogKill || entry.returning) return false;",
     "replace": "  if (!entry || entry.watchdogKill) return false;",
     "expect": "killed",
-    "tests": ["motion-return-to-sub.test.js"],
-    "namePattern": "#500 R6b"
+    "tests": ["motion-return-to-sub.test.js", "process-guards.test.js"],
+    "namePattern": "#500|returning to the sub"
   },
   {
     "label": "#500 M23: a switch whose SIGTERM could not be sent stays marked returning (the check gives up)",
@@ -9226,14 +9226,77 @@
     "namePattern": "#500 R"
   },
   {
-    "label": "#500 M26: the tick's own live-guard no longer disarms (equivalent: stop, exit and error already clear the timer, and a replaced entry cannot outlive a stop)",
+    "label": "#500 M26: the tick's own live-guard no longer disarms (a watchdog kill sets watchdogKill and clears nothing, so the timer would outlive it)",
     "file": "backend/src/lib/motionDetector.js",
     "find": "        if (!live()) { disarmReturnCheck(entry); return; }\r\n        // A tick that starts while",
     "replace": "        if (!live()) { return; }\r\n        // A tick that starts while",
-    "expect": "equivalent",
+    "expect": "killed",
     "tests": ["motion-return-to-sub.test.js"],
-    "namePattern": "#500",
-    "note": "Every path that makes live() false (stop, exit, error, a replacing start) already clears the timer synchronously, so the self-clear is a backstop with no reachable trigger. Kept because a leak costs the old launch's whole closure."
+    "namePattern": "#500 R6d",
+    "note": "Was labelled equivalent in the first cut; the round-2 review showed killStalledDetector sets watchdogKill and never disarms, so only this self-clear ends the timer before the process exits."
+  },
+  {
+    "label": "#500 M28: the tick's live() guard forgets watchdogKill (a second SIGTERM and a false switch line on a process the watchdog is killing)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        detectors.get(camera.id) === entry && !entry.stopped && !entry.returning && !entry.watchdogKill;",
+    "replace": "        detectors.get(camera.id) === entry && !entry.stopped && !entry.returning;",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R6d"
+  },
+  {
+    "label": "#500 M29: no re-check after the await (an answer landing after stop() still switches)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        if (!live()) { disarmReturnCheck(entry); return; }\r\n        readyRun = skipped",
+    "replace": "        readyRun = skipped",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R6e"
+  },
+  {
+    "label": "#500 M30: a skipped tick leaves an existing run intact instead of breaking it",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        readyRun = skipped ? 0 : nextReadyRun(readyRun, status);",
+    "replace": "        readyRun = skipped ? readyRun : nextReadyRun(readyRun, status);",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R3c"
+  },
+  {
+    "label": "#500 M31: production's check interval is 2 s (READY_POLL_MS) instead of the documented 20 s",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "  recheckMs: SUB_RECHECK_MS,",
+    "replace": "  recheckMs: READY_POLL_MS,",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R8: the timings"
+  },
+  {
+    "label": "#500 M32: production's relaunch delay is 0 (the switch log still promises ~5 s)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "  restartDelayMs: RESTART_DELAY_MS,",
+    "replace": "  restartDelayMs: 0,",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R8: the timings"
+  },
+  {
+    "label": "#500 M33: quiet is counted from process start only if the room moved (a fresh process is already 'quiet forever')",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "Math.max(entry.lastActiveMono ?? 0, entry.spawnedMono)",
+    "replace": "(entry.lastActiveMono ?? 0)",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R2e"
+  },
+  {
+    "label": "#500 M34: the activity stamp is set only when the camera has an outside channel (a zone), so an unzoned camera is always quiet",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        if (anyActive) entry.lastActiveMono = performance.now();",
+    "replace": "        if (anyActive && outPixels > 0) entry.lastActiveMono = performance.now();",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R2d"
   },
   {
     "label": "#500 M27: the tick's live() guard forgets `returning` (equivalent: the switch disarms the timer itself)",
