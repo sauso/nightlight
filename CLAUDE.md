@@ -95,7 +95,7 @@ kill the mutants** — coverage measures execution; mutation testing measures di
 
 There is no root-level build — `backend/` and `frontend/` are independent npm projects. No linter is
 configured in either. `backend/` has a unit test suite (Node's built-in runner, no dependencies);
-`frontend/` has its own (Vitest + Testing Library, 850+ tests, coverage-gated in CI). End-to-end
+`frontend/` has its own (Vitest + Testing Library, coverage-gated in CI). End-to-end
 coverage lives separately in `e2e/` (Playwright, needs Docker).
 
 ```bash
