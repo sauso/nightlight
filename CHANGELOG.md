@@ -61,16 +61,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   few short noises seconds apart could average out as one long loud sound and send an alert that the same
   noises in an ordinary quiet room would not. A silent window now counts as heard and quiet, exactly like a
   reading at the room's own learned ambient level: it is stored as 0 over ambient and included in the
-  minute's sound average and spread, it dilutes the alert's 4-second average like any quiet moment, and it
-  never counts toward "no microphone". A minute of nothing but silence now writes a per-minute row (sound 0)
+  minute's sound average and spread, it dilutes the alert's average over the **Sound confirm** time (4 s by
+  default, 0–30 s) like any quiet moment, and it never counts toward "no microphone". A minute of nothing but silence now writes a per-minute row (sound 0)
   even with no movement, where before it wrote none; a stream that delivers no audio at all still stores
   nothing, so the two stay distinguishable. The `[sound]` level line keeps printing for a silent microphone
   (`peak=?`). Sleep numbers are unchanged (a minute only counts as noisy above 6 dB over ambient, and a minute
   without video is not used); the live wake check now hears a silent minute as a quiet one, as it already did
   a quiet room. No setting or threshold changed. Known limits (silence cannot teach the app a room's ambient
-  level or bring it back down, and stored per-minute sound averages from before and after this change are not
-  comparable): [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "A muted or digitally silent microphone is recorded as a
-  quiet room".
+  level, and short bursts of sound between silences may never teach it one; silence never lowers the level,
+  though a long loud sound can still be absorbed into it just after the sound stops; and stored per-minute
+  sound averages from before and after this change are not comparable): [KNOWN-ISSUES.md](KNOWN-ISSUES.md),
+  "A muted or digitally silent microphone is recorded as a quiet room".
 - **A detected wake-up after midday, or asleep time before midnight, is saved on the right day in the
   morning review.** A time in the review is dated by the clock: before 12:00 is the morning after the
   night's date, 12:00 or later the night's own evening. But the app's own times can fall on the other side

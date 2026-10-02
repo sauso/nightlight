@@ -328,12 +328,15 @@ before that fix.
 **A muted microphone still prints this line, and differs in two ways.** A microphone that delivers
 *digital silence* (every audio sample exactly zero: muted, gated, or a codec that encodes silence that way)
 gives `peak=?dB` whenever every window since the last line was silent, and `ambient=?dB` until it has
-heard about 5 seconds of real sound to learn the room from. Silence is treated as a moment exactly at the
-room's ambient level: on its own it never alerts, it is recorded as quiet (0 over ambient) in the sleep
-data, and it breaks up separate noises rather than letting them add up to an alert. Unlike real quiet, it cannot lower
-the ambient level, so `ambient=` holds still through a silent stretch; that is expected, not the freeze
-described above. Limits are in [KNOWN-ISSUES.md](../KNOWN-ISSUES.md), "A muted or digitally silent
-microphone is recorded as a quiet room".
+learned the room's level from about 5 seconds of real sound in a row (bursts of sound shorter than that,
+separated by silences longer than the **Sound confirm** time, may never teach it one). Silence is treated as
+a moment exactly at the room's ambient level: on its own it never alerts, it is recorded as quiet (0 over
+ambient) in the sleep data, and it breaks up separate noises rather than letting them add up to an alert.
+Unlike real quiet, it cannot lower the ambient level, so `ambient=` normally holds still through a silent
+stretch; that is expected, not the freeze described above. The one exception: a loud sound that had been
+over the margin for almost the 45 seconds of the table above when the silence began can still be absorbed a
+moment into the silence, raising `ambient=`. Limits are in [KNOWN-ISSUES.md](../KNOWN-ISSUES.md), "A muted or
+digitally silent microphone is recorded as a quiet room".
 
 This line reports what the sound detector *decided from*; a separate `[obs]` line every 15 minutes reports
 what it actually *received*: how much of the time was covered, gaps and restarts, and sound that arrived

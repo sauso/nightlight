@@ -148,8 +148,9 @@ test('KNOWN LIMIT: a stream that is loud for MOST of the seed still seeds high',
   // silence about a limit is the thing this repo's rules forbid. Bounded ONLY BY A REAL QUIET FLOOR: the
   // EMA drags the floor back down once the room quietens to a measurable, non-zero level, which is why
   // it is a limit and not a defect. ⚠️ Digital silence (an all-zero window) does NOT drag it down: since
-  // #453 a silent window is a reading AT the ambient, which holds the floor exactly where it is. See the
-  // #453 KNOWN LIMIT test below for the silent-room version of this limit.
+  // #453 a silent window is a reading AT the ambient, whose tracking step is exactly zero, so silence never
+  // lowers the floor (it can still RAISE it, through the ordinary 45 s absorb of a sound that was loud just
+  // before: see "#453 R11/R18"). See the #453 KNOWN LIMIT test below for the silent-room version of this limit.
   const a = analyser();
   const rows = drive(a, [...rep(15, -20), ...rep(10, QUIET)]);
   assert.equal(rows[SEED_WINDOWS - 1].baseline, -20);
@@ -279,6 +280,330 @@ test('#453: a silent window is indistinguishable from a reading AT THE CURRENT A
   assert.ok(seen.silentInBand > 5, `silent windows inside the dead band: ${seen.silentInBand}`);
 });
 
+// ---------------------------------------------------------------------------------------------
+// #453 fix round 1: the equivalence above, made to bite
+// ---------------------------------------------------------------------------------------------
+// ⚠️ FOUND BY THE CODE REVIEW (Opus, 2026-10-02) AS SURVIVING MUTANTS: the fixture above visits every rule,
+// but never at the moments where silence alone decides a branch, so seven mutants that special-case silence
+// survived the whole 2,085-test suite: the staleness reset skipped for silence (R9, the 2026-09-02 defect
+// re-opened through silence after an ordinary ffmpeg restart), silence not resetting `loudSince` (R5) or
+// `frozenSince` (R13), not starting `loudSince` (R14), never absorbing (R11), keeping the trailing window
+// across an absorb (R18), never alerting (R12). The crafted cases below are the review's own distinguishing
+// inputs (re-derived here); the seeded differential after them is the general net.
+
+const SEEDING_SILENT = { baseline: null, over: null, confirmed: false, recordDb: 0, wouldAlert: false, silent: true };
+const RESULT_FIELDS = ['baseline', 'over', 'confirmed', 'recordDb', 'wouldAlert'];
+
+/**
+ * Drive two analysers through one history: `a` hears -Infinity for every silent window (`null`), `b` hears
+ * its own current baseline. Every field but `silent` must agree on every reading (while `b` is still seeding
+ * there is no ambient to stand in for, so a silent window must instead be exactly "no reading" for the state:
+ * `b` is not pushed and `a` must return SEEDING_SILENT). Returns `a`'s rows. `gaps[i]` adds ms before reading i.
+ */
+function silentVsAmbient(levels, { opts = {}, gaps = {}, start = T0 } = {}) {
+  const a = analyser(opts);
+  const b = analyser(opts);
+  let t = start;
+  return levels.map((lvl, i) => {
+    t += gaps[i] ?? 0;
+    const silent = lvl === null;
+    let ra;
+    if (silent && b.baseline === null) {
+      ra = a.push(-Infinity, t);
+      assert.deepEqual(ra, SEEDING_SILENT, `reading ${i}: a silent window while seeding`);
+    } else {
+      ra = a.push(silent ? -Infinity : lvl, t);
+      const rb = b.push(silent ? b.baseline : lvl, t);
+      for (const f of RESULT_FIELDS) {
+        assert.ok(Object.is(ra[f], rb[f]), `reading ${i} (${silent ? 'silent' : lvl}) ${f}: silent analyser ${ra[f]}, at-ambient ${rb[f]}`);
+      }
+      assert.equal(ra.silent, silent);
+    }
+    const row = { i, t, lvl, ...ra };
+    t += READING_MS;
+    return row;
+  });
+}
+const isStep = (rows, i) => i > 0 && rows[i].baseline - rows[i - 1].baseline > 1; // an absorb, never an EMA step
+
+test('#453 R9: digital silence as the FIRST window after an outage still drops the stale trailing window', () => {
+  // The 2026-09-02 staleness defect (see `staleMs` in the source), arriving through silence: 20 s of a cry
+  // above the margin, a 30 s hole in the stream (the routine ffmpeg restart), then the room is digitally
+  // silent. The silent window must clear the stale window exactly as an audible one does. With the reset
+  // skipped for silence, that first silent window read ~13 dB over against the stale cry, and the cry was
+  // absorbed a few readings later (the floor jumped to ~-45.7 in a silent room).
+  const levels = [...rep((START - T0) / READING_MS, QUIET), ...rep(secs(20), QUIET + 15), ...rep(secs(10), null)];
+  const back = (START - T0) / READING_MS + secs(20); // the first reading after the hole
+  const rows = silentVsAmbient(levels, { gaps: { [back]: 30000 } });
+  const floor = rows[back - 1].baseline;
+  assert.equal(rows[back].confirmed, false, 'the stale window must be discarded, not reused');
+  assert.equal(rows[back].over, 0, 'a silent window alone in a fresh window is exactly at the ambient');
+  for (let i = back; i < rows.length; i++) assert.equal(rows[i].baseline, floor, `the floor moved at reading ${i}`);
+});
+
+test('#453 R5: a silent window that drops the trailing average below the margin restarts the 45 s absorb clock', () => {
+  // A source just over the margin with a silent window every 4 s, each followed by a louder one. The first
+  // silent window lands one reading after the average first crosses the margin and dips it back under; the
+  // loud window after it lifts it straight back over. That dip restarts `loudSince`, as a quiet reading does,
+  // so the absorb comes exactly 45 s after the SECOND crossing (49.2 s in); with silence keeping `loudSince`
+  // it came 45 s after the first (48.8 s in: floor -47.7 at that reading instead of -58.8).
+  const cycle = [null, QUIET + 23.3, ...rep(18, QUIET + 12.3)];
+  const levels = [...rep((START - T0) / READING_MS, QUIET), ...rep(20, QUIET + 12.3), ...Array.from({ length: 20 }, () => cycle).flat()];
+  const rows = silentVsAmbient(levels);
+  let runStart = null;
+  let absorbs = 0;
+  let silentDips = 0;
+  rows.forEach((r, i) => {
+    if (r.t < START) return;
+    if (isStep(rows, i)) {
+      absorbs++;
+      assert.equal(r.t - runStart, 45000, `absorbed ${r.t - runStart} ms after the current above-margin run began`);
+      runStart = null;
+      return;
+    }
+    if (r.confirmed && r.over >= MARGIN) runStart ??= r.t;
+    else {
+      if (r.lvl === null && runStart !== null) silentDips++;
+      runStart = null;
+    }
+  });
+  assert.equal(absorbs, 1, 'the fixture must reach an absorb');
+  assert.ok(silentDips >= 1, `silent windows that interrupted an above-margin run: ${silentDips}`);
+  assert.ok(Math.abs(rows.find((r) => r.t - START >= 48800).baseline - (QUIET + 1.18)) < 0.1, 'not yet absorbed at 48.8 s');
+});
+
+test('#453 R13: a silent window that drops the average below half the margin restarts the dead-band freeze clock', () => {
+  // A source in the dead band (+6.7 over a floor that froze at ~-58.8) where every silent window dips the
+  // trailing average below half the margin and the louder window after it lifts it straight back. Each dip
+  // is a below-band reading, which spends the freeze clock exactly as a quiet reading AT the ambient would
+  // (its EMA step is zero), so the 5-minute escape never comes: the floor holds for the whole 8.6 minutes.
+  // With silence keeping `frozenSince`, the escape came 302.6 s in.
+  // ⚠️ STATED, NOT HIDDEN (KNOWN-ISSUES.md, #453 limits): this is the one shape where silence holds the
+  // freeze that the 2026-09-02 escape exists to end. dev e9e5d83, where silence was invisible, learned this
+  // source (floor -52.9). It needs EVERY silent window to be followed at once by a louder one (a steadier
+  // source after a silent dip makes audible below-band readings, which move the floor and escape normally).
+  const cycle = [null, QUIET + 14.7, ...rep(17, QUIET + 6.7)];
+  const levels = [...rep((START - T0) / READING_MS, QUIET), ...rep(20, QUIET + 10)];
+  while (levels.length < (START - T0) / READING_MS + 20 + secs(8.6 * 60)) levels.push(...cycle);
+  const rows = silentVsAmbient(levels);
+  const from = (START - T0) / READING_MS + 20;
+  const held = rows[from].baseline;
+  for (let i = from; i < rows.length; i++) assert.equal(rows[i].baseline, held, `the floor moved at reading ${i}`);
+  const dips = rows.slice(from).filter((r) => r.lvl === null && r.over < MARGIN * 0.5).length;
+  assert.ok(dips > 100, `silent windows below half the margin: ${dips}`);
+  assert.ok(rows.slice(from).every((r) => r.lvl === null || (r.over >= MARGIN * 0.5 && r.over < MARGIN)), 'every audible reading is in the band');
+});
+
+test('#453 R15: a silent window that lifts the average over the margin starts the dead-band freeze clock', () => {
+  // The rarest shape: silence RAISES the trailing average when the reading it pushes out sat below the
+  // floor. Sensitivity 100 (margin 4 dB) and the minimum 3-window average make it reachable: a quiet dip,
+  // two loud readings, then a silent window whose average (5.3) crosses the margin from 1.4. The freeze clock
+  // starts on THAT reading, as it would on a reading at the ambient, so the escape lands exactly 5 minutes
+  // after it (with silence not starting the clock, one reading later).
+  const opts = { margin: marginDb(100), trailN: 3 };
+  const levels = [...rep((START - T0) / READING_MS, QUIET), QUIET - 12, QUIET + 8, QUIET + 8, null, ...rep(2000, QUIET + 3.5)];
+  const rows = silentVsAmbient(levels, { opts });
+  const s = (START - T0) / READING_MS + 3;
+  assert.equal(rows[s].lvl, null);
+  assert.ok(rows[s - 1].over < 2 && rows[s].confirmed && rows[s].over >= 4, `the silent window crosses the margin: ${rows[s - 1].over} -> ${rows[s].over}`);
+  const move = rows.findIndex((r, i) => i > s && r.baseline !== rows[i - 1].baseline);
+  assert.ok(rows.slice(s + 1, move).every((r) => r.over >= 2 && r.over < 4), 'held in the band until the escape');
+  assert.equal(rows[move].t - rows[s].t, DEAD_BAND_MAX_MS, 'the escape counts from the silent window');
+});
+
+test('#453 R11/R18: the 45 s absorb can land on a silent window, and empties the trailing window as any absorb does', () => {
+  // A +30 cry for 46 s, then silence: for a few readings the trailing average still holds the cry, and the
+  // absorb falls due 0.6 s into the silence. It must fire there (as on a reading at the ambient) and empty
+  // the window. Consequence, documented in KNOWN-ISSUES.md: the floor is now the cry's level, so a +20 cry
+  // after the silence is NOT alerted. dev e9e5d83 alerted it: there the silence was a hole longer than the
+  // trailing window, the staleness reset dropped the 44.4 s run, and nothing was absorbed.
+  const cryStart = (START - T0) / READING_MS;
+  const levels = [...rep(cryStart, QUIET), ...rep(secs(46), QUIET + 30), ...rep(secs(10), null), ...rep(secs(30), QUIET + 20)];
+  const rows = silentVsAmbient(levels);
+  const absorbAt = rows.findIndex((r, i) => isStep(rows, i));
+  assert.equal(rows[absorbAt].lvl, null, 'the absorb lands on a silent window');
+  assert.equal(rows[absorbAt].t - rows[cryStart + secs(46)].t, 600, '0.6 s into the silence');
+  assert.ok(rows[absorbAt].baseline > QUIET + 20, `the floor jumped to the cry: ${rows[absorbAt].baseline}`);
+  assert.equal(rows[absorbAt + 1].confirmed, false, 'the trailing window was emptied');
+  assert.equal(rows[absorbAt + 1].over, 0);
+  assert.equal(rows.slice(cryStart + secs(56)).filter((r) => r.wouldAlert).length, 0, 'the later +20 cry is under the new floor');
+});
+
+test('#453 R12: the alert can fire ON a silent window', () => {
+  // A +15 source with every 5th window silent and no alert sent yet (no cooldown running): the trailing
+  // average first reaches the margin on a silent window, and that window is alert-eligible, as a reading at
+  // the ambient would be. With silence never alerting, the alert came one window later.
+  const levels = [...rep((START - T0) / READING_MS, QUIET), ...Array.from({ length: 800 }, (_, i) => (i % 5 === 4 ? null : QUIET + 15))];
+  const rows = silentVsAmbient(levels);
+  const first = rows.findIndex((r) => r.wouldAlert);
+  assert.equal(rows[first].lvl, null, 'the first alert-eligible reading is a silent window');
+  assert.ok(rows[first - 1].over < MARGIN && rows[first].over >= MARGIN);
+});
+
+// A small, fast, deterministic PRNG (mulberry32), so the differential below is the same run every time and a
+// failure names the seed that reproduces it.
+function mulberry32(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let x = Math.imul(s ^ (s >>> 15), 1 | s);
+    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * One random stream through two analysers, as in `silentVsAmbient` but generated, with random settings
+ * (margin, confirm window, cooldown), random holes in the stream (mostly longer than the trailing window,
+ * some shorter, some backward clock steps), alerts marked sent or suppressed at random (quiet hours), and
+ * silent windows deliberately placed where silence alone can decide a branch: the first window after a hole,
+ * the reading the average crosses the margin on, the seconds around a due absorb, and a louder window straight
+ * after a silent one. Returns null, or what diverged.
+ */
+function differentialStream(seed, reach) {
+  const rnd = mulberry32(seed);
+  const between = (lo, hi) => lo + rnd() * (hi - lo);
+  const chance = (p) => rnd() < p;
+  const confirmS = chance(0.5) ? 4 : Math.floor(between(0, 31)); // the Sound confirm setting, 0-30 s
+  const trailN = Math.max(3, Math.round((confirmS * 1000) / READING_MS)); // as soundDetector.js derives it
+  const margin = marginDb(chance(0.4) ? 50 : 1 + Math.floor(rnd() * 100));
+  const cooldownMs = 1000 * (chance(0.5) ? 120 : 1 + Math.floor(rnd() * 600));
+  const staleMs = trailN * READING_MS;
+  const opts = { margin, trailN, cooldownMs };
+  const a = createSoundAnalyser(opts);
+  const b = createSoundAnalyser(opts);
+  let t = T0 + Math.floor(rnd() * 86_400_000);
+  const floor = between(-75, -35);
+  const total = 400 + Math.floor(rnd() * (chance(0.15) ? 3000 : 1200));
+  let n = 0;
+  let loudFrom = null;
+  let prev = null;
+  let afterHole = false;
+  let lastSilent = false;
+  const where = () => `seed ${seed}, reading ${n}, ${JSON.stringify(opts)}`;
+
+  function step(level) {
+    const silent = level === null;
+    if (silent && b.baseline === null) {
+      const ra = a.push(-Infinity, t);
+      for (const f of RESULT_FIELDS) if (!Object.is(ra[f], SEEDING_SILENT[f])) return `${where()}: seeding silent ${f} ${ra[f]}`;
+      return a.baseline === null ? null : `${where()}: silence seeded the ambient`;
+    }
+    const before = b.baseline;
+    const ra = a.push(silent ? -Infinity : level, t);
+    const rb = b.push(silent ? b.baseline : level, t);
+    for (const f of RESULT_FIELDS) {
+      if (!Object.is(ra[f], rb[f])) return `${where()} (${silent ? 'silent' : level}): ${f} silent analyser ${ra[f]}, at-ambient ${rb[f]}`;
+    }
+    if (ra.silent !== silent) return `${where()}: silent flag`;
+    const absorbed = before !== null && rb.baseline - before > 0.5 && rb.over >= margin;
+    if (silent) {
+      if (rb.confirmed && rb.over >= margin) reach.silentAboveMargin++;
+      if (absorbed) reach.silentAbsorbs++;
+      if (rb.wouldAlert) reach.silentAlerts++;
+      if (afterHole) reach.silentAfterHole++;
+    }
+    if (absorbed) loudFrom = null;
+    else if (rb.confirmed && rb.over >= margin) loudFrom ??= t;
+    else loudFrom = null;
+    if (rb.wouldAlert && chance(0.7)) {
+      // The caller marks an alert only when one really went out: both analysers, or neither.
+      a.markAlerted(t);
+      b.markAlerted(t);
+    }
+    prev = rb;
+    return null;
+  }
+
+  function target(level) {
+    if (afterHole && chance(0.6)) return null;
+    if (prev && prev.confirmed && prev.over >= margin * 0.9 && loudFrom === null && chance(0.4)) return null;
+    if (loudFrom !== null && t - loudFrom >= 43_000 && t - loudFrom <= 47_000 && chance(0.5)) return null;
+    return level;
+  }
+
+  while (n < total) {
+    const base = b.baseline ?? floor;
+    const kind = rnd();
+    let len;
+    let gen;
+    let silentP = 0;
+    if (kind < 0.18) {
+      len = 10 + Math.floor(rnd() * 300); // quiet, around the floor
+      const o = between(-3, 2);
+      gen = () => base + o + between(-1, 1);
+      silentP = between(0, 0.3);
+    } else if (kind < 0.40) {
+      len = 5 + Math.floor(rnd() * 300); // a loud burst over the margin, with quiet dips below the floor
+      const o = margin + between(-2, 25);
+      gen = () => (chance(0.05) ? base - 25 : base + o);
+      silentP = between(0, 0.4);
+    } else if (kind < 0.52) {
+      len = 150 + Math.floor(rnd() * 600); // hovering at the margin, with spikes
+      const o = margin + between(-0.5, 2.5);
+      const sp = between(3, 12);
+      gen = () => (chance(0.05) ? base + o + sp : base + o);
+      silentP = between(0.03, 0.2);
+    } else if (kind < 0.64) {
+      len = 100 + Math.floor(rnd() * 1700); // in the dead band, up to ~6 minutes
+      const o = margin * between(0.5, 1);
+      const sp = between(3, 10);
+      gen = () => {
+        const r = rnd();
+        return r < 0.03 ? base - 20 : r < 0.08 ? base + o + sp : base + o;
+      };
+      silentP = between(0, 0.2);
+    } else if (kind < 0.72) {
+      len = 20 + Math.floor(rnd() * 300); // under half the margin
+      const o = margin * between(0, 0.5);
+      gen = () => base + o;
+      silentP = between(0, 0.3);
+    } else if (kind < 0.86) {
+      len = 1 + Math.floor(rnd() * 400); // a run of silence
+      gen = () => null;
+    } else {
+      const r = rnd(); // a hole in the stream
+      if (r < 0.7) t += staleMs + 1 + Math.floor(rnd() * 60_000);
+      else if (r < 0.85) t += Math.floor(rnd() * staleMs);
+      else t -= Math.floor(rnd() * 120_000); // the wall clock stepped back
+      afterHole = true;
+      reach.holes++;
+      continue;
+    }
+    for (let k = 0; k < len && n < total; k++, n++) {
+      let level = gen();
+      if (level !== null && chance(silentP)) level = null;
+      level = target(level);
+      if (level !== null && lastSilent && chance(0.3)) level += margin * between(0.5, 1.5);
+      if (level !== null) level = Math.min(0, level); // 0 dBFS is full scale: nothing real is louder
+      lastSilent = level === null;
+      const err = step(level);
+      if (err) return err;
+      afterHole = false;
+      t += 190 + Math.floor(rnd() * 26); // a jittery cadence, never grid-aligned
+    }
+  }
+  return null;
+}
+
+test('#453: SEEDED DIFFERENTIAL — over 2,000 random streams a silent window is exactly a reading at the current ambient', () => {
+  // The general net under the crafted cases above. Measured against the review's mutants (2,000 seeds): it
+  // kills the staleness skip (R9) on ~400 seeds, R14 on ~200, R12 on ~135, the absorb mutants (R11/R18) on
+  // ~70 and R5 on ~15. It does NOT reach R13/R15 (they need a dead-band hold of 5 minutes in a precise shape),
+  // which is why those two have crafted cases. Silence skipping the EMA step is EQUIVALENT (the step is exactly
+  // zero at the ambient) and survives by construction. ~1 s.
+  const reach = { silentAboveMargin: 0, silentAbsorbs: 0, silentAlerts: 0, silentAfterHole: 0, holes: 0 };
+  for (let seed = 1; seed <= 2000; seed++) {
+    const err = differentialStream(seed, reach);
+    if (err) assert.fail(`diverged: ${err}`);
+  }
+  // Not vacuous: the moments that matter were really reached, many times.
+  assert.ok(reach.silentAfterHole > 300, `silent first windows after a hole: ${reach.silentAfterHole}`);
+  assert.ok(reach.silentAboveMargin > 5000, `silent windows above the margin: ${reach.silentAboveMargin}`);
+  assert.ok(reach.silentAlerts > 50, `silent windows that were alert-eligible: ${reach.silentAlerts}`);
+  assert.ok(reach.silentAbsorbs > 20, `absorbs that landed on a silent window: ${reach.silentAbsorbs}`);
+});
+
 test('#453 C1a: separate sounds with digital silence between them do NOT add up to an alert', () => {
   // ★ THE REPRO THAT DECIDED THE DESIGN (plan v2, Opus finding 1, verified by running it). Settled at -60,
   // then a -45 window every 2 s and digital silence in between. On dev e9e5d83 the silence never reached
@@ -296,9 +621,10 @@ test('#453 C1a: separate sounds with digital silence between them do NOT add up 
   // The floor moved ONLY by the ordinary EMA: each of the 40 pulses closes BASELINE_ALPHA of its gap, and
   // each silent window, a reading exactly at the ambient, moves it by exactly zero. So it lands on the
   // closed form, not on -60 and not on -45. ⚠️ Stated, not hidden: nothing pulls it back DOWN between the
-  // pulses (a silent window holds the floor), so over a long run of sparse sub-margin pulses with silence
-  // between them the floor creeps toward the pulse level at the EMA's ordinary rate. That is exactly what
-  // a room whose quiet readings sat precisely at the ambient would do (KNOWN-ISSUES.md, #453 limits).
+  // pulses (a silent window moves it by exactly zero here), so over a long run of sparse sub-margin pulses
+  // with silence between them the floor creeps toward the pulse level at the EMA's ordinary rate (10 min of
+  // +8 dB pulses every 2 s: -60 -> -52.4). That is exactly what a room whose quiet readings sat precisely
+  // at the ambient would do (KNOWN-ISSUES.md, #453 limits).
   const expected = QUIET + 15 - 15 * (1 - BASELINE_ALPHA) ** 40;
   assert.ok(Math.abs(a.baseline - expected) < 1e-9, `floor ${a.baseline}, expected the EMA-only ${expected}`);
 
@@ -394,9 +720,37 @@ test('#453 KNOWN LIMIT: a detector that has only ever heard silence has no ambie
   assert.equal(cry[SEED_WINDOWS - 1].baseline, QUIET + 40, 'seeded at the cry');
   assert.equal(cry.filter((r) => r.wouldAlert).length, 0, 'so that first cry is not alerted');
   const after = drive(a, rep(secs(10 * 60), -Infinity), cry[cry.length - 1].t + READING_MS);
-  assert.equal(after[after.length - 1].baseline, QUIET + 40, 'silence holds the ambient where it is');
+  assert.equal(after[after.length - 1].baseline, QUIET + 40, 'silence after a sound already AT the ambient moves nothing');
   const quietAgain = drive(a, rep(secs(60), QUIET), after[after.length - 1].t + READING_MS);
   assert.ok(quietAgain[quietAgain.length - 1].baseline < QUIET + 40 - 10, 'a real quiet floor still pulls it down');
+});
+
+test('#453 KNOWN LIMIT: bursts shorter than the seed, with silence longer than the confirm window between them, never teach an ambient', () => {
+  // KNOWN-ISSUES.md states this with these numbers (fix round 1, review finding: the docs said "the first ~5 s
+  // of real sound become the ambient", which is not true here). While seeding, a silent window does not
+  // advance the stream clock, so a silence longer than the trailing window (the Sound confirm setting) is a
+  // hole and drops the partial seed; 4 s bursts never reach the 25 windows. A cold start, 9 minutes of 4 s
+  // bursts at -30 dBFS with 5 s of silence between: no ambient, no alert, the loud windows stored as nothing
+  // and the 1,500 silent ones as 0, so those minutes read quiet. dev e9e5d83 never learned an ambient from
+  // this stream either (its silences were outages); what is new is that the silent windows are now stored.
+  const a = analyser();
+  const levels = [];
+  while (levels.length < secs(9 * 60)) levels.push(...rep(secs(4), -30), ...rep(secs(5), -Infinity));
+  levels.length = secs(9 * 60);
+  const rows = drive(a, levels);
+  assert.equal(a.baseline, null, 'no ambient was ever learned');
+  assert.equal(rows.filter((r) => r.wouldAlert).length, 0);
+  assert.ok(rows.every((r, i) => r.recordDb === (levels[i] === -Infinity ? 0 : null)), 'silent windows store 0, loud ones nothing');
+  assert.equal(rows.filter((r) => r.recordDb === 0).length, 1500);
+});
+
+test('#453 KNOWN LIMIT: faint sounds separated by silence creep the ambient up at the ordinary rate (10 min of +8 dB every 2 s: -60 -> -52.4)', () => {
+  // The number KNOWN-ISSUES.md quotes. Each +8 reading is under half the margin, so the ordinary tracking
+  // closes 1% (BASELINE_ALPHA) of its gap; each silent window between them moves the floor by exactly zero
+  // where a real quieter reading would pull it back down.
+  const a = settled();
+  drive(a, Array.from({ length: secs(10 * 60) }, (_, i) => (i % 10 === 0 ? QUIET + 8 : -Infinity)), START);
+  assert.ok(Math.abs(a.baseline - -52.39) < 0.01, `floor after 10 min: ${a.baseline}`);
 });
 
 // ---------------------------------------------------------------------------------------------

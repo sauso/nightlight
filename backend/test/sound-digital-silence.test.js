@@ -9,7 +9,8 @@
 //   C2b  a leg that received only zero PCM and exited within 10 s is not a "does this camera have a
 //        microphone?" strike, while one that received no bytes at all still is (the control);
 //   C3b  a minute of nothing but silence reaches the live wake watcher exactly as a quiet audible minute with
-//        no motion already did before #453: the same call, the same watcher state.
+//        no motion already did before #453: the same call, the same watcher state;
+//   D2   (fix round 1) the 15-second level line's `maxAvgOver` counts silent windows too.
 // The other half of C2c (a watchdog kill is never a strike) is #369's C14a, in detector-watchdog-levers.test.js,
 // and is not duplicated here.
 //
@@ -53,6 +54,7 @@ const { flushActivity, onMinuteFlushed, _resetActivityTrackerForTests } = await 
 const { startSoundDetector, stopSoundDetector } = await import('../src/lib/soundDetector.js');
 const { _setObservationClockFactoryForTests } = await import('../src/lib/observationClock.js');
 const { handleMinute, _state } = await import('../src/lib/wakeWatcher.js');
+const { createSoundAnalyser, marginDb } = await import('../src/lib/soundBaseline.js');
 
 // The receipt time the stub clock hands out: the mocked Date, unless a test plants another (C2's minute boundary).
 let plantedWall = null;
@@ -181,6 +183,36 @@ test('#453 C2: a stream of nothing but digital silence is a quiet room from its 
     linesFor(`[sound] "${cam.name}" ambient=`).map(stripTime),
     rep(4, `[INFO] [sound] "${cam.name}" ambient=?dB peak=?dB maxAvgOver=? (fires at +11)`)
   );
+});
+
+test('#453 D2: a level line whose 15 s were all silent still reports the trailing average its silent windows saw', async (t) => {
+  // Found by the code review (2026-10-02) as a surviving mutant: leaving silent windows out of the level
+  // line's `maxAvgOver` changed nothing any test looked at. It matters right after a sound: the confirm
+  // window still holds it while the room has gone silent, and that average is what the line is for.
+  t.mock.timers.enable({ apis: ['Date'], now: T0 });
+  logger.clear();
+  const cam = soundCam('d2-level');
+  const proc = await start(cam);
+  // 0-12.8 s ambient (the first 25 windows seed the floor), 13.0-14.8 s a burst, then silence from 15.0 s
+  // (k = 75) to 30.0 s (k = 150). Line 1 is written at k = 75, BEFORE that window is pushed; line 2 at
+  // k = 150, so it covers exactly the 75 silent pushes 75-149 and no audible one.
+  const windows = [...rep(65, AMBIENT), ...rep(10, LOUD), ...rep(76, SILENT)];
+  deliver(t, proc, windows, T0);
+  await stopSoundDetector(cam.id);
+  await settle();
+  // What line 2 must say, from the analyser fed the same windows at the same times: the largest confirmed
+  // trailing average among pushes 75-149, and the floor as it stood before push 150.
+  const a = createSoundAnalyser({ margin: marginDb(50), trailN: 20, cooldownMs: 120_000, readingMs: STEP_MS });
+  let max = -Infinity;
+  windows.slice(0, 150).forEach((w, k) => {
+    const r = a.push(levelOf(w), T0 + k * STEP_MS);
+    if (k >= 75 && r.confirmed && r.over > max) max = r.over;
+  });
+  assert.ok(max > 1, `the silent windows' trailing average still held the burst: ${max}`);
+  const lines = linesFor(`[sound] "${cam.name}" ambient=`).map(stripTime);
+  assert.equal(lines.length, 2);
+  assert.equal(lines[1], `[INFO] [sound] "${cam.name}" ambient=${a.baseline.toFixed(1)}dB peak=?dB maxAvgOver=+${max.toFixed(1)} (fires at +11)`);
+  assert.deepEqual(rowsFor('detection_events', cam.id), [], 'a burst that never fills the confirm window is not an alert');
 });
 
 test('#453 C2 (guard): a stream that delivers NO bytes stores no sound row at all, so a missing stream is still told apart', async (t) => {

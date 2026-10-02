@@ -516,7 +516,8 @@ the Camera history for a `[detector-watchdog]` restart (next section) around tha
 **What you see:** for a camera whose microphone delivers *digital silence* (every audio sample exactly zero),
 the per-minute sound history (`activity_samples`) shows those minutes as quiet, 0 dB over ambient, instead of
 having no sound at all, and the `[sound]` level line keeps printing every 15 seconds with `peak=?dB` (and
-`ambient=?dB` until the camera has heard some real sound). Silence on its own never sets off a sound alert.
+`ambient=?dB` until the camera has learned the room's level from real sound: see the first limit below).
+Silence on its own never sets off a sound alert.
 
 **Why:** each 200 ms window of audio is turned into a loudness level. A window of exact zeros has no
 loudness at all (minus infinity in dB), and until issue #453 the sound detector threw such a window away as
@@ -533,8 +534,8 @@ moment of perfect quiet. No setting or threshold was added or changed.
 | | Digital silence (every sample 0) | A quiet room (real, faint sound) | No audio arriving at all |
 |---|---|---|---|
 | Per-minute history | Sound 0, every window counted; a row is written even with no movement | A small excursion around 0, every window counted | Nothing from sound (no row unless there was movement) |
-| Alerts | Never on its own (it counts as quiet in the 4-second average) | When a noise rises past the margin | Never |
-| Learns the room's ambient level | **No** (there is nothing to learn from) | Yes, continuously | No |
+| Alerts | Never on its own (it counts as quiet in the alert's average over the **Sound confirm** time: 4 s by default, 0–30 s) | When a noise rises past the margin | Never |
+| Changes the room's ambient level | **No**: silence never lowers it and never teaches it a level (one bounded exception: a long loud sound that ends just before the 45-second rule can still be absorbed a moment into the silence, below) | Yes, continuously | No |
 | A quick reconnect ("does this camera have a microphone?") | Not counted | Not counted | Counted; three in a row stop sound detection |
 | Sleep numbers | Quiet, like a quiet room | Quiet unless a noise passes 6 dB over ambient | Decided by the video alone |
 
@@ -542,17 +543,48 @@ In every column a minute with no video is unknown in the sleep numbers, whatever
 section).
 
 **Limits, stated rather than hidden:**
-- **Silence cannot teach the app the room's ambient level.** A detector that has only ever heard silence has
-  nothing to measure against, so the first ~5 seconds of real sound it hears become the ambient level. If
-  that first sound is a sustained cry (a microphone un-muted into a crying room), the cry *is* the ambient
-  and that first cry is not alerted. Fixing it would mean guessing a floor level, which was rejected: a
-  guessed floor makes every ordinary household noise after a silent spell read as loud.
-- **Silence holds the ambient level where it is; it never brings it down.** Only real, quieter sound lowers
-  it. And sounds heard between stretches of silence can raise it slowly through the ordinary ~20-second
-  tracking: a sound too faint to alert, repeated with silence between, creeps the ambient toward its own
-  level, as it would in a room whose quiet moments sat exactly at the ambient.
-- **While the ambient is still being learned** (about the first 5 seconds after a start with no learned
-  level), an audible window records nothing, but a silent one records 0.
+- **Silence cannot teach the app the room's ambient level, and can stop it learning one.** The level is
+  learned from 25 windows (about 5 seconds) of real sound, taken as their median. A detector that has only
+  ever heard silence has nothing to measure against, so its first 25 real windows become the ambient level:
+  if that first sound is a sustained cry (a microphone un-muted into a crying room), the cry *is* the
+  ambient and that first cry is not alerted. And while no level has been learned, a silence longer than the
+  **Sound confirm** time (4 s by default; 0.6 s at the shortest setting) is treated like a break in the
+  stream and starts the learning over, so real sound that only ever comes in bursts shorter than ~5 seconds,
+  with longer silences between, may never teach it a level at all: measured in a replay, a cold start
+  followed by 9 minutes of 4-second bursts at -30 dBFS with 5 seconds of silence between learned nothing and
+  sent no alert. Until a level exists, the loud windows are not stored (there is nothing to measure them
+  against) and the silent ones are stored as 0, so those minutes read as quiet ("heard, nothing above
+  ambient") although they held loud sound. No sleep number or alert moves because of it (a minute counts as
+  noisy only above 6 dB over ambient), and the same stream never taught a level before this change either
+  (its silences were breaks in the stream then too); what is new is that its silent windows are stored.
+  Storing 0 for silence before any level exists, rather than nothing, is the current design. Fixing the
+  learning would mean guessing a floor level, which was rejected: a guessed floor makes every ordinary
+  household noise after a silent spell read as loud.
+- **Silence never lowers the ambient level.** A silent window counts as a moment exactly at the ambient, so
+  the ordinary ~20-second tracking moves the level by exactly nothing on it; only real, quieter sound lowers
+  it. Sounds heard between stretches of silence can therefore only raise it: each sound under half the
+  margin closes about 1% of the gap to its own level, as any reading does, and nothing pulls it back down in
+  between. Measured in a replay: a sound 8 dB over the ambient every 2 seconds, with silence between, for 10
+  minutes, moved the ambient from -60 to -52.4 dBFS.
+- **A long loud sound can still be absorbed just after it stops.** A sound that stays over the alert margin
+  for 45 seconds is folded into the ambient level (the 45-second rule, docs/notifications.md). For a moment
+  after a loud sound stops, the alert's average over the Sound confirm time still holds it, so if the sound
+  had been over the margin for almost 45 seconds when the silence began, the 45 seconds complete during the
+  silence and the sound is absorbed then, raising the ambient to its level: a later cry no louder than it is
+  not alerted. Measured in a replay: a sound 30 dB over the ambient for 46 seconds, then silence, was
+  absorbed 0.6 seconds into the silence, and a cry 20 dB over the old ambient 10 seconds later sent no
+  alert; before this change it did (the silence was a break in the stream, which dropped the loud run). Only
+  a sound whose time over the margin ended within about 2 seconds of the 45 is affected (a sound 30 dB over;
+  under half a second for one 15 dB over).
+- **A sound in the "5 minutes" band can be kept from ever being learned.** A steady sound between half and
+  all of the margin is learned after 5 minutes. If silent windows interrupt it and every one of them is
+  followed at once by a louder window, each silence that pulls the average under half the margin restarts the
+  5 minutes (exactly as a moment at the ambient would), so the sound may never be learned and keeps being
+  measured against the old level; before this change the silence was invisible and the sound was learned.
+  Seen only in a constructed replay (8.6 minutes, never learned): it needs that exact pattern, every time,
+  for 5 minutes.
+- **While no ambient level has been learned yet** (normally about the first 5 seconds after a start; see the
+  first point), an audible window records nothing, but a silent one records 0.
 - **Stored minutes before and after this change differ.** Before it, a minute of silence stored no sound
   (NULL) and a minute with some silence averaged only its audible windows; from the first release after
   0.34.0 a silent window is stored as 0 and included in the minute's sound average, `sound_p75`, `sound_p90`

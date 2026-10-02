@@ -8871,5 +8871,124 @@
     "expect": "killed",
     "tests": ["sound-digital-silence.test.js"],
     "namePattern": "#453 C(2:|3b)"
+  },
+  {
+    "label": "#453 R9 (fix round 1): the staleness reset is skipped for a silent window (the 2026-09-02 defect, through silence after an outage)",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "    if (lastPush && now - lastPush > staleMs) {",
+    "replace": "    if (!silent && lastPush && now - lastPush > staleMs) {",
+    "expect": "killed",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 R5 (fix round 1): a silent window below the margin does not reset loudSince",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "      loudSince = 0;\r\n      if (over < margin * 0.5) {",
+    "replace": "      if (!silent) loudSince = 0;\r\n      if (over < margin * 0.5) {",
+    "expect": "killed",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 R13 (fix round 1): a silent window below half the margin does not reset frozenSince",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "        baseline += BASELINE_ALPHA * (rms - baseline);\r\n        frozenSince = 0;",
+    "replace": "        baseline += BASELINE_ALPHA * (rms - baseline);\r\n        if (!silent) frozenSince = 0;",
+    "expect": "killed",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 R14 (fix round 1): a silent window above the margin does not start loudSince",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "      if (!loudSince) loudSince = now;",
+    "replace": "      if (!silent && !loudSince) loudSince = now;",
+    "expect": "killed",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 R15 (fix round 1): a silent window above the margin does not start frozenSince",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "      if (!frozenSince) frozenSince = now;\r\n      if (now - loudSince >= REBASELINE_MS) {",
+    "replace": "      if (!silent && !frozenSince) frozenSince = now;\r\n      if (now - loudSince >= REBASELINE_MS) {",
+    "expect": "killed",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 R11 (fix round 1): the 45 s absorb never fires on a silent window",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "      if (now - loudSince >= REBASELINE_MS) {",
+    "replace": "      if (!silent && now - loudSince >= REBASELINE_MS) {",
+    "expect": "killed",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 R18 (fix round 1): an absorb on a silent window keeps the trailing window",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "        recent.length = 0;\r\n        return { baseline, over, confirmed, recordDb, wouldAlert: false, silent };",
+    "replace": "        if (!silent) recent.length = 0;\r\n        return { baseline, over, confirmed, recordDb, wouldAlert: false, silent };",
+    "expect": "killed",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 R12 (fix round 1): an alert never fires on a silent window",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "      if (now - lastAlert >= cooldownMs) wouldAlert = true;",
+    "replace": "      if (!silent && now - lastAlert >= cooldownMs) wouldAlert = true;",
+    "expect": "killed",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 L1 (fix round 1): a silent window on a settled analyser does not advance the stream clock (lastPush)",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "    lastPush = now;\r\n",
+    "replace": "    if (!silent) lastPush = now;\r\n",
+    "expect": "killed",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 EQ1 (fix round 1): a silent window skips the below-band EMA step",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "        baseline += BASELINE_ALPHA * (rms - baseline);\r\n        frozenSince = 0;",
+    "replace": "        if (!silent) baseline += BASELINE_ALPHA * (rms - baseline);\r\n        frozenSince = 0;",
+    "expect": "equivalent",
+    "note": "a silent window runs with rms equal to the baseline, so the step it skips is BASELINE_ALPHA * 0: exactly zero, no input can tell",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 EQ2 (fix round 1): a silent window skips the dead-band escape step",
+    "file": "backend/src/lib/soundBaseline.js",
+    "find": "        if (now - frozenSince >= DEAD_BAND_MAX_MS) baseline += BASELINE_ALPHA * (rms - baseline);",
+    "replace": "        if (!silent && now - frozenSince >= DEAD_BAND_MAX_MS) baseline += BASELINE_ALPHA * (rms - baseline);",
+    "expect": "equivalent",
+    "note": "a silent window runs with rms equal to the baseline, so the escape step it skips is BASELINE_ALPHA * 0: exactly zero, no input can tell",
+    "tests": ["soundBaseline.test.js"],
+    "namePattern": "#453"
+  },
+  {
+    "label": "#453 D2 (fix round 1): the level line's maxAvgOver leaves silent windows out",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "      if (r.confirmed && r.over > windowMaxOver) windowMaxOver = r.over;",
+    "replace": "      if (r.confirmed && r.over > windowMaxOver && !r.silent) windowMaxOver = r.over;",
+    "expect": "killed",
+    "tests": ["sound-digital-silence.test.js"],
+    "namePattern": "D2"
+  },
+  {
+    "label": "#453 D6 (fix round 1): a silent window is filed by the handler's own clock (now), not its event's receipt time",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "      if (r.recordDb !== null) recordSound(camera.id, r.recordDb, atMs);",
+    "replace": "      if (r.recordDb !== null) recordSound(camera.id, r.recordDb, r.silent ? now : atMs);",
+    "expect": "killed",
+    "tests": ["sound-digital-silence.test.js"],
+    "namePattern": "#453 C2:"
   }
 ]
