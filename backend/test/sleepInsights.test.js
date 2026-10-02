@@ -531,6 +531,45 @@ test('a night a parent marked "no one was in the bed" still gets its timelapse â
   assert.equal(discardCalls.mock.callCount(), 0, 'and its frames are not thrown away');
 });
 
+test('a night corrected while its stored row was still no_data is not frozen there: its first SCORED pass still gets its timelapse, then the lock holds', async (t) => {
+  // The lock (2026-09-30) holds only on a SCORED stored row. A correction saved while the row is still
+  // `no_data` (the samples had not arrived) must neither freeze the night unscored nor take away the one
+  // pass that assembles its timelapse: that happens on the FIRST scored pass, and nothing else ever
+  // cleans a night's raw frames up. Saved through saveNightReview, the real save path, so its store-first
+  // step (storeNightBeforeCorrection) is exercised too: it must leave a no_data row to the job.
+  const { saveNightReview } = await import('../src/lib/sleepReviews.js');
+  const assembleCalls = t.mock.fn();
+  const discardCalls = t.mock.fn();
+  t.mock.module('../src/lib/timelapse.js', {
+    namedExports: { assembleTimelapse: assembleCalls, discardTimelapseFrames: discardCalls },
+  });
+  t.after(() => db.prepare('DELETE FROM sleep_reviews WHERE child_id = ?').run(KID));
+  const flush = () => new Promise((r) => setImmediate(r));
+  const row = () => db.prepare('SELECT status, computed_at FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(KID, NIGHT_DATE);
+
+  t.mock.timers.enable({ apis: ['Date'], now: at3(7, 5, 1).getTime() });
+  runNightlySleepJob();
+  await flush();
+  assert.equal(row().status, 'no_data', 'precondition: nothing recorded yet');
+
+  saveNightReview(KID, NIGHT_DATE, { trueWakeAt: sqlTime3(at3(6, 10, 1)) });
+  assert.equal(row().status, 'no_data', 'the correction did not score the row itself');
+
+  layNight3([[at3(19, 0), at3(19, 10)], [at3(23, 0), at3(23, 6)], [at3(1, 0, 1), at3(1, 9, 1)]], at3(7, 0, 1));
+  t.mock.timers.tick(30 * 60 * 1000);
+  runNightlySleepJob();
+  await flush();
+  assert.equal(row().status, 'ok', 'the job scored it: a correction does not freeze a no_data row');
+  assert.equal(assembleCalls.mock.callCount(), 1, 'and that first scored pass assembled its timelapse');
+
+  const scored = row();
+  t.mock.timers.tick(30 * 60 * 1000);
+  runNightlySleepJob();
+  await flush();
+  assert.deepEqual(row(), scored, 'from then on the corrected night is locked');
+  assert.equal(assembleCalls.mock.callCount(), 1);
+});
+
 test('a night stays exactly as finalized across repeated runs (e.g. a process restart)', (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: at3(10, 30, 1).getTime() }); // safely past the 3h evidence horizon
   runNightlySleepJob();

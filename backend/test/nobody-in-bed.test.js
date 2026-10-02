@@ -467,17 +467,23 @@ test('a time receipt says nobody_in_bed: false, and un-flagging with no times le
 
 // --- 8. a recompute cannot fight the parent ---------------------------------------------------------
 
-test('an admin ?store=1 recompute leaves the overlay in force', async () => {
+// Rewritten 2026-09-30 for the lock. This used to expect `stored: true` (the recompute was written and
+// the overlay simply stayed on top of it). A flagged night is now a CORRECTED night, and a corrected night
+// is locked: the admin recompute is refused with a 409 rather than re-scoring it underneath the parent.
+// What this test always pinned still holds: the overlay stays in force and the detector's row stays the
+// detector's.
+test('an admin ?store=1 recompute of a flagged night is refused (the lock) and the overlay stays in force', async () => {
   layOkNight();
   computeAndStoreNight(CHILD, DATE);
   await put({ nobody_in_bed: true });
+  const before = storedRow();
 
   const res = await get(`/sleep/${DATE}?store=1&detail=1`);
-  assert.equal(res.status, 200);
-  assert.equal(res.body.stored, true, 'the recompute really was written');
-  assert.equal(res.body.status, 'ok', 'and it reports the RAW detector answer — the overlay is not stored');
+  assert.equal(res.status, 409, 'a corrected night is not recomputed');
+  assert.equal(res.body.reason, 'reviewed');
+  assert.deepEqual(storedRow(), before, 'and nothing was written, not even computed_at');
 
-  assert.equal(reviewRow().nobody_in_bed, 1, 'the flag survived the write');
+  assert.equal(reviewRow().nobody_in_bed, 1, 'the flag survived');
   assert.equal(storedRow().status, 'ok', 'sleep_nights holds the detector, as always');
   assert.equal((await get('/sleep?nights=1')).body.nights[0].status, 'empty', 'and the card still shows the parent');
   assert.equal((await get(`/sleep/${DATE}`)).body.status, 'empty');

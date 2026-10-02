@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Check, X, HelpCircle, Moon } from 'lucide-react';
+// `Baby` on "Put down here" is a reuse, not a new icon (design-language.md §4.1 keeps the set small):
+// the child going into bed, beside `Moon` for the child falling asleep.
+import { Check, X, HelpCircle, Moon, Baby } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
@@ -99,9 +101,27 @@ export default function NightReview() {
   const navigate = useNavigate();
   const { kids } = useCameras();
   // `loaded`: the server's settings have arrived, so `tz` is the app's REAL zone, not SettingsContext's
-  // placeholder 'UTC'. Only "Before bedtime" needs it — see `groupEarly` for why that one thing does.
+  // placeholder 'UTC'. Two things wait for it: "Before bedtime" (see `groupEarly`) and every control that
+  // can send a time (see `timesReady`).
   const { settings, loaded: settingsLoaded } = useSettings();
   const tz = settings?.timezone;
+  // ⚠️ NOTHING THAT CAN SEND A TIME WORKS UNTIL THE REAL TIMEZONE HAS ARRIVED (fix round 2, 2026-09-30,
+  // Codex P1, verified). "Fell asleep" and "Got up for the day" are UTC instants shown in `tz`, and until
+  // /settings resolves `tz` is the placeholder 'UTC', so a Sydney night of 19:13 / 06:37 reads 09:13 / 20:37.
+  // The seed puts them into the real zone when it arrives, but only while nothing is `touched`, and a chip tap
+  // or a keystroke in that moment set it: the two fields stayed in the placeholder zone and Save sent them (a
+  // wake before the asleep time, asleep 0). "That's right" sent them at once. So every control that can set
+  // `touched` or send a time waits for this: the four fields of the edit card (the note too, since typing it
+  // sets `touched`), the moment chips, "Not quite…" / "Add the times", "That's right" and "Save review", and
+  // `save()` itself refuses times without it. One gate over the whole time form rather than a touched flag
+  // per field, because a per-field flag still let a pressed-on-arrival chip keep a placeholder-zone time when
+  // un-pressed (`tapMoment` keeps asleep/wake as they were), and still let Save send the untouched fields
+  // before the zone arrived. Gated on `loaded`, NOT `tz !== 'UTC'`, for the reason `groupEarly` gives.
+  // Scoped like `groupEarly`: verdicts, "No one was in the bed" and "Save just the event answers" carry no
+  // time and stay usable, which is what matters if /settings FAILED and `loaded` never arrives this visit
+  // (the page then says why the times can't be changed). ⚠️ A new control that sets `touched` or sends a time
+  // must be gated on this too.
+  const timesReady = settingsLoaded;
   const kid = kids.find((k) => k.id === id);
 
   const [data, setData] = useState(null);
@@ -114,6 +134,25 @@ export default function NightReview() {
   // The recorded events named as the bedtime and the morning departure, if any were picked.
   const [onsetFrame, setOnsetFrame] = useState(null);
   const [wakeFrame, setWakeFrame] = useState(null);
+  // "In bed": when they were PUT DOWN, which is not when they fell asleep (2026-09-30). On the night of
+  // 2026-09-29 the detector had a child asleep at 19:13, which was right; they had been put down at 18:49 for
+  // a bedtime story, and the only frame button, "Put down here", wrote 18:49 into "Fell asleep". So the put-
+  // down now has its own time and its own frame, and "Asleep here" is the button that sets the asleep time.
+  //
+  // ⚠️ Seeded ONLY from what the parent already said (`review.true_in_bed_at`), never from the detector's
+  // `computed.in_bed_at`, and SENT only once touched (plan review R3). Seeding it from the detector would
+  // store the detector's put-down as the parent's on every save, and then the card would keep showing a
+  // put-down nobody confirmed, beside an asleep time they did. Its own touched flag for the same two
+  // reasons as `nobodyTouched`: it must keep re-seeding into the real timezone until the person uses it,
+  // and a second phone that never touched it must not blank the one the first phone saved.
+  const [inBed, setInBed] = useState('');
+  const [inBedFrame, setInBedFrame] = useState(null);
+  const [inBedTouched, setInBedTouched] = useState(false);
+  // What each moment field (inBed / onset / wake) held just before a frame chip filled it, so tapping the
+  // SAME chip again puts it back. A second tap is "not this one", and it used to leave the frame's time in
+  // the field and save it anyway, as a typed time with no frame: pick "Put down here", un-pick it, save,
+  // and an in-bed time was still recorded (fix round, 2026-09-30). See `tapMoment`.
+  const [beforePick, setBeforePick] = useState({});
   // Has the person actually touched the form? Nothing may overwrite their typing once they have.
   const [touched, setTouched] = useState(false);
   // Separate from `touched`, deliberately: a verdict tap and an onset/wake edit are unrelated, but a
@@ -186,7 +225,12 @@ export default function NightReview() {
       // something does not make you confirm from scratch.
       setOnsetFrame(data.review?.true_onset_transition_id ?? null);
       setWakeFrame(data.review?.true_wake_transition_id ?? null);
-      setEditing(Boolean(data.review?.true_onset_at || data.review?.true_wake_at));
+      // An in-bed-only answer is an answer too: reopening it must land on the times, not on "That's right".
+      setEditing(Boolean(data.review?.true_onset_at || data.review?.true_wake_at || data.review?.true_in_bed_at));
+    }
+    if (!inBedTouched) {
+      setInBed(toLocalHhmm(data.review?.true_in_bed_at, tz));
+      setInBedFrame(data.review?.true_in_bed_transition_id ?? null);
     }
     // ⚠️ Reasons are seeded INSIDE this guard, not in an effect of their own. This file has been bitten
     // twice by a tz arriving late and re-running a seed over someone's answers (see `touched` and
@@ -200,7 +244,7 @@ export default function NightReview() {
     // R5) — `editing` above is seeded from `review.true_onset_at`/`true_wake_at`, which a flag always
     // clears, so without this the screen would silently misrepresent what the parent actually said.
     if (!nobodyTouched) setNobody(!!data.review?.nobody_in_bed);
-  }, [data, tz, touched, verdictsTouched, nobodyTouched]);
+  }, [data, tz, touched, verdictsTouched, nobodyTouched, inBedTouched]);
 
   // Every verdict button on the screen goes through here, because all three places share one map.
   // Tapping the chosen answer again clears it: a mis-tap must be undoable, since a wrong label is worse
@@ -223,6 +267,54 @@ export default function NightReview() {
 
   const fmtEvent = useMemo(() => (t) => toLocalHhmm(t.created_at, tz), [tz]);
 
+  // One tap on a moment chip ("Put down here", "Asleep here", "Up for the day here").
+  //
+  // Picking a frame fills that moment's field with the frame's time and names the frame (it is sent too,
+  // and wins on the server: second-accurate). It also opens the edit card, because naming a frame IS
+  // correcting the night: without that the screen stayed on "That's right / Not quite" and the pick led
+  // nowhere. `touched` is set for every moment: it is what stops a late-arriving timezone re-running the
+  // seed and closing the card this tap just opened.
+  //
+  // Tapping the SAME chip again undoes the pick: the field goes back to exactly what it held before
+  // (`beforePick`), including, for "In bed", whether there was anything to send at all. So pick + un-pick
+  // + save sends nothing about the put-down. A chip that was already pressed when the page opened (a frame
+  // on record from an earlier save) has no "before" on this screen:
+  //   - for "In bed" the un-press removes the answer (the field empties, and the removal is sent only if a
+  //     put-down is actually on record). In bed is optional, so "not this frame, and no other" is empty;
+  //   - for asleep and wake the time is kept and only the frame is dropped, as it always was. Those two
+  //     fields are always sent, and emptying one would silently delete an answer on record.
+  const tapMoment = (key, t) => {
+    // The chips are disabled until then; this is the same rule for any other way in (see `timesReady`).
+    if (!timesReady) return;
+    const m = {
+      inBed: { value: inBed, setValue: setInBed, frame: inBedFrame, setFrame: setInBedFrame },
+      onset: { value: onset, setValue: setOnset, frame: onsetFrame, setFrame: setOnsetFrame },
+      wake: { value: wake, setValue: setWake, frame: wakeFrame, setFrame: setWakeFrame },
+    }[key];
+    setTouched(true);
+    setEditing(true);
+    if (m.frame !== t.id) {
+      setBeforePick((b) => ({ ...b, [key]: { value: m.value, frame: m.frame, inBedTouched } }));
+      m.setFrame(t.id);
+      m.setValue(fmtEvent(t));
+      if (key === 'inBed') setInBedTouched(true);
+      return;
+    }
+    const prev = beforePick[key];
+    setBeforePick((b) => ({ ...b, [key]: undefined }));
+    if (prev) {
+      m.setValue(prev.value);
+      m.setFrame(prev.frame);
+      if (key === 'inBed') setInBedTouched(prev.inBedTouched);
+    } else if (key === 'inBed') {
+      setInBed('');
+      setInBedFrame(null);
+      setInBedTouched(Boolean(data?.review?.true_in_bed_at));
+    } else {
+      m.setFrame(null);
+    }
+  };
+
   // The enlarged view's title/meta. A plain camera name as the title (Modal always shows one), the
   // time + which kind of event as the meta line underneath the photo — the same two facts the
   // thumbnail's own row already states, just readable at a glance once the image itself is legible.
@@ -231,6 +323,8 @@ export default function NightReview() {
 
   // `withTimes` false saves only the verdicts and leaves any recorded times alone.
   const save = async (withTimes, onsetHm = onset, wakeHm = wake) => {
+    // Never a time read in the placeholder zone, whichever button asked (see `timesReady`).
+    if (withTimes && !timesReady) return;
     setBusy(true);
     setError(null);
     try {
@@ -242,6 +336,11 @@ export default function NightReview() {
         // hand clears the id, so exactly one of the two is ever the answer.
         true_onset_transition_id: withTimes ? onsetFrame : undefined,
         true_wake_transition_id: withTimes ? wakeFrame : undefined,
+        // Only once the person has touched "In bed" (see `inBedTouched`). Left `undefined` otherwise, which
+        // the server reads as "keep what is stored": correcting only the asleep time must store nothing
+        // about the put-down, and a second phone must not blank one the first phone saved.
+        true_in_bed_local: withTimes && inBedTouched ? (inBed || null) : undefined,
+        true_in_bed_transition_id: withTimes && inBedTouched ? inBedFrame : undefined,
         note: note.trim() || null,
         // ⚠️ WHAT WE SHOWED THIS PERSON, sent back so the server records it beside their answer. The
         // server deliberately does not recompute it: a night's answer drifts while the page is open
@@ -327,6 +426,9 @@ export default function NightReview() {
   const transitions = data.transitions || [];
   const shownOnset = toLocalHhmm(data.computed?.onset_at, tz);
   const shownWake = toLocalHhmm(data.computed?.wake_at, tz);
+  // The detector's put-down, shown so the person can see what "in bed" it recorded. Display only: it is
+  // never copied into the In bed field (see `inBed`), and "That's right" confirms asleep and wake only.
+  const shownInBed = toLocalHhmm(data.computed?.in_bed_at, tz);
   const hasOpinion = Boolean(shownOnset || shownWake);
 
   // An out_of_bed the server flagged as immediately following an into_bed (quick_reversal_of names
@@ -360,8 +462,12 @@ export default function NightReview() {
   // `review.true_onset_at` covers a correction the person TYPED, with no frame named: it is as much a
   // bedtime as a named frame is, and without it a night the detector missed but a person fixed would
   // lose its grouping on the next visit (found in adversarial code review, 2026-09-25).
+  // A put-down the person named or typed (`inBedFrame`, `review.true_in_bed_at`) is as much a bedtime as
+  // an onset is: "Put down here" set `onsetFrame` before the in-bed split, so without these a night whose
+  // only anchor is a picked put-down would stop grouping.
   const hasBedtime = Boolean(
-    data.computed?.in_bed_at || onsetFrame || data.computed?.onset_at || data.review?.true_onset_at
+    data.computed?.in_bed_at || onsetFrame || inBedFrame || data.computed?.onset_at || data.review?.true_onset_at
+    || data.review?.true_in_bed_at
   );
   const isEarly = (t) => {
     const { date: localDate, hour } = localDateHour(t.created_at, tz);
@@ -427,32 +533,31 @@ export default function NightReview() {
         {/* Naming the moment, which is a DIFFERENT claim from "this event is correct". An exit
             can be perfectly real and still not be the end of the night — 05:45 was a genuine
             got-out-of-bed on a morning the child went back and got up again at 06:00. Tying
-            the wake to the "correct" verdict would have ended that night at the wrong one. */}
+            the wake to the "correct" verdict would have ended that night at the wrong one.
+            A got-into-bed event offers TWO moments, because going into bed and falling asleep are
+            different times on a bedtime-story night (see `inBed`): "Put down here" fills "In bed"
+            and never "Fell asleep"; "Asleep here" fills "Fell asleep". */}
         <div className="review-event__verdicts">
+          {t.type === 'into_bed' && (
+            <button
+              type="button"
+              className={`review-chip review-chip--moment${inBedFrame === t.id ? ' review-chip--on' : ''}`}
+              aria-pressed={inBedFrame === t.id}
+              disabled={!timesReady}
+              onClick={() => tapMoment('inBed', t)}
+            >
+              <Baby size={16} aria-hidden="true" /> Put down here
+            </button>
+          )}
           <button
             type="button"
             className={`review-chip review-chip--moment${
               (t.type === 'into_bed' ? onsetFrame : wakeFrame) === t.id ? ' review-chip--on' : ''}`}
             aria-pressed={(t.type === 'into_bed' ? onsetFrame : wakeFrame) === t.id}
-            onClick={() => {
-              setTouched(true);
-              // Naming a frame IS correcting the night, so open the times for review: the
-              // filled value has to be visible and there has to be something to press. Without
-              // this the screen stayed on "That's right / Not quite" and the pick led nowhere.
-              setEditing(true);
-              const time = fmtEvent(t);
-              if (t.type === 'into_bed') {
-                const on = onsetFrame === t.id;
-                setOnsetFrame(on ? null : t.id);
-                if (!on) setOnset(time);
-              } else {
-                const on = wakeFrame === t.id;
-                setWakeFrame(on ? null : t.id);
-                if (!on) setWake(time);
-              }
-            }}
+            disabled={!timesReady}
+            onClick={() => tapMoment(t.type === 'into_bed' ? 'onset' : 'wake', t)}
           >
-            <Moon size={16} /> {t.type === 'into_bed' ? 'Put down here' : 'Up for the day here'}
+            <Moon size={16} aria-hidden="true" /> {t.type === 'into_bed' ? 'Asleep here' : 'Up for the day here'}
           </button>
         </div>
         <div className="review-event__verdicts">
@@ -514,6 +619,14 @@ export default function NightReview() {
             </>
           ) : (
           <>
+          {/* Says why the time controls are greyed out (see `timesReady`). Usually gone a moment after the
+              page opens; it stays for the visit only if the settings request failed. */}
+          {!timesReady && (
+            <div className="camera-tile__sub">
+              Waiting for the app’s timezone setting before any time can be confirmed or changed. If this
+              doesn’t go away, reload the page.
+            </div>
+          )}
           {/* Confirm-or-correct, deliberately NOT a pre-filled form you can save by reflex. A pre-filled
               form puts the app's own answer one tap from becoming "ground truth" — and that answer is
               sometimes badly wrong (a drifted wake of 08:29 against a real 06:00). Blessing it by
@@ -523,6 +636,9 @@ export default function NightReview() {
             <>
               {hasOpinion ? (
                 <div className="review-shown">
+                  {shownInBed && (
+                    <div><span className="review-shown__label">In bed</span><strong>{shownInBed}</strong></div>
+                  )}
                   <div><span className="review-shown__label">Fell asleep</span><strong>{shownOnset || '—'}</strong></div>
                   <div><span className="review-shown__label">Got up for the day</span><strong>{shownWake || '—'}</strong></div>
                 </div>
@@ -537,13 +653,13 @@ export default function NightReview() {
                   <button
                     type="button"
                     className="btn btn-primary"
-                    disabled={busy}
+                    disabled={busy || !timesReady}
                     onClick={() => save(true, shownOnset, shownWake)}
                   >
                     {busy ? 'Saving…' : 'That’s right'}
                   </button>
                 )}
-                <button type="button" className="btn btn-secondary" onClick={() => setEditing(true)}>
+                <button type="button" className="btn btn-secondary" disabled={!timesReady} onClick={() => setEditing(true)}>
                   {hasOpinion ? 'Not quite…' : 'Add the times'}
                 </button>
                 <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => saveNobody(true)}>
@@ -558,21 +674,33 @@ export default function NightReview() {
               <div className="camera-tile__sub">
                 {hasOpinion && `We said ${shownOnset || '—'} to ${shownWake || '—'}. `}
                 Put in what actually happened — your times are what {kid?.name || 'their'}’s card will show.
-                {(onsetFrame || wakeFrame) && ' Times you picked from a frame are exact to the second.'}
+                {(onsetFrame || wakeFrame || inBedFrame) && ' Times you picked from a frame are exact to the second.'}
               </div>
+              {/* Above "Fell asleep", in the order the two happen. Optional: leave it empty and nothing
+                  about the put-down is recorded (and nothing is sent, see `inBedTouched`). */}
+              <label className="field">
+                <span className="field__label">In bed</span>
+                <input
+                  type="time"
+                  value={inBed}
+                  disabled={!timesReady}
+                  onChange={(e) => { setTouched(true); setInBedTouched(true); setInBedFrame(null); setInBed(e.target.value); }}
+                />
+              </label>
               <label className="field">
                 <span className="field__label">Fell asleep</span>
-                <input type="time" value={onset} onChange={(e) => { setTouched(true); setOnsetFrame(null); setOnset(e.target.value); }} />
+                <input type="time" value={onset} disabled={!timesReady} onChange={(e) => { setTouched(true); setOnsetFrame(null); setOnset(e.target.value); }} />
               </label>
               <label className="field">
                 <span className="field__label">Got up for the day</span>
-                <input type="time" value={wake} onChange={(e) => { setTouched(true); setWakeFrame(null); setWake(e.target.value); }} />
+                <input type="time" value={wake} disabled={!timesReady} onChange={(e) => { setTouched(true); setWakeFrame(null); setWake(e.target.value); }} />
               </label>
               <label className="field">
                 <span className="field__label">Anything else worth noting</span>
                 <input
                   type="text"
                   value={note}
+                  disabled={!timesReady}
                   placeholder="e.g. put back on the bed to get dressed at 5:45"
                   onChange={(e) => { setTouched(true); setNote(e.target.value); }}
                 />
@@ -733,6 +861,15 @@ export default function NightReview() {
               <span className="review-card__go" aria-hidden="true">{showEvents ? '⌃' : '›'}</span>
             </button>
           )}
+          {/* Inline help rather than a help screen (there is none): said ONCE above the list, not under
+              every got-into-bed row, because a night can carry a dozen of them. Only when the list has a
+              got-into-bed event, since those are the only rows with the two buttons. */}
+          {showEvents && transitions.some((t) => t.type === 'into_bed') && (
+            <div className="review-events__help">
+              <strong>Put down here</strong> = they went into bed. <strong>Asleep here</strong> = they fell
+              asleep. Reading a story first? Mark both.
+            </div>
+          )}
           {/* Grouped at the TOP of the open list, itself collapsed, with a one-tap answer for the lot —
               the owner's complaint was a 2pm walk across the zone flooding the list. The group is a
               shortcut, never a lock: open it and every event has its own chips, same as below. */}
@@ -784,7 +921,7 @@ export default function NightReview() {
             has just failed — the top card already hid the time inputs in that state, so this button
             must not reappear offering to save whatever they were last set to. */}
         {editing && !nobody ? (
-          <button type="button" className="btn btn-primary btn-block" disabled={busy} onClick={() => save(true)}>
+          <button type="button" className="btn btn-primary btn-block" disabled={busy || !timesReady} onClick={() => save(true)}>
             {busy ? 'Saving…' : 'Save review'}
           </button>
         ) : (showEvents || quickReversals.length > 0 || lingeringOnly.length > 0) && transitions.length > 0 && (

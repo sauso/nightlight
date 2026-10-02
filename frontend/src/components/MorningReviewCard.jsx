@@ -47,10 +47,15 @@ export default function MorningReviewCard({ childId, fmtTime }) {
     // `card.nobody_in_bed` comes from reviewCardState, NOT the raw review row — that route already
     // returns a real boolean (unlike GET /review's raw 0/1 column), so no truthiness cast is needed
     // here the way NightReview.jsx's seed needs one.
+    //
+    // `onset_at`/`wake_at` are the RESOLVED times (the parent's, else the stored detector's), added to
+    // the done card 2026-09-30 so an in-bed-only answer reads back a whole night (plan review R1). The
+    // `true_*` fallback is only for a response without them.
     return (
       <ReviewReceipt
-        onsetAt={card.true_onset_at}
-        wakeAt={card.true_wake_at}
+        onsetAt={card.onset_at ?? card.true_onset_at}
+        wakeAt={card.wake_at ?? card.true_wake_at}
+        inBedAt={card.true_in_bed_at}
         nobodyInBed={card.nobody_in_bed}
         fmtTime={fmtTime}
         onOpen={open}
