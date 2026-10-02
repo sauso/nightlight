@@ -10,6 +10,29 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Added
+- **The morning review now records "In bed" separately from "Fell asleep".** On a bedtime-story night a
+  child can be put down half an hour before they fall asleep, and the review had no way to say both: its
+  only frame button, **Put down here**, set the *asleep* time, so marking the put-down overwrote an asleep
+  time the detector had right (found correcting a real night: put down 18:49, asleep 19:13, and the card
+  ended up saying asleep 18:49). A recorded *got into bed* event now has two buttons: **Put down here**
+  fills a new **In bed** time and never touches the asleep time, and **Asleep here** fills "Fell asleep". A
+  short line above the event list says which is which. A corrected in-bed time moves only the "in bed"
+  time. The asleep and wake-up times the form saves alongside it (as your confirmation) no longer
+  recalculate the total asleep on a screen that was already showing those times; a screen recalculates
+  only where a saved time differs from its own, which is normally a time you changed (the README explains
+  when the review page and the child's card start from different versions of the night, and what that
+  does). Tapping a picked frame's button a second time now undoes the pick and puts the field back as it
+  was, for all three buttons (it
+  used to leave the frame's time in the field and save it). The card, detail page and receipt ("You said in bed 6:49, asleep 7:13 to 6:37") show your in-bed
+  time next to your asleep time. "In bed" can't be saved later than "Fell asleep" (a picked frame may be
+  up to a minute after a typed asleep time), or, when the review is left with no asleep time (none given,
+  or "Fell asleep" emptied), later than the asleep time the night already has; "Fell asleep" can't be
+  later than "Got up for the day" either, or, when you give no wake-up time, later than the wake-up time
+  the night already has. Each is checked against what was saved before as well as what is being saved, a
+  refused save stores nothing, event answers included, and a later note, event answer or dismissal is
+  never refused because the night changed after you answered. Reviews saved before this are kept as they
+  were: none is reinterpreted as an in-bed time. Nothing here assumes a particular house, child or
+  timezone. Details in the README's morning-review section.
 - **The morning review can now say "No one was in the bed" for the whole night**, not just correct a
   time. Previously the only option was to type times, so a night the detector scored as hours of sleep
   in an empty bed could only be saved with nothing in it. The new option sits next to the usual times on
@@ -29,6 +52,53 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
     is skipped — a push already sent cannot be recalled, but no further one goes out for a flagged night.
 
 ### Fixed
+- **A detected wake-up after midday, or asleep time before midnight, is saved on the right day in the
+  morning review.** A time in the review is dated by the clock: before 12:00 is the morning after the
+  night's date, 12:00 or later the night's own evening. But the app's own times can fall on the other side
+  of that line: a wake-up after midday when the sleep window ends after 09:00 (a wake-up is looked for up
+  to 3 hours past the window's end), or an asleep time before midnight when the window opens just after
+  it (an asleep time is looked for from 3 hours before the window opens). **That's right**, or saving the
+  form with that time left as it was, then put it a day off, so the corrected night ended before it began.
+  Now a time saved exactly as the app showed it is saved as that exact time, as long as it is one the app
+  could have worked out for that night (inside the child's sleep window widened by those 3 hours each
+  side); anything else is dated by the clock as before, so a time sent from outside the app can at most be
+  moved to another day inside that same span, never to an arbitrary one. The same goes for the hour that happens twice on the night the clocks go back:
+  the app's own time in it keeps the occurrence the page showed, instead of whichever one the timezone
+  arithmetic picked (the second at or east of UTC, the first west of it), which could be an hour off. A
+  time you type yourself is still dated by the clock (a known limit in the README). Any timezone, any
+  install.
+- **A night you have corrected is no longer recalculated afterwards.** After a parent corrected a wake
+  time, the nightly update kept re-saving the night for up to about 3 hours after its window closed and
+  never looked at the correction, so the corrected night's total asleep and wake-ups could change hours
+  later (seen when a bed was changed after the corrected wake-up). Now any correction in the morning review
+  (an in-bed, asleep or wake time, "No one was in the bed", or a plain **That's right**) **locks** the
+  night's saved summary: the nightly update leaves it alone and **Recompute this night** refuses it
+  (`409`, `reason: "reviewed"`; the dialog says the night is locked). So an early rough pass is not what
+  gets locked, saving a correction on last night while it is still being refined first saves it freshly
+  worked out at that moment; any older or already-settled night is locked as it is and never re-scored by
+  a correction. Editing or removing the correction always works, and removing the last one unlocks the
+  night. Answering only per-event questions or dismissing the card locks nothing. A note saved from the
+  review form does lock the night, because the form always saves the asleep and wake-up times it shows
+  with it, as a confirmation; only a note sent on its own through the API doesn't. The automatic "Sleep
+  report updated" push is now skipped after any correction, not only after "No one was in the bed", and it
+  no longer goes out late: nothing is pushed more than about 3 hours (at most one 30-minute check past
+  them) after the window closed. Before, removing a correction hours later, or a server that had been off
+  across the morning, could send "Sleep report updated" for a night the parent had been looking at all
+  morning; now that pass only updates the saved summary. Known limits (the locked night is the one worked
+  out when you press save, an uncorrected time freezes at its value then, a night corrected before its
+  first summary keeps that summary's missing wake-up until you add one, the sleep detail page still works
+  the night out fresh, the review page and the card can start from different versions of the night,
+  nights corrected before this update are locked as last saved, an old open page can be refused a save
+  until reloaded, the repeated hour on the night the clocks go back) are in the README; the notification
+  change is in [docs/notifications.md](docs/notifications.md).
+- **The morning review no longer saves times in the wrong timezone when used the moment it opens.** Until
+  the app has loaded the timezone set in Settings (usually a moment after the page opens, or never that
+  visit if loading it fails) it shows times in UTC. Tapping a frame button or typing in that moment kept
+  "Fell asleep" and "Got up for the day" in UTC even after the real timezone arrived, and saving then
+  stored them: on a Sydney night of 7:13 pm to 6:37 am, 09:13 and 20:37, a wake-up before the asleep time.
+  **That's right** sent the UTC times straight away. Now the time controls stay greyed out, with a line
+  saying why, until the timezone has loaded; event answers and "No one was in the bed" carry no time and
+  work at once. Any timezone, any install.
 - **The audio-liveness check no longer reads a failed run as "no audio"** (issue #515). The check that
   decides whether a camera's audio is really flowing counted its probe's output before the output had
   finished arriving, and read a probe that failed to run as "confirmed no audio"; two of those in a row

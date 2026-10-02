@@ -262,6 +262,34 @@ describe('SleepSummaryCard', () => {
     expect(inBedLine()).toBeNull();
   });
 
+  test('★ a put-down the PARENT gave shows beside their own corrected asleep time — the put-down night', async () => {
+    // 2026-09-30. The corrected-onset rule above hides the DETECTOR's put-down, because it belongs to the
+    // bedtime the person overrode. A put-down the person gave themselves (`in_bed_corrected`) is not that,
+    // so it shows: put down 18:49 for a story, asleep 19:13.
+    live({
+      scope: 'last_night',
+      night: {
+        ...OK_NIGHT, algo_onset_at: OK_NIGHT.onset_at, onset_at: '2026-09-01 09:13:00', corrected: true,
+        in_bed_at: '2026-09-01 08:49:20', in_bed_corrected: true, algo_in_bed_at: '2026-09-01 08:47:12',
+      },
+    });
+    show();
+    expect(await screen.findByText('You corrected this')).toBeInTheDocument();
+    expect(inBedLine()).toMatch(/^In bed .* · Asleep .*$/);
+    expect(inBedLine()).toMatch(hhmm(18, 49));
+    expect(inBedLine()).toMatch(hhmm(19, 13));
+  });
+
+  test('...but a put-down the parent gave that is not a minute before asleep still reads as one time', async () => {
+    live({
+      scope: 'last_night',
+      night: { ...OK_NIGHT, corrected: true, algo_onset_at: OK_NIGHT.onset_at, in_bed_at: '2026-09-01 09:09:30', in_bed_corrected: true },
+    });
+    show();
+    expect(await screen.findByText('You corrected this')).toBeInTheDocument();
+    expect(inBedLine()).toBeNull();
+  });
+
   test('a WAKE-only correction still shows "In bed" — the onset and put-down are still one story', async () => {
     live({
       scope: 'last_night',

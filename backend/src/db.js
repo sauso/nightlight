@@ -230,6 +230,10 @@ db.exec(`
   -- nobody_in_bed (0/1, default 0): the parent's "no one was in the bed" for the WHOLE night. Mutually
   -- exclusive with the true_* columns — saveNightReview nulls them when it is set, and a time saved
   -- later clears it — so a row can never claim both "nobody slept here" and "they slept 19:40-06:10".
+  --
+  -- true_in_bed_at / true_in_bed_transition_id: when the parent says the child went INTO the bed (the
+  -- put-down), separate from true_onset_at (when they fell ASLEEP). Added 2026-09-30: the only frame
+  -- button used to fill the asleep time, so a bedtime story made a put-down overwrite a correct onset.
   CREATE TABLE IF NOT EXISTS sleep_reviews (
     child_id TEXT NOT NULL,
     night_date TEXT NOT NULL,
@@ -237,6 +241,8 @@ db.exec(`
     true_wake_at TEXT,
     true_onset_transition_id INTEGER,
     true_wake_transition_id INTEGER,
+    true_in_bed_at TEXT,
+    true_in_bed_transition_id INTEGER,
     computed_onset_at TEXT,
     computed_wake_at TEXT,
     note TEXT,
@@ -403,8 +409,23 @@ if (!bedTxColumns.includes('out_frames')) {
 // identified as "this is the moment they got up" is a LABELLED EXAMPLE, and that pairing — picture to
 // meaning — is the thing an occupancy check would have to be measured against. The time alone loses it.
 const sleepReviewColumns = db.prepare('PRAGMA table_info(sleep_reviews)').all().map((c) => c.name);
-for (const col of ['true_onset_transition_id', 'true_wake_transition_id']) {
+// `true_in_bed_transition_id` joined this loop 2026-09-30: it is an INTEGER id like the two before it,
+// and NULL on every existing review is the right answer ("no put-down frame was named").
+for (const col of ['true_onset_transition_id', 'true_wake_transition_id', 'true_in_bed_transition_id']) {
   if (!sleepReviewColumns.includes(col)) db.exec(`ALTER TABLE sleep_reviews ADD COLUMN ${col} INTEGER`);
+}
+
+// The parent's own "in bed" (put-down) time, separate from their "asleep" time (true_onset_at). Added
+// 2026-09-30 after the night of 2026-09-29: the detector had the onset right (asleep 19:13), the child had
+// been put down at 18:49 for a bedtime story, and the review's only frame button ("Put down here") wrote
+// 18:49 into the ASLEEP time. Also in the CREATE TABLE above for fresh installs; this is the upgrade path.
+//
+// ⚠️ Its OWN statement, NOT a fourth entry in the loop above (plan review): that loop emits `INTEGER`,
+// and this column holds a UTC timestamp string like every other true_* time. NULL on existing reviews is
+// correct: no review before this ever recorded a put-down, and none can be reinterpreted as one (there is
+// no way to tell which stored onsets came from the old "Put down here" button).
+if (!sleepReviewColumns.includes('true_in_bed_at')) {
+  db.exec('ALTER TABLE sleep_reviews ADD COLUMN true_in_bed_at TEXT');
 }
 
 // "No one was in the bed" — a parent saying the detector's whole night was about an empty bed (added

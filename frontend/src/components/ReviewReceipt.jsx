@@ -20,7 +20,13 @@ import { Check } from 'lucide-react';
 // the bed" plan, R4/R9 — this is also what an OLDER client, which has never heard of the flag, falls
 // back to when reading a flagged reviewCardState response; additive fields degrade gracefully to that,
 // not to nothing).
-export default function ReviewReceipt({ onsetAt, wakeAt, nobodyInBed, fmtTime, onOpen }) {
+//
+// `inBedAt` (2026-09-30): the put-down the person gave, read back BEFORE the asleep time — "You said in
+// bed 6:49, asleep 7:13 to 6:37." `onsetAt`/`wakeAt` are the RESOLVED times (theirs where they gave one,
+// otherwise the detector's the card is showing), so an in-bed-only answer still reads back a whole night
+// instead of "— to —", which would look like a save that failed (plan review R1).
+export default function ReviewReceipt({ onsetAt, wakeAt, inBedAt, nobodyInBed, fmtTime, onOpen }) {
+  const span = `${fmtTime(onsetAt) || '—'} to ${fmtTime(wakeAt) || '—'}`;
   return (
     <div className="card review-card review-card--done">
       <button type="button" className="review-card__body" onClick={onOpen}>
@@ -30,7 +36,9 @@ export default function ReviewReceipt({ onsetAt, wakeAt, nobodyInBed, fmtTime, o
           <span className="camera-tile__sub">
             {nobodyInBed
               ? 'You said no one was in the bed. Tap to change it.'
-              : <>You said {fmtTime(onsetAt) || '—'} to {fmtTime(wakeAt) || '—'}. Tap to change it.</>}
+              : inBedAt
+                ? `You said in bed ${fmtTime(inBedAt)}, asleep ${span}. Tap to change it.`
+                : `You said ${span}. Tap to change it.`}
           </span>
         </span>
         <span className="review-card__go" aria-hidden="true">›</span>

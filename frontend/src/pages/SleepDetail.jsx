@@ -131,8 +131,20 @@ export default function SleepDetail() {
         // after a flag-only save — a successful save that reads exactly like a failed one, the same
         // class of bug the receipt exists to prevent in the first place. `nobody_in_bed` here is the
         // RAW stored column (0/1, same as `dismissed`), not reviewCardState's boolean, hence truthiness.
+        // An in-bed-only answer (2026-09-30) is an answer too, and gets a receipt of its own: the gate is
+        // no longer "raw onset or wake present" (plan review R1).
+        //
+        // The receipt reads back RESOLVED times: the parent's where they gave one, otherwise `computed`,
+        // the detector's own answer from this same response (what the review screen showed, and what this
+        // page's night is computed from). Without that an in-bed-only save read "asleep — to —".
         const rev = r?.review;
-        setReceipt(rev && (rev.true_onset_at || rev.true_wake_at || rev.nobody_in_bed) ? rev : null);
+        setReceipt(rev && (rev.true_onset_at || rev.true_wake_at || rev.true_in_bed_at || rev.nobody_in_bed)
+          ? {
+            ...rev,
+            shown_onset_at: rev.true_onset_at || r.computed?.onset_at || null,
+            shown_wake_at: rev.true_wake_at || r.computed?.wake_at || null,
+          }
+          : null);
       })
       .catch(() => { /* the receipt is confirmation, not function — never block the night on it */ });
     return () => { alive = false; };
@@ -183,7 +195,8 @@ export default function SleepDetail() {
         </div>
 
         {receipt && (
-          <ReviewReceipt onsetAt={receipt.true_onset_at} wakeAt={receipt.true_wake_at} nobodyInBed={!!receipt.nobody_in_bed}
+          <ReviewReceipt onsetAt={receipt.shown_onset_at} wakeAt={receipt.shown_wake_at} inBedAt={receipt.true_in_bed_at}
+            nobodyInBed={!!receipt.nobody_in_bed}
             fmtTime={fmtTime} onOpen={() => navigate(`/children/${id}/review/${date}`)} />
         )}
 

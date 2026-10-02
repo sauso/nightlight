@@ -277,6 +277,10 @@ Each kind ages out differently — this is the part most worth reading twice:
     and kept like any other night's, and marking the night deletes nothing. This is deliberate: the mark
     can be taken back, and a tap in a review should never destroy video that taking it back could not
     restore. If you don't want that night's timelapse, an admin can delete it from the child's page.
+  - Correcting a night's times, or the **lock** that a correction puts on the night's summary (README,
+    "A night you have corrected is locked"), changes nothing here either. A timelapse is made once, the
+    first time the nightly update scores the night, and a correction never takes that pass away: a night
+    corrected before it was first scored still gets its timelapse when it is.
 
 There is also a **minimum-free-space guard** across all three: if the volume is nearly full, new video
 is skipped, so recording can never be the thing that fills your disk.

@@ -361,15 +361,38 @@ report (the child's sleep card and detail page) keeps catching up, not another p
 never resolves at all within that window, there is no follow-up to send — the original
 report, with no wake time listed, is what you get.
 
-**Marking a night "No one was in the bed" stops its follow-up.** Once you have said nobody slept there
-(in the morning review, for that child and that night), Nightlight will not send a "Sleep report
-updated" telling you when they got up. What it will **not** do is take back the report that already
-went out: a delivered notification can't be recalled, so that one still describes the night as the
-cameras read it. The same applies if you mark the night *before* the first report is sent (possible in
-the first half-hour or so after the window closes): the report still describes the cameras' version.
-Take the mark back within about 3 hours of the window closing and the follow-up can still arrive (once a
-wake time is known, including one worked out while the mark was on), because the app is showing the
-cameras' version of the night again. After those 3 hours, nothing more is sent either way.
+**Correcting a night stops its follow-up.** Once you have corrected a night in the morning review (for
+that child and that night) — typed or picked an in-bed, asleep or wake time, confirmed it with **That's
+right**, or said "No one was in the bed" — Nightlight will not send a "Sleep report updated" telling you
+when the cameras think they got up. You have already said what happened, so the detector's wake time is
+not pushed over your answer. Until 2026-09-30 only "No one was in the bed" did this; a typed wake time
+could still be followed by the detector's own. Answering only the per-event questions or dismissing the
+card is not a correction and changes nothing here. A note on its own isn't one either, but the review
+form always saves the asleep and wake-up times it shows along with your note (as your confirmation of
+them), so **a note saved from the review form counts as a correction** and stops the follow-up. Only a
+note sent on its own through the API doesn't.
+
+What it will **not** do is take back the report that already went out: a delivered notification can't be
+recalled, so that one still describes the night as the cameras read it. The same applies if you correct
+the night *before* the first report is sent (possible in the first half-hour or so after the window
+closes, from the sleep detail page): the first report still goes out as usual and describes the cameras'
+version. Remove your correction within about 3 hours of the window closing and the follow-up can still
+arrive (once a wake time is known), because the app is showing the cameras' version of the night again.
+After those 3 hours (at most one 30-minute check past them), nothing more is sent either way. That holds
+even when the app has a reason to update the night later: remove your correction hours afterwards (say
+at 1 pm, for a window that closed at 7 am), or have the server off across the morning, and the saved
+summary still catches up on its next check, but no "Sleep report updated" goes out for it. (Before
+2026-09-30 either could send one hours late.)
+
+| | First "Sleep report" | "Sleep report updated" follow-up |
+|---|---|---|
+| Night not corrected | sent when the window closes | sent once, if the wake time was unknown and becomes known within about 3 hours |
+| Night corrected after the first report | already sent, not recalled | not sent |
+| Night corrected before the first report | still sent, with the cameras' figures | not sent |
+| Correction removed after those ~3 hours | already sent | not sent (the saved summary still updates) |
+
+A corrected night is also **locked** (README, "A night you have corrected is locked"): its saved summary
+stops being refined, which is the other half of why no later wake time is pushed.
 
 ## Troubleshooting
 
