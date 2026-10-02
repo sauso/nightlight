@@ -14,13 +14,14 @@ import {
 } from './bedTransitionTracker.js';
 import { childSamplingActiveNow } from './sleepAnalysis.js';
 import { isDemoModeActive } from '../middleware/demoMode.js';
-import { killIfSpawned, detectorHealthOf, killStalledDetector } from './processGuards.js';
+import { killIfSpawned, detectorHealthOf, killStalledDetector, safeInterval } from './processGuards.js';
 import { buildMotionTaps, createStderrRouter, SIDE_CHANNEL_LOG_ARGS } from './ffmpegSideChannel.js';
 import { openObservation } from './observationClock.js';
 
 // Server-side motion detection. Per camera with detection enabled, a cheap FFmpeg leg reads
 // the already-published MediaMTX stream (the sub-stream when there is one — far cheaper to
-// decode), scaled tiny and grayscale at a low frame rate, and we frame-diff consecutive
+// decode; if the sub is not up it falls back to main and returns to the sub once it is, see
+// SUB_GRACE_MS below), scaled tiny and grayscale at a low frame rate, and we frame-diff consecutive
 // NAMING: user-facing wording is "bed" throughout (see the 0.26.0 changelog). A few identifiers here
 // still read `crib*` (cribActive, cribLastActive) and the DB column is still `detect_zone` — those are
 // deliberately untouched to keep the rename free of schema and API churn. They mean the same thing.
@@ -95,6 +96,94 @@ const ACTIVE_GRACE_MS = 1500;
 const SUB_GRACE_MS = 45000;
 const READY_POLL_MS = 2000;
 
+// --- #500: RETURNING to the sub after a fallback to main. ---
+// The 45 s grace above is decided ONCE, at launch. After an outage longer than it (the camera's scheduled
+// reboot, a Wi-Fi drop, a MediaMTX restart) both paths come back within about a second of each other, main
+// is usually first, and the detector used to stay on main until its ffmpeg next exited, which can be a day
+// or more (seen 2026-09-25: after the daily reboot both staging detectors and one prod detector were on
+// main, and nothing said so). The motion thresholds were calibrated on the SUB stream (10 fps there; main
+// is 15 fps, a different encoder and noise floor), so a night on main is a different measurement, and it
+// costs more CPU, which is what preferring the sub is for.
+//
+// So a detector that fell back to main WHILE THE CAMERA HAS A SUB polls the sub, and once the sub has been
+// seen ready for a stable stretch AND the room has been quiet, it relaunches itself: SIGTERM, then the
+// ordinary exit-handler relaunch (RESTART_DELAY_MS, then launch() -> pickReadyPath picks the sub because it
+// is ready). One lineage, so stopMotionDetector still cancels it (#253) and closure state that survives a
+// relaunch (believedOccupied) survives this too.
+//
+// ⚠️ ALL FOUR NUMBERS ARE CHOSEN, NOT MEASURED. None is a detection threshold and none changes a number
+// computed on a given stream; they only decide WHEN to switch. They were set from one house's 64 s reboot
+// outage (sub ~0.75 s behind main); for another install they are a hypothesis.
+export const SUB_RECHECK_MS = 20 * 1000;
+// Consecutive ready SAMPLES (not continuous readiness: a sub that drops and returns between two samples still
+// counts) before switching: 3 x 20 s = 40-60 s of ready, so a sub that is ready for a moment, or the 0.75 s
+// post-reboot lag, never triggers a relaunch. A not-ready OR UNKNOWN answer (#451: a MediaMTX API timeout is
+// not evidence of ready) resets the run.
+export const SUB_STABLE_CHECKS = 3;
+// ★ DERIVED, NOT TYPED. The relaunch builds a NEW bed-transition tracker, which forgets when the bed last
+// moved. oobLinkKind accepts a big outside burst up to OOB_LINK_SLOW_MS after that, and a confirmed exit then
+// needs OOB_CONFIRM_QUIET_MS more. A switch in that window loses a real exit that an un-relaunched tracker
+// would have confirmed (verified by running the real tracker in #500's plan review: bed active at t=0, a 12%
+// outside burst at 45 s, a relaunch at 36 s of quiet -> the exit was gone), and an exit sets the reported wake
+// time. So the room must have been quiet for longer than both, plus a margin. If either constant changes
+// this follows (motion-return-to-sub.test.js pins the inequality).
+export const SUB_QUIET_MS = OOB_LINK_SLOW_MS + OOB_CONFIRM_QUIET_MS + 24 * 1000;
+// A sub that flaps ready/not-ready must not cost a relaunch per outage blip: at most one switch per this long
+// per startMotionDetector call (a fresh start, e.g. a settings save, forgets it: a small accepted hole).
+export const SUB_SWITCH_MIN_GAP_MS = 10 * 60 * 1000;
+
+// Every timing above in one object so a test can shrink them (the 45 s grace and the 5 s relaunch delay make
+// a real-time test of this impractical). Production never calls the setter, so `timing` IS the constants.
+const PRODUCTION_TIMING = Object.freeze({
+  subGraceMs: SUB_GRACE_MS,
+  readyPollMs: READY_POLL_MS,
+  restartDelayMs: RESTART_DELAY_MS,
+  recheckMs: SUB_RECHECK_MS,
+  stableChecks: SUB_STABLE_CHECKS,
+  quietMs: SUB_QUIET_MS,
+  minGapMs: SUB_SWITCH_MIN_GAP_MS,
+});
+let timing = PRODUCTION_TIMING;
+export function _setReturnTimingForTests(overrides) {
+  timing = Object.freeze({ ...PRODUCTION_TIMING, ...overrides });
+}
+export function _resetReturnTimingForTests() {
+  timing = PRODUCTION_TIMING;
+}
+
+// Every live return-check timer. Only so a test can see that none survives stop / exit / error / a replaced
+// entry: a leaked interval sends no request (its own guard returns first), so nothing else can show it.
+const returnTimers = new Set();
+export function _returnTimerCountForTests() {
+  return returnTimers.size;
+}
+function disarmReturnCheck(entry) {
+  if (!entry.returnTimer) return;
+  clearInterval(entry.returnTimer);
+  returnTimers.delete(entry.returnTimer);
+  entry.returnTimer = null;
+}
+
+// The sub path's name, or null when the camera has no sub-stream configured.
+function subPathOf(camera) {
+  return camera.sub_rtsp_url && String(camera.sub_rtsp_url).trim() ? subPathName(camera.mediamtx_path) : null;
+}
+
+// The run of consecutive ready samples after one more answer from MediaMTX. ONLY a confirmed `ready === true`
+// extends it: not ready, an unknown (an API timeout, #451) and no answer at all all break it.
+export function nextReadyRun(run, status) {
+  return status && status.ready === true ? run + 1 : 0;
+}
+
+// Should a detector reading main go back to the sub now? Pure, so the boundaries are testable without a
+// process. `sinceLastSwitchMs` is null when this start has never switched (NOT 0: a 0 would block the first
+// return for 10 minutes after boot, which is when a power cut boots the server and the cameras together).
+export function shouldReturnToSub({ readyRun, quietMs, sinceLastSwitchMs }) {
+  return readyRun >= timing.stableChecks
+    && quietMs >= timing.quietMs
+    && (sinceLastSwitchMs == null || sinceLastSwitchMs >= timing.minGapMs);
+}
+
 // Map 1..100 sensitivity to the fraction of zone pixels that must change for a frame to count
 // as "active". Higher sensitivity => smaller fraction => easier to trigger.
 // Exported for tests only — it and buildZoneMask below are the two pure functions on this path, and
@@ -153,13 +242,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // Resolve to the path to analyse once one is actually publishing, preferring the sub-stream
 // (cheap to decode). Polls MediaMTX readiness rather than spawning ffmpeg speculatively, so we
 // never hit a 404 (at startup, or after a blip took both streams down): it waits up to
-// SUB_GRACE_MS for the sub, then settles for the main path if the sub still isn't up. Because
-// this runs on every (re)launch, the detector also returns to the sub after a blip instead of
-// staying stuck on the heavier main stream. Resolves null if the detector was stopped meanwhile.
+// SUB_GRACE_MS for the sub, then settles for the main path if the sub still isn't up.
+// ⚠️ This choice is made ONCE per launch. It used to be described here as "the detector also returns to the
+// sub after a blip", which was true only if something relaunched it: nothing did while its ffmpeg kept
+// running, so a detector that settled for main stayed there (#500). launch() now arms a return check for
+// exactly that case (see SUB_RECHECK_MS). Resolves null if the detector was stopped meanwhile.
 async function pickReadyPath(camera, entry) {
-  const sub = camera.sub_rtsp_url && String(camera.sub_rtsp_url).trim() ? subPathName(camera.mediamtx_path) : null;
+  const sub = subPathOf(camera);
   const main = camera.mediamtx_path;
-  const deadline = Date.now() + SUB_GRACE_MS;
+  const deadline = Date.now() + timing.subGraceMs;
   for (;;) {
     if (entry.stopped) return null;
     if (sub) {
@@ -171,7 +262,7 @@ async function pickReadyPath(camera, entry) {
       const st = await getPathStatus(main).catch(() => null);
       if (st && st.ready) return main;
     }
-    await sleep(READY_POLL_MS);
+    await sleep(timing.readyPollMs);
   }
 }
 
@@ -247,6 +338,13 @@ export async function startMotionDetector(camera) {
   // (settings change, camera reassignment, app restart) — see its own comment on why that's correct.
   let believedOccupied = null;
 
+  // #500: when this detector last relaunched itself from main back to the sub (performance.now(); null = never
+  // since this start). Outside launch() for the same reason as believedOccupied: it has to outlive the relaunch
+  // it triggers, or a sub that flaps would be switched back to every time. A fresh startMotionDetector call
+  // forgets it (a settings save, or the 5-minute reconcile finding a detector in its relaunch gap): a small
+  // accepted hole in the 10-minute bound, documented in KNOWN-ISSUES.
+  let lastSwitchMono = null;
+
   async function launch() {
     // Claim the slot before the async gap below, so a concurrent start/reconcile can't
     // double-run this camera's detector.
@@ -278,6 +376,16 @@ export async function startMotionDetector(camera) {
     // launch builds a fresh entry, so lastDataMono/lastInputRecordMono start unset: "nothing yet".)
     entry.path = path;
     entry.spawnedMono = performance.now();
+    // #500: this launch settled for the MAIN stream although the camera has a sub. Say so (nothing did before),
+    // and watch for the sub coming back. `returnTimer` is armed AFTER the spawn so a failed spawn never has one
+    // (its 'error' handler disarms anyway).
+    const subPath = subPathOf(camera);
+    if (subPath && path === camera.mediamtx_path) {
+      logger.warn(
+        `[detect:${path}] "${camera.name}": sub stream ${subPath} not ready, reading the MAIN stream (more CPU; the motion thresholds were calibrated on the sub); will return to the sub once it is ready`
+      );
+      armReturnCheck(subPath);
+    }
     // One observation GENERATION per ffmpeg process (#373, C3): the stdout and stderr handlers below close
     // over this launch's own handle, so a late 'close' or late bytes from an old process can never touch a
     // newer one. The handle is fail-safe: whatever the clock does, it cannot throw into this file.
@@ -317,6 +425,7 @@ export async function startMotionDetector(camera) {
       // sane cadence, and isDetecting() reports the truth in the meantime — without this the leg would be
       // left claimed by a process that never existed, and reconcile would skip it as healthy.
       logger.error(`[detect:${path}] could not start ffmpeg: ${err.code || err.message}`);
+      disarmReturnCheck(entry); // #500: a failed spawn never emits 'exit', which is the other place this is cleared
       if (detectors.get(camera.id) === entry) detectors.delete(camera.id);
     });
 
@@ -356,6 +465,10 @@ export async function startMotionDetector(camera) {
         }
         const fraction = changed / zonePixels;
         const now = Date.now();
+        // #500: when the room last moved, in EITHER channel, for the return-to-sub quiet gate. Set here, ahead of
+        // the `!activityOnly` branch below: a sleep-tracking-only leg is exactly the one whose bed transitions
+        // a relaunch could lose. Monotonic, like the other #369 stamps on the entry.
+        let anyActive = fraction >= threshold;
         // #493: what the clone ledger needs to find this frame again, or null (no working clock).
         const sample = obsGen === null ? null : { gen: obsGen, token };
         // Feed the raw per-frame movement into the per-minute activity timeline (independent of the
@@ -369,6 +482,7 @@ export async function startMotionDetector(camera) {
         // channel so sleep tracking can flag someone in the room vs stirring in the bed.
         if (outPixels > 0) {
           const outFraction = changedOut / outPixels;
+          if (outFraction >= threshold) anyActive = true;
           recordMotionOut(camera.id, outFraction, sample, atMs);
           // --- "Out of bed" / "into bed" classification. Runs whether the leg is alerting or
           // activity-only (a distinct, low-rate signal, not raw motion). The candidate state machine
@@ -462,6 +576,7 @@ export async function startMotionDetector(camera) {
             }
           }
         }
+        if (anyActive) entry.lastActiveMono = performance.now();
         // Activity-only legs (MQTT-source / motion-off child cameras) stop here — no alert bookkeeping.
         if (!activityOnly) {
           if (fraction >= threshold) {
@@ -483,6 +598,67 @@ export async function startMotionDetector(camera) {
         }
       }
       prev = frame;
+    }
+
+    // #500: the return check for a detector that fell back to main (armed by launch() above). One tick every
+    // timing.recheckMs; see SUB_RECHECK_MS for what it waits for and why.
+    function armReturnCheck(subPath) {
+      let readyRun = 0; // consecutive ready SAMPLES of the sub
+      let checking = false; // a getPathStatus is awaiting
+      let skipped = false; // a tick was skipped while one was awaiting: that answer no longer ends an unbroken run
+
+      // True while this entry is still the live, tracked, un-stopped one that nobody is already killing.
+      const live = () =>
+        detectors.get(camera.id) === entry && !entry.stopped && !entry.returning && !entry.watchdogKill;
+
+      async function tick() {
+        // Guard FIRST, and disarm on failure: a timer that outlived its generation sends no request (this
+        // returns before any), so only this self-clear and the clears at exit/error/stop keep it from leaking
+        // the old launch's whole closure (the previous frame buffer among it) once per fallback.
+        if (!live()) { disarmReturnCheck(entry); return; }
+        // A tick that starts while the previous one is still awaiting is a SKIPPED OBSERVATION (#451's rule):
+        // the previous one's answer is stale by the time it lands, so it must not extend the run. Production
+        // cannot overlap (20 s between ticks vs the 5 s MediaMTX deadline) but nothing else pins that.
+        if (checking) { skipped = true; return; }
+        checking = true;
+        let status = null;
+        try {
+          status = await getPathStatus(subPath).catch(() => null);
+        } finally {
+          checking = false;
+        }
+        // Re-check after the await: the entry may have been stopped, replaced or killed while we waited.
+        if (!live()) { disarmReturnCheck(entry); return; }
+        readyRun = skipped ? 0 : nextReadyRun(readyRun, status);
+        skipped = false;
+        const nowMono = performance.now();
+        // Quiet = since the last frame that was active in EITHER channel (inside or outside the bed zone), or
+        // since this process started if none was. See SUB_QUIET_MS for why this must outlast the slow link.
+        const quietMs = nowMono - Math.max(entry.lastActiveMono ?? 0, entry.spawnedMono);
+        const sinceLastSwitchMs = lastSwitchMono == null ? null : nowMono - lastSwitchMono;
+        if (!shouldReturnToSub({ readyRun, quietMs, sinceLastSwitchMs })) return;
+
+        // Mark first so a second tick, or the #369 watchdog (killStalledDetector refuses a `returning` entry),
+        // cannot arm a second kill while this one is in flight.
+        entry.returning = true;
+        if (!killIfSpawned(proc, 'SIGTERM')) {
+          entry.returning = false; // nothing was signalled (no process, or already reaped): try again next tick
+          return;
+        }
+        disarmReturnCheck(entry);
+        lastSwitchMono = nowMono;
+        logger.info(
+          `[detect:${path}] "${camera.name}": sub stream ${subPath} ready again (${readyRun} checks, quiet ${Math.round(quietMs / 1000)}s), returning the motion detector from main to sub (a relaunch: ~${Math.round(timing.restartDelayMs / 1000)}s gap; an open bed-transition candidate and the alert cooldown reset)`
+        );
+        // The same SIGKILL fallback stopMotionDetector and killStalledDetector use, cleared when SIGTERM works.
+        const force = setTimeout(() => killIfSpawned(proc, 'SIGKILL'), FORCE_KILL_TIMEOUT_MS);
+        force.unref?.();
+        proc.once('exit', () => clearTimeout(force));
+      }
+
+      entry.returnTimer = safeInterval(`detect-return:${camera.name}`, timing.recheckMs, tick);
+      entry.returnTimer.unref?.();
+      returnTimers.add(entry.returnTimer);
     }
 
     proc.stdout.on('data', (chunk) => {
@@ -542,6 +718,7 @@ export async function startMotionDetector(camera) {
     });
 
     proc.on('exit', (code) => {
+      disarmReturnCheck(entry); // #500: the timer belongs to this process
       const wasTracked = detectors.get(camera.id) === entry;
       if (wasTracked) detectors.delete(camera.id);
       if (!entry.stopped && wasTracked) {
@@ -550,13 +727,17 @@ export async function startMotionDetector(camera) {
         // #369: a kill by the detector watchdog is a recovery, not a failure, so INFO; it already logged its own
         // diagnosis line. The phrase "restarting in 5s" is kept on purpose: restart-cancellation.test.js counts
         // relaunches by it, and a watchdog kill goes through this very relaunch.
+        // #500: our own return to the sub is a deliberate kill too, and is tested BEFORE the code branches: an
+        // ffmpeg that gets SIGTERM exits non-zero (or with a signal and a null code), so an unordered check
+        // would log an ERROR for every switch. (The 5s in the text is the real RESTART_DELAY_MS in production.)
         if (entry.watchdogKill) logger.info(`[detect:${path}] stopped by the detector watchdog (no frames), restarting in 5s`);
+        else if (entry.returning) logger.info(`[detect:${path}] returning to the sub stream, restarting in 5s`);
         else if (code === 0) logger.raw(`detect:${path}`, 'stream ended, reconnecting');
         else logger.error(`[detect:${path}] exited (code ${code}), restarting in 5s`);
         pendingRestarts.set(camera.id, setTimeout(() => {
           pendingRestarts.delete(camera.id);
           if (!entry.stopped && !detectors.has(camera.id)) launch().catch(() => {});
-        }, RESTART_DELAY_MS));
+        }, timing.restartDelayMs));
       }
     });
   }
@@ -573,6 +754,7 @@ export function stopMotionDetector(cameraId) {
   if (!entry) return Promise.resolve();
   entry.stopped = true;
   detectors.delete(cameraId);
+  disarmReturnCheck(entry); // #500: synchronously, before the kill, so no tick can race the stop
   // Caught during launch()'s async path-selection gap (no process spawned yet) — the launch
   // will see `stopped` and abort itself, so there's nothing to kill.
   if (!entry.proc) return Promise.resolve();

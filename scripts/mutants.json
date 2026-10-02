@@ -8990,5 +8990,259 @@
     "expect": "killed",
     "tests": ["sound-digital-silence.test.js"],
     "namePattern": "#453 C2:"
+  },
+  {
+    "label": "#500 M0 (control): a comment edit in motionDetector.js must change nothing",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "// --- #500: RETURNING to the sub after a fallback to main. ---",
+    "replace": "// --- #500: RETURNING to the sub after a fallback to main. --- [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500"
+  },
+  {
+    "label": "#500 M1 (control): a detector that fell back to main arms NOTHING (R1 must kill this, which proves it fails on dev's behaviour)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "    if (subPath && path === camera.mediamtx_path) {",
+    "replace": "    if (false && subPath && path === camera.mediamtx_path) {",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R1"
+  },
+  {
+    "label": "#500 M2: fellBack forgets the sub != null guard (a camera with no sub polls /v3/paths/get/null)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "    if (subPath && path === camera.mediamtx_path) {",
+    "replace": "    if (path === camera.mediamtx_path) {",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R5"
+  },
+  {
+    "label": "#500 M3: fellBack is true only when the detector is NOT on main",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "    if (subPath && path === camera.mediamtx_path) {",
+    "replace": "    if (subPath && path !== camera.mediamtx_path) {",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R1"
+  },
+  {
+    "label": "#500 M4: an UNKNOWN (API timeout) extends the ready run",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "  return status && status.ready === true ? run + 1 : 0;",
+    "replace": "  return status && (status.ready === true || status.unknown) ? run + 1 : 0;",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R3"
+  },
+  {
+    "label": "#500 M5: a not-ready answer does not reset the ready run",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "  return status && status.ready === true ? run + 1 : 0;",
+    "replace": "  return status && status.ready === true ? run + 1 : run;",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R3"
+  },
+  {
+    "label": "#500 M6: one more ready sample is needed than the constant says (> instead of >=)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "  return readyRun >= timing.stableChecks",
+    "replace": "  return readyRun > timing.stableChecks",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R8"
+  },
+  {
+    "label": "#500 M7: the quiet comparison excludes exactly the threshold (> instead of >=)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "    && quietMs >= timing.quietMs",
+    "replace": "    && quietMs > timing.quietMs",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R8"
+  },
+  {
+    "label": "#500 M8: the min-gap comparison excludes exactly the gap (> instead of >=)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "sinceLastSwitchMs >= timing.minGapMs",
+    "replace": "sinceLastSwitchMs > timing.minGapMs",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R8"
+  },
+  {
+    "label": "#500 M9: lastSwitchMono starts at 0, so the first return is blocked for the first 10 minutes of the process",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "  let lastSwitchMono = null;",
+    "replace": "  let lastSwitchMono = 0;",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R1"
+  },
+  {
+    "label": "#500 M10: the quiet gate is removed (the room is always quiet)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        const quietMs = nowMono - Math.max(entry.lastActiveMono ?? 0, entry.spawnedMono);",
+    "replace": "        const quietMs = Infinity;",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R2"
+  },
+  {
+    "label": "#500 M11: motion OUTSIDE the zone does not count as activity",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "          if (outFraction >= threshold) anyActive = true;",
+    "replace": "          if (false) anyActive = true;",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R2"
+  },
+  {
+    "label": "#500 M12: motion INSIDE the zone does not count as activity",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        let anyActive = fraction >= threshold;",
+    "replace": "        let anyActive = false;",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R2"
+  },
+  {
+    "label": "#500 M13: the activity stamp is set only on alerting legs (inside the !activityOnly branch's condition)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        if (anyActive) entry.lastActiveMono = performance.now();",
+    "replace": "        if (anyActive && !activityOnly) entry.lastActiveMono = performance.now();",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R2"
+  },
+  {
+    "label": "#500 M14: a skipped (overlapped) tick does not break the run: the slow answer extends it",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        readyRun = skipped ? 0 : nextReadyRun(readyRun, status);",
+    "replace": "        readyRun = nextReadyRun(readyRun, status);",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R3b"
+  },
+  {
+    "label": "#500 M15: no in-flight guard (an overlapping tick starts its own request)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        if (checking) { skipped = true; return; }",
+    "replace": "        if (false) { skipped = true; return; }",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R3b"
+  },
+  {
+    "label": "#500 M16: the switch never marks the entry as returning (the exit is logged as a failure)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        entry.returning = true;",
+    "replace": "        entry.returning = false;",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R7"
+  },
+  {
+    "label": "#500 M17: the exit handler recognises a return only for a clean (code 0) exit",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        else if (entry.returning) logger.info(",
+    "replace": "        else if (entry.returning && code === 0) logger.info(",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R7"
+  },
+  {
+    "label": "#500 M18: the process's exit does not clear the return timer",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "      disarmReturnCheck(entry); // #500: the timer belongs to this process",
+    "replace": "      // [mutant] exit does not disarm",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R6: the process exiting"
+  },
+  {
+    "label": "#500 M19: a failed spawn's 'error' does not clear the return timer",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "      disarmReturnCheck(entry); // #500: a failed spawn never emits 'exit', which is the other place this is cleared",
+    "replace": "      // [mutant] error does not disarm",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R6: the process exiting"
+  },
+  {
+    "label": "#500 M20: stop() does not clear the return timer (a wedged process exits 3 s later)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "  disarmReturnCheck(entry); // #500: synchronously, before the kill, so no tick can race the stop",
+    "replace": "  // [mutant] stop does not disarm",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R6: stop"
+  },
+  {
+    "label": "#500 M21: the switch has no SIGKILL fallback for a process that ignores SIGTERM",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        const force = setTimeout(() => killIfSpawned(proc, 'SIGKILL'), FORCE_KILL_TIMEOUT_MS);",
+    "replace": "        const force = setTimeout(() => {}, FORCE_KILL_TIMEOUT_MS);",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R6b"
+  },
+  {
+    "label": "#500 M22: killStalledDetector (the #369 watchdog lever) does not refuse an entry that is returning",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "  if (!entry || entry.watchdogKill || entry.returning) return false;",
+    "replace": "  if (!entry || entry.watchdogKill) return false;",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R6b"
+  },
+  {
+    "label": "#500 M23: a switch whose SIGTERM could not be sent stays marked returning (the check gives up)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "          entry.returning = false; // nothing was signalled (no process, or already reaped): try again next tick",
+    "replace": "          entry.returning = true; // nothing was signalled (no process, or already reaped): try again next tick",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R6c"
+  },
+  {
+    "label": "#500 M24: the switch does not record when it happened (the min-gap never applies)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        lastSwitchMono = nowMono;",
+    "replace": "        // [mutant] lastSwitchMono not recorded",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R4"
+  },
+  {
+    "label": "#500 M25: SUB_QUIET_MS loses its margin (60 s + 6 s only: not longer than the window it must outlast)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "export const SUB_QUIET_MS = OOB_LINK_SLOW_MS + OOB_CONFIRM_QUIET_MS + 24 * 1000;",
+    "replace": "export const SUB_QUIET_MS = OOB_LINK_SLOW_MS + OOB_CONFIRM_QUIET_MS;",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500 R"
+  },
+  {
+    "label": "#500 M26: the tick's own live-guard no longer disarms (equivalent: stop, exit and error already clear the timer, and a replaced entry cannot outlive a stop)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        if (!live()) { disarmReturnCheck(entry); return; }\r\n        // A tick that starts while",
+    "replace": "        if (!live()) { return; }\r\n        // A tick that starts while",
+    "expect": "equivalent",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500",
+    "note": "Every path that makes live() false (stop, exit, error, a replacing start) already clears the timer synchronously, so the self-clear is a backstop with no reachable trigger. Kept because a leak costs the old launch's whole closure."
+  },
+  {
+    "label": "#500 M27: the tick's live() guard forgets `returning` (equivalent: the switch disarms the timer itself)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        detectors.get(camera.id) === entry && !entry.stopped && !entry.returning && !entry.watchdogKill;",
+    "replace": "        detectors.get(camera.id) === entry && !entry.stopped && !entry.watchdogKill;",
+    "expect": "equivalent",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#500",
+    "note": "The switch calls disarmReturnCheck right after marking the entry returning, so no later tick exists to read the flag."
   }
 ]

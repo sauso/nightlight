@@ -668,7 +668,8 @@ cooldown after a restart: the existing behaviour of every detector relaunch, iss
 that was building up to an alert, and a pending bed-exit or bed-entry candidate. The motion detector's
 belief about whether the child is in bed, and the sound detector's learned ambient level and cooldown, are
 kept. A restarted motion detector also returns to the Low stream if it had fallen back to the main one
-after a blip (#500); this does not help a detector that never goes dark.
+after a blip; since #500 a detector on the main stream goes back by itself when the Low stream is up and the
+room is quiet (the next section), so this no longer depends on a restart.
 
 **Limits, stated rather than hidden:**
 - **The minutes before the restart are still lost.** Since issue #508 the sleep numbers report those dark
@@ -697,6 +698,69 @@ after a blip (#500); this does not help a detector that never goes dark.
 **What to do:** nothing, it is self-healing. If one camera shows these rows regularly, include the
 `[detector-watchdog]` lines when reporting it: the `path`, `probe` and `input tap` fields say where the
 stream stopped (the detector's side, or the stream it reads), which nothing could tell before.
+
+---
+
+## Motion detection reads the Low stream, and goes back to it after an outage (`reading the MAIN stream` in the log)
+
+**What you see:** two lines in the log, minutes apart, after a camera has been off for a while (its scheduled
+reboot, a Wi-Fi drop, a server restart):
+
+```
+[WARN] [detect:cam_…] "Nursery Cam": sub stream cam_…-sub not ready, reading the MAIN stream (more CPU; the motion thresholds were calibrated on the sub); will return to the sub once it is ready
+[INFO] [detect:cam_…] "Nursery Cam": sub stream cam_…-sub ready again (3 checks, quiet 95s), returning the motion detector from main to sub (a relaunch: ~5s gap; an open bed-transition candidate and the alert cooldown reset)
+```
+
+**Which stream motion detection reads:** the camera's **Low (sub) stream** when it has one and it is up,
+because it is far cheaper to decode and it is the stream every motion threshold in Nightlight was measured
+on. A camera with no Low stream always reads the main stream, and none of this applies to it. The **sound**
+detector always reads the main stream (that is where the audio is).
+
+**What happens when the Low stream is not up:** a motion detector that (re)starts waits up to 45 seconds for
+the Low stream, then settles for the main one. The streams of a camera that was off for longer than that come
+back within about a second of each other, and the main one is usually first, so this is a race that happens
+after any outage longer than 45 seconds, on any install. Before this was fixed (#500) the detector then
+stayed on the main stream until its ffmpeg next exited, which could be a day or more, and nothing said so. Main is a different
+measurement (a different frame rate, encoder and noise; 15 fps against 10 fps on the cameras the numbers were
+calibrated on) and costs more CPU.
+
+**Now:** a detector on the main stream checks the Low stream every 20 seconds, and **switches back when**
+
+| Condition (fixed, not configurable) | Value | Why |
+|---|---|---|
+| The Low stream was ready on 3 checks in a row | 3 x 20 s | A stream that is up for a moment, or the second it lags the main one after a reboot, must not trigger a relaunch. A check that could not be answered (MediaMTX timed out) counts as not ready. |
+| The room has been quiet | 90 s | See the limit below: derived from the bed-exit rules, not typed. |
+| At most one switch per | 10 min | A Low stream that keeps dropping must not cost a relaunch every time it comes back. |
+
+The switch is a **normal detector relaunch** (the same one a dropped stream causes): about 5 seconds with no
+motion samples, which the sleep numbers show as "No data" for those minutes like any other gap. The bed
+transition rules start afresh (a half-seen bed exit or entry is forgotten, and so are "when the bed last
+moved" and the 2-minute pause after a logged exit or entry), and the alert cooldown resets, so a motion alert can fire again sooner than the cooldown after a
+switch (the same as every relaunch, issue #454). The detector's belief about whether the child is in bed is
+kept. The relaunch follows the same stop rules as any other: switching detection off, or disabling or
+deleting the camera, cancels it.
+
+**Limits, stated rather than hidden:**
+- **The room must go quiet first.** The switch waits until neither the bed nor the area outside it has moved
+  for 90 seconds (a quiet period longer than the 60 s the exit rules look back for a bed that has just moved,
+  plus the 6 s they need to confirm an exit, plus a margin), so a relaunch cannot lose a bed exit. A room
+  that never goes quiet (a child playing, a TV in shot) stays on the main stream, as it did before.
+- **The numbers were chosen, not measured.** 20 s, 3 checks and 10 minutes were picked from one house's 64
+  second daily camera reboot; for another install they are a hypothesis. None of them is a detection
+  threshold, and none changes a number computed on a given stream.
+- **Readiness is sampled, not watched.** A Low stream that drops and returns between two checks still counts
+  as ready.
+- **A switch can land back on the main stream.** If the Low stream drops again in the 5 seconds before the
+  relaunch, the detector waits up to 45 s for it again and may settle for the main stream, then tries again
+  at least 10 minutes after the last switch. Worst case, a flapping Low stream costs one gap of up to about
+  50 seconds per 10 minutes.
+- **The 10-minute limit is per start.** Saving the camera's settings, or the 5-minute check finding a
+  detector in its relaunch gap, starts the detector afresh and forgets when it last switched.
+- **Which stream each minute used is not stored.** The log is the only record; the sleep numbers do not
+  say which stream a night's motion came from.
+
+**What to do:** nothing, it is self-healing. If a camera keeps showing the first line and never the second,
+its Low stream is not coming back: check the camera's Low-quality stream path in **Cameras → edit**.
 
 ---
 

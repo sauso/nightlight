@@ -52,6 +52,20 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
     is skipped — a push already sent cannot be recalled, but no further one goes out for a flagged night.
 
 ### Fixed
+- **Motion detection now goes back to the Low stream after an outage, instead of staying on the main stream
+  until it next restarted** (issue #500). A motion detector waits up to 45 seconds for the camera's Low
+  (sub) stream, then settles for the main stream. After any outage longer than that (a scheduled camera
+  reboot, a Wi-Fi drop, a server restart) both streams return within about a second of each other and the
+  main one is usually first, so the detector stayed on it, which could be a day or more, and nothing said so.
+  Every motion threshold was measured on the Low stream, and the main one costs more CPU. A detector that
+  fell back now says so in the log (`reading the MAIN stream`) and, once the Low stream has been ready on 3
+  checks 20 seconds apart **and** neither the bed nor the area outside it has moved for 90 seconds, relaunches
+  itself onto the Low stream (`returning the motion detector from main to sub`), at most once per 10 minutes.
+  The switch is an ordinary detector relaunch: about 5 seconds with no motion samples, a half-seen bed exit
+  or entry and the alert cooldown start afresh, and the belief about whether the child is in bed is kept.
+  The 90-second quiet period is derived from the bed-exit rules so a switch cannot lose an exit. The numbers
+  are fixed, not settings, and were chosen rather than measured. A camera with no Low stream, and the sound
+  detector, are unchanged. See KNOWN-ISSUES for the limits.
 - **A muted or silent microphone is now recorded as a quiet room instead of as missing sound, and silence
   between separate noises no longer adds them up into a sound alert** (issue #453). When a microphone
   delivers digital silence (every audio sample exactly zero: a muted or gated microphone, or a codec that
