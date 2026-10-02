@@ -790,6 +790,9 @@ describe('detector decisions: the #373 golden, with a working, a throwing and no
 //     peaks, and the whole of the next minute, are identical;
 //   - without a bed zone, motion_out_* stay NULL whatever was corrected.
 const STALL_INPUTS = 575; // ~119 s of stream: two stored minutes, with the stall in the first
+// #452: the planted stall's own length (stallInputs: 275,400 ticks at 90 kHz before input 151), not a recording of the
+// code's output: the frame the hold releases is stamped with the receipt time of input 151, 3,060 ms after input 150's.
+const STALL_RESTART_GAP_MS = 3060;
 // `base` = the receipt time of stream time 0 (#447's relaunch test shifts it so the collision sits in one minute).
 function stallInputs(base = T0) {
   const out = [];
@@ -977,6 +980,14 @@ describe('#493: a stall\'s clones leave motion_frames/motion_level/motion_out_le
         assert.deepEqual(run[v].events, run.none.events, `${v}: alerts`);
         assert.deepEqual(run[v].log, run.none.log, `${v}: log lines`);
       }
+      // ★ #452: the one line the stall adds. The 3,060 ms hole falls in the middle of a bed-active run (frames
+      // 140-150), so the motion run restarts ONCE, on the first frame of the clump that follows it; nothing is
+      // pending on the bed-transition side, so no `confirmation restarted` line. Identical in every clock variant
+      // (asserted above on the whole log), and the line carries no camera path, which differs per variant. The
+      // rest of the log is what it was before #452. The gap is the planted 3,060 ms (STALL_RESTART_GAP_MS).
+      const restartLines = run.none.log.filter((l) => l.includes('motion run restarted'));
+      assert.deepEqual(restartLines, [`[INFO] [detect] "493 Stall Cam" motion run restarted — no frames for ${STALL_RESTART_GAP_MS}ms`]);
+      assert.deepEqual(run.none.log.filter((l) => l.includes('confirmation restarted')), [], 'no bed-transition candidate was pending across the stall');
 
       // No proof, no correction: the raw counts, byte for byte. Minute 1's raw count is every frame written
       // before its flush, less the generation's first (the detector's baseline, never counted).

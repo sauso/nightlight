@@ -52,6 +52,23 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
     is skipped — a push already sent cannot be recalled, but no further one goes out for a flagged night.
 
 ### Fixed
+- **A motion alert or a bed exit/entry is no longer confirmed across a gap in the camera's video** (issue #452).
+  Both used to count *time elapsed* rather than video received: motion that was active, then silent for 20 seconds,
+  then active again was alerted on at once as "sustained", and a single quiet frame arriving after a long hole
+  confirmed a bed exit or entry as if its 6 quiet seconds had been watched. Now a frame that reaches Nightlight
+  after a gap (longer than 1.5 s, or 5 times the camera's own frame interval if that is larger, so a slow camera
+  is not starved) restarts the count: a motion alert needs its *Motion confirm* time of frames received after
+  the gap, and a pending exit or entry needs its full 6 seconds of received quiet. A pending exit or entry is
+  restarted, not cancelled, so a real exit during an outage is still recorded, just later; activity on the
+  first frame after the gap still cancels it, as before. A restart is logged (`motion run restarted` /
+  `confirmation restarted`, with the length of the gap), only when something was actually waiting.
+  *Motion confirm* 0 still alerts on the first frame. **Differs from the neighbours:** candidate opening, the
+  bed/outside links, the alert cooldown, sound alerts, stored counts and peaks are unchanged, and a stored
+  `out_of_bed`/`into_bed` after a gap is stamped later, with a `peak` and `out_frames` that can differ. The
+  numbers (1.5 s, factor 5, 16 intervals) are chosen, not measured, and a camera that keeps stalling confirms
+  more slowly (about 7 s for the 6 s exit on one with 3 gaps a minute); a stall ffmpeg fills with repeats as it
+  happens is not caught. Details and limits: [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "A motion alert or a bed
+  exit/entry is not confirmed across a gap in the video".
 - **Motion detection now goes back to the Low stream after an outage, instead of staying on the main stream
   until it next restarted** (issue #500). A motion detector waits up to 45 seconds for the camera's Low
   (sub) stream, then settles for the main stream. After any outage longer than that (a scheduled camera

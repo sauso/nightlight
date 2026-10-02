@@ -8,7 +8,7 @@ import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
 import { recordMotion, recordMotionOut, excludeClone } from './activityTracker.js';
 import { recordBedTransition, TRANSITION } from './bedTransitions.js';
-import { OOB_LINK_MS, OOB_LINK_SLOW_MS, OOB_SLOW_OUT_MIN } from './bedTransitionRules.js';
+import { OOB_LINK_MS, OOB_LINK_SLOW_MS, OOB_SLOW_OUT_MIN, createFrameGapDetector } from './bedTransitionRules.js';
 import {
   createBedTransitionTracker, OOB_CONFIRM_QUIET_MS, IB_CONFIRM_QUIET_MS, IB_LINK_MS,
 } from './bedTransitionTracker.js';
@@ -76,6 +76,18 @@ const PIXEL_DELTA = 24;
 // flickers frame to frame); only a gap longer than this ends the run.
 const ACTIVE_GRACE_MS = 1500;
 
+// #452: the FLOOR of the frame-arrival gap bound (createFrameGapDetector in bedTransitionRules.js, which
+// explains the adaptive part and the honest limits). It IS ACTIVE_GRACE_MS on purpose: the repo already says
+// "a motion run has not ended" for gaps up to this long, so a frame that arrives later than this after the
+// previous one means the camera (or ffmpeg, or this process) was not delivering video, and neither a motion
+// run nor a pending bed transition may be confirmed across it. Reusing the number adds none for a normal
+// camera. Chosen, not measured (no per-gap data existed when it was set).
+const FRAME_GAP_MS = ACTIVE_GRACE_MS;
+
+// What a frame-gap event's `gapMs` means in a log line: a negative one is a backward wall-clock step (an NTP
+// correction, a manual change), which the gap detector deliberately counts as a gap too.
+const gapText = (gapMs) => (gapMs < 0 ? `system clock stepped back ${-gapMs}ms` : `no frames for ${gapMs}ms`);
+
 // --- "Out of bed" / "into bed" — bed <-> outside transition classification. ---
 // A child climbing out reads as motion in the bed FIRST, then motion OUTSIDE the bed while the bed
 // goes and STAYS quiet (the child has left it). A parent entering is the reverse (outside first) or
@@ -127,6 +139,11 @@ export const SUB_STABLE_CHECKS = 3;
 // outside burst at 45 s, a relaunch at 36 s of quiet -> the exit was gone), and an exit sets the reported wake
 // time. So the room must have been quiet for longer than both, plus a margin. If either constant changes
 // this follows (motion-return-to-sub.test.js pins the inequality).
+// ⚠️ "An exit confirms OOB_CONFIRM_QUIET_MS after it opens" is only true of an uninterrupted stream. Since #452 a
+// frame that arrives after a gap restarts that 6 s of quiet (createFrameGapDetector), so on a camera whose main
+// stream keeps stalling an exit can take longer than the 24 s margin above, and a return-to-sub relaunch in that
+// time could still lose a pending exit. Not handled here (refusing the return while a candidate is pending is a
+// follow-up issue); the quiet gate normally keeps a stalling stream from reaching this far. Suspected, not measured.
 // ⚠️ What this does NOT prevent: the new tracker also forgets the 120 s pause (OOB_COOLDOWN_MS / IB_COOLDOWN_MS)
 // after a logged exit or entry, longer than this quiet period, so a second exit or entry ~100 s after a first
 // can be recorded that an uninterrupted tracker would have suppressed (verified by running the real tracker in
@@ -405,7 +422,10 @@ export async function startMotionDetector(camera) {
     // `unknown` too (the #493 plan's second review round). The listener keys by the observation's OWN `gen`,
     // not this launch's, so a verdict landing after a reconnect still corrects the frame it is about (the
     // clock keeps one listener per camera, refreshed on every launch). Nothing here feeds a decision: bed
-    // transitions, alerts and every peak are what they were (bed-transition gating is deferred to #452).
+    // transitions, alerts and every peak are what they were. (Not to be confused with #452, which stops a
+    // confirmation spanning a sampling outage: that is decided in handleFrame, synchronously, from frame ARRIVAL
+    // times by createFrameGapDetector, and neither waits for nor reads this clock's verdicts, which land ~5 s
+    // after a frame.)
     const obs = openObservation(camera.id, 'motion', {
       label: camera.name,
       path,
@@ -446,7 +466,11 @@ export async function startMotionDetector(camera) {
     // launch() (i.e. per ffmpeg connection), matching where this state used to be declared; unlike
     // believedOccupied (declared above, outside launch()) this has nothing "in flight" worth keeping
     // across a reconnect.
-    const bedTransitionTracker = createBedTransitionTracker({ activeGraceMs: ACTIVE_GRACE_MS });
+    const bedTransitionTracker = createBedTransitionTracker({ activeGraceMs: ACTIVE_GRACE_MS, maxFrameGapMs: FRAME_GAP_MS });
+    // #452: arrival-gap detector for the motion ALERT's run (the tracker owns its own for the bed transitions;
+    // both read the same stream, so they agree). One per launch, like the tracker: a relaunch starts with no
+    // history and its first frame is never a gap.
+    const frameGap = createFrameGapDetector({ floorMs: FRAME_GAP_MS });
 
     const outPixels = mask ? FRAME_BYTES - zonePixels : 0; // area outside the bed zone (0 = whole frame)
 
@@ -473,6 +497,10 @@ export async function startMotionDetector(camera) {
         }
         const fraction = changed / zonePixels;
         const now = Date.now();
+        // #452: did this frame arrive after a gap? Once per analysed frame, ahead of both the bed-transition
+        // block and the alert block (and outside the `!activityOnly` branch, so the detector's picture of the
+        // stream's spacing has no holes on any leg).
+        const gap = frameGap.observe(now);
         // #500: when the room last moved, in EITHER channel, for the return-to-sub quiet gate. Set here, ahead of
         // the `!activityOnly` branch below: a sleep-tracking-only leg is exactly the one whose bed transitions
         // a relaunch could lose. Monotonic, like the other #369 stamps on the entry.
@@ -522,6 +550,13 @@ export async function startMotionDetector(camera) {
               case 'oob-cancelled':
                 logger.info(`[oob] "${camera.name}" candidate cancelled — bed re-active after ${ev.pendingForMs}ms`);
                 break;
+              case 'oob-confirm-restarted':
+                // #452: info, and only emitted when a candidate was actually pending, so a healthy stream
+                // gains no noise. These lines are also the staging evidence for how often the rule fires.
+                logger.info(
+                  `[oob] "${camera.name}" confirmation restarted — ${gapText(ev.gapMs)} (needs ${OOB_CONFIRM_QUIET_MS}ms of received quiet from here)`
+                );
+                break;
               case 'oob-impossible-flag':
                 // ROADMAP §1.2 item 1, LOG-ONLY (2026-09-12: a retrospective check against real
                 // owner-verdicted transitions found that unconditionally SUPPRESSING a repeat is
@@ -553,6 +588,11 @@ export async function startMotionDetector(camera) {
               }
               case 'ib-cancelled':
                 logger.info(`[intobed] "${camera.name}" candidate cancelled — outside re-active after ${ev.pendingForMs}ms`);
+                break;
+              case 'ib-confirm-restarted':
+                logger.info(
+                  `[intobed] "${camera.name}" confirmation restarted — ${gapText(ev.gapMs)} (needs ${IB_CONFIRM_QUIET_MS}ms of received quiet from here)`
+                );
                 break;
               case 'ib-impossible-flag':
                 // ROADMAP §1.2 item 1, LOG-ONLY — see the OOB side's comment for why this flags rather
@@ -587,6 +627,20 @@ export async function startMotionDetector(camera) {
         if (anyActive) entry.lastActiveMono = performance.now();
         // Activity-only legs (MQTT-source / motion-off child cameras) stop here — no alert bookkeeping.
         if (!activityOnly) {
+          // ★ #452: a frame that arrives after a gap ends the current run, so an active frame, a long silence
+          // and another active frame can no longer satisfy `confirmMs` on the spot (acceptance criterion (a)).
+          // The measure is the gap between CONSECUTIVE FRAMES (what the detector sees), not `now - lastActive`:
+          // the two are not byte-identical in steady state (a quiet stretch under ACTIVE_GRACE_MS followed by an
+          // active frame is a continuing run and must stay one). An active post-gap frame then starts a fresh run
+          // at `now`. No camera path in the line: the #493 stall tests give each clock variant its own path and
+          // require identical logs across variants. The alert cooldown (`lastAlert`) is wall time by design and
+          // is untouched. `detect_confirm_s = 0` is a legal setting (routes/cameras.js): the post-gap active frame
+          // starts a run and `0 >= 0` alerts at once, which is kept on purpose; "a gap frame cannot confirm" means
+          // a POSITIVE confirmation time.
+          if (gap && activeSince) {
+            activeSince = 0;
+            logger.info(`[detect] "${camera.name}" motion run restarted — ${gapText(gap.gapMs)}`);
+          }
           if (fraction >= threshold) {
             if (!activeSince) activeSince = now;
             lastActive = now;

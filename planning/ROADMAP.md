@@ -888,7 +888,17 @@ no clock. Every threshold in it came from ONE house's runs (Stage 1: night, over
   FINALIZE_MS and a sound-leg hook that does not exist). Its second acceptance criterion ("wake-clip
   timestamps line up") is deferred to #412: the wake anchor stays at the minute's END so the 23-63 s ring
   holds it. KNOWN-ISSUES.md "The sleep timeline's minutes are the minutes the samples arrived in".
-- **#452** confirmation across an outage (read `restarts`/`gaps`), **#448** the wake watcher.
+- **#452** confirmation across an outage — **BUILT** on branch `fix/452-confirmation-across-outage` (T2, plan v2,
+  2026-10-03). Scope A only: a frame that arrives after a GAP (`createFrameGapDetector` in `bedTransitionRules.js`:
+  floor 1500 ms = `ACTIVE_GRACE_MS`, x5 the median of the last 16 intervals, all chosen not measured) restarts a
+  motion alert's run and a pending exit/entry's 6 s of quiet (reset, not cancel, not suspend). Candidate opening and the
+  links still bridge a gap on purpose. It does NOT read the observation clock (so a stall ffmpeg fills with repeats as it
+  happens is not caught: scope B, a follow-up), and does not touch sound (`soundBaseline.js` already guards a gap longer
+  than its window). Build-time deviation from the plan: a delta that was itself a gap IS recorded in the median window
+  (else a slow camera never learns its bound). Follow-ups to file: scope B (clone-gated confirmation), #500
+  pending-candidate refusal, backward-step cooldown clamp. Evidence once on staging: count `confirmation restarted` /
+  `motion run restarted` lines per night. KNOWN-ISSUES.md "A motion alert or a bed exit/entry is not confirmed across a
+  gap in the video". **#448** the wake watcher is still open (the same "active, outage, active" shape).
 - **#508** sleep analysis stops counting zero-frame minutes as watched — built on branch
   `fix/508-zero-frame-minutes` (plan v2, 2026-09-30). Read-time only: `motionSeen(r) = motion_frames > 0`
   in all three `activity_samples` readers of `sleepAnalysis.js`; an unwatched minute is `null` (sound not

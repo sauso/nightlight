@@ -329,7 +329,7 @@ only raise a minute's average, never lower it, because a repeat's movement is al
 | `motion_frames`, `motion_level`, `motion_out_level` | Left out |
 | `motion_peak`, `motion_out_peak` (what every sleep threshold reads) | Unchanged. A peak is the minute's largest movement, and a repeat never moves anything |
 | Whether a minute is stored at all, and the live wake check | Unchanged: every analysed frame still counts, as before |
-| Motion alerts, in/out-of-bed transitions | Unchanged: decided the moment a frame arrives, before `[obs]` can judge it (issue #452) |
+| Motion alerts, in/out-of-bed transitions | Not corrected by `[obs]`: decided the moment a frame arrives, before it can judge it. A stall's repeats are not what stops them, a **gap in the arriving frames** is (issue #452, next section) |
 
 A minute in which *every* analysed frame was a proven repeat is still stored: `motion_frames` 0 and an
 empty `motion_level`, beside a `motion_peak` of 0, exactly as it was stored before. Since issue #508 the sleep
@@ -353,6 +353,79 @@ numbers treat such a minute as **unwatched** (unknown), not as a still room.
   never registers movement, so this only guards against a wrong verdict.
 
 **What to do:** nothing.
+
+## A motion alert or a bed exit/entry is not confirmed across a gap in the video (`confirmation restarted` in the log)
+
+**What you see:** usually nothing. In the log, only when something was waiting to be confirmed and the camera's
+video stopped arriving for a moment, one of
+
+```
+[INFO] [oob] "Nursery Cam" confirmation restarted — no frames for 3060ms (needs 6000ms of received quiet from here)
+[INFO] [intobed] "Nursery Cam" confirmation restarted — no frames for 3060ms (needs 6000ms of received quiet from here)
+[INFO] [detect] "Nursery Cam" motion run restarted — no frames for 3060ms
+```
+
+(`system clock stepped back 500ms` replaces `no frames for …` if the server's clock was set back.) A healthy
+stream never prints them.
+
+**Why:** a motion alert (the *Motion confirm* setting) and a bed exit/entry (6 seconds of quiet) used to measure
+the *time elapsed* since they began, not how much video had actually arrived in it. A motion run that was
+active, then silent for 20 seconds, then active again was alerted on at once as "sustained", and a single quiet
+frame arriving after a long hole confirmed a bed exit as if 6 quiet seconds had been watched (issue #452).
+Both now count **video that arrived**: a frame that reaches Nightlight after a gap restarts the count, and a
+confirmation then needs its full time of frames received *after* the gap.
+
+**Differs from the neighbouring numbers** — the part that is easy to get wrong:
+
+| Stored or decided | After a gap in the video |
+|---|---|
+| A motion alert (*Motion confirm*) | The run restarts at the first frame after the gap. `Motion confirm` 0 still alerts on that frame (0 s is a legal setting: there is nothing to confirm) |
+| A pending bed exit or entry | The 6 s of quiet restarts at the first frame after the gap. It is **not cancelled** (a real exit whose outside motion ended during the outage must still be recorded) and the quiet seen **before** the gap is **not** carried over |
+| A pending exit or entry that sees *activity* on the first frame after the gap | Cancelled, as before: activity needs no continuity |
+| Opening a bed exit/entry candidate, and how far back the bed/outside links reach | Unchanged: a gap does not stop a candidate opening, nor shorten the 8 s / 60 s links (see limits) |
+| The alert cooldown | Unchanged: real time, not video |
+| `activity_samples` counts and peaks | Unchanged |
+| A stored `out_of_bed` / `into_bed` row | Its time is the moment it was **confirmed**, so after a gap it is later than before. Its `peak`, `out_peak` and `out_frames` can differ, because a restarted wait collects more evidence. The sleep numbers do not read those three fields |
+
+**What counts as a gap:** the time between two consecutive frames' arrival is longer than the larger of 1.5 s
+(the same grace that already says a motion run has not ended) and 5 times the camera's typical frame interval
+(the median of its last 16 intervals longer than 50 ms; frames delivered together are one arrival and are not
+intervals). At 5 frames a second the bound is the 1.5 s floor. A camera slower than about 0.67 frames a second
+delivers its frames in bursts further apart than that, so the bound widens with it (10 s at 0.5 frames a
+second, learnt from its first intervals) instead of treating every burst as a gap and never confirming
+anything. A camera that slows down mid-stream is treated as gappy for about 9 of its slow intervals until the
+median catches up.
+
+**Limits, stated rather than hidden:**
+- **The numbers were chosen, not measured.** 1.5 s, the factor 5, the 16-interval window and the 50 ms minimum
+  are reasoned, not fitted: no record of the real distribution of arrival gaps existed when they were set (the
+  `[obs]` line measures the camera's timestamps, not when frames reach Nightlight). For another install they are a
+  hypothesis. The only evidence is one house's saved staging logs: 428 of about 455 motion periods had no gap over
+  0.5 s, and the bad ones had 7 to 49 gaps per 15 minutes averaging 0.6 to 2.1 s (two mornings, one camera, the
+  wake window), so the rule **will fire in production exactly when exits are pending**.
+- **It makes confirmation slower on a gappy camera, never earlier and never impossible.** On such a camera
+  (about 3.3 gaps a minute) a 6 s bed confirmation waits about 7 s on average, and a 30 s *Motion confirm* (the
+  setting's maximum) about 76 s. A stored exit or entry after a gap is stamped later.
+- **A stall that ffmpeg fills with repeats as it happens is not caught.** The rule looks at when frames
+  arrive. When the camera stalls, ffmpeg normally holds back and then releases a clump of repeats at once (a gap,
+  caught); a stall filled continuously keeps frames arriving and passes. Gating confirmations on the `[obs]`
+  proven repeats would catch it, but its verdicts land about 5 s after a frame, inside the 6 s window, and the
+  clock is documented as possibly absent: a separate follow-up.
+- **Opening a candidate across a gap is kept on purpose.** A real exit during an outage is the case worth
+  keeping, and the issue's criteria are about confirmation. It is **not** conservative: a change that built up
+  during the stall can open an exit candidate, which 6 s of received quiet then confirms.
+- **A clump after a stall drains quickly only because the detector watchdog caps a stall at about 75 s** (60 s
+  of silence plus a 15 s check, roughly 375 repeats; see "A detector was restarted" below, issue #369).
+- **Sound alerts are not covered.** The sound analyser already drops its window on a gap longer than its own
+  confirm window (4 s at the default), so a shorter hole can still be bridged. Unchanged.
+- **Returning to the Low stream (see "Motion detection reads the Low stream" below) can still lose a pending exit** on a main stream
+  that keeps stalling: its quiet period assumes an exit confirms 6 s after it opens, which a restart now
+  lengthens. Suspected, not measured; refusing the switch while a candidate is pending is a follow-up.
+- **The wake watcher (#448) has the same "active, outage, active" shape and is not changed here.**
+- A backward clock step of S seconds still suppresses a motion alert or an exit for up to S plus the cooldown
+  (pre-existing, filed separately).
+
+**What to do:** nothing. To see how often it fires, count the `restarted` lines per night.
 
 ## The sleep timeline's minutes are the minutes the samples arrived in
 

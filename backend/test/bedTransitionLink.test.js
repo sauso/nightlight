@@ -9,6 +9,7 @@ import {
   oobLinkKind, accumulateOutEvidence, trimOutSamples, evidenceFromSamples, EMPTY_EVIDENCE,
   intoBedRejected, outOfBedRejected, entryNearMissWorthLogging, findQuickReversals,
   findLingeringBedMotion, LINGERING_MOTION_ACTIVE, LINGERING_WINDOW_MS, LINGERING_MIN_ACTIVE_MINUTES,
+  createFrameGapDetector,
 } from '../src/lib/bedTransitionRules.js';
 
 test('an adult lifting a child out links instantly', () => {
@@ -457,4 +458,140 @@ test('minActiveMinutes is configurable independently of the four-minute default'
   const threeMinutes = activeMinutes('01', '02', '03');
   assert.equal(findLingeringBedMotion(lingeringExit(), null, threeMinutes), null, 'the default still requires four');
   assert.equal(findLingeringBedMotion(lingeringExit(), null, threeMinutes, { minActiveMinutes: 3 }).active_minutes, 3);
+});
+
+// --- createFrameGapDetector (#452): "did this frame arrive after a gap?" --------------------------------------
+//
+// Every number below comes from the helper's own comment: floor 1500 ms (motionDetector.js passes its
+// ACTIVE_GRACE_MS), factor 5, a 16-delta window, a 50 ms minimum recorded delta. The tracker-level and
+// detector-level consequences are tested in bedTransitionTracker.test.js and motion-frame-gap.test.js.
+const FLOOR = 1500;
+// Feeds `times` through a fresh detector and returns each call's result.
+function observeAll(times, options = {}) {
+  const d = createFrameGapDetector({ floorMs: FLOOR, ...options });
+  return times.map((t) => d.observe(t));
+}
+// n frames spaced `step` ms apart, starting at `from` (the first one included).
+const spaced = (from, n, step) => Array.from({ length: n }, (_, i) => from + i * step);
+
+test('#452 frame gap: floorMs is required and must be positive', () => {
+  assert.throws(() => createFrameGapDetector({}), /floorMs/);
+  assert.throws(() => createFrameGapDetector(), /floorMs/);
+  assert.throws(() => createFrameGapDetector({ floorMs: 0 }), /floorMs/);
+  assert.throws(() => createFrameGapDetector({ floorMs: -5 }), /floorMs/);
+});
+
+test('#452 frame gap: the first frame has nothing before it to be late after', () => {
+  // Even a first frame at a huge time: there is no previous frame, so there cannot be a gap. Kills a detector
+  // that starts with prev = 0 and calls the first frame a 1.7e12 ms gap.
+  assert.equal(createFrameGapDetector({ floorMs: FLOOR }).observe(1_700_000_000_000), null);
+});
+
+test('#452 frame gap: the floor is exact, 1500 ms is not a gap and 1501 ms is', () => {
+  // ACTIVE_GRACE_MS's own convention: a gap "no longer than" the grace has not ended a run. Fresh detectors,
+  // so the window is empty and the floor alone governs.
+  assert.deepEqual(observeAll([10_000, 11_500]), [null, null], '1500 ms: not a gap');
+  assert.deepEqual(observeAll([10_000, 11_501]), [null, { gapMs: 1501 }], '1501 ms: a gap, reporting its length');
+});
+
+test('#452 frame gap: a steady 5 fps stream, and one jittering inside the floor, never reports a gap', () => {
+  assert.ok(observeAll(spaced(0, 200, 200)).every((r) => r === null));
+  const jitter = [0];
+  for (let i = 0; i < 200; i += 1) jitter.push(jitter[jitter.length - 1] + [200, 120, 900, 1400, 40, 200][i % 6]);
+  assert.ok(observeAll(jitter).every((r) => r === null), 'every delta is at or under 1500 ms');
+});
+
+test('#452 frame gap: a backward wall-clock step ALWAYS counts as a gap, with a negative gapMs', () => {
+  const [, , back, after] = observeAll([1000, 1200, 1199, 1399]);
+  assert.deepEqual(back, { gapMs: -1 }, 'even one millisecond backwards: conservative, it only restarts a confirmation');
+  assert.equal(after, null, 'the next frame is measured from the stepped-back time, not from before the step');
+  // A big step back, on a detector whose bound has grown wide: still a gap (a negative delta is under any bound).
+  assert.deepEqual(observeAll([...spaced(0, 20, 2000), 1000]).at(-1), { gapMs: -(38_000 - 1000) });
+});
+
+test('#452 frame gap: frames sharing one receipt time (a clump) are not gaps and do not drag the bound to nothing', () => {
+  // 3 frames delivered at once every 600 ms, as a bursty read does. If the in-clump deltas (0) were recorded the
+  // median would be 0 and the bound would fall back to the 1500 ms floor; ignoring them keeps the 600 ms cadence
+  // in the median (bound 5 x 600 = 3000), so a 2000 ms hole is NOT a gap on this camera.
+  const clumped = [];
+  for (let i = 0; i < 30; i += 1) clumped.push(i * 600, i * 600, i * 600);
+  const out = observeAll([...clumped, 29 * 600 + 2000]);
+  assert.ok(out.every((r) => r === null), 'no gap anywhere, including the 2000 ms hole');
+});
+
+test('#452 frame gap: a delta of exactly minDeltaMs (50) is clump noise, 51 is a real interval', () => {
+  // Clumps of 3 frames 50 ms apart, 920 ms between clumps. With 50 ms deltas ignored the median is 920 (bound 4600),
+  // so a 3000 ms hole is not a gap; recording them (>= instead of >) makes the median 50 and the bound the floor.
+  const stream = [];
+  for (let i = 0; i < 30; i += 1) stream.push(i * 1020, i * 1020 + 50, i * 1020 + 100);
+  const last = stream[stream.length - 1];
+  assert.equal(observeAll([...stream, last + 3000]).at(-1), null, '50 ms deltas are not recorded');
+  // The same shape at 51 ms: now the in-clump delta IS an interval (and the median), the bound is the floor.
+  const stream51 = [];
+  for (let i = 0; i < 30; i += 1) stream51.push(i * 1020, i * 1020 + 51, i * 1020 + 102);
+  const last51 = stream51[stream51.length - 1];
+  assert.deepEqual(observeAll([...stream51, last51 + 3000]).at(-1), { gapMs: 3000 }, '51 ms deltas are recorded');
+});
+
+test('#452 frame gap: one 20 s stall does not widen the bound for the frame after it', () => {
+  // A stall must not inflate its own bound. 10 normal 200 ms frames, a 20 s stall, then a frame 1600 ms later:
+  // still a gap (the bound is the 1500 ms floor). With the stall's delta averaged in (a mean, not a median) the
+  // bound would be ~10 s and this frame would pass.
+  const out = observeAll([...spaced(0, 10, 200), 1800 + 20_000, 1800 + 20_000 + 1600]);
+  assert.deepEqual(out.slice(-2), [{ gapMs: 20_000 }, { gapMs: 1600 }]);
+});
+
+test('#452 frame gap: a stall met right after the second frame cannot lift the bound either (the LOWER median)', () => {
+  // Window of one 200 ms delta, then a 20 s stall: a window of two. The mean of the middle two (10.1 s) would
+  // make the bound 50 s; the lower median stays 200 ms, so the frame 1600 ms later is still a gap.
+  assert.deepEqual(observeAll([0, 200, 20_200, 21_800]).slice(-2), [{ gapMs: 20_000 }, { gapMs: 1600 }]);
+});
+
+test('#452 frame gap: a slow camera (a 2 s burst cadence) learns its own bound; a real 20 s stall in it is still a gap', () => {
+  // 0.5 fps delivered in 5-frame bursts, one burst every 2 s: slower than 1/1.5 s, so against the floor alone EVERY
+  // burst would be a gap and nothing could ever confirm. Cold start: the very first interval is judged against the
+  // floor (a gap, once) and is recorded; from then on the median is 2000 ms and the bound 10 s.
+  const bursts = [];
+  for (let i = 0; i < 20; i += 1) for (let k = 0; k < 5; k += 1) bursts.push(i * 2000);
+  const out = observeAll(bursts);
+  const gaps = out.map((r, i) => (r ? i : -1)).filter((i) => i >= 0);
+  assert.deepEqual(gaps, [5], 'exactly one gap: the first burst, before the bound has anything to learn from');
+  // After learning: a 6 s hole is not a gap, a 20 s stall is.
+  const d = createFrameGapDetector({ floorMs: FLOOR });
+  for (const t of bursts) d.observe(t);
+  assert.equal(d.observe(38_000 + 6000), null, 'a 6 s hole in a 2 s cadence: not a gap');
+  assert.deepEqual(d.observe(44_000 + 20_000), { gapMs: 20_000 }, 'a 20 s stall: a gap');
+});
+
+test('#452 frame gap: a camera that slows from 15 fps to 2 s per burst is starved only until the window has learned it', () => {
+  // 16 deltas of 67 ms fill the window; then 2000 ms deltas. The lower median of 16 flips once 9 of them are
+  // 2000 ms, so the first 9 slow intervals are gaps (each judged against the old bound) and the 10th is not.
+  const d = createFrameGapDetector({ floorMs: FLOOR });
+  let t = 0;
+  for (let i = 0; i < 17; i += 1) { d.observe(t); t += 67; }
+  const results = [];
+  for (let i = 0; i < 12; i += 1) { t += 2000 - 67; results.push(d.observe(t)); t += 67; }
+  assert.deepEqual(results.map((r) => (r ? 1 : 0)), [1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0]);
+});
+
+test('#452 frame gap: the bound relaxes again when the camera speeds up (the window is trimmed to its last 16 deltas)', () => {
+  // A slow phase (bound 10 s), then a fast one: after 9 fast deltas the median is back to 200 ms, so a 3000 ms
+  // hole is a gap again. Without trimming the window keeps the slow samples and the bound stays wide.
+  const d = createFrameGapDetector({ floorMs: FLOOR });
+  let t = 0;
+  for (let i = 0; i < 20; i += 1) { d.observe(t); t += 2000; }
+  for (let i = 0; i < 12; i += 1) { d.observe(t); t += 200; }
+  assert.deepEqual(d.observe(t + 3000 - 200), { gapMs: 3000 });
+});
+
+test('#452 frame gap: factor and windowN are injectable (minDeltaMs is pinned by its own boundary test above)', () => {
+  // factor 1 makes the bound the median itself (floor aside), so a 2x hole (4000 ms) is a gap on a 2 s cadence;
+  // the default factor 5 (bound 10 s) lets the same hole through.
+  const slow = spaced(0, 12, 2000); // the last frame is at 22000
+  assert.deepEqual(observeAll([...slow, 22_000 + 4000], { floorMs: 100, factor: 1 }).at(-1), { gapMs: 4000 });
+  assert.equal(observeAll([...slow, 22_000 + 4000], { floorMs: 100, factor: 5 }).at(-1), null);
+  // windowN 1: only the LAST delta is the typical interval, so one 200 ms delta after a slow phase relaxes it.
+  const fastAfterSlow = [...spaced(0, 10, 2000), 18_200];
+  assert.deepEqual(observeAll([...fastAfterSlow, 18_200 + 3000], { windowN: 1 }).at(-1), { gapMs: 3000 });
+  assert.equal(observeAll([...fastAfterSlow, 18_200 + 3000]).at(-1), null, 'default window: the slow median still holds');
 });

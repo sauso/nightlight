@@ -540,10 +540,12 @@ describe('#500: returning from main to the sub', { concurrency: false }, () => {
       }
       return events;
     };
-    const continuous = createBedTransitionTracker({ activeGraceMs: 1500 });
+    // #452: maxFrameGapMs is now a required option. 1500 = motionDetector.js's FRAME_GAP_MS; the frames below are
+    // 200 ms apart, so it never fires and this premise is about the link windows only.
+    const continuous = createBedTransitionTracker({ activeGraceMs: 1500, maxFrameGapMs: 1500 });
     assert.ok(eventsFor(continuous, 0, 60_000).includes('oob-confirmed'), 'premise: the continuous tracker should confirm the exit');
     // A tracker that began at 36 s (a relaunch after ~35 s of quiet) has never seen the bed move.
-    const relaunched = createBedTransitionTracker({ activeGraceMs: 1500 });
+    const relaunched = createBedTransitionTracker({ activeGraceMs: 1500, maxFrameGapMs: 1500 });
     assert.ok(!eventsFor(relaunched, 36_000, 60_000).includes('oob-confirmed'), 'premise: the relaunched tracker has forgotten the bed');
     // So the quiet the switch waits for must exceed the slow-link window plus the confirm quiet.
     assert.ok(motion.SUB_QUIET_MS > OOB_LINK_SLOW_MS + OOB_CONFIRM_QUIET_MS,
