@@ -59,15 +59,23 @@ export class WedgedFfmpeg extends FakeFfmpeg {
 // LOAD, so a suite must `await startFakeMediamtx()` BEFORE its dynamic imports of anything that loads it. Doing
 // it later left the detectors polling the default port forever: they never spawned, and their cases passed
 // while testing nothing (restart-cancellation.test.js).
-// `isReady(pathName)` decides each path's readiness per request (default: every path is ready).
+// `isReady(pathName)` decides each path's readiness per request (default: every path is ready). #500: it may
+// also return a Promise (awaited) or the sentinel 'hang', which NEVER answers, so that with
+// setMediamtxApiTimeoutForTest a caller sees the real `unknown` result (lib/mediamtx.js's timeout) and not just
+// "not ready". Every other caller is unaffected: a plain boolean answers at once, as before.
 export async function startFakeMediamtx({ isReady = () => true } = {}) {
-  const server = createServer((req, res) => {
+  const server = createServer(async (req, res) => {
     res.setHeader('content-type', 'application/json');
     const m = /\/v3\/paths\/get\/([^?]+)/.exec(req.url);
-    if (m) return res.end(JSON.stringify({ ready: !!isReady(decodeURIComponent(m[1])), name: 'x' }));
+    if (m) {
+      const ready = await isReady(decodeURIComponent(m[1]));
+      if (ready === 'hang') return; // the client's own deadline ends it
+      return res.end(JSON.stringify({ ready: !!ready, name: 'x' }));
+    }
     res.end('{}');
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   process.env.MEDIAMTX_API = `http://127.0.0.1:${server.address().port}`;
-  return { server, close: () => new Promise((r) => server.close(r)) };
+  // closeAllConnections: a hung request would otherwise keep close() waiting for the whole test run.
+  return { server, close: () => new Promise((r) => { server.close(r); server.closeAllConnections?.(); }) };
 }

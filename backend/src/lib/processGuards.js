@@ -141,12 +141,15 @@ export function detectorHealthOf(entry) {
 //   * MIN_KILL_AGE_MS on the monotonic clock: never a process that has not had time to connect.
 //   * `watchdogKill` already set: a second call while the first kill is in flight is a no-op, so one judged
 //     stall can never arm two SIGKILL timers.
+//   * `returning` set (#500): the motion detector is already killing ITSELF to go back to the sub stream. A
+//     second SIGTERM and a second SIGKILL timer on the same process would be a double kill (verified by
+//     running this lever on such an entry before the guard existed: it returned true and signalled again).
 // SIGKILL follows after `forceKillMs` if SIGTERM is ignored (a wedged ffmpeg can be), unref'd so it never holds
 // the process open, and cleared on 'exit' so a process that obeyed SIGTERM is signalled exactly once.
 // `watchdogKill` stays set on the entry for its exit handler: the sound leg must not count this exit as a
 // no-microphone strike, and both legs log it as a recovery, not a failure.
 export function killStalledDetector(entry, { expectSpawn, expectLastData } = {}, forceKillMs) {
-  if (!entry || entry.watchdogKill) return false;
+  if (!entry || entry.watchdogKill || entry.returning) return false;
   if (entry.spawnedMono !== expectSpawn) return false;
   if (entry.lastDataMono != null && (expectLastData == null || entry.lastDataMono > expectLastData)) return false;
   if (performance.now() - entry.spawnedMono < MIN_KILL_AGE_MS) return false;

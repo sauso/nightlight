@@ -26,7 +26,7 @@ import { stripCommentsOnly } from './helpers/sourceScan.js';
 const scriptDir = useTempDataDir();
 
 const { logger } = await import('../src/lib/logger.js');
-const { safeInterval, reportGuardFailure, resetGuardRateLimit, killIfSpawned, perTargetRunner } = await import('../src/lib/processGuards.js');
+const { safeInterval, reportGuardFailure, resetGuardRateLimit, killIfSpawned, perTargetRunner, killStalledDetector } = await import('../src/lib/processGuards.js');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -800,6 +800,32 @@ describe('★★★ killIfSpawned — killing a child that never spawned', () =>
     // The win32 EINVAL, and the race where a child is reaped between the pid check and the call. Every
     // caller is a shutdown or a restart; a throw there is the outage this whole file exists to prevent.
     assert.equal(killIfSpawned({ pid: 999999, kill: () => { throw new Error('ESRCH'); } }), false);
+  });
+});
+
+// #500: the motion detector kills ITSELF to go back to the sub stream and marks its entry `returning` first. The #369
+// watchdog's lever must then refuse it, or a wedged process gets a second SIGTERM and a second SIGKILL timer. The
+// detector-level case is motion-return-to-sub.test.js R6b; this pins the guard in this (core) module on its own.
+describe('killStalledDetector refuses an entry that is returning to the sub stream (#500)', () => {
+  test('a returning entry is not signalled; the same entry without the flag is (so the refusal is the flag)', () => {
+    const kill = killStalledDetector;
+    const signals = [];
+    let onExit = null;
+    const entry = (extra) => ({
+      proc: { pid: 4242, kill: (s) => { signals.push(s); return true; }, once: (_e, fn) => { onExit = fn; } },
+      spawnedMono: performance.now() - 60_000, // far past MIN_KILL_AGE_MS
+      lastDataMono: null,
+      ...extra,
+    });
+    const tokens = (e) => ({ expectSpawn: e.spawnedMono, expectLastData: null });
+    const returning = entry({ returning: true });
+    assert.equal(kill(returning, tokens(returning), 3000), false);
+    assert.deepEqual(signals, []);
+    assert.equal(returning.watchdogKill, undefined, 'a refused kill still marked the entry');
+    const plain = entry({});
+    assert.equal(kill(plain, tokens(plain), 3000), true);
+    assert.deepEqual(signals, ['SIGTERM']);
+    onExit?.(); // clears the SIGKILL timer so it cannot hold the test process open
   });
 });
 
