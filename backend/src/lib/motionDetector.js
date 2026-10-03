@@ -51,6 +51,89 @@ function cancelPendingRestart(cameraId) {
   }
 }
 
+// --- #454: the frame-diff motion ALERT cooldown outlives a detector relaunch. ---
+// camera id -> wall ms (Date.now()) of the last frame-diff alert that actually FIRED. It used to be a
+// `let lastAlert = 0` inside launch(), so every ffmpeg relaunch started with a zero stamp and sustained motion
+// could alert again sooner than `detect_cooldown_s` after the previous alert. ONVIF (onvifMotion.js) and MQTT
+// (mqttClient.js) already keep theirs in a module-level Map for exactly that reason; this is the same shape.
+// WHICH CAUSES MATTER AT WHICH COOLDOWN: an ffmpeg exit (a reconnect, "stream ended") and any re-entry of
+// startMotionDetector (below) re-armed the cooldown at ANY setting, the default 60 s included. The #369 watchdog
+// kill needs >= 60 s of silence and the #500 return to the sub needs 90 s of quiet, so those two only mattered
+// with a cooldown above about 70 s / 95 s.
+//
+// WHY MODULE LEVEL, not a closure variable beside `believedOccupied` (#424): startMotionDetector is RE-ENTERED
+// by a detection-settings save (the frontend autosaves every control through that one endpoint), by any camera
+// edit (a rename included), assign/unassign, enable/disable, routes/children.js, and by the 5-minute reconcile
+// when it lands in the 5 s relaunch gap (isDetecting() is false there, index.js). Each re-entry builds a NEW
+// closure and calls stopMotionDetector first, so anything declared inside startMotionDetector is lost on all of
+// them. For the same reason stopMotionDetector and startMotionDetector must NOT clear this: start calls stop
+// first, and an unrelated edit or reconcile tick is not a request for a fresh cooldown. Only forgetMotionAlert,
+// called from the camera DELETE route, removes an entry. (A frame still draining from the old process after
+// `exit` could re-stamp a deleted camera once; a number per camera id, which is a UUID. Not guarded: a `stopped`
+// check on the alert would change when alerts fire, which is out of scope here.)
+//
+// WALL CLOCK, not the observation clock (#373/#447): `now` in handleFrame is Date.now() and the old stamp was
+// that too (the comment in handleFrame says "wall time by design"). The observation clock files FRAMES by
+// receipt, can be absent or throwing, and a cooldown is the gap between two ALERTS, not between frames.
+//
+// WHY `Math.min(stored, now)` WITH A WRITE-BACK (alertStampFor below). A stamp can only be ahead of `now` after
+// the wall clock stepped BACK (an NTP correction, a manual change). Treating a future stamp as "no previous
+// alert" (fail open) was measured in #454's plan review to fire 25 alerts in 25 frames with `detect_confirm_s = 0`
+// and a clock that stepped back each frame (the old code: one), and after a one-hour step back it re-alerted 3 s
+// later. Clamping the stamp to now and writing the clamp back means a ONE-WAY backward step silences the alert
+// for at most ONE cooldown, counted from the first analysed frame after the step (at 5 fps that is immediate; if
+// frames stop for ten minutes after the step, it starts at the next frame), where the old code stayed silent for
+// the step plus a cooldown. A forward step shortens a cooldown, as it always did.
+//
+// ⚠️ KNOWN LIMIT, found by code review and verified by running it, NOT desired behaviour: the clamp is written
+// BACK, so it is not a "never worse than before" rule. A clock that steps back and is then corrected FORWARD
+// leaves the stamp at the stepped-back time, and the first run after the correction can alert INSIDE the cooldown
+// (one extra alert; pinned by a test, motion-alert-cooldown.test.js C8). A clock that oscillates by hours between
+// frames can alert repeatedly (11-12 alerts in 20 frames were measured; the old code: one). That is not what
+// NTP does, so it was left. The fix, if it ever matters, is a monotonic companion stamp (performance.now()) next
+// to the wall one; it is a bigger change and the tests steer time only through the Date mock. This covers the
+// frame-diff alert only; the bed-transition cooldowns, ONVIF and MQTT keep their old behaviour after a backward
+// step (KNOWN-ISSUES, #582).
+//
+// WHAT IS DELIBERATELY NOT KEPT across a relaunch (decided in the plan, not forgotten): the bed-transition
+// tracker, including its 120 s pause after a logged exit or entry and a pending candidate. It gates stored
+// `bed_transitions` rows that sleep analysis reads as the authoritative wake time, so moving it moves reported
+// numbers and needs its own old-vs-new check on both databases; 120 s is a calibrated number. A relaunch can
+// already record a duplicate exit within two minutes (KNOWN-ISSUES, #500): a duplicate, not a lost transition.
+// The SOUND alert cooldown (soundDetector.js's analyser) is a different shape and is not touched: it already
+// lives outside the per-ffmpeg launch, so it already survives a relaunch (it is lost on a re-entry).
+//
+// Nothing here persists across a SERVER restart (a container restart starts every stamp at zero). That would
+// need the last motion `detection_events` row, told apart from ONVIF/MQTT rows by `detail`, parsed from UTC
+// text, plus a DB read at start: a design of its own. The cost is at most one extra alert per camera per
+// restart, and only if motion is sustained within `detect_cooldown_s` of it.
+const motionAlertStamps = new Map();
+
+// The stamp to compare against: 0 when this camera has never alerted, otherwise the stored time CLAMPED to
+// now (see above). Pure, so the boundaries are testable without a process.
+export function alertStampFor(stored, now) {
+  return stored == null ? 0 : Math.min(stored, now);
+}
+
+// Forget a camera's alert stamp. The ONLY deleter: the camera DELETE route (see the header above).
+export function forgetMotionAlert(cameraId) {
+  motionAlertStamps.delete(cameraId);
+}
+
+// Test-only views of the store, like _returnTimerCountForTests below: nothing else shows what it holds.
+export function _motionAlertStampForTests(cameraId) {
+  return motionAlertStamps.get(cameraId);
+}
+export function _setMotionAlertStampForTests(cameraId, ms) {
+  motionAlertStamps.set(cameraId, ms);
+}
+export function _motionAlertStampCountForTests() {
+  return motionAlertStamps.size;
+}
+export function _resetMotionAlertsForTests() {
+  motionAlertStamps.clear();
+}
+
 const RESTART_DELAY_MS = 5000;
 const FORCE_KILL_TIMEOUT_MS = 3000;
 
@@ -121,7 +204,8 @@ const READY_POLL_MS = 2000;
 // seen ready for a stable stretch AND the room has been quiet, it relaunches itself: SIGTERM, then the
 // ordinary exit-handler relaunch (RESTART_DELAY_MS, then launch() -> pickReadyPath picks the sub because it
 // is ready). One lineage, so stopMotionDetector still cancels it (#253) and closure state that survives a
-// relaunch (believedOccupied) survives this too.
+// relaunch (believedOccupied) survives this too, as does the alert cooldown (#454: module level, so the switch
+// does not re-arm a motion alert; before #454 it did, which KNOWN-ISSUES used to document as a side effect).
 //
 // ⚠️ ALL FOUR NUMBERS ARE CHOSEN, NOT MEASURED. None is a detection threshold and none changes a number
 // computed on a given stream; they only decide WHEN to switch. They were set from one house's 64 s reboot
@@ -461,7 +545,10 @@ export async function startMotionDetector(camera) {
     let buf = Buffer.alloc(0);
     let activeSince = 0; // start of the current sustained-motion run (0 = not currently active)
     let lastActive = 0; // last frame that was above the active threshold
-    let lastAlert = 0;
+    // (#454: the alert stamp is no longer declared here, per launch. It is `motionAlertStamps` at module level, so
+    // a relaunch keeps it; see the header above that Map. `prev`, `buf`, `activeSince`, `lastActive`, `frameGap` and
+    // the tracker below stay per launch ON PURPOSE: a frame diff across two processes is meaningless, #452 ends a
+    // run across any gap and a relaunch is the biggest gap, and the tracker's reasons are in that header.)
     // Out-of-bed / into-bed candidate state machine — see bedTransitionTracker.js. One instance per
     // launch() (i.e. per ffmpeg connection), matching where this state used to be declared; unlike
     // believedOccupied (declared above, outside launch()) this has nothing "in flight" worth keeping
@@ -633,10 +720,21 @@ export async function startMotionDetector(camera) {
           // the two are not byte-identical in steady state (a quiet stretch under ACTIVE_GRACE_MS followed by an
           // active frame is a continuing run and must stay one). An active post-gap frame then starts a fresh run
           // at `now`. No camera path in the line: the #493 stall tests give each clock variant its own path and
-          // require identical logs across variants. The alert cooldown (`lastAlert`) is wall time by design and
-          // is untouched. `detect_confirm_s = 0` is a legal setting (routes/cameras.js): the post-gap active frame
-          // starts a run and `0 >= 0` alerts at once, which is kept on purpose; "a gap frame cannot confirm" means
-          // a POSITIVE confirmation time.
+          // require identical logs across variants. The alert cooldown is wall time by design and #452 does not
+          // touch it (#454 keeps it across a relaunch, below). `detect_confirm_s = 0` is a legal setting
+          // (routes/cameras.js): the post-gap active frame starts a run and `0 >= 0` alerts at once, which is kept
+          // on purpose; "a gap frame cannot confirm" means a POSITIVE confirmation time. After a relaunch that
+          // first active frame alerts at once only if the cooldown since the last alert has elapsed (#454).
+          //
+          // #454: the cooldown stamp, read ONCE per analysed frame, ahead of the run logic. Read on EVERY frame (not
+          // only an active one) so a stamp left ahead of `now` by a backward wall-clock step is clamped to now on the
+          // first frame after the step and the one-cooldown-of-silence bound starts there; see alertStampFor and the
+          // header above the Map. `stampKey` is one named seam so the key is one thing, read and written alike.
+          // Only this branch ever touches the Map: an activity-only leg fires no alerts and never stamps.
+          const stampKey = camera.id;
+          const storedStamp = motionAlertStamps.get(stampKey);
+          const lastAlert = alertStampFor(storedStamp, now);
+          if (storedStamp != null && lastAlert !== storedStamp) motionAlertStamps.set(stampKey, lastAlert);
           if (gap && activeSince) {
             activeSince = 0;
             logger.info(`[detect] "${camera.name}" motion run restarted — ${gapText(gap.gapMs)}`);
@@ -646,9 +744,9 @@ export async function startMotionDetector(camera) {
             lastActive = now;
             if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs && inActiveWindow(camera)) {
               // inActiveWindow gates the WHOLE alert: outside a camera's schedule, motion produces no
-              // in-app event and no push, and lastAlert is left untouched so an alert can fire promptly
-              // the moment the window opens.
-              lastAlert = now; // cooldown gates re-fire; a continuing run alerts once per cooldown
+              // in-app event and no push, and the stamp is left untouched so an alert can fire promptly
+              // the moment the window opens (also across a relaunch: the stamp is only written when an alert FIRES).
+              motionAlertStamps.set(stampKey, now); // cooldown gates re-fire; a continuing run alerts once per cooldown
               const pct = (fraction * 100).toFixed(1);
               // Shared downstream (record event + push both channels); pass the exact path we're
               // analysing so a stream-grab snapshot uses the same (cheap) sub-stream. Fire-and-forget.
@@ -710,7 +808,7 @@ export async function startMotionDetector(camera) {
         disarmReturnCheck(entry);
         lastSwitchMono = nowMono;
         logger.info(
-          `[detect:${path}] "${camera.name}": sub stream ${subPath} ready again (${readyRun} checks, quiet ${Math.round(quietMs / 1000)}s), returning the motion detector from main to sub (a relaunch: ~${Math.round(timing.restartDelayMs / 1000)}s gap; bed-transition and alert-cooldown state reset)`
+          `[detect:${path}] "${camera.name}": sub stream ${subPath} ready again (${readyRun} checks, quiet ${Math.round(quietMs / 1000)}s), returning the motion detector from main to sub (a relaunch: ~${Math.round(timing.restartDelayMs / 1000)}s gap; the bed-transition state resets, the alert cooldown carries over)`
         );
         // The same SIGKILL fallback stopMotionDetector and killStalledDetector use, cleared when SIGTERM works.
         const force = setTimeout(() => killIfSpawned(proc, 'SIGKILL'), FORCE_KILL_TIMEOUT_MS);
