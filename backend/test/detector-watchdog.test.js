@@ -375,8 +375,10 @@ describe('C6: path readiness (#451)', () => {
 describe('C7: the ladder is by attempt count, and the probe never vetoes it', () => {
   // Per action, the exact sequence of collaborator calls: path, probe, path again, [request], kill, event.
   // The event is LAST since #578: it records what the lever achieved, so it can only be written once the lever
-  // has answered (before, it came first and said "restarted" for a kill the lever had refused). What pins E7's
-  // "commit before the lever" now is C12b and C21a (the attempt counts although the lever threw or refused).
+  // has answered (before, it came first and said "restarted" for a kill the lever had refused). C12b and C21a
+  // pin that the attempt COUNTS when the lever threw or refused. They do not pin where the commit sits relative
+  // to the lever: the lever is synchronous, so moving the commit to just after it is an equivalent mutation
+  // (observable only through a lever that re-enters the watchdog, which nothing does).
   const L1 = ['status', 'probe:video', 'status', 'kill:motion', 'event'];
   const L2 = ['status', 'probe:video', 'status', 'post', 'kill:motion', 'event'];
   for (const probe of [true, 'video-missing', null]) {
@@ -645,6 +647,9 @@ describe('C9: the episode survives the gaps, and escalates on a crash loop', () 
       assert.equal(logged('[guard:detector-watchdog'), threw, 'the escalation tick threw');
       assert.match(h.events.at(-1).detail,
         /^motion detector getting no frames \(no data through 1 attempt\(s\) and the relaunches since\) - sub-stream \(Low\) restart requested by the detector watchdog$/);
+      // No kill was attempted here (#578), so the line must not mention one: nothing appended after `lever:`.
+      const last = logger.getRecent().filter((l) => l.includes(`[detector-watchdog] "${c.name}"`)).at(-1);
+      assert.ok(last.includes('[WARN]') && last.endsWith('attempt 2; lever: sub publisher'), `a request-only line mentions a kill: ${last}`);
       const ep = h.wd.episodeOf(c.id, 'motion');
       assert.deepEqual([ep.attempts, ep.lastActionMono, ep.gensWithoutData], [2, h.ms(270), 0], 'the escalation was not committed as attempt 2');
     });
@@ -866,6 +871,24 @@ describe('C11/C12: the recheck after the probe, and commit-before-mutate', () =>
     assert.ok(second.includes('[WARN]') && second.endsWith('attempt 2; lever: sub publisher; detector kill threw'), second);
     assert.equal(logged('[guard:detector-watchdog:Cam c12b:motion]'), 2, 'the second throw was swallowed instead of reaching the guard');
     assert.equal(h.wd.episodeOf(c.id, 'motion').attempts, 2);
+  });
+
+  test('C12b2: a lever that throws a FALSY value (`throw undefined`) is still a throw: worded as one, reaches the guard, no row, the attempt counted', async () => {
+    // JavaScript can throw anything. A check on the caught VALUE (`if (err)`) would read `throw undefined` as a
+    // plain refusal: no "threw" wording and, worse, the throw swallowed instead of reaching the guard.
+    const c = cam('c12b2');
+    const h = detectorHarness([c]);
+    h.onKill = () => { throw undefined; }; // eslint-disable-line no-throw-literal
+    h.run('motion', c.id, { path: 'cam_c12b2-sub', spawned: -600, data: 0 });
+    guards.resetGuardRateLimit();
+    await h.ticks(15, 120);
+    assert.deepEqual(h.killTimes(), [75], 'the throwing lever was retried inside the backoff floor');
+    assert.deepEqual(h.events, [], 'a lever that threw was recorded as a restart');
+    const lines = logger.getRecent().filter((l) => l.includes('[detector-watchdog] "Cam c12b2"'));
+    assert.equal(lines.length, 1);
+    assert.ok(lines[0].includes('[INFO]') && lines[0].includes('lever threw') && !lines[0].includes('lever refused'), lines[0]);
+    assert.equal(logged('[guard:detector-watchdog:Cam c12b2:motion]'), 1, 'a falsy throw was swallowed instead of reaching the guard');
+    assert.equal(h.wd.episodeOf(c.id, 'motion').attempts, 1);
   });
 
   test('C12c/C17: the diagnosis line carries path, path status, probe, input-tap age (INCONCLUSIVE when absent), attempt, lever', async () => {

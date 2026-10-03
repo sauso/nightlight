@@ -744,7 +744,8 @@ export function createDetectorWatchdog(overrides = {}) {
     // a process too young, or - since #500 - a detector `returning` from main to the sub stream, whose own SIGTERM
     // is already in flight). A REFUSED kill still counts as an attempt (the next action waits the backoff, and on
     // motion the second action also asks for the stream restart): changing that is a change to the ladder, not to
-    // what is recorded, and is documented as a limit in KNOWN-ISSUES.md.
+    // what is recorded, and is documented as a limit in KNOWN-ISSUES.md. (Known, not guarded: a throw from the
+    // logger or from recordCameraEvent AFTER a real kill would still skip the steps after it, as it always did.)
     const ep = episodes.get(key) ?? {
       camId: cam.id, attempts: 0, lastActionMono: null, lastHealthyMono: null, flowingSinceMono: null,
       lastSeenSpawnMono: null, gensWithoutData: 0, path: null,
@@ -770,13 +771,17 @@ export function createDetectorWatchdog(overrides = {}) {
     // The lever returns true ONLY if it signalled a process (killStalledDetector). `=== true`, not truthy: a
     // lever that returned anything else (undefined from a mis-wired dep, a count) did not demonstrably restart
     // anything, and the history must not say it did. A throw is caught only so the outcome can be recorded
-    // below; it is rethrown at the end so the per-leg guard reports it exactly as before.
+    // below; it is rethrown at the end so the per-leg guard reports it exactly as before. WHETHER it threw is a
+    // flag of its own, never a test of the caught value: JavaScript can throw `undefined` (or 0, or ''), and
+    // testing the value would record such a throw as a plain refusal and swallow it.
     let restarted = false;
-    let leverError = null;
+    let threw = false;
+    let leverError;
     if (kill) {
       try {
         restarted = L.restart(cam.id, { expectSpawn: fresh.spawnedMono, expectLastData: fresh.lastDataMono }) === true;
       } catch (err) {
+        threw = true;
         leverError = err;
       }
     }
@@ -792,22 +797,23 @@ export function createDetectorWatchdog(overrides = {}) {
       `probe: ${words[String(probe)] ?? 'inconclusive'}; ` +
       `input tap: ${fresh?.inputRecordAgeMs != null ? `last record ${seconds(fresh.inputRecordAgeMs)}s ago` : 'no record (inconclusive)'}; ` +
       `attempt ${ep.attempts}`;
-    // The diagnosis line goes BEFORE the row: a database failure while recording must not lose the one line that
-    // says what was found (and what was done) after a real kill.
+    // The diagnosis line goes BEFORE the row. This is DEFENSIVE, not a case that happens today (recordCameraEvent
+    // catches its own database errors): if a row ever could throw after a real kill, the one line that says what
+    // was found and what was done must already be written.
     if (!restarted && !requestKind) {
       // Nothing acted. INFO, not WARN: the watchdog tried and was refused, and nothing happened to the camera.
       // The reasons are the ones reachable here (the health re-read and the lever run in one synchronous block,
       // and a stalled process is far older than the lever's minimum age): the lever's boolean does not say which.
-      logger.info(`${diagnosis}; ${leverError ? 'lever threw (reported under the guard line)' : 'lever refused: the detector was already being stopped, returning to the sub stream, or nothing could be signalled'}`);
+      logger.info(`${diagnosis}; ${threw ? 'lever threw (reported under the guard line)' : 'lever refused: the detector was already being stopped, returning to the sub stream, or nothing could be signalled'}`);
     } else {
       // A mixed outcome (a request posted but the kill refused or thrown) stays ONE line: the kill's fate is
       // appended, and `lever:` names only what acted.
-      logger.warn(`${diagnosis}; lever: ${lever}${kill && !restarted ? `; detector kill ${leverError ? 'threw' : 'refused'}` : ''}`);
+      logger.warn(`${diagnosis}; lever: ${lever}${kill && !restarted ? `; detector kill ${threw ? 'threw' : 'refused'}` : ''}`);
     }
     if (restarted || requestKind) {
       deps.recordCameraEvent(cam.id, cam.name, EVENT.RESTART, `${leg} detector getting no ${L.noun} (${dark}) - ${levers} by the detector watchdog`);
     }
-    if (leverError) throw leverError;
+    if (threw) throw leverError;
   }
 
   async function tick() {

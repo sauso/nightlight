@@ -9947,7 +9947,7 @@
   {
     "label": "#578 M4b: a mixed outcome drops the \"detector kill refused\" note from the one WARN line",
     "file": "backend/src/lib/cameraWatchdogs.js",
-    "find": "${kill && !restarted ? `; detector kill ${leverError ? 'threw' : 'refused'}` : ''}",
+    "find": "${kill && !restarted ? `; detector kill ${threw ? 'threw' : 'refused'}` : ''}",
     "replace": "",
     "expect": "killed",
     "tests": ["detector-watchdog.test.js"],
@@ -9965,17 +9965,17 @@
   {
     "label": "#578 M6: a refused or thrown kill rolls the attempt back (the backoff is lost)",
     "file": "backend/src/lib/cameraWatchdogs.js",
-    "find": "    if (leverError) throw leverError;",
-    "replace": "    if (kill && !restarted) { ep.attempts -= 1; ep.lastActionMono = null; }\r\n    if (leverError) throw leverError;",
+    "find": "    if (threw) throw leverError;",
+    "replace": "    if (kill && !restarted) { ep.attempts -= 1; ep.lastActionMono = null; }\r\n    if (threw) throw leverError;",
     "expect": "killed",
     "tests": ["detector-watchdog.test.js"],
     "namePattern": "^C(21|12b)",
-    "note": "namePattern is a regex: a refusal commits the attempt the same before or after the lever, so only a rollback (and the throwing lever of C12b) tell the orderings apart. 'The commit moves after the lever' is covered by the existing #369 M12a (`^C12b:`): with a throwing lever it behaves exactly like a commit that never happens."
+    "note": "namePattern is a regex: a refusal commits the attempt the same before or after the lever, so only a rollback (and the throwing lever of C12b) tell the orderings apart. 'The commit moves to just after the lever' is an EQUIVALENT mutation since #578: the lever is synchronous and its throw is caught before the commit would run, so nothing observable differs. The existing #369 M12a (`^C12b:`) covers the commit never being stored."
   },
   {
     "label": "#578 M7: a throwing lever is swallowed instead of rethrown to the per-leg guard",
     "file": "backend/src/lib/cameraWatchdogs.js",
-    "find": "    if (leverError) throw leverError;",
+    "find": "    if (threw) throw leverError;",
     "replace": "    void leverError;",
     "expect": "killed",
     "tests": ["detector-watchdog.test.js"],
@@ -10016,5 +10016,32 @@
     "expect": "killed",
     "tests": ["motion-return-to-sub.test.js"],
     "namePattern": "#578"
+  },
+  {
+    "label": "#578 M12: a request-only action (no kill attempted) also logs \"detector kill refused\"",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "${kill && !restarted ? `; detector kill",
+    "replace": "${!restarted ? `; detector kill",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C9f"
+  },
+  {
+    "label": "#578 M13: a lever that throws a falsy value (`throw undefined`) is swallowed (the rethrow tests the value, not a flag)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (threw) throw leverError;",
+    "replace": "    if (leverError) throw leverError;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C12b"
+  },
+  {
+    "label": "#578 M13b: a lever that throws a falsy value is worded as a refusal (the INFO line tests the value, not a flag)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "${diagnosis}; ${threw ? 'lever threw",
+    "replace": "${diagnosis}; ${leverError ? 'lever threw",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C12b"
   }
 ]

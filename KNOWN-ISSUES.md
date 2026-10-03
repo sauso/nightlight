@@ -736,7 +736,8 @@ It has the same diagnosis as the `[WARN]` one. The log does not say which of the
 stream restart was requested in the same step, the row says only that (*sub-stream (Low) restart requested*,
 never *detector restarted*) and the one `[WARN]` line ends `lever: sub publisher; detector kill refused`.
 Before issue #578 a refused kill was recorded as a restart anyway. If the detector's stop request raised an
-error (a bug, not a refusal), the line says `lever threw` and the error is reported separately under
+error (a bug, not a refusal), the `[INFO]` line says `lever threw` instead (in the mixed case above, the
+`[WARN]` line ends `detector kill threw`), and the error is reported separately under
 `[guard:detector-watchdog:…]` as before.
 
 **Why:** each camera's motion and sound detectors are small ffmpeg processes reading the camera's stream.

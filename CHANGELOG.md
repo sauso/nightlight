@@ -57,7 +57,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   (and a `[WARN]` log line) *before* asking for the stop, and never checked whether the stop was refused (for
   example because the motion detector was already on its way back from the main stream to the Low one). Now the
   row and the `[WARN]` line follow the answer and name only what happened. A refused stop writes no row and one
-  `[INFO]` line ending `lever refused`; if a stream restart was requested in the same step, the row says only
+  `[INFO]` line containing `lever refused` (and the likely reasons); if a stream restart was requested in the same step, the row says only
   that. A refused stop still counts as an attempt, so it still advances the backoff (1, 2, 4 ... 30 minutes)
   and, for motion, the second attempt still asks for the stream restart (stated in KNOWN-ISSUES.md as a limit).
   The row wording `no data through N restart(s)` is now `N attempt(s)` for the same reason. The sound detector
