@@ -52,6 +52,26 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
     is skipped — a push already sent cannot be recalled, but no further one goes out for a flagged night.
 
 ### Fixed
+- **A motion alert can no longer fire sooner than the Motion cooldown after the last one just because the
+  detector restarted** (issue #454). The time of the last frame-diff motion alert lived inside one run of the
+  detector's ffmpeg, so every relaunch (a camera reconnect or "stream ended", a transport restart, the detector
+  watchdog's kill, the return to the Low stream) started a cooldown from zero, and sustained motion could alert
+  again straight away. It is now kept per camera for as long as the server runs, so those relaunches, and the
+  detector being started again by a detection-settings save, any camera edit (a rename too), assigning the
+  camera or switching it off and on, all keep it. **Differs from the neighbours:** it is **lost when the server
+  itself restarts** (nothing is stored; a container that restarts nightly can alert once more per camera per
+  restart, only if motion is sustained within the cooldown of the last alert); the **sound** cooldown was
+  already kept across an ffmpeg relaunch and is not changed here; MQTT and ONVIF motion keep their own
+  cooldowns; and the bed-exit/entry rules (their 2-minute pause and a pending exit) still start afresh on a
+  relaunch. **What you may notice:** after changing a motion setting, the next alert is no longer immediate,
+  so to retest wait out the cooldown (60 s by default; 1 s minimum, the form allows up to 3600 s) or set a
+  short one. A backward step of the server's clock now silences the frame-diff alert for at most one cooldown
+  (it used to be the step plus a cooldown); the other cooldowns are unchanged. A deleted camera's time is
+  forgotten with it. No number or threshold was added or changed. In 30 days of one house's saved data no
+  two motion alerts were closer than the cooldown and no relaunch followed an alert within 60 s, so no stored
+  alert or sleep number changes; at the default 60 s only an ffmpeg exit could ever show the old symptom.
+  Details and limits: [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "What a restart keeps", and
+  [docs/notifications.md](docs/notifications.md).
 - **Wake clips no longer treat a gap in the camera's readings as part of one wake** (issue #448). The live
   wake watcher counted readings instead of minutes, so five active minutes spread over about forty minutes of
   mostly missing readings were recorded as one wake, while the sleep timeline (which counts minutes) showed none.
@@ -121,8 +141,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   checks 20 seconds apart **and** neither the bed nor the area outside it has moved for 90 seconds, relaunches
   itself onto the Low stream (`returning the motion detector from main to sub`), at most once per 10 minutes.
   The switch is an ordinary detector relaunch: about 5 seconds with no motion samples, the bed-transition
-  rules (a half-seen exit or entry, and the 2-minute pause after a logged one) and the alert cooldown start
-  afresh, and the belief about whether the child is in bed is kept.
+  rules (a half-seen exit or entry, and the 2-minute pause after a logged one) start afresh, while the motion
+  alert cooldown (issue #454) and the belief about whether the child is in bed are kept.
   The 90-second quiet period is derived from the bed-exit rules so a switch cannot lose an exit. The numbers
   are fixed, not settings, and were chosen rather than measured. A camera with no Low stream, and the sound
   detector, are unchanged. See KNOWN-ISSUES for the limits.
@@ -215,7 +235,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   off from 1 to 30 minutes. A new detector gets 90 seconds to start delivering. Each restart is one row
   in **Camera history** saying "detector", plus one log line that records where the stream stopped. None
   of it is configurable. The minutes before a restart are still lost from that night's sleep data (issue
-  #508), and a restart resets the motion alert cooldown, as every detector relaunch already did (#454).
+  #508). A restart no longer resets the motion alert cooldown either (issue #454, above).
   Details, defaults and limits: [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "A detector was restarted".
 - **The sleep timeline no longer counts the pictures ffmpeg repeats during a camera stall as watched
   time.** When a camera stalls, or runs slower than 5 frames a second, the motion detector's ffmpeg

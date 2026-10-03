@@ -10268,5 +10268,167 @@
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
     "namePattern": "^C10d:"
+  },
+  {
+    "label": "#454 M0 (control): a comment edit in motionDetector.js must change nothing",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "// --- #454: the frame-diff motion ALERT cooldown outlives a detector relaunch. ---",
+    "replace": "// --- #454: the frame-diff motion ALERT cooldown outlives a detector relaunch. --- [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": ["motion-alert-cooldown.test.js"],
+    "namePattern": "^#454 C"
+  },
+  {
+    "label": "#454 M1: alertStampFor ignores the stored stamp (every launch, and every frame, starts from \"never alerted\": the old behaviour)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "  return stored == null ? 0 : Math.min(stored, now);",
+    "replace": "  return 0;",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown.test.js"],
+    "namePattern": "^#454 C(1|8):"
+  },
+  {
+    "label": "#454 M2: an alert that fires does not write its stamp",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "              motionAlertStamps.set(stampKey, now); // cooldown gates re-fire; a continuing run alerts once per cooldown",
+    "replace": "              // [mutant] stamp not written when an alert fires",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown.test.js"],
+    "namePattern": "^#454 C1:"
+  },
+  {
+    "label": "#454 M3: startMotionDetector forgets the camera's stamp (a settings save, a rename or a reconcile re-arms the cooldown)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "export async function startMotionDetector(camera) {",
+    "replace": "export async function startMotionDetector(camera) {\r\n  forgetMotionAlert(camera.id);",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown.test.js"],
+    "namePattern": "^#454 C4:"
+  },
+  {
+    "label": "#454 M4: stopMotionDetector forgets the camera's stamp (start calls stop first, so every re-entry loses it)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "export function stopMotionDetector(cameraId) {",
+    "replace": "export function stopMotionDetector(cameraId) {\r\n  forgetMotionAlert(cameraId);",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown.test.js"],
+    "namePattern": "^#454 C4:"
+  },
+  {
+    "label": "#454 M5: a stamp ahead of now is used as it stands (the old behaviour after a backward clock step: the step plus a cooldown of silence)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "  return stored == null ? 0 : Math.min(stored, now);",
+    "replace": "  return stored == null ? 0 : stored;",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown.test.js"],
+    "namePattern": "^#454 C8:"
+  },
+  {
+    "label": "#454 M6: the clamped stamp is not written back (it stays an hour ahead; every frame is clamped afresh to now, so the cooldown never ends)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "          if (storedStamp != null && lastAlert !== storedStamp) motionAlertStamps.set(stampKey, lastAlert);",
+    "replace": "          // [mutant] no write-back of the clamped stamp",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown.test.js"],
+    "namePattern": "^#454 C8:"
+  },
+  {
+    "label": "#454 M7: the detection PUT (the frontend's autosave) forgets the camera's stamp",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.put('/:id/detection', requireAdmin, async (req, res) => {",
+    "replace": "router.put('/:id/detection', requireAdmin, async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown-routes.test.js"],
+    "namePattern": "^#454 C5:"
+  },
+  {
+    "label": "#454 M7b: PUT /:id (a rename, an address edit) forgets the camera's stamp",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.put('/:id', requireAdmin, async (req, res) => {",
+    "replace": "router.put('/:id', requireAdmin, async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown-routes.test.js"],
+    "namePattern": "^#454 C5:"
+  },
+  {
+    "label": "#454 M7c: PUT /:id/assign forgets the camera's stamp",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.put('/:id/assign', async (req, res) => {",
+    "replace": "router.put('/:id/assign', async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown-routes.test.js"],
+    "namePattern": "^#454 C5:"
+  },
+  {
+    "label": "#454 M7d: PUT /:id/enabled forgets the camera's stamp",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.put('/:id/enabled', requireAdmin, async (req, res) => {",
+    "replace": "router.put('/:id/enabled', requireAdmin, async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown-routes.test.js"],
+    "namePattern": "^#454 C5:"
+  },
+  {
+    "label": "#454 M8: DELETE does not forget the camera's stamp (the store grows with deleted cameras)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "  forgetMotionAlert(req.params.id);",
+    "replace": "  // [mutant] the camera's alert stamp is not forgotten",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown-routes.test.js"],
+    "namePattern": "^#454 C6:"
+  },
+  {
+    "label": "#454 M9: every camera shares ONE stamp key (one camera's alert silences all the others)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "          const stampKey = camera.id;",
+    "replace": "          const stampKey = 'one-key-for-every-camera';",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown.test.js"],
+    "namePattern": "^#454 C11:"
+  },
+  {
+    "label": "#454 M10: the stamp is written whenever the confirm time and cooldown allow, even when the quiet-hours schedule then suppresses the alert",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs && inActiveWindow(camera)) {",
+    "replace": "if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs && (motionAlertStamps.set(stampKey, now), inActiveWindow(camera))) {",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown.test.js"],
+    "namePattern": "^#454 C10:"
+  },
+  {
+    "label": "#454 M11: an activity-only leg writes an alert stamp on every frame",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        if (anyActive) entry.lastActiveMono = performance.now();",
+    "replace": "        if (anyActive) entry.lastActiveMono = performance.now();\r\n        if (activityOnly) motionAlertStamps.set(camera.id, now);",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown.test.js"],
+    "namePattern": "^#454 C11:"
+  },
+  {
+    "label": "#454 M12: the cooldown comparison uses a hard-coded 60000 instead of the camera's cooldown",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "now - lastAlert >= cooldownMs",
+    "replace": "now - lastAlert >= 60000",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown.test.js"],
+    "namePattern": "^#454 C(7|9):"
+  },
+  {
+    "label": "#454 M13 (extra, not in the plan): a stamp ahead of now is read as \"never alerted\" (the fail-open design plan review measured at 25 alerts in 25 frames)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "  return stored == null ? 0 : Math.min(stored, now);",
+    "replace": "  return stored == null || stored > now ? 0 : stored;",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown.test.js"],
+    "namePattern": "^#454 C8:"
+  },
+  {
+    "label": "#454 M14 (extra, not in the plan): the cooldown boundary excludes exactly one cooldown (> instead of >=)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "now - lastAlert >= cooldownMs",
+    "replace": "now - lastAlert > cooldownMs",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown.test.js"],
+    "namePattern": "^#454 C(2|9):"
   }
 ]
