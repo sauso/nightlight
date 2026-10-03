@@ -723,6 +723,23 @@ followed by `[INFO] [detect:…] stopped by the detector watchdog (no frames), r
 again soon after, a later line says `lever: detector + sub publisher` (or `main publisher`), and the camera
 watchdog logs `restarting its sub-stream (Low) at the detector watchdog's request`.
 
+**A row and a `[WARN]` line are written only for what actually happened.** The watchdog asks for the
+detector to be stopped, and the request can be refused: the detector is already being stopped, is on its way
+back from the main stream to the Low one (#500), or had nothing to signal. Then the history shows **no
+restart**, and the log has one line at `[INFO]` instead of `[WARN]`:
+
+```
+[INFO] [detector-watchdog] "Nursery Cam" motion on cam_…-sub: no data for 75s; path ready, 2 reader(s), tracks H264+Opus; probe: video packets arriving (packets, not frames); input tap: last record 74s ago; attempt 1; lever refused: the detector was already being stopped, returning to the sub stream, or nothing could be signalled
+```
+
+It has the same diagnosis as the `[WARN]` one. The log does not say which of the reasons applied. If the
+stream restart was requested in the same step, the row says only that (*sub-stream (Low) restart requested*,
+never *detector restarted*) and the one `[WARN]` line ends `lever: sub publisher; detector kill refused`.
+Before issue #578 a refused kill was recorded as a restart anyway. If the detector's stop request raised an
+error (a bug, not a refusal), the `[INFO]` line says `lever threw` instead (in the mixed case above, the
+`[WARN]` line ends `detector kill threw`), and the error is reported separately under
+`[guard:detector-watchdog:…]` as before.
+
 **Why:** each camera's motion and sound detectors are small ffmpeg processes reading the camera's stream.
 One can stay alive and connected while receiving nothing at all. That happened on a real install for 4h45
 and 8h43 in one month, silently, until the camera's daily reboot: the stream looked ready, audio kept
@@ -761,7 +778,7 @@ camera rebooting, MediaMTX down) is the camera watchdog's job, not this one's.
 | Check interval | 15 s | How often each detector is looked at. |
 | Stale after | 60 s | No output for longer than this = dark. A healthy detector writes ~5 times a second. |
 | Startup grace | 90 s | How long a new detector gets for its first output. |
-| Backoff | 1 min doubling, capped at 30 min | Between two actions on the same detector. |
+| Backoff | 1 min doubling, capped at 30 min | Between two attempts on the same detector. An attempt whose stop request was refused counts too (limits, below), so not every attempt has a Camera history row. |
 | Recovered after | 5 min | Unbroken health that forgets the attempt count. |
 | Crash-loop escalation | 3 min | Stream restart asked for when two or more relaunched detectors in a row delivered nothing, with no healthy moment since the last action (the relaunch keeps dying before anyone can judge it). |
 | Request expiry | 60 s | A stream-restart request not acted on by then is dropped. |
@@ -782,6 +799,17 @@ after a blip; since #500 a detector on the main stream goes back by itself when 
 room is quiet (the next section), so this no longer depends on a restart.
 
 **Limits, stated rather than hidden:**
+- **A refused stop request still counts as an attempt (issue #578).** The attempt and its backoff are counted
+  before the request is made, so that a request that errors or hangs can never cause a retry without backoff.
+  A refusal is counted the same way, which has three consequences. (1) Every refusal in a row doubles the
+  backoff (1, 2, 4 ... 30 minutes), so a detector that cannot be signalled (one stuck "being stopped" or
+  "returning") can delay the first real restart by up to 30 minutes. (2) On a motion detector the second
+  attempt also asks for the stream restart, **even though no detector restart happened**, so a refusal can
+  bring that request one step earlier than a real restart would; on a camera whose detector reads the main
+  stream that restarts the transcoder and briefly interrupts live view, and it repeats at the later backoff
+  steps. (3) A **sound** detector's refused attempt writes no Camera history row at all (before #578 it wrote
+  a false one), so a sound detector that is repeatedly refused leaves only the `[INFO]` lines. A refusal that
+  should not feed the backoff would need a different retry rule; not done, filed as #585.
 - **The minutes before the restart are still lost.** Since issue #508 the sleep numbers report those dark
   minutes as unknown ("No data") rather than as quiet sleep (previous section), so a restart shortens a hole
   in the night; it does not fill it.
@@ -806,7 +834,8 @@ room is quiet (the next section), so this no longer depends on a restart.
   switched off or a sleep-sampling window closes: all three drop its requests.
 
 **What to do:** nothing, it is self-healing. If one camera shows these rows regularly, include the
-`[detector-watchdog]` lines when reporting it: the `path`, `probe` and `input tap` fields say where the
+`[detector-watchdog]` lines when reporting it (both `[WARN]` and `[INFO]` ones: a camera with `lever refused`
+lines and no rows is being refused, not left alone, and Camera history will not show it): the `path`, `probe` and `input tap` fields say where the
 stream stopped (the detector's side, or the stream it reads), which nothing could tell before.
 
 ---
