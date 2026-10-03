@@ -441,8 +441,11 @@ export function createAudioWatchdog(overrides = {}) {
 //               request the camera watchdog consumes. THIS WATCHDOG NEVER STARTS OR STOPS A PUBLISHER
 //               ITSELF: startTranscoder is not safe under two concurrent calls for one camera (processGuards.js),
 //               and the camera watchdog's per-leg runner is what already serialises that leg's restarts.
-// Every action records one camera_events RESTART naming the detector, and ONE diagnosis line (path status,
-// a video/audio probe, the ffmpeg input tap's age) - that line is how the unknown root cause gets learned.
+// Every action that actually DID something records one camera_events RESTART naming what acted (the detector
+// only if its kill really signalled a process, #578), and ONE diagnosis line (path status, a video/audio probe,
+// the ffmpeg input tap's age) - that line is how the unknown root cause gets learned. An attempt whose kill was
+// refused and that posted no request did nothing: it writes the diagnosis line at INFO ("lever refused") and NO
+// row, because Camera history is a claim about what happened to the camera.
 //
 // ⚠️ NO PROBE RESULT EVER VETOES AN ACTION (Astra R1/R2, Sol R2). A probe cannot prove a negative (live RTSP
 // never ends, a stalled setup looks like silence), and a video PACKET is not a decodable FRAME (the publisher
@@ -733,6 +736,16 @@ export function createDetectorWatchdog(overrides = {}) {
 
     // E7. COMMIT BEFORE MUTATING (Opus R1): a lever that throws, hangs or empties the entry can never cause a
     // retry without backoff, because the attempt is already counted.
+    // ⚠️ #578: the COMMIT stays here, before the lever, but the camera_events ROW moved to AFTER it. They guard
+    // different things. The commit is a guard against retrying without backoff, so it must not wait on an outcome
+    // (a lever that throws or hangs still counts). The row is a CLAIM about the outcome, so it can only be written
+    // once the outcome is known: it used to be written first and said "detector restarted" for a kill that
+    // killStalledDetector had refused (no process to signal, a replaced process, data that arrived meanwhile,
+    // a process too young, or - since #500 - a detector `returning` from main to the sub stream, whose own SIGTERM
+    // is already in flight). A REFUSED kill still counts as an attempt (the next action waits the backoff, and on
+    // motion the second action also asks for the stream restart): changing that is a change to the ladder, not to
+    // what is recorded, and is documented as a limit in KNOWN-ISSUES.md. (Known, not guarded: a throw from the
+    // logger or from recordCameraEvent AFTER a real kill would still skip the steps after it, as it always did.)
     const ep = episodes.get(key) ?? {
       camId: cam.id, attempts: 0, lastActionMono: null, lastHealthyMono: null, flowingSinceMono: null,
       lastSeenSpawnMono: null, gensWithoutData: 0, path: null,
@@ -748,20 +761,59 @@ export function createDetectorWatchdog(overrides = {}) {
     inconclusiveProbe.delete(key);
 
     const publisher = requestKind === 'sub' ? 'sub-stream (Low)' : 'transcoder';
-    const dark = verdict.entryStalled ? darkFor(fresh) : `no data through ${attempts} restart(s) and the relaunches since`;
-    const lever = kill && requestKind ? `detector + ${requestKind} publisher` : kill ? 'detector' : `${requestKind} publisher`;
-    const levers = [kill && `${leg} detector restarted`, requestKind && `${publisher} restart requested`].filter(Boolean).join(', ');
-    deps.recordCameraEvent(cam.id, cam.name, EVENT.RESTART, `${leg} detector getting no ${L.noun} (${dark}) - ${levers} by the detector watchdog`);
+    // `attempt(s)`, not `restart(s)`: `attempts` counts a refused kill too (#578), so it is no longer a count of
+    // restarts.
+    const dark = verdict.entryStalled ? darkFor(fresh) : `no data through ${attempts} attempt(s) and the relaunches since`;
+    // The request is posted BEFORE the lever, as it always was: it asks the CAMERA watchdog for a publisher
+    // restart, which does not depend on whether this detector's kill landed, and a lever that throws must not
+    // swallow it.
+    if (requestKind) deps.restartRequests.post(cam.id, requestKind, `${leg} detector on ${path}: ${dark}`);
+    // The lever returns true ONLY if it signalled a process (killStalledDetector). `=== true`, not truthy: a
+    // lever that returned anything else (undefined from a mis-wired dep, a count) did not demonstrably restart
+    // anything, and the history must not say it did. A throw is caught only so the outcome can be recorded
+    // below; it is rethrown at the end so the per-leg guard reports it exactly as before. WHETHER it threw is a
+    // flag of its own, never a test of the caught value: JavaScript can throw `undefined` (or 0, or ''), and
+    // testing the value would record such a throw as a plain refusal and swallow it.
+    let restarted = false;
+    let threw = false;
+    let leverError;
+    if (kill) {
+      try {
+        restarted = L.restart(cam.id, { expectSpawn: fresh.spawnedMono, expectLastData: fresh.lastDataMono }) === true;
+      } catch (err) {
+        threw = true;
+        leverError = err;
+      }
+    }
+    // What ACTUALLY acted, for the row and the line. Both are built from this, never from `kill`, which only says
+    // what was attempted.
+    const lever = [restarted && 'detector', requestKind && `${requestKind} publisher`].filter(Boolean).join(' + ');
+    const levers = [restarted && `${leg} detector restarted`, requestKind && `${publisher} restart requested`].filter(Boolean).join(', ');
     const words = leg === 'motion' ? VIDEO_PROBE_WORDS : AUDIO_PROBE_WORDS;
-    logger.warn(
+    // ONE text for the WARN and the INFO line below, so the two cannot drift apart.
+    const diagnosis =
       `[detector-watchdog] "${cam.name}" ${leg} on ${path}: ${dark}; ` +
       `path ready, ${status.readers ?? '?'} reader(s), tracks ${(status.tracks || []).join('+') || 'none'}; ` +
       `probe: ${words[String(probe)] ?? 'inconclusive'}; ` +
       `input tap: ${fresh?.inputRecordAgeMs != null ? `last record ${seconds(fresh.inputRecordAgeMs)}s ago` : 'no record (inconclusive)'}; ` +
-      `attempt ${ep.attempts}; lever: ${lever}`
-    );
-    if (requestKind) deps.restartRequests.post(cam.id, requestKind, `${leg} detector on ${path}: ${dark}`);
-    if (kill) L.restart(cam.id, { expectSpawn: fresh.spawnedMono, expectLastData: fresh.lastDataMono });
+      `attempt ${ep.attempts}`;
+    // The diagnosis line goes BEFORE the row. This is DEFENSIVE, not a case that happens today (recordCameraEvent
+    // catches its own database errors): if a row ever could throw after a real kill, the one line that says what
+    // was found and what was done must already be written.
+    if (!restarted && !requestKind) {
+      // Nothing acted. INFO, not WARN: the watchdog tried and was refused, and nothing happened to the camera.
+      // The reasons are the ones reachable here (the health re-read and the lever run in one synchronous block,
+      // and a stalled process is far older than the lever's minimum age): the lever's boolean does not say which.
+      logger.info(`${diagnosis}; ${threw ? 'lever threw (reported under the guard line)' : 'lever refused: the detector was already being stopped, returning to the sub stream, or nothing could be signalled'}`);
+    } else {
+      // A mixed outcome (a request posted but the kill refused or thrown) stays ONE line: the kill's fate is
+      // appended, and `lever:` names only what acted.
+      logger.warn(`${diagnosis}; lever: ${lever}${kill && !restarted ? `; detector kill ${threw ? 'threw' : 'refused'}` : ''}`);
+    }
+    if (restarted || requestKind) {
+      deps.recordCameraEvent(cam.id, cam.name, EVENT.RESTART, `${leg} detector getting no ${L.noun} (${dark}) - ${levers} by the detector watchdog`);
+    }
+    if (threw) throw leverError;
   }
 
   async function tick() {

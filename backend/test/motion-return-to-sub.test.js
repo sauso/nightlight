@@ -69,6 +69,7 @@ const { default: db } = await import('../src/db.js');
 const { logger } = await import('../src/lib/logger.js');
 const motion = await import('../src/lib/motionDetector.js');
 const { killStalledDetector } = await import('../src/lib/processGuards.js');
+const { createDetectorWatchdog } = await import('../src/lib/cameraWatchdogs.js');
 const { setMediamtxApiTimeoutForTest } = await import('../src/lib/mediamtx.js');
 const { _setObservationClockFactoryForTests, _resetObservationClocksForTests } = await import('../src/lib/observationClock.js');
 const { createBedTransitionTracker, OOB_CONFIRM_QUIET_MS } = await import('../src/lib/bedTransitionTracker.js');
@@ -423,6 +424,54 @@ describe('#500: returning from main to the sub', { concurrency: false }, () => {
     assert.equal(killStalledDetector(plain, tokens(plain), 3000), true, 'control: the lever must still kill an ordinary stalled entry');
     assert.deepEqual(signals, ['SIGTERM']);
     onExit?.(); // clears the lever's SIGKILL timer so it cannot keep the test process alive
+  });
+
+  // #578: the other half of R6b's lever refusal. R6b proves killStalledDetector REFUSES a returning entry; this proves
+  // what the detector WATCHDOG then writes. It used to record a "detector restarted" row (and a WARN) BEFORE the
+  // lever ran and ignored the lever's answer, so the refusal R6b pins produced a false row in Camera history.
+  // Here the watchdog and the lever are the REAL ones (only MediaMTX, the probes and the event sink are faked),
+  // on an entry the REAL detector put into `returning` by its own return check: a fixture in the watchdog's own
+  // test file cannot do that, its fake clock makes the real lever refuse as "too young" with or without the flag.
+  // The monotonic offset ages the process past the 90 s startup grace so the watchdog judges it entry-stalled.
+  const watchdogOn = (cam, events) => createDetectorWatchdog({
+    listCameras: () => [cam],
+    getPathStatus: async () => ({ ready: true, readers: 1, tracks: ['H264'] }),
+    probeVideoFlowing: async () => true,
+    probeAudioFlowing: async () => true,
+    recordCameraEvent: (_id, _name, _type, detail) => events.push(detail),
+  });
+
+  test('#578: the REAL watchdog and lever on a detector that is `returning`: the kill is refused, nothing is signalled and NO restart row is written', async () => {
+    fast({ stableChecks: 1, quietMs: 0, minGapMs: 0, recheckMs: 30, restartDelayMs: 30 });
+    const cam = camera('w578a');
+    wedged.add(urlOf(MAIN(cam.id))); // ignores the return's SIGTERM, so the entry stays `returning` for the 3 s SIGKILL timer
+    const proc = await startOnMain(cam);
+    subAnswers(cam.id).dflt = true;
+    await waitFor(() => proc.signals.includes('SIGTERM'), 'the return\'s SIGTERM');
+    assert.equal(motion.getMotionDetectorHealth(cam.id)?.path, MAIN(cam.id), 'premise: the entry is still the one that is returning');
+    monoOffset += 100_000;
+    const events = [];
+    await watchdogOn(cam, events).tick();
+    assert.deepEqual(proc.signals, ['SIGTERM'], 'the watchdog signalled a detector that was already returning');
+    assert.deepEqual(events, [], 'a kill the lever refused because the detector was returning was recorded as a restart');
+    const mine = linesFor(`[detector-watchdog] "${cam.name}"`);
+    assert.equal(mine.length, 1, `expected one watchdog line, got ${mine.length}`);
+    assert.ok(mine[0].includes('INFO') && mine[0].includes('lever refused'), mine[0]);
+  });
+
+  test('#578 (control): the same watchdog and lever on a stalled detector that is NOT returning: it is signalled and the restart is recorded', async () => {
+    fast(); // the sub never becomes ready (setAnswers), so this detector stays on main and is never `returning`
+    const cam = camera('w578b');
+    const proc = await startOnMain(cam);
+    monoOffset += 100_000;
+    const events = [];
+    await watchdogOn(cam, events).tick();
+    assert.deepEqual(proc.signals, ['SIGTERM'], 'the control did not signal the stalled detector, so the refusal above proves nothing');
+    assert.equal(events.length, 1);
+    assert.match(events[0], /^motion detector getting no frames \(no data in the \d+s since it started\) - motion detector restarted by the detector watchdog$/);
+    const mine = linesFor(`[detector-watchdog] "${cam.name}"`);
+    assert.equal(mine.length, 1);
+    assert.ok(mine[0].includes('WARN') && mine[0].endsWith('lever: detector'), mine[0]);
   });
 
   test('#500 R6c: when nothing could be signalled (no pid) the detector is not marked returning and tries again', async () => {
