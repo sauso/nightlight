@@ -809,7 +809,7 @@ room is quiet (the next section), so this no longer depends on a restart.
   stream that restarts the transcoder and briefly interrupts live view, and it repeats at the later backoff
   steps. (3) A **sound** detector's refused attempt writes no Camera history row at all (before #578 it wrote
   a false one), so a sound detector that is repeatedly refused leaves only the `[INFO]` lines. A refusal that
-  should not feed the backoff would need a different retry rule; not done, filed as a follow-up.
+  should not feed the backoff would need a different retry rule; not done, filed as #585.
 - **The minutes before the restart are still lost.** Since issue #508 the sleep numbers report those dark
   minutes as unknown ("No data") rather than as quiet sleep (previous section), so a restart shortens a hole
   in the night; it does not fill it.
