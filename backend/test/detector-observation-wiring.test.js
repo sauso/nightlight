@@ -99,7 +99,7 @@ mock.module('node:child_process', {
 const { default: db } = await import('../src/db.js');
 const { logger } = await import('../src/lib/logger.js');
 const { flushActivity, _resetActivityTrackerForTests } = await import('../src/lib/activityTracker.js');
-const { startMotionDetector, stopMotionDetector } = await import('../src/lib/motionDetector.js');
+const { startMotionDetector, stopMotionDetector, _resetMotionAlertsForTests } = await import('../src/lib/motionDetector.js');
 const { startSoundDetector, stopSoundDetector } = await import('../src/lib/soundDetector.js');
 const {
   getObservationClock, sweepIdleClocks, _setObservationClockFactoryForTests, _resetObservationClocksForTests,
@@ -112,7 +112,15 @@ after(async () => {
 // #447: the tracker remembers, per camera, the last minute it closed, and the golden runs the SAME camera at the
 // SAME planted times three times over: without this, the second variant's 12:00 samples would be filed in the
 // minute after the first variant's last one.
-beforeEach(() => _resetActivityTrackerForTests());
+beforeEach(() => {
+  _resetActivityTrackerForTests();
+  // #454: the motion alert stamp now outlives a detector, so the SAME camera id replayed from the SAME planted
+  // times (the golden's three clock variants, the #493 stall variants) would find the previous run's stamp. NOT
+  // merely hygiene: the stamp (e.g. T0 + 73 s) is AHEAD of the next run's clock (T0), the detector clamps a stamp
+  // ahead of `now` to `now`, and that would silence the next run's first alert (T0 + 8 s) for a whole cooldown.
+  // Optional-called so this file still loads, and fails on its assertions, against code without #454.
+  _resetMotionAlertsForTests?.();
+});
 
 // #447: a tick this long after a minute's end writes it: past activityTracker's 7 s GRACE_MS, which its own
 // tests pin with literal times either side. The flushes below pass it explicitly and never move the mocked clock.
@@ -348,8 +356,9 @@ const MOTION_MIN2 = frames([
   { n: 224, flickerEvery: 11 },
 ]);
 // Generation 2, after the relaunch: outside, then bed. An into_bed while the belief (which survives a
-// relaunch) is already "in bed" is logged as impossible; the alert state does NOT survive, so this run
-// alerts even though the last alert was well inside the cooldown.
+// relaunch) is already "in bed" is logged as impossible. Since #454 the alert cooldown survives the relaunch too,
+// so this run's alert (it would fire at 126 s) is SUPPRESSED: the last alert, at 73 s, is only 53 s earlier,
+// inside the 60 s cooldown. (Before #454 the stamp was per launch, this run alerted, and this comment said so.)
 const MOTION_GEN2 = frames([
   { n: 10, out: true },
   { n: 20, bed: true },
@@ -431,9 +440,16 @@ makeCamera(db, { id: soundCamera.id, name: soundCamera.name, path: soundCamera.m
 //   - the first frame of every generation is a baseline with no diff (299 of 300 frames in minute 1,
 //     69 of 70 in generation 2), and the frame delivered after 'exit' is still analysed (it now sits with
 //     generation 2's frames in 12:02, the minute it arrived in);
-//   - the alert cooldown resets on a relaunch (generation 2 alerts at 126 s, 53 s after the 73 s alert,
-//     inside the 60 s cooldown), while the in/out-of-bed BELIEF survives it (the "flagged impossible"
-//     line);
+//   - ★ #454: the alert cooldown now SURVIVES a relaunch, like the in/out-of-bed BELIEF (the "flagged
+//     impossible" line): generation 2's run would alert at 126 s, 53 s after the 73 s alert, inside the 60 s
+//     cooldown, so it does not. Before #454 it did alert, and the golden held a third `motion` event plus its
+//     `motion on` and `no snapshot` lines. RE-DERIVED BY HAND, NOT RE-RECORDED (the rule of this file): the
+//     alerts are at 8.0 s and 73.0 s of generation 1 (the premises of MOTION_MIN1/MIN2) and generation 2's would
+//     be at 126.0 s (MOTION_GEN2's bed run starts at 123.0 s, +3 s of confirmation), so `events` goes from 3 rows
+//     to 2 and the log loses exactly generation 2's `motion on` line and the `no snapshot` line its alert's
+//     grab prints (the three grabs print identical text; the last one in the log is the one that goes). Nothing
+//     else moves: activity rows, bed transitions and every other line are what they were (the alert block runs
+//     after `recordMotion` and the bed-transition tracker, and reads nothing they write);
 //   - the second loud sound run does not alert (inside the 120 s cooldown) but still moves the level
 //     lines and the stored sound_* numbers.
 // Log lines that are verbatim forwards of a stderr capture are NOT in these literals: they are checked
@@ -490,7 +506,7 @@ const GOLDEN_MOTION = {
   events: [
     { camera_id: 'cam-golden-motion', camera_name: 'Golden Motion Cam', type: 'motion', detail: '33.3% of zone', snapshot: 0, clip_status: null, clip_path: null, clip_duration_s: null, clip_bytes: null },
     { camera_id: 'cam-golden-motion', camera_name: 'Golden Motion Cam', type: 'motion', detail: '33.3% of zone', snapshot: 0, clip_status: null, clip_path: null, clip_duration_s: null, clip_bytes: null },
-    { camera_id: 'cam-golden-motion', camera_name: 'Golden Motion Cam', type: 'motion', detail: '33.3% of zone', snapshot: 0, clip_status: null, clip_path: null, clip_duration_s: null, clip_bytes: null },
+    // (#454: there was a third row here, generation 2's alert at 126 s; the cooldown now suppresses it.)
   ],
   log: [
     '[INFO] [intobed] "Golden Motion Cam" bed active with no entry link — outside last active never (this run) (need <=8000ms), believed unknown',
@@ -511,10 +527,9 @@ const GOLDEN_MOTION = {
     '[INFO] [detect] no snapshot for "Golden Motion Cam" (grab failed/timed out) — feed/alert without image',
     '[INFO] [detect] no snapshot for "Golden Motion Cam" (grab failed/timed out) — feed/alert without image',
     '[INFO] [intobed] "Golden Motion Cam" entry candidate — outside active 200ms ago, bed now 33.3%',
-    '[INFO] [detect] motion on "Golden Motion Cam" (33.3% of zone)',
+    // (#454: generation 2's `motion on` line sat here, and a third `no snapshot` line closed the log: see above.)
     '[INFO] [intobed] "Golden Motion Cam" INTO BED would be flagged impossible — already believed in bed (§1.2 item 1, log-only)',
     '[INFO] [intobed] "Golden Motion Cam" INTO BED — motion entered the bed, outside quiet 6000ms since, bed peak 33.3%',
-    '[INFO] [detect] no snapshot for "Golden Motion Cam" (grab failed/timed out) — feed/alert without image',
   ],
 };
 // ★ #447, derived by hand as for motion: SOUND_MIN1's windows all arrive at 0-59.8 s and SOUND_MIN2's at

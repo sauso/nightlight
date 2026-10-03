@@ -460,8 +460,11 @@ the motion alert, which uses the same helper.
   lengthens. Suspected, not measured; refusing the switch while a candidate is pending is a follow-up.
 - **The wake watcher (#448) had the same "active, outage, active" shape; it is fixed separately.** See "A wake
   recording does not bridge a gap in the readings" below.
-- A backward clock step of S seconds still suppresses a motion alert or an exit for up to S plus the cooldown
-  (pre-existing, filed separately).
+- A backward clock step of S seconds still suppresses a bed exit or entry (their 2-minute pause) and an ONVIF
+  or MQTT motion alert for up to S plus the cooldown (pre-existing, filed separately, #582). The **frame-diff**
+  motion alert is different since #454: after a one-way backward step its cooldown is clamped to the new time,
+  so it is silent for at most one cooldown, not S plus the cooldown. It has its own limit ("What a restart
+  keeps", below).
 
 **What to do:** nothing. To see how often it fires, count the `restarted` lines per night.
 
@@ -865,13 +868,52 @@ restarts a camera whose *main stream's audio* stopped for two checks; the **dete
 *detector* that stopped receiving while its stream looks fine. Only the detector watchdog's rows say
 "detector".
 
-**What a restart resets:** on motion, the alert cooldown (so a motion alert can fire again sooner than the
-cooldown after a restart: the existing behaviour of every detector relaunch, issue #454), a motion run
-that was building up to an alert, and a pending bed-exit or bed-entry candidate. The motion detector's
-belief about whether the child is in bed, and the sound detector's learned ambient level and cooldown, are
-kept. A restarted motion detector also returns to the Low stream if it had fallen back to the main one
-after a blip; since #500 a detector on the main stream goes back by itself when the Low stream is up and the
-room is quiet (the next section), so this no longer depends on a restart.
+**What a restart resets:** on motion, a motion run that was building up to an alert, and a pending bed-exit
+or bed-entry candidate (with the 2-minute pause after a logged exit or entry, so a restart can record a second
+exit or entry within 2 minutes of one just logged: a duplicate, not a lost one). The motion detector's belief
+about whether the child is in bed, the sound detector's learned ambient level and cooldown, and the motion
+alert cooldown (below) are kept. A restarted motion detector also returns to the Low stream if it had fallen
+back to the main one after a blip; since #500 a detector on the main stream goes back by itself when the Low
+stream is up and the room is quiet (the next section), so this no longer depends on a restart.
+
+**What a restart keeps: the motion alert cooldown (issue #454).** Before #454 every relaunch of the motion
+detector started its alert cooldown from zero, so sustained motion could alert again sooner than **Motion
+cooldown** after the previous alert. Now the time of the last motion alert is kept per camera, and a motion
+alert cannot fire sooner than **Motion cooldown** after it, whatever happened to the detector in between:
+- **Kept through:** a camera reconnect or "stream ended", a transport restart, the detector watchdog's kill,
+  the return to the Low stream (next section), and the detector being started again by a detection-settings
+  save, any camera edit (a rename too), assigning or unassigning the camera, or switching it off and on.
+- **Lost when the server (the container) restarts.** Nothing is stored. For a container that restarts every
+  night the cost is at most one extra motion alert per camera per restart, and only if motion is sustained
+  within **Motion cooldown** of the last alert before it.
+- **Which causes mattered at which cooldown.** An ffmpeg exit (a reconnect, "stream ended") and the detector being
+  started again (a settings save, a camera edit, assigning, an enable/disable) re-armed the cooldown at **any**
+  setting, the default 60 s included. The detector watchdog waits for 60 s of silence before it restarts
+  anything, and the return to the Low stream waits for 90 s of quiet, so those two only mattered with a longer
+  cooldown (above about 70 s and 95 s). Across 30 days of one house's saved data
+  no motion alert pair was closer than the cooldown and no relaunch fell within 60 s after an alert: this is a
+  correctness fix, and no stored alert, sleep number or detection event changes because of it.
+- **Changing the setting:** the last alert's time is compared with the *current* **Motion cooldown**, so
+  lowering it applies from the next frame and raising it extends the wait. **To test motion alerts right after
+  changing motion settings, wait out the cooldown (60 s by default) or set a short one**: a settings save no
+  longer re-arms an alert (it did, before).
+- **An alert that was silenced** (outside the alert schedule, or by snoozing the camera) does not start a
+  cooldown, so one can fire as soon as the schedule opens or the snooze ends (unchanged).
+- **A backward step of the server's clock** (a time-sync correction) silences the frame-diff alert for at most
+  one cooldown, counted from the first video frame analysed after the step (at 5 frames a second that is
+  immediate; if frames stop for ten minutes after the step it starts at the next frame). The ONVIF and MQTT
+  motion alerts and the bed-exit rules still wait the step plus a cooldown (see the gap section above, #582).
+  **Known limit:** this is only for a ONE-WAY step. If the clock steps back and is later corrected *forward*,
+  the stored time stays at the stepped-back value and the first motion after the correction can alert once
+  inside the cooldown; a clock that jumps by hours between consecutive frames can alert repeatedly. Real
+  time-sync corrections do not behave like that, so it was left. A monotonic companion time would fix it; not
+  done (#582).
+- **The sound cooldown is not the same.** It already survived an ffmpeg relaunch (it lives in the sound
+  analyser), and still starts again when the sound detector is started afresh by a settings save, a camera edit
+  or an enable/disable; the motion cooldown now survives those too. The **ONVIF** and **MQTT** motion sources
+  keep their own cooldowns, unchanged.
+- **Deleting a camera forgets its cooldown.** A frame still arriving from the stopped detector in that instant
+  can store one stray time for the deleted camera (a number, nothing else); not guarded.
 
 **Limits, stated rather than hidden:**
 - **A refused stop request still counts as an attempt (issue #578).** The attempt and its backoff are counted
@@ -922,7 +964,7 @@ reboot, a Wi-Fi drop, a server restart):
 
 ```
 [WARN] [detect:cam_…] "Nursery Cam": sub stream cam_…-sub not ready, reading the MAIN stream (more CPU; the motion thresholds were calibrated on the sub); will return to the sub once it is ready
-[INFO] [detect:cam_…] "Nursery Cam": sub stream cam_…-sub ready again (3 checks, quiet 95s), returning the motion detector from main to sub (a relaunch: ~5s gap; bed-transition and alert-cooldown state reset)
+[INFO] [detect:cam_…] "Nursery Cam": sub stream cam_…-sub ready again (3 checks, quiet 95s), returning the motion detector from main to sub (a relaunch: ~5s gap; the bed-transition state resets, the alert cooldown carries over)
 ```
 
 **Which stream motion detection reads:** the camera's **Low (sub) stream** when it has one and it is up,
@@ -951,9 +993,9 @@ motion samples, which the sleep numbers show as "No data" for those minutes like
 transition rules start afresh (a half-seen bed exit or entry is forgotten, and so are "when the bed last
 moved" and the 2-minute pause after a logged exit or entry, so an exit or entry that happens within 2
 minutes of one logged just before the switch can be recorded where an uninterrupted detector would have
-suppressed it), and the alert cooldown resets, so a motion alert can fire again sooner than the cooldown after a
-switch (the same as every relaunch, issue #454). The detector's belief about whether the child is in bed is
-kept. The relaunch follows the same stop rules as any other: switching detection off, or disabling or
+suppressed it). The motion **alert cooldown is kept** (issue #454): a switch does not let a motion alert fire
+sooner than the cooldown after the last one, which it did before. The detector's belief about whether the
+child is in bed is kept. The relaunch follows the same stop rules as any other: switching detection off, or disabling or
 deleting the camera, cancels it.
 
 **Limits, stated rather than hidden:**
