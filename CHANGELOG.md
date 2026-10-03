@@ -52,6 +52,28 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
     is skipped — a push already sent cannot be recalled, but no further one goes out for a flagged night.
 
 ### Fixed
+- **Wake clips no longer treat a gap in the camera's readings as part of one wake** (issue #448). The live
+  wake watcher counted readings instead of minutes, so five active minutes spread over about forty minutes of
+  mostly missing readings were recorded as one wake, while the sleep timeline (which counts minutes) showed none.
+  A wake now bridges at most 3 minutes with no active reading, whether the camera reported them quiet or
+  reported nothing, the same rule and the same constant as the nightly job, so two qualifying bursts of
+  activity either side of an outage are two wakes and two clips. The watcher also starts watching only after
+  15 *consecutive* quiet minutes that were actually reported (a missing minute restarts the count), where
+  before 14 quiet minutes, a long outage and one more counted as 15. This is deliberately stricter than the
+  sleep timeline's own "settled" rule: the cost is that a camera that drops a minute more often than about every
+  15 minutes never starts watching and records no wake clips. On the saved 30 days of two cameras in one house,
+  replaying the old and the new rule, the start of watching differed on exactly one night in four camera-months
+  (8 minutes later), so a night is rarely delayed; unknown on other installs. An already-watching watcher is
+  not stopped by a gap. A server clock that steps backwards by more than about 2 minutes (smaller steps were
+  already absorbed) now ends the run in progress, and restarts the count toward watching if the watcher was
+  still settling, instead of silently mixing the repeated minutes in; a repeated minute is counted once. The
+  wake clip's ring hold is still released when a run ends, and a late clip-cut can no longer release the hold
+  of a newer wake. A wake that starts after a gap has its clip anchored at its own first minute. The 3, 5 and
+  15 are the same numbers as before: the nightly job's own constants, shared with the live watcher (a retune
+  moves both), tuned on nights from two cameras in one house and not validated elsewhere. No stored sleep
+  number changes: only the wake clips can differ (fewer for sparse activity, more where one run used to span
+  an outage). Known limits are in
+  [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "A wake recording does not bridge a gap in the readings".
 - **Camera history no longer shows a detector restart that did not happen** (issue #578). When a detector
   stopped receiving video or audio, the detector watchdog wrote "detector restarted by the detector watchdog"
   (and a `[WARN]` log line) *before* asking for the stop, and never checked whether the stop was refused (for
