@@ -18,6 +18,7 @@ useTempDataDir();
 
 const { default: db } = await import('../src/db.js');
 const md = await import('../src/lib/motionDetector.js');
+const { BED_TRANSITION_ACTIVE_FRACTION } = await import('../src/lib/bedTransitionRules.js');
 
 // The analysis frame is a fixed 320x180 gray8 buffer (aspect is deliberately squashed — irrelevant for
 // frame-diff, and fixed dimensions let ffmpeg's stdout be sliced into exact frame-sized chunks).
@@ -53,6 +54,27 @@ test('the waypoints the source comment claims are the ones it produces', () => {
   // "corrected" toward a value nobody measured, so the claim is pinned here rather than trusted.
   assert.equal((md.activeFractionThreshold(50) * 100).toFixed(2), '5.15');
   assert.equal((md.activeFractionThreshold(90) * 100).toFixed(2), '1.19', 'both live cameras run at 90');
+});
+
+// --- #368: the bed-transition threshold is its own number -----------------------------------------------
+// Until #368 the out-of-bed / into-bed tracker classified frames at activeFractionThreshold(sensitivity), so the
+// alert slider moved stored `bed_transitions` rows. It now reads a fixed constant. The pin is in TWO assertions on
+// purpose, because they fail for different reasons and call for different responses:
+//   1. the LITERAL: nobody changes the calibrated number by accident (a rewrite as 0.01, 0.0515 or 0.0119 fails
+//      here and nowhere else: the pixel-boundary tests cannot tell 0.0119 from 0.011899, 342.69 px from 342.72);
+//   2. the PROVENANCE: it is the value the alert curve gives at 90, the sensitivity the rules were calibrated at.
+// ⚠️ If the second one fails because the ALERT curve was changed, edit THAT ASSERTION on purpose and keep the
+// constant: re-coupling the constant to the curve (the easy way to make this go green) is the exact bug #368 fixed.
+test('#368 C5: BED_TRANSITION_ACTIVE_FRACTION is the literal calibrated number, a fraction of a zone', () => {
+  assert.equal(BED_TRANSITION_ACTIVE_FRACTION, 0.011898989898989899);
+  assert.ok(Number.isFinite(BED_TRANSITION_ACTIVE_FRACTION) && BED_TRANSITION_ACTIVE_FRACTION > 0 && BED_TRANSITION_ACTIVE_FRACTION < 1);
+  // It must sit inside the alert curve's own range, or no sensitivity could ever have produced it.
+  assert.ok(BED_TRANSITION_ACTIVE_FRACTION > md.activeFractionThreshold(100) && BED_TRANSITION_ACTIVE_FRACTION < md.activeFractionThreshold(1));
+});
+
+test('#368 C5: provenance: the constant equals what the alert curve gives at sensitivity 90 (if the alert curve changed, edit THIS assertion deliberately; never re-couple the constant to the curve)', () => {
+  assert.ok(Object.is(BED_TRANSITION_ACTIVE_FRACTION, md.activeFractionThreshold(90)),
+    'the transition constant no longer equals the alert curve at 90. If you changed the alert curve, the transitions must NOT move with it: edit this assertion on purpose and leave BED_TRANSITION_ACTIVE_FRACTION alone.');
 });
 
 test('out-of-range and missing sensitivities are clamped, not propagated', () => {

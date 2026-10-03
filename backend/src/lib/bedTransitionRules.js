@@ -3,6 +3,41 @@
 // unit test — which is how the exit rule below stayed unable to see a child climbing out unaided for
 // months without a single test going red. Rules that can be stated as a function belong here.
 
+// --- What counts as "the bed moved" / "the outside moved" (#368) ---
+//
+// The per-frame test the tracker reads: a frame is ACTIVE in a channel when the changed fraction of that
+// channel's pixels is at least this. Every window and rule below (the link windows, the confirm quiet times,
+// the 120 s pauses, OOB_SLOW_OUT_MIN) was measured with the detector classifying frames at THIS number.
+//
+// WHERE 0.011898989898989899 CAME FROM: it is the value `activeFractionThreshold(90)` in motionDetector.js
+// returns (0.002 + 0.098 * 10/99, about 1.19 % of the zone). Before #368 the tracker used whatever the motion
+// ALERT sensitivity gave, so the number was whatever the owner had set the slider to. The saved configuration of
+// all four cameras in the prod and staging snapshots of 2026-10-03/04 is sensitivity 90, and none of the 4295
+// stored `bed_transitions` rows has a peak below 0.012 (the rounding of 1.19 %, stored to 0.001): consistent with
+// every transition having been recorded at 1.19 %. Sensitivity HISTORY is not stored, so "ran at 90 throughout"
+// is an inference from the current config and the stored peaks, not a proof. It reproduces the pre-#368
+// decision bit for bit on those cameras (same double, same `>=`), so nothing this house recorded moves.
+//
+// WHAT IT IS NOT: not derived from a room (frames are not stored, only per-minute samples, so there is nothing
+// to derive from), not validated outside one house, and not the sleep side's MOTION_ACTIVE (0.01) or
+// MOTION_OUT_ACTIVE (0.03), which are separate numbers and untouched. A literal on purpose, not a call to
+// `activeFractionThreshold(90)`: this issue is about removing the coupling between the alert curve and the
+// transition evidence, and a shared function would let a later edit of the alert curve move the transitions
+// again without anyone deciding to. motionDetector.test.js pins the literal AND (in a separate assertion that
+// says so) the equality with the alert curve at 90; if the curve changes, edit that assertion on purpose,
+// never re-couple.
+//
+// WHO IT CHANGES (stated, not guessed): an install NOT at sensitivity 90 ran the old tracker at its own
+// threshold (the default, 50, is 5.15 %). At any sensitivity below 90 this number is LOWER, so those installs
+// will record more transitions, and a small stir of 1-5 % of the zone (a mattress settling) now cancels a
+// pending exit, exactly as it does in the calibrated house (by design: it is bed movement). Above 90 (up to
+// 100 = 0.2 %) it is HIGHER, and transitions can move in either direction (the cancel paths). Whether that is
+// better for those installs' reported sleep is NOT known; nobody has measured one. At the default threshold
+// OOB_SLOW_OUT_MIN (5 %) was inert (an active outside frame was already >= 5.15 %); at this one it is a real
+// filter. A household that quieted a noisy room by lowering the sensitivity loses that lever for transitions
+// (it still works for alerts); the remedy is the zone. KNOWN-ISSUES.md says all of this to the person running it.
+export const BED_TRANSITION_ACTIVE_FRACTION = 0.011898989898989899;
+
 // --- "Out of bed": how long after the bed last moved may an outside burst still be the same body? ---
 //
 // TWO windows, because the two ways a body leaves a bed do not look alike:

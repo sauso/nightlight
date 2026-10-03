@@ -8,7 +8,7 @@ import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
 import { recordMotion, recordMotionOut, excludeClone } from './activityTracker.js';
 import { recordBedTransition, TRANSITION } from './bedTransitions.js';
-import { OOB_LINK_MS, OOB_LINK_SLOW_MS, OOB_SLOW_OUT_MIN, createFrameGapDetector } from './bedTransitionRules.js';
+import { OOB_LINK_MS, OOB_LINK_SLOW_MS, OOB_SLOW_OUT_MIN, BED_TRANSITION_ACTIVE_FRACTION, createFrameGapDetector } from './bedTransitionRules.js';
 import {
   createBedTransitionTracker, OOB_CONFIRM_QUIET_MS, IB_CONFIRM_QUIET_MS, IB_LINK_MS,
 } from './bedTransitionTracker.js';
@@ -432,7 +432,42 @@ export async function startMotionDetector(camera) {
   }
 
   const { mask, zonePixels } = buildZoneMask(camera);
-  const threshold = activeFractionThreshold(camera.detect_sensitivity);
+  // #368: TWO thresholds, because the same number used to answer two different questions.
+  //  - alertThreshold: how much movement is worth a NOTIFICATION. A preference, driven by the sensitivity slider.
+  //    Feeds only the alert run below.
+  //  - transitionThreshold: what the bed-transition tracker reads as "the bed / the outside moved". Calibrated
+  //    evidence behind stored out_of_bed / into_bed rows that sleep analysis treats as authoritative, so it must
+  //    not move when someone retunes how many alerts they get. A fixed constant, see BED_TRANSITION_ACTIVE_FRACTION
+  //    for where the number came from and who it changes. It also applies on activity-only legs (MQTT / ONVIF
+  //    source, motion off), whose stored sensitivity the UI hides and which used to silently govern their evidence.
+  const alertThreshold = activeFractionThreshold(camera.detect_sensitivity);
+  const transitionThreshold = BED_TRANSITION_ACTIVE_FRACTION;
+  // A bed zone that leaves some area outside it (the same test as `outPixels` in launch(): a zone covering the
+  // whole frame has no outside, so no tracker input either).
+  const zoned = mask ? FRAME_BYTES - zonePixels > 0 : false;
+  // #500's return-to-sub quiet gate ("has the room been quiet long enough to throw this detector's state away")
+  // reads `quietBedFraction` for the bed / whole-frame channel. Its quiet time (SUB_QUIET_MS) is DERIVED from the
+  // tracker's own link windows, so it has to count the movement the tracker counts: the transition threshold. But
+  // the alert run is state a relaunch also throws away, so on an ALERTING leg the alert's own definition of active
+  // keeps counting too; the gate takes whichever is MORE sensitive. Consequences, all intended:
+  //  - a zoned alerting camera at sensitivity 90: both thresholds equal, identical to before #368.
+  //  - sensitivity below 90: a bed burst between the two (alert-quiet, tracker-active) now defers the return,
+  //    which it did not before, so a relaunch can no longer lose the exit that burst opened.
+  //  - sensitivity above 90: a bed burst the alert counts but the tracker does not (0.2-1.19 %) still defers, so
+  //    a return tick cannot split an alert-active run (the alert must not change).
+  //  - an UNZONED alerting camera has no tracker (the tracker block needs an outside), so only the alert's
+  //    definition applies: exactly the pre-#368 gate.
+  //  - an activity-only leg has no alert run, so it gates on the transition threshold alone, whatever sensitivity
+  //    is stored on its row.
+  // The outside channel is read by the tracker only, so it uses the transition threshold (a 0.5 % outside burst at
+  // sensitivity 100 no longer defers a return: nothing reads it below 1.19 %).
+  // Not a guarantee that every pending exit survives a return: repeated frame gaps restart the 6 s quiet clock,
+  // which the SUB_QUIET_MS comment already says.
+  const alertDefinesQuiet = !activityOnly;
+  const quietBedFraction = Math.min(
+    alertDefinesQuiet ? alertThreshold : Infinity,
+    zoned || !alertDefinesQuiet ? transitionThreshold : Infinity
+  );
   const confirmMs = Math.max(0, (camera.detect_confirm_s ?? 3) * 1000);
   const cooldownMs = Math.max(1, camera.detect_cooldown_s ?? 60) * 1000;
 
@@ -591,11 +626,14 @@ export async function startMotionDetector(camera) {
         // #500: when the room last moved, in EITHER channel, for the return-to-sub quiet gate. Set here, ahead of
         // the `!activityOnly` branch below: a sleep-tracking-only leg is exactly the one whose bed transitions
         // a relaunch could lose. Monotonic, like the other #369 stamps on the entry.
-        let anyActive = fraction >= threshold;
+        // #368: the bed channel reads `quietBedFraction` (the more sensitive of the alert's and the tracker's
+        // definition of active, see its comment above), not the alert threshold alone.
+        let anyActive = fraction >= quietBedFraction;
         // #493: what the clone ledger needs to find this frame again, or null (no working clock).
         const sample = obsGen === null ? null : { gen: obsGen, token };
         // Feed the raw per-frame movement into the per-minute activity timeline (independent of the
-        // alert threshold/cooldown below), so sleep tracking sees continuous motion, not just alerts.
+        // alert threshold/cooldown below, and of the transition threshold), so sleep tracking sees continuous
+        // motion, not just alerts.
         // Still counted HERE, synchronously, whatever the clock later says: see openObservation above.
         // Filed under the RECEIPT minute (#447), not `now`: `now` is this handler's own Date.now(), which the
         // decisions below keep using exactly as before, but a per-call clock read would let the two channels
@@ -605,7 +643,7 @@ export async function startMotionDetector(camera) {
         // channel so sleep tracking can flag someone in the room vs stirring in the bed.
         if (outPixels > 0) {
           const outFraction = changedOut / outPixels;
-          if (outFraction >= threshold) anyActive = true;
+          if (outFraction >= transitionThreshold) anyActive = true;
           recordMotionOut(camera.id, outFraction, sample, atMs);
           // --- "Out of bed" / "into bed" classification. Runs whether the leg is alerting or
           // activity-only (a distinct, low-rate signal, not raw motion). The candidate state machine
@@ -614,8 +652,14 @@ export async function startMotionDetector(camera) {
           // this used to produce inline — the extraction changed WHERE this logic lives, not WHAT it
           // does (see planning/reviews/simultaneous-activity-gap-plan-2026-09-18.md for why a live
           // behavior change wasn't safe to bundle with it).
-          const cribActive = fraction >= threshold;
-          const outActive = outFraction >= threshold;
+          //
+          // #368: BOTH channels are classified at the FIXED transition threshold, never at the alert sensitivity.
+          // Until #368 these two lines read the alert threshold, so changing how many notifications someone
+          // wanted changed which exits and entries were stored (and activity-only legs ran at a sensitivity the UI
+          // hides). The alert below keeps its own threshold; the `fraction` / `outFraction` passed to the tracker
+          // are the raw measurements and are unaffected.
+          const cribActive = fraction >= transitionThreshold;
+          const outActive = outFraction >= transitionThreshold;
           const { events, believedOccupied: nextBelievedOccupied } = bedTransitionTracker.pushFrame(
             { cribActive, outActive, fraction, outFraction },
             now,
@@ -739,7 +783,8 @@ export async function startMotionDetector(camera) {
             activeSince = 0;
             logger.info(`[detect] "${camera.name}" motion run restarted — ${gapText(gap.gapMs)}`);
           }
-          if (fraction >= threshold) {
+          // #368: the ALERT's own threshold (the sensitivity slider); the bed-transition tracker above does not read it.
+          if (fraction >= alertThreshold) {
             if (!activeSince) activeSince = now;
             lastActive = now;
             if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs && inActiveWindow(camera)) {

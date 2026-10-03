@@ -127,7 +127,9 @@ const subAnswers = (id) => answers.get(SUB(id));
 // One always-open child so an activity-only (sleep-tracking-only) leg is wanted whatever the date is.
 makeChild(db, { id: 'kid-ret', name: 'Return Child', start: '00:00', end: '23:59' });
 const ZONE = JSON.stringify([{ x: 0, y: 0, w: 0.5, h: 1 }]); // the bed is the LEFT half
-function camera(id, { sub = true, activityOnly = false, zone = false } = {}) {
+// `sens` (#368): the stored motion sensitivity, default 50. It only sets the ALERT threshold now; the quiet gate also
+// reads the fixed transition threshold (see the #368 tests below).
+function camera(id, { sub = true, activityOnly = false, zone = false, sens = 50 } = {}) {
   makeCamera(db, { id, name: `Ret ${id}`, path: MAIN(id) });
   return {
     id,
@@ -140,7 +142,7 @@ function camera(id, { sub = true, activityOnly = false, zone = false } = {}) {
     detect_motion_enabled: 1,
     // 'mqtt' = the camera alerts elsewhere, so this leg is activity-only (the sleep sampler): no alert bookkeeping.
     detect_source: activityOnly ? 'mqtt' : 'framediff',
-    detect_sensitivity: 50,
+    detect_sensitivity: sens,
     detect_confirm_s: 3,
     detect_cooldown_s: 60,
     detect_zone: zone ? ZONE : null,
@@ -165,12 +167,19 @@ async function startOnMain(cam) {
 // frame differ from the one before it.
 const FW = 320; const FH = 180; const FRAME_BYTES = FW * FH;
 const BASE = 60; const LIT = 200;
-function paint({ bed = false, out = false, all = false }) {
+// #368: `bedPx` / `outPx` / `allPx` light an EXACT number of pixels (row by row, in the left half / the right half / the
+// whole frame), for the cases that live between the alert threshold and the fixed transition threshold. Against the zone
+// of 28 800 px (the left half): 144 px = 0.5 %, 864 px = 3 %; the unzoned frame is 57 600 px: 1 728 px = 3 %.
+function paint({ bed = false, out = false, all = false, bedPx = 0, outPx = 0, allPx = 0 }) {
   const f = Buffer.alloc(FRAME_BYTES, BASE);
   const fill = (x0, x1, y0, y1) => { for (let y = y0; y < y1; y++) f.fill(LIT, y * FW + x0, y * FW + x1); };
+  const lit = (x0, w, n) => { for (let i = 0; i < n; i++) f[Math.floor(i / w) * FW + x0 + (i % w)] = LIT; };
   if (all) fill(0, FW, 0, FH); // the whole frame: what an UNZONED camera sees as motion
   if (bed) fill(0, 160, 0, 60);
   if (out) fill(160, 320, 0, 40);
+  lit(0, 160, bedPx);
+  lit(160, 160, outPx);
+  lit(0, FW, allPx);
   return f;
 }
 // Emit moving frames for `ms` of real time (one every 25 ms), then return the time of the last one.
@@ -559,6 +568,77 @@ describe('#500: returning from main to the sub', { concurrency: false }, () => {
     assert.deepEqual(onMain.signals, [], 'it switched during whole-frame motion on an unzoned camera');
     await waitFor(() => onMain.signals.includes('SIGTERM'), 'the switch once the room went quiet', 4_000);
     assert.ok(realNow() - lastFrame >= 450, 'it did not wait for the quiet gate');
+  });
+
+  // --- #368: WHICH movement the quiet gate counts -----------------------------------------------------------------
+  // The gate's quiet time (SUB_QUIET_MS) is derived from the bed-transition tracker's own windows, so it has to count
+  // the movement the tracker counts: the FIXED transition threshold (1.19 % of the zone, bedTransitionRules.js), not the
+  // alert sensitivity. On a camera that ALERTS it also keeps counting what the alert counts, so a relaunch can never
+  // split an alert-active run. Each case below uses frames BETWEEN the two thresholds, which the old code (alert
+  // threshold only) answered the other way. The stored sensitivity: 50 = alert threshold 5.15 %, 100 = 0.2 %.
+  //
+  // A DEFERRING case emits frames for 900 ms and checks nothing switched during them (the gate is 500 ms), then that the
+  // switch followed the quiet. A NON-deferring case keeps emitting frames and checks the switch happened WHILE they
+  // were still arriving (the gate counts quiet from the process start when nothing active has been seen, R2e), which a
+  // deferring gate could never do.
+  async function moveUntilSwitch(proc, region, capMs) {
+    const end = realNow() + capMs;
+    let k = 0;
+    while (realNow() < end && proc.signals.length === 0) {
+      proc.stdout.emit('data', paint(k % 2 === 0 ? region : {}));
+      k += 1;
+      await sleep(25);
+    }
+    return proc.signals.includes('SIGTERM');
+  }
+  const gateDefers = async (id, camOpts, region, what) => {
+    fast({ quietMs: 500, minGapMs: 0 });
+    const cam = camera(id, camOpts);
+    const onMain = await startOnMain(cam);
+    subAnswers(cam.id).dflt = true;
+    const lastFrame = await moveFor(onMain, 900, region);
+    assert.deepEqual(onMain.signals, [], `it switched during ${what}: the quiet gate did not count that movement`);
+    await waitFor(() => onMain.signals.includes('SIGTERM'), 'the switch once the room went quiet', 4_000);
+    assert.ok(realNow() - lastFrame >= 450, `it switched only ${Math.round(realNow() - lastFrame)} ms after the last frame (gate: 500 ms)`);
+  };
+  const gateIgnores = async (id, camOpts, region, what) => {
+    fast({ quietMs: 500, minGapMs: 0 });
+    const cam = camera(id, camOpts);
+    const onMain = await startOnMain(cam);
+    subAnswers(cam.id).dflt = true;
+    assert.ok(await moveUntilSwitch(onMain, region, 2_500), `it never switched while ${what} kept arriving: the gate counted it as activity`);
+  };
+
+  test('#368 C6: activity-only zoned leg at sensitivity 50: a 3 % BED burst (under the alert 5.15 %, over the fixed 1.19 %) defers the switch', async () => {
+    await gateDefers('c6a', { activityOnly: true, zone: true, sens: 50 }, { bedPx: 864 }, 'a 3 % bed burst');
+  });
+
+  test('#368 C6: activity-only zoned leg at sensitivity 50: a 3 % OUTSIDE burst defers the switch', async () => {
+    await gateDefers('c6b', { activityOnly: true, zone: true, sens: 50 }, { outPx: 864 }, 'a 3 % outside burst');
+  });
+
+  test('#368 C6: an ALERTING zoned leg at sensitivity 100: a 0.5 % BED burst (under the fixed 1.19 %, over the alert 0.2 %) still defers the switch, so a relaunch cannot split an alert run', async () => {
+    await gateDefers('c6c', { zone: true, sens: 100 }, { bedPx: 144 }, 'a 0.5 % bed burst the alert counts as active');
+  });
+
+  test('#368 C6: an ALERTING zoned leg at sensitivity 100: a 0.5 % OUTSIDE burst does NOT defer it (only the tracker reads the outside, and not below 1.19 %)', async () => {
+    await gateIgnores('c6d', { zone: true, sens: 100 }, { outPx: 144 }, 'a 0.5 % outside burst');
+  });
+
+  test('#368 C6: an activity-only zoned leg at sensitivity 100: a 0.5 % bed burst does NOT defer it (the stored sensitivity does not govern an activity-only leg)', async () => {
+    await gateIgnores('c6e', { activityOnly: true, zone: true, sens: 100 }, { bedPx: 144 }, 'a 0.5 % bed burst');
+  });
+
+  test('#368 C6: an UNZONED ALERTING leg keeps its old gate (the alert threshold): at sensitivity 50 a 3 % whole-frame burst does NOT defer, at 100 a 0.5 % one does', async () => {
+    await gateIgnores('c6f', { sens: 50 }, { allPx: 1728 }, 'a 3 % whole-frame burst (under the alert 5.15 %)');
+    await motion.stopAllMotionDetectors();
+    await gateDefers('c6g', { sens: 100 }, { allPx: 288 }, 'a 0.5 % whole-frame burst (over the alert 0.2 %)');
+  });
+
+  test('#368 C6: an UNZONED ACTIVITY-ONLY leg gates on the fixed threshold: a 3 % whole-frame burst defers it at sensitivity 50, a 0.5 % one does not at sensitivity 100', async () => {
+    await gateDefers('c6h', { activityOnly: true, sens: 50 }, { allPx: 1728 }, 'a 3 % whole-frame burst');
+    await motion.stopAllMotionDetectors();
+    await gateIgnores('c6i', { activityOnly: true, sens: 100 }, { allPx: 288 }, 'a 0.5 % whole-frame burst');
   });
 
   test('#500 R2e: with no active frame at all, quiet is counted from the process start, not from "forever"', async () => {

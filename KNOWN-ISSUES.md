@@ -1026,6 +1026,52 @@ its Low stream is not coming back: check the camera's Low-quality stream path in
 
 ---
 
+## Bed exits and entries use one fixed threshold, measured in one house (the motion sensitivity slider no longer moves them)
+
+**What you see:** nothing in the log or the screen. The effect is in the sleep numbers: after upgrading to
+the version that fixed #368, the number of recorded "out of bed" and "into bed" events on a camera can
+change, if its **Motion sensitivity** was not 90.
+
+**Why:** the frame-by-frame motion leg decides "did the bed move" and "did the area outside it move" by
+comparing the changed fraction of the picture with a threshold. Until #368 that was the same number the
+motion **alert** used, so turning the sensitivity slider (to get more or fewer notifications) also changed
+which exits and entries were stored, and a camera that only feeds sleep tracking (MQTT or ONVIF motion, or
+motion detection switched off) used a sensitivity whose slider the screen does not even show. Now the alert
+keeps the slider and exits and entries use a **fixed 1.19% of the zone** (the value the slider gives at 90).
+Sleep analysis reads those rows as the authoritative bedtime and wake evidence, so they must not move when
+someone retunes notifications.
+
+**What it changes, stated rather than guessed:**
+- **1.19% is calibrated in one house.** Every rule the exits and entries follow (the link windows, the
+  6 s confirmations, the 2 minute pause) was measured with the threshold at that value, on two cameras. The
+  saved settings of all the cameras in that house are sensitivity 90, and none of its 4295 stored
+  rows has a peak below it, which is consistent with, but does not prove, that they always were. It is not
+  derived from your room, and nothing checks it against your camera.
+- **Below 90 (the default is 50, 5.15%) the threshold goes down.** More exits and entries will be recorded
+  (at least the ones that were too small to reach 5.15%), and a movement of about 1-5% of the zone, such
+  as a child settling, now cancels a pending exit, as it does in the calibrated house. **Whether that
+  makes your reported sleep better or worse is not known:** nobody has measured an install at the default.
+  Even in the calibrated house most of the transitions a person reviewed were judged wrong (sleep analysis
+  reduces their effect by grouping them into episodes and checking occupancy), so a different threshold is
+  not a step away from a known-good one.
+- **Above 90 (up to 100, 0.2%) the threshold goes up**, and transitions can change in either direction
+  (for example, a false exit that is recorded holds off a real one for the 2 minute pause).
+- **Stored history is not rewritten**, and neither are sleep nights already computed.
+- **A noisy room can no longer be quieted for sleep tracking by lowering the sensitivity.** A fan, a
+  curtain or infrared noise in the picture used to be tamed that way. Now only the detection zone helps
+  (**Cameras → edit → detection zone**), and 1.19% of a small outside area is only a handful of pixels, so
+  a zone that leaves little outside the bed gives little protection.
+- **The relaunch quiet gate follows both numbers.** The wait before a detector returns to the Low stream
+  (previous section) counts movement as the exit rules do, and, on a camera that alerts, also as the alert
+  does.
+- **The slider's other effects are unchanged:** an alert fires exactly as before at every sensitivity.
+
+**What to do:** if exits and entries look wrong on a camera, check the detection zone first (draw it over a
+real picture and look at what it covers). There is no setting for this threshold. Making it per-room, derived
+from the room or exposed, needs real frames to evaluate and is a separate piece of work.
+
+---
+
 ## Confirmed bugs (fix pending)
 
 ### Compatibility (HLS) mode doesn't play when the app is served over plain HTTP
