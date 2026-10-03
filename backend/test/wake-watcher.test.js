@@ -727,6 +727,44 @@ describe('★ #448 — the watcher counts MINUTES, not callbacks', () => {
       assert.equal(stateOf().asleep, true, 'fifteen consecutive minutes after the step');
     });
 
+    // Fix round 1 (#448 review): a SMALL backward step is a backward step too. C10 steps a whole hour, which any
+    // threshold between 0 and 60 minutes passes; these step exactly 1, 2 and 3 minutes (the sizes a `< lastAt - N`
+    // mutant tolerates), so a rule that only notices "big" steps back fails here. activityTracker itself absorbs
+    // steps of up to STEP_CLAMP_MS (2 min) before they reach the watcher, but the watcher must not depend on that:
+    // it is a different module's number and the ordering guard is written against the labels alone.
+    for (const back of [1, 2, 3]) {
+      test(`C10c: a label ${back} min OLDER than the last one still ends the run and re-baselines`, () => {
+        settle();
+        actives(3);
+        const lastIdx = clock - 1; // the label of the 3rd active minute
+        assert.equal(stateOf().run.activeCount, 3, 'precondition');
+        clock = lastIdx - back;
+        const stepIdx = clock;
+        const calls = [];
+        for (let i = 0; i < WAKE_ACTIVE_MIN; i++) {
+          calls.push(moving());
+          if (i === 0) {
+            assert.equal(stateOf().run.activeCount, 1, `a label ${back} min back inherited the old run's count`);
+            assert.equal(stateOf().run.startMs, endMs(stepIdx), 'the new run starts at the first label after the step');
+          }
+        }
+        assert.deepEqual(calls.map((r) => r?.captured === true), [false, false, false, false, true], 'the 5th call, not an earlier one');
+        assert.equal(calls[4].startMs, endMs(stepIdx), 'startMs is the first of the five re-lived minutes');
+      });
+
+      test(`C10d: a label ${back} min OLDER than the last one resets the settling progress`, () => {
+        for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) quiet();
+        clock = clock - 1 - back; // `back` minutes before the last accepted label
+        quiet();
+        assert.equal(stateOf().quietRun, 1, `the ${back}-minute step back carried the settling progress across it`);
+        assert.equal(stateOf().asleep, false);
+        for (let i = 0; i < ONSET_QUIET_MIN - 2; i++) quiet();
+        assert.equal(stateOf().asleep, false, 'fourteen consecutive minutes since the step: one short');
+        quiet();
+        assert.equal(stateOf().asleep, true, 'fifteen consecutive minutes since the step');
+      });
+    }
+
     test('C12: reset() forgets lastAt: a label re-delivered after the watcher left the window is a NEW minute', () => {
       // Not "the first sample after returning counts 1": that passes whether or not lastAt was cleared
       // (plan review verified). Re-delivering the label from just BEFORE the reset is what tells them apart:
@@ -817,6 +855,113 @@ describe('★ #448 — the watcher counts MINUTES, not callbacks', () => {
         assert.equal(stateOf().run, newRun);
         assert.equal(newRun.holding, true, 'the old capture released the new run\'s hold');
         assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE]);
+      } finally {
+        wakeClips(true);
+      }
+    });
+  });
+
+  // Fix round 1 (#448 review): the WORDING of "run ended" is the only trace an operator has of why a run was
+  // dropped, and endRun only logs when the run was HOLDING a ring hold, so these need a REAL segmenter (as the
+  // #446 tests arm one: the entry exists only synchronously, so no await before the last assertion). A mutant
+  // that changes only a log argument is invisible to every assertion on state; these pin the three reasons and
+  // the "a captured run says nothing" rule.
+  describe('what the log says when a held run ends', () => {
+    const runEndedLines = () => logger.getRecent().filter((l) => l.includes('run ended'));
+    const nothingRecordedLines = () => logger.getRecent().filter((l) => l.includes('nothing recorded'));
+    function armedWithHeldRun(activeMin) {
+      wakeClips(true);
+      armSegmenterNow();
+      settle();
+      logger.clear();
+      actives(activeMin);
+      assert.equal(stateOf().run.holding, true, 'precondition: the run holds the ring');
+    }
+
+    test('C17a: a run ended by a hole says the READINGS were N min apart, with the right N', () => {
+      try {
+        armedWithHeldRun(2);
+        skip(10);
+        moving();
+        const lines = runEndedLines();
+        assert.equal(lines.length, 1, `expected exactly one "run ended" line, got ${JSON.stringify(lines)}`);
+        assert.match(lines[0], /run ended \(readings 11 min apart\)/);
+      } finally {
+        wakeClips(true);
+      }
+    });
+
+    test('C17b: ONE missing minute is still a hole, and is named as one (3 quiet reported, 1 missing, active)', () => {
+      // 2 active, 3 quiet payloads (3 non-active minutes: still bridged), 1 missing minute, then an active one:
+      // 4 non-active minutes between the actives, so the run ends, and exactly one of them was a missing minute.
+      // A `missingMin > 1` test for "was there a hole" would call this one a plain stir.
+      try {
+        armedWithHeldRun(2);
+        quiet();
+        quiet();
+        quiet();
+        assert.equal(stateOf().run?.holding, true, 'precondition: 3 reported quiet minutes still bridge');
+        skip(1);
+        moving();
+        const lines = runEndedLines();
+        assert.equal(lines.length, 1, `expected exactly one "run ended" line, got ${JSON.stringify(lines)}`);
+        assert.match(lines[0], /run ended \(readings 2 min apart\)/);
+      } finally {
+        wakeClips(true);
+      }
+    });
+
+    test('C17c: a run ended by REPORTED quiet minutes is a stir, not a hole', () => {
+      try {
+        armedWithHeldRun(2);
+        for (let i = 0; i < WAKE_GAP_MIN + 1; i++) quiet();
+        const lines = runEndedLines();
+        assert.equal(lines.length, 1, `expected exactly one "run ended" line, got ${JSON.stringify(lines)}`);
+        assert.match(lines[0], /run ended \(stir, under the wake threshold\)/);
+        assert.doesNotMatch(lines[0], /readings/);
+      } finally {
+        wakeClips(true);
+      }
+    });
+
+    test('C17d: a run ended by an older label says the clock went back', () => {
+      try {
+        armedWithHeldRun(2);
+        clock -= 30;
+        moving();
+        const lines = runEndedLines();
+        assert.equal(lines.length, 1, `expected exactly one "run ended" line, got ${JSON.stringify(lines)}`);
+        assert.match(lines[0], /run ended \(the clock went back\)/);
+      } finally {
+        wakeClips(true);
+      }
+    });
+
+    test('C17e: a run that ALREADY CAPTURED logs no "nothing recorded" line when a hole ends it', () => {
+      // The capture is still pending (no await), so the run is still holding: endRun releases it, and must not
+      // claim "nothing recorded" about a wake that was recorded.
+      try {
+        armedWithHeldRun(WAKE_ACTIVE_MIN);
+        assert.equal(stateOf().run.captured, true, 'precondition: the run captured');
+        skip(10);
+        moving();
+        assert.equal(stateOf().run.activeCount, 1, 'the hole ended the captured run');
+        assert.deepEqual(nothingRecordedLines(), []);
+        assert.deepEqual(runEndedLines(), []);
+      } finally {
+        wakeClips(true);
+      }
+    });
+
+    test('C17f: a run that ALREADY CAPTURED logs no "nothing recorded" line when an older label ends it', () => {
+      try {
+        armedWithHeldRun(WAKE_ACTIVE_MIN);
+        assert.equal(stateOf().run.captured, true, 'precondition: the run captured');
+        clock -= 30;
+        moving();
+        assert.equal(stateOf().run.activeCount, 1, 'the older label ended the captured run');
+        assert.deepEqual(nothingRecordedLines(), []);
+        assert.deepEqual(runEndedLines(), []);
       } finally {
         wakeClips(true);
       }

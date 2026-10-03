@@ -133,7 +133,9 @@ export function handleMinute({ cameraId, bucketStart, motionPeak, soundPeak }) {
   //   * The SAME label again: counted once and ignored. DEFENSIVE ONLY: 660 clock-step scenarios through the
   //     real tracker (plan review, #448) never produced two equal labels back to back, a re-lived minute
   //     follows a BACKWARD label ("19:05 19:02 19:03"), so this is a cheap guard for a path nobody has seen,
-  //     which keeps "deduplicate repeated buckets" (the issue's wording) true rather than assumed.
+  //     which keeps "deduplicate repeated buckets" (the issue's wording) true rather than assumed. Where the
+  //     nightly job OR-merges duplicate rows of one minute, this branch keeps the FIRST payload and drops the
+  //     rest (unreachable from the real tracker, so the difference cannot show).
   //   * An OLDER label: time went backwards. That one IS reachable. Whether the minutes either side of the
   //     step are continuous is unknowable and label arithmetic across it means nothing, so the run is ended,
   //     the settling progress is dropped, and this sample becomes the new baseline and is processed normally.
@@ -144,6 +146,12 @@ export function handleMinute({ cameraId, bucketStart, motionPeak, soundPeak }) {
     if (at === st.lastAt) return null;
     if (at < st.lastAt) {
       // Same as the bridge case below: a run that already captured is not "nothing recorded", so it logs nothing.
+      // ⚠️ KNOWN LIMIT, not fixed here (#471): endRun releases the WAKE hold of a run whose capture may still be
+      // extracting its clip, and an ACTIVE label that jumps far forward replaces the captured run the same way
+      // (the new run's hold then takes the single WAKE slot). Both need a clock step of more than about 2 minutes
+      // (activityTracker absorbs smaller ones) within about a minute of the 5th active minute. Protecting a clip
+      // that is still being cut needs a per-capture lease, which is #471's job. This change adds one more trigger
+      // for that release; a hole is far past an extraction (wake clips are at most 120 s), a clock step is not.
       endRun(cameraId, st, st.run?.captured ? null : 'the clock went back');
       st.quietRun = 0;
     }
@@ -166,9 +174,12 @@ export function handleMinute({ cameraId, bucketStart, motionPeak, soundPeak }) {
     // requiring a fully observed window regressed flaky cameras to `no_sleep` (#442). The live gate's only job
     // is to keep bedtime settling OUT of the recorder, so the safe error here is arming LATE (a missed clip,
     // never an alert). The price, stated: a camera that drops a minute more often than about every 15 minutes
-    // never arms. Measured on two cameras in one house over 30 days (plan, #448): about 10 holes of 4+ minutes
-    // per camera per month, so a night is rarely delayed; unknown on any other install. KNOWN-ISSUES.md says
-    // the same. If that is too strict, the nightly 8-of-15 rule is one function away; no new number needed.
+    // never arms. ANY hole restarts the count, even one missing minute (most holes are single minutes): on the
+    // saved 30-day snapshots of two cameras in one house that is roughly 20-25 holes per camera per month on one
+    // database and 45-50 on the other. What shows a night is rarely delayed is the old-vs-new replay of those 30
+    // days (#448 review): arming differed on exactly one night in four camera-months, 8 minutes later. Unknown on
+    // any other install. KNOWN-ISSUES.md says the same. If that is too strict, the nightly 8-of-15 rule is one
+    // function away; no new number needed.
     if (missingMin > 0) st.quietRun = 0;
     st.quietRun = active ? 0 : st.quietRun + 1;
     if (st.quietRun >= ONSET_QUIET_MIN) {
