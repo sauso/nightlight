@@ -373,9 +373,12 @@ describe('C6: path readiness (#451)', () => {
 
 // ---------------------------------------------------------------------------------------------------------
 describe('C7: the ladder is by attempt count, and the probe never vetoes it', () => {
-  // Per action, the exact sequence of collaborator calls: path, probe, path again, event, [request], kill.
-  const L1 = ['status', 'probe:video', 'status', 'event', 'kill:motion'];
-  const L2 = ['status', 'probe:video', 'status', 'event', 'post', 'kill:motion'];
+  // Per action, the exact sequence of collaborator calls: path, probe, path again, [request], kill, event.
+  // The event is LAST since #578: it records what the lever achieved, so it can only be written once the lever
+  // has answered (before, it came first and said "restarted" for a kill the lever had refused). What pins E7's
+  // "commit before the lever" now is C12b and C21a (the attempt counts although the lever threw or refused).
+  const L1 = ['status', 'probe:video', 'status', 'kill:motion', 'event'];
+  const L2 = ['status', 'probe:video', 'status', 'post', 'kill:motion', 'event'];
   for (const probe of [true, 'video-missing', null]) {
     test(`C7: probe=${JSON.stringify(probe)}: attempt 1 restarts the detector only; attempts 2 and 3 also request the publisher`, async () => {
       const c = cam(`c7-${probe}`);
@@ -538,7 +541,9 @@ describe('C9: the episode survives the gaps, and escalates on a crash loop', () 
     // 75 + 180 = 255 is AT the limit; the first tick past it is 270.
     assert.deepEqual(h.postTimes(), [270]);
     assert.deepEqual(h.killTimes(), [75]);
-    assert.match(h.events[1].detail, /no data through 1 restart\(s\)/);
+    // `attempt(s)`, not `restart(s)` (#578): the count includes a refused kill, so it is not a count of restarts.
+    assert.match(h.events[1].detail, /no data through 1 attempt\(s\)/);
+    assert.doesNotMatch(h.events[1].detail, /restart\(s\)/);
   });
 
   test('C9d: an action resets the generation count: after an escalation, ONE more replacement is not a crash loop', async () => {
@@ -629,15 +634,17 @@ describe('C9: the episode survives the gaps, and escalates on a crash loop', () 
       const threw = logged('[guard:detector-watchdog');
       const from = h.calls.length;
       await h.tickAt(270); // 195 s after the action: the first tick past EPISODE_STALL
-      // E3 (status), the probe, the E5 re-read (status), then the event and the request. No kill:motion.
-      assert.deepEqual(h.calls.slice(from), ['status', 'probe:video', 'status', 'event', 'post'],
-        `the escalation did not go status -> probe -> status -> event -> post: ${h.calls.slice(from).join(', ')}`);
+      // E3 (status), the probe, the E5 re-read (status), then the request and the event. No kill:motion. The
+      // request comes BEFORE the event since #578 (the event is written last, after whatever lever ran; here
+      // none did, so the order is the request's own position, ahead of that).
+      assert.deepEqual(h.calls.slice(from), ['status', 'probe:video', 'status', 'post', 'event'],
+        `the escalation did not go status -> probe -> status -> post -> event: ${h.calls.slice(from).join(', ')}`);
       assert.deepEqual(h.posted.map((p) => [p.at, p.kind]), [[270, 'sub']]);
       assert.deepEqual(h.killTimes(), [75], 'a crash-loop escalation killed a detector');
       // A kill aimed at a null reading would throw on its missing spawn token, inside the runner's catch.
       assert.equal(logged('[guard:detector-watchdog'), threw, 'the escalation tick threw');
       assert.match(h.events.at(-1).detail,
-        /^motion detector getting no frames \(no data through 1 restart\(s\) and the relaunches since\) - sub-stream \(Low\) restart requested by the detector watchdog$/);
+        /^motion detector getting no frames \(no data through 1 attempt\(s\) and the relaunches since\) - sub-stream \(Low\) restart requested by the detector watchdog$/);
       const ep = h.wd.episodeOf(c.id, 'motion');
       assert.deepEqual([ep.attempts, ep.lastActionMono, ep.gensWithoutData], [2, h.ms(270), 0], 'the escalation was not committed as attempt 2');
     });
@@ -826,7 +833,11 @@ describe('C11/C12: the recheck after the probe, and commit-before-mutate', () =>
     assert.equal(h.wd.episodeOf(c.id, 'motion').attempts, 1);
   });
 
-  test('C12b: a lever that THROWS: event and diagnosis line once, the attempt counted, no retry inside the floor', async () => {
+  test('C12b: a lever that THROWS: no row (nothing was restarted), one INFO line, the throw still reaches the guard, the attempt counted, no retry inside the floor', async () => {
+    // E7 (the attempt is committed BEFORE the lever) is pinned here: with the commit moved after the lever, or
+    // rolled back on a throw, the throwing lever would be called again inside the floor. Since #578 the row is
+    // written AFTER the lever and says only what acted, so a lever that threw writes none (it used to write
+    // "detector restarted" first).
     const c = cam('c12b');
     const h = detectorHarness([c]);
     h.onKill = () => { throw new Error('lever exploded (planted)'); };
@@ -834,12 +845,27 @@ describe('C11/C12: the recheck after the probe, and commit-before-mutate', () =>
     guards.resetGuardRateLimit();
     await h.ticks(15, 120);
     assert.deepEqual(h.killTimes(), [75], 'the throwing lever was retried inside the backoff floor');
-    assert.equal(h.events.length, 1);
+    assert.deepEqual(h.events, [], 'a lever that threw was recorded as a restart');
     assert.equal(logged('[detector-watchdog] "Cam c12b"'), 1);
+    const first = logger.getRecent().filter((l) => l.includes('[detector-watchdog] "Cam c12b"'));
+    assert.ok(first[0].includes('[INFO]') && first[0].includes('lever threw'), `not an INFO "lever threw" line: ${first[0]}`);
     assert.equal(logged('[guard:detector-watchdog:Cam c12b:motion]'), 1, 'the throw was not reported under the leg\'s own guard label');
     assert.equal(h.wd.episodeOf(c.id, 'motion').attempts, 1);
+
+    // Attempt 2 (t=135): the request is posted and the lever throws again. The row is worded for the request
+    // ONLY, the throw still reaches the guard (a second report, once its rate limit is cleared), and the attempt
+    // is counted.
+    guards.resetGuardRateLimit();
     await h.tickAt(135);
     assert.deepEqual(h.killTimes(), [75, 135]);
+    assert.deepEqual(h.postTimes(), [135], 'a lever that threw swallowed the publisher request');
+    assert.equal(h.events.length, 1);
+    assert.equal(h.events[0].detail,
+      'motion detector getting no frames (no data for 135s) - sub-stream (Low) restart requested by the detector watchdog');
+    const second = logger.getRecent().filter((l) => l.includes('[detector-watchdog] "Cam c12b"')).at(-1);
+    assert.ok(second.includes('[WARN]') && second.endsWith('attempt 2; lever: sub publisher; detector kill threw'), second);
+    assert.equal(logged('[guard:detector-watchdog:Cam c12b:motion]'), 2, 'the second throw was swallowed instead of reaching the guard');
+    assert.equal(h.wd.episodeOf(c.id, 'motion').attempts, 2);
   });
 
   test('C12c/C17: the diagnosis line carries path, path status, probe, input-tap age (INCONCLUSIVE when absent), attempt, lever', async () => {
@@ -855,6 +881,111 @@ describe('C11/C12: the recheck after the probe, and commit-before-mutate', () =>
     assert.match(lines[0], /\[WARN\] \[detector-watchdog\] "Cam c12c" motion on cam_c12c-sub: no data for 75s; path ready, 2 reader\(s\), tracks H264\+Opus; probe: audio but NO video packets; input tap: no record \(inconclusive\); attempt 1; lever: detector$/);
     assert.match(lines[1], /no data for 135s; .*input tap: last record 5s ago; attempt 2; lever: detector \+ sub publisher$/);
   });
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// #578: the history says what HAPPENED. The lever (killStalledDetector) returns false when it refuses: no entry,
+// a kill already in flight, a detector `returning` from main to the sub stream (#500), a replaced process, data
+// that arrived meanwhile, a process too young, or nothing to signal. The watchdog used to write the camera_events
+// RESTART row and the WARN line BEFORE calling the lever and to ignore its answer, so every one of those wrote
+// "detector restarted" for a restart that never happened. The row and the line now follow the lever and name only
+// what acted. The attempt is still COMMITTED first (E7): a refused kill counts, which is documented, not hidden.
+// The detector-side half (the REAL lever refusing a `returning` entry) is in motion-return-to-sub.test.js.
+describe('C21 (#578): a kill the lever refused is not recorded as a restart', () => {
+  // Every line the watchdog wrote about this camera's legs (the diagnosis lines; the guard's own lines differ).
+  const linesOf = (c) => logger.getRecent().filter((l) => l.includes(`[detector-watchdog] "${c.name}"`));
+  const motionHarness = (id, onKill) => {
+    const c = cam(id);
+    const h = detectorHarness([c]);
+    h.onKill = onKill;
+    h.run('motion', c.id, { path: `${c.mediamtx_path}-sub`, spawned: -600, data: 0 });
+    return { c, h };
+  };
+
+  test('C21a: motion, lever REFUSES: no row, exactly one INFO line saying so, no WARN, the attempt still counted (E7)', async () => {
+    const { c, h } = motionHarness('c21a', () => false);
+    await h.ticks(15, 120);
+    assert.deepEqual(h.killTimes(), [75], 'the refused kill was retried inside the backoff floor (or never tried)');
+    assert.deepEqual(h.events, [], 'a refused kill was recorded in Camera history as a restart');
+    assert.deepEqual(h.postTimes(), [], 'the first action asked for a publisher restart');
+    const lines = linesOf(c);
+    assert.equal(lines.length, 1, `expected one diagnosis line, got ${lines.length}`);
+    assert.ok(lines[0].includes('[INFO]') && lines[0].includes('lever refused'), `not an INFO "lever refused" line: ${lines[0]}`);
+    assert.equal(lines.filter((l) => l.includes('[WARN]')).length, 0, 'a refused kill logged a WARN');
+    assert.match(lines[0], /no data for 75s; path ready, 2 reader\(s\), tracks H264\+Opus; probe: video packets arriving \(packets, not frames\); input tap: no record \(inconclusive\); attempt 1; lever refused: /,
+      'the INFO line lost the diagnosis the WARN carries');
+    // E7: the attempt is counted although nothing was killed, so the backoff applies (the 60 s floor after t=75).
+    assert.equal(h.wd.episodeOf(c.id, 'motion').attempts, 1);
+    // ... and it expires: at t=135 the floor has elapsed and the lever is tried again.
+    await h.tickAt(135);
+    assert.deepEqual(h.killTimes(), [75, 135]);
+  });
+
+  test('C21b: CONTROL, motion, lever returns true: one row, one WARN naming the detector, no "refused" anywhere', async () => {
+    const { c, h } = motionHarness('c21b', () => true);
+    await h.ticks(15, 120);
+    assert.deepEqual(h.killTimes(), [75]);
+    assert.equal(h.events.length, 1);
+    assert.match(h.events[0].detail, /^motion detector getting no frames \(no data for 75s\) - motion detector restarted by the detector watchdog$/);
+    const lines = linesOf(c);
+    assert.equal(lines.length, 1);
+    assert.ok(lines[0].includes('[WARN]') && lines[0].endsWith('attempt 1; lever: detector'), lines[0]);
+    assert.ok(!lines[0].includes('refused') && !lines[0].includes('threw'), lines[0]);
+    assert.equal(h.wd.episodeOf(c.id, 'motion').attempts, 1);
+  });
+
+  test('C21c: SOUND leg, lever REFUSES: no row, exactly one INFO line, the attempt counted', async () => {
+    const c = cam('c21c', { sound: 1 });
+    const h = detectorHarness([c]);
+    h.wanted = () => false; // this camera runs no motion leg
+    h.onKill = (leg) => leg !== 'sound';
+    h.run('sound', c.id, { path: c.mediamtx_path, spawned: -600, data: 0 });
+    await h.ticks(15, 120);
+    assert.deepEqual(h.killTimes('sound'), [75], 'the refused sound kill was retried inside the floor (or never tried)');
+    assert.deepEqual(h.events, [], 'a refused SOUND kill was recorded in Camera history as a restart');
+    const lines = linesOf(c);
+    assert.equal(lines.length, 1);
+    assert.ok(lines[0].includes('[INFO]') && lines[0].includes('lever refused'), lines[0]);
+    assert.match(lines[0], /sound on cam_c21c: no data for 75s; .*probe: audio flowing; .*attempt 1; lever refused: /);
+    assert.equal(h.wd.episodeOf(c.id, 'sound').attempts, 1);
+  });
+
+  test('C21d: motion, attempt 2: the kill is REFUSED but the publisher request is posted: the row names only the request, one WARN says the kill was refused', async () => {
+    const { c, h } = motionHarness('c21d', () => false);
+    await h.ticks(15, 120);
+    assert.deepEqual(h.events, [], 'precondition: attempt 1 (refused) wrote a row');
+    const from = h.calls.length;
+    await h.tickAt(135);
+    // The order inside an action: request, lever, then the row (written last, from what acted).
+    assert.deepEqual(h.calls.slice(from), ['status', 'probe:video', 'status', 'post', 'kill:motion', 'event']);
+    assert.deepEqual(h.postTimes(), [135], 'a refused kill swallowed the publisher request');
+    assert.equal(h.events.length, 1);
+    assert.equal(h.events[0].detail,
+      'motion detector getting no frames (no data for 135s) - sub-stream (Low) restart requested by the detector watchdog');
+    assert.ok(!h.events[0].detail.includes('detector restarted'), 'the row still says the detector was restarted');
+    const lines = linesOf(c);
+    assert.equal(lines.length, 2, 'a mixed outcome must be ONE line, not two');
+    assert.ok(lines[0].includes('[INFO]') && lines[0].includes('lever refused'), lines[0]);
+    assert.ok(lines[1].includes('[WARN]') && lines[1].endsWith('attempt 2; lever: sub publisher; detector kill refused'), lines[1]);
+    assert.equal(h.wd.episodeOf(c.id, 'motion').attempts, 2);
+  });
+
+  // Only `=== true` is a restart. killStalledDetector returns a boolean, so anything else is a mis-wired lever,
+  // and "did not demonstrably restart" must not be written down as "restarted". Truthy non-true values (1, {})
+  // are in the loop so that a `!!result` or `result !== false` shortcut dies; the falsy ones so that a missing
+  // return does.
+  let n = 0;
+  for (const result of [undefined, null, 0, false, 1, {}]) {
+    test(`C21e: a lever that returned ${JSON.stringify(result) ?? 'undefined'} (${typeof result}) is a refusal: no row, one INFO line`, async () => {
+      const { c, h } = motionHarness(`c21e-${n++}`, () => result);
+      await h.ticks(15, 120);
+      assert.deepEqual(h.killTimes(), [75], 'precondition: the lever was not called exactly once');
+      assert.deepEqual(h.events, [], `a lever result of ${JSON.stringify(result)} was recorded as a restart`);
+      const lines = linesOf(c);
+      assert.equal(lines.length, 1);
+      assert.ok(lines[0].includes('[INFO]') && lines[0].includes('lever refused'), lines[0]);
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------------------------------------

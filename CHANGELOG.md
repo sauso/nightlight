@@ -52,6 +52,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
     is skipped — a push already sent cannot be recalled, but no further one goes out for a flagged night.
 
 ### Fixed
+- **Camera history no longer shows a detector restart that did not happen** (issue #578). When a detector
+  stopped receiving video or audio, the detector watchdog wrote "detector restarted by the detector watchdog"
+  (and a `[WARN]` log line) *before* asking for the stop, and never checked whether the stop was refused (for
+  example because the motion detector was already on its way back from the main stream to the Low one). Now the
+  row and the `[WARN]` line follow the answer and name only what happened. A refused stop writes no row and one
+  `[INFO]` line ending `lever refused`; if a stream restart was requested in the same step, the row says only
+  that. A refused stop still counts as an attempt, so it still advances the backoff (1, 2, 4 ... 30 minutes)
+  and, for motion, the second attempt still asks for the stream restart (stated in KNOWN-ISSUES.md as a limit).
+  The row wording `no data through N restart(s)` is now `N attempt(s)` for the same reason. The sound detector
+  is covered the same way. Nothing here assumes a particular camera, child or timezone.
 - **A motion alert or a bed exit/entry is no longer confirmed across a gap in the camera's video** (issue #452).
   Both used to count *time elapsed* rather than video received: motion that was active, then silent for 20 seconds,
   then active again was alerted on at once as "sustained", and a single quiet frame arriving after a long hole

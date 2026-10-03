@@ -9887,5 +9887,134 @@
     "replace": "const frameGap = createFrameGapDetector({ floorMs: FRAME_GAP_MS, windowN: 17 });",
     "expect": "killed",
     "tests": ["motion-frame-gap.test.js"]
+  },
+  {
+    "label": "#578 M0 (control): a comment edit in the new checkLeg block must change nothing",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    // ONE text for the WARN and the INFO line below, so the two cannot drift apart.",
+    "replace": "    // ONE text for the WARN and the INFO line below, so the two cannot drift apart. [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C(21|12b)"
+  },
+  {
+    "label": "#578 M1 (the bug): the restart is recorded whatever the lever answered",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "        restarted = L.restart(cam.id, { expectSpawn: fresh.spawnedMono, expectLastData: fresh.lastDataMono }) === true;",
+    "replace": "        restarted = (L.restart(cam.id, { expectSpawn: fresh.spawnedMono, expectLastData: fresh.lastDataMono }), true);",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C21",
+    "note": "C21a (motion), C21c (sound), C21d (mixed) and every C21e case: a refused kill must write no restart row."
+  },
+  {
+    "label": "#578 M2: any lever result but `false` counts as a restart (`!== false` for `=== true`)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "        restarted = L.restart(cam.id, { expectSpawn: fresh.spawnedMono, expectLastData: fresh.lastDataMono }) === true;",
+    "replace": "        restarted = L.restart(cam.id, { expectSpawn: fresh.spawnedMono, expectLastData: fresh.lastDataMono }) !== false;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C21e",
+    "note": "Killed by the undefined / null cases of C21e. The 0, 1 and {} cases also kill a `!!result` variant (1 and {} are truthy, 0 is falsy)."
+  },
+  {
+    "label": "#578 M3: a refused kill writes no INFO line (the diagnosis is dropped)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "logger.info(`${diagnosis}; ",
+    "replace": "void (`${diagnosis}; ",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C(21|12b)"
+  },
+  {
+    "label": "#578 M3b: a refused kill logs its line at WARN instead of INFO",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "logger.info(`${diagnosis}; ",
+    "replace": "logger.warn(`${diagnosis}; ",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C(21|12b)"
+  },
+  {
+    "label": "#578 M4: a mixed outcome (request posted, kill refused) still says \"detector restarted\" in the row",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "const levers = [restarted && `${leg} detector restarted`",
+    "replace": "const levers = [kill && `${leg} detector restarted`",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C(21|12b)"
+  },
+  {
+    "label": "#578 M4b: a mixed outcome drops the \"detector kill refused\" note from the one WARN line",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "${kill && !restarted ? `; detector kill ${leverError ? 'threw' : 'refused'}` : ''}",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C(21|12b)"
+  },
+  {
+    "label": "#578 M5: the publisher request is not posted when a kill is attempted (as if it waited on the lever's success)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "if (requestKind) deps.restartRequests.post(",
+    "replace": "if (requestKind && !kill) deps.restartRequests.post(",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C(21|12b)"
+  },
+  {
+    "label": "#578 M6: a refused or thrown kill rolls the attempt back (the backoff is lost)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (leverError) throw leverError;",
+    "replace": "    if (kill && !restarted) { ep.attempts -= 1; ep.lastActionMono = null; }\r\n    if (leverError) throw leverError;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C(21|12b)",
+    "note": "namePattern is a regex: a refusal commits the attempt the same before or after the lever, so only a rollback (and the throwing lever of C12b) tell the orderings apart. 'The commit moves after the lever' is covered by the existing #369 M12a (`^C12b:`): with a throwing lever it behaves exactly like a commit that never happens."
+  },
+  {
+    "label": "#578 M7: a throwing lever is swallowed instead of rethrown to the per-leg guard",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (leverError) throw leverError;",
+    "replace": "    void leverError;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C12b"
+  },
+  {
+    "label": "#578 M8: the sound leg ignores the lever's answer",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "        restarted = L.restart(cam.id, { expectSpawn: fresh.spawnedMono, expectLastData: fresh.lastDataMono }) === true;",
+    "replace": "        restarted = (L.restart(cam.id, { expectSpawn: fresh.spawnedMono, expectLastData: fresh.lastDataMono }) === true) || leg === 'sound';",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C21c"
+  },
+  {
+    "label": "#578 M9: a row is written for every attempted action, even when nothing acted",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    if (restarted || requestKind) {",
+    "replace": "    if (true) {",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C(21|12b)"
+  },
+  {
+    "label": "#578 M10: the request-only row says `restart(s)` again for a count that includes refused attempts",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "no data through ${attempts} attempt(s) and the relaunches since",
+    "replace": "no data through ${attempts} restart(s) and the relaunches since",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C9[bf]"
+  },
+  {
+    "label": "#578 M11: the real lever's refusal of a `returning` detector no longer stops the restart row (the real watchdog and lever)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "        restarted = L.restart(cam.id, { expectSpawn: fresh.spawnedMono, expectLastData: fresh.lastDataMono }) === true;",
+    "replace": "        restarted = (L.restart(cam.id, { expectSpawn: fresh.spawnedMono, expectLastData: fresh.lastDataMono }), true);",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "#578"
   }
 ]
