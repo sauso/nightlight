@@ -419,6 +419,60 @@ describe('#454 the frame-diff alert cooldown across a detector relaunch', { conc
     assert.equal(await g.rows(), 1);
   });
 
+  // ★ A KNOWN LIMIT, PINNED SO IT IS NOT FORGOTTEN: NOT DESIRED BEHAVIOUR (code review round 1, verified by running).
+  // The clamp is written back, so a clock that steps back and is later corrected FORWARD leaves the stamp at the
+  // stepped-back time, and the first run after the correction alerts inside the cooldown. If a monotonic companion
+  // stamp ever replaces this (motionDetector.js's header, KNOWN-ISSUES), this test should flip to expecting 1 alert.
+  test('#454 C8: KNOWN LIMIT (not desired): a step back followed by a correction FORWARD lets exactly one extra alert through inside the cooldown', async (t) => {
+    const g = await rig(t, camera(uniq('c8limit')));
+    g.burst(T0 + 3200);
+    const alertAt = T0 + 3200;
+    assert.equal(await g.alerts(), 1, 'premise');
+    const step = alertAt - 3_600_000;
+    g.quiet(step); // the clock steps back an hour: the stamp is clamped to it and written back
+    g.quiet(step + 200);
+    g.quiet(step + 400);
+    g.quiet(alertAt + 10_000); // corrected forward: 10 s after the real alert, well inside the 60 s cooldown
+    for (let at = alertAt + 10_200; at <= alertAt + 13_200; at += 200) g.active(at); // a 3 s run
+    assert.equal(await g.alerts(), 2, 'the documented limit: one extra alert after a back-and-forward clock correction');
+    // ...and only one: the alert that fired re-stamped the corrected clock, so the cooldown holds again.
+    for (let at = alertAt + 13_400; at <= alertAt + 20_000; at += 200) g.active(at);
+    assert.equal(await g.alerts(), 2);
+  });
+
+  // ---- C15 (code review round 1): the stamp is keyed by the camera ID, which is what DELETE and every re-entry use ----
+  test('#454 C15: the alert the detector writes is stored under the camera ID, at the alert time', async (t) => {
+    const cam = camera(uniq('c15key'));
+    const g = await rig(t, cam);
+    g.burst(T0 + 3200);
+    assert.equal(await g.alerts(), 1, 'premise');
+    assert.equal(stampOf(cam.id), T0 + 3200, 'no stamp under the camera id (DELETE and the routes look it up by id)');
+  });
+
+  test('#454 C15: a RENAME (the same id, a new name) inside the cooldown keeps it', async (t) => {
+    const cam = camera(uniq('c15name'));
+    const g = await rig(t, cam);
+    g.burst(T0 + 3200);
+    assert.equal(await g.rows(), 1, 'premise');
+    const old = g.cur();
+    await startMotionDetector({ ...cam, name: `${cam.name} renamed` }); // what PUT /:id does after a rename
+    await g.replacedBy(old);
+    g.burst(T0 + 3200 + 20_000);
+    assert.equal(await g.rows(), 1, 'a renamed camera alerted again inside the cooldown (the stamp is not keyed by the id)');
+  });
+
+  test('#454 C15: an activity-only leg leaves a PRE-EXISTING future stamp untouched (the read and clamp belong to the alerting leg)', async (t) => {
+    const childId = uniq('kid');
+    makeChild(db, { id: childId, name: 'Cooldown Child', start: '00:00', end: '23:59' });
+    const cam = camera(uniq('c15act'), { detect_source: 'mqtt', child_id: childId });
+    const g = await rig(t, cam);
+    const future = T0 + 3_600_000;
+    seam('_setMotionAlertStampForTests')(cam.id, future); // e.g. left by an alerting leg before a backward clock step
+    g.baseline(T0);
+    for (let at = T0 + 200; at <= T0 + 2000; at += 200) g.active(at);
+    assert.equal(stampOf(cam.id), future, 'an activity-only leg clamped or rewrote the alert stamp');
+  });
+
   // ---- C9 ----
   test('#454 C9: detect_confirm_s = 0: the first active frame after a relaunch alerts at once IF the cooldown has elapsed', async (t) => {
     const g = await rig(t, camera(uniq('c9a'), { detect_confirm_s: 0 }));

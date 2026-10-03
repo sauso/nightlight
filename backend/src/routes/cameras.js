@@ -1153,8 +1153,10 @@ router.delete('/:id', requireAdmin, async (req, res) => {
   forgetObservationClocks(req.params.id);
   // #454: and its motion alert stamp. DELETE is the ONLY route that clears it: a settings save, a rename, an
   // assign and an enable/disable all keep the cooldown on purpose (see the header over `motionAlertStamps`), and
-  // this comes AFTER the stop above, which waits for the process to exit. A stdout frame can still drain after
-  // 'exit' and re-stamp a deleted camera once: a known, documented residual (one number per UUID), not guarded.
+  // this comes AFTER the stop above. That stop waits for the process to exit for at most FORCE_KILL_TIMEOUT_MS
+  // (3 s, then it resolves either way), so a stdout frame can still drain after it and re-stamp a deleted camera
+  // once: a known, documented residual (one number per UUID), not guarded. The ORDER (stop, then forget) is not
+  // covered by a test: the route tests plant a stamp and have no running detector to race.
   forgetMotionAlert(req.params.id);
   stopClipCapture(req.params.id);
   try {

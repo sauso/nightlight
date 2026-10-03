@@ -462,8 +462,9 @@ the motion alert, which uses the same helper.
   recording does not bridge a gap in the readings" below.
 - A backward clock step of S seconds still suppresses a bed exit or entry (their 2-minute pause) and an ONVIF
   or MQTT motion alert for up to S plus the cooldown (pre-existing, filed separately, #582). The **frame-diff**
-  motion alert no longer does: its cooldown is clamped to the new time, so it is silent for at most one
-  cooldown after the step (issue #454; "What a restart keeps", below).
+  motion alert is different since #454: after a one-way backward step its cooldown is clamped to the new time,
+  so it is silent for at most one cooldown, not S plus the cooldown. It has its own limit ("What a restart
+  keeps", below).
 
 **What to do:** nothing. To see how often it fires, count the `restarted` lines per night.
 
@@ -885,9 +886,11 @@ alert cannot fire sooner than **Motion cooldown** after it, whatever happened to
 - **Lost when the server (the container) restarts.** Nothing is stored. For a container that restarts every
   night the cost is at most one extra motion alert per camera per restart, and only if motion is sustained
   within **Motion cooldown** of the last alert before it.
-- **At the default 60 s, only an ffmpeg exit could ever show the old symptom.** The detector watchdog waits for
-  60 s of silence before it restarts anything, and the return to the Low stream waits for 90 s of quiet, so those
-  two only mattered with a longer cooldown (above about 70 s and 95 s). Across 30 days of one house's saved data
+- **Which causes mattered at which cooldown.** An ffmpeg exit (a reconnect, "stream ended") and the detector being
+  started again (a settings save, a camera edit, assigning, an enable/disable) re-armed the cooldown at **any**
+  setting, the default 60 s included. The detector watchdog waits for 60 s of silence before it restarts
+  anything, and the return to the Low stream waits for 90 s of quiet, so those two only mattered with a longer
+  cooldown (above about 70 s and 95 s). Across 30 days of one house's saved data
   no motion alert pair was closer than the cooldown and no relaunch fell within 60 s after an alert: this is a
   correctness fix, and no stored alert, sleep number or detection event changes because of it.
 - **Changing the setting:** the last alert's time is compared with the *current* **Motion cooldown**, so
@@ -897,8 +900,14 @@ alert cannot fire sooner than **Motion cooldown** after it, whatever happened to
 - **An alert that was silenced** (outside the alert schedule, or by snoozing the camera) does not start a
   cooldown, so one can fire as soon as the schedule opens or the snooze ends (unchanged).
 - **A backward step of the server's clock** (a time-sync correction) silences the frame-diff alert for at most
-  one cooldown from the step. The ONVIF and MQTT motion alerts and the bed-exit rules still wait the step plus
-  a cooldown (see the gap section above, #582).
+  one cooldown, counted from the first video frame analysed after the step (at 5 frames a second that is
+  immediate; if frames stop for ten minutes after the step it starts at the next frame). The ONVIF and MQTT
+  motion alerts and the bed-exit rules still wait the step plus a cooldown (see the gap section above, #582).
+  **Known limit:** this is only for a ONE-WAY step. If the clock steps back and is later corrected *forward*,
+  the stored time stays at the stepped-back value and the first motion after the correction can alert once
+  inside the cooldown; a clock that jumps by hours between consecutive frames can alert repeatedly. Real
+  time-sync corrections do not behave like that, so it was left. A monotonic companion time would fix it; not
+  done (#582).
 - **The sound cooldown is not the same.** It already survived an ffmpeg relaunch (it lives in the sound
   analyser), and still starts again when the sound detector is started afresh by a settings save, a camera edit
   or an enable/disable; the motion cooldown now survives those too. The **ONVIF** and **MQTT** motion sources

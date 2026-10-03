@@ -10430,5 +10430,69 @@
     "expect": "killed",
     "tests": ["motion-alert-cooldown.test.js"],
     "namePattern": "^#454 C(2|9):"
+  },
+  {
+    "label": "#454 M15: the stamp is keyed by the camera NAME (a rename loses it, and DELETE's id finds nothing)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "          const stampKey = camera.id;",
+    "replace": "          const stampKey = camera.name;",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown.test.js"],
+    "namePattern": "^#454 C15:"
+  },
+  {
+    "label": "#454 M16: an activity-only leg clamps a stamp that is ahead of now (the read/clamp moved out of the alerting branch, as a single-site equivalent)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        if (anyActive) entry.lastActiveMono = performance.now();",
+    "replace": "        if (anyActive) entry.lastActiveMono = performance.now();\r\n        if (activityOnly) { const s = motionAlertStamps.get(camera.id); if (s != null && s > now) motionAlertStamps.set(camera.id, now); }",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown.test.js"],
+    "namePattern": "^#454 C15:",
+    "note": "The real edit (moving the three read/clamp lines above `if (!activityOnly)`) is multi-line and the lines are not contiguous with a unique find; this single-site edit has the same effect on an activity-only leg."
+  },
+  {
+    "label": "#454 M17: the detection PUT forgets the stamp INSIDE its `if (!updated.disabled)` block, ahead of the start/stop calls",
+    "file": "backend/src/routes/cameras.js",
+    "find": "    if (motionLegWanted(updated)) {\r\n      await startMotionDetector(updated).catch((e) =>",
+    "replace": "    forgetMotionAlert(updated.id);\r\n    if (motionLegWanted(updated)) {\r\n      await startMotionDetector(updated).catch((e) =>",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown-routes.test.js"],
+    "namePattern": "^#454 C5:.*ENABLED"
+  },
+  {
+    "label": "#454 M17b: PUT /:id forgets the stamp INSIDE its `if (!existing.disabled)` block",
+    "file": "backend/src/routes/cameras.js",
+    "find": "    // ONVIF motion subscription follows the same restart (its endpoint/creds may have changed).",
+    "replace": "    forgetMotionAlert(updated.id);\r\n    // ONVIF motion subscription follows the same restart (its endpoint/creds may have changed).",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown-routes.test.js"],
+    "namePattern": "^#454 C5:.*ENABLED"
+  },
+  {
+    "label": "#454 M17c: PUT /:id/assign forgets the stamp INSIDE its `if (!updated.disabled)` block",
+    "file": "backend/src/routes/cameras.js",
+    "find": "    else await stopMotionDetector(updated.id).catch(() => {});\r\n    reconcileClipRing(updated);",
+    "replace": "    else await stopMotionDetector(updated.id).catch(() => {});\r\n    forgetMotionAlert(updated.id);\r\n    reconcileClipRing(updated);",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown-routes.test.js"],
+    "namePattern": "^#454 C5:.*ENABLED"
+  },
+  {
+    "label": "#454 M17d: PUT /:id/enabled (enabled=true) forgets the stamp ahead of the detector start",
+    "file": "backend/src/routes/cameras.js",
+    "find": "    if (motionLegWanted(cam)) await startMotionDetector(cam).catch(() => {});",
+    "replace": "    forgetMotionAlert(req.params.id);\r\n    if (motionLegWanted(cam)) await startMotionDetector(cam).catch(() => {});",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown-routes.test.js"],
+    "namePattern": "^#454 C5:.*enabled=true"
+  },
+  {
+    "label": "#454 M17e: PUT /:id/enabled (enabled=false) forgets the stamp inside the disable branch",
+    "file": "backend/src/routes/cameras.js",
+    "find": "    await stopMotionDetector(req.params.id).catch(() => {});\r\n    await stopOnvifMotion(req.params.id).catch(() => {});",
+    "replace": "    await stopMotionDetector(req.params.id).catch(() => {});\r\n    forgetMotionAlert(req.params.id);\r\n    await stopOnvifMotion(req.params.id).catch(() => {});",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown-routes.test.js"],
+    "namePattern": "^#454 C5:.*enabled=false on an ENABLED"
   }
 ]

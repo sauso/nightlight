@@ -56,6 +56,10 @@ function cancelPendingRestart(cameraId) {
 // `let lastAlert = 0` inside launch(), so every ffmpeg relaunch started with a zero stamp and sustained motion
 // could alert again sooner than `detect_cooldown_s` after the previous alert. ONVIF (onvifMotion.js) and MQTT
 // (mqttClient.js) already keep theirs in a module-level Map for exactly that reason; this is the same shape.
+// WHICH CAUSES MATTER AT WHICH COOLDOWN: an ffmpeg exit (a reconnect, "stream ended") and any re-entry of
+// startMotionDetector (below) re-armed the cooldown at ANY setting, the default 60 s included. The #369 watchdog
+// kill needs >= 60 s of silence and the #500 return to the sub needs 90 s of quiet, so those two only mattered
+// with a cooldown above about 70 s / 95 s.
 //
 // WHY MODULE LEVEL, not a closure variable beside `believedOccupied` (#424): startMotionDetector is RE-ENTERED
 // by a detection-settings save (the frontend autosaves every control through that one endpoint), by any camera
@@ -76,10 +80,20 @@ function cancelPendingRestart(cameraId) {
 // the wall clock stepped BACK (an NTP correction, a manual change). Treating a future stamp as "no previous
 // alert" (fail open) was measured in #454's plan review to fire 25 alerts in 25 frames with `detect_confirm_s = 0`
 // and a clock that stepped back each frame (the old code: one), and after a one-hour step back it re-alerted 3 s
-// later. Clamping the stamp to now and writing the clamp back gives at most ONE cooldown of silence after a step
-// (the old code: the step plus a cooldown), cannot storm, and is never worse than the old behaviour. A forward
-// step shortens a cooldown, as it always did. This covers the frame-diff alert only; the bed-transition
-// cooldowns, ONVIF and MQTT keep their old behaviour after a backward step (KNOWN-ISSUES, #582).
+// later. Clamping the stamp to now and writing the clamp back means a ONE-WAY backward step silences the alert
+// for at most ONE cooldown, counted from the first analysed frame after the step (at 5 fps that is immediate; if
+// frames stop for ten minutes after the step, it starts at the next frame), where the old code stayed silent for
+// the step plus a cooldown. A forward step shortens a cooldown, as it always did.
+//
+// ⚠️ KNOWN LIMIT, found by code review and verified by running it, NOT desired behaviour: the clamp is written
+// BACK, so it is not a "never worse than before" rule. A clock that steps back and is then corrected FORWARD
+// leaves the stamp at the stepped-back time, and the first run after the correction can alert INSIDE the cooldown
+// (one extra alert; pinned by a test, motion-alert-cooldown.test.js C8). A clock that oscillates by hours between
+// frames can alert repeatedly (11-12 alerts in 20 frames were measured; the old code: one). That is not what
+// NTP does, so it was left. The fix, if it ever matters, is a monotonic companion stamp (performance.now()) next
+// to the wall one; it is a bigger change and the tests steer time only through the Date mock. This covers the
+// frame-diff alert only; the bed-transition cooldowns, ONVIF and MQTT keep their old behaviour after a backward
+// step (KNOWN-ISSUES, #582).
 //
 // WHAT IS DELIBERATELY NOT KEPT across a relaunch (decided in the plan, not forgotten): the bed-transition
 // tracker, including its 120 s pause after a logged exit or entry and a pending candidate. It gates stored

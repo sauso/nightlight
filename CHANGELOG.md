@@ -65,11 +65,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   cooldowns; and the bed-exit/entry rules (their 2-minute pause and a pending exit) still start afresh on a
   relaunch. **What you may notice:** after changing a motion setting, the next alert is no longer immediate,
   so to retest wait out the cooldown (60 s by default; 1 s minimum, the form allows up to 3600 s) or set a
-  short one. A backward step of the server's clock now silences the frame-diff alert for at most one cooldown
-  (it used to be the step plus a cooldown); the other cooldowns are unchanged. A deleted camera's time is
+  short one. A one-way backward step of the server's clock now silences the frame-diff alert for at most one
+  cooldown (it used to be the step plus a cooldown); a step back followed by a correction forward can let one
+  alert through inside the cooldown, and a clock that jumps by hours between frames can alert repeatedly (a known
+  limit, not what time sync does); the other cooldowns are unchanged. A deleted camera's time is
   forgotten with it. No number or threshold was added or changed. In 30 days of one house's saved data no
   two motion alerts were closer than the cooldown and no relaunch followed an alert within 60 s, so no stored
-  alert or sleep number changes; at the default 60 s only an ffmpeg exit could ever show the old symptom.
+  alert or sleep number changes. An ffmpeg exit and any restart of the detector by a settings save or camera
+  edit re-armed the cooldown at any setting; the watchdog kill and the return to the Low stream only mattered
+  with a cooldown above about 70 s and 95 s.
   Details and limits: [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "What a restart keeps", and
   [docs/notifications.md](docs/notifications.md).
 - **Wake clips no longer treat a gap in the camera's readings as part of one wake** (issue #448). The live
