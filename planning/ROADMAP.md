@@ -908,7 +908,7 @@ no clock. Every threshold in it came from ONE house's runs (Stage 1: night, over
   confirmation), #500 pending-candidate refusal, backward-step cooldown clamp, a restart cap / max wait for
   chronic gaps. Evidence once on staging: count `confirmation restarted` /
   `motion run restarted` lines per night. KNOWN-ISSUES.md "A motion alert or a bed exit/entry is not confirmed across a
-  gap in the video". **#448** the wake watcher is still open (the same "active, outage, active" shape).
+  gap in the video". **#448** the wake watcher (the same "active, outage, active" shape) is fixed on dev and awaits the release: a watcher run no longer bridges a hole longer than `WAKE_GAP_MIN`, and settling needs 15 consecutive observed minutes (KNOWN-ISSUES.md "A wake recording does not bridge a gap in the readings").
 - **#508** sleep analysis stops counting zero-frame minutes as watched — built on branch
   `fix/508-zero-frame-minutes` (plan v2, 2026-09-30). Read-time only: `motionSeen(r) = motion_frames > 0`
   in all three `activity_samples` readers of `sleepAnalysis.js`; an unwatched minute is `null` (sound not

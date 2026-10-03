@@ -10043,5 +10043,230 @@
     "expect": "killed",
     "tests": ["detector-watchdog.test.js"],
     "namePattern": "^C12b"
+  },
+  {
+    "label": "#448 M0: control: a comment edit in wakeWatcher.js must change nothing",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "// Whole minutes since the last accepted payload: 1 = the very next minute, 2 = one minute had no payload.",
+    "replace": "// Whole minutes since the last accepted payload: 1 = the very next minute, 2 = one minute had no payload. [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C(1|3):",
+    "note": "Validates the harness for the #448 group. If this is ever KILLED, no other #448 result in the run means anything."
+  },
+  {
+    "label": "#448 M1: a hole in the readings no longer restarts the settling count (callbacks counted again)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (missingMin > 0) st.quietRun = 0;",
+    "replace": "/* a hole does not reset the settling count */",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C(6|7):"
+  },
+  {
+    "label": "#448 M2: the settling count restarts only for a hole of 2+ missing minutes (a single missing minute still counts)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (missingMin > 0) st.quietRun = 0;",
+    "replace": "if (missingMin > 1) st.quietRun = 0;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C6:",
+    "note": "Only C6 (one missing minute, 14 quiet + hole + 1) tells this from the real rule; C7's 60-minute hole is past either threshold."
+  },
+  {
+    "label": "#448 M3: the bridge ends a run at WAKE_GAP_MIN non-active minutes instead of past it (`>` becomes `>=`)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (nonActive > WAKE_GAP_MIN) {",
+    "replace": "if (nonActive >= WAKE_GAP_MIN) {",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C(2|4a) \\(control\\)"
+  },
+  {
+    "label": "#448 M4: the active branch does not subtract 1 (an active minute after a gap of exactly WAKE_GAP_MIN is split)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "const nonActive = active ? sinceActiveMin - 1 : sinceActiveMin;",
+    "replace": "const nonActive = sinceActiveMin;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C(2 \\(control\\)|16:)"
+  },
+  {
+    "label": "#448 M5: the bridge check is skipped on the active branch (the original #448 defect)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (nonActive > WAKE_GAP_MIN) {",
+    "replace": "if (!active && nonActive > WAKE_GAP_MIN) {",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C(1|3|5):"
+  },
+  {
+    "label": "#448 M6: a repeated label is not ignored (it is counted again)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (at === st.lastAt) return null;",
+    "replace": "if (at === st.lastAt) void 0;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C9b?:"
+  },
+  {
+    "label": "#448 M7: an older label is ignored instead of re-baselining (the watcher goes deaf for as long as a clock step lasts)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (at < st.lastAt) {",
+    "replace": "if (at < st.lastAt) return null;\r\n    if (false) {",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C(10|10b):"
+  },
+  {
+    "label": "#448 M8: lastAt is not advanced by quiet payloads (a quiet stretch looks like one growing hole)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "st.lastAt = at;",
+    "replace": "if (active) st.lastAt = at;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C(6|7):",
+    "note": "Killed by the settling tests only: while no active minute has been seen lastAt stays null, so no quiet-only hole is ever noticed (C6/C7 expect one). The sparse-fixture tests survive this mutation because their gaps follow an active minute."
+  },
+  {
+    "label": "#448 M9: reset() keeps lastAt (a window that opens again measures from the night before)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "st.lastAt = null;",
+    "replace": "void 0;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C12:"
+  },
+  {
+    "label": "#448 M10: the run a hole ends is dropped WITHOUT releasing its ring hold (a leaked WAKE hold)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "endRun(cameraId, st, st.run.captured ? null : why);",
+    "replace": "st.run = null;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C11 \\(leak half\\)",
+    "note": "Killed ONLY by the leak half of C11: with wake clips on, the new run's hold overwrites the leaked one (one slot per owner) and hides it, so C11's first test passes with this mutation. The leak half switches wake clips off during the hole so the new run takes no hold."
+  },
+  {
+    "label": "#448 M11: a backward label does not end the run (the re-lived minutes inherit the old count)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "endRun(cameraId, st, st.run?.captured ? null : 'the clock went back');",
+    "replace": "void 0;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C(10|11b):"
+  },
+  {
+    "label": "#448 M12 (EQUIVALENT): Math.round becomes Math.floor in the elapsed-minute division",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "Math.round((at - st.lastAt) / MINUTE_MS)",
+    "replace": "Math.floor((at - st.lastAt) / MINUTE_MS)",
+    "expect": "equivalent",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C(6|7):",
+    "note": "Every label is 'YYYY-MM-DD HH:MM:00' (activityTracker minuteBucketUtc) plus a whole minute, so the difference of two labels is always an exact multiple of 60000 ms and round, floor and ceil agree. The round is there for a stray sub-minute label that no producer sends. The same holds for the second Math.round (the distance from the last active minute); not given its own entry."
+  },
+  {
+    "label": "#448 M13: the capture's .finally guards on startMs equality again (a late finally releases a NEW run's hold)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (st.run === run && run.holding) {",
+    "replace": "if (st.run?.holding && st.run.startMs === startMs) {",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C11b:"
+  },
+  {
+    "label": "#448 M14: the bridge is measured from the last PAYLOAD instead of the last ACTIVE minute",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "const sinceActiveMin = Math.round((at - st.run.lastActiveMs) / MINUTE_MS);",
+    "replace": "const sinceActiveMin = elapsedMin;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C(4b|12b)"
+  },
+  {
+    "label": "#448 M15: a backward label does not reset the settling progress",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "'the clock went back');\r\n      st.quietRun = 0;",
+    "replace": "'the clock went back');",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C10b:"
+  },
+  {
+    "label": "#448 M16: a hole disarms an armed watcher",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "const missingMin = elapsedMin - 1; // minutes with NO payload between the last one and this one",
+    "replace": "const missingMin = elapsedMin - 1; // minutes with NO payload between the last one and this one\r\n  if (missingMin > 0) { endRun(cameraId, st, null); st.asleep = false; st.quietRun = 0; }",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C(1:|8 )"
+  },
+  {
+    "label": "#448 W1: a single missing minute is not called a hole in the log (`missingMin > 0` becomes `> 1`)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "const why = missingMin > 0 ?",
+    "replace": "const why = missingMin > 1 ?",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C17b:",
+    "note": "Log-only mutant: no assertion on state sees it. Needs a held run (a real segmenter) so endRun logs at all."
+  },
+  {
+    "label": "#448 W3: a run that already captured logs 'nothing recorded' when a hole ends it",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "endRun(cameraId, st, st.run.captured ? null : why);",
+    "replace": "endRun(cameraId, st, why);",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C17e:"
+  },
+  {
+    "label": "#448 W4: a run ended by an older label logs nothing (the reason is dropped)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "endRun(cameraId, st, st.run?.captured ? null : 'the clock went back');",
+    "replace": "endRun(cameraId, st, null);",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C17d:",
+    "note": "Same find as M11, which replaces the whole call; this one keeps the call and drops only the log reason."
+  },
+  {
+    "label": "#448 W33: the older-label guard ignores a step back of up to 3 minutes (`at < lastAt` becomes `at < lastAt - 3 min`)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (at < st.lastAt) {",
+    "replace": "if (at < st.lastAt - 3 * MINUTE_MS) {",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C10c:"
+  },
+  {
+    "label": "#448 W34: the older-label guard ignores a step back of 1 minute (`at < lastAt` becomes `at < lastAt - 1 min`)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (at < st.lastAt) {",
+    "replace": "if (at < st.lastAt - MINUTE_MS) {",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C10c:",
+    "note": "Killed only by the 1-minute-back case of C10c."
+  },
+  {
+    "label": "#448 W35: the older-label guard needs a step back of 4+ minutes (`at < lastAt` becomes `at <= lastAt - 4 min`)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (at < st.lastAt) {",
+    "replace": "if (at <= st.lastAt - 4 * MINUTE_MS) {",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C10c:",
+    "note": "For minute-aligned labels this is the same as W33 (a difference of more than 3 minutes is one of 4 or more); both are kept because they are different edits a reviewer can make."
+  },
+  {
+    "label": "#448 W36: a step back of up to 3 minutes does not reset the settling progress",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "'the clock went back');\r\n      st.quietRun = 0;",
+    "replace": "'the clock went back');\r\n      if (at < st.lastAt - 3 * MINUTE_MS) st.quietRun = 0;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "^C10d:"
   }
 ]
