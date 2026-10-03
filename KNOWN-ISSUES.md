@@ -458,7 +458,8 @@ the motion alert, which uses the same helper.
 - **Returning to the Low stream (see "Motion detection reads the Low stream" below) can still lose a pending exit** on a main stream
   that keeps stalling: its quiet period assumes an exit confirms 6 s after it opens, which a restart now
   lengthens. Suspected, not measured; refusing the switch while a candidate is pending is a follow-up.
-- **The wake watcher (#448) has the same "active, outage, active" shape and is not changed here.**
+- **The wake watcher (#448) had the same "active, outage, active" shape; it is fixed separately.** See "A wake
+  recording does not bridge a gap in the readings" below.
 - A backward clock step of S seconds still suppresses a motion alert or an exit for up to S plus the cooldown
   (pre-existing, filed separately).
 
@@ -620,6 +621,67 @@ closing sentence.
 
 **What to do:** nothing. If a night shows a long "No data" stretch while the camera was plainly on, check
 the Camera history for a `[detector-watchdog]` restart (next section) around that time.
+
+## A wake recording does not bridge a gap in the readings, and settling needs 15 unbroken minutes
+
+**What you see:** wake clips (README, "Wake clips") are recorded by the live wake watcher, which only
+records and never alerts. Two things about when it decides:
+
+- **Two bursts of activity with a hole in the camera's readings between them are two wakes, and two clips.**
+  A "hole" is a minute for which the camera reported nothing at all (the video or sound feed was down; no
+  motion frame and no sound window arrived). Before issue #448 the watcher counted readings, not minutes, so
+  five active minutes spread over fifty minutes of mostly missing readings could be recorded as one wake,
+  while the sleep timeline (which has always counted minutes) showed no wake at all.
+- **The watcher starts watching only after 15 consecutive quiet minutes that were actually read.** A hole
+  restarts that count. So after an outage in the evening the watcher can start watching later than the
+  sleep timeline's bedtime, and a wake in between has no clip.
+
+**The rule, in one place:** a run of active minutes bridges at most `WAKE_GAP_MIN` = **3** minutes with no
+active reading, whether those minutes were read as quiet or not read at all, and is a wake once it holds
+`WAKE_ACTIVE_MIN` = **5** active minutes. A gap of 4 or more minutes ends the run; the next active minute
+starts a new one. This is the sleep timeline's own rule (`markWakeRuns`), read from the same constants, so the
+clips and the timeline agree on where a wake is. An armed watcher is **not** disarmed by a hole: only the
+progress toward arming restarts, so a wake that follows a camera reconnect is still recorded.
+
+**Differs from the neighbouring rule** — the part that is easy to get wrong:
+
+| | Sleep timeline (nightly job) | Live wake watcher |
+|---|---|---|
+| A minute with no reading in a wake | Not active; bridged up to 3 in a row | The same |
+| Deciding the child has settled | 15-minute window with no active minute and at least 8 minutes actually read quiet | **15 consecutive minutes read quiet**; one missing minute starts the count again |
+| Settled, then a hole | n/a | Stays watching |
+
+The live rule is stricter on purpose: its only job is to keep bedtime settling out of the recorder, so the
+safe mistake is to start late (a missed clip, never an alert). The cost, stated: **a camera that drops a
+minute more often than about every 15 minutes never starts watching and records no wake clips.** Measured on
+the two cameras of one house over 30 days: about 10 holes of 4 or more minutes per camera per month, so a
+night is rarely delayed; the rate on another install is unknown. The nightly job uses the looser rule because
+requiring a fully read window made flaky cameras lose whole nights (issue #442).
+
+**The numbers are calibrated on two cameras in one house.** 3, 5 and 15 were measured on 101 wakes of those
+cameras (2026-08-26) and are shared with the nightly job, so a retune of one moves both. They are constants,
+not settings, so there is no default to change or range to set.
+
+**Known limits:**
+
+- **A video stall with live sound still counts as watched.** The watcher is told when a minute had no
+  reading at all, not that the picture behind it was frozen, so a stalled camera whose microphone keeps
+  working feeds it sound-only minutes (see "Minutes with no video are unknown in the sleep numbers",
+  which lists this as not yet applied to the live watcher).
+- **A backward clock step ends the run in progress and restarts the count toward arming.** The sleep timeline
+  merges the repeated minutes; the watcher does not, so it can lose at most the one run (and a clip) that a
+  step of the server's clock interrupted.
+- **An armed watcher whose camera sends nothing between two nights stays armed.** It is reset by the first
+  reading outside the sleep window, so the next evening's settling can be recorded as a wake if the camera
+  was silent for the whole day.
+- **The 20-minute sweep is only a backstop.** A camera that goes silent in the middle of a run keeps its ring
+  hold until the sweep ends the run, up to about 20 minutes after its last active minute. A run that keeps
+  receiving readings is ended by the rule above, not by the sweep.
+
+**What to do:** nothing. In the log, `[wake] "<camera>" settled — watching for wakes` marks the start of
+watching (no such line all night means the camera never had 15 unbroken minutes), and a run dropped at a gap
+logs `run ended (readings N min apart)` when that run had taken a ring hold (N is the distance between the two
+readings, which is also what a forward jump of the server's clock looks like).
 
 ## A muted or digitally silent microphone is recorded as a quiet room
 

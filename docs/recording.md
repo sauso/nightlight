@@ -61,9 +61,18 @@ that gap without making alerts noisier.
 **What is and isn't recorded**
 
 - Only for children with **Track sleep** on (per child, under the child's settings).
-- Only **once your child is actually asleep** — settling at bedtime is never recorded.
+- Only **once your child is actually asleep** — settling at bedtime is never recorded. "Asleep" here
+  means **15 quiet minutes in a row that the camera actually reported**; a minute the camera reported
+  nothing for starts the count again. That is stricter than the sleep timeline's own rule, so after an
+  outage in the evening recording can start later than the timeline's bedtime (a camera that drops a
+  minute more often than about every 15 minutes never starts). Once started, a gap does not stop it.
 - Only for a real wake-up: a brief **stir is ignored**, using the same threshold the sleep timeline
-  uses to decide what counts as a wake-up.
+  uses to decide what counts as a wake-up. Activity that pauses for up to **3 minutes** is still one
+  wake-up, and a minute the camera reported nothing for counts as a pause, exactly as on the timeline; a
+  longer gap ends the wake-up, so activity either side of an outage is two wake-ups and two clips. The
+  numbers (3 minutes, 5 active minutes, 15 quiet minutes) are fixed, not settings, and were measured on two
+  cameras in one house. See "A wake recording does not bridge a gap in the readings" in
+  [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
 - The clip starts at the **beginning** of the wake-up, not when it was confirmed — the opening is the
   part that explains why.
 

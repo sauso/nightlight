@@ -31,28 +31,40 @@ const { MOTION_ACTIVE, SOUND_ACTIVE, ONSET_QUIET_MIN, WAKE_ACTIVE_MIN, WAKE_GAP_
 const MINUTE_MS = 60 * 1000;
 // A little before the first active minute, so the hold covers the clip's lead-in too.
 const HOLD_LEAD_MS = 15 * 1000;
-// A run only survives while an active minute keeps arriving inside the bridging window, so by
-// construction an un-qualified run cannot live longer than
-// (WAKE_ACTIVE_MIN - 1) active + WAKE_ACTIVE_MIN * WAKE_GAP_MIN quiet minutes — about 17. There is
-// therefore no need for a time backstop on the NORMAL path.
+// ★ WHO ENFORCES THE BRIDGE LIMIT (#448). handleMinute does, on the data path, in MINUTES ELAPSED between
+// payloads, for an active sample and a quiet one alike (see "One bridge rule" in handleMinute). Until #448 this
+// comment claimed that an un-qualified run "cannot live longer than about 17 minutes" and that no time
+// backstop was needed on the normal path. That was FALSE: only the quiet branch checked elapsed time, an
+// active sample after a hole just did activeCount++, so a camera whose minutes arrived sparsely (active at
+// +0/+10/+20/+30/+40 minutes, nothing in between) kept ONE run alive, and recorded it as a wake, for as long
+// as it kept sending. The nightly job (sleepAnalysis.js markWakeRuns) splits that into five one-minute runs.
+// The cause was one thing seen three ways: the watcher counted CALLBACKS, not minutes.
 //
-// What does need one: activityTracker only flushes a camera that saw signal, so a camera that goes
-// offline mid-run simply stops calling us. Its run would stay open and its ring hold would never be
-// released — the ring then grows without bound for as long as the camera is down. Nothing on the
-// per-minute path can notice that, precisely because the per-minute path has stopped, so it is swept
-// on a timer instead.
+// What the sweep below is for, and not for: activityTracker only flushes a camera that saw signal, so a
+// camera that goes offline mid-run simply stops calling us. Its run would stay open and its ring hold would
+// never be released — the ring then grows without bound for as long as the camera is down. Nothing on the
+// per-minute path can notice that, precisely because the per-minute path has stopped, so it is swept on a
+// timer instead. It is a HYGIENE BACKSTOP for a silent camera, not what decides where a run ends: 20 minutes
+// is not calibrated against anything (no night set it) and is deliberately far longer than the bridge, so a
+// healthy run is never cut by one late tick. After #448 the data path already ends a run the first time a
+// payload shows a hole longer than WAKE_GAP_MIN, so only a camera that sends NOTHING more reaches the sweep.
 const STALE_RUN_MS = 20 * 60 * 1000;
 const SWEEP_INTERVAL_MS = 60 * 1000;
 const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
-// camera_id -> { asleep, quietRun, run }
+// camera_id -> { asleep, quietRun, run, lastAt }
 // run = { startMs, activeCount, lastActiveMs, captured, holding }
+// lastAt (#448) = the end-of-minute ms of the last payload ACCEPTED for this camera, null = none yet. It is
+// what lets handleMinute measure TIME between payloads, because activityTracker sends no payload at all for a
+// minute with neither a motion frame nor a sound window (closeMinute: `hasSignal`), so an outage is visible
+// only as a jump in the labels. Cleared by reset() and by a new slot(): a window that opens again must not
+// measure from the night before.
 const state = new Map();
 
 function slot(cameraId) {
   let st = state.get(cameraId);
   if (!st) {
-    st = { asleep: false, quietRun: 0, run: null };
+    st = { asleep: false, quietRun: 0, run: null, lastAt: null };
     state.set(cameraId, st);
   }
   return st;
@@ -71,6 +83,7 @@ function reset(cameraId, st) {
   endRun(cameraId, st, null);
   st.asleep = false;
   st.quietRun = 0;
+  st.lastAt = null;
 }
 
 const cameraQ = db.prepare('SELECT id, name, child_id, disabled FROM cameras WHERE id = ?');
@@ -111,8 +124,52 @@ export function handleMinute({ cameraId, bucketStart, motionPeak, soundPeak }) {
   const active =
     (motionPeak != null && motionPeak > MOTION_ACTIVE) || (soundPeak != null && soundPeak > SOUND_ACTIVE);
 
+  // --- ordering guard (#448): labels are the only clock this function has, so check they move forward ---
+  // activityTracker normally hands over one payload per camera per minute, oldest first, but it has two
+  // deliberate ways to repeat or rewind a label (a clock step re-baselines the camera, or closes minutes
+  // that were filed ahead of the clock), and a payload that skips minutes is how an outage shows up at all
+  // (see lastAt in the state comment). Both of the next two branches protect the arithmetic below, which
+  // subtracts labels and would otherwise go negative or double-count.
+  //   * The SAME label again: counted once and ignored. DEFENSIVE ONLY: 660 clock-step scenarios through the
+  //     real tracker (plan review, #448) never produced two equal labels back to back, a re-lived minute
+  //     follows a BACKWARD label ("19:05 19:02 19:03"), so this is a cheap guard for a path nobody has seen,
+  //     which keeps "deduplicate repeated buckets" (the issue's wording) true rather than assumed.
+  //   * An OLDER label: time went backwards. That one IS reachable. Whether the minutes either side of the
+  //     step are continuous is unknowable and label arithmetic across it means nothing, so the run is ended,
+  //     the settling progress is dropped, and this sample becomes the new baseline and is processed normally.
+  //     Conservative on purpose: the nightly job merges the re-lived minutes into one timeline, so it would not
+  //     split here, and we lose at most one run. Dropping older labels instead (the obvious alternative) would
+  //     deafen the watcher for as long as the step: a one-hour step is an hour of missed wakes.
+  if (st.lastAt != null) {
+    if (at === st.lastAt) return null;
+    if (at < st.lastAt) {
+      // Same as the bridge case below: a run that already captured is not "nothing recorded", so it logs nothing.
+      endRun(cameraId, st, st.run?.captured ? null : 'the clock went back');
+      st.quietRun = 0;
+    }
+  }
+  // Whole minutes since the last accepted payload: 1 = the very next minute, 2 = one minute had no payload.
+  // Math.round, not floor: labels are minute-aligned so the division is already exact; round only keeps a
+  // stray sub-minute label from truncating a real gap down by one.
+  const elapsedMin = st.lastAt == null || at < st.lastAt ? 1 : Math.round((at - st.lastAt) / MINUTE_MS);
+  const missingMin = elapsedMin - 1; // minutes with NO payload between the last one and this one
+  st.lastAt = at;
+
   // --- onset gate: nothing is recorded until the child is actually asleep ---
   if (!st.asleep) {
+    // ★ Settling needs ONSET_QUIET_MIN CONSECUTIVE OBSERVED quiet minutes (#448, acceptance criterion 3 of the
+    // issue: "time spent in a gap cannot count toward the 15 minutes"). Before, quietRun counted CALLBACKS, so
+    // 14 quiet minutes, a 40-minute outage and 1 more quiet minute read as "15 quiet minutes" and armed the
+    // watcher on a child whose last 40 minutes nobody saw. A hole restarts the count.
+    // ⚠️ Deliberately STRICTER than the nightly onset rule (sleepAnalysis.js), which accepts a 15-minute window
+    // with no active minute and >= ONSET_QUIET_MIN * MIN_COVERAGE_FRAC (8) confirmed-quiet minutes, because
+    // requiring a fully observed window regressed flaky cameras to `no_sleep` (#442). The live gate's only job
+    // is to keep bedtime settling OUT of the recorder, so the safe error here is arming LATE (a missed clip,
+    // never an alert). The price, stated: a camera that drops a minute more often than about every 15 minutes
+    // never arms. Measured on two cameras in one house over 30 days (plan, #448): about 10 holes of 4+ minutes
+    // per camera per month, so a night is rarely delayed; unknown on any other install. KNOWN-ISSUES.md says
+    // the same. If that is too strict, the nightly 8-of-15 rule is one function away; no new number needed.
+    if (missingMin > 0) st.quietRun = 0;
     st.quietRun = active ? 0 : st.quietRun + 1;
     if (st.quietRun >= ONSET_QUIET_MIN) {
       st.asleep = true;
@@ -120,6 +177,32 @@ export function handleMinute({ cameraId, bucketStart, motionPeak, soundPeak }) {
       logger.info(`[wake] "${camera.name}" settled — watching for wakes`);
     }
     return null;
+  }
+
+  // --- ONE bridge rule for the active branch and the quiet branch (#448) ---
+  // The nightly job's rule (markWakeRuns) is: two active minutes belong to one run when the NON-ACTIVE
+  // minutes between them number <= WAKE_GAP_MIN, whether those minutes were observed-quiet or had no reading
+  // at all (an unobserved minute is non-active there). Here, `nonActive` is the count of such minutes so
+  // far: a quiet sample d minutes after the last active one has d of them; an ACTIVE sample d minutes after
+  // has d - 1 BETWEEN them (this sample is the next active minute, it is not in the gap). That "- 1" is the
+  // whole off-by-one: the quiet branch ends a run at d >= 4 (as it always did), the active branch at d >= 5,
+  // exactly the nightly `g - k <= WAKE_GAP_MIN`. Before #448 only the quiet branch checked, so an active
+  // sample after a hole topped the old run up however long the hole was.
+  // Measured from the last ACTIVE minute, not from the last payload: quiet payloads inside the gap are
+  // part of the gap, and a hole after them extends it (a rule that restarts the clock at every payload would
+  // bridge "4 active, 2 quiet, 2 missing, active", which the nightly job splits).
+  // The same constant as the nightly job, by reference: a retune of WAKE_GAP_MIN moves both together.
+  // An ARMED watcher stays armed across a hole (only the settling progress above is reset): disarming would
+  // drop a real wake that follows a reconnect, and the arming gate exists only to keep bedtime settling out.
+  if (st.run) {
+    const sinceActiveMin = Math.round((at - st.run.lastActiveMs) / MINUTE_MS);
+    const nonActive = active ? sinceActiveMin - 1 : sinceActiveMin;
+    if (nonActive > WAKE_GAP_MIN) {
+      // "readings N min apart" and not "no readings for N min": a forward clock jump looks identical to a
+      // hole in the labels, and the log must not claim an outage it cannot see.
+      const why = missingMin > 0 ? `readings ${elapsedMin} min apart` : 'stir, under the wake threshold';
+      endRun(cameraId, st, st.run.captured ? null : why);
+    }
   }
 
   if (active) {
@@ -147,6 +230,11 @@ export function handleMinute({ cameraId, bucketStart, motionPeak, soundPeak }) {
     if (!st.run.captured && st.run.activeCount >= WAKE_ACTIVE_MIN) {
       st.run.captured = true;
       const startMs = st.run.startMs;
+      // The run THIS capture belongs to, by identity (#448). The `.finally` below used to ask "is the current
+      // run's startMs still mine?", but a backward clock step re-baselines the watcher and can start a NEW run
+      // whose first label equals this run's startMs while this capture is still extracting; the old guard then
+      // released the NEW run's hold (one WAKE owner key per camera). Found by plan review, verified by running.
+      const run = st.run;
       logger.info(
         `[wake] "${camera.name}" awake (${st.run.activeCount} active min) — recording the opening, no alert`
       );
@@ -160,9 +248,9 @@ export function handleMinute({ cameraId, bucketStart, motionPeak, soundPeak }) {
         // guard with an assumption about another module.
         .catch((err) => logger.error(`[wake] capture failed for "${camera.name}": ${err.message}`))
         .finally(() => {
-          if (st.run?.holding && st.run.startMs === startMs) {
+          if (st.run === run && run.holding) {
             releaseRing(cameraId, RING_OWNER.WAKE);
-            st.run.holding = false;
+            run.holding = false;
           }
         });
       return { captured: true, startMs };
@@ -170,13 +258,8 @@ export function handleMinute({ cameraId, bucketStart, motionPeak, soundPeak }) {
     return null;
   }
 
-  // Quiet minute. A wake can be intermittent, so short gaps are bridged; a longer one ends the run.
-  if (st.run) {
-    const gapMin = Math.round((at - st.run.lastActiveMs) / MINUTE_MS);
-    if (gapMin > WAKE_GAP_MIN) {
-      endRun(cameraId, st, st.run.captured ? null : 'stir, under the wake threshold');
-    }
-  }
+  // Quiet minute: a wake can be intermittent, so short gaps are bridged and a longer one ended the run in
+  // the bridge rule above. Nothing more to do.
   return null;
 }
 

@@ -28,6 +28,7 @@ const { SLEEP_THRESHOLDS } = await import('../src/lib/sleepAnalysis.js');
 const { startSegmenter, stopAllSegmenters, isSegmenterRunning, ringDepthMs } = await import('../src/lib/clipRecorder.js');
 const { holdOwners, effectiveHold, RING_OWNER } = await import('../src/lib/ringHolds.js');
 const activity = await import('../src/lib/activityTracker.js');
+const { logger } = await import('../src/lib/logger.js');
 const { handleMinute, startWakeWatcher, stopWakeWatcher, sweepStaleRuns, _state } =
   await import('../src/lib/wakeWatcher.js');
 
@@ -53,15 +54,34 @@ function windowAroundNow() {
 }
 
 // A minute of activity, `n` minutes after the run's notional start.
+//
+// ⚠️ #448: the labels are measured from ONE minute-aligned instant fixed when the file loads, not from
+// Date.now() at every call. The watcher now treats the distance between two labels as elapsed TIME, so a
+// wall clock that rolled over a minute boundary between two calls of a test would shift the later label by a
+// whole minute and read as a one-minute hole (or a repeated label), breaking settle() about once in every
+// few thousand runs. The window the watcher checks is the real clock's (windowAroundNow), unaffected.
+const BASE_MS = Math.floor(Date.now() / 60_000) * 60_000;
 let clock = 0;
-function minute({ motion = 0, sound = 0 } = {}) {
-  const t = new Date(Date.now() - (200 - clock) * 60 * 1000);
-  clock++;
+// Start (ms) of the minute the label `idx` names; the watcher's own `at` for it is this + 60 s.
+const labelStartMs = (idx) => BASE_MS - (200 - idx) * 60 * 1000;
+function labelFor(idx) {
+  const t = new Date(labelStartMs(idx));
   const p = (x) => String(x).padStart(2, '0');
-  const bucketStart =
-    `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())}:00`;
-  return handleMinute({ cameraId: CAM, bucketStart, motionPeak: motion, soundPeak: sound });
+  return `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())}:00`;
 }
+const deliver = (bucketStart, motion = 0, sound = 0) =>
+  handleMinute({ cameraId: CAM, bucketStart, motionPeak: motion, soundPeak: sound });
+function minute({ motion = 0, sound = 0 } = {}) {
+  const idx = clock;
+  clock++;
+  return deliver(labelFor(idx), motion, sound);
+}
+// The notional clock moves on by `n` minutes without a payload: what an outage looks like to the watcher,
+// because activityTracker sends nothing at all for a minute with neither a motion frame nor a sound window.
+const skip = (n) => { clock += n; };
+// Where the watcher puts a run that starts at label `idx` (the minute's END, #447).
+const endMs = (idx) => labelStartMs(idx) + 60 * 1000;
+const stateOf = () => _state().get(CAM);
 
 const quiet = () => minute({ motion: 0, sound: 0 });
 const loud = () => minute({ sound: SOUND_ACTIVE + 10 });
@@ -476,6 +496,523 @@ describe('★ what the numbers MEAN, in real readings rather than expressions', 
     minute({ motion: 0.05 });
     for (let i = 0; i < 30; i++) quiet();
     assert.equal(_state().get(CAM).run, null, 'a thirty-minute silence did not end the run');
+  });
+
+  // #448 (C16). The bridge limit is in MINUTES, whoever did or did not report them: the literals 3 and 4 are
+  // the WAKE_GAP_MIN boundary spelled out (a gap of 3 non-active minutes bridges, 4 splits, as the nightly
+  // job's markWakeRuns), so a drift of the constant breaks a named test without any fixture being derived
+  // from it. Both kinds of gap: minutes that arrived quiet, and minutes that never arrived at all.
+  for (const [what, fill] of [
+    ['unreported minutes', (n) => { clock += n; }],
+    ['quiet minutes', (n) => { for (let i = 0; i < n; i++) quiet(); }],
+  ]) {
+    test(`C16: five active minutes 3 ${what} apart are one wake; 4 ${what} apart are five stirs`, () => {
+      const wakeWithGap = (between) => {
+        settleLiterally();
+        let captures = 0;
+        for (let i = 0; i < 5; i++) {
+          if (minute({ motion: 0.05 })?.captured) captures++;
+          if (i < 4) fill(between);
+        }
+        return captures;
+      };
+      assert.equal(wakeWithGap(3), 1, `a gap of 3 ${what} should be bridged`);
+      _state().clear();
+      clock = 0;
+      assert.equal(wakeWithGap(4), 0, `a gap of 4 ${what} should split the run`);
+    });
+  }
+});
+
+describe('★ #448 — the watcher counts MINUTES, not callbacks', () => {
+  // The live watcher is the mirror of the nightly job's wake rule (sleepAnalysis.js markWakeRuns), and the
+  // nightly job treats a minute with no reading as NON-ACTIVE: a run bridges at most WAKE_GAP_MIN of them,
+  // observed-quiet or missing. Before #448 the watcher counted callbacks instead of minutes, which broke it
+  // three ways at once: an ACTIVE sample after a hole never checked elapsed time (the issue's repro: five
+  // active minutes ten minutes apart were ONE wake), settling counted callbacks (14 quiet minutes, a
+  // 40-minute outage and 1 more quiet minute armed the watcher), and the 20-minute sweep was never the
+  // bridge enforcer its header comment claimed.
+  //
+  // THE SHAPE OF A HOLE: activityTracker.closeMinute calls its listeners only `if (hasSignal(s))`, so a minute
+  // with neither a motion frame nor a sound window produces NO payload (not a payload of nulls). An outage is
+  // visible only as a jump in `bucketStart`; `skip(n)` is exactly that. C14 pins this premise against the
+  // real tracker instead of assuming it.
+  //
+  // ⚠️ SWEEP TRAP (plan review, verified): this file's labels sit ~200 minutes in the past, so
+  // sweepStaleRuns() with its default Date.now() would end EVERY run here and any test that calls it would
+  // pass on the old code. Every sweep call below takes the SIMULATED time (run.lastActiveMs + k minutes).
+
+  // Deliver `n` active minutes; the startMs of every capture they produced.
+  function actives(n, fn = moving) {
+    const got = [];
+    for (let i = 0; i < n; i++) {
+      const r = fn();
+      if (r?.captured) got.push(r.startMs);
+    }
+    return got;
+  }
+
+  // A REAL segmenter, as the #446 tests arm one (see that block for why): the entry exists only
+  // synchronously, so every call that needs it must run with no `await` in between.
+  function armSegmenterNow() {
+    const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(CAM);
+    startSegmenter(CAM, camera.mediamtx_path, { preRollSec: 5, postRollSec: 15 });
+    assert.equal(isSegmenterRunning(CAM), true, 'precondition: the segmenter armed synchronously');
+  }
+  const wakeClips = (on) => db.prepare("UPDATE settings SET wake_clips_enabled = ? WHERE id = 'app'").run(on ? 1 : 0);
+
+  describe('a hole in the readings is time, not nothing', () => {
+    test('C1: the issue\'s fixture (five active minutes ten minutes apart) is five stirs, not one wake', () => {
+      settle();
+      const got = [];
+      for (let i = 0; i < WAKE_ACTIVE_MIN; i++) {
+        const idx = clock;
+        const r = moving();
+        if (r?.captured) got.push(r.startMs);
+        const run = stateOf().run;
+        assert.equal(run.activeCount, 1, `active minute ${i + 1}: the run must have restarted after the hole`);
+        assert.equal(run.startMs, endMs(idx), `active minute ${i + 1}: the new run starts HERE`);
+        // C15: the 20-minute sweep is not what enforces the bridge. Ten minutes of simulated silence never
+        // reaches it, so a split that only happened because of the sweep would show up as a nonzero count.
+        for (let k = 1; k <= 9; k++) {
+          assert.equal(sweepStaleRuns(run.lastActiveMs + k * 60_000), 0, `C15: the sweep must not be what ends the run (+${k} min)`);
+        }
+        skip(9); // the next active minute is ten minutes after this one
+      }
+      assert.deepEqual(got, [], 'nothing may be recorded: the nightly job sees five one-minute runs, zero wakes');
+    });
+
+    test(`C2 (control): five active minutes ${WAKE_GAP_MIN} unreported minutes apart are still ONE wake`, () => {
+      settle();
+      const got = [];
+      for (let i = 0; i < WAKE_ACTIVE_MIN; i++) {
+        got.push(...actives(1));
+        if (i < WAKE_ACTIVE_MIN - 1) skip(WAKE_GAP_MIN);
+      }
+      assert.deepEqual(got, [endMs(ONSET_QUIET_MIN)], 'a gap of exactly the bridge limit is bridged, whoever did not report it');
+    });
+
+    test(`C3: one minute past the bridge (${WAKE_GAP_MIN + 1} unreported minutes) splits the run`, () => {
+      settle();
+      const got = [];
+      for (let i = 0; i < WAKE_ACTIVE_MIN; i++) {
+        got.push(...actives(1));
+        assert.equal(stateOf().run.activeCount, 1, `active minute ${i + 1}: each one opens a fresh run`);
+        skip(WAKE_GAP_MIN + 1);
+      }
+      assert.deepEqual(got, []);
+    });
+
+    test(`C4a (control): the quiet branch is unchanged — ${WAKE_GAP_MIN} quiet minutes still bridge`, () => {
+      settle();
+      actives(WAKE_ACTIVE_MIN - 1);
+      for (let g = 0; g < WAKE_GAP_MIN; g++) quiet();
+      assert.deepEqual(actives(1), [endMs(ONSET_QUIET_MIN)]);
+    });
+
+    test(`C4b (control): the quiet branch is unchanged — ${WAKE_GAP_MIN + 1} quiet minutes end the run`, () => {
+      settle();
+      actives(WAKE_ACTIVE_MIN - 1);
+      for (let g = 0; g < WAKE_GAP_MIN + 1; g++) quiet();
+      assert.equal(stateOf().run, null, 'ended by the quiet minute that made the gap one too long');
+      assert.deepEqual(actives(1), [], 'the fifth active minute starts a fresh run, it does not complete the old one');
+    });
+
+    test('C5: two real wakes with an outage between them are two captures, not one', () => {
+      settle();
+      const first = actives(WAKE_ACTIVE_MIN);
+      skip(10);
+      const second = actives(WAKE_ACTIVE_MIN);
+      assert.equal(first.length, 1);
+      assert.equal(second.length, 1, 'the second wake was merged into the first');
+      assert.equal(second[0] - first[0], (WAKE_ACTIVE_MIN + 10) * 60_000, 'the second clip starts at the second wake');
+    });
+
+    test('C12b: the bridge is measured from the last ACTIVE minute, not from the last payload', () => {
+      // 4 active, 2 quiet, 2 missing, active: 4 non-active minutes between the actives, which the nightly job
+      // splits. A rule that restarts its clock at every payload sees a gap of only 2 after the last quiet one,
+      // bridges, and records a wake: it passes C1, C3 and C5 and fails only here.
+      settle();
+      actives(WAKE_ACTIVE_MIN - 1);
+      quiet();
+      quiet();
+      skip(2);
+      assert.deepEqual(actives(1), [], 'a hole after quiet payloads extends the same gap');
+      assert.equal(stateOf().run.activeCount, 1);
+    });
+
+    test('C8 (control): a hole does NOT disarm an armed watcher', () => {
+      // Only the settling PROGRESS is reset by a hole. Disarming would drop a real wake that follows a camera
+      // reconnect, and the arming gate exists only to keep bedtime settling out of the recorder.
+      settle();
+      skip(90);
+      assert.deepEqual(actives(WAKE_ACTIVE_MIN), [endMs(ONSET_QUIET_MIN + 90)]);
+      assert.equal(stateOf().asleep, true);
+    });
+  });
+
+  describe('settling needs consecutive OBSERVED minutes', () => {
+    test('C6: 14 quiet minutes, one missing minute, 1 more is NOT asleep; the count restarted at the hole', () => {
+      for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) quiet();
+      skip(1);
+      quiet();
+      assert.equal(stateOf().asleep, false, 'the missing minute counted toward the 15');
+      assert.equal(stateOf().quietRun, 1, 'the count restarted at the hole');
+      for (let i = 0; i < ONSET_QUIET_MIN - 2; i++) quiet();
+      assert.equal(stateOf().asleep, false, 'fourteen consecutive observed minutes since the hole: one short');
+      quiet();
+      assert.equal(stateOf().asleep, true, 'fifteen consecutive observed minutes since the hole');
+    });
+
+    test('C7: a LONG outage is not settled time either (14 quiet, 60 missing, 1 more)', () => {
+      for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) quiet();
+      skip(60);
+      quiet();
+      assert.equal(stateOf().asleep, false, 'an hour nobody saw armed the watcher');
+      for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) quiet();
+      assert.equal(stateOf().asleep, true, 'control half: 15 contiguous observed minutes do arm it');
+    });
+  });
+
+  describe('an ordering guard on the labels', () => {
+    test('C9: a repeated label counts ONCE (defensive branch): five copies of one active minute are not a wake', () => {
+      settle();
+      const idx = clock;
+      moving();
+      for (let i = 0; i < WAKE_ACTIVE_MIN; i++) {
+        assert.equal(deliver(labelFor(idx), MOTION_ACTIVE + 0.05), null, 'a repeated label must never capture');
+      }
+      assert.equal(stateOf().run.activeCount, 1, 'the copies were counted');
+    });
+
+    test('C9b: a repeated QUIET label does not advance settling', () => {
+      for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) quiet();
+      const idx = clock - 1;
+      for (let i = 0; i < 3; i++) deliver(labelFor(idx), 0, 0);
+      assert.equal(stateOf().asleep, false, 'a repeated label counted as a new quiet minute');
+      assert.equal(stateOf().quietRun, ONSET_QUIET_MIN - 1);
+      quiet();
+      assert.equal(stateOf().asleep, true);
+    });
+
+    test('C10: a label that goes BACKWARDS ends the run and re-baselines: not deaf, and no inherited count', () => {
+      settle();
+      actives(3);
+      assert.equal(stateOf().run.activeCount, 3, 'precondition');
+      clock -= 60; // the wall clock steps back an hour
+      const stepIdx = clock;
+      const calls = [];
+      for (let i = 0; i < WAKE_ACTIVE_MIN; i++) {
+        calls.push(moving());
+        if (i === 0) {
+          assert.equal(stateOf().run.activeCount, 1, 'the run before the step was ended, not extended');
+          assert.equal(stateOf().run.startMs, endMs(stepIdx), 'the new run starts at the first label after the step');
+        }
+      }
+      // WHICH call captures and WHICH startMs is what discriminates: today's code carries the old count over and
+      // captures on the 2nd call with the old run's startMs; a "drop older labels" version never captures.
+      assert.deepEqual(calls.map((r) => r?.captured === true), [false, false, false, false, true], 'the 5th call, not an earlier one');
+      assert.equal(calls[4].startMs, endMs(stepIdx), 'startMs is the first of the five re-lived minutes');
+    });
+
+    test('C10b: a backward label resets the settling progress (14 quiet, step back, quiet is not asleep)', () => {
+      for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) quiet();
+      clock = 2;
+      quiet(); // the first minute after the step
+      assert.equal(stateOf().asleep, false, 'progress made before the step was carried across it');
+      assert.equal(stateOf().quietRun, 1);
+      for (let i = 0; i < ONSET_QUIET_MIN - 2; i++) quiet();
+      assert.equal(stateOf().asleep, false);
+      quiet();
+      assert.equal(stateOf().asleep, true, 'fifteen consecutive minutes after the step');
+    });
+
+    test('C12: reset() forgets lastAt: a label re-delivered after the watcher left the window is a NEW minute', () => {
+      // Not "the first sample after returning counts 1": that passes whether or not lastAt was cleared
+      // (plan review verified). Re-delivering the label from just BEFORE the reset is what tells them apart:
+      // cleared, it is a fresh quiet minute; kept, it is a repeated label and is ignored.
+      for (let i = 0; i < 5; i++) quiet();
+      const lastIdx = clock - 1;
+      assert.equal(stateOf().lastAt, endMs(lastIdx), 'precondition: lastAt follows the last accepted label');
+      db.prepare('UPDATE children SET track_sleep = 0 WHERE id = ?').run(CHILD);
+      try {
+        quiet(); // out of tracking: the watcher resets
+      } finally {
+        db.prepare('UPDATE children SET track_sleep = 1 WHERE id = ?').run(CHILD);
+      }
+      assert.equal(stateOf().quietRun, 0);
+      assert.equal(stateOf().lastAt, null, 'reset() left a stale lastAt behind');
+      clock = lastIdx;
+      quiet();
+      assert.equal(stateOf().quietRun, 1, 'the re-delivered label was treated as a repeat of the one before the reset');
+    });
+  });
+
+  describe('the ring hold follows the run', () => {
+    test('C11: after a hole the NEW run holds from ITS first minute, with one WAKE owner and a log line', () => {
+      try {
+        wakeClips(true);
+        armSegmenterNow();
+        settle();
+        logger.clear();
+        const t0 = clock;
+        moving();
+        assert.equal(effectiveHold(CAM), endMs(t0) - 15_000, 'precondition: held from the first minute');
+        skip(10);
+        const t1 = clock;
+        moving();
+        assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE]);
+        assert.equal(effectiveHold(CAM), endMs(t1) - 15_000, 'the hold is still anchored on the run the hole ended');
+        assert.ok(
+          logger.getRecent().some((l) => l.includes('run ended (readings 11 min apart)')),
+          'the log must say the READINGS were apart (a forward clock jump looks the same), not claim an outage'
+        );
+      } finally {
+        wakeClips(true);
+      }
+    });
+
+    test('C11 (leak half): the ended run\'s hold is RELEASED even when the new run takes none (wake clips switched off in the hole)', () => {
+      // One hold slot per owner: with wake clips on, the new run's hold would overwrite the old one and hide a
+      // missed release. Switching them off during the hole is what makes a leak visible.
+      try {
+        wakeClips(true);
+        armSegmenterNow();
+        settle();
+        moving();
+        assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE], 'precondition');
+        skip(10);
+        wakeClips(false);
+        moving();
+        assert.deepEqual(holdOwners(CAM), [], 'the old run\'s hold leaked');
+      } finally {
+        wakeClips(true);
+      }
+    });
+
+    test('C11b: the late .finally of an OLD capture cannot release a NEW run\'s hold (run identity, not startMs)', async () => {
+      // Everything up to the first await is synchronous so the segmenter entry exists and the old capture's
+      // promise chain has not run yet. The old run captures (clips switched off just before, so the attempt
+      // resolves at once and its .finally is queued); the clock steps back to exactly the first label, which
+      // starts a NEW run with the SAME startMs and its own hold. A guard on startMs equality releases it.
+      try {
+        wakeClips(true);
+        armSegmenterNow();
+        settle();
+        const firstIdx = clock;
+        moving();
+        assert.equal(stateOf().run.holding, true, 'precondition: the first minute took a hold');
+        wakeClips(false);
+        for (let i = 1; i < WAKE_ACTIVE_MIN; i++) moving();
+        const oldRun = stateOf().run;
+        assert.equal(oldRun.captured, true, 'precondition: the run captured');
+        wakeClips(true);
+        clock = firstIdx;
+        moving();
+        const newRun = stateOf().run;
+        assert.notEqual(newRun, oldRun);
+        assert.equal(newRun.startMs, oldRun.startMs, 'precondition: the same startMs, which is what fooled the old guard');
+        assert.equal(newRun.holding, true, 'precondition: the new run took its own hold');
+        await new Promise((resolve) => setImmediate(resolve)); // NOW the old capture's .finally runs
+        assert.equal(stateOf().run, newRun);
+        assert.equal(newRun.holding, true, 'the old capture released the new run\'s hold');
+        assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE]);
+      } finally {
+        wakeClips(true);
+      }
+    });
+  });
+
+  describe('the model: the live watcher against the nightly job\'s rule, on hostile timelines', () => {
+    // A small seeded PRNG so a failure names its seed and can be replayed exactly.
+    function mulberry32(seed) {
+      let a = seed >>> 0;
+      return () => {
+        a = (a + 0x6d2b79f5) >>> 0;
+        let t = a;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    // A STRUCTURED timeline, one char per minute: Q = a quiet payload, A = an active payload, H = a hole (no
+    // payload at all). Uniform random slots would almost never arm (15 quiet payloads in a row at 1/3 each),
+    // so the run-splitting code would go unexercised and the test would pass vacuously: a settle block first
+    // (sometimes with one hole or one active inside it), then bursts of 1-8 actives separated by 0-6 holes or
+    // quiet payloads (per timeline: all holes, all quiet, or a mix), so gaps land on both sides of every bridge
+    // limit in both branches.
+    function buildTimeline(rand) {
+      const int = (lo, hi) => lo + Math.floor(rand() * (hi - lo + 1));
+      const slots = [];
+      const settleLen = int(15, 25);
+      for (let i = 0; i < settleLen; i++) slots.push('Q');
+      const r = rand();
+      if (r < 0.3) slots[int(0, settleLen - 1)] = 'H';
+      else if (r < 0.5) slots[int(0, settleLen - 1)] = 'A';
+      const holeProb = [0, 0.5, 1][int(0, 2)];
+      const target = int(60, 100);
+      while (slots.length < target) {
+        const burst = int(1, 8);
+        for (let i = 0; i < burst; i++) slots.push('A');
+        const gap = int(0, 6);
+        for (let i = 0; i < gap; i++) slots.push(rand() < holeProb ? 'H' : 'Q');
+      }
+      slots.length = Math.min(slots.length, 100);
+      return slots.join('');
+    }
+
+    // The OFFLINE reference: the whole timeline at once, the nightly job's semantics (sleepAnalysis.js
+    // markWakeRuns: a minute with no payload is non-active, a run bridges <= WAKE_GAP_MIN non-active minutes,
+    // a run with >= WAKE_ACTIVE_MIN actives is a wake), and the live arming rule (the first
+    // ONSET_QUIET_MIN consecutive payloads that are all quiet). It reads only the timeline array: it shares no
+    // state, no `lastAt`, no bridge arithmetic with handleMinute.
+    function reference(timeline) {
+      const n = timeline.length;
+      let armedAt = -1;
+      let streak = 0;
+      for (let i = 0; i < n && armedAt < 0; i++) {
+        streak = timeline[i] === 'Q' ? streak + 1 : 0;
+        if (streak >= ONSET_QUIET_MIN) armedAt = i;
+      }
+      if (armedAt < 0) return { armedAt, startMs: [] };
+      const active = Array.from(timeline, (c, i) => i > armedAt && c === 'A');
+      const startMs = [];
+      for (let i = armedAt + 1; i < n; ) {
+        if (!active[i]) { i++; continue; }
+        let last = i;
+        let count = 0;
+        let k = i;
+        while (k < n) {
+          if (active[k]) { last = k; count++; k++; continue; }
+          let g = k;
+          while (g < n && !active[g]) g++;
+          if (g < n && g - k <= WAKE_GAP_MIN) { k = g; continue; }
+          break;
+        }
+        if (count >= WAKE_ACTIVE_MIN) startMs.push(endMs(i));
+        i = last + 1;
+      }
+      return { armedAt, startMs };
+    }
+
+    // Feed a timeline to the real handler. `dupRand`, when given, re-delivers some payloads' labels right
+    // after them with the OPPOSITE kind of reading (an active copy of a quiet minute and vice versa): a
+    // repeated label has to be ignored whatever it says.
+    function replay(timeline, dupRand = null) {
+      _state().clear();
+      const startMs = [];
+      for (let i = 0; i < timeline.length; i++) {
+        const c = timeline[i];
+        if (c === 'H') continue;
+        const r = deliver(labelFor(i), c === 'A' ? MOTION_ACTIVE + 0.05 : 0, 0);
+        if (r?.captured) startMs.push(r.startMs);
+        if (dupRand && dupRand() < 0.25) {
+          const copy = deliver(labelFor(i), c === 'A' ? 0 : MOTION_ACTIVE + 0.05, 0);
+          assert.equal(copy, null, `a repeated label captured (minute ${i} of ${timeline})`);
+        }
+      }
+      return startMs;
+    }
+
+    // ⚠️ WHY 250 AND NOT MORE: measured, one handleMinute call costs ~0.65 ms here (childWindowActiveNow builds
+    // several Intl.DateTimeFormat objects per call, and sleepAnalysis.js is not ours to change or mock), so the
+    // 250 timelines of 60-100 minutes (a quarter of them replayed a second time with repeated labels) take
+    // ~15 s. The seeds are fixed, so the counts below are exactly reproducible; the floors sit under what the
+    // generator produces today and exist to catch a generator edit that makes the comparison vacuous.
+    test('C13: 250 seeded timelines: the watcher\'s captures equal the offline reference, with and without repeated labels', () => {
+      const SEQUENCES = 250;
+      const SEED0 = 448000;
+      let armed = 0;
+      let withCapture = 0;
+      let holeSplits = 0;
+      let holeBridges = 0;
+      let holesDecide = 0;
+      const realInfo = logger.info;
+      logger.info = () => {}; // thousands of "settled"/"awake" lines would bury the report
+      try {
+        wakeClips(false); // captureWakeClip resolves at once: this test is about the decision, not the cut
+        for (let s = 0; s < SEQUENCES; s++) {
+          const seed = SEED0 + s;
+          const timeline = buildTimeline(mulberry32(seed));
+          const want = reference(timeline);
+          const where = `seed ${seed}: ${timeline}`;
+          assert.deepEqual(replay(timeline), want.startMs, `captures differ from the nightly rule (${where})`);
+          if (s % 4 === 0) {
+            assert.deepEqual(
+              replay(timeline, mulberry32(seed ^ 0x5bd1e995)), want.startMs,
+              `repeated labels changed the result (${where})`
+            );
+          }
+          if (want.armedAt >= 0) {
+            armed++;
+            const after = timeline.slice(want.armedAt + 1);
+            if (want.startMs.length) withCapture++;
+            // A pure hole longer than the bridge, directly between two active minutes, and one of exactly the bridge.
+            if (new RegExp(`AH{${WAKE_GAP_MIN + 1},}A`).test(after)) holeSplits++;
+            if (new RegExp(`AH{${WAKE_GAP_MIN}}A`).test(after)) holeBridges++;
+            // The old, callback-counting behaviour is the same timeline with the holes squeezed out. How many
+            // timelines does that change the NUMBER of wakes for (or whether it arms)? Those are the ones this
+            // test can fail on the old code with; if the generator stops producing them it proves nothing.
+            if (reference(timeline.replace(/H/g, '')).startMs.length !== want.startMs.length) holesDecide++;
+          }
+        }
+      } finally {
+        logger.info = realInfo;
+        wakeClips(true);
+      }
+      // The coverage floors: if the generator regresses, the comparison above could pass without ever
+      // exercising a split, a bridge or a capture. They are asserts, not logs.
+      assert.ok(armed >= 150, `only ${armed} of ${SEQUENCES} timelines armed the watcher`);
+      assert.ok(withCapture >= 150, `only ${withCapture} timelines produced a capture`);
+      assert.ok(holeSplits >= 40, `only ${holeSplits} timelines had a hole longer than the bridge between two actives`);
+      assert.ok(holeBridges >= 30, `only ${holeBridges} timelines had a hole of exactly the bridge between two actives`);
+      assert.ok(holesDecide >= 20, `only ${holesDecide} timelines where counting callbacks instead of minutes changes the answer`);
+    });
+  });
+
+  describe('the premise, against the real tracker', () => {
+    test('C14: an outage delivers NO payload, and the watcher then does not bridge it (end to end)', () => {
+      activity._resetActivityTrackerForTests();
+      const seen = [];
+      const offSeen = activity.onMinuteFlushed((p) => seen.push(p.bucketStart));
+      const off = activity.onMinuteFlushed(handleMinute);
+      // Explicit receipt times well inside the past: the window the watcher checks is the real clock's, the
+      // labels are not. Same technique as the #447 block above (recordMotion with a receipt time, flushActivity
+      // with the tick's time).
+      const M0 = BASE_MS - 150 * 60_000;
+      const minuteAt = (i) => M0 + i * 60_000;
+      const labelAt = (i) => new Date(minuteAt(i)).toISOString().slice(0, 19).replace('T', ' ');
+      const feed = (i, fraction) => {
+        activity.recordMotion(CAM, fraction, null, minuteAt(i) + 20_000);
+        activity.flushActivity(minuteAt(i + 1) + 900); // the tick just after the minute ends
+      };
+      const outage = (i) => activity.flushActivity(minuteAt(i + 1) + 900); // the tick runs, nothing was received
+      try {
+        for (let i = 0; i < ONSET_QUIET_MIN; i++) feed(i, 0);
+        assert.equal(stateOf().asleep, true, 'precondition: 15 observed quiet minutes arm the watcher');
+        for (let i = 15; i < 15 + WAKE_ACTIVE_MIN - 1; i++) feed(i, MOTION_ACTIVE + 0.05);
+        assert.equal(stateOf().run.activeCount, WAKE_ACTIVE_MIN - 1, 'precondition: one active minute short of a wake');
+        for (let i = 19; i < 29; i++) outage(i); // ten minutes with no motion frame and no sound window
+        feed(29, MOTION_ACTIVE + 0.05);
+
+        // The premise: the tracker skipped the ten minutes instead of sending nulls for them.
+        const expected = [];
+        for (let i = 0; i <= 18; i++) expected.push(labelAt(i));
+        expected.push(labelAt(29));
+        assert.deepEqual(seen, expected, 'the tracker must send nothing for a minute with no signal');
+
+        // The chain: the watcher saw the jump and did not bridge it.
+        const run = stateOf().run;
+        assert.equal(run.activeCount, 1, 'the active minute after a ten-minute outage topped up the old run');
+        assert.equal(run.captured, false);
+        assert.equal(run.startMs, minuteAt(29) + 60_000);
+      } finally {
+        off();
+        offSeen();
+        activity._resetActivityTrackerForTests();
+      }
+    });
   });
 });
 
