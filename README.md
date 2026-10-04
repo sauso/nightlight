@@ -303,6 +303,30 @@ measurement**, and (like everything here) never a safety device — see the warn
   over register as movement outside the bed, and can stop a real climb-out being recognised.
   Only clearly-outside-the-bed movement is listed; faint changes (a shadow, the camera's
   night-vision adjusting) are ignored rather than reported as someone in the room.
+- **When the motion camera samples.** The movement timeline comes from a frame-by-frame motion leg that
+  reads the camera's low-resolution stream. When it runs depends on how the camera's motion is set up:
+
+  | Camera | When the leg runs |
+  |---|---|
+  | Frame-diff source with motion alerts on | around the clock (it is alerting anyway) |
+  | Motion alerts off, or motion from MQTT or ONVIF, on a camera assigned to a child who tracks sleep | only from **3 hours before the sleep window opens to 3 hours after it closes** |
+  | Not assigned to a child, or the child's sleep tracking is off | not at all (unless it alerts) |
+
+  The 3 + 3 hours are the same distance either side that the detector widens the window by (asleep times
+  are looked for from 3 hours before the window opens, wake-ups up to 3 hours after it closes). A camera
+  that stopped sampling sooner would never see a morning departure that comes after the window, and a
+  window that opens shortly after midnight (00:00 to 02:59) is sampled from the previous evening. The leg
+  starts and stops on the server's 5-minute check, so it begins up to 5 minutes after the 3-hour mark and
+  lingers 5 to 10 minutes after the closing one.
+  - **The cost:** about 3 hours more a day of one low-resolution video decode per such camera (15 hours a
+    day becomes 18 for a 19:00-07:00 window). That is a relative figure; the extra CPU was not measured.
+    A frame-diff camera with motion alerts on already runs all day and costs nothing extra.
+  - **What is not widened:** none of these is widened to 3 hours. The timelapse records only inside the
+    sleep window itself. The live wake watcher (which also decides wake clips) uses the window plus 5
+    minutes either side.
+  - **Known limits:** a departure later than 3 hours after the window closes is not seen by any camera, and
+    for a camera of this kind the morning review has no recorded *got out / into bed* events after about
+    3 hours past the window's end, because nothing past that point feeds the night's numbers.
 - **Getting up for the day.** The morning wake is the point the bed empties and stays empty, rather
   than the last movement seen in it — otherwise a parent stripping the bed an hour later would be
   reported as the child waking. A single stray minute of movement in an otherwise still bed (an adult

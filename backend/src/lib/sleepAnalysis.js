@@ -298,46 +298,88 @@ export function childTracksSleep(childId) {
   return childSleepConfig(childId).track;
 }
 
-// A few minutes of slack on each side of the window so the 5-min reconcile that starts/stops the
-// activity leg never clips the window edges: the leg is running a touch before bedtime and lingers a
-// touch past wake, guaranteeing full coverage of [start, end) even with the reconcile's granularity.
+// Slack for the 5-min reconcile (index.js reconcileCameraPaths) that starts and stops the activity leg.
+// It is the END-edge slack of every gate below, so the leg lingers 5-10 min past the edge it is told to
+// stop at and the final minute before that edge is flushed (activityTracker closes a minute on a 1 s
+// tick) before the leg is torn down. childWindowActiveNow additionally uses it as its LEAD (5 min before
+// the window start). The sampling gate has no start slack: its lead is the 3 h lookbehind, and the leg
+// begins 0-5 min after that edge (plus the wait for the stream path), a known limit in the README.
 const WINDOW_MARGIN_MS = 5 * 60 * 1000;
 
-// Is this child's sleep window open RIGHT NOW (within the small margin above)? The activity-only motion
-// leg is gated on this so it only samples overnight, not all day — there's no point running it outside
-// each child's window. Returns false when the child doesn't track sleep. (Frame-diff ALERT legs are not
-// gated on this; they run 24/7 regardless — see motionDetector.motionLegWanted.)
-function windowOpenNow(childId, leadMs) {
+// Is this child's sleep window open RIGHT NOW, widened by `leadMs` before its start and `trailMs` after
+// its end? The activity-only motion leg is gated on this so it only samples around the sleep window, not
+// all day. Returns false when the child doesn't track sleep. (Frame-diff ALERT legs are not gated on
+// this; they run 24/7 regardless - see motionDetector.motionLegWanted.)
+//
+// Candidate nights are today's (0) and yesterday's (-1), plus tomorrow's (+1) only when `nextNight`.
+// Why that range is enough, and no more: a night two or more days AHEAD cannot reach back to now,
+// because the lead (at most ONSET_LOOKBEHIND_MS, 3 h) is shorter than the shortest local day (23 h, on
+// a spring-forward day); and any night OLDER than yesterday that covers an instant also implies that
+// yesterday's night covers it (it starts before the instant and ends after it). Do not "explain" this
+// as consecutive windows abutting: they do not, a 19:00-07:00 child has a gap every day.
+//
+// Why +1 exists, and why it is sampling-only: a window opening 00:00-02:59 local has its 3 h lookbehind
+// on the PREVIOUS calendar day, so at 22:30 the instant belongs to TOMORROW's night (issue #353; the
+// old loop never tried it). childWindowActiveNow deliberately keeps {0, -1} so the wake watcher (which has
+// no second gate, wakeWatcher.js) behaves exactly as before this fix: its 5-minute lead has a known,
+// harmless gap for a window opening 00:00-00:04 (the wake watcher only arms once sleep has begun), and
+// the leg itself is covered by the 3 h lead of the sampling gate. (The timelapse is not the reason: it
+// also needs currentNightDate non-null, true only inside the configured window, see timelapse.js.)
+//
+// `leadMs` and `trailMs` are ABSOLUTE milliseconds added to real instants from windowBoundsUtc, exactly
+// as computeNight adds ONSET_LOOKBEHIND_MS and WAKE_LOOKAHEAD_MS, so on a DST night the lead and tail
+// are 3 REAL hours (the wall clock may differ by one) - the same horizon the inference reads.
+function windowOpenNow(childId, leadMs, trailMs, nextNight = false) {
   const cfg = childSleepConfig(childId);
   if (!cfg.track) return false;
   const tz = appSettings().timezone || 'UTC';
   const now = Date.now();
-  // Check today's window and yesterday's (a window that wraps midnight is still open in the small hours).
-  for (let delta = 0; delta >= -1; delta--) {
+  for (let delta = nextNight ? 1 : 0; delta >= -1; delta--) {
     const date = localDateStr(tz, delta);
     const { startUtc, endUtc } = windowBoundsUtc(date, tz, cfg.start, cfg.end);
-    if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + WINDOW_MARGIN_MS) return true;
+    if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return true;
   }
   return false;
 }
 
+// Unchanged on purpose by #353: the window itself with a 5-minute slack each side. It gates the wake
+// watcher, which has no second gate, so widening this to the sampling horizon below would move the wake
+// watcher's input (in a core module) for no benefit to #353. The timelapse also calls it, but is already
+// bounded by currentNightDate (non-null only inside the configured window), so it never captures outside
+// the window whatever this returns.
 export function childWindowActiveNow(childId) {
-  return windowOpenNow(childId, WINDOW_MARGIN_MS);
+  return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS);
 }
 
-// Should the activity-only SAMPLING leg be running now? Same window, but opened ONSET_LOOKBEHIND_MS
-// early so a child who goes down before their configured bedtime is already being sampled — otherwise
-// the lookbehind in computeNight has nothing to read and an early night is still clipped.
+// Should the activity-only SAMPLING leg be running now? The window opened ONSET_LOOKBEHIND_MS early and
+// closed WAKE_LOOKAHEAD_MS + WINDOW_MARGIN_MS late.
 //
-// Kept separate from childWindowActiveNow deliberately: that one also gates the timelapse, which should
-// keep starting at the configured bedtime rather than three hours before it. This only widens sampling.
+// Lead: so a child who goes down before their configured bedtime is already being sampled - otherwise the
+// lookbehind in computeNight has nothing to read and an early night is still clipped.
 //
-// It costs nothing on a framediff-ALERTING camera, which is never window-gated (motionLegWanted returns
-// early for those) and already samples 24/7 — measured at ~1437 of a possible 1440 rows/camera/day, or
-// ~10.7 MB at the 30-day retention. It matters for the MQTT-source/alerts-off cameras that DO get gated,
-// where running 24/7 would burn detector CPU all day for no benefit.
+// Tail: the inference's OWN horizon. computeNight reads the morning departure evidence (the departure
+// scan, the bed-transition read, the metrics extension) up to WAKE_LOOKAHEAD_MS after the window end, and
+// isEvidenceFinal / reportableSpanMs close at the same instant; the margin is the reconcile slack above.
+// A tail that stops sooner leaves the morning departure UNOBSERVED for an activity-only camera (issue
+// #353; found by the 2026-09-11 Codex review, reproduced on dev 11236d7: sampling false at 07:06 and
+// 09:59 for a 19:00-07:00 window). No new number: both lengths are the constants the inference uses.
+//
+// Kept separate from childWindowActiveNow deliberately: that one gates the wake watcher (and is checked by
+// the timelapse), which keep the configured window plus 5 minutes. This only widens sampling (and is the
+// only gate with the +1 candidate night, see windowOpenNow).
+//
+// Cost: an activity-only camera runs 3 h more a day (15 h -> 18 h for a 19:00-07:00 child), ONE ffmpeg
+// decoding 320x180 gray at 5 fps (not measured as CPU). It costs nothing on a framediff-ALERTING camera,
+// which is never window-gated (motionLegWanted returns early for those) and already samples 24/7 -
+// measured at ~1437 of a possible 1440 rows/camera/day, or ~10.7 MB at the 30-day retention. It
+// matters for the MQTT-source/alerts-off cameras that DO get gated, where running 24/7 would burn
+// detector CPU all day for no benefit.
+//
+// Known limits: the leg starts 0-5 min after the lead edge (no reconcile slack on a start edge), and
+// the morning review (local noon to noon, plus 1 h of lingering-motion evidence) lacks transitions after
+// about window end + 3 h for such a camera, because nothing past the horizon feeds inference.
 export function childSamplingActiveNow(childId) {
-  return windowOpenNow(childId, ONSET_LOOKBEHIND_MS);
+  return windowOpenNow(childId, ONSET_LOOKBEHIND_MS, WAKE_LOOKAHEAD_MS + WINDOW_MARGIN_MS, true);
 }
 
 // Offset (localWallClock - UTC) in ms for a given instant in a tz.

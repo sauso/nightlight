@@ -65,6 +65,13 @@ reconciliation. Three independent mechanisms keep the pipeline alive without man
   that's missing/misconfigured and restarts any camera whose transcoder isn't running. It only
   *writes* to MediaMTX when something is actually wrong, since every write forces a path reload
   that disconnects the current publisher.
+- The same pass decides each camera's pixel-diff motion leg through `reconcileMotionLeg()`
+  (`lib/motionDetector.js`; it lives there, not inline, because `index.js` spawns MediaMTX at import so
+  no test can import it). A frame-diff camera with alerts on runs around the clock; an *activity-only*
+  camera (alerts off, or MQTT/ONVIF motion, assigned to a child) runs only while `childSamplingActiveNow`
+  (`lib/sleepAnalysis.js`) is open: `ONSET_LOOKBEHIND_MS` before the child's window to `WAKE_LOOKAHEAD_MS`
+  (+ the 5-minute reconcile margin) after it, the inference's own span, so the morning departure is
+  observed (#353). The lead and tail are absolute milliseconds, so a DST night gives 3 real hours.
 - A watchdog (15s interval) tracks how long each camera's MediaMTX path has been "not ready"
   and force-restarts that camera's transcoder past a 30s threshold — a second, independent
   layer of defense beyond FFmpeg's own stream error handling.

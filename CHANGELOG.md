@@ -52,6 +52,19 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
     is skipped — a push already sent cannot be recalled, but no further one goes out for a flagged night.
 
 ### Fixed
+- **A camera with motion alerts off (or MQTT/ONVIF motion) now keeps sampling until 3 hours after the
+  sleep window closes, so the morning wake can be found** (issue #353). Its motion leg runs only to feed
+  sleep tracking, and it used to stop 5 minutes after the window ends, although the sleep numbers look for
+  the morning departure up to 3 hours after it: that departure was never observed, so such a night had no
+  wake time. A bedtime shortly after midnight (a window opening 00:00 to 02:59) is now also sampled from 3
+  hours before it, which is the previous evening; before, that lookbehind was missed. The 3 + 3 hours are
+  the sleep detector's own, and are real hours across a daylight-saving change. The cost is about 3 more
+  hours a day of one low-resolution video decode for such a camera (15 hours a day becomes 18 for a
+  19:00-07:00 window; CPU not measured). A frame-diff camera with motion alerts on already samples around
+  the clock and is unchanged, and so are the timelapse, wake clips and the wake watcher. The morning
+  review for such a camera still has no events past about 3 hours after the window's end. Details in the
+  README ("When the motion camera samples") and KNOWN-ISSUES. Nothing assumes a particular house or
+  timezone.
 - **A garbled ffmpeg log line no longer leaves the sound `[obs]` measurement blind for hours** (issue #573).
   The `[obs]` line's sound side could suddenly read `observed=0 unknown=4500 side=unavailable` and stay that
   way until the camera reconnected or rebooted, while the sound detector itself kept working (`[sound]`
