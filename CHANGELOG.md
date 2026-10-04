@@ -52,6 +52,27 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
     is skipped — a push already sent cannot be recalled, but no further one goes out for a flagged night.
 
 ### Fixed
+- **Motion sensitivity no longer changes which bed exits and entries are recorded** (issue #368). The
+  sensitivity slider set one threshold that the motion alert and the out-of-bed / into-bed detection
+  both used, so tuning how many notifications you wanted also changed the stored `out_of_bed` and
+  `into_bed` rows that sleep analysis reads as bedtime and wake evidence, and a camera that only feeds
+  sleep tracking (MQTT or ONVIF motion, or motion detection off) used a sensitivity whose slider the screen
+  does not show. The alert keeps the slider exactly as before; exits and entries now use a **fixed 1.19% of
+  the zone**, which is the value the slider gives at 90. **Differs from the neighbours:** the detector's
+  return to the Low stream (#500) waits until the room has been quiet by both definitions on a camera that
+  alerts (the alert's and the exit rules'), and by the fixed one alone on a camera that does not; a camera
+  with no bed zone that alerts keeps only the alert's definition. At the default sensitivity (50) "quiet"
+  now means under 1.19% in both channels instead of under 5.15%, so a picture with 1.19-5.15% noise (a fan,
+  a curtain, infrared noise) keeps the detector on the main stream for as long as that noise lasts (the
+  return has no forced timeout). **What you may notice:** if your
+  sensitivity was not 90, the exits and entries recorded from now on can change, in either
+  direction: below 90 (the default is 50, 5.15%) the threshold goes down, so movements the old threshold
+  ignored now count, which can add exits and entries and can also cancel a pending exit (a movement of 1-5%
+  of the zone, such as a child settling, now cancels it), so the totals can move in either direction; above
+  90 it goes up. Whether that is better for your reported sleep is not known. 1.19% was calibrated in one house, is not derived from your room, and
+  there is no setting for it; a noisy room can no longer be quieted for sleep tracking by lowering the
+  sensitivity, so redraw the detection zone. Stored rows and sleep nights already computed are not
+  rewritten. See KNOWN-ISSUES.md and the motion sensitivity row of docs/notifications.md.
 - **A motion alert can no longer fire sooner than the Motion cooldown after the last one just because the
   detector restarted** (issue #454). The time of the last frame-diff motion alert lived inside one run of the
   detector's ffmpeg, so every relaunch (a camera reconnect or "stream ended", a transport restart, the detector

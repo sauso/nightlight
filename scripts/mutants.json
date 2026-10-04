@@ -9093,7 +9093,7 @@
   {
     "label": "#500 M11: motion OUTSIDE the zone does not count as activity",
     "file": "backend/src/lib/motionDetector.js",
-    "find": "          if (outFraction >= threshold) anyActive = true;",
+    "find": "          if (outFraction >= transitionThreshold) anyActive = true;",
     "replace": "          if (false) anyActive = true;",
     "expect": "killed",
     "tests": ["motion-return-to-sub.test.js"],
@@ -9102,7 +9102,7 @@
   {
     "label": "#500 M12: motion INSIDE the zone does not count as activity",
     "file": "backend/src/lib/motionDetector.js",
-    "find": "        let anyActive = fraction >= threshold;",
+    "find": "        let anyActive = fraction >= quietBedFraction;",
     "replace": "        let anyActive = false;",
     "expect": "killed",
     "tests": ["motion-return-to-sub.test.js"],
@@ -9763,7 +9763,7 @@
     "label": "#452 M40: the motion run is reset only when the gap frame is itself active (the quiet-frame reset and its log line are lost)",
     "file": "backend/src/lib/motionDetector.js",
     "find": "if (gap && activeSince) {",
-    "replace": "if (gap && activeSince && fraction >= threshold) {",
+    "replace": "if (gap && activeSince && fraction >= alertThreshold) {",
     "expect": "killed",
     "tests": ["motion-frame-gap.test.js"]
   },
@@ -10494,5 +10494,182 @@
     "expect": "killed",
     "tests": ["motion-alert-cooldown-routes.test.js"],
     "namePattern": "^#454 C5:.*enabled=false on an ENABLED"
+  },
+  {
+    "label": "#368 M1: the motion ALERT reads the transition threshold instead of the slider",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "          if (fraction >= alertThreshold) {",
+    "replace": "          if (fraction >= transitionThreshold) {",
+    "expect": "killed",
+    "tests": ["motion-transition-threshold.test.js"],
+    "namePattern": "^#368 C4:"
+  },
+  {
+    "label": "#368 M2: BOTH tracker channels classify at the alert threshold again (the pre-#368 coupling)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "          const cribActive = fraction >= transitionThreshold;\r\n          const outActive = outFraction >= transitionThreshold;",
+    "replace": "          const cribActive = fraction >= alertThreshold;\r\n          const outActive = outFraction >= alertThreshold;",
+    "expect": "killed",
+    "tests": ["motion-transition-threshold.test.js"],
+    "namePattern": "^#368 C(1|2|3|10):"
+  },
+  {
+    "label": "#368 M3: only the BED channel of the tracker is decoupled (cribActive still reads the alert threshold)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "          const cribActive = fraction >= transitionThreshold;",
+    "replace": "          const cribActive = fraction >= alertThreshold;",
+    "expect": "killed",
+    "tests": ["motion-transition-threshold.test.js"],
+    "namePattern": "^#368 C(1|2):"
+  },
+  {
+    "label": "#368 M4: only the OUTSIDE channel of the tracker is decoupled (outActive still reads the alert threshold)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "          const outActive = outFraction >= transitionThreshold;",
+    "replace": "          const outActive = outFraction >= alertThreshold;",
+    "expect": "killed",
+    "tests": ["motion-transition-threshold.test.js"],
+    "namePattern": "^#368 C(1|2):"
+  },
+  {
+    "label": "#368 M5a: the quiet gate's bed channel reads the alert threshold only (a 3 % bed burst at sensitivity 50 no longer defers an activity-only leg)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        let anyActive = fraction >= quietBedFraction;",
+    "replace": "        let anyActive = fraction >= alertThreshold;",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "^#368 C6:"
+  },
+  {
+    "label": "#368 M5b: the quiet gate's outside channel reads the alert threshold (a 3 % outside burst at sensitivity 50 no longer defers; a 0.5 % one at 100 does)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "          if (outFraction >= transitionThreshold) anyActive = true;",
+    "replace": "          if (outFraction >= alertThreshold) anyActive = true;",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "^#368 C6:"
+  },
+  {
+    "label": "#368 M5c: quietBedFraction loses its transition term (an activity-only leg's bed channel can never be active)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "    zoned || !alertDefinesQuiet ? transitionThreshold : Infinity",
+    "replace": "    Infinity",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "^#368 C6:"
+  },
+  {
+    "label": "#368 M5d: quietBedFraction loses its alert term (a 0.5 % bed burst at sensitivity 100 on an alerting leg no longer defers)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "    alertDefinesQuiet ? alertThreshold : Infinity,",
+    "replace": "    Infinity,",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "^#368 C6:"
+  },
+  {
+    "label": "#368 M5e: an UNZONED alerting leg's gate is moved onto the transition threshold (it has no tracker, so it keeps the alert's)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "    zoned || !alertDefinesQuiet ? transitionThreshold : Infinity",
+    "replace": "    transitionThreshold",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "^#368 C6:"
+  },
+  {
+    "label": "#368 M6a: the transition constant is 0.01 (the sleep side's MOTION_ACTIVE)",
+    "file": "backend/src/lib/bedTransitionRules.js",
+    "find": "export const BED_TRANSITION_ACTIVE_FRACTION = 0.011898989898989899;",
+    "replace": "export const BED_TRANSITION_ACTIVE_FRACTION = 0.01;",
+    "expect": "killed",
+    "tests": ["motion-transition-threshold.test.js"],
+    "namePattern": "^#368 C(2|5):",
+    "note": "scored on the BEHAVIOURAL tests only (no literal pin in its tests list), so it shows the ladder and the pixel boundary discriminate on their own"
+  },
+  {
+    "label": "#368 M6b: the transition constant is 0.0515 (the default sensitivity's alert threshold)",
+    "file": "backend/src/lib/bedTransitionRules.js",
+    "find": "export const BED_TRANSITION_ACTIVE_FRACTION = 0.011898989898989899;",
+    "replace": "export const BED_TRANSITION_ACTIVE_FRACTION = 0.0515;",
+    "expect": "killed",
+    "tests": ["motion-transition-threshold.test.js"],
+    "namePattern": "^#368 C(2|5):",
+    "note": "scored on the BEHAVIOURAL tests only, as M6a"
+  },
+  {
+    "label": "#368 M6c: the transition constant is 0.0119 (a rounded 1.19 %)",
+    "file": "backend/src/lib/bedTransitionRules.js",
+    "find": "export const BED_TRANSITION_ACTIVE_FRACTION = 0.011898989898989899;",
+    "replace": "export const BED_TRANSITION_ACTIVE_FRACTION = 0.0119;",
+    "expect": "killed",
+    "tests": ["motionDetector.test.js", "motion-transition-threshold.test.js"],
+    "namePattern": "^#368 C5:",
+    "note": "the 342 / 343 px boundary cannot see it (0.0119 of 28 800 px is 342.72); the literal pin in motionDetector.test.js and the 589 / 49 500 equality fixtures do"
+  },
+  {
+    "label": "#368 M7: an activity-only leg keeps classifying at the alert threshold (the stored, hidden sensitivity governs it again)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "  const transitionThreshold = BED_TRANSITION_ACTIVE_FRACTION;",
+    "replace": "  const transitionThreshold = activityOnly ? alertThreshold : BED_TRANSITION_ACTIVE_FRACTION;",
+    "expect": "killed",
+    "tests": ["motion-transition-threshold.test.js"],
+    "namePattern": "^#368 C3:"
+  },
+  {
+    "label": "#368 M8a: `>=` becomes `>` on the bed channel of the transition comparison",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "          const cribActive = fraction >= transitionThreshold;",
+    "replace": "          const cribActive = fraction > transitionThreshold;",
+    "expect": "killed",
+    "tests": ["motion-transition-threshold.test.js"],
+    "namePattern": "^#368 C5:",
+    "note": "not equivalent: 589 changed px of a 49 500 px zone is EXACTLY the constant (589 / 49 500 === 0.011898989898989899), so only the BIG_ZONE equality fixture tells `>=` from `>`"
+  },
+  {
+    "label": "#368 M8b: `>=` becomes `>` on the outside channel of the transition comparison",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "          const outActive = outFraction >= transitionThreshold;",
+    "replace": "          const outActive = outFraction > transitionThreshold;",
+    "expect": "killed",
+    "tests": ["motion-transition-threshold.test.js"],
+    "namePattern": "^#368 C5:",
+    "note": "not equivalent: 589 changed outside px of a 49 500 px area is exactly the constant; the SMALL_ZONE equality fixture kills it"
+  },
+  {
+    "label": "#368 M9: the transition threshold is derived from detect_sensitivity again (the coupling #368 removed, spelled as a fresh call)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "  const transitionThreshold = BED_TRANSITION_ACTIVE_FRACTION;",
+    "replace": "  const transitionThreshold = activeFractionThreshold(camera.detect_sensitivity);",
+    "expect": "killed",
+    "tests": ["motion-transition-threshold.test.js"],
+    "namePattern": "^#368 C(1|2):"
+  },
+  {
+    "label": "#368 M10: zoned is always false (a zoned alerting leg's bed gate loses the transition threshold)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "  const zoned = mask ? FRAME_BYTES - zonePixels > 0 : false;",
+    "replace": "  const zoned = false;",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "^#368 C6: an ALERTING zoned leg at sensitivity 50",
+    "note": "only an ALERTING zoned leg at sensitivity 50 tells it apart: at 100 the alert term already wins, and an activity-only leg ignores `zoned`"
+  },
+  {
+    "label": "#368 M11: zoned is true for any mask (a whole-frame zone is treated as zoned)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "  const zoned = mask ? FRAME_BYTES - zonePixels > 0 : false;",
+    "replace": "  const zoned = !!mask;",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "^#368 C6: a camera whose zone covers the WHOLE frame"
+  },
+  {
+    "label": "#368 M12: an activity-only leg runs the alert bookkeeping (it can alert)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        if (!activityOnly) {",
+    "replace": "        if (true) {",
+    "expect": "killed",
+    "tests": ["motion-transition-threshold.test.js"],
+    "namePattern": "^#368 C3: an activity-only leg \\(.*\\) never alerts on a SUSTAINED burst"
   }
 ]

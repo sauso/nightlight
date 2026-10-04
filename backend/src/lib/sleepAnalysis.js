@@ -34,8 +34,9 @@ const MOTION_ACTIVE = 0.01; // in-bed per-frame changed-fraction above this = re
 // below the quietest genuine one.
 //
 // NB: this is the per-MINUTE display/analysis threshold, deliberately independent of the per-FRAME
-// threshold the detector uses to open a bed-transition candidate (motionDetector.js, from
-// detect_sensitivity). They answer different questions and are not kept in step.
+// threshold the detector uses to open a bed-transition candidate (motionDetector.js: the fixed
+// BED_TRANSITION_ACTIVE_FRACTION in bedTransitionRules.js since #368, no longer detect_sensitivity, which
+// now only sets the motion alert). They answer different questions and are not kept in step.
 const MOTION_OUT_ACTIVE = 0.03;
 const SOUND_ACTIVE = 6; // dB over ambient above this = a clear noise/cry
 const ONSET_QUIET_MIN = 15; // continuous quiet minutes to call it "asleep"
