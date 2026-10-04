@@ -149,9 +149,11 @@ const ASHOWINFO_RECORD = new RegExp(
 // fixtures/obs/torn-ashowinfo-real.txt) tore AFTER the first call; none tore inside it.
 //
 // The core takes the same sub-patterns as the strict grammar and stops at the checksum token. The lookahead
-// after the 8 hex digits is a literal SPACE (not \s) or the end of the line: it is the first call's own
-// trailing space, so `checksum:AAAAAAAAno frame!` (a cut inside the digits with foreign text glued on) is
-// not salvaged. Everything before `checksum:` must still match, so a cut anywhere before it stays a lost
+// after the 8 hex digits is a literal SPACE (not \s): it is the first call's own trailing space, so
+// `checksum:AAAAAAAAno frame!` (a cut inside the digits with foreign text glued on) is not salvaged. The end
+// of the line is deliberately NOT accepted either (round-1 review): it is unreachable in real data (the first
+// call always ends with its own space, and the line buffer strips only a `\r`), and refusing it keeps the
+// pre-#573 behaviour (a lost record) for any line that does not end in that space. Everything before `checksum:` must still match, so a cut anywhere before it stays a lost
 // record and still opens the hole, exactly as before.
 //
 // What is NOT claimed: (1) a cut INSIDE the 8 hex digits followed by hex-looking foreign text can salvage a
@@ -165,7 +167,7 @@ const ASHOWINFO_RECORD = new RegExp(
 // now calls unknown, which moves stored motion numbers: a separate change.
 const ASHOWINFO_CORE = new RegExp(
   String.raw`^n:(\d+) pts:(-?\d+|NOPTS) pts_time:(${TS}) fmt:\S+ channels:\d+ chlayout:${CHLAYOUT} rate:(\d+) ` +
-    String.raw`nb_samples:(\d+) checksum:([0-9A-F]{8})(?= |$)`
+    String.raw`nb_samples:(\d+) checksum:([0-9A-F]{8})(?= )`
 );
 // The per-frame lines a tap prints AFTER a record, and its one-time config banner. Each is matched in full
 // for the same reason as the record: a glued error must not be dropped as a "continuation".

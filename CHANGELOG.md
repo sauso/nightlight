@@ -63,8 +63,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   recovered (sound only), and the glued message is still logged exactly as before. Nothing the detector
   decides or stores changes: nothing reads the sound side of `[obs]` yet, so this only fixes what the
   line says. A timestamp line that is truly lost still blinds the rest of its ffmpeg run, as designed, but
-  now logs one warning, at most once per camera per 15 minutes (`[obs] "<camera>" sound gen=N timestamp
-  sequence broke (<why>) …`), so a blind measurement can be told from a dead microphone. Motion timestamp
+  now logs one warning when the run goes blind, at most once per camera per 15 minutes (`[obs] "<camera>"
+  sound gen=N timestamp sequence broke (<why>) …`), so a blind measurement can be told from a dead microphone. Motion timestamp
   lines are not changed. See KNOWN-ISSUES, "The `[obs]` line".
 - **Motion sensitivity no longer changes which bed exits and entries are recorded** (issue #368). The
   sensitivity slider set one threshold that the motion alert and the out-of-bed / into-bed detection

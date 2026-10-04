@@ -155,7 +155,9 @@ describe('#573 a real tear shape does not blind the run', () => {
         assert.equal(rig.clock.summary().side, 'ok', why);
         assert.equal(pipe.delivered.length, 400, `${why}: one onRecord per record`);
         assert.deepEqual(pipe.parseErrors, [], why);
-        assert.equal(pipe.router.stats().salvaged, 1, why);
+        // A salvaged record is a record in the accounting too (round-1 review), and none is "lost".
+        const stats = pipe.router.stats();
+        assert.deepEqual({ records: stats.records, salvaged: stats.salvaged, lostRecords: stats.lostRecords }, { records: 400, salvaged: 1, lostRecords: 0 }, why);
         assert.equal(rig.logs.filter((l) => l.includes('timestamp sequence broke')).length, 0, why);
         runs += 1;
       }
@@ -348,6 +350,23 @@ describe('#573 foreign text at every offset', () => {
     assert.ok(records > 400 && notRecords > 1500, `${records} records, ${notRecords} not`);
   });
 
+  test('#573 C4: a line that ends EXACTLY after the 8 checksum digits is not a record; with the first call\'s own space and foreign text it is', () => {
+    // The end of the line is not accepted after the digits (round-1 review): unreachable in real data, and
+    // refusing it keeps the pre-#573 behaviour (a lost record) for a line that does not end in that space.
+    const r = rec(9);
+    const bare = `${PREFIX}${r.core.slice(0, -1)}`;
+    assert.ok(bare.endsWith(`checksum:${r.sum}`), 'the constructed line ends right after the digits');
+    assert.notEqual(classifyLine(bare, SOUND).kind, 'record');
+    const lost = route([bare]);
+    assert.equal(lost.records.length, 0);
+    assert.deepEqual(lost.parseErrors, ['audio']);
+    const withSpace = `${PREFIX}${r.core}${FOREIGN_DTS}`;
+    assert.equal(classifyLine(withSpace, SOUND).kind, 'record');
+    const kept = route([withSpace]);
+    assert.deepEqual(kept.records.map((x) => x.n), [9]);
+    assert.deepEqual(kept.parseErrors, []);
+  });
+
   test('#573 C4: the same torn text on a MOTION tap (showinfo@in / showinfo@out) is never salvaged: still lost, still reported', () => {
     const messages = [...REAL.map((l) => l.replace(/^.*\[info\] /, '')), ...[...tornCases()].filter((c) => c.layout === 'same' && c.cut > c.hexEnd).slice(0, 60).map((c) => c.lines[0].slice(PREFIX.length))];
     for (const [tag, tap] of [['showinfo@in', 'in'], ['showinfo@out', 'out']]) {
@@ -468,6 +487,40 @@ describe('#573 a lost core still blinds the run, with one warning', () => {
     assert.deepEqual(pipe.parseErrors, ['audio']);
     assert.deepEqual(broke(rig), [WORDING(pipe.gen.id, 'a record failed to parse')]);
     assert.equal(rig.clock.summary().side, 'ok', 'the first windows were placed: a partial loss reads ok and shows in unknown');
+  });
+
+  test('#573 C8: the FIRST record\'s core is lost: the warning says a record failed to parse, not "the first record was n=1"', () => {
+    // Reason priority (round-1 review): the parse failure is the cause, the n>0 of the next record is its effect.
+    const rig = makeClock('sound');
+    const pipe = pipeline(rig);
+    play(rig, pipe, 0, 100, { tear: { 0: lostCoreLines(0) } });
+    assert.deepEqual(broke(rig), [WORDING(pipe.gen.id, 'a record failed to parse')]);
+    const o = finish(rig, pipe, 100_000 + 100 * 40 + 10_000);
+    assert.ok(o.every((x) => x.cls === 'unknown' && x.reason === 'hole'), 'holeAt = 0: nothing before the loss to place');
+  });
+
+  test('#573 C8: a glue at EVERY offset inside the core, driven through the router into a real generation: hole after it, one warning', () => {
+    const r = rec(50);
+    const checksumAt = r.core.indexOf('checksum:');
+    let offsets = 0;
+    // From 2: a cut at 1 leaves `nApplication…`, which does not even start `n:` (not a record-shaped line).
+    for (let cut = 2; cut <= checksumAt; cut += 1) {
+      const rig = makeClock('sound');
+      const pipe = pipeline(rig);
+      const lines = [`${PREFIX}${r.core.slice(0, cut)}${FOREIGN_DTS}`, `${PREFIX}${r.core.slice(cut)}${r.tails['after-core']}`];
+      play(rig, pipe, 0, 200, { tear: { 50: lines } });
+      const o = finish(rig, pipe, 100_000 + 200 * 40 + 10_000);
+      const why = `cut ${cut}: ${JSON.stringify(r.core.slice(0, cut))}`;
+      // The hole sits at record 50's position (50 x 320 samples = 2.0 s): 10 windows end by then.
+      assert.equal(o.length, 40, why);
+      assert.ok(o.slice(0, 10).every((x) => x.cls === 'observed'), why);
+      assert.ok(o.slice(10).every((x) => x.cls === 'unknown' && x.reason === 'hole'), why);
+      assert.deepEqual(pipe.parseErrors, ['audio'], why);
+      assert.equal(broke(rig).length, 1, why);
+      offsets += 1;
+    }
+    assert.equal(offsets, checksumAt - 1, 'every offset from 2 up to the checksum token was driven');
+    assert.ok(offsets > 80, `only ${offsets} offsets`);
   });
 
   test('#573 C8: a second hole in the same generation does not warn again', () => {

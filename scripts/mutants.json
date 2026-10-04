@@ -10684,8 +10684,8 @@
   {
     "label": "#573 M-573-02: the core drops its 8-hex-digit requirement",
     "file": "backend/src/lib/ffmpegSideChannel.js",
-    "find": "checksum:([0-9A-F]{8})(?= |$)",
-    "replace": "checksum:([0-9A-F]*)(?= |$)",
+    "find": "checksum:([0-9A-F]{8})(?= )",
+    "replace": "checksum:([0-9A-F]*)(?= )",
     "expect": "killed",
     "tests": ["ashowinfo-torn-record.test.js"],
     "namePattern": "^#573 C4: a cut before the checksum"
@@ -10693,8 +10693,8 @@
   {
     "label": "#573 M-573-03: the core's lookahead after the digits accepts any whitespace, not just the first call's own space",
     "file": "backend/src/lib/ffmpegSideChannel.js",
-    "find": "checksum:([0-9A-F]{8})(?= |$)",
-    "replace": "checksum:([0-9A-F]{8})(?=\\s|$)",
+    "find": "checksum:([0-9A-F]{8})(?= )",
+    "replace": "checksum:([0-9A-F]{8})(?=\\s)",
     "expect": "killed",
     "tests": ["ashowinfo-torn-record.test.js"],
     "namePattern": "^#573 C4: a cut before the checksum",
@@ -10822,7 +10822,7 @@
   {
     "label": "#573 M-573-17: the core drops its lookahead after the checksum digits",
     "file": "backend/src/lib/ffmpegSideChannel.js",
-    "find": "checksum:([0-9A-F]{8})(?= |$)",
+    "find": "checksum:([0-9A-F]{8})(?= )",
     "replace": "checksum:([0-9A-F]{8})",
     "expect": "killed",
     "tests": ["ashowinfo-torn-record.test.js"],
@@ -10845,5 +10845,32 @@
     "expect": "killed",
     "tests": ["ashowinfo-torn-record.test.js"],
     "namePattern": "^#573 C8: (a glue inside|the other ways)"
+  },
+  {
+    "label": "#573 M-573-20: the core accepts the end of the line right after the checksum digits again",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "checksum:([0-9A-F]{8})(?= )",
+    "replace": "checksum:([0-9A-F]{8})(?= |$)",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C4: a line that ends EXACTLY"
+  },
+  {
+    "label": "#573 M-573-21: the hole reason checks `the first record was n=N` before a parse failure",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "if (this.taint) holeWhy = 'a record failed to parse';",
+    "replace": "if (prev === null) holeWhy = `the first record was n=${rec.n}`; else if (this.taint) holeWhy = 'a record failed to parse';",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C8: the FIRST record"
+  },
+  {
+    "label": "#573 M-573-22: a salvaged record is not counted in the router's `records`",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "stats.records += 1;",
+    "replace": "if (!d.salvaged) stats.records += 1;",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C1: each real tear"
   }
 ]
