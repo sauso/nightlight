@@ -40,8 +40,9 @@ test('#368 C8: the motion sensitivity row says alerts only and names the fixed t
 test('#368 C8: a section explains the fixed threshold, its number, and the known limit', () => {
   assert.ok(fixedSection, 'the "Bed exits and entries use a fixed threshold" section is missing');
   assert.ok(fixedSection.includes(PCT), `the section must state ${PCT}`);
-  // The two things the owner of another house must be told: it was measured in one house, and they may see a change.
-  assert.match(fixedSection, /measured in one house/i);
+  // The two things the owner of another house must be told: it was calibrated in one house, and they may see a change.
+  assert.match(fixedSection, /calibrated in one house/i);
+  assert.ok(!/measured in one house/i.test(doc), 'the 1.19% is what the slider gives at 90, not a measurement: say "calibrated"');
   assert.match(fixedSection, /in either direction/i);
   assert.match(fixedSection, /redraw the detection zone/i, 'the remedy for a noisy room must be named');
 });

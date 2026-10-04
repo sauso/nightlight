@@ -10643,5 +10643,33 @@
     "expect": "killed",
     "tests": ["motion-transition-threshold.test.js"],
     "namePattern": "^#368 C(1|2):"
+  },
+  {
+    "label": "#368 M10: zoned is always false (a zoned alerting leg's bed gate loses the transition threshold)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "  const zoned = mask ? FRAME_BYTES - zonePixels > 0 : false;",
+    "replace": "  const zoned = false;",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "^#368 C6: an ALERTING zoned leg at sensitivity 50",
+    "note": "only an ALERTING zoned leg at sensitivity 50 tells it apart: at 100 the alert term already wins, and an activity-only leg ignores `zoned`"
+  },
+  {
+    "label": "#368 M11: zoned is true for any mask (a whole-frame zone is treated as zoned)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "  const zoned = mask ? FRAME_BYTES - zonePixels > 0 : false;",
+    "replace": "  const zoned = !!mask;",
+    "expect": "killed",
+    "tests": ["motion-return-to-sub.test.js"],
+    "namePattern": "^#368 C6: a camera whose zone covers the WHOLE frame"
+  },
+  {
+    "label": "#368 M12: an activity-only leg runs the alert bookkeeping (it can alert)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "        if (!activityOnly) {",
+    "replace": "        if (true) {",
+    "expect": "killed",
+    "tests": ["motion-transition-threshold.test.js"],
+    "namePattern": "^#368 C3: an activity-only leg \\(.*\\) never alerts on a SUSTAINED burst"
   }
 ]

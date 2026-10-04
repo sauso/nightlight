@@ -12,9 +12,12 @@
 //   C1  the issue's reproduction (a 3.47 % burst in bed, then outside, then quiet) records the SAME exit at sensitivity
 //       1, 50, 90 and 100 (today: none at 1 and 50, one at 90 and 100);
 //   C2  a ladder of burst sizes (0.5 / 1.0 / 1.5 / 3.47 / 6 / 20 %) gives identical rows and identical
-//       [oob]/[intobed]/[coactive] lines at every sensitivity, and the threshold sits where it should in the ladder
-//       (1.0 % records nothing, 1.5 % does);
-//   C3  the same on the activity-only legs (MQTT source, ONVIF source, motion off), which also never alert;
+//       [oob]/[intobed] lines at every sensitivity, and the threshold sits where it should in the ladder
+//       (1.0 % records nothing, 1.5 % does). The 20 % rung is a CONTROL: it passes on the old code too (20 % is over every
+//       sensitivity's alert threshold). The ladder never has both channels active in one frame, so a separate C2 test
+//       with a co-active fixture pins the [coactive] line;
+//   C3  the same on the activity-only legs (MQTT source, ONVIF source, motion off), which also never alert (a second C3
+//       test runs a SUSTAINED burst an alerting camera alerts on, since the exit script is shorter than the confirm time);
 //   C4  the ALERT is unchanged: it still follows the slider (3.47 % alerts at 90 and 100 but not at 50; 6 % alerts at
 //       50; 1.0 % alerts only at 100), which is also what kills a mutant that mixes the two thresholds;
 //   C5  the pixel boundary through launch(): 342 px of a 28 800 px zone is inactive and 343 is active; 588 / 589 px of
@@ -235,7 +238,7 @@ describe('#368 the bed-transition threshold is fixed; the alert keeps the slider
   // moved to 0.5 % or to 2 % would still be identical across sensitivities and is caught by the null / non-null column.
   const LADDER = [[0.5, 144, null], [1.0, 288, null], [1.5, 432, 0.015], [3.47, 1000, 0.035], [6, 1728, 0.06], [20, 5760, 0.2]];
   for (const [pct, px, peak] of LADDER) {
-    test(`#368 C2: a ${pct} % bed + outside burst gives identical rows and [oob]/[intobed]/[coactive] lines at sensitivity 1, 50, 90 and 100`, async (t) => {
+    test(`#368 C2: a ${pct} % bed + outside burst gives identical rows and [oob]/[intobed] lines at sensitivity 1, 50, 90 and 100`, async (t) => {
       begin(t);
       const results = {};
       for (const sens of SENS) results[sens] = await run(t, { sens }, exitScript(px, px));
@@ -253,6 +256,22 @@ describe('#368 the bed-transition threshold is fixed; the alert keeps the slider
     });
   }
 
+  // The ladder above never has both channels active in one frame, so its `[coactive]` comparison is vacuous. This is the
+  // fixture that does: both regions change by 3.47 % on frames 1-4 (an episode of 800 ms), then both go quiet on frame 5.
+  // Derived by hand: the episode starts at frame 1 (T0 + 200 ms) and resolves at frame 5 (T0 + 1 000 ms), 800 ms later,
+  // with both channels quiet; both peaks 1000 / 28 800 = 3.47 % -> "3.5%". No exit or entry candidate can open (they need
+  // exactly one channel active), so that line is the whole trace and no row is stored. At sensitivity 50 the old code saw
+  // neither channel as active and logged nothing.
+  test('#368 C2: a co-active frame (bed and outside both 3.47 %) logs the same [coactive] episode at sensitivity 1, 50, 90 and 100', async (t) => {
+    begin(t);
+    const script = [[0, 0], [1000, 1000], [0, 0], [1000, 1000], [0, 0], ...Array.from({ length: 10 }, () => [0, 0])];
+    for (const sens of SENS) {
+      const r = await run(t, { sens }, script);
+      assert.deepEqual(r.trace, ['[coactive] "CAM" bed+outside both active 800ms, then both quiet — bed peak 3.5%, outside peak 3.5%'], `sensitivity ${sens}`);
+      assert.deepEqual(r.rows, [], `sensitivity ${sens}`);
+    }
+  });
+
   // ---- C3 ----
   // The activity-only legs. `alerts` must be 0 on every one of them (an activity-only leg fires no alert at ANY
   // sensitivity), and the leg must really have run: the 3.47 % case records its exit.
@@ -268,6 +287,22 @@ describe('#368 the bed-transition threshold is fixed; the alert keeps the slider
         const small = await run(t, { sens, kind }, exitScript(288, 288));
         assert.deepEqual(small.rows, [], `${kind} at sensitivity ${sens}: a 1.0 % burst (under the fixed threshold) recorded an exit`);
         assert.equal(small.alerts, 0);
+      }
+    });
+  }
+
+  // Review round 1: the exit script's longest run is 2 s, under the 3 s confirm time, so the `alerts === 0` above could
+  // not fail. These run a SUSTAINED 3.4 s burst (alertScript: it confirms at 3.2 s) that an ALERTING camera on the same
+  // frames DOES alert on (the control, asserted first so the zero below cannot pass vacuously). 1728 px = 6 % alerts at
+  // sensitivity 50 and above; 1000 px = 3.47 % at 90 and 100.
+  for (const kind of ['mqtt', 'onvif', 'motion-off']) {
+    test(`#368 C3: an activity-only leg (${kind}) never alerts on a SUSTAINED burst an alerting camera alerts on`, async (t) => {
+      begin(t);
+      for (const [sens, px] of [[50, 1728], [90, 1000], [100, 1000]]) {
+        const control = await run(t, { sens, kind: 'alerting' }, alertScript(px));
+        assert.equal(control.alerts, 1, `control: an ALERTING camera at sensitivity ${sens} must alert on ${px} px sustained, or the zero below proves nothing`);
+        const r = await run(t, { sens, kind }, alertScript(px));
+        assert.equal(r.alerts, 0, `${kind} at sensitivity ${sens} raised a motion alert on a sustained burst: an activity-only leg ran the alert bookkeeping`);
       }
     });
   }

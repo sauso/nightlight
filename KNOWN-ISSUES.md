@@ -1026,7 +1026,7 @@ its Low stream is not coming back: check the camera's Low-quality stream path in
 
 ---
 
-## Bed exits and entries use one fixed threshold, measured in one house (the motion sensitivity slider no longer moves them)
+## Bed exits and entries use one fixed threshold, calibrated in one house (the motion sensitivity slider no longer moves them)
 
 **What you see:** nothing in the log or the screen. The effect is in the sleep numbers: after upgrading to
 the version that fixed #368, the number of recorded "out of bed" and "into bed" events on a camera can
@@ -1043,13 +1043,15 @@ someone retunes notifications.
 
 **What it changes, stated rather than guessed:**
 - **1.19% is calibrated in one house.** Every rule the exits and entries follow (the link windows, the
-  6 s confirmations, the 2 minute pause) was measured with the threshold at that value, on two cameras. The
+  6 s confirmations, the 2 minute pause) was calibrated with the threshold at that value (by the setting the
+  cameras were on; the setting's history is not stored), on two cameras. The
   saved settings of all the cameras in that house are sensitivity 90, and none of its 4295 stored
   rows has a peak below it, which is consistent with, but does not prove, that they always were. It is not
   derived from your room, and nothing checks it against your camera.
-- **Below 90 (the default is 50, 5.15%) the threshold goes down.** More exits and entries will be recorded
-  (at least the ones that were too small to reach 5.15%), and a movement of about 1-5% of the zone, such
-  as a child settling, now cancels a pending exit, as it does in the calibrated house. **Whether that
+- **Below 90 (the default is 50, 5.15%) the threshold goes down:** movements the old threshold ignored now
+  count, which can add exits and entries and can also cancel a pending exit (a movement of 1-5% of the zone,
+  such as a child settling, now cancels it, as it does in the calibrated house). The totals can move in
+  either direction (a pending exit that used to confirm can now be cancelled, and open an entry instead). **Whether that
   makes your reported sleep better or worse is not known:** nobody has measured an install at the default.
   Even in the calibrated house most of the transitions a person reviewed were judged wrong (sleep analysis
   reduces their effect by grouping them into episodes and checking occupancy), so a different threshold is
@@ -1063,8 +1065,11 @@ someone retunes notifications.
   a zone that leaves little outside the bed gives little protection.
 - **The relaunch quiet gate follows both numbers.** The wait before a detector returns to the Low stream
   (previous section) counts movement as the exit rules do, and, on a camera that alerts, also as the alert
-  does.
-- **The slider's other effects are unchanged:** an alert fires exactly as before at every sensitivity.
+  does. At the default sensitivity (50) "quiet" now means under 1.19% in both channels instead of under
+  5.15%, so a picture with 1.19-5.15% noise (a fan, a curtain, infrared noise) keeps the detector on the main
+  stream for as long as that noise lasts (the return has no forced timeout). A camera with no bed zone that
+  alerts keeps only the alert's definition.
+- **The alert itself is unchanged:** it fires exactly as before at every sensitivity.
 
 **What to do:** if exits and entries look wrong on a camera, check the detection zone first (draw it over a
 real picture and look at what it covers). There is no setting for this threshold. Making it per-room, derived

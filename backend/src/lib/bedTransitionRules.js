@@ -7,7 +7,7 @@
 //
 // The per-frame test the tracker reads: a frame is ACTIVE in a channel when the changed fraction of that
 // channel's pixels is at least this. Every window and rule below (the link windows, the confirm quiet times,
-// the 120 s pauses, OOB_SLOW_OUT_MIN) was measured with the detector classifying frames at THIS number.
+// the 120 s pauses, OOB_SLOW_OUT_MIN) was calibrated with the detector classifying frames at THIS number.
 //
 // WHERE 0.011898989898989899 CAME FROM: it is the value `activeFractionThreshold(90)` in motionDetector.js
 // returns (0.002 + 0.098 * 10/99, about 1.19 % of the zone). Before #368 the tracker used whatever the motion
@@ -28,9 +28,11 @@
 // never re-couple.
 //
 // WHO IT CHANGES (stated, not guessed): an install NOT at sensitivity 90 ran the old tracker at its own
-// threshold (the default, 50, is 5.15 %). At any sensitivity below 90 this number is LOWER, so those installs
-// will record more transitions, and a small stir of 1-5 % of the zone (a mattress settling) now cancels a
-// pending exit, exactly as it does in the calibrated house (by design: it is bed movement). Above 90 (up to
+// threshold (the default, 50, is 5.15 %). At any sensitivity below 90 this number is LOWER: movements the old
+// threshold ignored now count, which can add exits and entries AND can cancel a pending exit (a small stir of
+// 1-5 % of the zone, a mattress settling, now cancels it, exactly as in the calibrated house: by design, it is
+// bed movement), so the totals can move in either direction (traced: at 50 a 6 % bed burst + 6 % outside burst
+// + a later 2 % bed frame used to confirm an exit and now cancels it and opens an entry). Above 90 (up to
 // 100 = 0.2 %) it is HIGHER, and transitions can move in either direction (the cancel paths). Whether that is
 // better for those installs' reported sleep is NOT known; nobody has measured one. At the default threshold
 // OOB_SLOW_OUT_MIN (5 %) was inert (an active outside frame was already >= 5.15 %); at this one it is a real

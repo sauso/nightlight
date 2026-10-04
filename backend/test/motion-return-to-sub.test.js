@@ -127,6 +127,9 @@ const subAnswers = (id) => answers.get(SUB(id));
 // One always-open child so an activity-only (sleep-tracking-only) leg is wanted whatever the date is.
 makeChild(db, { id: 'kid-ret', name: 'Return Child', start: '00:00', end: '23:59' });
 const ZONE = JSON.stringify([{ x: 0, y: 0, w: 0.5, h: 1 }]); // the bed is the LEFT half
+// #368: a zone painted over the WHOLE frame. buildZoneMask returns a real mask of 57 600 px (checked), so there is no
+// "outside" (outPixels = 0) and no tracker: it must behave as the unzoned leg. `zone: 'whole'` selects it.
+const WHOLE_FRAME_ZONE = JSON.stringify([{ x: 0, y: 0, w: 1, h: 1 }]);
 // `sens` (#368): the stored motion sensitivity, default 50. It only sets the ALERT threshold now; the quiet gate also
 // reads the fixed transition threshold (see the #368 tests below).
 function camera(id, { sub = true, activityOnly = false, zone = false, sens = 50 } = {}) {
@@ -145,7 +148,7 @@ function camera(id, { sub = true, activityOnly = false, zone = false, sens = 50 
     detect_sensitivity: sens,
     detect_confirm_s: 3,
     detect_cooldown_s: 60,
-    detect_zone: zone ? ZONE : null,
+    detect_zone: zone === 'whole' ? WHOLE_FRAME_ZONE : zone ? ZONE : null,
     detect_schedule_enabled: 0,
     detect_record_clips: 0,
     snapshot_url: null,
@@ -633,6 +636,20 @@ describe('#500: returning from main to the sub', { concurrency: false }, () => {
     await gateIgnores('c6f', { sens: 50 }, { allPx: 1728 }, 'a 3 % whole-frame burst (under the alert 5.15 %)');
     await motion.stopAllMotionDetectors();
     await gateDefers('c6g', { sens: 100 }, { allPx: 288 }, 'a 0.5 % whole-frame burst (over the alert 0.2 %)');
+  });
+
+  // Review round 1: an ALERTING zoned leg at sensitivity 50. A 3 % bed burst is alert-inactive (5.15 %) but tracker-active
+  // (1.19 %), and a zoned alerting leg has a tracker, so it DEFERS. The old gate used the alert threshold alone and let it
+  // switch. This is the only case that tells `zoned` from `false` (and `zoned || !alertDefinesQuiet` from
+  // `!alertDefinesQuiet`): every other zoned alerting case here sits at sensitivity 100, where the alert term already wins.
+  test('#368 C6: an ALERTING zoned leg at sensitivity 50: a 3 % BED burst (alert-quiet, tracker-active) defers the switch', async () => {
+    await gateDefers('c6j', { zone: true, sens: 50 }, { bedPx: 864 }, 'a 3 % bed burst on an ALERTING zoned leg');
+  });
+
+  test('#368 C6: a camera whose zone covers the WHOLE frame has no outside and no tracker, so it keeps the alert gate: at 50 a 3 % burst does NOT defer, at 100 a 0.5 % one does', async () => {
+    await gateIgnores('c6k', { zone: 'whole', sens: 50 }, { allPx: 1728 }, 'a 3 % whole-frame burst (under the alert 5.15 %)');
+    await motion.stopAllMotionDetectors();
+    await gateDefers('c6l', { zone: 'whole', sens: 100 }, { allPx: 288 }, 'a 0.5 % whole-frame burst (over the alert 0.2 %)');
   });
 
   test('#368 C6: an UNZONED ACTIVITY-ONLY leg gates on the fixed threshold: a 3 % whole-frame burst defers it at sensitivity 50, a 0.5 % one does not at sensitivity 100', async () => {
