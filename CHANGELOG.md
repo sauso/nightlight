@@ -52,6 +52,22 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
     is skipped — a push already sent cannot be recalled, but no further one goes out for a flagged night.
 
 ### Fixed
+- **A wake clip now starts at the wake's first moving or noisy frame, not up to a minute after it** (issue
+  #412). Since #447 the clip began 3 seconds before the END of the wake's first active minute, so it started
+  up to 57 seconds (about 27 on average) after the first frame and could miss the opening it exists to show
+  (#447's entry said "starting them at the first moving frame is #412": that is now done). The clip now opens about 2 to 3
+  seconds before the first frame that was over the same motion or sound threshold that makes a minute active,
+  or at the oldest footage the recording buffer still holds, if that is later: a continuous buffer of about 70
+  seconds or more reaches the first frame, a shallower one starts the clip up to about a minute minus its depth
+  after the first frame (roughly 22 seconds with a 38 second buffer, 37 with a 23 second one; derived, about 4
+  seconds either way). A clip is not anchored earlier than the footage the buffer really holds (that would leave
+  nothing to cut and fail it); where the buffer has a gap so that no footage at all falls in the clip's window, the old start
+  (the end of the first active minute) is used, as before. The log says when the buffer cost the opening: `[wake]
+  "<camera>" the buffer reaches back only to N s after the first movement: the clip starts there`. The clip's
+  recorded start is the clip's planned first frame (3 seconds before the first moving or noisy one; with an almost empty buffer, up to 3 seconds before the first footage it holds), so it can be a few seconds before the wake's minute on the
+  timeline; the review page still pairs them. Which minutes count as a wake, what is recorded and what the
+  sleep numbers read are unchanged. Details in `docs/recording.md` and KNOWN-ISSUES ("Where a wake clip
+  starts"). Nothing here assumes a particular house, child or timezone.
 - **A camera with motion alerts off (or MQTT/ONVIF motion) now keeps sampling until 3 hours after the
   sleep window closes, so the morning wake can be found** (issue #353). Its motion leg runs only to feed
   sleep tracking, and it used to stop 5 minutes after the window ends, although the sleep numbers look for
