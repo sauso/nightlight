@@ -1117,6 +1117,50 @@ from the room or exposed, needs real frames to evaluate and is a separate piece 
 
 ---
 
+## A camera with motion alerts off (or MQTT/ONVIF motion) samples for 3 hours past the sleep window, and no further
+
+**What you see:** nothing on screen. In the sleep numbers, a child whose camera has motion alerts off, or
+takes its motion from MQTT or ONVIF, now gets a morning wake found up to 3 hours after the window closes
+(before issue #353 its sampling stopped 5 minutes after the window, so the morning departure was never
+seen). The server's CPU shows one more low-resolution video decode for 3 hours more each day on that
+camera.
+
+**Why:** the motion leg of such a camera runs only to feed sleep tracking, and only while the sleep
+window, widened by 3 hours before it and 3 hours after it, is open. That 3 + 3 hours is the sleep
+detector's own span (the lookbehind for an early bedtime and the lookahead for a late wake), not a number
+chosen for this: the morning departure is searched for, and the night's saved summary is refined, up to
+3 hours after the window closes, and nothing past that point can change the night.
+
+**What it changes, stated rather than guessed:**
+- **A departure later than 3 hours after the window closes is not seen by any camera.** That is the
+  detector's existing limit, not new. Lengthening it is a separate decision that would move numbers on
+  every install.
+- **The morning review has no *got out / into bed* events past about 3 hours after the window's end for
+  such a camera.** The review looks from local noon to noon (plus an hour of lingering-movement evidence
+  either side), and the sampling stops before the end of that range. It does not change the night's wake
+  time, which is capped at the same 3 hours. A frame-diff camera with motion alerts on samples around the clock and does not
+  have this gap.
+- **The extra CPU is a relative figure, not measured.** 3 more hours a day (15 hours becomes 18 for a
+  19:00-07:00 window) of one ffmpeg reading the low-resolution stream at 5 frames a second. Frame-diff
+  cameras with motion alerts on already run all day.
+- **The leg starts up to 5 minutes after the 3-hour lead edge** (there is no slack on the start edge; the
+  server checks every 5 minutes) and lingers 5 to 10 minutes after the closing edge, so the last minute is
+  written.
+- **Calibrated in one house.** The 3 hours are the detector's, which were measured on two cameras in one
+  house. A child who stays in bed more than 3 hours after the window closes is not measured on any install.
+- **The timelapse, wake watcher and wake clips are not widened to 3 hours.** The timelapse records only
+  inside the sleep window itself; the live wake watcher (which also decides wake clips) uses the window plus
+  5 minutes either side. For a window that opens between 00:00 and 00:04, the wake watcher's 5-minute lead
+  does not cover the minutes before midnight; this is harmless (the watcher arms only after sleep has begun)
+  and the motion leg itself is covered by its own 3-hour lead.
+
+**What to do:** nothing. There is no setting for this span. The only ways to avoid the extra decode are to
+switch the child's sleep tracking off or to unassign the camera from the child. Turning motion alerts on
+does not avoid it: only a frame-diff camera with alerts on runs all day (more decoding, not less), and a
+camera with MQTT or ONVIF motion stays activity-only with alerts on, so the span stays.
+
+---
+
 ## Confirmed bugs (fix pending)
 
 ### Compatibility (HLS) mode doesn't play when the app is served over plain HTTP

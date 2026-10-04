@@ -260,6 +260,12 @@ export function _productionTimingForTests() {
   return PRODUCTION_TIMING;
 }
 
+// The live detector Map entry for a camera, or undefined. A restart replaces the Map entry, so identity is the
+// only way to tell a kept leg from a restarted one when the leg logs no start line (an alerting leg).
+export function _detectorEntryForTests(cameraId) {
+  return detectors.get(cameraId);
+}
+
 // Every live return-check timer. Only so a test can see that none survives stop / exit / error / a replaced
 // entry: a leaked interval sends no request (its own guard returns first), so nothing else can show it.
 const returnTimers = new Set();
@@ -405,9 +411,11 @@ export function motionAlerting(camera) {
 // a child-assigned camera whose motion alerts come from MQTT (or has motion alerting off) still runs
 // the cheap leg to feed a continuous motion timeline (activityTracker) — but fires NO alerts, so it
 // doesn't reintroduce the false positives the MQTT source avoids. The activity-only leg runs only when
-// the child has sleep tracking ON *and* their sleep window is currently open (childSamplingActiveNow), so
-// it samples overnight instead of burning CPU all day; the 5-min reconcile starts it at bedtime and
-// stops it after wake. A camera with no child (or one outside its window) that isn't a framediff alerter
+// the child has sleep tracking ON *and* the sampling gate is open (childSamplingActiveNow), so it samples
+// around the sleep window instead of burning CPU all day. That gate opens ONSET_LOOKBEHIND_MS before
+// the window and stays open WAKE_LOOKAHEAD_MS (+ the 5-min reconcile slack) after it ends, the span the
+// sleep inference reads (issue #353); the 5-min reconcile starts the leg at the lead edge and stops it
+// after the tail. A camera with no child (or one outside that span) that isn't a framediff alerter
 // runs no leg. Frame-diff ALERT legs above are NOT window-gated — alerts run 24/7.
 export function motionLegWanted(camera) {
   // Detection switches do not stop the activity-only sleep sampler. The public demo plays a looped
@@ -419,6 +427,22 @@ export function motionLegWanted(camera) {
   // childSamplingActiveNow, not childWindowActiveNow: sampling opens a few hours BEFORE the configured
   // bedtime so an early night is captured (bedtime is never a rigid time). See its comment.
   return !!camera.child_id && childSamplingActiveNow(camera.child_id);
+}
+
+// The reconcile decision for the pixel-diff leg, extracted from index.js reconcileCameraPaths (#353):
+// start it when wanted and not running, stop it when no longer wanted and running, otherwise leave it
+// ALONE. "Leave alone" matters: startMotionDetector stops-then-starts, and a restart resets the
+// bed-transition tracker and its believed-occupied state, which would lose an exit in progress. The
+// decision lives here, not inline, because index.js spawns MediaMTX and the transcoders at import, so
+// no test can import it; a test can import this. motionLegWanted is evaluated ONCE (the inline form
+// evaluated it twice, which could disagree across a window edge between the two calls).
+export async function reconcileMotionLeg(cam) {
+  const wanted = motionLegWanted(cam);
+  if (wanted && !isDetecting(cam.id)) {
+    await startMotionDetector(cam).catch((e) => logger.error(`[detect] start failed: ${e.message}`));
+  } else if (!wanted && isDetecting(cam.id)) {
+    await stopMotionDetector(cam.id).catch(() => {});
+  }
 }
 
 export async function startMotionDetector(camera) {
