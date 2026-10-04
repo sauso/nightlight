@@ -307,11 +307,14 @@ const FH = 180;
 const FRAME_BYTES = FW * FH;
 const BASE = 60;
 const LIT = 200; // |LIT - BASE| = 140, far over the detector's PIXEL_DELTA of 24
-// Painted regions, and what each one does to the detector's two channels (sensitivity 50 -> an
-// active threshold of 5.15% of the zone):
-//   bed:     rows 0-59 of the left half   = 9,600 px = 33.3% of the 28,800 px zone   -> active
-//   out:     rows 0-39 of the right half  = 6,400 px = 22.2% of the 28,800 px outside -> active
-//   flicker: rows 170-174 of the left half =  800 px =  2.8% of the zone            -> NOT active
+// Painted regions, and what each one does to the detector's channels. Sensitivity 50 gives the motion ALERT an
+// active threshold of 5.15% of the zone; the bed-transition tracker reads a FIXED 1.19% since #368:
+//   bed:     rows 0-59 of the left half   = 9,600 px = 33.3% of the 28,800 px zone   -> active (alert and tracker)
+//   out:     rows 0-39 of the right half  = 6,400 px = 22.2% of the 28,800 px outside -> active (tracker)
+//   flicker: rows 170-174 of the left half =  800 px =  2.8% of the zone            -> NOT active for the ALERT (under
+//            5.15%), but ACTIVE for the bed-transition tracker (over 1.19%). Before #368 both used the alert's number
+//            and this band was inert to both; it is kept as the file's own picture of a small bed movement, which is
+//            exactly the band #368 moved from "ignored" to "seen" (the tracker lines it adds are in GOLDEN_MOTION).
 // An active region is lit on alternate frames, so every frame of a run differs from the one before.
 function paint({ bed = false, out = false, flicker = false }) {
   const f = Buffer.alloc(FRAME_BYTES, BASE);
@@ -340,13 +343,13 @@ function frames(script) {
 
 // Generation 1, minute 1 (0-60 s), one frame per read. Approximate times at 5 fps in the comments.
 const MOTION_MIN1 = frames([
-  { n: 25, flickerEvery: 5 }, //   0-5 s   quiet, sub-threshold flicker
+  { n: 25, flickerEvery: 5 }, //   0-5 s   no alert-level motion: 2.8% flicker (the tracker sees it since #368)
   { n: 26, bed: true }, //         5-10 s  bed moving: the motion alert confirms 3 s in
   { n: 10, out: true }, //        10-12 s  outside only: an exit candidate (bed active <8 s ago)
   { n: 40 }, //                   12-20 s  quiet bed for >6 s: the exit is confirmed (out_of_bed)
   { n: 10, out: true }, //        20-22 s  outside again
   { n: 20, bed: true }, //        22-26 s  bed only, outside quiet: entry candidate -> into_bed 6 s on
-  { n: 169, flickerEvery: 7 }, // 26-60 s  quiet (the alert cooldown, 60 s, keeps this run silent)
+  { n: 169, flickerEvery: 7 }, // 26-60 s  no alert-level motion (the alert cooldown, 60 s, keeps this run silent); its 2.8% flicker is seen by the tracker (see GOLDEN_MOTION's log)
 ]);
 // Generation 1, minute 2 (60-120 s): a second bed run at 70 s, 65 s after the first alert, so it
 // alerts again. Delivered in 3-frame bursts (a clump) and then re-cut into 40,000-byte reads.
@@ -517,6 +520,19 @@ const GOLDEN_MOTION = {
     '[INFO] [oob] "Golden Motion Cam" candidate cancelled — bed re-active after 2000ms',
     '[INFO] [intobed] "Golden Motion Cam" entry candidate — outside active 200ms ago, bed now 33.3%',
     '[INFO] [intobed] "Golden Motion Cam" INTO BED — motion entered the bed, outside quiet 6000ms since, bed peak 33.3%',
+    // ★ #368, DERIVED BY HAND, NOT RE-RECORDED (and checked against the real tracker in a scratch replay): the 2.8%
+    // flicker is over the fixed 1.19% transition threshold, which the alert threshold at sensitivity 50 (5.15%) used to
+    // hide from the tracker. Two things move, nothing else: (1) the first `no entry link` line above is now logged at
+    // 0.2 s (the first flicker diff, frame 1) instead of 5.0 s (the first bed frame); the text and its place in this
+    // list are the same, and the 5.0 s occurrence is now inside the 30 s rate limit; (2) THIS line is new. The INTO BED
+    // above confirmed at 28.2 s (frame 141). The 169-frame segment's flicker frames are 131 + k for k = 0, 7, 14...;
+    // k = 0, 1, 7, 8 (26.2-27.8 s) fall inside that pending candidate and only touch its peak, but k = 14 (frame 145,
+    // 29.0 s) is the first bed-active frame after it with the outside last active at frame 110 (22.0 s): 7.0 s earlier,
+    // inside the 8 s entry link, so a candidate opens. It cannot confirm: when its 6 s of quiet ends (35.0 s) the 120 s
+    // entry pause (28.2 s + 120 s) is still running, so no INTO BED line and no row, which is why `transitions` is
+    // unchanged. Later flickers find the outside last active 14 s earlier (no link) and the belief already "in bed"
+    // (no near-miss). 2.8% = 800 / 28,800 px. The alert rows are unchanged: the alert reads its own threshold.
+    '[INFO] [intobed] "Golden Motion Cam" entry candidate — outside active 7000ms ago, bed now 2.8%',
     '[INFO] [detect] motion on "Golden Motion Cam" (33.3% of zone)',
     // rtsp-refused-error.err, forwarded: the logger's credential redaction drops the URL query string.
     '[detect:path_golden_motion] [tcp @ 0x78fde35b0e40] Connection to tcp://127.0.0.1:1[redacted] failed: Connection refused',

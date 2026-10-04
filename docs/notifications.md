@@ -229,7 +229,7 @@ saved is what the camera is still using).
 
 | Setting | Default | Range | What it does |
 |---|---|---|---|
-| **Motion sensitivity** | 50 | 1–100 | How much of the detection zone must change between frames. Higher = more sensitive. |
+| **Motion sensitivity** | 50 | 1–100 | How much of the detection zone must change between frames for a **motion alert**. Higher = more sensitive: roughly **10% of the zone at 1, 5.15% at 50, 1.19% at 90, 0.2% at 100**. It changes **alerts only** (on a camera that alerts and has fallen back to the main stream it can also change how soon the detector returns to the Low stream, see [KNOWN-ISSUES.md](../KNOWN-ISSUES.md)). It does not change sleep tracking, nor the out-of-bed / into-bed detection, which use a fixed 1.19% threshold whatever this is set to (see [Bed exits and entries use a fixed threshold](#bed-exits-and-entries-use-a-fixed-threshold)). |
 | **Motion confirm** | 3 s | 0–30 s | Motion must persist this long before alerting, counted in video that actually arrived: if the camera's video stops for more than about 1.5 s mid-run (a stall, a reboot, a Wi-Fi drop; a camera slower than about 0.67 frames a second learns a wider limit after about 9 frames, and until then every frame restarts the count, so its first alert after a restart of the detector comes later, at about 24 s), the count restarts at the next frame, so a stall can make an alert later, never earlier than it would have come. 0 alerts on the first frame, including the first one after such a gap. See [KNOWN-ISSUES.md](../KNOWN-ISSUES.md). |
 | **Motion cooldown** | 60 s | 1–3600 s (the form's limit; the server raises values below 1 to 1, and turns 0 or a non-number into the 60 s default) | Minimum gap between motion alerts from this camera. **It survives the detector restarting**: a camera reconnect, the detector watchdog, the return to the Low stream, a rename, or saving any camera setting do not start it over, so motion cannot alert again sooner than this after the last alert (before issue #454 a detector restart did). Two things to know. To test alerts right after changing a motion setting, wait out the cooldown (or set a short one): saving a setting no longer lets the next alert fire at once. And it is **lost when the server itself restarts** (nothing is stored), so a container that restarts nightly can alert once more per camera per restart. A one-way backward step of the server's clock silences it for at most one cooldown (a step back that is later corrected forward can let one alert through inside it). The sound cooldown below is separate; MQTT and ONVIF motion alerts keep their own. See [KNOWN-ISSUES.md](../KNOWN-ISSUES.md). |
 | **Sound sensitivity** | 50 | 1–100 | How far above the room's own ambient level a noise must rise. Higher = smaller margin = easier to trigger: roughly **+18 dB at 1, +11 dB at 50, +4 dB at 100**. |
@@ -280,10 +280,34 @@ Sound is measured **relative to each room's own ambient level**, which the app l
 not as an absolute loudness. A room next to a busy road and a silent room both settle at "0 over
 ambient", so the same sensitivity means the same thing in both.
 
+### Bed exits and entries use a fixed threshold
+
+Sleep tracking reads two kinds of event from the frame-by-frame motion leg: a child leaving the bed
+("out of bed") and being put into it ("into bed"). Both are decided by the same test the motion alert
+uses, "did enough of the area change between two frames", but with a **fixed threshold of 1.19% of the
+area (the bed zone, and separately the area outside it)** instead of the motion sensitivity slider.
+**Motion sensitivity therefore changes alerts only**; it no longer moves the stored exits and entries
+(before issue #368 it did, and the slider is not even shown on a camera that only feeds sleep tracking,
+for example one using MQTT or ONVIF motion or with motion detection switched off).
+
+⚠️ **Known limit: 1.19% is calibrated in one house.** It is the value the sensitivity slider gave at 90,
+which is what every transition rule (the link windows, the confirmation times, the two-minute pause) was
+calibrated at (the saved settings say so; the history of the setting is not stored). It is not derived
+from your room and nothing checks it against your camera. If your
+motion sensitivity was **not** 90, expect your recorded exits and entries to **change after upgrading,
+in either direction**: below 90 the threshold goes down, so movements the old threshold ignored now count,
+which can add exits and entries and can also cancel a pending exit (a movement of 1–5% of the zone, such
+as a child settling, now cancels it, the way it does in the calibrated house); the totals can move in
+either direction. Above 90 the threshold goes up. Whether that is better for your sleep numbers is **not
+known**. Stored history is not
+rewritten. A noisy room (a fan, a curtain, infrared noise) can no longer be quieted for sleep tracking by
+lowering the motion sensitivity: redraw the detection zone instead. See [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
+
 ### ⚠️ Sound sensitivity also changes sleep tracking
 
-This is the one that surprises people, because motion sensitivity does **not** work this way — it only
-affects alerts. Sound sensitivity affects **both**. The same margin that decides when to notify you
+This is the one that surprises people, because motion sensitivity does **not** change sleep tracking
+(the out-of-bed / into-bed threshold above is fixed): it only affects alerts. Sound sensitivity affects
+**both**. The same margin that decides when to notify you
 also decides when a *steady* background noise gets absorbed into the room's ambient level, and sleep
 tracking counts a minute as "awake" partly from sound.
 
