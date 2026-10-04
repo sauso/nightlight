@@ -25,11 +25,13 @@ process.env.PATH = emptyBinDir;
 
 const { default: db } = await import('../src/db.js');
 const { SLEEP_THRESHOLDS } = await import('../src/lib/sleepAnalysis.js');
-const { startSegmenter, stopAllSegmenters, isSegmenterRunning, ringDepthMs } = await import('../src/lib/clipRecorder.js');
+const { startSegmenter, stopAllSegmenters, isSegmenterRunning, ringDepthMs, setRingDepth, extractClip, clipCoverStartMs, ringOldestStartMs } =
+  await import('../src/lib/clipRecorder.js');
 const { holdOwners, effectiveHold, RING_OWNER } = await import('../src/lib/ringHolds.js');
 const activity = await import('../src/lib/activityTracker.js');
 const { logger } = await import('../src/lib/logger.js');
-const { handleMinute, startWakeWatcher, stopWakeWatcher, sweepStaleRuns, _state } =
+const { WAKE_CLIP_LEAD_SEC, getWakeClipSettings } = await import('../src/lib/recordings.js');
+const { handleMinute, startWakeWatcher, stopWakeWatcher, sweepStaleRuns, firstActiveFrameMs, wakeClipAnchor, _state } =
   await import('../src/lib/wakeWatcher.js');
 
 const { MOTION_ACTIVE, SOUND_ACTIVE, ONSET_QUIET_MIN, WAKE_ACTIVE_MIN, WAKE_GAP_MIN } = SLEEP_THRESHOLDS;
@@ -325,20 +327,23 @@ describe('★ #446 — a WAKE hold is gated on wake clips actually being enabled
 
 describe('★ #447 — the WAKE hold is taken young enough for every ring size the settings allow', () => {
   // activityTracker labels a minute by when its samples ARRIVED and hands it over at the minute's END, on a
-  // 1 s tick. handleMinute anchors the run at that END and holds the ring HOLD_LEAD_MS (15 s) before it. The
-  // ring is only as deep as the clip settings make it (clipRecorder.ringDepthMsFor, nothing sizes it for wake
-  // clips): 63 s with on-demand Record on, 38 s with it off, 23 s at the smallest clip settings. A hold point
-  // older than the ring when it is taken protects nothing: the lead-in is already gone.
+  // 1 s tick. handleMinute anchors the run at the wake's first active frame (#412; at the minute's END, `at`,
+  // for a payload that carries no rises) and holds the ring from clipCoverStartMs(anchor, WAKE_CLIP_LEAD_SEC)
+  // = anchor - 7 s (#412; it was a separate `at - 15 s`, #447's HOLD_LEAD_MS, before). The ring is only as deep
+  // as the clip settings make it (clipRecorder.ringDepthMsFor, nothing sizes it for wake clips): 63 s with
+  // on-demand Record on, 38 s with it off, 23 s at the smallest clip settings. A hold point older than the ring
+  // when it is taken protects nothing: the lead-in is already gone.
   // This drives the REAL chain — samples into the tracker, its ticks, its listener into handleMinute, the hold —
   // so it fails both on a minute delivered late (at +GRACE, 22.9 s old here) and on a hold anchored at the
   // minute's START (75.9 s old here: past every ring). Before #447 the hold was 15 s + the flush phase (0-60 s)
-  // old; ≤ 16 s is never worse than the best case that had.
+  // old. With no ring files in this test the anchor is `at` (nothing to clamp to), so the hold is 7 s before the
+  // minute's end, 7.9 s old when the 0.9 s-phase tick takes it; the real-footage cases are in the #412 block.
   for (const { preRollSec, postRollSec, ring, why } of [
     { preRollSec: 30, postRollSec: 15, ring: 63_000, why: 'on-demand Record on (its 30 s pre-roll)' },
     { preRollSec: 5, postRollSec: 15, ring: 38_000, why: 'Record off, default clip settings' },
     { preRollSec: 0, postRollSec: 5, ring: 23_000, why: 'the smallest clip settings allowed' },
   ]) {
-    test(`${ring / 1000} s ring (${why}): the hold point is at most 16 s old when it is taken, and at least 15 s`, () => {
+    test(`${ring / 1000} s ring (${why}): the hold is clipCoverStartMs(anchor), anchored no later than the minute's end, and fits the ring`, () => {
       db.prepare("UPDATE settings SET wake_clips_enabled = 1 WHERE id = 'app'").run();
       const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(CAM);
       startSegmenter(CAM, camera.mediamtx_path, { preRollSec, postRollSec });
@@ -360,18 +365,638 @@ describe('★ #447 — the WAKE hold is taken young enough for every ring size t
         assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE]);
         const age = takenAt - effectiveHold(CAM);
         assert.ok(age <= ring, `the hold point was ${age} ms old against a ${ring} ms ring: the lead-in is gone`);
-        assert.ok(age <= 16_000, `the hold point was ${age} ms old: more than HOLD_LEAD_MS + one tick`);
+        // #412 C11: the hold is the ONE formula extractClip reads back with, taken from the run's anchor, and the
+        // anchor is never later than the minute's end (today's anchor is the ceiling).
+        const run = stateOf().run;
+        const minuteEnd = M + 60_000;
+        assert.ok(run.startMs <= minuteEnd, `the anchor ${run.startMs - minuteEnd} ms is later than the minute's end`);
+        assert.equal(effectiveHold(CAM), clipCoverStartMs(run.startMs, WAKE_CLIP_LEAD_SEC));
         // ...and from BELOW (#447 fix round 1: with only the upper bound, an anchor a minute or 30 s LATER than the
         // minute's end passed, because a hold point in the future has a negative age). The listener hears a minute
-        // at or after its end, so an anchor at the end is never later than the tick that took the hold, and the
-        // hold sits HOLD_LEAD_MS (15 s, wakeWatcher.js, not exported) before that anchor: at least 15 s old. Less
-        // means the anchor is a moment that had not happened yet, and the clip would open after the movement.
-        assert.ok(age >= 15_000, `the hold point was ${age} ms old: younger than HOLD_LEAD_MS, so anchored in the future`);
+        // at or after its end, so an anchor at or before the end is never later than the tick that took the hold,
+        // and the hold sits 7 s (clipCoverStartMs: 3 s lead + 2 segments either side) before that anchor: at least
+        // 7 s old. Less means the anchor is a moment that had not happened yet, and the clip would open after the
+        // movement.
+        assert.ok(age >= 7_000, `the hold point was ${age} ms old: younger than the cover margin, so anchored in the future`);
+        // ...and an upper bound again (the #412 rewrite had dropped the old `age <= 16 s`, which let the #447 mutant
+        // "the listener is told at +GRACE" survive): with no ring files the anchor is the minute's end, so the hold
+        // is the 7 s cover margin plus the tick that heard the minute (7.9 s here, a 0.9 s phase). A minute heard
+        // late (the tracker's 7 s grace) would be 7 s older, 14.9 s: still inside the 23 s ring, so only this bound
+        // catches it. 9 s = 7 s + one 1 s tick + 1 s of slack.
+        assert.ok(age <= 9_000, `the hold point was ${age} ms old: the minute was heard late (more than 7 s + one tick)`);
       } finally {
         off();
       }
     });
   }
+});
+
+// -------------------------------------------------------------------------------------------
+// ★ #412 — THE CLIP STARTS AT THE WAKE'S FIRST ACTIVE FRAME, CLAMPED TO THE FOOTAGE THE RING REALLY HOLDS.
+//
+// What was wrong (and what was NOT): since #447 the clip was anchored at the END of the wake's first active
+// minute, up to 57 s (27 s on average) after the first active frame. The issue's own headline, a hold that
+// lands after the ring pruned the opening, does not occur today (the hold is taken ~1 s after `at` and the
+// clip needs footage from `at - 7 s`; the smallest ring, 23 s, keeps 8 s of margin). The fix anchors on the
+// first frame over the same thresholds that define `active` and clamps to the ring's ACTUAL oldest closed
+// segment, because a clip anchored before the ring's footage has an EMPTY selection in extractClip and the row
+// fails. The claim ids C1..C12 below are the plan's.
+//
+// Fixtures are explicit times relative to each test's own synthetic minute M (a fixed past instant or a
+// labelStartMs), set on ring-dir files with utimes. Nothing here depends on the second of the minute the suite
+// runs in. With no ffmpeg on PATH the segmenter entry only exists SYNCHRONOUSLY, so every chain below runs
+// without an `await` between startSegmenter and its last read.
+describe('★ #412 — the wake clip is anchored on the first active frame, clamped to the ring\'s real footage', () => {
+  const LEAD_MS = WAKE_CLIP_LEAD_SEC * 1000;
+  const sqlTime = (ms) => new Date(ms).toISOString().replace('T', ' ').slice(0, 19);
+  // Closed segment mtimes every 2 s (SEGMENT_SEC, restated only to build fixtures) from `from` to `to`, offsets.
+  const every2s = (from, to) => { const a = []; for (let o = from; o <= to; o += 2000) a.push(o); return a; };
+  // The oldest closed segment's CONTENT start for a fixture list: its mtime minus one segment length.
+  const contentStart = (mtimes) => Math.min(...mtimes) - 2000;
+  const bufferLinesIn = (lines) => lines.filter((l) => l.includes('the buffer reaches back only'));
+
+  beforeEach(() => {
+    db.prepare("UPDATE settings SET wake_clips_enabled = 1, wake_clip_seconds = 30 WHERE id = 'app'").run();
+  });
+  after(() => {
+    db.prepare("UPDATE settings SET wake_clips_enabled = 1, wake_clip_seconds = 30 WHERE id = 'app'").run();
+  });
+
+  // Arm a REAL segmenter and plant closed segments in its ring dir (it wipes the dir on start, so files go in
+  // after). `mtimes` are absolute ms.
+  function startRing({ preRollSec = 30, postRollSec = 15 } = {}, mtimes = []) {
+    const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(CAM);
+    const entry = startSegmenter(CAM, camera.mediamtx_path, { preRollSec, postRollSec });
+    assert.equal(isSegmenterRunning(CAM), true, 'precondition: the segmenter armed synchronously');
+    plant(entry, mtimes);
+    return entry;
+  }
+  let plantedN = 0;
+  function plant(entry, mtimes) {
+    for (const m of mtimes) {
+      const p = path.join(entry.ringDir, `seg-${String(plantedN++).padStart(6, '0')}.mkv`);
+      fs.writeFileSync(p, 'x');
+      fs.utimesSync(p, new Date(m), new Date(m));
+    }
+  }
+
+  // ONE hand-built active minute at the next label, after the watcher is armed. `ring` = { preRollSec,
+  // postRollSec, mtimeOffsets } (offsets from the minute's START M; or `mtimeAbs`, absolute ms, for a segment
+  // that must be "still being written" relative to the real clock; `growTo` = settings to resize the running
+  // ring to afterwards), `rises` / `soundRises` = [[offsetMs, value]] or undefined for a legacy payload that
+  // carries no arrays.
+  function oneRun({ ring = null, rises, soundRises, motionPeak = MOTION_ACTIVE + 0.05, soundPeak = null, clipsEnabled = true }) {
+    db.prepare("UPDATE settings SET wake_clips_enabled = ? WHERE id = 'app'").run(clipsEnabled ? 1 : 0);
+    settle();
+    const idx = clock++;
+    const M = labelStartMs(idx);
+    const entry = ring ? startRing(ring, ring.mtimeAbs ?? ring.mtimeOffsets.map((o) => M + o)) : null;
+    if (ring?.growTo) assert.equal(setRingDepth(CAM, ring.growTo), true);
+    logger.clear();
+    const payload = { cameraId: CAM, bucketStart: labelFor(idx), motionPeak, soundPeak };
+    if (rises) payload.motionRises = rises.map(([o, value]) => ({ atMs: M + o, value }));
+    if (soundRises) payload.soundRises = soundRises.map(([o, value]) => ({ atMs: M + o, value }));
+    const result = handleMinute(payload);
+    return { M, at: M + 60_000, run: stateOf().run, hold: effectiveHold(CAM), lines: logger.getRecent(), entry, result };
+  }
+
+  // Start extractClip's REAL selection for each `at` NOW (the segmenter entry only exists synchronously) and say
+  // whether it found footage: 'empty' (the failure the clamp exists to prevent: "no ring segments covered the
+  // requested window"), 'selected' (it got past selection and failed at the ffmpeg spawn, which is not
+  // installed here by design) or the unexpected message.
+  function trySelect(ats) {
+    const { clipSeconds } = getWakeClipSettings();
+    return Promise.all(ats.map((at, i) =>
+      extractClip(CAM, { preRollSec: WAKE_CLIP_LEAD_SEC, postRollSec: clipSeconds, at, settleMs: 0, outBase: `t412-${i}` })
+        .then(() => 'selected', (err) =>
+          /no ring segments covered/.test(err.message) ? 'empty' : /spawn|ENOENT|ffmpeg/i.test(err.message) ? 'selected' : err.message)));
+  }
+
+  // THE REAL CHAIN: samples into the real tracker, its ticks (synthetic times), its listener into the real
+  // handleMinute, the real holdRing, the real captureWakeClip (its `recordings` row is inserted synchronously
+  // before the cut, so `started_at` is observable). 15 quiet minutes arm the watcher, then `activeMinutes`
+  // consecutive active minutes; `frames` = [[offsetMs into the FIRST active minute, 'm'|'s'|'o', value]].
+  // Ticks at each minute's end + 0.5 s (the first tick at or after the end tells the listener).
+  const CHAIN_M = Date.UTC(2026, 0, 15, 3, 0, 0); // fixed, in the past: the first active minute starts here
+  function runChain({ frames, ring, activeMinutes = WAKE_ACTIVE_MIN }) {
+    db.prepare('DELETE FROM recordings').run();
+    startRing(ring, ring.mtimeOffsets.map((o) => CHAIN_M + o));
+    activity._resetActivityTrackerForTests();
+    logger.clear();
+    const off = activity.onMinuteFlushed(handleMinute);
+    let holdFrom = null;
+    try {
+      const events = [];
+      for (let i = ONSET_QUIET_MIN; i >= 1; i--) events.push([CHAIN_M - i * 60_000 + 20_000, 'm', 0]);
+      for (const [o, kind, v] of frames) events.push([CHAIN_M + o, kind, v]);
+      for (let i = 1; i < activeMinutes; i++) events.push([CHAIN_M + i * 60_000 + 20_000, 'm', MOTION_ACTIVE + 0.05]);
+      events.sort((a, b) => a[0] - b[0]);
+      let k = 0;
+      for (let t = CHAIN_M - ONSET_QUIET_MIN * 60_000 + 60_500; t <= CHAIN_M + activeMinutes * 60_000 + 500; t += 60_000) {
+        while (k < events.length && events[k][0] < t) {
+          const [at, kind, v] = events[k++];
+          if (kind === 'm') activity.recordMotion(CAM, v, null, at);
+          else if (kind === 's') activity.recordSound(CAM, v, at);
+          else activity.recordMotionOut(CAM, v, null, at);
+        }
+        activity.flushActivity(t);
+        if (holdFrom === null && effectiveHold(CAM) !== null) holdFrom = effectiveHold(CAM);
+      }
+    } finally {
+      off();
+      activity._resetActivityTrackerForTests();
+    }
+    const rows = db.prepare("SELECT id, started_at, status FROM recordings WHERE kind = 'wake' ORDER BY id").all();
+    return { rows, holdFrom, run: stateOf().run, lines: logger.getRecent() };
+  }
+
+  describe('C3 — firstActiveFrameMs finds the first frame over the thresholds that define `active`', () => {
+    // Through the REAL tracker, one minute at a time: record the samples, tick, take the payload the listener got.
+    const MIN0 = Date.UTC(2026, 0, 14, 0, 0, 0);
+    function trackerPayload(M, samples) {
+      activity._resetActivityTrackerForTests();
+      let got = null;
+      const off = activity.onMinuteFlushed((p) => { got = p; });
+      try {
+        for (const [kind, v, o] of samples) {
+          if (kind === 'm') activity.recordMotion(CAM, v, null, M + o);
+          else if (kind === 's') activity.recordSound(CAM, v, M + o);
+          else activity.recordMotionOut(CAM, v, null, M + o);
+        }
+        activity.flushActivity(M + 60_500);
+      } finally {
+        off();
+        activity._resetActivityTrackerForTests();
+      }
+      return got;
+    }
+    // The brute force: the earliest sample that is over ITS channel's threshold (out-of-bed motion never counts).
+    const oracle = (samples) => {
+      let best = null;
+      for (const [kind, v, o] of samples) {
+        const hot = (kind === 'm' && v > MOTION_ACTIVE) || (kind === 's' && v > SOUND_ACTIVE);
+        if (hot && (best === null || o < best)) best = o;
+      }
+      return best;
+    };
+
+    const planted = [
+      ['values exactly AT both thresholds do not count', [['m', MOTION_ACTIVE, 5000], ['s', SOUND_ACTIVE, 6000]], null],
+      ['just over the motion threshold counts', [['m', MOTION_ACTIVE + 1e-9, 7000]], 7000],
+      ['just over the sound threshold counts', [['s', SOUND_ACTIVE + 1e-9, 7000]], 7000],
+      ['sub-threshold rises before the first qualifying one are skipped', [['m', 0.002, 1000], ['m', 0.005, 2000], ['m', 0.02, 10_000]], 10_000],
+      ['a sound value between 0.01 and 6 does not count (it would, compared with the MOTION threshold)', [['s', 3, 1000], ['m', 0.02, 20_000]], 20_000],
+      ['sound first, then motion', [['s', SOUND_ACTIVE + 4, 8000], ['m', 0.02, 20_000]], 8000],
+      ['motion first, then sound', [['m', 0.02, 4000], ['s', SOUND_ACTIVE + 4, 30_000]], 4000],
+      ['two qualifying rises: the FIRST', [['m', 0.02, 10_000], ['m', 0.5, 20_000]], 10_000],
+      ['a later, lower frame does not move it', [['m', 0.02, 10_000], ['m', 0.015, 15_000]], 10_000],
+      ['out-of-bed motion first is ignored', [['o', 0.9, 2000], ['m', 0.02, 30_000]], 30_000],
+      ['a frame at the very start of the minute', [['m', 0.3, 0]], 0],
+      ['a frame in the last millisecond of the minute', [['m', 0.3, 59_999]], 59_999],
+      ['sound-only minute', [['s', SOUND_ACTIVE + 1, 41_000]], 41_000],
+    ];
+    for (const [name, samples, want] of planted) {
+      test(`C3: ${name}`, () => {
+        const M = MIN0;
+        const payload = trackerPayload(M, samples);
+        assert.ok(payload, 'precondition: the tracker told the listener about the minute');
+        assert.equal(firstActiveFrameMs(payload, M), want === null ? null : M + want);
+        // The same predicate as handleMinute's `active`: a minute is active exactly when it has an active frame.
+        const active = (payload.motionPeak != null && payload.motionPeak > MOTION_ACTIVE) ||
+          (payload.soundPeak != null && payload.soundPeak > SOUND_ACTIVE);
+        assert.equal(active, want !== null, 'the active frame and the active minute must agree');
+      });
+    }
+
+    test('C3: 400 seeded random minutes through the real tracker equal the brute-force first frame', () => {
+      let s = 412_000;
+      const rand = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+      const pick = (a) => a[Math.floor(rand() * a.length)];
+      const motionValues = [0, 0.0005, 0.004, MOTION_ACTIVE, MOTION_ACTIVE + 1e-9, 0.05, 0.3, 0.9];
+      const soundValues = [0, 2, 5.9, SOUND_ACTIVE, SOUND_ACTIVE + 1e-9, 8, 20];
+      let armed = 0;
+      let none = 0;
+      let nonTrivial = 0;
+      for (let seq = 0; seq < 400; seq++) {
+        const n = Math.floor(rand() * 10);
+        const offs = Array.from({ length: n }, () => Math.floor(rand() * 60_000)).sort((a, b) => a - b);
+        const samples = offs.map((o) => {
+          const kind = pick(['m', 'm', 's', 'o']);
+          return [kind, pick(kind === 's' ? soundValues : motionValues), o];
+        });
+        const payload = trackerPayload(MIN0, samples);
+        const want = oracle(samples);
+        const got = payload ? firstActiveFrameMs(payload, MIN0) : null;
+        assert.equal(got, want === null ? null : MIN0 + want, `seq ${seq}: ${JSON.stringify(samples)}`);
+        if (want === null) none++; else armed++;
+        // A first frame that is NOT the minute's first sample: the cases where "first rise" and "first frame over
+        // the threshold" differ.
+        if (want !== null && samples.length && samples.some(([k, , o]) => o < want && k !== 'o')) nonTrivial++;
+      }
+      // The floors catch a generator edit that makes the comparison vacuous.
+      assert.ok(armed >= 150, `only ${armed} sequences had an active frame`);
+      assert.ok(none >= 40, `only ${none} sequences had none`);
+      assert.ok(nonTrivial >= 60, `only ${nonTrivial} sequences had sub-threshold samples before the active frame`);
+    });
+
+    test('C9: rises outside the minute are filtered BEFORE the minimum: a clamped early sample cannot pull the anchor out (real tracker)', () => {
+      // A small backward clock step: a sample received during minute 1 arrives after minute 1 was told, so the
+      // tracker files it under minute 2 but keeps its own (earlier) receipt time.
+      activity._resetActivityTrackerForTests();
+      const seen = [];
+      const off = activity.onMinuteFlushed((p) => seen.push(p));
+      try {
+        const M1 = MIN0;
+        const M2 = MIN0 + 60_000;
+        const M3 = MIN0 + 120_000;
+        activity.recordMotion(CAM, 0.05, null, M1 + 10_000);
+        activity.flushActivity(M1 + 60_500); // minute 1 told
+        activity.recordMotion(CAM, 0.02, null, M1 + 30_000); // clamped into minute 2, stamped 30 s before it
+        activity.recordMotion(CAM, 0.5, null, M2 + 40_000); // the real first frame over the threshold, inside minute 2
+        activity.flushActivity(M2 + 60_500);
+        // Same again for minute 3, but the clamped sample is the HIGH one: it masks the later, lower, in-bounds frame.
+        activity.recordMotion(CAM, 0.9, null, M2 + 50_000);
+        activity.recordMotion(CAM, 0.03, null, M3 + 40_000);
+        activity.flushActivity(M3 + 60_500);
+        assert.equal(seen.length, 3);
+        assert.deepEqual(seen[1].motionRises.map((r) => r.atMs), [M1 + 30_000, M2 + 40_000], 'precondition: the clamped sample leads the list');
+        assert.equal(firstActiveFrameMs(seen[1], M2), M2 + 40_000, 'the stamp before the minute must not be the anchor');
+        // Known limit, stated: a clamped HIGH sample hides later frames (they are not peak-raising), so nothing is
+        // left inside the minute and the anchor falls back to `at`: today's behaviour, never a wrong early one.
+        assert.deepEqual(seen[2].motionRises.map((r) => r.atMs), [M2 + 50_000]);
+        assert.equal(firstActiveFrameMs(seen[2], M3), null);
+      } finally {
+        off();
+        activity._resetActivityTrackerForTests();
+      }
+    });
+
+    test('C9: only rises inside [minuteStart, minuteStart + 60 s) count: lower bound inclusive, upper exclusive (hand-built payloads)', () => {
+      const M = MIN0;
+      const hot = 1;
+      assert.equal(firstActiveFrameMs({ motionRises: [{ atMs: M, value: hot }] }, M), M, 'the minute\'s first millisecond is inside');
+      assert.equal(firstActiveFrameMs({ motionRises: [{ atMs: M - 1, value: hot }] }, M), null, 'before the minute: not its frame');
+      assert.equal(firstActiveFrameMs({ motionRises: [{ atMs: M + 60_000, value: hot }] }, M), null, 'the next minute\'s first ms: not inside');
+      assert.equal(firstActiveFrameMs({ motionRises: [{ atMs: M + 59_999, value: hot }] }, M), M + 59_999);
+      // Outside rises cannot hide an inside one, on either side, in either channel.
+      assert.equal(
+        firstActiveFrameMs({
+          motionRises: [{ atMs: M - 5000, value: hot }, { atMs: M + 70_000, value: hot }, { atMs: M + 30_000, value: hot }],
+          soundRises: [{ atMs: M - 1, value: 99 }, { atMs: M + 45_000, value: 99 }],
+        }, M),
+        M + 30_000
+      );
+      assert.equal(firstActiveFrameMs({ soundRises: [{ atMs: M - 20_000, value: 99 }, { atMs: M + 45_000, value: 99 }] }, M), M + 45_000);
+    });
+
+    test('C8: a payload with no rises, null, or arrays of the wrong kind yields null (legacy payload: the old anchor)', () => {
+      const M = MIN0;
+      assert.equal(firstActiveFrameMs({ cameraId: CAM, bucketStart: 'x', motionPeak: 1, soundPeak: 99 }, M), null);
+      assert.equal(firstActiveFrameMs({ motionRises: null, soundRises: undefined }, M), null);
+      assert.equal(firstActiveFrameMs({ motionRises: 'nope', soundRises: { length: 1 } }, M), null);
+      assert.equal(firstActiveFrameMs(undefined, M), null);
+      assert.equal(firstActiveFrameMs({ motionRises: [null, { atMs: NaN, value: 1 }, { atMs: M + 1, value: NaN }] }, M), null, 'junk entries are skipped, never thrown on');
+    });
+  });
+
+  describe('wakeClipAnchor — the pure rule', () => {
+    const at = 1_000_000;
+    test('no frame, or no footage to measure: today\'s anchor (`at`)', () => {
+      assert.equal(wakeClipAnchor({ at, frameMs: null, oldestStartMs: at - 50_000, leadMs: LEAD_MS }), at);
+      assert.equal(wakeClipAnchor({ at, frameMs: at - 30_000, oldestStartMs: null, leadMs: LEAD_MS }), at);
+      assert.equal(wakeClipAnchor({ at, frameMs: undefined, oldestStartMs: undefined, leadMs: LEAD_MS }), at);
+    });
+    test('the first frame when the ring reaches back far enough', () => {
+      assert.equal(wakeClipAnchor({ at, frameMs: at - 30_000, oldestStartMs: at - 70_000, leadMs: LEAD_MS }), at - 30_000);
+    });
+    test('the oldest footage plus the lead when the ring does not reach back to the frame', () => {
+      assert.equal(wakeClipAnchor({ at, frameMs: at - 55_000, oldestStartMs: at - 20_000, leadMs: LEAD_MS }), at - 20_000 + LEAD_MS);
+    });
+    test('the boundary: footage that starts exactly lead before the frame does not move it', () => {
+      assert.equal(wakeClipAnchor({ at, frameMs: at - 30_000, oldestStartMs: at - 30_000 - LEAD_MS, leadMs: LEAD_MS }), at - 30_000);
+      assert.equal(wakeClipAnchor({ at, frameMs: at - 30_000, oldestStartMs: at - 30_000 - LEAD_MS + 1, leadMs: LEAD_MS }), at - 30_000 + 1);
+    });
+    test('C6: never later than `at`, even when the footage starts after `at - lead` (a young ring, a late listener)', () => {
+      assert.equal(wakeClipAnchor({ at, frameMs: at - 10_000, oldestStartMs: at + 20_000, leadMs: LEAD_MS }), at);
+      assert.equal(wakeClipAnchor({ at, frameMs: at - 10_000, oldestStartMs: at - LEAD_MS + 1, leadMs: LEAD_MS }), at);
+    });
+    test('C6: 3000 seeded cases: frame <= anchor <= at, and the clip never opens before the footage unless `at` itself is the anchor', () => {
+      let s = 6_000;
+      const rand = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+      let clamped = 0;
+      for (let i = 0; i < 3000; i++) {
+        const frameMs = at - 60_000 + Math.floor(rand() * 60_000);
+        const oldestStartMs = at - 200_000 + Math.floor(rand() * 320_000); // from far older than any ring to after `at`
+        const a = wakeClipAnchor({ at, frameMs, oldestStartMs, leadMs: LEAD_MS });
+        assert.ok(a <= at, `anchor ${a} is after at (${JSON.stringify({ frameMs, oldestStartMs })})`);
+        assert.ok(a >= frameMs, `anchor ${a} is before the first frame ${frameMs}`);
+        if (a < at) assert.ok(a - LEAD_MS >= oldestStartMs, `the clip opens before the oldest footage (${JSON.stringify({ frameMs, oldestStartMs })})`);
+        if (a > frameMs) clamped++;
+      }
+      assert.ok(clamped >= 300, `only ${clamped} cases exercised the clamp`);
+    });
+  });
+
+  describe('C4 — through the real chain, the clip opens at the first frame\'s lead-in (fails on the #447 anchor by +57/+47/+27/-2 s)', () => {
+    // A 63 s ring (on-demand Record on, this house's default) whose oldest footage reaches back to M - 6 s: further
+    // than any first frame's lead-in, so the clamp does not bind.
+    const ring63 = { preRollSec: 30, postRollSec: 15, mtimeOffsets: every2s(-4000, 60_000) };
+    for (const s of [0, 10_000, 30_000, 59_000]) {
+      test(`first frame ${s / 1000} s into the first active minute: started_at = frame - 3 s, hold = clipCoverStartMs(frame)`, () => {
+        const f = CHAIN_M + s;
+        const res = runChain({ frames: [[s, 'm', MOTION_ACTIVE + 0.05]], ring: ring63 });
+        assert.equal(res.rows.length, 1, 'exactly one wake clip row');
+        assert.equal(res.rows[0].started_at, sqlTime(f - LEAD_MS), 'the clip opens 3 s before the first active frame');
+        assert.equal(res.holdFrom, clipCoverStartMs(f, WAKE_CLIP_LEAD_SEC));
+        assert.equal(res.run.startMs, f, 'the run\'s anchor is the first frame itself');
+        assert.equal(res.run.lastActiveMs, CHAIN_M + WAKE_ACTIVE_MIN * 60_000, 'C7: lastActiveMs stays the LABEL of the last active minute');
+        assert.deepEqual(bufferLinesIn(res.lines), [], 'the ring reaches the first frame: nothing to report');
+      });
+    }
+
+    test('the first frame is the first one OVER the threshold: sub-threshold motion and out-of-bed motion before it are skipped; sound can be first', () => {
+      const res = runChain({
+        frames: [
+          [1000, 'o', 0.9], // out-of-bed: never starts a wake
+          [2000, 'm', 0.004], // below the motion threshold
+          [3000, 's', 3], // between the motion threshold and the sound threshold: neither
+          [8000, 's', SOUND_ACTIVE + 4], // the first frame over its threshold
+          [20_000, 'm', 0.3],
+        ],
+        ring: ring63,
+      });
+      assert.equal(res.rows.length, 1);
+      assert.equal(res.rows[0].started_at, sqlTime(CHAIN_M + 8000 - LEAD_MS));
+      assert.equal(res.holdFrom, clipCoverStartMs(CHAIN_M + 8000, WAKE_CLIP_LEAD_SEC));
+    });
+
+    test('C4 (control): the SAME wake with a legacy-shaped anchor would start at the end of the minute: the old value is what the fix moved', () => {
+      // Documents the size of the change in this very fixture: the old anchor `at` is CHAIN_M + 60 s, so the old
+      // clip started at CHAIN_M + 57 s, which for a frame at +10 s is 47 s after the first frame (the plan's
+      // table), and the new clip starts 3 s BEFORE it. (A hand-computed constant on purpose: it is what #447
+      // produced, not something the new code computes.)
+      const f = CHAIN_M + 10_000;
+      const res = runChain({ frames: [[10_000, 'm', MOTION_ACTIVE + 0.05]], ring: ring63 });
+      const oldStart = CHAIN_M + 60_000 - LEAD_MS;
+      const newStart = Date.parse(res.rows[0].started_at.replace(' ', 'T') + 'Z');
+      assert.equal(newStart - f, -3_000, 'what #412 does: it begins 3 s before the first frame');
+      // The size of the change, computed from the CODE's row against #447's hand-written start (the end of the
+      // first active minute minus the lead): 50 s earlier (the 47 s it began after the first frame, plus the 3 s
+      // lead-in it now has before it). (A bare `oldStart - f === 47_000` here was arithmetic
+      // on two constants of this test and could never fail; code review, Opus.)
+      assert.equal(oldStart - newStart, 50_000, 'the clip now opens 50 s earlier than #447 opened it for this wake');
+    });
+  });
+  describe('C5 — a ring that does not reach the first frame clamps the anchor to its real footage, and extractClip still finds footage', () => {
+    // The 5 s minimum clip length (settings: wake_clip_seconds): the post-roll that makes an unclamped anchor's
+    // selection EMPTY soonest (coverEnd = anchor + 9 s), so it is the setting that shows the failure.
+    const MIN_CLIP_S = 5;
+    for (const { name, ring, firstFrame, clampedTo } of [
+      {
+        name: '23 s ring (the smallest clip settings): oldest footage starts at M + 38 s',
+        ring: { preRollSec: 0, postRollSec: 5, mtimeOffsets: every2s(40_000, 60_000) },
+        firstFrame: 0,
+        clampedTo: 38_000,
+      },
+      {
+        name: '38 s ring (Record off, default clip settings): oldest footage starts at M + 23 s',
+        ring: { preRollSec: 5, postRollSec: 15, mtimeOffsets: every2s(25_000, 60_000) },
+        firstFrame: 0,
+        clampedTo: 23_000,
+      },
+      {
+        name: '38 s ring, a first frame the ring DOES reach (M + 30 s): no clamp',
+        ring: { preRollSec: 5, postRollSec: 15, mtimeOffsets: every2s(25_000, 60_000) },
+        firstFrame: 30_000,
+        clampedTo: null,
+      },
+    ]) {
+      test(`${name}`, async () => {
+        db.prepare("UPDATE settings SET wake_clip_seconds = ? WHERE id = 'app'").run(MIN_CLIP_S);
+        assert.equal(getWakeClipSettings().clipSeconds, MIN_CLIP_S, 'precondition: the minimum clip length');
+        const f = CHAIN_M + firstFrame;
+        const res = runChain({ frames: [[firstFrame, 'm', MOTION_ACTIVE + 0.05]], ring });
+        const wantAnchor = clampedTo === null ? f : CHAIN_M + clampedTo + LEAD_MS;
+        assert.equal(res.run.startMs, wantAnchor, 'the anchor');
+        assert.equal(res.rows[0].started_at, sqlTime(wantAnchor - LEAD_MS), 'the clip opens at the oldest footage (or the first frame\'s lead-in)');
+        assert.equal(res.holdFrom, clipCoverStartMs(wantAnchor, WAKE_CLIP_LEAD_SEC));
+        // The real selection on the very files the clamp read: non-empty at the anchor. The control, extractClip
+        // at the UNCLAMPED first frame, is empty on the clamped rings: that is the failed row the clamp prevents.
+        const [atAnchor, atFrame] = await trySelect([res.run.startMs, f]);
+        assert.equal(atAnchor, 'selected', 'extractClip found no footage at the clamped anchor');
+        if (clampedTo !== null) assert.equal(atFrame, 'empty', 'control: the unclamped anchor must fail here, or this test shows nothing');
+        else assert.equal(atFrame, 'selected');
+        // C10: the line is the evidence for whether a deeper ring is worth building: it prints how far after the
+        // first movement the clip starts.
+        const lines = bufferLinesIn(res.lines);
+        if (clampedTo === null) assert.deepEqual(lines, []);
+        else {
+          assert.equal(lines.length, 1);
+          assert.match(lines[0], new RegExp(`only to ${clampedTo / 1000} s after the first movement: the clip starts there`));
+          assert.match(lines[0], /"Kid Room"/);
+        }
+      });
+    }
+
+    test('hostile: a YOUNG ring (restarted mid-minute: only segments younger than its nominal depth) is clamped to its first segment, not to the nominal depth', async () => {
+      // 63 s nominal depth, but the ring started at M + 40 s (a settings save restarts it): the oldest file is M + 42 s.
+      // A clamp on the NOMINAL depth (the rejected design) would anchor at the frame (M + 5 s) and the selection
+      // would be EMPTY; the clamp on the real files anchors at M + 43 s and the selection finds footage.
+      db.prepare("UPDATE settings SET wake_clip_seconds = 5 WHERE id = 'app'").run();
+      const res = runChain({ frames: [[5000, 'm', MOTION_ACTIVE + 0.05]], ring: { preRollSec: 30, postRollSec: 15, mtimeOffsets: every2s(42_000, 60_000) } });
+      assert.equal(ringDepthMs(CAM), 63_000, 'precondition: a nominal depth that would reach the frame');
+      assert.equal(res.run.startMs, CHAIN_M + 40_000 + LEAD_MS);
+      const [atAnchor, atFrame] = await trySelect([res.run.startMs, CHAIN_M + 5000]);
+      assert.equal(atAnchor, 'selected');
+      assert.equal(atFrame, 'empty', 'control: what a clamp on the nominal depth would have produced');
+    });
+
+    test('hostile: a ring GROWN mid-minute (setRingDepth 23 s -> 63 s) is still only as old as its files', async () => {
+      db.prepare("UPDATE settings SET wake_clip_seconds = 5 WHERE id = 'app'").run();
+      const r = oneRun({
+        ring: { preRollSec: 0, postRollSec: 5, mtimeOffsets: every2s(42_000, 60_000), growTo: { preRollSec: 30, postRollSec: 15 } },
+        rises: [[5000, MOTION_ACTIVE + 0.05]],
+      });
+      assert.equal(ringDepthMs(CAM), 63_000, 'precondition: the nominal depth now reaches the frame');
+      assert.equal(ringOldestStartMs(CAM), r.M + 40_000, 'the clamp reads the files, whatever the depth now says');
+      assert.equal(r.run.startMs, r.M + 40_000 + LEAD_MS);
+      const [atAnchor, atFrame] = await trySelect([r.run.startMs, r.M + 5000]);
+      assert.equal(atAnchor, 'selected');
+      assert.equal(atFrame, 'empty', 'control: what a clamp on the nominal depth would have produced');
+    });
+
+    // Code review (Opus), verified by running: the clamp reads only the OLDEST segment, so a ring with a HOLE after it
+    // (the detector reading the sub stream while the ring records the main one, or a relaunch that keeps old segments)
+    // anchors at the first frame, extractClip's selection for that window is EMPTY and the row would fail, where
+    // today's anchor (`at`) is cut. The anchor is kept only when the shared selection finds footage for it.
+    for (const { clipSeconds, after: tail } of [
+      { clipSeconds: 5, after: every2s(24_000, 60_000) },
+      { clipSeconds: 30, after: every2s(50_000, 60_000) },
+    ]) {
+      test(`hostile: a GAPPED ring (footage up to M, then nothing until M + ${tail[0] / 1000} s; ${clipSeconds} s clip): the old anchor, and the cut at it finds footage`, async () => {
+        db.prepare('UPDATE settings SET wake_clip_seconds = ? WHERE id = ?').run(clipSeconds, 'app');
+        const r = oneRun({ ring: { mtimeOffsets: [-2000, 0, ...tail] }, rises: [[10_000, MOTION_ACTIVE + 0.05]] });
+        assert.equal(ringOldestStartMs(CAM), r.M - 4000, 'precondition: the oldest segment reaches back past the first frame');
+        assert.equal(r.run.startMs, r.at, 'nothing covers the first frame\'s window: today\'s anchor');
+        assert.equal(r.hold, clipCoverStartMs(r.at, WAKE_CLIP_LEAD_SEC));
+        const [atAnchor, atFrame] = await trySelect([r.run.startMs, r.M + 10_000]);
+        assert.equal(atAnchor, 'selected', 'the old anchor is cut');
+        assert.equal(atFrame, 'empty', 'control: the first frame\'s window has no footage, the clip would have failed');
+      });
+    }
+
+    test('a ring whose footage resumes INSIDE the clip\'s window (after the first frame) keeps the early anchor: the post-roll side of the window counts (Codex, round 1)', async () => {
+      db.prepare("UPDATE settings SET wake_clip_seconds = 30 WHERE id = 'app'").run();
+      // Footage up to M, nothing until M + 20 s, then continuous. The first frame is at M + 10 s: the clip's window is
+      // [M + 3 s, M + 44 s], which holds the resumed footage, so extractClip finds something and the clip is cut
+      // (from M + 18 s: its offset clamps to the footage; the recorded start is earlier than the footage, which is the
+      // documented limit). A check that ignored the post-roll (window ending at the first frame) would call this a hole.
+      const r = oneRun({ ring: { mtimeOffsets: [-2000, 0, ...every2s(20_000, 60_000)] }, rises: [[10_000, MOTION_ACTIVE + 0.05]] });
+      assert.equal(r.run.startMs, r.M + 10_000, 'the early anchor is kept');
+      const [atAnchor] = await trySelect([r.run.startMs]);
+      assert.equal(atAnchor, 'selected', 'and extractClip finds footage for it');
+    });
+
+    test('control for the gapped ring: the SAME first frame on a continuous ring is anchored at the frame', () => {
+      db.prepare("UPDATE settings SET wake_clip_seconds = 30 WHERE id = 'app'").run();
+      const r = oneRun({ ring: { mtimeOffsets: every2s(-4000, 60_000) }, rises: [[10_000, MOTION_ACTIVE + 0.05]] });
+      assert.equal(r.run.startMs, r.M + 10_000);
+    });
+
+    test('hostile: no closed segment yet, an EMPTY ring: today\'s anchor, no log', () => {
+      const r = oneRun({ ring: { mtimeOffsets: [] }, rises: [[5000, 1]] });
+      assert.equal(ringOldestStartMs(CAM), null);
+      assert.equal(r.run.startMs, r.at, 'nothing to clamp to: the old anchor');
+      assert.equal(r.hold, clipCoverStartMs(r.at, WAKE_CLIP_LEAD_SEC));
+      assert.deepEqual(bufferLinesIn(r.lines), []);
+    });
+
+    test('hostile: no closed segment yet, only the segment still being written: today\'s anchor, no log', () => {
+      // mtime = now: younger than SEGMENT_OPEN_MS, so it is not footage (and a clamp that counted it would
+      // anchor at the end of the minute plus the lead: later than `at`).
+      const r = oneRun({ ring: { mtimeAbs: [Date.now()] }, rises: [[5000, 1]] });
+      assert.equal(ringOldestStartMs(CAM), null);
+      assert.equal(r.run.startMs, r.at);
+      assert.deepEqual(bufferLinesIn(r.lines), []);
+    });
+  });
+
+  describe('C6 — the anchor is never later than `at`', () => {
+    test('60 seeded rings (oldest footage anywhere from 90 s before the minute to 120 s after it) and first frames: frame <= anchor <= at, hold = clipCoverStartMs(anchor)', () => {
+      let s = 66_000;
+      const rand = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+      let clamped = 0;
+      let youngerThanAt = 0;
+      for (let n = 0; n < 60; n++) {
+        stopAllSegmenters();
+        _state().clear();
+        clock = 0;
+        const oldestMtime = -90_000 + Math.floor(rand() * 210_000);
+        const frame = Math.floor(rand() * 60_000);
+        const r = oneRun({ ring: { mtimeOffsets: every2s(oldestMtime, oldestMtime + 20_000) }, rises: [[frame, 1]] });
+        assert.ok(r.run.startMs <= r.at, `case ${n}: anchor after at`);
+        assert.ok(r.run.startMs >= r.M + frame, `case ${n}: anchor before the first frame`);
+        assert.equal(r.hold, clipCoverStartMs(r.run.startMs, WAKE_CLIP_LEAD_SEC), `case ${n}: hold`);
+        if (r.run.startMs > r.M + frame) clamped++;
+        if (oldestMtime - 2000 > 57_000) youngerThanAt++;
+      }
+      assert.ok(clamped >= 15, `only ${clamped} cases exercised the clamp`);
+      assert.ok(youngerThanAt >= 5, `only ${youngerThanAt} cases had footage younger than at - 3 s`);
+    });
+  });
+
+  describe('C8 — a payload with no rises keeps today\'s anchor; only the hold moved (at - 15 s -> clipCoverStartMs(at, 3))', () => {
+    test('legacy payload on a ring that HAS footage: anchor = at, hold = at - 7 s, no buffer line', () => {
+      const r = oneRun({ ring: { mtimeOffsets: every2s(-4000, 60_000) } });
+      assert.equal(r.run.startMs, r.at);
+      assert.equal(r.hold, r.at - 7000);
+      assert.equal(r.hold, clipCoverStartMs(r.at, WAKE_CLIP_LEAD_SEC));
+      assert.deepEqual(bufferLinesIn(r.lines), []);
+      assert.deepEqual(r.result, null, 'the first active minute only starts a run');
+    });
+    test('rises that are all outside the minute (or sub-threshold) also leave the anchor at `at`', () => {
+      const ring = { mtimeOffsets: every2s(-4000, 60_000) };
+      const outside = oneRun({ ring, rises: [[-1, 1], [60_000, 1]] });
+      assert.equal(outside.run.startMs, outside.at);
+      stopAllSegmenters(); _state().clear(); clock = 0;
+      const sub = oneRun({ ring, rises: [[10_000, MOTION_ACTIVE], [20_000, 0.005]], soundRises: [[30_000, SOUND_ACTIVE]] });
+      assert.equal(sub.run.startMs, sub.at);
+    });
+  });
+
+  describe('C7 — the hold is taken and released the same with and without the rises (clips ENABLED; the seeded timeline test runs with them off)', () => {
+    test('one WAKE owner while the run lives, `holding` set, none after the stale sweep, for a legacy payload and for one with rises', () => {
+      for (const rises of [undefined, [[10_000, MOTION_ACTIVE + 0.2]]]) {
+        const r = oneRun({ ring: { mtimeOffsets: every2s(-4000, 60_000) }, rises });
+        assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE], `a hold must be taken (rises: ${!!rises})`);
+        assert.equal(r.run.holding, true);
+        assert.equal(sweepStaleRuns(r.run.lastActiveMs + 60 * 60 * 1000), 1, 'the stale sweep ends the run');
+        assert.deepEqual(holdOwners(CAM), [], `the hold must be released with the run (rises: ${!!rises})`);
+        stopAllSegmenters(); _state().clear(); clock = 0;
+      }
+    });
+  });
+
+  describe('C10 — the "buffer reaches back only" line: only when the clamp cost the opening, with that number', () => {
+    // Oldest closed segment: mtime M + 22 s, so the oldest footage starts at O = M + 20 s and the clamp is O + 3 s.
+    const ring = { preRollSec: 5, postRollSec: 15, mtimeOffsets: every2s(22_000, 60_000) };
+    for (const [frameOffset, anchorOffset, wantN] of [
+      [10_000, 23_000, 10], // the ring starts 10 s after the movement
+      [10_400, 23_000, 10], // 9.6 s rounds to 10
+      [19_000, 23_000, 1],
+      [19_400, 23_000, 1], // 0.6 s lost rounds to 1 s (a mutant that rounds up or needs a full second differs here)
+      [19_600, 23_000, null], // 0.4 s lost rounds to 0: no line rather than "only to 0 s after the first movement"
+      [18_501, 23_000, 1], // 1.499 s
+      [18_500, 23_000, 2], // 1.5 s rounds to 2
+      [20_000, 23_000, null], // the clip (anchor - 3 s) opens EXACTLY at the movement: nothing lost
+      [21_000, 23_000, null], // the 3 s lead-in hides the clamp
+      [22_999, 23_000, null],
+      [23_000, 23_000, null], // the first frame is the anchor: no clamp
+      [40_000, 40_000, null],
+    ]) {
+      test(`first frame at M + ${frameOffset / 1000} s -> anchor M + ${anchorOffset / 1000} s, ${wantN === null ? 'no line' : `"${wantN} s" line`}`, () => {
+        const r = oneRun({ ring, rises: [[frameOffset, MOTION_ACTIVE + 0.05]] });
+        assert.equal(r.run.startMs, r.M + anchorOffset);
+        const lines = bufferLinesIn(r.lines);
+        if (wantN === null) assert.deepEqual(lines, []);
+        else {
+          assert.equal(lines.length, 1);
+          assert.match(lines[0], new RegExp(`only to ${wantN} s after the first movement`));
+        }
+      });
+    }
+    test('no line when wake clips are switched off (no hold is taken, so nothing is protected or clamped for)', () => {
+      const r = oneRun({ ring, rises: [[10_000, MOTION_ACTIVE + 0.05]], clipsEnabled: false });
+      assert.deepEqual(r.hold, null);
+      assert.deepEqual(bufferLinesIn(r.lines), []);
+    });
+    test('no line for a legacy payload (no first frame to compare with), however shallow the ring', () => {
+      const r = oneRun({ ring });
+      assert.equal(r.run.startMs, r.at);
+      assert.deepEqual(bufferLinesIn(r.lines), []);
+    });
+  });
+
+  describe('C11 — the hold is the one formula extractClip reads back with, taken from the anchor (the 15 s lead is gone)', () => {
+    test('the lead is the exported 3 s, and the hold sits clipCoverStartMs(anchor, lead) = anchor - 7 s before it on every case', () => {
+      assert.equal(WAKE_CLIP_LEAD_SEC, 3, 'a deliberate pin: the lead-in and the clamp margin move together');
+      for (const frame of [0, 12_000, 48_000]) {
+        stopAllSegmenters(); _state().clear(); clock = 0;
+        const r = oneRun({ ring: { mtimeOffsets: every2s(-4000, 60_000) }, rises: [[frame, 1]] });
+        assert.equal(r.hold, r.M + frame - 7000);
+        assert.equal(r.hold, clipCoverStartMs(r.run.startMs, WAKE_CLIP_LEAD_SEC));
+        assert.notEqual(r.hold, r.at - 15_000, 'the old at - 15 s hold is gone');
+      }
+    });
+  });
+
+  describe('C12 — the review page still pairs a clip that opens a few seconds before its wake\'s timeline minute (non-regression; see sleepDetailHelpers.test.jsx)', () => {
+    test('started_at can precede the first active minute by up to the lead: the row is the real clip start', () => {
+      const res = runChain({ frames: [[0, 'm', MOTION_ACTIVE + 0.05]], ring: { preRollSec: 30, postRollSec: 15, mtimeOffsets: every2s(-4000, 60_000) } });
+      // The minute starts at CHAIN_M; the clip at CHAIN_M - 3 s (D2: real, not floored to the minute).
+      assert.equal(res.rows[0].started_at, sqlTime(CHAIN_M - LEAD_MS));
+    });
+  });
 });
 
 // -------------------------------------------------------------------------------------------
@@ -795,12 +1420,14 @@ describe('★ #448 — the watcher counts MINUTES, not callbacks', () => {
         logger.clear();
         const t0 = clock;
         moving();
-        assert.equal(effectiveHold(CAM), endMs(t0) - 15_000, 'precondition: held from the first minute');
+        // #412 C8: a payload with no rises keeps today's ANCHOR (endMs, asserted by the C1-C5 startMs checks above);
+        // the hold is the one deliberate change: clipCoverStartMs(at, 3) = at - 7 s, where it was at - 15 s.
+        assert.equal(effectiveHold(CAM), clipCoverStartMs(endMs(t0), WAKE_CLIP_LEAD_SEC), 'precondition: held from the first minute');
         skip(10);
         const t1 = clock;
         moving();
         assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE]);
-        assert.equal(effectiveHold(CAM), endMs(t1) - 15_000, 'the hold is still anchored on the run the hole ended');
+        assert.equal(effectiveHold(CAM), clipCoverStartMs(endMs(t1), WAKE_CLIP_LEAD_SEC), 'the hold is still anchored on the run the hole ended');
         assert.ok(
           logger.getRecent().some((l) => l.includes('run ended (readings 11 min apart)')),
           'the log must say the READINGS were apart (a forward clock jump looks the same), not claim an outage'
@@ -1113,6 +1740,126 @@ describe('★ #448 — the watcher counts MINUTES, not callbacks', () => {
       assert.ok(holeSplits >= 40, `only ${holeSplits} timelines had a hole longer than the bridge between two actives`);
       assert.ok(holeBridges >= 30, `only ${holeBridges} timelines had a hole of exactly the bridge between two actives`);
       assert.ok(holesDecide >= 20, `only ${holesDecide} timelines where counting callbacks instead of minutes changes the answer`);
+    });
+
+    // ★ #412 C7: carrying the rises changes WHERE a clip starts and nothing else. The same structured timelines as
+    // C13 are replayed twice through the real handler, once with legacy payloads and once with rises planted
+    // (a sub-threshold decoy, then the first frame over the threshold, often at the very start of the minute: the
+    // early first frame that would split a run if the anchor leaked into the bridge arithmetic), on a ring whose
+    // footage is older than any frame so the clamp never binds. Per delivered minute: the capture decision, the
+    // run's activeCount, `lastActiveMs` and `captured` must be identical; only `startMs` may differ, and only by
+    // landing inside the run's first active minute. (A mutant that copies the anchor into lastActiveMs fails it.)
+    test('C7 (#412): 150 seeded timelines: capture decisions, run counts and lastActiveMs are identical with and without rises; only startMs moves, within the first active minute', () => {
+      const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(CAM);
+      const snapshots = (timeline, withRises, rand) => {
+        _state().clear();
+        const out = [];
+        for (let i = 0; i < timeline.length; i++) {
+          const c = timeline[i];
+          if (c === 'H') continue;
+          const M = labelStartMs(i);
+          // Hostile quiet minutes (code review, Opus): a quiet minute that really had sub-threshold readings has
+          // peaks above 0 AND rises at those peaks, on BOTH channels. With `[]` and peaks of 0 a mutant that read the
+          // rises into `active` (any rise, or a threshold a quarter of the real one) could not be told from the
+          // real code. The same peaks go into the legacy payload, so only the arrays differ between the two runs.
+          const subM = MOTION_ACTIVE / 2;
+          const subS = SOUND_ACTIVE / 2;
+          const payload = { cameraId: CAM, bucketStart: labelFor(i), motionPeak: c === 'A' ? MOTION_ACTIVE + 0.05 : subM, soundPeak: subS };
+          if (withRises) {
+            payload.soundRises = [{ atMs: M + 7_000, value: subS }];
+            payload.motionRises = c === 'A' ? [] : [{ atMs: M + 5_000, value: subM }];
+            if (c === 'A') {
+              const decoyAt = M + Math.floor(rand() * 30_000);
+              const frameAt = rand() < 0.4 ? M : decoyAt + 1 + Math.floor(rand() * (59_000 - (decoyAt - M)));
+              if (frameAt > decoyAt) payload.motionRises.push({ atMs: decoyAt, value: MOTION_ACTIVE / 2 });
+              payload.motionRises.push({ atMs: frameAt, value: MOTION_ACTIVE + 0.05 });
+            }
+          }
+          const r = handleMinute(payload);
+          const run = stateOf()?.run;
+          out.push({
+            i,
+            captured: r?.captured === true,
+            run: run ? { activeCount: run.activeCount, lastActiveMs: run.lastActiveMs, captured: run.captured } : null,
+            startMs: r?.captured ? r.startMs : null,
+          });
+        }
+        return out;
+      };
+      const strip = (snaps) => snaps.map(({ startMs, ...rest }) => rest);
+      const realInfo = logger.info;
+      logger.info = () => {};
+      let captures = 0;
+      let earlyFirstFrames = 0;
+      try {
+        db.prepare("UPDATE settings SET wake_clips_enabled = 0 WHERE id = 'app'").run(); // the decision, not the cut (as C13)
+        const entry = startSegmenter(CAM, camera.mediamtx_path, { preRollSec: 30, postRollSec: 15 });
+        // CONTINUOUS footage over the whole timeline (a closed segment every 10 s, from before its first minute to
+        // after its last). It has to cover each first frame's window, not just reach back past it: since the review
+        // round the watcher keeps an earlier anchor only when extractClip's selection finds footage for it, and one
+        // 10-day-old segment (this fixture before) covers nothing, so every anchor would fall back to `at`.
+        for (let t = labelStartMs(0) - 12_000; t <= labelStartMs(100) + 60_000; t += 10_000) {
+          const seg = path.join(entry.ringDir, `seg-${t}.mkv`);
+          fs.writeFileSync(seg, 'x');
+          fs.utimesSync(seg, new Date(t), new Date(t));
+        }
+        assert.equal(ringOldestStartMs(CAM) !== null, true, 'precondition: the ring reports footage, so the anchor is the first frame');
+        for (let s = 0; s < 150; s++) {
+          const timeline = buildTimeline(mulberry32(412_000 + s));
+          const legacy = snapshots(timeline, false, null);
+          const planted = snapshots(timeline, true, mulberry32(0x412 + s));
+          assert.deepEqual(strip(planted), strip(legacy), `rises changed a decision (seed ${412_000 + s}: ${timeline})`);
+          for (let k = 0; k < legacy.length; k++) {
+            if (!legacy[k].captured) continue;
+            captures++;
+            const L = legacy[k].startMs; // the old anchor: the END of the run's first active minute
+            assert.ok(planted[k].startMs <= L, `seed ${412_000 + s}: anchor after the old one`);
+            assert.ok(planted[k].startMs >= L - 60_000, `seed ${412_000 + s}: anchor outside the run's first active minute`);
+            if (planted[k].startMs === L - 60_000) earlyFirstFrames++;
+          }
+        }
+      } finally {
+        logger.info = realInfo;
+        wakeClips(true);
+      }
+      assert.ok(captures >= 150, `only ${captures} captures compared`);
+      assert.ok(earlyFirstFrames >= 20, `only ${earlyFirstFrames} early first frames (a frame at the very start of the minute)`);
+    });
+
+    test('C7 (#412): an early first frame plus a gap of exactly WAKE_GAP_MIN still bridges: one wake, captured on the 5th active minute', () => {
+      // A (frame at the very start of its minute), WAKE_GAP_MIN quiet minutes, then four more actives. If the anchor
+      // (59 s before the label) leaked into the bridge arithmetic, the gap would measure 4 and the run would split.
+      const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(CAM);
+      const entry = startSegmenter(CAM, camera.mediamtx_path, { preRollSec: 30, postRollSec: 15 });
+      wakeClips(false);
+      try {
+        settle();
+        const idxFirst = clock;
+        // Continuous footage around the first active minute (see the seeded test above for why a single old
+        // segment no longer does): a closed segment every 2 s from 10 s before the minute to 40 s after it.
+        for (let t = labelStartMs(idxFirst) - 10_000; t <= labelStartMs(idxFirst) + 40_000; t += 2_000) {
+          const seg = path.join(entry.ringDir, `seg-${t}.mkv`);
+          fs.writeFileSync(seg, 'x');
+          fs.utimesSync(seg, new Date(t), new Date(t));
+        }
+        const risesAt = (idx) => [{ atMs: labelStartMs(idx), value: MOTION_ACTIVE + 0.05 }];
+        const active = () => {
+          const idx = clock++;
+          return handleMinute({
+            cameraId: CAM, bucketStart: labelFor(idx), motionPeak: MOTION_ACTIVE + 0.05, soundPeak: 0,
+            motionRises: risesAt(idx), soundRises: [],
+          });
+        };
+        assert.equal(active(), null);
+        assert.equal(stateOf().run.startMs, labelStartMs(idxFirst), 'precondition: the anchor is the first frame, a whole minute before the label');
+        assert.equal(stateOf().run.lastActiveMs, endMs(idxFirst), 'lastActiveMs stays the label');
+        for (let g = 0; g < WAKE_GAP_MIN; g++) assert.equal(quiet(), null);
+        const captured = [];
+        for (let i = 0; i < WAKE_ACTIVE_MIN - 1; i++) { const r = active(); if (r?.captured) captured.push(r.startMs); }
+        assert.deepEqual(captured, [labelStartMs(idxFirst)], 'bridged into ONE wake, anchored on its first frame');
+      } finally {
+        wakeClips(true);
+      }
     });
   });
 

@@ -2,9 +2,9 @@ import db from '../db.js';
 import { logger } from './logger.js';
 import { onMinuteFlushed } from './activityTracker.js';
 import { SLEEP_THRESHOLDS, childTracksSleep, childWindowActiveNow } from './sleepAnalysis.js';
-import { holdRing, releaseRing, isSegmenterRunning } from './clipRecorder.js';
+import { holdRing, releaseRing, isSegmenterRunning, ringOldestStartMs, ringHasFootageFor, clipCoverStartMs } from './clipRecorder.js';
 import { RING_OWNER } from './ringHolds.js';
-import { captureWakeClip, pruneWakeClips, getWakeClipSettings } from './recordings.js';
+import { captureWakeClip, pruneWakeClips, getWakeClipSettings, WAKE_CLIP_LEAD_SEC } from './recordings.js';
 
 // Live wake detection, for recording only — it never alerts.
 //
@@ -29,8 +29,6 @@ import { captureWakeClip, pruneWakeClips, getWakeClipSettings } from './recordin
 const { MOTION_ACTIVE, SOUND_ACTIVE, ONSET_QUIET_MIN, WAKE_ACTIVE_MIN, WAKE_GAP_MIN } = SLEEP_THRESHOLDS;
 
 const MINUTE_MS = 60 * 1000;
-// A little before the first active minute, so the hold covers the clip's lead-in too.
-const HOLD_LEAD_MS = 15 * 1000;
 // ★ WHO ENFORCES THE BRIDGE LIMIT (#448). handleMinute does, on the data path, in MINUTES ELAPSED between
 // payloads, for an active sample and a quiet one alike (see "One bridge rule" in handleMinute). Until #448 this
 // comment claimed that an un-qualified run "cannot live longer than about 17 minutes" and that no time
@@ -54,6 +52,8 @@ const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 // camera_id -> { asleep, quietRun, run, lastAt }
 // run = { startMs, activeCount, lastActiveMs, captured, holding }
+//   startMs = the clip's anchor (#412: first active frame, clamped to the ring); lastActiveMs = the END label of
+//   the last active minute (the bridge arithmetic and the stale-run sweep read it, so it is NOT the anchor)
 // lastAt (#448) = the end-of-minute ms of the last payload ACCEPTED for this camera, null = none yet. It is
 // what lets handleMinute measure TIME between payloads, because activityTracker sends no payload at all for a
 // minute with neither a motion frame nor a sound window (closeMinute: `hasSignal`), so an outage is visible
@@ -93,7 +93,55 @@ function bucketMs(bucketStart) {
   return Date.parse(`${bucketStart.replace(' ', 'T')}Z`);
 }
 
-export function handleMinute({ cameraId, bucketStart, motionPeak, soundPeak }) {
+// #412: the wall time of the first frame of this minute that was over its channel's active threshold, or null
+// when the payload cannot say. `payload.motionRises` / `soundRises` are the samples that RAISED the minute's
+// running peak (activityTracker); the first sample above any threshold is necessarily one of them, so the
+// first rise over MOTION_ACTIVE / SOUND_ACTIVE is the first active frame. The thresholds are the SAME imported
+// ones that define `active` in handleMinute, so "the frame that made the minute active" is exact by
+// construction; there is no new threshold here. Strict `>`, like `active`: a value exactly AT the threshold
+// does not make a minute active, so it is not an active frame either.
+// Rises are FILTERED to the minute [minuteStartMs, minuteStartMs + 60 s) BEFORE the minimum is taken: a
+// sample stamped before its minute (activityTracker moves a sample from a small backward clock step into the
+// next minute, keeping its original receipt time) must not pull the anchor out of the minute, and a stamp at
+// or past the minute's end cannot come from the real tracker at all (only a hand-built payload). When
+// nothing is left, or the payload carries no arrays (a legacy payload), the answer is null and the caller
+// keeps its old anchor.
+export function firstActiveFrameMs(payload, minuteStartMs) {
+  let first = null;
+  const scan = (rises, threshold) => {
+    if (!Array.isArray(rises)) return;
+    for (const r of rises) {
+      if (!r || !(r.value > threshold)) continue;
+      if (!Number.isFinite(r.atMs) || r.atMs < minuteStartMs || r.atMs >= minuteStartMs + MINUTE_MS) continue;
+      if (first === null || r.atMs < first) first = r.atMs;
+    }
+  };
+  scan(payload?.motionRises, MOTION_ACTIVE);
+  scan(payload?.soundRises, SOUND_ACTIVE);
+  return first;
+}
+
+// #412: where a wake clip is anchored. `at` is the END of the wake's first active minute (the anchor the
+// watcher used since #447), `frameMs` its first active frame (firstActiveFrameMs), `oldestStartMs` the start
+// of the oldest footage the ring holds (clipRecorder.ringOldestStartMs), `leadMs` the clip's lead-in (the clip
+// starts at anchor - leadMs).
+//   * No frame, or no footage to measure: `at`, exactly what the watcher did before #412.
+//   * Else the first frame, but never so early that the CLIP (anchor - leadMs) would open before the oldest
+//     footage: extractClip's selection would then be EMPTY and the row would fail ("no ring segments
+//     covered the requested window"), which is worse than a late start. Hence the max with oldest + lead.
+//   * And never later than `at`: the old anchor is the ceiling, so this can only make a clip start EARLIER
+//     than it did, whatever the ring holds. Known edge (code review): when the oldest footage starts less
+//     than `leadMs` before `at` (an almost empty ring), the ceiling wins over the clamp, the anchor is `at`
+//     (today's anchor) and the clip's PLANNED start, at - leadMs, precedes the footage by up to `leadMs`.
+//     extractClip still cuts from the footage (its selection is non-empty because the hold reaches back 7 s
+//     before the anchor) and `started_at` is then up to `leadMs` early: the old code had the same edge.
+export function wakeClipAnchor({ at, frameMs, oldestStartMs, leadMs }) {
+  if (frameMs == null || oldestStartMs == null) return at;
+  return Math.min(at, Math.max(frameMs, oldestStartMs + leadMs));
+}
+
+export function handleMinute(payload) {
+  const { cameraId, bucketStart, motionPeak, soundPeak } = payload;
   const st = slot(cameraId);
   const camera = cameraQ.get(cameraId);
 
@@ -105,19 +153,22 @@ export function handleMinute({ cameraId, bucketStart, motionPeak, soundPeak }) {
     return null;
   }
 
-  // ★ THE MINUTE'S END, NOT ITS START (#447). activityTracker now labels a minute by when its samples
-  // arrived and hands it over at that minute's END. Before #447 the label was the FLUSH time floored to
-  // the minute, which fell at a boot-dependent point INSIDE the 60 s of samples it held, and the minute was
-  // handed over 0-60 s after that label. The true start would move the hold point a full minute back from
-  // the moment it is taken, and the ring may not reach it: the ring is 63 s deep only with on-demand Record
-  // on, 38 s with it off and 23 s at the smallest clip settings (clipRecorder.ringDepthMsFor; nothing sizes
-  // it for wake clips). Plan review round 2 measured the true start losing the lead-in of 100% of wake clips
-  // on a 38 s ring and failing 96% on a 23 s one. The end keeps the hold point at most HOLD_LEAD_MS + one
-  // tracker tick old when it is taken, on every ring size (wake-watcher.test.js pins it) — never older than
-  // before #447, when it was HOLD_LEAD_MS + 0-60 s old.
-  // ⚠️ The price, stated: the clip now always starts at the END of the wake's first active minute, where
-  // before it started at that boot-dependent point inside it (on average 30 s earlier in the activity).
-  // Anchoring on the first active FRAME, with a ring sized for wake clips, is issue #412.
+  // ★ THE MINUTE IS HEARD AT ITS END (#447, resolved for the clip by #412). activityTracker labels a minute
+  // by when its samples arrived and hands it over at that minute's END, within ~1 s (its flush tick). So
+  // `at` (the label's end) is the moment of the call, and the wake's first active frame is somewhere in the
+  // 60 s BEFORE it. #447 anchored the clip at `at` itself because the true minute start would have moved the
+  // hold point a full minute back from the moment it is taken, and the ring may not reach it: the ring is 63 s
+  // deep only with on-demand Record on, 38 s with it off and 23 s at the smallest clip settings
+  // (clipRecorder.ringDepthMsFor; nothing sizes it for wake clips). Plan review round 2 measured the true
+  // start losing the lead-in of 100% of wake clips on a 38 s ring and failing 96% on a 23 s one. The price
+  // was a deterministic late start: the clip began at the END of the first active minute, up to 57 s after
+  // the first active frame (~27 s on average).
+  // #412 resolves that trade-off: when a run starts, anchor on the first active FRAME (firstActiveFrameMs)
+  // and CLAMP it to the oldest footage the ring actually holds (wakeClipAnchor, ringOldestStartMs reads the
+  // real segment files), so a shallow ring still cuts a clip, just later. An earlier anchor is kept only
+  // when extractClip's own selection finds footage for it (a ring with a hole after its oldest segment would
+  // otherwise fail a clip the old code cut), so no clip the old code cut is failed by this. The old anchor
+  // `at` stays the ceiling and the label (`lastActiveMs`).
   const at = bucketMs(bucketStart) + MINUTE_MS;
   if (!Number.isFinite(at)) return null;
 
@@ -218,9 +269,37 @@ export function handleMinute({ cameraId, bucketStart, motionPeak, soundPeak }) {
 
   if (active) {
     if (!st.run) {
-      st.run = { startMs: at, activeCount: 0, lastActiveMs: at, captured: false, holding: false };
-      // Hold from the first active minute so the wake's opening survives the ~63s ring long enough to
-      // find out whether this is a wake or just a stir.
+      // #412: `startMs` is the clip's ANCHOR (first active frame, clamped to the ring), and ONLY startMs.
+      // `lastActiveMs` stays `at`, the label: the bridge arithmetic below and sweepStaleRuns measure whole
+      // minutes from it, and copying the anchor in (up to a minute EARLIER than `at`) would LENGTHEN the gap to
+      // the next active minute by up to that much: "1 active, 3 quiet, active" measures round(297/60) = 5
+      // minutes instead of 4 and a run that must bridge (WAKE_GAP_MIN = 3) would split.
+      const leadMs = WAKE_CLIP_LEAD_SEC * 1000;
+      const f = firstActiveFrameMs(payload, at - MINUTE_MS);
+      const oldest = ringOldestStartMs(cameraId);
+      let anchor = wakeClipAnchor({ at, frameMs: f, oldestStartMs: oldest, leadMs });
+      // The clamp above reads only the OLDEST segment, which assumes the ring is continuous from there to now.
+      // It may not be (the detector can read the camera's sub stream while the ring records the main one, and a
+      // relaunch keeps the old segments), and then an earlier anchor can have NOTHING covering its window:
+      // extractClip's selection is empty and the row fails, where today's anchor (`at`) would have been cut. So
+      // an anchor earlier than `at` is kept only when the same selection extractClip will make (shared
+      // function, clipRecorder.selectRingSegments) finds footage for it now; otherwise today's anchor stands.
+      // What this proves, and what it does not (Codex, round 1): the WINDOW holds some footage, not that footage
+      // exists AT the first frame (footage resuming later in the window keeps the early anchor and the cut begins
+      // where the footage does). And it is evaluated now with today's wake_clip_seconds: an admin changing that
+      // setting before the capture, on a ring with such a hole, can leave the early anchor with an empty window.
+      if (anchor < at) {
+        const { clipSeconds } = getWakeClipSettings();
+        if (!ringHasFootageFor(cameraId, { at: anchor, preRollSec: WAKE_CLIP_LEAD_SEC, postRollSec: clipSeconds })) {
+          anchor = at;
+        }
+      }
+      st.run = { startMs: anchor, activeCount: 0, lastActiveMs: at, captured: false, holding: false };
+      // Hold from the clip's cover start so the wake's opening survives the ~63s ring long enough to
+      // find out whether this is a wake or just a stir. clipCoverStartMs is the SAME formula extractClip
+      // reads back with (#446), so the hold can never be shallower than the cut. (Before #412 the hold was
+      // a separate `at - 15 s`; for a legacy payload with no rises it is now `at - 7 s`, deliberately: one
+      // formula, and the cut needs nothing older.)
       //
       // #446: only take the hold when wake clips are actually enabled. captureWakeClip already returns
       // null when they're off (recordings.js), so a hold taken anyway protects nothing — it just sits
@@ -231,8 +310,26 @@ export function handleMinute({ cameraId, bucketStart, motionPeak, soundPeak }) {
       // takes a hold does; `st.run.holding` stays false when it doesn't, and the existing
       // `if (st.run?.holding)` guards below already treat that as "nothing to release".
       if (isSegmenterRunning(cameraId) && getWakeClipSettings().enabled) {
-        holdRing(cameraId, RING_OWNER.WAKE, at - HOLD_LEAD_MS);
+        holdRing(cameraId, RING_OWNER.WAKE, clipCoverStartMs(anchor, WAKE_CLIP_LEAD_SEC));
         st.run.holding = true;
+        // The clamp cost the opening: the ring's oldest footage starts after the first frame's lead-in. This
+        // line is the evidence for whether a deeper ring is worth building (#412 follow-up); nothing else
+        // logs it. Not logged when the clip still opens before or at the movement (a 0-3 s clamp is hidden
+        // by the lead-in), nor when there was no frame to compare against, nor when the ring had no closed
+        // segment to measure (`oldest` null: the anchor is then `at` for lack of information, and the line
+        // would claim a buffer depth nobody measured).
+        if (f != null && oldest != null) {
+          // Whole seconds, and no line for a loss that rounds to 0 s or below (a clip that still opens at or
+          // before the movement has lost nothing; a 0 s line would read "reaches back only to 0 s after the
+          // first movement", which says nothing a person can act on).
+          const lostSec = Math.round((anchor - leadMs - f) / 1000);
+          if (lostSec >= 1) {
+            logger.info(
+              `[wake] "${camera.name}" the buffer reaches back only to ${lostSec} s ` +
+                `after the first movement: the clip starts there`
+            );
+          }
+        }
       }
     }
     st.run.activeCount++;
