@@ -492,6 +492,28 @@ test('#412 C2: a non-finite receipt time stores the time actually used for bucke
   assert.deepEqual(seen[0].soundRises, [{ atMs: M + 7000, value: 8 }]);
 });
 
+test('#412 C2: the fallback time is read ONCE per sample, so a clock that crosses a minute between two reads cannot split the bucket from the stamp', () => {
+  // Each Date.now() call is 1 s later than the one before, starting 0.5 s before the minute's end. Two reads (one
+  // to choose the minute, one to stamp the rise) would file the sample under M and stamp it M + 60.5 s, outside
+  // its own minute, where wakeWatcher drops it. (Code review, Codex, #412.)
+  const seen = [];
+  listen((e) => seen.push(e));
+  for (const record of [() => at.recordMotion('cam-1', 0.4, null, NaN), () => at.recordSound('cam-1', 8, NaN)]) {
+    let n = 0;
+    const spy = mock.method(Date, 'now', () => M + 59_500 + 1000 * n++);
+    try {
+      record();
+    } finally {
+      spy.mock.restore();
+    }
+  }
+  ticks(M, M + 2 * MIN);
+  assert.equal(seen.length, 1, 'both samples were filed under minute M');
+  assert.equal(seen[0].bucketStart, label(M));
+  assert.deepEqual(seen[0].motionRises, [{ atMs: M + 59_500, value: 0.4 }], 'the stamp is the time the minute was chosen from');
+  assert.deepEqual(seen[0].soundRises, [{ atMs: M + 59_500, value: 8 }]);
+});
+
 test('#412 C2: a sample clamped into the next minute keeps its own receipt time (the watcher filters by the minute)', () => {
   const seen = [];
   listen((e) => seen.push(e));

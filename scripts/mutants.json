@@ -11501,6 +11501,69 @@
     "replace": "export const WAKE_CLIP_LEAD_SEC = 6;",
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
-    "namePattern": "C11 —"
+    "namePattern": "C11 —|C4 —|C5 —|C10 —"
+  },
+  {
+    "label": "#412 M-412-48: an anchor earlier than `at` is kept although the ring has a hole there and the cut would find nothing",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (!ringHasFootageFor(cameraId, { at: anchor, preRollSec: WAKE_CLIP_LEAD_SEC, postRollSec: clipSeconds })) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "GAPPED ring"
+  },
+  {
+    "label": "#412 M-412-49: the footage check uses the wrong clip length (0 s of post-roll instead of wake_clip_seconds)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "postRollSec: clipSeconds })) {",
+    "replace": "postRollSec: 0 })) {",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "GAPPED ring"
+  },
+  {
+    "label": "#412 M-412-50: ringHasFootageFor ignores where the window starts (footage older than the window counts)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "s.m - SEGMENT_SEC * 1000 <= coverEnd && s.m >= coverStart && now - s.m > SEGMENT_OPEN_MS)",
+    "replace": "s.m - SEGMENT_SEC * 1000 <= coverEnd && now - s.m > SEGMENT_OPEN_MS)",
+    "expect": "killed",
+    "tests": ["clip-recorder.test.js"],
+    "namePattern": "ringHasFootageFor"
+  },
+  {
+    "label": "#412 M-412-51: ringHasFootageFor says yes for a camera with no segmenter",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "if (!entry) return false; // a camera with no segmenter has no footage",
+    "replace": "if (!entry) return true; // a camera with no segmenter has no footage",
+    "expect": "killed",
+    "tests": ["clip-recorder.test.js"],
+    "namePattern": "ringHasFootageFor"
+  },
+  {
+    "label": "#412 M-412-52: the buffer line is logged for a loss that rounds to 0 s",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (lostSec >= 1) {",
+    "replace": "if (true) {",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "C10 —"
+  },
+  {
+    "label": "#412 M-412-53: the buffer line rounds up instead of to the nearest second",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "Math.round((anchor - leadMs - f) / 1000)",
+    "replace": "Math.ceil((anchor - leadMs - f) / 1000)",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "C10 —"
+  },
+  {
+    "label": "#412 M-412-54: a quiet minute's sub-threshold RISES make it active (any rise counts)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "(motionPeak != null && motionPeak > MOTION_ACTIVE) ||",
+    "replace": "(payload.soundRises || []).length > 0 || (motionPeak != null && motionPeak > MOTION_ACTIVE) ||",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "C7 \\(#412\\)"
   }
 ]

@@ -28,7 +28,7 @@ useTempDataDir();
 const { default: db } = await import('../src/db.js');
 const {
   CLIPS_DIR, startSegmenter, stopSegmenter, stopAllSegmenters, isSegmenterRunning,
-  holdRing, releaseRing, extractClip, probeClip, ringOldestStartMs,
+  holdRing, releaseRing, extractClip, probeClip, ringOldestStartMs, ringHasFootageFor,
 } = await import('../src/lib/clipRecorder.js');
 const { RING_OWNER, effectiveHold, holdOwners, clearHolds } = await import('../src/lib/ringHolds.js');
 
@@ -359,6 +359,49 @@ describe('★ #412 ringOldestStartMs: where the ring\'s footage really starts', 
       });
       assert.equal(selected, closed, `precondition: extractClip's own verdict for a ${ageMs} ms old segment`);
       assert.equal(oldest !== null, selected, `ringOldestStartMs and extractClip disagree for a ${ageMs} ms old segment`);
+    }
+  });
+});
+
+// --- ringHasFootageFor (#412) --------------------------------------------------------------------------
+// The wake watcher keeps an anchor EARLIER than today's only when the cut at it would find footage; a ring with
+// a hole after its oldest segment reaches back past the first frame yet covers nothing there (code review).
+describe('★ #412 ringHasFootageFor: would extractClip find any footage for a clip here', () => {
+  const clip = { preRollSec: 5, postRollSec: 15 };
+
+  test('false when no segmenter runs for the camera, even with segment files lying in its ring dir', () => {
+    segment('seg-orphan.mkv', 10_000);
+    assert.equal(ringHasFootageFor(CAM, { at: Date.now(), ...clip }), false);
+  });
+
+  test('false for an empty ring; true with a closed segment inside the window', () => {
+    startSegmenter(CAM, 'somepath');
+    assert.equal(ringHasFootageFor(CAM, { at: Date.now(), ...clip }), false);
+    segment('seg-in.mkv', 5_000);
+    assert.equal(ringHasFootageFor(CAM, { at: Date.now(), ...clip }), true);
+  });
+
+  test('false when the only footage is OLDER than the window or LATER than it', () => {
+    startSegmenter(CAM, 'somepath');
+    segment('seg-old.mkv', 30_000); // mtime now - 30 s; the window for a clip at `now` starts 13 s before it
+    assert.equal(ringHasFootageFor(CAM, { at: Date.now(), ...clip }), false, 'older than the window');
+    // The same segment is footage for a clip that happened back then, and not for one that happens long after.
+    assert.equal(ringHasFootageFor(CAM, { at: Date.now() - 30_000, ...clip }), true);
+    assert.equal(ringHasFootageFor(CAM, { at: Date.now() - 120_000, ...clip }), false, 'the window ended before the segment began');
+  });
+
+  test('agrees with extractClip\'s own verdict (same selection) on windows either side of every boundary', async () => {
+    startSegmenter(CAM, 'somepath');
+    segment('seg-a.mkv', 20_000);
+    segment('seg-b.mkv', 8_000);
+    segment('seg-open.mkv', 0); // still being written: not footage
+    for (const age of [0, 5_000, 12_000, 25_000, 40_000, 90_000]) {
+      const at = Date.now() - age;
+      let selected = true;
+      await extractClip(CAM, { at, ...clip, settleMs: 0 }).catch((err) => {
+        if (/no ring segments covered/.test(err.message)) selected = false;
+      });
+      assert.equal(ringHasFootageFor(CAM, { at, ...clip }), selected, `disagree for a clip ${age} ms ago`);
     }
   });
 });

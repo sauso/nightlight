@@ -312,7 +312,11 @@ export function cloneLedgerSize() {
 // tests and for any caller with no receipt; the detectors always pass it.
 export function recordMotion(cameraId, fraction, sample = null, atMs = Date.now()) {
   if (!(fraction >= 0)) return;
-  const s = slot(cameraId, atMs);
+  // #412: the fallback time is read ONCE and used both to pick the minute and to stamp a rise. Reading
+  // Date.now() twice (once inside minuteFor, once for the stamp) could straddle a minute boundary and stamp
+  // the rise in the minute AFTER the one the sample was filed under, where wakeWatcher filters it out.
+  const usedAt = Number.isFinite(atMs) ? atMs : Date.now();
+  const s = slot(cameraId, usedAt);
   s.motionSum += fraction;
   if (fraction > s.motionPeak) {
     s.motionPeak = fraction;
@@ -324,7 +328,7 @@ export function recordMotion(cameraId, fraction, sample = null, atMs = Date.now(
     // threshold-free and wakeWatcher applies the SAME MOTION_ACTIVE that defines `active`. The list is
     // short (one entry per new maximum, not per frame). recordMotionOut records nothing: out-of-bed
     // movement does not make a minute active, so it cannot start a wake.
-    s.motionRises.push({ atMs: Number.isFinite(atMs) ? atMs : Date.now(), value: fraction });
+    s.motionRises.push({ atMs: usedAt, value: fraction });
   }
   s.motionFrames++;
   s.observedMotionFrames++;
@@ -350,14 +354,15 @@ export function recordMotionOut(cameraId, fraction, sample = null, atMs = Date.n
 // receipt time of the stdout event that delivered the window (every window of one event shares it).
 export function recordSound(cameraId, overDb, atMs = Date.now()) {
   if (!(overDb >= 0)) return;
-  const s = slot(cameraId, atMs);
+  const usedAt = Number.isFinite(atMs) ? atMs : Date.now(); // read once, see recordMotion (#412)
+  const s = slot(cameraId, usedAt);
   s.soundSum += overDb;
   s.soundSumSq += overDb * overDb;
   s.soundValues.push(overDb);
   if (overDb > s.soundPeak) {
     s.soundPeak = overDb;
     // #412: same idea as recordMotion's motionRises (peak-raising samples only, time actually used).
-    s.soundRises.push({ atMs: Number.isFinite(atMs) ? atMs : Date.now(), value: overDb });
+    s.soundRises.push({ atMs: usedAt, value: overDb });
   }
   s.soundWindows++;
 }

@@ -287,8 +287,8 @@ export function reconcileStaleRecordings() {
 // watcher anchors on the first moving or noisy frame, clamped to the oldest footage the ring still holds,
 // see lib/wakeWatcher.js wakeClipAnchor; since #447 it anchored on the END of the first active minute, up to
 // 57 s late). A few seconds of lead-in, so the clip doesn't start on the very frame that tripped the
-// threshold. Exported (#412) because the watcher's clamp needs the same lead: a clip never starts before
-// the ring's oldest footage, and the lead is part of where the clip starts.
+// threshold. Exported (#412) because the watcher's clamp needs the same lead: a clip is not anchored so
+// early that it would open before the ring's oldest footage, and the lead is part of where the clip starts.
 export const WAKE_CLIP_LEAD_SEC = 3;
 // The whole window is already in the past by the time a wake qualifies (5 active minutes later), so
 // there is no post-roll to wait out — just let the current segment close.

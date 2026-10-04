@@ -551,15 +551,20 @@ read from its files, because a clip that opens before the buffer's oldest footag
 fails. So the clip starts at the first moving or noisy frame (3 s before it), or at the oldest footage the
 buffer still holds if that is later.
 
-- **How late, by buffer depth.** A buffer of about 70 seconds or more always reaches the first frame. With
-  less, the clip starts up to roughly a minute minus the buffer depth after it: about 26 seconds late with a 38
-  second buffer, about 41 with a 23 second one. This house runs 63 seconds, which is nearly exact. These are
+- **How late, by buffer depth.** A continuous buffer of about 70 seconds or more reaches the first frame. With
+  less, the clip starts up to roughly a minute minus the buffer depth after it: about 22 seconds after the first
+  frame with a 38 second buffer, about 37 with a 23 second one (the same figure the log line below prints, on the
+  day). As an example, a 63 second buffer (on-demand Record on) is nearly exact. If the buffer has a gap that
+  leaves nothing at the first frame (the motion check can read a different stream from the one that is
+  buffered), the clip falls back to the old start, the end of the first active minute. These are
   derived, not measured, and approximate to about 4 seconds (a 2 second segment plus the 2 second tick that
   prunes the buffer). When the buffer cost the opening, the log says so once per wake: `[wake] "<camera>" the
   buffer reaches back only to N s after the first movement: the clip starts there`. A deeper buffer for wake
   clips is not built; this line is how to tell whether anyone needs one.
-- **The clip's start time can precede the wake's minute.** A clip's recorded start is its real first frame,
-  3 s before the first active frame, so for a movement in the first seconds of a minute it can be a few
+- **The clip's start time can precede the wake's minute.** A clip's recorded start is its planned first frame,
+  3 s before the first active frame (with an almost empty buffer, whose oldest footage is less than 3 s
+  before the end of the minute, the cut begins at that footage and the recorded start is up to 3 s earlier
+  than it), so for a movement in the first seconds of a minute it can be a few
   seconds before the wake's minute on the timeline. The review page still pairs the clip with its wake (it
   matches within 3 minutes).
 - **Unverified.** That a frame's arrival time at the detector lines up with the footage in the buffer to

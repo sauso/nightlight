@@ -57,13 +57,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   up to 57 seconds (about 27 on average) after the first frame and could miss the opening it exists to show
   (#447's entry said "starting them at the first moving frame is #412": that is now done). The clip now opens 3
   seconds before the first frame that was over the same motion or sound threshold that makes a minute active,
-  or at the oldest footage the recording buffer still holds, if that is later: a buffer of about 70 seconds
-  or more always reaches the first frame, a shallower one starts the clip up to about a minute minus its depth
-  late (roughly 26 seconds with a 38 second buffer, 41 with a 23 second one; derived, about 4 seconds
-  either way). A clip is never started before the buffer's
-  footage (that would leave nothing to cut and fail it). The log says when the buffer cost the opening: `[wake]
+  or at the oldest footage the recording buffer still holds, if that is later: a continuous buffer of about 70
+  seconds or more reaches the first frame, a shallower one starts the clip up to about a minute minus its depth
+  after the first frame (roughly 22 seconds with a 38 second buffer, 37 with a 23 second one; derived, about 4
+  seconds either way). A clip is not anchored earlier than the footage the buffer really holds (that would leave
+  nothing to cut and fail it); where the buffer has a gap that leaves nothing at the first frame, the old start
+  (the end of the first active minute) is used, as before. The log says when the buffer cost the opening: `[wake]
   "<camera>" the buffer reaches back only to N s after the first movement: the clip starts there`. The clip's
-  recorded start is its real first frame, so it can be a few seconds before the wake's minute on the
+  recorded start is the clip's planned first frame (3 seconds before the first moving or noisy one; with an almost empty buffer, up to 3 seconds before the first footage it holds), so it can be a few seconds before the wake's minute on the
   timeline; the review page still pairs them. Which minutes count as a wake, what is recorded and what the
   sleep numbers read are unchanged. Details in `docs/recording.md` and KNOWN-ISSUES ("Where a wake clip
   starts"). Nothing here assumes a particular house, child or timezone.

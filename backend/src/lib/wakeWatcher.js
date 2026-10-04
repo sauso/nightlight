@@ -2,7 +2,7 @@ import db from '../db.js';
 import { logger } from './logger.js';
 import { onMinuteFlushed } from './activityTracker.js';
 import { SLEEP_THRESHOLDS, childTracksSleep, childWindowActiveNow } from './sleepAnalysis.js';
-import { holdRing, releaseRing, isSegmenterRunning, ringOldestStartMs, clipCoverStartMs } from './clipRecorder.js';
+import { holdRing, releaseRing, isSegmenterRunning, ringOldestStartMs, ringHasFootageFor, clipCoverStartMs } from './clipRecorder.js';
 import { RING_OWNER } from './ringHolds.js';
 import { captureWakeClip, pruneWakeClips, getWakeClipSettings, WAKE_CLIP_LEAD_SEC } from './recordings.js';
 
@@ -130,7 +130,11 @@ export function firstActiveFrameMs(payload, minuteStartMs) {
 //     footage: extractClip's selection would then be EMPTY and the row would fail ("no ring segments
 //     covered the requested window"), which is worse than a late start. Hence the max with oldest + lead.
 //   * And never later than `at`: the old anchor is the ceiling, so this can only make a clip start EARLIER
-//     than it did, whatever the ring holds.
+//     than it did, whatever the ring holds. Known edge (code review): when the oldest footage starts less
+//     than `leadMs` before `at` (an almost empty ring), the ceiling wins over the clamp, the anchor is `at`
+//     (today's anchor) and the clip's PLANNED start, at - leadMs, precedes the footage by up to `leadMs`.
+//     extractClip still cuts from the footage (its selection is non-empty because the hold reaches back 7 s
+//     before the anchor) and `started_at` is then up to `leadMs` early: the old code had the same edge.
 export function wakeClipAnchor({ at, frameMs, oldestStartMs, leadMs }) {
   if (frameMs == null || oldestStartMs == null) return at;
   return Math.min(at, Math.max(frameMs, oldestStartMs + leadMs));
@@ -161,8 +165,10 @@ export function handleMinute(payload) {
   // the first active frame (~27 s on average).
   // #412 resolves that trade-off: when a run starts, anchor on the first active FRAME (firstActiveFrameMs)
   // and CLAMP it to the oldest footage the ring actually holds (wakeClipAnchor, ringOldestStartMs reads the
-  // real segment files), so a shallow ring still cuts a clip, just later, and never fails one the old code
-  // cut. The old anchor `at` stays the ceiling and the label (`lastActiveMs`).
+  // real segment files), so a shallow ring still cuts a clip, just later. An earlier anchor is kept only
+  // when extractClip's own selection finds footage for it (a ring with a hole after its oldest segment would
+  // otherwise fail a clip the old code cut), so no clip the old code cut is failed by this. The old anchor
+  // `at` stays the ceiling and the label (`lastActiveMs`).
   const at = bucketMs(bucketStart) + MINUTE_MS;
   if (!Number.isFinite(at)) return null;
 
@@ -265,12 +271,25 @@ export function handleMinute(payload) {
     if (!st.run) {
       // #412: `startMs` is the clip's ANCHOR (first active frame, clamped to the ring), and ONLY startMs.
       // `lastActiveMs` stays `at`, the label: the bridge arithmetic below and sweepStaleRuns measure whole
-      // minutes from it, and copying the anchor in would shorten the gap to the next minute by up to 57 s
-      // (round(297/60) = 5 instead of 4 changes whether "4 active, 3 quiet, active" bridges).
+      // minutes from it, and copying the anchor in (up to a minute EARLIER than `at`) would LENGTHEN the gap to
+      // the next active minute by up to that much: "1 active, 3 quiet, active" measures round(297/60) = 5
+      // minutes instead of 4 and a run that must bridge (WAKE_GAP_MIN = 3) would split.
       const leadMs = WAKE_CLIP_LEAD_SEC * 1000;
       const f = firstActiveFrameMs(payload, at - MINUTE_MS);
       const oldest = ringOldestStartMs(cameraId);
-      const anchor = wakeClipAnchor({ at, frameMs: f, oldestStartMs: oldest, leadMs });
+      let anchor = wakeClipAnchor({ at, frameMs: f, oldestStartMs: oldest, leadMs });
+      // The clamp above reads only the OLDEST segment, which assumes the ring is continuous from there to now.
+      // It may not be (the detector can read the camera's sub stream while the ring records the main one, and a
+      // relaunch keeps the old segments), and then an earlier anchor can have NOTHING covering its window:
+      // extractClip's selection is empty and the row fails, where today's anchor (`at`) would have been cut. So
+      // an anchor earlier than `at` is kept only when the same selection extractClip will make (shared
+      // function, clipRecorder.selectRingSegments) finds footage for it now; otherwise today's anchor stands.
+      if (anchor < at) {
+        const { clipSeconds } = getWakeClipSettings();
+        if (!ringHasFootageFor(cameraId, { at: anchor, preRollSec: WAKE_CLIP_LEAD_SEC, postRollSec: clipSeconds })) {
+          anchor = at;
+        }
+      }
       st.run = { startMs: anchor, activeCount: 0, lastActiveMs: at, captured: false, holding: false };
       // Hold from the clip's cover start so the wake's opening survives the ~63s ring long enough to
       // find out whether this is a wake or just a stir. clipCoverStartMs is the SAME formula extractClip
@@ -296,10 +315,15 @@ export function handleMinute(payload) {
         // segment to measure (`oldest` null: the anchor is then `at` for lack of information, and the line
         // would claim a buffer depth nobody measured).
         if (f != null && oldest != null && anchor - leadMs > f) {
-          logger.info(
-            `[wake] "${camera.name}" the buffer reaches back only to ${Math.round((anchor - leadMs - f) / 1000)} s ` +
-              `after the first movement: the clip starts there`
-          );
+          // Whole seconds, and no line for a loss that rounds to 0 s (it would read "reaches back only to 0 s
+          // after the first movement", which says nothing a person can act on).
+          const lostSec = Math.round((anchor - leadMs - f) / 1000);
+          if (lostSec >= 1) {
+            logger.info(
+              `[wake] "${camera.name}" the buffer reaches back only to ${lostSec} s ` +
+                `after the first movement: the clip starts there`
+            );
+          }
         }
       }
     }

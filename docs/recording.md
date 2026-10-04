@@ -76,14 +76,16 @@ that gap without making alerts noisier.
   [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
 - The clip starts at the **beginning** of the wake-up, not when it was confirmed — the opening is the
   part that explains why. Precisely: it starts 3 seconds before the first frame that showed movement or
-  noise (the same threshold that makes a minute count as active on the sleep timeline; sound counts as
-  well as movement), or at the oldest footage the buffer still holds, if that is later. A buffer of about
-  70 seconds or more always reaches the first frame; with a shallower one the clip starts up to roughly a
-  minute minus the buffer depth after it (about 26 seconds late with a 38 second buffer, about 41 with a 23
-  second one). The buffer's depth comes from the clip pre-roll and post-roll and the on-demand pre-roll
+  noise (the same threshold that makes a minute count as active in the live wake check, in-bed movement or
+  sound; unlike the sleep timeline, out-of-bed movement does not count), or at the oldest footage the buffer
+  still holds, if that is later. A continuous buffer of about 70 seconds or more reaches the first frame; with
+  a shallower one the clip starts up to roughly a minute minus the buffer depth after it (about 22 seconds
+  after the first frame with a 38 second buffer, about 37 with a 23 second one). If the buffer has a gap that
+  leaves nothing at the first frame, the clip starts where it did before, at the end of that first minute. The buffer's depth comes from the clip pre-roll and post-roll and the on-demand pre-roll
   settings: 23 seconds at the smallest clip settings, 38 on the defaults with on-demand recording off, 63
-  with it on, and more with larger settings. The figures are derived, approximate to about 4 seconds, not measured. The clip's recorded start is its real
-  first frame, so it can be a few seconds before the wake's minute on the timeline; the review page still
+  with it on, and more with larger settings. The figures are derived, approximate to about 4 seconds, not measured. The clip's recorded start is its planned
+  first frame (3 seconds before the first moving or noisy one; with an almost empty buffer, up to 3 seconds
+  before the first footage it holds), so it can be a few seconds before the wake's minute on the timeline; the review page still
   matches it to that wake. See "Where a wake clip starts" in [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
 
 **Settings → Recording → Wake clips**
