@@ -260,6 +260,12 @@ export function _productionTimingForTests() {
   return PRODUCTION_TIMING;
 }
 
+// The live detector Map entry for a camera, or undefined. A restart replaces the Map entry, so identity is the
+// only way to tell a kept leg from a restarted one when the leg logs no start line (an alerting leg).
+export function _detectorEntryForTests(cameraId) {
+  return detectors.get(cameraId);
+}
+
 // Every live return-check timer. Only so a test can see that none survives stop / exit / error / a replaced
 // entry: a leaked interval sends no request (its own guard returns first), so nothing else can show it.
 const returnTimers = new Set();

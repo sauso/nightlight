@@ -22,6 +22,10 @@
 // no DST, a half-hour offset) so that no offset, zone or whole-hour assumption can hide in the code.
 //
 // Date is frozen with mock.timers (apis: ['Date'] only, never the real timers) and ALWAYS reset in finally.
+//
+// KNOWN-EQUIVALENT mutants, deliberately NOT tested (no input can tell them apart): a candidate-night range of
+// +2 / -2 instead of +1 / -1 (a night two days away can never cover an instant, see windowOpenNow), and the
+// order the candidate nights are tried in (the result is an OR over them).
 import { test, before, after, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { useTempDataDir, cleanupTempDataDirs } from './helpers/harness.js';
@@ -185,10 +189,11 @@ test('#353 a 00:02 start is sampled from 21:02 the previous evening (kills: +1 n
 // ---------------------------------------------------------------------------------------------------
 // P5: GUARD, childWindowActiveNow is UNCHANGED on purpose
 // ---------------------------------------------------------------------------------------------------
-// It gates the wake watcher and the timelapse. #353 widens SAMPLING only: the wake watcher has no second gate,
-// so widening this one would have moved its input by up to 5 minutes for a window opening 00:00-00:04 in a
-// core module, for no benefit to this issue (the leg itself is covered by the sampling gate's 3 h lead). The
-// timelapse must keep recording the configured window, not the sampling horizon.
+// It gates the wake watcher (and is checked by the timelapse). #353 widens SAMPLING only: the wake watcher has
+// no second gate, so widening this one would have moved its input by up to 5 minutes for a window opening
+// 00:00-00:04 in a core module, for no benefit to this issue (the leg itself is covered by the sampling gate's
+// 3 h lead). The timelapse is NOT the reason: it also needs currentNightDate non-null (true only inside the
+// configured window), so it never captures outside the window whatever this gate returns.
 
 test('#353 childWindowActiveNow keeps its 5-minute tail and lead, and stays closed at 07:06 (kills: childWindowActiveNow trail = the sampling tail)', () => {
   setup({ tz: MEL, start: '19:00', end: '07:00' });
@@ -315,4 +320,23 @@ test('#353 a half-hour-offset zone (Asia/Kolkata, UTC+5:30, no DST) gets the sam
   assert.equal(sampling(Z('2026-08-27T13:30:00Z')), true, '19:00 IST');
   assert.equal(sampling(Z('2026-08-28T03:30:00Z') + margin - MS), true);
   assert.equal(sampling(Z('2026-08-28T03:30:00Z') + margin), false);
+});
+
+// ---------------------------------------------------------------------------------------------------
+// P8: the tail of a window that does NOT cross midnight (the issue's own 01:00-07:00 bedtime)
+// ---------------------------------------------------------------------------------------------------
+
+test('#353 the tail of a 01:00-07:00 window (which does not cross midnight) is the same horizon + margin (kills: the tail applied only to yesterday\'s night)', () => {
+  setup({ tz: MEL, start: '01:00', end: '07:00' });
+  // Night 2026-08-28 starts 01:00 and ends 07:00 on 08-28 AEST = 2026-08-27T21:00Z. Its morning is the night with
+  // delta 0 (today's own date), unlike a 19:00-07:00 child whose morning is delta -1, so a tail that is long only
+  // for yesterday's night passes every other test in this file and fails here.
+  const windowEnd = Z('2026-08-27T21:00:00Z');
+  const horizon = reportableSpanMs(KID, '2026-08-28').toMs; // read back from the app...
+  assert.equal(horizon, Z('2026-08-28T00:00:00Z'), '...and checked against a literal: 10:00 local');
+  const margin = reconcileMargin(windowEnd);
+  assert.equal(sampling(Z('2026-08-27T21:06:00Z')), true, '07:06 local');
+  assert.equal(sampling(Z('2026-08-27T23:59:00Z')), true, '09:59 local');
+  assert.equal(sampling(horizon + margin - MS), true, 'last millisecond of the tail');
+  assert.equal(sampling(horizon + margin), false, 'closed at horizon + margin');
 });

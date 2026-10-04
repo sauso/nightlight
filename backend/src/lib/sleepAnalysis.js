@@ -299,10 +299,11 @@ export function childTracksSleep(childId) {
 }
 
 // Slack for the 5-min reconcile (index.js reconcileCameraPaths) that starts and stops the activity leg.
-// It is applied to the END edge of every gate below, so the leg lingers 5-10 min past the edge it is
-// told to stop at and the final minute before that edge is flushed (activityTracker closes a minute on
-// a 1 s tick) before the leg is torn down. There is no slack on a START edge: the leg begins 0-5 min
-// after it (plus the wait for the stream path), a known limit documented in the README.
+// It is the END-edge slack of every gate below, so the leg lingers 5-10 min past the edge it is told to
+// stop at and the final minute before that edge is flushed (activityTracker closes a minute on a 1 s
+// tick) before the leg is torn down. childWindowActiveNow additionally uses it as its LEAD (5 min before
+// the window start). The sampling gate has no start slack: its lead is the 3 h lookbehind, and the leg
+// begins 0-5 min after that edge (plus the wait for the stream path), a known limit in the README.
 const WINDOW_MARGIN_MS = 5 * 60 * 1000;
 
 // Is this child's sleep window open RIGHT NOW, widened by `leadMs` before its start and `trailMs` after
@@ -319,10 +320,11 @@ const WINDOW_MARGIN_MS = 5 * 60 * 1000;
 //
 // Why +1 exists, and why it is sampling-only: a window opening 00:00-02:59 local has its 3 h lookbehind
 // on the PREVIOUS calendar day, so at 22:30 the instant belongs to TOMORROW's night (issue #353; the
-// old loop never tried it). childWindowActiveNow deliberately keeps {0, -1} so the wake watcher and the
-// timelapse behave exactly as before this fix: its 5-minute lead has a known, harmless gap for a window
-// opening 00:00-00:04 (the wake watcher only arms once sleep has begun), and the leg itself is covered
-// by the 3 h lead of the sampling gate.
+// old loop never tried it). childWindowActiveNow deliberately keeps {0, -1} so the wake watcher (which has
+// no second gate, wakeWatcher.js) behaves exactly as before this fix: its 5-minute lead has a known,
+// harmless gap for a window opening 00:00-00:04 (the wake watcher only arms once sleep has begun), and
+// the leg itself is covered by the 3 h lead of the sampling gate. (The timelapse is not the reason: it
+// also needs currentNightDate non-null, true only inside the configured window, see timelapse.js.)
 //
 // `leadMs` and `trailMs` are ABSOLUTE milliseconds added to real instants from windowBoundsUtc, exactly
 // as computeNight adds ONSET_LOOKBEHIND_MS and WAKE_LOOKAHEAD_MS, so on a DST night the lead and tail
@@ -341,8 +343,10 @@ function windowOpenNow(childId, leadMs, trailMs, nextNight = false) {
 }
 
 // Unchanged on purpose by #353: the window itself with a 5-minute slack each side. It gates the wake
-// watcher and the timelapse, which must keep working to the configured window rather than the sampling
-// horizon below (the timelapse would otherwise record from 3 h before bedtime to 3 h after wake).
+// watcher, which has no second gate, so widening this to the sampling horizon below would move the wake
+// watcher's input (in a core module) for no benefit to #353. The timelapse also calls it, but is already
+// bounded by currentNightDate (non-null only inside the configured window), so it never captures outside
+// the window whatever this returns.
 export function childWindowActiveNow(childId) {
   return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS);
 }
@@ -360,9 +364,9 @@ export function childWindowActiveNow(childId) {
 // #353; found by the 2026-09-11 Codex review, reproduced on dev 11236d7: sampling false at 07:06 and
 // 09:59 for a 19:00-07:00 window). No new number: both lengths are the constants the inference uses.
 //
-// Kept separate from childWindowActiveNow deliberately: that one also gates the timelapse and the wake
-// watcher, which keep the configured window. This only widens sampling (and is the only gate with the +1
-// candidate night, see windowOpenNow).
+// Kept separate from childWindowActiveNow deliberately: that one gates the wake watcher (and is checked by
+// the timelapse), which keep the configured window plus 5 minutes. This only widens sampling (and is the
+// only gate with the +1 candidate night, see windowOpenNow).
 //
 // Cost: an activity-only camera runs 3 h more a day (15 h -> 18 h for a 19:00-07:00 child), ONE ffmpeg
 // decoding 320x180 gray at 5 fps (not measured as CPU). It costs nothing on a framediff-ALERTING camera,

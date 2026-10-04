@@ -11038,5 +11038,44 @@
     "tests": ["motion-leg-reconcile.test.js"],
     "namePattern": "^#353 index.js reconcileCameraPaths",
     "note": "A source-text check only (index.js cannot be imported by a test): it stops the call site being silently reverted, it does not prove the runtime behaviour."
+  },
+  {
+    "label": "#353 M-353-18: the tail is long only for yesterday's night (a window that does not cross midnight loses its tail)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "now < endUtc.getTime() + trailMs",
+    "replace": "now < endUtc.getTime() + (delta < 0 ? trailMs : WINDOW_MARGIN_MS)",
+    "expect": "killed",
+    "tests": ["sleep-sampling-horizon.test.js"],
+    "namePattern": "^#353 the tail of a 01:00-07:00 window",
+    "note": "A 19:00-07:00 child's morning is the night with delta -1, so every other tail test passes with this mutant; a 01:00-07:00 child's morning is delta 0."
+  },
+  {
+    "label": "#353 M-353-19: reconcileMotionLeg restarts an alerting leg on every reconcile",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "if (wanted && !isDetecting(cam.id)) {",
+    "replace": "if (wanted && (!isDetecting(cam.id) || motionAlerting(cam))) {",
+    "expect": "killed",
+    "tests": ["motion-leg-reconcile.test.js"],
+    "namePattern": "^#353 an ALERTING",
+    "note": "An alerting leg logs no start line, so only the identity of the detector entry shows the restart."
+  },
+  {
+    "label": "#353 M-353-20: an MQTT camera with motion alerts ON is treated as not wanted by the sleep gate (it is activity-only, not alerting)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "return !!camera.child_id && childSamplingActiveNow(camera.child_id);",
+    "replace": "return !!camera.child_id && !(camera.detect_source === 'mqtt' && camera.detect_motion_enabled) && childSamplingActiveNow(camera.child_id);",
+    "expect": "killed",
+    "tests": ["motion-leg-reconcile.test.js"],
+    "namePattern": "^#353 MQTT source, alerts ON"
+  },
+  {
+    "label": "#353 M-353-21: the index.js call site is commented out",
+    "file": "backend/src/index.js",
+    "find": "await reconcileMotionLeg(cam);",
+    "replace": "// await reconcileMotionLeg(cam);",
+    "expect": "killed",
+    "tests": ["motion-leg-reconcile.test.js"],
+    "namePattern": "^#353 index.js reconcileCameraPaths",
+    "note": "A source-text check only; the strengthened test requires the call to be a statement on its own line."
   }
 ]

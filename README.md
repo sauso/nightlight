@@ -320,9 +320,10 @@ measurement**, and (like everything here) never a safety device — see the warn
   lingers 5 to 10 minutes after the closing one.
   - **The cost:** about 3 hours more a day of one low-resolution video decode per such camera (15 hours a
     day becomes 18 for a 19:00-07:00 window). That is a relative figure; the extra CPU was not measured.
-    A camera that alerts already runs all day and costs nothing extra.
-  - **What is not widened:** the timelapse, the wake clips and the live wake watcher still use the sleep
-    window itself (plus 5 minutes either side), not the 3 hours.
+    A frame-diff camera with motion alerts on already runs all day and costs nothing extra.
+  - **What is not widened:** none of these is widened to 3 hours. The timelapse records only inside the
+    sleep window itself. The live wake watcher (which also decides wake clips) uses the window plus 5
+    minutes either side.
   - **Known limits:** a departure later than 3 hours after the window closes is not seen by any camera, and
     for a camera of this kind the morning review has no recorded *got out / into bed* events after about
     3 hours past the window's end, because nothing past that point feeds the night's numbers.

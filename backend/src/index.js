@@ -467,7 +467,8 @@ async function reconcileCameraPaths(attempt = 1) {
       // cameras, or ACTIVITY-ONLY for child-assigned cameras whose alerts come from MQTT (sleep
       // tracking's motion signal) — motionLegWanted() decides; startMotionDetector picks the mode.
       // motionLegWanted() also gates the activity-only leg on the sleep window: it starts 3 h before
-      // bedtime and is torn down 3 h after wake (the inference's own lookbehind and lookahead, #353).
+      // the sleep window opens and is torn down 3 h after it closes (the inference's own lookbehind and
+      // lookahead, #353).
       // The alert leg is 24/7 and never hits the stop branch. The start/stop decision lives in
       // motionDetector.js (reconcileMotionLeg), not here, because this file spawns MediaMTX and the
       // transcoders at import so no test can import it; a decision in here could not be tested.
