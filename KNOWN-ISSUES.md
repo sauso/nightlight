@@ -228,7 +228,10 @@ the recording it was in the middle of saving. Verify with `docker inspect -f '{{
 ```
 
 and, occasionally, `[obs] … WALL-STEP +900ms (host clock stepped; not a gap)` or
-`[obs] … side-channel unavailable (no tap records) …`.
+`[obs] … side-channel unavailable (no tap records) …`, or, on a sound detector, a warning (once per camera
+per 15-minute period at most) such as `[obs] "Nursery Cam" sound gen=2 timestamp sequence broke (a record
+failed to parse): the rest of this ffmpeg run's windows are reported UNKNOWN. This is the timestamp
+measurement only; …` (see "A sound line that reads `side=unavailable` does not, by itself, mean the sampler is dead", below).
 
 **Why:** the detectors read a tiny copy of each camera's stream and judge movement and noise from it.
 That copy is not a perfect record of time: when a camera stalls, ffmpeg repeats the last picture to keep
@@ -258,8 +261,34 @@ their own before/after comparison.
 | `age p50/p99` | How long after being observed a sample reached the detector. About 330 ms is normal for motion (ffmpeg holds each frame until the next arrives). |
 | `compressed` / `clamps` / `uncertain` | Timestamps that had to be squeezed to stay in order: after a backlog longer than an hour, after an out-of-order stamp, or after the host clock went backwards. A non-zero `clamps` is worth reporting. |
 | `wallSteps` | Times the host clock jumped (NTP). Logged as `WALL-STEP`, never as a gap. UTC for a sample never goes backwards within one run. |
-| `side` | Whether the timestamp evidence could place **any** sample in **this** 15-minute period. It is judged afresh every period, so it goes back to `ok` as soon as samples are placed again. `ok`: at least one sample was placed. `unavailable`: every sample was `unknown`. That happens when ffmpeg's timestamp lines stopped arriving or parsing (for example after an ffmpeg upgrade changes their format), or arrive but cannot be used (for example without the line that gives their time base). It also happens on sound once one timestamp line is lost, because every later window of that ffmpeg run is `unknown`, and on motion when every picture was identical, as from a frozen camera (then `ambiguous` equals `unknown`). `pending`: no sample was finalised this period (`samples=0`), so there is nothing to judge. A *partial* loss leaves `side=ok` and shows in `unknown`. When a run's timestamp lines are unusable from its very start, a one-off `side-channel unavailable` line also says which of the first two causes it is. A failure later in a run shows only here. Detection carries on untouched; the samples are just `unknown`. |
+| `side` | Whether the timestamp evidence could place **any** sample in **this** 15-minute period. It is judged afresh every period, so it goes back to `ok` as soon as samples are placed again. `ok`: at least one sample was placed. `unavailable`: every sample was `unknown`. That happens when ffmpeg's timestamp lines stopped arriving or parsing (for example after an ffmpeg upgrade changes their format), or arrive but cannot be used (for example without the line that gives their time base). It also happens on sound once one timestamp line is truly lost (since issue #573 a *torn* sound timestamp line, one with another message glued onto its unused tail, is recovered and no longer does this), because every later window of that ffmpeg run is `unknown`, and on motion when every picture was identical, as from a frozen camera (then `ambiguous` equals `unknown`). `pending`: no sample was finalised this period (`samples=0`), so there is nothing to judge. A *partial* loss leaves `side=ok` and shows in `unknown`. When a run's timestamp lines are unusable from its very start, a one-off `side-channel unavailable` line also says which of the first two causes it is. A failure later in a run shows only here. Detection carries on untouched; the samples are just `unknown`. |
 | `warn` / `late` | Internal errors the observation code caught (should be 0), and data from an ffmpeg run that had already ended (dropped, never mixed into the next run). `warn` stays 0 on a stream that has stopped being usable: nothing threw, so that shows in `side`, not here. |
+
+**A sound line that reads `side=unavailable` does not, by itself, mean the sampler is dead.** A period such as
+`observed=0 unknown=4500 side=unavailable cover=0.0%/0.0%` means the timestamp *measurement* is blind. The
+loudness readings the sound detector decides from come from the audio itself, a separate path, so the
+`[sound] "<camera>" ambient=…` lines keep printing and alerts keep firing. To check, look at the stored
+history: `activity_samples.sound_windows` is about 300 per minute (one 200 ms window each) while the
+detector is sampling. It happens when one sound timestamp record is truly lost: the clock cannot know how
+many samples that record held, does not guess, and reports every later window of that ffmpeg run as
+`unknown`. When a run goes blind the warning line above says so and why (`a record failed to parse`,
+`n jumped A -> B` or `the first record was n=N`), once when the run goes blind (and at most once per camera
+per 15-minute period): it is not repeated in later periods of the same run, so for a run that has been blind
+for hours look for it in the container log (`docker logs`), not only in the app's recent-lines view.
+**What to do:** nothing. The measurement comes back by itself at the next ffmpeg restart (a reconnect, or a
+camera's daily reboot); nothing is restarted for it, because that would cost seconds of real detection to
+repair a measurement no decision reads yet. Include the warning line when reporting a sound problem. The
+one exception: if EVERY sound run reports `side=unavailable` from its first period, together with the
+one-off `side-channel unavailable (no tap records)` line, the timestamp lines have stopped parsing (for
+example after an ffmpeg upgrade). That is worth reporting, with those lines.
+*History, stated plainly:* before issue #573 the usual cause was a torn record. ffmpeg prints one timestamp
+record in several pieces, and another message (the muxer's `Application provided invalid, non monotonically
+increasing dts`) can land between them, which the parser then counted as a lost record. On a two-camera
+staging install that happened about once per camera per day, and it was also seen on a production install,
+for hours at a time. No stored number was affected: nothing reads the sound side of `[obs]` yet, so it
+only changed this display. Since #573 a torn record whose first half is intact is recovered (the
+message is still logged exactly as before), and the warning is how a genuine loss is told apart from a
+dead sampler.
 
 **Differs from the detectors' other log lines:** the `[sound]` level line and the `[oob]`/`[intobed]` lines
 describe decisions; `[obs]` describes the input those decisions were made from. The two can disagree —
@@ -273,6 +302,15 @@ observed it.
   G711 audio), a fake camera and four measurement runs. A camera or network that jitters more will show
   more `delayed`, `unknown` and `gaps`; AAC audio was only tested with synthetic files. A lost stretch of
   sound shorter than 0.5 s is absorbed rather than reported.
+- **Only a torn *sound* timestamp line is recovered (issue #573).** A torn *motion* timestamp line is still
+  treated as lost, as before: the motion clock handles that locally (a few samples `unknown`, 174 of 6.17
+  million on the two staging cameras measured) and recovering it would change which frames the clone filter
+  labels, which is a separate change. The sound recovery relies on ffmpeg printing a record's timestamp
+  fields in one piece: that is read from ffmpeg 8.1.2's source and matches all 18 torn records found in the
+  saved staging and production logs, but it has not been tested against a real ffmpeg run. A different
+  ffmpeg that splits them differently would show as the one-off `side-channel unavailable (no tap records)`
+  line (if no record ever parses) or as the warning above (if a later record opens a hole), not as a wrong
+  timestamp.
 - **A long camera stall keeps its evidence.** ffmpeg writes each picture only once the next one exists,
   so the picture before a stall reaches the detector a whole stall later. Its timestamp line is kept
   until then, however long the stall, and dropped 30 s after the next line has arrived.
@@ -304,7 +342,9 @@ observed it.
   `[obs] N ffmpeg stderr line(s) not shown (rate limit); last: …`.
 
 **What to do:** nothing — it is diagnostic. If a camera's line shows a steady non-zero `unknown`, `clamps`
-or `warn`, or `side=unavailable`, include the line when reporting a detection problem.
+or `warn`, or `side=unavailable`, include the line when reporting a detection problem. For a sound line
+reading `side=unavailable`, also include the `timestamp sequence broke` warning, and see the paragraph above
+before concluding the microphone stopped.
 
 ## A stalled camera's repeated pictures are left out of the per-minute motion count
 

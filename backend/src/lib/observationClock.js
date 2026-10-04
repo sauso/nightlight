@@ -130,6 +130,11 @@ const SIDE_CHECK_SAMPLES = 10;
 // Bounds on per-period bookkeeping, so a period cannot grow memory without bound.
 const AGE_SAMPLES_MAX = 20_000;
 const WALL_STEP_LOG_MAX = 10;
+// #573: how many "the sound timestamp sequence broke" warnings one camera may log per [obs] period. One is
+// enough to tell a blind measurement from a dead sampler, and a flapping camera opens a NEW generation (so a
+// new hole) every ~5 s, which would print one warning per reconnect. The suppressed ones are still visible
+// on the [obs] line as `unknown`. No new [obs] field: that line's format is pinned by tests and documented.
+const HOLE_WARN_MAX = 1;
 // Sound positions are sums of nb_samples/rate in floating point; two positions this close are the same.
 const POS_EPS = 1e-9;
 
@@ -341,7 +346,7 @@ function newPeriod() {
     samples: 0, real: 0, fpsClone: 0, cfrDup: 0, cfrDrop: 0, runsCapped: 0, unknown: 0, ambiguous: 0, reordered: 0,
     observed: 0, silent: 0, gaps: 0, gapMs: 0, delayed: 0, restarts: 0, restartMs: 0,
     compressed: 0, clamps: 0, uncertain: 0, wallSteps: 0, warn: 0, late: 0, ages: [],
-    wallStepLogs: 0, active: false,
+    wallStepLogs: 0, holeWarns: 0, active: false,
   };
 }
 
@@ -506,13 +511,17 @@ export function openObservation(cameraId, leg, { label, path, fps, windowSeconds
 
 // --- the per-camera, per-leg clock --------------------------------------------------------------------------
 export class ObservationClock {
-  constructor(cameraId, leg, { clocks = {}, label, log, onObservation, tombstone } = {}) {
+  constructor(cameraId, leg, { clocks = {}, label, log, warn, onObservation, tombstone } = {}) {
     this.cameraId = cameraId;
     this.leg = leg;
     this.label = label || String(cameraId);
     this.monoNow = clocks.monoNow || (() => performance.now());
     this.wallNow = clocks.wallNow || (() => Date.now());
     this.log = log || ((line) => logger.info(line));
+    // #573: the channel for a line that is a WARNING (the sound hole notice). Not named `warn` on the clock:
+    // the [obs] line already has a `warn=` field that counts caught exceptions. Production (no `log`, no
+    // `warn`) uses logger.warn; a test that injects `log` sees the warning there too, in order with the rest.
+    this.logWarn = warn || (log ? log : (line) => logger.warn(line));
     // The clock's OWN listener: the one its creator passed, refreshed by getObservationClock on reconnect.
     this.onObservation = onObservation || null;
     // #493: further, independent listeners (addObservationListener). Needed because the #373 golden test
@@ -773,6 +782,8 @@ export class ObservationClock {
   // record — every later window is UNKNOWN by design (R1-F11), while records keep arriving and parsing
   // (samples=100 unknown=100 side=ok). And live, 2026-09-27: a camera's sound leg read cover=0.0% with
   // every sample unknown for over 18 hours, and printed side=ok on every one of those lines.
+  // (#573: the usual cause of such a run was a TORN ashowinfo record, which ffmpegSideChannel.js now
+  // delivers as a record instead of reporting it lost; only a genuinely lost record does this today.)
   // Outcome, not input: "records arrived" is exactly the test that was fooled — the n-hole's records are
   // perfectly good records — so this counts what the evidence actually PLACED, whatever the cause. That
   // also flags a frozen picture (every sample `ambiguous`): the lines arrive, but they cannot place
@@ -1844,8 +1855,18 @@ class SoundGeneration extends Generation {
       // ★ An ashowinfo n-hole makes the cumulative sample index unknowable (the lost record's sample count
       // is gone; AAC frames are 1,024 samples), so EVERY later window in this generation is UNKNOWN. No
       // resync heuristic (R1-F11). Measured hole rate with -nostats: 0 in 250k+ records.
+      //
+      // #573: R1-F11 is UNCHANGED. What changed is what reaches it: a TORN record (foreign text glued after
+      // the intact first half of the line) is now delivered as a record by ffmpegSideChannel.js, so it no
+      // longer opens a hole. A record whose first half is truly lost still does, and it blinds the rest of
+      // this ffmpeg run, which is why the hole now logs ONE warning (warnHole, below): without it a blind
+      // measurement reads exactly like a dead sampler. The reason is captured here, beside the state change.
+      let holeWhy = null;
       if (this.holeAt === null && ((prev === null && rec.n > 0) || (prev !== null && rec.n !== prev.n + 1) || this.taint)) {
         this.holeAt = this.cum;
+        if (this.taint) holeWhy = 'a record failed to parse';
+        else if (prev === null) holeWhy = `the first record was n=${rec.n}`;
+        else holeWhy = `n jumped ${prev.n} -> ${rec.n}`;
       }
       this.taint = false;
       // Media position from INTEGER sample counts, not a running sum of nb/rate: adding 0.04 s five hundred
@@ -1872,7 +1893,30 @@ class SoundGeneration extends Generation {
       this.process(rx);
       this.trimRecords();
       this.foldDisc();
+      // After every state update, so a throwing log can never leave a half-opened hole behind.
+      if (holeWhy !== null) this.warnHole(holeWhy);
     });
+  }
+
+  // #573: say ONCE when a run goes blind. Once per generation falls out of `holeAt` being set once; at most
+  // HOLE_WARN_MAX per [obs] period per camera on top (a flapping camera opens a generation every ~5 s).
+  // Wording: "broke", not "lost" (a filter-graph re-init on a rate/format/layout change restarts `n` at 0:
+  // a hole with nothing lost), and it says what it measures and where the sampler's own health is told,
+  // because a blind timestamp measurement does not mean a stalled sampler (the sound detector's samples
+  // come from stdout; this module only reads stderr). No restart here, deliberately: it would cost 5-50 s
+  // of real detection (RESTART_DELAY plus up to PATH_GRACE) to repair a measurement that no decision reads
+  // today. Its own try/catch: a throwing log must not undo the hole state or count as a `warn`.
+  warnHole(why) {
+    const p = this.clock.period;
+    if (p.holeWarns >= HOLE_WARN_MAX) return;
+    p.holeWarns += 1;
+    try {
+      this.clock.logWarn(
+        `[obs] "${this.clock.label}" sound gen=${this.id} timestamp sequence broke (${why}): the rest of this ffmpeg run's windows are reported UNKNOWN. This is the timestamp measurement only; whether the sampler is alive is told by the [sound] ambient= lines and the stored sound_windows per minute`
+      );
+    } catch {
+      /* a throwing log must never undo the hole state or count as `warn` */
+    }
   }
 
   sizes() {

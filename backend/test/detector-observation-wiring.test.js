@@ -100,7 +100,7 @@ const { default: db } = await import('../src/db.js');
 const { logger } = await import('../src/lib/logger.js');
 const { flushActivity, _resetActivityTrackerForTests } = await import('../src/lib/activityTracker.js');
 const { startMotionDetector, stopMotionDetector, _resetMotionAlertsForTests } = await import('../src/lib/motionDetector.js');
-const { startSoundDetector, stopSoundDetector } = await import('../src/lib/soundDetector.js');
+const { startSoundDetector, stopSoundDetector, getSoundDetectorHealth } = await import('../src/lib/soundDetector.js');
 const {
   getObservationClock, sweepIdleClocks, _setObservationClockFactoryForTests, _resetObservationClocksForTests,
 } = await import('../src/lib/observationClock.js');
@@ -1425,5 +1425,139 @@ describe('#447: activity is filed under the receipt minute of the stdout event t
     flushActivity(NOW + 3 * 60_000);
     assert.deepEqual(rowsFor('activity_samples', cam.id).map((r) => [r.bucket_start, r.sound_windows]),
       [['2026-09-25 11:59:00', 5]]);
+  });
+});
+
+// --- #573: a TORN ashowinfo record, through the real sound detector -----------------------------------------
+// ffmpeg prints one ashowinfo record in several av_log calls and another thread's text (the muxer's dts
+// warning) can land between two of them. The first call, which holds everything the observation clock reads, is
+// intact in every tear seen (18 of 18 in the saved staging and prod logs), so the record is now delivered to the
+// clock instead of being reported lost, and the log still gets the foreign line exactly as before.
+// What must hold end to end, with the golden's own PCM and helpers (nothing above is touched or re-recorded):
+//   - activity_samples, detection_events and the decision log are IDENTICAL with and without the tears (no
+//     stored number moves: nothing reads the sound side of the clock today, C11 pins that);
+//   - the only log difference is the forwarded torn lines themselves, each carrying a planted marker, and never
+//     a tail line;
+//   - the clock places all 600 windows in BOTH runs (before the fix, the first tear blinded every window after it).
+describe('#573 a torn ashowinfo record, through the real sound detector', { concurrency: false }, () => {
+  const MARKER = 'MARKER573';
+  const FOREIGN = `Application provided invalid, non monotonically increasing dts to muxer in stream 0: 1000 >= 1000 ${MARKER}`;
+  const TORN_WINDOWS = [100, 300];
+  // The real tear shape ("after the first call"), built from the generated record by index arithmetic: the first
+  // line is the record up to and including `checksum:HEX ` plus the foreign text; the rest of the record follows
+  // under a fresh prefix. The tail line is CONSTRUCTED (no tail line is in any saved log).
+  function tornSoundRecords(w) {
+    const [line] = soundRecords(w);
+    const cut = line.indexOf('plane_checksums:');
+    return [`${line.slice(0, cut)}${FOREIGN}`, `${line.slice(0, line.indexOf('n:'))}${line.slice(cut)}`];
+  }
+  const recordsWithTears = (w) => (TORN_WINDOWS.includes(w) ? tornSoundRecords(w) : soundRecords(w));
+
+  function soundCam(tag) {
+    return { ...soundCamera, id: `cam-573-${tag}`, name: `Cam573${tag}`, mediamtx_path: `path_573_${tag}` };
+  }
+
+  // The golden's sound scenario (without its mjpeg stderr capture), on its own camera.
+  async function runSound(t, cam, recordsFor) {
+    t.mock.timers.setTime(T0);
+    logger.clear();
+    resetCamera(cam.id);
+    _resetActivityTrackerForTests();
+    _resetObservationClocksForTests();
+    const observations = [];
+    _setObservationClockFactoryForTests(CLOCK_VARIANTS.working(observations));
+    makeCamera(db, { id: cam.id, name: cam.name, path: cam.mediamtx_path });
+    const before = detectorProcs.length;
+    await startSoundDetector(cam);
+    await waitFor(() => detectorProcs.length === before + 1, `${cam.id} spawn`);
+    const proc = detectorProcs[before];
+    const WIN_BYTES = WIN_SAMPLES * 2;
+    const st = { bytes: 0, emitted: 0 };
+    deliverObserved(t, proc, single(SOUND_MIN1.slice(0, 100), T0), WIN_BYTES, recordsFor, st);
+    deliverObserved(t, proc, split(SOUND_MIN1.slice(100, 200), T0 + 100 * STEP_MS, 5_000), WIN_BYTES, recordsFor, st);
+    deliverObserved(t, proc, burst(SOUND_MIN1.slice(200), T0 + 200 * STEP_MS, 4), WIN_BYTES, recordsFor, st);
+    t.mock.timers.setTime(T0 + 60_000);
+    flushActivity(T0 + 60_000 + PAST_GRACE_MS);
+    deliverObserved(t, proc, single(SOUND_MIN2, T0 + 60_000), WIN_BYTES, recordsFor, st);
+    t.mock.timers.setTime(T0 + 120_000);
+    flushActivity(T0 + 120_000 + PAST_GRACE_MS);
+    const summary = getObservationClock(cam.id, 'sound').summary();
+    await stopSoundDetector(cam.id);
+    await settle();
+    const strip = (rows) => rows.map(({ camera_id, camera_name, ...rest }) => rest); // eslint-disable-line no-unused-vars
+    return {
+      observations,
+      summary,
+      activity: strip(rowsFor('activity_samples', cam.id)),
+      events: strip(rowsFor('detection_events', cam.id)),
+      // Names and paths differ between the two cameras; nothing else may.
+      log: logFor(cam.name, cam.mediamtx_path).map((l) => l.replaceAll(cam.name, '<cam>').replaceAll(cam.mediamtx_path, '<path>')),
+    };
+  }
+
+  test('#573 C10: with two torn records, the stored rows, events and decision log are identical to the intact run; all 600 windows observed', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: T0 });
+    t.after(() => _setObservationClockFactoryForTests(null));
+    const intact = await runSound(t, soundCam('intact'), soundRecords);
+    const torn = await runSound(t, soundCam('torn'), recordsWithTears);
+
+    // Not vacuous: the run stored its two minutes and alerted once, as the golden does.
+    assert.equal(intact.activity.length, 2);
+    assert.equal(intact.events.length, 1);
+    assert.deepEqual(torn.activity, intact.activity, 'activity_samples');
+    assert.deepEqual(torn.events, intact.events, 'detection_events');
+
+    // The log differs only by the two forwarded torn lines (byte for byte what the old classifier forwarded:
+    // the whole original line), and never carries a tail.
+    const expected = TORN_WINDOWS.map((w) => `[sound:<path>] ${tornSoundRecords(w)[0]}`);
+    assert.deepEqual(torn.log.filter((l) => l.includes(MARKER)), expected);
+    assert.deepEqual(torn.log.filter((l) => !l.includes(MARKER)), intact.log);
+    assert.equal(torn.log.filter((l) => l.includes('plane_checksums')).length, 0, 'no tail line reached the log');
+    assert.equal(intact.log.filter((l) => l.includes(MARKER)).length, 0);
+
+    for (const [name, run] of [['intact', intact], ['torn', torn]]) {
+      assert.equal(run.observations.length, 600, name);
+      assert.equal(run.observations.filter((o) => o.cls === 'observed').length, 600, `${name}: every window observed`);
+      assert.equal(run.summary.unknown, 0, name);
+      assert.equal(run.summary.side, 'ok', name);
+      assert.equal(run.summary.warn, 0, name);
+    }
+  });
+
+  test('#573 C11: nothing reads sound observations today: with the default factory the sound clock has no listener', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: T0 });
+    logger.clear();
+    _resetObservationClocksForTests();
+    _setObservationClockFactoryForTests(null);
+    const cam = soundCam('default');
+    makeCamera(db, { id: cam.id, name: cam.name, path: cam.mediamtx_path });
+    const before = detectorProcs.length;
+    await startSoundDetector(cam);
+    await waitFor(() => detectorProcs.length === before + 1, 'spawn');
+    deliverObserved(t, detectorProcs[before], single(SOUND_MIN1.slice(0, 20), T0), WIN_SAMPLES * 2, soundRecords, { bytes: 0, emitted: 0 });
+    const clock = getObservationClock(cam.id, 'sound');
+    assert.ok(clock.gens.some((g) => g.recordsSeen > 0), 'not vacuous: this clock is the one the detector fed');
+    assert.equal(clock.onObservation, null, 'a sound consumer must bring its own old-vs-new A/B (see #573)');
+    assert.equal(clock.observationListeners.size, 0);
+    await stopSoundDetector(cam.id);
+    await settle();
+  });
+
+  test('#573 C13: a stream whose FIRST and only record is torn still refreshes the detector\'s input-record age (diagnosis only)', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: T0 });
+    logger.clear();
+    _resetObservationClocksForTests();
+    _setObservationClockFactoryForTests(CLOCK_VARIANTS.working([]));
+    t.after(() => _setObservationClockFactoryForTests(null));
+    const cam = soundCam('age');
+    makeCamera(db, { id: cam.id, name: cam.name, path: cam.mediamtx_path });
+    const before = detectorProcs.length;
+    await startSoundDetector(cam);
+    await waitFor(() => detectorProcs.length === before + 1, 'spawn');
+    assert.equal(getSoundDetectorHealth(cam.id).inputRecordAgeMs, null, 'nothing has arrived yet');
+    detectorProcs[before].stderr.emit('data', Buffer.from(`${tornSoundRecords(0).join('\n')}\n`));
+    assert.equal(typeof getSoundDetectorHealth(cam.id).inputRecordAgeMs, 'number');
+    await stopSoundDetector(cam.id);
+    await settle();
   });
 });

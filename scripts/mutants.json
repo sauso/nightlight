@@ -10671,5 +10671,206 @@
     "expect": "killed",
     "tests": ["motion-transition-threshold.test.js"],
     "namePattern": "^#368 C3: an activity-only leg \\(.*\\) never alerts on a SUSTAINED burst"
+  },
+  {
+    "label": "#573 M-573-01: salvage never recovers a record (the strict grammar's loss is back)",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "const r = ASHOWINFO_CORE.exec(message);",
+    "replace": "const r = null;",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C1:"
+  },
+  {
+    "label": "#573 M-573-02: the core drops its 8-hex-digit requirement",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "checksum:([0-9A-F]{8})(?= )",
+    "replace": "checksum:([0-9A-F]*)(?= )",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C4: a cut before the checksum"
+  },
+  {
+    "label": "#573 M-573-03: the core's lookahead after the digits accepts any whitespace, not just the first call's own space",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "checksum:([0-9A-F]{8})(?= )",
+    "replace": "checksum:([0-9A-F]{8})(?=\\s)",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C4: a cut before the checksum",
+    "note": "Only a foreign text that BEGINS with a tab (or another non-space whitespace) tells the two apart: C4 plants one. Real foreign text has never been seen to; this pins the choice, it does not claim a real case."
+  },
+  {
+    "label": "#573 M-573-04: a NOPTS pts is accepted by the salvage",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "const r = ASHOWINFO_CORE.exec(message);",
+    "replace": "const r = ASHOWINFO_CORE.exec(message); if (r) r[2] = '0';",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C4: NOPTS torn after the core"
+  },
+  {
+    "label": "#573 M-573-05: the foreign text of a salvaged line is no longer forwarded to the log",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "emit(d.forwardText, 'small');",
+    "replace": "void d.forwardText;",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C2:"
+  },
+  {
+    "label": "#573 M-573-06: a salvaged record is also reported lost (the hole opens again)",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "if (d.salvaged) stats.salvaged += 1;",
+    "replace": "if (d.salvaged) { stats.salvaged += 1; stats.lostRecords += 1; callback(onParseError, d.tap); }",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C1:"
+  },
+  {
+    "label": "#573 M-573-07: the salvage is applied to the motion taps too",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "if (tap === 'audio') {",
+    "replace": "if (tap === 'audio' || tap === 'in' || tap === 'out') {",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C4: the same torn text on a MOTION tap",
+    "note": "The motion lines in that test carry ashowinfo-shaped text on purpose: a real showinfo line never matches the audio core, so without it this mutant would be equivalent."
+  },
+  {
+    "label": "#573 M-573-08: a healthy line takes the salvage path (gains the `salvaged` key)",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "if (rec && (tap !== 'out' || rec.checksum !== null)) return { kind: 'record', tap, rec };",
+    "replace": "if (rec && (tap !== 'out' || rec.checksum !== null)) return { kind: 'record', tap, rec, salvaged: true };",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C3:"
+  },
+  {
+    "label": "#573 M-573-09: the hole warning is never logged",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "if (holeWhy !== null) this.warnHole(holeWhy);",
+    "replace": "void holeWhy;",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C8:"
+  },
+  {
+    "label": "#573 M-573-10: two hole warnings are allowed per [obs] period",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "const HOLE_WARN_MAX = 1;",
+    "replace": "const HOLE_WARN_MAX = 2;",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C8: a flapping camera"
+  },
+  {
+    "label": "#573 M-573-11: no per-period cap on the hole warning",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "if (p.holeWarns >= HOLE_WARN_MAX) return;",
+    "replace": "if (p.holeWarns < 0) return;",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C8: a flapping camera"
+  },
+  {
+    "label": "#573 M-573-12: the warning ignores the injected log (it always goes to logger.warn)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "this.logWarn = warn || (log ? log : (line) => logger.warn(line));",
+    "replace": "this.logWarn = warn || ((line) => logger.warn(line));",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C12: logWarn falls back"
+  },
+  {
+    "label": "#573 M-573-13: the log decision of a salvaged line is taken on the remainder after the core, not on the whole message",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "return isFragment(message)\r\n            ? { kind: 'record', tap, rec: salvaged, salvaged: true }",
+    "replace": "return isFragment(message.replace(/^.*?checksum:[0-9A-F]{8}/, ''))\r\n            ? { kind: 'record', tap, rec: salvaged, salvaged: true }",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C2: a valid multi-word chlayout"
+  },
+  {
+    "label": "#573 M-573-14: a salvaged-and-forwarded record is not handed to the clock/detector (onRecord skipped)",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "callback(onRecord, { tap: d.tap, ...d.rec });\r\n            emit(d.forwardText, 'small');",
+    "replace": "emit(d.forwardText, 'small');",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js", "detector-observation-wiring.test.js"],
+    "namePattern": "^#573 C(1|13):"
+  },
+  {
+    "label": "#573 M-573-15: a forwarded salvaged line leaves Rule B at `false` (the next untagged line is dropped)",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "stats.unparseable += 1;\r\n            prevForwarded = true;",
+    "replace": "stats.unparseable += 1;\r\n            prevForwarded = false;",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C2: the untagged line after a FORWARDED"
+  },
+  {
+    "label": "#573 M-573-16: the core is tried before the strict grammar (the foreign text of a torn line is no longer forwarded)",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "const rec = tap === 'audio' ? parseAudioRecord(message) : parseVideoRecord(message);",
+    "replace": "const rec = tap === 'audio' ? (salvageAudioRecord(message) ?? parseAudioRecord(message)) : parseVideoRecord(message);",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C(2|3):",
+    "note": "A healthy line comes out identical either way (the core is a prefix of the strict grammar), so the observable damage is the torn line: it becomes a plain record and its foreign text is never forwarded."
+  },
+  {
+    "label": "#573 M-573-17: the core drops its lookahead after the checksum digits",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "checksum:([0-9A-F]{8})(?= )",
+    "replace": "checksum:([0-9A-F]{8})",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C4: a cut before the checksum"
+  },
+  {
+    "label": "#573 M-573-18: a throwing log escapes the warning and is counted as a clock `warn`",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "/* a throwing log must never undo the hole state or count as `warn` */",
+    "replace": "throw new Error('mutant: a throwing log escapes the warning');",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C8: a throwing log"
+  },
+  {
+    "label": "#573 M-573-19: the hole reason prefers the wrong branch (a parse failure is worded as an n jump)",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "if (this.taint) holeWhy = 'a record failed to parse';",
+    "replace": "if (!this.taint) holeWhy = 'a record failed to parse';",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C8: (a glue inside|the other ways)"
+  },
+  {
+    "label": "#573 M-573-20: the core accepts the end of the line right after the checksum digits again",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "checksum:([0-9A-F]{8})(?= )",
+    "replace": "checksum:([0-9A-F]{8})(?= |$)",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C4: a line that ends EXACTLY"
+  },
+  {
+    "label": "#573 M-573-21: the hole reason checks `the first record was n=N` before a parse failure",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "if (this.taint) holeWhy = 'a record failed to parse';",
+    "replace": "if (prev === null) holeWhy = `the first record was n=${rec.n}`; else if (this.taint) holeWhy = 'a record failed to parse';",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C8: the FIRST record"
+  },
+  {
+    "label": "#573 M-573-22: a salvaged record is not counted in the router's `records`",
+    "file": "backend/src/lib/ffmpegSideChannel.js",
+    "find": "stats.records += 1;",
+    "replace": "if (!d.salvaged) stats.records += 1;",
+    "expect": "killed",
+    "tests": ["ashowinfo-torn-record.test.js"],
+    "namePattern": "^#573 C1: each real tear"
   }
 ]
