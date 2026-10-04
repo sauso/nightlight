@@ -10872,5 +10872,171 @@
     "expect": "killed",
     "tests": ["ashowinfo-torn-record.test.js"],
     "namePattern": "^#573 C1: each real tear"
+  },
+  {
+    "label": "#353 M-353-01: the sampling tail drops WAKE_LOOKAHEAD_MS (back to a 5-minute tail: the morning departure is unobserved)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "return windowOpenNow(childId, ONSET_LOOKBEHIND_MS, WAKE_LOOKAHEAD_MS + WINDOW_MARGIN_MS, true);",
+    "replace": "return windowOpenNow(childId, ONSET_LOOKBEHIND_MS, WINDOW_MARGIN_MS, true);",
+    "expect": "killed",
+    "tests": ["sleep-sampling-horizon.test.js", "motion-leg-reconcile.test.js"],
+    "namePattern": "^#353 (a 19:00-07:00 child is still sampled|the sampling horizon is the inference's own|MQTT source|ONVIF source|frame-diff source)"
+  },
+  {
+    "label": "#353 M-353-02: the sampling tail drops WINDOW_MARGIN_MS (the final minute before the horizon is not flushed)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "return windowOpenNow(childId, ONSET_LOOKBEHIND_MS, WAKE_LOOKAHEAD_MS + WINDOW_MARGIN_MS, true);",
+    "replace": "return windowOpenNow(childId, ONSET_LOOKBEHIND_MS, WAKE_LOOKAHEAD_MS, true);",
+    "expect": "killed",
+    "tests": ["sleep-sampling-horizon.test.js"],
+    "namePattern": "^#353 (the sampling tail ends one reconcile margin|the sampling horizon is the inference's own)"
+  },
+  {
+    "label": "#353 M-353-03: the sampling tail is doubled (the leg runs 3 h longer than the inference reads)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "return windowOpenNow(childId, ONSET_LOOKBEHIND_MS, WAKE_LOOKAHEAD_MS + WINDOW_MARGIN_MS, true);",
+    "replace": "return windowOpenNow(childId, ONSET_LOOKBEHIND_MS, WAKE_LOOKAHEAD_MS * 2 + WINDOW_MARGIN_MS, true);",
+    "expect": "killed",
+    "tests": ["sleep-sampling-horizon.test.js", "motion-leg-reconcile.test.js"],
+    "namePattern": "^#353 (the sampling tail ends one reconcile margin|the afternoon gap|MQTT source|ONVIF source|frame-diff source)"
+  },
+  {
+    "label": "#353 M-353-04: the +1 (next) night is never tried for the sampling gate (a bedtime after midnight has no lookbehind on the previous evening)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "for (let delta = nextNight ? 1 : 0; delta >= -1; delta--) {",
+    "replace": "for (let delta = 0; delta >= -1; delta--) {",
+    "expect": "killed",
+    "tests": ["sleep-sampling-horizon.test.js"],
+    "namePattern": "^#353 (a 01:00 bedtime|the \\+1 night|a 00:02 start|childWindowActiveNow does not try)"
+  },
+  {
+    "label": "#353 M-353-05: childWindowActiveNow also tries the next night (the wake watcher's input moves)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS);",
+    "replace": "return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS, true);",
+    "expect": "killed",
+    "tests": ["sleep-sampling-horizon.test.js"],
+    "namePattern": "^#353 childWindowActiveNow does not try the next night"
+  },
+  {
+    "label": "#353 M-353-06: yesterday's night is never tried (the morning after a window is not sampled)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "for (let delta = nextNight ? 1 : 0; delta >= -1; delta--) {",
+    "replace": "for (let delta = nextNight ? 1 : 0; delta >= 0; delta--) {",
+    "expect": "killed",
+    "tests": ["sleep-sampling-horizon.test.js", "motion-leg-reconcile.test.js"],
+    "namePattern": "^#353 (a 19:00-07:00 child is still sampled|MQTT source|ONVIF source|frame-diff source)"
+  },
+  {
+    "label": "#353 M-353-07: the sampling lead is only WINDOW_MARGIN_MS (an early bedtime has no lookbehind again)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "return windowOpenNow(childId, ONSET_LOOKBEHIND_MS, WAKE_LOOKAHEAD_MS + WINDOW_MARGIN_MS, true);",
+    "replace": "return windowOpenNow(childId, WINDOW_MARGIN_MS, WAKE_LOOKAHEAD_MS + WINDOW_MARGIN_MS, true);",
+    "expect": "killed",
+    "tests": ["sleep-sampling-horizon.test.js", "motion-leg-reconcile.test.js"],
+    "namePattern": "^#353 (the afternoon gap|a 01:00 bedtime|a 00:02 start|MQTT source|ONVIF source|frame-diff source)"
+  },
+  {
+    "label": "#353 M-353-08: the start edge is exclusive (>= becomes >)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return true;",
+    "replace": "if (now > startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return true;",
+    "expect": "killed",
+    "tests": ["sleep-sampling-horizon.test.js", "motion-leg-reconcile.test.js"],
+    "namePattern": "^#353 (the afternoon gap|a 01:00 bedtime|childWindowActiveNow keeps|MQTT source|ONVIF source|frame-diff source)"
+  },
+  {
+    "label": "#353 M-353-09: the end edge is inclusive (< becomes <=)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return true;",
+    "replace": "if (now >= startUtc.getTime() - leadMs && now <= endUtc.getTime() + trailMs) return true;",
+    "expect": "killed",
+    "tests": ["sleep-sampling-horizon.test.js", "motion-leg-reconcile.test.js"],
+    "namePattern": "^#353 (the sampling tail ends one reconcile margin|childWindowActiveNow keeps|MQTT source|ONVIF source|frame-diff source)"
+  },
+  {
+    "label": "#353 M-353-10: childWindowActiveNow's tail is the sampling tail (the wake watcher and the timelapse are widened to the horizon)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS);",
+    "replace": "return windowOpenNow(childId, WINDOW_MARGIN_MS, WAKE_LOOKAHEAD_MS + WINDOW_MARGIN_MS);",
+    "expect": "killed",
+    "tests": ["sleep-sampling-horizon.test.js"],
+    "namePattern": "^#353 childWindowActiveNow keeps"
+  },
+  {
+    "label": "#353 M-353-11a: the tail is computed in WALL-CLOCK terms (local end + trail as a local time), not as absolute ms: wrong by an hour across a DST change in either direction",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return true;",
+    "replace": "if (now >= startUtc.getTime() - leadMs && now < (() => { const w = new Date(endUtc.getTime() + tzOffsetMs(endUtc, tz) + trailMs); return zonedToUtc(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate(), w.getUTCHours(), w.getUTCMinutes(), tz).getTime(); })()) return true;",
+    "expect": "killed",
+    "tests": ["sleep-sampling-horizon.test.js"],
+    "namePattern": "^#353 DST (spring-forward|fall-back): the horizon is 3 REAL hours",
+    "note": "Spring-forward: a wall-clock horizon closes an hour EARLY (17:00Z, not 18:00Z). Fall-back: an hour LATE. Each direction is its own test, so a one-directional fix of the mutant still dies in the other."
+  },
+  {
+    "label": "#353 M-353-11b: the lead is computed in WALL-CLOCK terms (local start - lead as a local time), not as absolute ms",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return true;",
+    "replace": "if (now >= (() => { const w = new Date(startUtc.getTime() + tzOffsetMs(startUtc, tz) - leadMs); return zonedToUtc(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate(), w.getUTCHours(), w.getUTCMinutes(), tz).getTime(); })() && now < endUtc.getTime() + trailMs) return true;",
+    "expect": "killed",
+    "tests": ["sleep-sampling-horizon.test.js"],
+    "namePattern": "^#353 DST (spring-forward|fall-back): a lookbehind that really crosses the change",
+    "note": "The lookbehind crosses the change in each direction (03:30 start on the spring-forward day, 04:00 start on the fall-back day), so the wall-clock lead is an hour off either way."
+  },
+  {
+    "label": "#353 M-353-12: reconcileMotionLeg never stops a leg that is no longer wanted (the leg runs all day once started)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "await stopMotionDetector(cam.id).catch(() => {});",
+    "replace": "/* mutant: stop branch removed */",
+    "expect": "killed",
+    "tests": ["motion-leg-reconcile.test.js"],
+    "namePattern": "^#353 (MQTT source|ONVIF source|frame-diff source|an unassigned)"
+  },
+  {
+    "label": "#353 M-353-13: reconcileMotionLeg never starts a wanted leg (an activity-only camera is never sampled)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "await startMotionDetector(cam).catch((e) => logger.error(`[detect] start failed: ${e.message}`));",
+    "replace": "/* mutant: start branch removed */",
+    "expect": "killed",
+    "tests": ["motion-leg-reconcile.test.js"],
+    "namePattern": "^#353 (MQTT source|ONVIF source|frame-diff source|an unassigned|an ALERTING)"
+  },
+  {
+    "label": "#353 M-353-14: the start condition drops !isDetecting (every reconcile restarts the leg and resets the bed-transition tracker)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "if (wanted && !isDetecting(cam.id)) {",
+    "replace": "if (wanted) {",
+    "expect": "killed",
+    "tests": ["motion-leg-reconcile.test.js"],
+    "namePattern": "^#353 (MQTT source|ONVIF source|frame-diff source)",
+    "note": "isDetecting stays true across a restart, so only the count of start log lines tells kept from restarted."
+  },
+  {
+    "label": "#353 M-353-15: the start and stop conditions are swapped (a wanted leg is stopped, an unwanted one is started)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "if (wanted && !isDetecting(cam.id)) {",
+    "replace": "if (!wanted && !isDetecting(cam.id)) {",
+    "expect": "killed",
+    "tests": ["motion-leg-reconcile.test.js"],
+    "namePattern": "^#353 (MQTT source|ONVIF source|frame-diff source|an ALERTING)"
+  },
+  {
+    "label": "#353 M-353-16: motionLegWanted consults the sleep gate before motionAlerting (an alerting camera of a tracking-off child is stopped)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "if (motionAlerting(camera)) return true;",
+    "replace": "if (camera.child_id && !childSamplingActiveNow(camera.child_id)) return false;\r\n  if (motionAlerting(camera)) return true;",
+    "expect": "killed",
+    "tests": ["motion-leg-reconcile.test.js"],
+    "namePattern": "^#353 an ALERTING"
+  },
+  {
+    "label": "#353 M-353-17: the index.js call site is reverted to the inline start/stop pair",
+    "file": "backend/src/index.js",
+    "find": "await reconcileMotionLeg(cam);",
+    "replace": "if (motionLegWanted(cam) && !isDetecting(cam.id)) { await startMotionDetector(cam); }",
+    "expect": "killed",
+    "tests": ["motion-leg-reconcile.test.js"],
+    "namePattern": "^#353 index.js reconcileCameraPaths",
+    "note": "A source-text check only (index.js cannot be imported by a test): it stops the call site being silently reverted, it does not prove the runtime behaviour."
   }
 ]

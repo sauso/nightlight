@@ -32,7 +32,7 @@ import { subConfigured, isSubRunning, startSubStream } from './lib/subStream.js'
 import db from './db.js';
 import { upsertPath, isPathConfiguredCorrectly } from './lib/mediamtx.js';
 import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder.js';
-import { startMotionDetector, stopMotionDetector, isDetecting, stopAllMotionDetectors, motionLegWanted } from './lib/motionDetector.js';
+import { stopAllMotionDetectors, reconcileMotionLeg } from './lib/motionDetector.js';
 import { startOnvifMotion, stopOnvifMotion, isOnvifMotion, onvifMotionWanted, stopAllOnvifMotion } from './lib/onvifMotion.js';
 import { startSoundDetector, isSoundDetecting, stopAllSoundDetectors } from './lib/soundDetector.js';
 import { reconcileClipRing, stopAllClipCapture } from './lib/clipCapture.js';
@@ -466,13 +466,12 @@ async function reconcileCameraPaths(attempt = 1) {
       // Keep the pixel-diff leg alive (reads the stream above). It runs to ALERT for frame-diff
       // cameras, or ACTIVITY-ONLY for child-assigned cameras whose alerts come from MQTT (sleep
       // tracking's motion signal) — motionLegWanted() decides; startMotionDetector picks the mode.
-      // motionLegWanted() also window-gates the activity-only leg, so start it at bedtime and tear it
-      // down after wake (the alert leg is 24/7 and never hits the stop branch).
-      if (motionLegWanted(cam) && !isDetecting(cam.id)) {
-        await startMotionDetector(cam).catch((e) => logger.error(`[detect] start failed: ${e.message}`));
-      } else if (!motionLegWanted(cam) && isDetecting(cam.id)) {
-        await stopMotionDetector(cam.id).catch(() => {});
-      }
+      // motionLegWanted() also gates the activity-only leg on the sleep window: it starts 3 h before
+      // bedtime and is torn down 3 h after wake (the inference's own lookbehind and lookahead, #353).
+      // The alert leg is 24/7 and never hits the stop branch. The start/stop decision lives in
+      // motionDetector.js (reconcileMotionLeg), not here, because this file spawns MediaMTX and the
+      // transcoders at import so no test can import it; a decision in here could not be tested.
+      await reconcileMotionLeg(cam);
       // Keep the ONVIF motion subscription alive for cameras on the 'onvif' source (peer to the
       // pixel-diff leg; the camera reports motion over its Event service). Tear one down if the
       // camera has since switched away from ONVIF.
