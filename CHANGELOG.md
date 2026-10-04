@@ -52,6 +52,20 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
     is skipped — a push already sent cannot be recalled, but no further one goes out for a flagged night.
 
 ### Fixed
+- **A garbled ffmpeg log line no longer leaves the sound `[obs]` measurement blind for hours** (issue #573).
+  The `[obs]` line's sound side could suddenly read `observed=0 unknown=4500 side=unavailable` and stay that
+  way until the camera reconnected or rebooted, while the sound detector itself kept working (`[sound]`
+  level lines printed, alerts fired, stored `sound_windows` stayed at about 300 a minute). The cause was one
+  timestamp line in ffmpeg's output with another message glued onto its end (the muxer's `Application
+  provided invalid, non monotonically increasing dts`): the parser threw the whole line away although the
+  part it needs was intact, and one lost line blinds the rest of that ffmpeg run. It happened about once per
+  camera per day on a two-camera install and was seen on a production install. Such a line is now
+  recovered (sound only), and the glued message is still logged exactly as before. Nothing the detector
+  decides or stores changes: nothing reads the sound side of `[obs]` yet, so this only fixes what the
+  line says. A timestamp line that is truly lost still blinds the rest of its ffmpeg run, as designed, but
+  now logs one warning, at most once per camera per 15 minutes (`[obs] "<camera>" sound gen=N timestamp
+  sequence broke (<why>) …`), so a blind measurement can be told from a dead microphone. Motion timestamp
+  lines are not changed. See KNOWN-ISSUES, "The `[obs]` line".
 - **Motion sensitivity no longer changes which bed exits and entries are recorded** (issue #368). The
   sensitivity slider set one threshold that the motion alert and the out-of-bed / into-bed detection
   both used, so tuning how many notifications you wanted also changed the stored `out_of_bed` and

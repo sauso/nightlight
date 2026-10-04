@@ -12,7 +12,9 @@
 //   - [error]/[fatal]/[panic] -> the log, with the level token stripped so the text is byte-for-byte what
 //     `-loglevel error` printed (fixtures/obs/loglevel-*.err are the same run captured both ways);
 //   - an untagged line (no level token) -> the same fate as the line before it ("Rule B", below);
-//   - a tap-tagged line that looks like a record but fails the WHOLE grammar -> the log (see below).
+//   - a tap-tagged line that looks like a record but fails the WHOLE grammar -> the log (see below). The
+//     one exception is an AUDIO line whose first half (the part the clock reads) is intact: that is
+//     delivered to the clock as a record, and the log still gets what it always got (#573, ASHOWINFO_CORE).
 // It also owns the Adler-32 that aligns stdout samples with `out` records, and the tap/argument builders,
 // so the detectors and this parser can never disagree about which tag is which tap.
 //
@@ -135,6 +137,36 @@ const ASHOWINFO_RECORD = new RegExp(
   String.raw`^n:(\d+) pts:(-?\d+|NOPTS) pts_time:(${TS}) fmt:\S+ channels:\d+ chlayout:${CHLAYOUT} rate:(\d+) ` +
     String.raw`nb_samples:(\d+) checksum:([0-9A-F]{8}) plane_checksums: \[ (?:[0-9A-F]{8} )+\]\s*$`
 );
+// ★ THE CORE GRAMMAR (#573): the first half of an `ashowinfo` record, which is the half the clock reads.
+// ffmpeg's ashowinfo prints one record in several av_log calls. The FIRST call carries every field
+// observationClock.js uses (n, pts, pts_time, rate, nb_samples) and ends `checksum:%08X ` (with a trailing
+// space); then come `plane_checksums: [ `, one `%08X ` per plane and `]\n`. A call is written under log.c's
+// mutex, so another thread's text (the muxer's `Application provided invalid, non monotonically increasing
+// dts`) can land only AFTER the first call, never inside it. That is why the strict grammar above threw
+// away a COMPLETE record: its unused tail was glued to foreign text, the line failed the whole-line match,
+// the clock was told a record was lost, and one lost record blinds the rest of that ffmpeg run (R1-F11,
+// observationClock.js). 18 of 18 real torn records in the saved staging and prod logs (2026-09-28 .. 10-04,
+// fixtures/obs/torn-ashowinfo-real.txt) tore AFTER the first call; none tore inside it.
+//
+// The core takes the same sub-patterns as the strict grammar and stops at the checksum token. The lookahead
+// after the 8 hex digits is a literal SPACE (not \s) or the end of the line: it is the first call's own
+// trailing space, so `checksum:AAAAAAAAno frame!` (a cut inside the digits with foreign text glued on) is
+// not salvaged. Everything before `checksum:` must still match, so a cut anywhere before it stays a lost
+// record and still opens the hole, exactly as before.
+//
+// What is NOT claimed: (1) a cut INSIDE the 8 hex digits followed by hex-looking foreign text can salvage a
+// wrong CHECKSUM, which nothing reads (the five fields the clock reads were right in every case of a
+// reviewer's one-off fuzz over 4 record shapes, every offset, 11 foreign texts, which is not kept in the
+// repo; ashowinfo-torn-record.test.js C4 re-runs the same shapes and offsets with 4 foreign texts); (2) that the first call is atomic rests on a read
+// of the ffmpeg 8.1.2 source and on the 18 real tears, not on a test that runs real ffmpeg; a future ffmpeg
+// that prints the record in a different number of calls is covered only by this being audio-only and by the
+// hole warning in observationClock.js; (3) the salvage is AUDIO ONLY: the motion clock handles a lost record
+// locally (a few samples `unknown`), and salvaging an `in` record would let the clone filter label frames it
+// now calls unknown, which moves stored motion numbers: a separate change.
+const ASHOWINFO_CORE = new RegExp(
+  String.raw`^n:(\d+) pts:(-?\d+|NOPTS) pts_time:(${TS}) fmt:\S+ channels:\d+ chlayout:${CHLAYOUT} rate:(\d+) ` +
+    String.raw`nb_samples:(\d+) checksum:([0-9A-F]{8})(?= |$)`
+);
 // The per-frame lines a tap prints AFTER a record, and its one-time config banner. Each is matched in full
 // for the same reason as the record: a glued error must not be dropped as a "continuation".
 const CONFIG_LINE = /^config (in|out) time_base: (\d+)\/(\d+), frame_rate: (\d+)\/(\d+)\s*$/;
@@ -179,6 +211,22 @@ export function classifyLine(line, taps) {
       // An `out` record is useless without its checksum (it is how stdout is aligned), so one without is
       // treated like any other malformed record.
       if (rec && (tap !== 'out' || rec.checksum !== null)) return { kind: 'record', tap, rec };
+      // #573: an AUDIO line that failed the whole-line grammar but whose first av_log call (the core) is
+      // intact is a complete record with foreign text glued after it: hand the clock the record instead of
+      // telling it one was lost. `salvaged: true` marks it (the healthy result above carries no extra key).
+      // What reaches the log is exactly what the old code sent: the old rule on the WHOLE message (nothing
+      // foreign -> it was a `fragment`, dropped; any foreign token -> it was `unparseable`, the original line
+      // forwarded), decided on the whole message and not on the remainder after the core, because the two
+      // differ (a valid multi-word chlayout such as `2 channels` makes isFragment see a foreign word, and the
+      // old code forwarded that line). The router reads `forwardText` and keeps the log byte-identical.
+      if (tap === 'audio') {
+        const salvaged = salvageAudioRecord(message);
+        if (salvaged) {
+          return isFragment(message)
+            ? { kind: 'record', tap, rec: salvaged, salvaged: true }
+            : { kind: 'record', tap, rec: salvaged, salvaged: true, forwardText: line };
+        }
+      }
       // A record that failed the whole grammar is LOST to the clock either way. It reaches the log unless
       // it is nothing but record fields (no foreign text glued into it), which would only be noise there.
       return isFragment(message) ? { kind: 'fragment', tap, lost: true } : { kind: 'unparseable', tap, text: line, lost: true };
@@ -214,6 +262,22 @@ function parseVideoRecord(message) {
 
 function parseAudioRecord(message) {
   const r = ASHOWINFO_RECORD.exec(message);
+  if (!r || r[2] === 'NOPTS') return null;
+  return {
+    n: Number(r[1]),
+    pts: Number(r[2]),
+    ptsTime: Number(r[3]),
+    rate: Number(r[4]),
+    nbSamples: Number(r[5]),
+    checksum: parseChecksum(r[6]),
+  };
+}
+
+// #573: the same record object as parseAudioRecord, read from the intact first call of a torn line (see
+// ASHOWINFO_CORE). `NOPTS` is still "no record", as in the strict path. Same keys in the same order, so a
+// salvaged record is indistinguishable from a healthy one to the clock.
+function salvageAudioRecord(message) {
+  const r = ASHOWINFO_CORE.exec(message);
   if (!r || r[2] === 'NOPTS') return null;
   return {
     n: Number(r[1]),
@@ -283,6 +347,8 @@ export function createStderrRouter({
   const stats = {
     lines: 0, records: 0, config: 0, continuation: 0, fragments: 0, dropped: 0, forwarded: 0, suppressed: 0,
     unparseable: 0, lostRecords: 0, untagged: 0, collapsed: 0, classifierErrors: 0, callbackErrors: 0,
+    // #573: audio records recovered from a line that had foreign text glued after the first av_log call.
+    salvaged: 0,
   };
   // Rule B's memory: did the previous line reach (or try to reach) the log?
   let prevForwarded = null;
@@ -370,6 +436,21 @@ export function createStderrRouter({
       switch (d.kind) {
         case 'record':
           stats.records += 1;
+          if (d.salvaged) stats.salvaged += 1;
+          if (d.forwardText !== undefined) {
+            // #573: a record recovered from a line with FOREIGN text glued on. The record goes to the clock;
+            // the line still goes to the log exactly as the old `unparseable` sent it (same text, same
+            // small bucket, counted as `unparseable`), because the foreign text is a real message (an
+            // error from another thread) that must not be lost. `prevForwarded = true` is Rule B: the next
+            // UNTAGGED line may be the second line of that foreign message, and the old `unparseable` left
+            // it forwarded; with `false` that line would be dropped. No onParseError and no lostRecords:
+            // the clock lost nothing.
+            stats.unparseable += 1;
+            prevForwarded = true;
+            callback(onRecord, { tap: d.tap, ...d.rec });
+            emit(d.forwardText, 'small');
+            return;
+          }
           prevForwarded = false;
           callback(onRecord, { tap: d.tap, ...d.rec });
           return;
