@@ -55,7 +55,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - **A wake clip now starts at the wake's first moving or noisy frame, not up to a minute after it** (issue
   #412). Since #447 the clip began 3 seconds before the END of the wake's first active minute, so it started
   up to 57 seconds (about 27 on average) after the first frame and could miss the opening it exists to show
-  (#447's entry said "starting them at the first moving frame is #412": that is now done). The clip now opens 3
+  (#447's entry said "starting them at the first moving frame is #412": that is now done). The clip now opens about 2 to 3
   seconds before the first frame that was over the same motion or sound threshold that makes a minute active,
   or at the oldest footage the recording buffer still holds, if that is later: a continuous buffer of about 70
   seconds or more reaches the first frame, a shallower one starts the clip up to about a minute minus its depth

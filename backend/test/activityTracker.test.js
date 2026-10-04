@@ -1376,6 +1376,19 @@ test('#447: a receipt time that is not a finite number is filed by the clock ins
   assert.equal(rowFor('cam-1').motion_frames, 3);
 });
 
+test('#447: a receipt time that is not a finite number is filed by the clock for the out-of-bed channel too (minuteFor\'s own fallback)', () => {
+  // #412 made recordMotion and recordSound resolve the fallback themselves (once, so the stamp and the minute agree),
+  // so minuteFor's `Number.isFinite(atMs) ? atMs : Date.now()` is reached with a bad time only through
+  // recordMotionOut, which still passes the raw value. Without that fallback the out-of-bed readings would open a NaN
+  // minute no tick can close, and the row's out-of-bed peak would be missing.
+  for (const bad of [NaN, Infinity, 'x']) {
+    at.recordMotionOut('cam-1', 0.2, null, bad);
+  }
+  at.recordMotion('cam-1', 0.01); // a finite reading, so the minute has a row to read the out-of-bed columns from
+  assert.equal(at.flushActivity(Date.now() + 2 * MIN), 1, 'written by an ordinary tick');
+  assert.equal(rowFor('cam-1').motion_out_peak, 0.2, 'the out-of-bed readings were filed under the clock\'s minute');
+});
+
 test('#447: a stop writes the minutes that have ENDED (no listener called) and never the one still receiving', () => {
   const seen = listenAll();
   at.recordMotion('cam-1', 0.1, null, M + 30_000); // 19:00, ended by the stop

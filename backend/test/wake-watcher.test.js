@@ -1782,10 +1782,15 @@ describe('★ #448 — the watcher counts MINUTES, not callbacks', () => {
       try {
         db.prepare("UPDATE settings SET wake_clips_enabled = 0 WHERE id = 'app'").run(); // the decision, not the cut (as C13)
         const entry = startSegmenter(CAM, camera.mediamtx_path, { preRollSec: 30, postRollSec: 15 });
-        const old = new Date(BASE_MS - 10 * 24 * 60 * 60 * 1000);
-        const seg = path.join(entry.ringDir, 'seg-old.mkv');
-        fs.writeFileSync(seg, 'x');
-        fs.utimesSync(seg, old, old);
+        // CONTINUOUS footage over the whole timeline (a closed segment every 10 s, from before its first minute to
+        // after its last). It has to cover each first frame's window, not just reach back past it: since the review
+        // round the watcher keeps an earlier anchor only when extractClip's selection finds footage for it, and one
+        // 10-day-old segment (this fixture before) covers nothing, so every anchor would fall back to `at`.
+        for (let t = labelStartMs(0) - 12_000; t <= labelStartMs(100) + 60_000; t += 10_000) {
+          const seg = path.join(entry.ringDir, `seg-${t}.mkv`);
+          fs.writeFileSync(seg, 'x');
+          fs.utimesSync(seg, new Date(t), new Date(t));
+        }
         assert.equal(ringOldestStartMs(CAM) !== null, true, 'precondition: the ring reports footage, so the anchor is the first frame');
         for (let s = 0; s < 150; s++) {
           const timeline = buildTimeline(mulberry32(412_000 + s));
@@ -1814,14 +1819,17 @@ describe('★ #448 — the watcher counts MINUTES, not callbacks', () => {
       // (59 s before the label) leaked into the bridge arithmetic, the gap would measure 4 and the run would split.
       const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(CAM);
       const entry = startSegmenter(CAM, camera.mediamtx_path, { preRollSec: 30, postRollSec: 15 });
-      const seg = path.join(entry.ringDir, 'seg-old.mkv');
-      fs.writeFileSync(seg, 'x');
-      const old = new Date(BASE_MS - 10 * 24 * 60 * 60 * 1000);
-      fs.utimesSync(seg, old, old);
       wakeClips(false);
       try {
         settle();
         const idxFirst = clock;
+        // Continuous footage around the first active minute (see the seeded test above for why a single old
+        // segment no longer does): a closed segment every 2 s from 10 s before the minute to 40 s after it.
+        for (let t = labelStartMs(idxFirst) - 10_000; t <= labelStartMs(idxFirst) + 40_000; t += 2_000) {
+          const seg = path.join(entry.ringDir, `seg-${t}.mkv`);
+          fs.writeFileSync(seg, 'x');
+          fs.utimesSync(seg, new Date(t), new Date(t));
+        }
         const risesAt = (idx) => [{ atMs: labelStartMs(idx), value: MOTION_ACTIVE + 0.05 }];
         const active = () => {
           const idx = clock++;

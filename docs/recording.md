@@ -75,7 +75,7 @@ that gap without making alerts noisier.
   validated elsewhere). See "A wake recording does not bridge a gap in the readings" in
   [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
 - The clip starts at the **beginning** of the wake-up, not when it was confirmed — the opening is the
-  part that explains why. Precisely: it starts 3 seconds before the first frame that showed movement or
+  part that explains why. Precisely: it starts about 2 to 3 seconds before the first frame that showed movement or
   noise (the same threshold that makes a minute count as active in the live wake check, in-bed movement or
   sound; unlike the sleep timeline, out-of-bed movement does not count), or at the oldest footage the buffer
   still holds, if that is later. A continuous buffer of about 70 seconds or more reaches the first frame; with

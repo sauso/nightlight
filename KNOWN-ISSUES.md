@@ -567,9 +567,14 @@ buffer still holds if that is later.
   than it), so for a movement in the first seconds of a minute it can be a few
   seconds before the wake's minute on the timeline. The review page still pairs the clip with its wake (it
   matches within 3 minutes).
-- **Unverified.** That a frame's arrival time at the detector lines up with the footage in the buffer to
-  within the 3 second lead-in (a soak against real video will measure it), and that a camera with a keyframe
-  interval over 2 seconds starts its buffer segments no later than 2 seconds apart.
+- **Measured once, on a synthetic stream only.** How a frame's arrival time at the detector lines up with the
+  footage in the buffer was measured on a scripted 15 fps test stream with a 2 second keyframe interval (a
+  white box flickering from a known instant, three wakes started at different seconds of the minute, real
+  ffmpeg, the real app): the first flickering frame was 1.7, 1.9 and 2.1 seconds into the clip, against the 3
+  seconds intended, so about 1 to 1.3 seconds of the 3 second lead-in is lost and the clip still opens before
+  the first frame. The 3 second lead was kept. A real camera's encoder and network delay differ and were not
+  measured. **Unverified:** that a camera with a keyframe interval over 2 seconds starts its buffer segments no
+  later than 2 seconds apart.
 - **A payload without the first-frame information** (nothing sends one today) keeps the old anchor, the end
   of the minute; its buffer hold now reaches back 7 seconds before it instead of 15, the same margin the cut
   itself reads.

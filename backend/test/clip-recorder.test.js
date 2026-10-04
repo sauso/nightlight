@@ -395,14 +395,16 @@ describe('★ #412 ringHasFootageFor: would extractClip find any footage for a c
     segment('seg-a.mkv', 20_000);
     segment('seg-b.mkv', 8_000);
     segment('seg-open.mkv', 0); // still being written: not footage
-    for (const age of [0, 5_000, 12_000, 25_000, 40_000, 90_000]) {
-      const at = Date.now() - age;
-      let selected = true;
-      await extractClip(CAM, { at, ...clip, settleMs: 0 }).catch((err) => {
-        if (/no ring segments covered/.test(err.message)) selected = false;
-      });
-      assert.equal(ringHasFootageFor(CAM, { at, ...clip }), selected, `disagree for a clip ${age} ms ago`);
-    }
+    // Every call is started SYNCHRONOUSLY: with no ffmpeg on PATH the segmenter's entry is deleted on the first tick
+    // after its spawn fails, and extractClip checks the entry only before its first await.
+    const ages = [0, 5_000, 12_000, 25_000, 40_000, 90_000];
+    const ats = ages.map((age) => Date.now() - age);
+    const has = ats.map((at) => ringHasFootageFor(CAM, { at, ...clip }));
+    const selected = await Promise.all(ats.map((at) =>
+      extractClip(CAM, { at, ...clip, settleMs: 0 }).then(() => true, (err) =>
+        /no ring segments covered/.test(err.message) ? false : /spawn|ENOENT|ffmpeg/i.test(err.message) ? true : err.message)));
+    ages.forEach((age, i) => assert.equal(has[i], selected[i], `disagree for a clip ${age} ms ago (extractClip: ${selected[i]})`));
+    assert.deepEqual(has.filter(Boolean).length > 0 && has.filter((h) => !h).length > 0, true, 'the cases include both verdicts');
   });
 });
 

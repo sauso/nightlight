@@ -11126,7 +11126,7 @@
   {
     "label": "#412 M-412-06: a motion rise stores the raw receipt time (NaN for a non-finite one) instead of the time used for bucketing",
     "file": "backend/src/lib/activityTracker.js",
-    "find": "s.motionRises.push({ atMs: Number.isFinite(atMs) ? atMs : Date.now(), value: fraction });",
+    "find": "s.motionRises.push({ atMs: usedAt, value: fraction });",
     "replace": "s.motionRises.push({ atMs, value: fraction });",
     "expect": "killed",
     "tests": ["activityTracker.test.js"],
@@ -11135,7 +11135,7 @@
   {
     "label": "#412 M-412-07: a sound rise stores the raw receipt time instead of the time used for bucketing",
     "file": "backend/src/lib/activityTracker.js",
-    "find": "s.soundRises.push({ atMs: Number.isFinite(atMs) ? atMs : Date.now(), value: overDb });",
+    "find": "s.soundRises.push({ atMs: usedAt, value: overDb });",
     "replace": "s.soundRises.push({ atMs, value: overDb });",
     "expect": "killed",
     "tests": ["activityTracker.test.js"],
@@ -11565,5 +11565,23 @@
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
     "namePattern": "C7 \\(#412\\)"
+  },
+  {
+    "label": "#412 M-412-55: a motion rise reads the clock a SECOND time for its stamp (can straddle a minute boundary)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "s.motionRises.push({ atMs: usedAt, value: fraction });",
+    "replace": "s.motionRises.push({ atMs: Number.isFinite(atMs) ? atMs : Date.now(), value: fraction });",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "read ONCE per sample"
+  },
+  {
+    "label": "#412 M-412-56: a sound rise reads the clock a SECOND time for its stamp",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "s.soundRises.push({ atMs: usedAt, value: overDb });",
+    "replace": "s.soundRises.push({ atMs: Number.isFinite(atMs) ? atMs : Date.now(), value: overDb });",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "read ONCE per sample"
   }
 ]
