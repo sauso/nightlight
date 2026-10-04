@@ -537,14 +537,39 @@ and all the sound readings from one chunk, always land in the same minute.
 | A row's minute (`bucket_start`) | The UTC minute its samples arrived in | The minute a timer fired in, 0-60 s after the samples, different after every restart |
 | When the row is stored | 7 s after the minute ends: the `[obs]` measurement needs 5 s to judge a minute's last frames, plus 2 s of margin | Once a minute, at the timer |
 | When the live wake check hears a minute | Within 1 s of the minute ending | 0-60 s after it |
-| Where a wake clip starts | 3 s before the END of the wake's first active minute | 3 s before the old row label: a restart-dependent point inside that minute, on average 30 s earlier |
+| Where a wake clip starts | 3 s before the wake's first moving or noisy frame, or at the oldest footage the buffer still holds if that is later (#412; between #447 and #412 it was 3 s before the END of the first active minute, up to 57 s after the first frame) | 3 s before the old row label: a restart-dependent point inside that minute |
 | Thresholds, peaks, what counts as active | Unchanged | |
 
-The wake-clip anchor is deliberate. The recording ring a clip is cut from is only as deep as the clip
-settings make it: 63 seconds with on-demand Record on, 38 with it off, 23 at the smallest clip settings.
-Anchoring on the true start of the minute would ask the ring for footage a minute older than it keeps, and
-lose the clip's opening on the smaller rings. Starting the clip at the first moving frame instead is issue
-#412.
+**Where a wake clip starts, and why it can start late (#447, resolved by #412).** The recording ring a clip is
+cut from is only as deep as the clip settings make it: 63 seconds with on-demand Record on, 38 with it off,
+23 at the smallest clip settings (clip pre-roll and post-roll, and on-demand pre-roll, size it). #447 anchored
+the clip at the END of the wake's first active minute so the ring still held the hold point, which made every
+clip start up to 57 seconds (about 27 on average) after the first moving or noisy frame. #412 anchors the clip
+at that first frame instead (the first frame over the same motion or sound threshold that makes a minute
+active; the clip opens 3 s before it) and clamps the anchor to the oldest footage the buffer actually holds,
+read from its files, because a clip that opens before the buffer's oldest footage has nothing to cut and
+fails. So the clip starts at the first moving or noisy frame (3 s before it), or at the oldest footage the
+buffer still holds if that is later.
+
+- **How late, by buffer depth.** A buffer of about 70 seconds or more always reaches the first frame. With
+  less, the clip starts up to roughly a minute minus the buffer depth after it: about 26 seconds late with a 38
+  second buffer, about 41 with a 23 second one. This house runs 63 seconds, which is nearly exact. These are
+  derived, not measured, and approximate to about 4 seconds (a 2 second segment plus the 2 second tick that
+  prunes the buffer). When the buffer cost the opening, the log says so once per wake: `[wake] "<camera>" the
+  buffer reaches back only to N s after the first movement: the clip starts there`. A deeper buffer for wake
+  clips is not built; this line is how to tell whether anyone needs one.
+- **The clip's start time can precede the wake's minute.** A clip's recorded start is its real first frame,
+  3 s before the first active frame, so for a movement in the first seconds of a minute it can be a few
+  seconds before the wake's minute on the timeline. The review page still pairs the clip with its wake (it
+  matches within 3 minutes).
+- **Unverified.** That a frame's arrival time at the detector lines up with the footage in the buffer to
+  within the 3 second lead-in (a soak against real video will measure it), and that a camera with a keyframe
+  interval over 2 seconds starts its buffer segments no later than 2 seconds apart.
+- **A payload without the first-frame information** (nothing sends one today) keeps the old anchor, the end
+  of the minute; its buffer hold now reaches back 7 seconds before it instead of 15, the same margin the cut
+  itself reads.
+- **Not covered by this change:** a settings save or camera edit restarts the buffer and drops the hold, which
+  can still fail a wake clip that is being cut (#413, #490).
 
 **Sleep numbers can move on a borderline night.** Each row moves by less than a minute, but the sleep rules
 have sharp edges (15 quiet minutes to fall asleep, 20 minutes away from the bed to be up for the morning), so

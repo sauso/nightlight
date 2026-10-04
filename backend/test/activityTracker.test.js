@@ -387,6 +387,141 @@ test('a listener that throws cannot cost us the rest of the flush', () => {
   assert.deepEqual(seen.sort(), ['cam-1', 'cam-2'], 'the surviving listener still saw both cameras');
 });
 
+// --- #412: the rises in the listener payload ------------------------------------------------------
+// The wake watcher anchors a wake clip on the first frame of the minute that was over its threshold. The
+// tracker stays threshold-free: it reports, per channel, the samples that RAISED the minute's running peak
+// ({ atMs, value } in arrival order), and the watcher applies the thresholds that define `active`. These
+// tests pin what the payload carries; wake-watcher.test.js pins what is DONE with it (C1-C2 of the #412 plan).
+// Every one reads the payload through the real record*/flushActivity path, with explicit receipt times.
+test('#412 C1: the payload keeps its four fields exactly and gains motionRises / soundRises, and nothing else', () => {
+  const seen = [];
+  listen((e) => seen.push(e));
+  at.recordMotion('cam-1', 0.1, null, M + 10_000);
+  at.recordMotion('cam-1', 0.3, null, M + 20_000);
+  at.recordSound('cam-1', 7, M + 30_000);
+  ticks(M, M + MIN + 8000); // past GRACE_MS, so the row is written too
+  assert.equal(seen.length, 1);
+  assert.deepEqual(seen[0], {
+    cameraId: 'cam-1',
+    bucketStart: label(M),
+    motionPeak: 0.3,
+    soundPeak: 7,
+    motionRises: [{ atMs: M + 10_000, value: 0.1 }, { atMs: M + 20_000, value: 0.3 }],
+    soundRises: [{ atMs: M + 30_000, value: 7 }],
+  });
+  // The same peaks the row stores (the old contract, unchanged): the new fields are additive.
+  const r = rowFor('cam-1');
+  assert.equal(seen[0].motionPeak, r.motion_peak);
+  assert.equal(seen[0].soundPeak, r.sound_peak);
+});
+
+test('#412 C1: an empty channel is [] (never null or undefined); a sound-only minute keeps motionPeak null', () => {
+  const soundOnly = [];
+  listen((e) => soundOnly.push(e));
+  at.recordSound('cam-1', 9, M + 5000);
+  ticks(M, M + MIN + 1000);
+  assert.equal(soundOnly.length, 1);
+  assert.equal(soundOnly[0].motionPeak, null, 'a channel that saw nothing stays null, exactly as before');
+  assert.deepEqual(soundOnly[0].motionRises, []);
+  assert.deepEqual(soundOnly[0].soundRises, [{ atMs: M + 5000, value: 9 }]);
+
+  const motionOnly = [];
+  listen((e) => motionOnly.push(e));
+  at.recordMotion('cam-2', 0.2, null, M + MIN + 5000);
+  ticks(M + MIN, M + 2 * MIN + 1000);
+  assert.equal(motionOnly.length, 1);
+  assert.equal(motionOnly[0].soundPeak, null);
+  assert.deepEqual(motionOnly[0].soundRises, []);
+  assert.deepEqual(motionOnly[0].motionRises, [{ atMs: M + MIN + 5000, value: 0.2 }]);
+});
+
+test('#412 C2: a rise is exactly a sample that raised the running peak: not 0, not an equal value, not a lower one', () => {
+  const seen = [];
+  listen((e) => seen.push(e));
+  // 0 first (the peak starts at 0, 0 is not above it), then 0.2, the same 0.2 again, a lower 0.1, then 0.5.
+  [[0, 1], [0.2, 2], [0.2, 3], [0.1, 4], [0.5, 5]].forEach(([v, s]) => at.recordMotion('cam-1', v, null, M + s * 1000));
+  [[0, 1], [3, 2], [3, 3], [2, 4], [9, 5]].forEach(([v, s]) => at.recordSound('cam-1', v, M + s * 1000));
+  ticks(M, M + MIN + 1000);
+  assert.equal(seen.length, 1);
+  assert.deepEqual(seen[0].motionRises, [{ atMs: M + 2000, value: 0.2 }, { atMs: M + 5000, value: 0.5 }]);
+  assert.deepEqual(seen[0].soundRises, [{ atMs: M + 2000, value: 3 }, { atMs: M + 5000, value: 9 }]);
+  assert.equal(seen[0].motionPeak, 0.5);
+  assert.equal(seen[0].soundPeak, 9);
+});
+
+test('#412 C2: a minute with only zero readings has a peak of 0 and NO rises', () => {
+  // The peak is 0, not null (a frame was analysed), and a 0 never "raised" anything.
+  const seen = [];
+  listen((e) => seen.push(e));
+  at.recordMotion('cam-1', 0, null, M + 1000);
+  at.recordSound('cam-1', 0, M + 2000);
+  ticks(M, M + MIN + 1000);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].motionPeak, 0);
+  assert.equal(seen[0].soundPeak, 0);
+  assert.deepEqual(seen[0].motionRises, []);
+  assert.deepEqual(seen[0].soundRises, []);
+});
+
+test('#412 C2: recordMotionOut never records a rise (out-of-bed movement cannot start a wake)', () => {
+  const seen = [];
+  listen((e) => seen.push(e));
+  at.recordMotionOut('cam-1', 0.9, null, M + 3000); // before and bigger than the in-bed sample
+  at.recordMotion('cam-1', 0.02, null, M + 4000);
+  ticks(M, M + MIN + 1000);
+  assert.equal(seen.length, 1);
+  assert.deepEqual(seen[0].motionRises, [{ atMs: M + 4000, value: 0.02 }], 'the out-of-bed 0.9 is not in the list');
+  assert.equal(seen[0].motionPeak, 0.02);
+});
+
+test('#412 C2: a non-finite receipt time stores the time actually used for bucketing (Date.now), not NaN', () => {
+  // minuteFor falls back to Date.now() for a non-finite atMs; the rise must carry that same time, or the
+  // watcher would filter it out of its own minute (NaN) and never see the first frame.
+  const seen = [];
+  listen((e) => seen.push(e));
+  const spy = mock.method(Date, 'now', () => M + 7000);
+  try {
+    at.recordMotion('cam-1', 0.4, null, NaN);
+    at.recordSound('cam-1', 8, Infinity);
+  } finally {
+    spy.mock.restore();
+  }
+  ticks(M, M + MIN + 1000);
+  assert.equal(seen.length, 1);
+  assert.deepEqual(seen[0].motionRises, [{ atMs: M + 7000, value: 0.4 }]);
+  assert.deepEqual(seen[0].soundRises, [{ atMs: M + 7000, value: 8 }]);
+});
+
+test('#412 C2: a sample clamped into the next minute keeps its own receipt time (the watcher filters by the minute)', () => {
+  const seen = [];
+  listen((e) => seen.push(e));
+  at.recordMotion('cam-1', 0.3, null, M + 10_000);
+  ticks(M, M + MIN + 1000); // minute M is told and closed
+  at.recordMotion('cam-1', 0.4, null, M + 30_000); // a small backward clock step: filed under the NEXT minute
+  at.recordMotion('cam-1', 0.5, null, M + MIN + 20_000);
+  assert.equal(at.activityCounters('cam-1').clamped, 1, 'precondition: the first sample was clamped');
+  ticks(M + MIN + 2000, M + 2 * MIN + 1000);
+  assert.equal(seen.length, 2);
+  assert.equal(seen[1].bucketStart, label(M + MIN));
+  assert.deepEqual(
+    seen[1].motionRises,
+    [{ atMs: M + 30_000, value: 0.4 }, { atMs: M + MIN + 20_000, value: 0.5 }],
+    'the clamped sample is in the next minute, stamped before it'
+  );
+});
+
+test('#412 C1: a listener cannot change what another listener (or the slot) sees: the arrays are copies', () => {
+  const second = [];
+  listen((e) => { e.motionRises.push({ atMs: 0, value: 99 }); e.motionRises[0].value = -1; e.soundRises.length = 0; });
+  listen((e) => second.push(e));
+  at.recordMotion('cam-1', 0.3, null, M + 10_000);
+  at.recordSound('cam-1', 7, M + 11_000);
+  ticks(M, M + MIN + 1000);
+  assert.equal(second.length, 1);
+  assert.deepEqual(second[0].motionRises, [{ atMs: M + 10_000, value: 0.3 }]);
+  assert.deepEqual(second[0].soundRises, [{ atMs: M + 11_000, value: 7 }]);
+});
+
 // --- retention --------------------------------------------------------------------------------
 
 test('pruneActivitySamples cuts exactly at the 30-day line', () => {

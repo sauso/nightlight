@@ -283,9 +283,13 @@ export function reconcileStaleRecordings() {
 // A wake detected by the sleep tracker gets a SHORT clip and no alert, so there is something to look
 // at in the morning. Deliberately bounded: the average wake is ~19 minutes and capture runs
 // ~172 KiB/s, so recording wakes end to end would be ~1.1 GiB/night. The opening is what explains
-// "why", so we take wake_clip_seconds (default 30) from the wake's first active minute and stop.
-// A few seconds of lead-in, so the clip doesn't start on the very frame that tripped the threshold.
-const WAKE_CLIP_LEAD_SEC = 3;
+// "why", so we take wake_clip_seconds (default 30) from the wake's first active FRAME and stop (#412: the
+// watcher anchors on the first moving or noisy frame, clamped to the oldest footage the ring still holds,
+// see lib/wakeWatcher.js wakeClipAnchor; since #447 it anchored on the END of the first active minute, up to
+// 57 s late). A few seconds of lead-in, so the clip doesn't start on the very frame that tripped the
+// threshold. Exported (#412) because the watcher's clamp needs the same lead: a clip never starts before
+// the ring's oldest footage, and the lead is part of where the clip starts.
+export const WAKE_CLIP_LEAD_SEC = 3;
 // The whole window is already in the past by the time a wake qualifies (5 active minutes later), so
 // there is no post-roll to wait out — just let the current segment close.
 const WAKE_SETTLE_MS = 5000;
@@ -306,9 +310,10 @@ export function getWakeClipSettings() {
 }
 
 /**
- * Cut the opening of a wake that has already happened. `wakeStartMs` is the wake's first active
- * minute, which by now is several minutes old — the caller is expected to have held the ring from
- * that point (see lib/wakeWatcher.js), because the ring is only ~63s deep by default.
+ * Cut the opening of a wake that has already happened. `wakeStartMs` is the wake's anchor (#412: its
+ * first active frame, clamped to the oldest footage the ring held), which by now is several minutes old —
+ * the caller is expected to have held the ring from that point (see lib/wakeWatcher.js), because the ring
+ * is only ~63s deep by default.
  * Resolves the recordings row id, or null if nothing could be captured.
  *
  * NEVER THROWS, and that is enforced by the wrapper below rather than asserted. This runs on a timer

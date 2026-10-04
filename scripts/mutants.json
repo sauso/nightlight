@@ -716,7 +716,7 @@
   {
     "label": "★ extractClip: the half-written tail segment is concatenated",
     "file": "backend/src/lib/clipRecorder.js",
-    "find": "&& now - s.m > 700)",
+    "find": "&& now - s.m > SEGMENT_OPEN_MS)",
     "replace": "&& true)",
     "expect": "killed",
     "tests": [
@@ -11077,5 +11077,430 @@
     "tests": ["motion-leg-reconcile.test.js"],
     "namePattern": "^#353 index.js reconcileCameraPaths",
     "note": "A source-text check only; the strengthened test requires the call to be a statement on its own line."
+  },
+  {
+    "label": "#412 M-412-01: motion rises record every sample, not only the ones that raised the running peak",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "if (fraction > s.motionPeak) {",
+    "replace": "if (fraction >= 0) {",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#412 C[12]"
+  },
+  {
+    "label": "#412 M-412-02: a motion rise is `>=` the peak (an equal value and a first 0 count as rises)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "if (fraction > s.motionPeak) {",
+    "replace": "if (fraction >= s.motionPeak) {",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#412 C[12]"
+  },
+  {
+    "label": "#412 M-412-03: sound rises record every window, not only the ones that raised the running peak",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "if (overDb > s.soundPeak) {",
+    "replace": "if (overDb >= 0) {",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#412 C[12]"
+  },
+  {
+    "label": "#412 M-412-04: a sound rise is `>=` the peak",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "if (overDb > s.soundPeak) {",
+    "replace": "if (overDb >= s.soundPeak) {",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#412 C[12]"
+  },
+  {
+    "label": "#412 M-412-05: recordMotionOut records a rise (out-of-bed movement could start a wake clip)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "if (fraction > s.motionOutPeak) s.motionOutPeak = fraction;",
+    "replace": "if (fraction > s.motionOutPeak) { s.motionOutPeak = fraction; s.motionRises.push({ atMs: Number.isFinite(atMs) ? atMs : Date.now(), value: fraction }); }",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#412 C[12]"
+  },
+  {
+    "label": "#412 M-412-06: a motion rise stores the raw receipt time (NaN for a non-finite one) instead of the time used for bucketing",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "s.motionRises.push({ atMs: Number.isFinite(atMs) ? atMs : Date.now(), value: fraction });",
+    "replace": "s.motionRises.push({ atMs, value: fraction });",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#412 C[12]"
+  },
+  {
+    "label": "#412 M-412-07: a sound rise stores the raw receipt time instead of the time used for bucketing",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "s.soundRises.push({ atMs: Number.isFinite(atMs) ? atMs : Date.now(), value: overDb });",
+    "replace": "s.soundRises.push({ atMs, value: overDb });",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#412 C[12]"
+  },
+  {
+    "label": "#412 M-412-08: the payload loses motionRises",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "motionRises: s.motionRises.map((r) => ({ ...r })),",
+    "replace": "motionRises: undefined,",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#412 C[12]"
+  },
+  {
+    "label": "#412 M-412-09: the payload's soundRises is null for an empty channel instead of []",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "soundRises: s.soundRises.map((r) => ({ ...r })),",
+    "replace": "soundRises: null,",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#412 C[12]"
+  },
+  {
+    "label": "#412 M-412-10: the payload hands out the slot's own motionRises array (a listener can change it)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "motionRises: s.motionRises.map((r) => ({ ...r })),",
+    "replace": "motionRises: s.motionRises,",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#412 C[12]"
+  },
+  {
+    "label": "#412 M-412-11: the payload copies the motionRises array but shares its entries",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "motionRises: s.motionRises.map((r) => ({ ...r })),",
+    "replace": "motionRises: s.motionRises.slice(),",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#412 C[12]"
+  },
+  {
+    "label": "#412 M-412-12: the payload hands out the slot's own soundRises array",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "soundRises: s.soundRises.map((r) => ({ ...r })),",
+    "replace": "soundRises: s.soundRises,",
+    "expect": "killed",
+    "tests": ["activityTracker.test.js"],
+    "namePattern": "#412 C[12]"
+  },
+  {
+    "label": "#412 M-412-13: firstActiveFrameMs counts a value exactly AT its threshold (`>=`)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (!r || !(r.value > threshold)) continue;",
+    "replace": "if (!r || !(r.value >= threshold)) continue;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "C3 — firstActiveFrameMs"
+  },
+  {
+    "label": "#412 M-412-14: firstActiveFrameMs takes the LAST qualifying rise",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (first === null || r.atMs < first) first = r.atMs;",
+    "replace": "first = r.atMs;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "C3 — firstActiveFrameMs"
+  },
+  {
+    "label": "#412 M-412-15: firstActiveFrameMs takes the LATEST qualifying rise (`>` for the minimum)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (first === null || r.atMs < first) first = r.atMs;",
+    "replace": "if (first === null || r.atMs > first) first = r.atMs;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "C3 — firstActiveFrameMs"
+  },
+  {
+    "label": "#412 M-412-16: firstActiveFrameMs ignores sound",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "scan(payload?.soundRises, SOUND_ACTIVE);",
+    "replace": "void SOUND_ACTIVE;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "C3 — firstActiveFrameMs"
+  },
+  {
+    "label": "#412 M-412-17: sound rises are compared with the MOTION threshold",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "scan(payload?.soundRises, SOUND_ACTIVE);",
+    "replace": "scan(payload?.soundRises, MOTION_ACTIVE);",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "C3 — firstActiveFrameMs"
+  },
+  {
+    "label": "#412 M-412-18: motion rises are compared with the SOUND threshold",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "scan(payload?.motionRises, MOTION_ACTIVE);",
+    "replace": "scan(payload?.motionRises, SOUND_ACTIVE);",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "C3 — firstActiveFrameMs"
+  },
+  {
+    "label": "#412 M-412-19: firstActiveFrameMs drops the lower bound of the minute",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "r.atMs < minuteStartMs || ",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "C3 — firstActiveFrameMs",
+    "note": "Also stands for \"the minimum is taken before filtering\": a one-line mutant cannot reorder the two steps, and with no lower bound a clamped early sample pulls the anchor out of its minute exactly as that ordering would."
+  },
+  {
+    "label": "#412 M-412-20: firstActiveFrameMs drops the upper bound of the minute",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": " || r.atMs >= minuteStartMs + MINUTE_MS) continue;",
+    "replace": ") continue;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "C3 — firstActiveFrameMs"
+  },
+  {
+    "label": "#412 M-412-21: the upper bound of the minute is inclusive",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "r.atMs >= minuteStartMs + MINUTE_MS",
+    "replace": "r.atMs > minuteStartMs + MINUTE_MS",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "C3 — firstActiveFrameMs"
+  },
+  {
+    "label": "#412 M-412-22: the lower bound of the minute is exclusive",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "r.atMs < minuteStartMs ||",
+    "replace": "r.atMs <= minuteStartMs ||",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "C3 — firstActiveFrameMs"
+  },
+  {
+    "label": "#412 M-412-23: firstActiveFrameMs lets a non-finite receipt time through",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "!Number.isFinite(r.atMs) || ",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "C3 — firstActiveFrameMs"
+  },
+  {
+    "label": "#412 M-412-24: wakeClipAnchor has no ceiling at `at` (no Math.min)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "return Math.min(at, Math.max(frameMs, oldestStartMs + leadMs));",
+    "replace": "return Math.max(frameMs, oldestStartMs + leadMs);",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "wakeClipAnchor|C4 —|C5 —|C6 —|C8 —|C10 —|C11 —"
+  },
+  {
+    "label": "#412 M-412-25: wakeClipAnchor has no clamp to the ring's oldest footage",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "return Math.min(at, Math.max(frameMs, oldestStartMs + leadMs));",
+    "replace": "return Math.min(at, frameMs);",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "wakeClipAnchor|C4 —|C5 —|C6 —|C8 —|C10 —|C11 —"
+  },
+  {
+    "label": "#412 M-412-26: wakeClipAnchor clamps to the oldest footage but forgets the lead-in",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "return Math.min(at, Math.max(frameMs, oldestStartMs + leadMs));",
+    "replace": "return Math.min(at, Math.max(frameMs, oldestStartMs));",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "wakeClipAnchor|C4 —|C5 —|C6 —|C8 —|C10 —|C11 —"
+  },
+  {
+    "label": "#412 M-412-27: wakeClipAnchor with no footage to measure still anchors on the frame (unclamped)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (frameMs == null || oldestStartMs == null) return at;",
+    "replace": "if (frameMs == null) return at;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "wakeClipAnchor|C4 —|C5 —|C6 —|C8 —|C10 —|C11 —"
+  },
+  {
+    "label": "#412 M-412-28: wakeClipAnchor with no first frame still moves the anchor to the ring's oldest footage",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (frameMs == null || oldestStartMs == null) return at;",
+    "replace": "if (oldestStartMs == null) return at;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "wakeClipAnchor|C4 —|C5 —|C6 —|C8 —|C10 —|C11 —"
+  },
+  {
+    "label": "#412 M-412-29: lastActiveMs of a run's first minute is the clip anchor, not the label (the bridge arithmetic would split a run)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "st.run.lastActiveMs = at;",
+    "replace": "st.run.lastActiveMs = st.run.activeCount === 1 ? st.run.startMs : at;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "#412 — the wake clip is anchored|C7 \\(#412\\)"
+  },
+  {
+    "label": "#412 M-412-30: the new run's initializer carries the anchor as lastActiveMs (EQUIVALENT: the next statement overwrites it)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "activeCount: 0, lastActiveMs: at, captured: false, holding: false };",
+    "replace": "activeCount: 0, lastActiveMs: anchor, captured: false, holding: false };",
+    "expect": "equivalent",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "#412 — the wake clip is anchored|C7 \\(#412\\)",
+    "note": "handleMinute runs `st.run.lastActiveMs = at` right after creating the run, so the initializer's value is never read. The real mutant is M-412-29, which changes that overwrite."
+  },
+  {
+    "label": "#412 M-412-31: the hold goes back to `at - 15 s` (the #447 formula)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "holdRing(cameraId, RING_OWNER.WAKE, clipCoverStartMs(anchor, WAKE_CLIP_LEAD_SEC));",
+    "replace": "holdRing(cameraId, RING_OWNER.WAKE, at - 15000);",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "#412 — the wake clip is anchored|C7 \\(#412\\)|#447"
+  },
+  {
+    "label": "#412 M-412-32: the hold uses a different lead than the cut (clipCoverStartMs with 0)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "holdRing(cameraId, RING_OWNER.WAKE, clipCoverStartMs(anchor, WAKE_CLIP_LEAD_SEC));",
+    "replace": "holdRing(cameraId, RING_OWNER.WAKE, clipCoverStartMs(anchor, 0));",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "#412 — the wake clip is anchored|C7 \\(#412\\)|#447"
+  },
+  {
+    "label": "#412 M-412-33: the buffer line is logged whenever the anchor is after the frame (`anchor > f`)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (f != null && oldest != null && anchor - leadMs > f) {",
+    "replace": "if (f != null && oldest != null && anchor > f) {",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "C10 —|C5 —"
+  },
+  {
+    "label": "#412 M-412-34: the buffer line is logged when the clip opens exactly at the movement (`>=`)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (f != null && oldest != null && anchor - leadMs > f) {",
+    "replace": "if (f != null && oldest != null && anchor - leadMs >= f) {",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "C10 —|C5 —"
+  },
+  {
+    "label": "#412 M-412-35: the buffer line is logged even when the ring had no footage to measure",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (f != null && oldest != null && anchor - leadMs > f) {",
+    "replace": "if (f != null && anchor - leadMs > f) {",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "C10 —|C5 —"
+  },
+  {
+    "label": "#412 M-412-36: the buffer line is logged for a payload with no first frame",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (f != null && oldest != null && anchor - leadMs > f) {",
+    "replace": "if (oldest != null && anchor - leadMs > f) {",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "C10 —|C5 —|C8 —"
+  },
+  {
+    "label": "#412 M-412-37: the buffer line rounds down instead of to the nearest second",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "Math.round((anchor - leadMs - f) / 1000)",
+    "replace": "Math.floor((anchor - leadMs - f) / 1000)",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "C10 —|C5 —"
+  },
+  {
+    "label": "#412 M-412-38: the first frame is looked for in the NEXT minute (minute start = at)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "const f = firstActiveFrameMs(payload, at - MINUTE_MS);",
+    "replace": "const f = firstActiveFrameMs(payload, at);",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "#412 — the wake clip is anchored|C7 \\(#412\\)"
+  },
+  {
+    "label": "#412 M-412-39: the watcher never asks the ring where its footage starts (no clamp)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "const oldest = ringOldestStartMs(cameraId);",
+    "replace": "const oldest = null;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "#412 — the wake clip is anchored|C7 \\(#412\\)"
+  },
+  {
+    "label": "#412 M-412-40: the run's clip anchor is the end of the minute again (#447)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "st.run = { startMs: anchor,",
+    "replace": "st.run = { startMs: at,",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "#412 — the wake clip is anchored|C7 \\(#412\\)"
+  },
+  {
+    "label": "#412 M-412-41: ringOldestStartMs returns the oldest segment's close time, not its content start",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "return oldest === null ? null : oldest - SEGMENT_SEC * 1000;",
+    "replace": "return oldest === null ? null : oldest;",
+    "expect": "killed",
+    "tests": ["clip-recorder.test.js", "wake-watcher.test.js"],
+    "namePattern": "#412 ringOldestStartMs|#412 — the wake clip is anchored"
+  },
+  {
+    "label": "#412 M-412-42: ringOldestStartMs returns a number (0) when there is no closed segment",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "return oldest === null ? null : oldest - SEGMENT_SEC * 1000;",
+    "replace": "return oldest === null ? 0 : oldest - SEGMENT_SEC * 1000;",
+    "expect": "killed",
+    "tests": ["clip-recorder.test.js", "wake-watcher.test.js"],
+    "namePattern": "#412 ringOldestStartMs|#412 — the wake clip is anchored"
+  },
+  {
+    "label": "#412 M-412-43: ringOldestStartMs returns the NEWEST closed segment",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "if (oldest === null || m < oldest) oldest = m;",
+    "replace": "if (oldest === null || m > oldest) oldest = m;",
+    "expect": "killed",
+    "tests": ["clip-recorder.test.js", "wake-watcher.test.js"],
+    "namePattern": "#412 ringOldestStartMs|#412 — the wake clip is anchored"
+  },
+  {
+    "label": "#412 M-412-44: ringOldestStartMs counts the segment still being written",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "if (m == null || now - m <= SEGMENT_OPEN_MS) continue;",
+    "replace": "if (m == null) continue;",
+    "expect": "killed",
+    "tests": ["clip-recorder.test.js", "wake-watcher.test.js"],
+    "namePattern": "#412 ringOldestStartMs|#412 — the wake clip is anchored"
+  },
+  {
+    "label": "#412 M-412-45: ringOldestStartMs counts concat lists and other non-segment files",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "if (!f.endsWith('.mkv')) continue; // concat-*.txt lists are not footage",
+    "replace": "/* every file counts */",
+    "expect": "killed",
+    "tests": ["clip-recorder.test.js"],
+    "namePattern": "#412 ringOldestStartMs"
+  },
+  {
+    "label": "#412 M-412-46: ringOldestStartMs throws for a camera with no segmenter instead of returning null",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "if (!entry) return null;",
+    "replace": "/* no guard */",
+    "expect": "killed",
+    "tests": ["clip-recorder.test.js"],
+    "namePattern": "#412 ringOldestStartMs"
+  },
+  {
+    "label": "#412 M-412-47: the wake clip's lead-in changes (the lead is pinned, the hold and the clamp move with it)",
+    "file": "backend/src/lib/recordings.js",
+    "find": "export const WAKE_CLIP_LEAD_SEC = 3;",
+    "replace": "export const WAKE_CLIP_LEAD_SEC = 6;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "C11 —"
   }
 ]

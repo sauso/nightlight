@@ -48,6 +48,11 @@ const RING_ROOT = path.join(CLIPS_DIR, '.ring');
 // 2s segments: short enough that pre-roll rounds to a whole-segment boundary the plan calls
 // acceptable, long enough to keep the file/keyframe overhead low.
 const SEGMENT_SEC = 2;
+// A segment whose mtime is within this long of now is still being written. extractClip skips it so it never
+// concatenates a partial tail, and ringOldestStartMs (#412) applies the SAME test, from this one constant, so
+// the wake watcher's clamp and the cut can never disagree about which segments exist. 700 ms is the value
+// extractClip has always used (a margin over the filesystem's mtime granularity, not a measurement).
+const SEGMENT_OPEN_MS = 700;
 const RESTART_DELAY_MS = 5000;
 
 // cameraId -> { proc, stopped, ringDir, ringDepthMs, janitor }. Holds live in ringHolds.js, keyed by
@@ -310,6 +315,33 @@ export function clipCoverStartMs(at, preRollSec) {
   return at - (preRollSec + 2 * SEGMENT_SEC) * 1000;
 }
 
+// The wall-clock time the OLDEST footage in this camera's ring starts at (the content start of its oldest
+// CLOSED segment: close time minus SEGMENT_SEC, the same convention extractClip uses for its offset), or
+// null when there is no segmenter or no closed segment yet. #412: the wake watcher clamps a clip's anchor
+// to this, because a clip that opens before the ring's oldest footage has an EMPTY selection in extractClip
+// ("no ring segments covered the requested window") and the row goes `failed`; extractClip's own
+// `Math.max(0, ...)` offset clamp only runs after a non-empty selection, so it does not protect that case.
+// WHY it reads the files and not the nominal depth: a ring that was wiped (a settings save restarts it), is
+// still filling after a start, or was just grown by setRingDepth is YOUNGER than its depth, and a clamp on
+// the nominal depth would anchor before its first segment and fail a clip the unclamped code cuts. This reads
+// the same directory, the same mtimes and the same closed-segment test (SEGMENT_OPEN_MS) as extractClip's
+// selection, so the clamp and the cut cannot disagree. Approximate to the janitor's tick (a segment can
+// outlive its depth by up to SEGMENT_SEC): the caller's docs say +-4 s (2 s segment + 2 s janitor tick,
+// reasoned, not measured).
+export function ringOldestStartMs(cameraId) {
+  const entry = segmenters.get(cameraId);
+  if (!entry) return null;
+  const now = Date.now();
+  let oldest = null;
+  for (const f of safeReaddir(entry.ringDir)) {
+    if (!f.endsWith('.mkv')) continue; // concat-*.txt lists are not footage
+    const m = statMtime(path.join(entry.ringDir, f));
+    if (m == null || now - m <= SEGMENT_OPEN_MS) continue; // gone, or still being written
+    if (oldest === null || m < oldest) oldest = m;
+  }
+  return oldest === null ? null : oldest - SEGMENT_SEC * 1000;
+}
+
 function runFfmpeg(args, { tool = 'ffmpeg' } = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawn(tool, args, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -380,8 +412,8 @@ export async function extractClip(
     })
     // A segment is finished ~SEGMENT_SEC after it starts; its mtime ≈ close time ≈ segment END. Keep any
     // segment whose [end-SEGMENT, end] overlaps the cover window. Skip the one still being written
-    // (mtime within ~700ms of now) so we never concat a partial tail.
-    .filter((s) => s.m != null && s.m - SEGMENT_SEC * 1000 <= coverEnd && s.m >= coverStart && now - s.m > 700)
+    // (mtime within SEGMENT_OPEN_MS of now) so we never concat a partial tail.
+    .filter((s) => s.m != null && s.m - SEGMENT_SEC * 1000 <= coverEnd && s.m >= coverStart && now - s.m > SEGMENT_OPEN_MS)
     .sort((a, b) => a.m - b.m);
 
   if (!segs.length) throw new Error('no ring segments covered the requested window');

@@ -79,7 +79,14 @@ const lastClosed = new Map();
 // (checked when this changed; a new subscriber must not assume the row exists yet).
 const minuteListeners = new Set();
 
-/** Subscribe to per-minute activity. cb({ cameraId, bucketStart, motionPeak, soundPeak }). */
+/**
+ * Subscribe to per-minute activity.
+ * cb({ cameraId, bucketStart, motionPeak, soundPeak, motionRises, soundRises }).
+ * `motionRises` / `soundRises` (#412) are the samples that raised the minute's running peak, as
+ * { atMs, value } in arrival order ([] for an empty channel, always arrays); the first four fields are
+ * unchanged. `atMs` is the receipt time the detector passed, which can lie before `bucketStart` after a small
+ * backward clock step (the sample was clamped into this minute), so a consumer filters by the minute's bounds.
+ */
 export function onMinuteFlushed(cb) {
   minuteListeners.add(cb);
   return () => minuteListeners.delete(cb);
@@ -198,7 +205,10 @@ function slot(cameraId, atMs) {
     s = { minuteMs, notified: false, keys: new Set(),
       motionSum: 0, motionPeak: 0, motionFrames: 0, observedMotionFrames: 0,
       soundSum: 0, soundPeak: 0, soundWindows: 0, soundValues: [], soundSumSq: 0,
-      motionOutSum: 0, motionOutPeak: 0, motionOutFrames: 0, observedMotionOutFrames: 0 };
+      motionOutSum: 0, motionOutPeak: 0, motionOutFrames: 0, observedMotionOutFrames: 0,
+      // #412: the samples that RAISED this minute's running peak, per channel, as { atMs, value } in
+      // arrival order. See recordMotion for why this is enough to find "the first frame over a threshold".
+      motionRises: [], soundRises: [] };
     slots.set(minuteMs, s);
   }
   return s;
@@ -304,7 +314,18 @@ export function recordMotion(cameraId, fraction, sample = null, atMs = Date.now(
   if (!(fraction >= 0)) return;
   const s = slot(cameraId, atMs);
   s.motionSum += fraction;
-  if (fraction > s.motionPeak) s.motionPeak = fraction;
+  if (fraction > s.motionPeak) {
+    s.motionPeak = fraction;
+    // #412: remember WHEN each new running peak was reached (the time actually used for bucketing, the
+    // same fallback as minuteFor, so a non-finite `atMs` stores a real time). The first sample above ANY
+    // threshold is necessarily one that raised the running peak (every earlier sample was at or below that
+    // threshold, so the peak was still at or below it), so a consumer can find "the first frame over my
+    // threshold" from this list without the tracker knowing any threshold: the tracker stays
+    // threshold-free and wakeWatcher applies the SAME MOTION_ACTIVE that defines `active`. The list is
+    // short (one entry per new maximum, not per frame). recordMotionOut records nothing: out-of-bed
+    // movement does not make a minute active, so it cannot start a wake.
+    s.motionRises.push({ atMs: Number.isFinite(atMs) ? atMs : Date.now(), value: fraction });
+  }
   s.motionFrames++;
   s.observedMotionFrames++;
   stageFrame(cameraId, s, sample, fraction, 'motion');
@@ -333,7 +354,11 @@ export function recordSound(cameraId, overDb, atMs = Date.now()) {
   s.soundSum += overDb;
   s.soundSumSq += overDb * overDb;
   s.soundValues.push(overDb);
-  if (overDb > s.soundPeak) s.soundPeak = overDb;
+  if (overDb > s.soundPeak) {
+    s.soundPeak = overDb;
+    // #412: same idea as recordMotion's motionRises (peak-raising samples only, time actually used).
+    s.soundRises.push({ atMs: Number.isFinite(atMs) ? atMs : Date.now(), value: overDb });
+  }
   s.soundWindows++;
 }
 
@@ -378,6 +403,10 @@ function closeMinute(cameraId, s, notify = true) {
         bucketStart,
         motionPeak: s.motionFrames ? s.motionPeak : null,
         soundPeak: s.soundWindows ? s.soundPeak : null,
+        // #412: additive. Copies, so a listener cannot change the slot, which is still written to the row
+        // afterwards. `[]` for an empty channel; wakeWatcher derives the wake's first active frame from these.
+        motionRises: s.motionRises.map((r) => ({ ...r })),
+        soundRises: s.soundRises.map((r) => ({ ...r })),
       });
     } catch (err) {
       logger.error(`[activity] minute listener failed for ${cameraId}: ${err.message}`);

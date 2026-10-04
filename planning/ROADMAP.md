@@ -886,8 +886,9 @@ no clock. Every threshold in it came from ONE house's runs (Stage 1: night, over
   later). ⚠️ It reads NO sampler or analysis coverage — the "must name coverage" requirement above is
   DEFERRED with Stage B (keying by the PTS-derived observation time, which needs samples held for
   FINALIZE_MS and a sound-leg hook that does not exist). Its second acceptance criterion ("wake-clip
-  timestamps line up") is deferred to #412: the wake anchor stays at the minute's END so the 23-63 s ring
-  holds it. KNOWN-ISSUES.md "The sleep timeline's minutes are the minutes the samples arrived in".
+  timestamps line up") was deferred to #412 and is done there: the clip is anchored on the first active frame,
+  clamped to the ring's real footage (the #447 anchor at the minute's END was the interim, so the 23-63 s ring
+  held it). KNOWN-ISSUES.md "The sleep timeline's minutes are the minutes the samples arrived in".
 - **#452** confirmation across an outage — **BUILT** on branch `fix/452-confirmation-across-outage` (T2, plan v2,
   2026-10-03). Scope A only: a frame that arrives after a GAP (`createFrameGapDetector` in `bedTransitionRules.js`:
   floor 1500 ms = `ACTIVE_GRACE_MS`, x5 the 9th-longest of the last 16 intervals once 9 are held, all chosen not measured) restarts a

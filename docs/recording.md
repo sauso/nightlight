@@ -75,7 +75,16 @@ that gap without making alerts noisier.
   validated elsewhere). See "A wake recording does not bridge a gap in the readings" in
   [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
 - The clip starts at the **beginning** of the wake-up, not when it was confirmed — the opening is the
-  part that explains why.
+  part that explains why. Precisely: it starts 3 seconds before the first frame that showed movement or
+  noise (the same threshold that makes a minute count as active on the sleep timeline; sound counts as
+  well as movement), or at the oldest footage the buffer still holds, if that is later. A buffer of about
+  70 seconds or more always reaches the first frame; with a shallower one the clip starts up to roughly a
+  minute minus the buffer depth after it (about 26 seconds late with a 38 second buffer, about 41 with a 23
+  second one). The buffer's depth comes from the clip pre-roll and post-roll and the on-demand pre-roll
+  settings: 23 seconds at the smallest clip settings, 38 on the defaults with on-demand recording off, 63
+  with it on, and more with larger settings. The figures are derived, approximate to about 4 seconds, not measured. The clip's recorded start is its real
+  first frame, so it can be a few seconds before the wake's minute on the timeline; the review page still
+  matches it to that wake. See "Where a wake clip starts" in [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
 
 **Settings → Recording → Wake clips**
 

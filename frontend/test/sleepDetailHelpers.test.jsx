@@ -165,6 +165,15 @@ describe('clipForWake — which recording belongs to a wake', () => {
     expect(clipForWake([{ id: 2, started_at: '2026-08-30 01:56:59' }], WAKE_START, WAKE_END)).toBeNull();
   });
 
+  it('NON-REGRESSION (#412): a clip that opens 3 s before its wake\'s first minute is still paired with it', () => {
+    // Not a claim test: this passes on the code before #412 too, and is here so it stays true. Since #412 the
+    // server anchors a wake clip on the first moving or noisy FRAME, and a clip's started_at is its real start
+    // (frame - 3 s), which for a frame in the first seconds of a minute is a few seconds BEFORE the wake's
+    // timeline minute. The +-3 minute margin absorbs it; a tightened margin would orphan those clips.
+    const clips = [{ id: 11, started_at: '2026-08-30 01:59:57' }]; // WAKE_START is 02:00:00
+    expect(clipForWake(clips, WAKE_START, WAKE_END)?.id).toBe(11);
+  });
+
   it('⚠️ takes the FIRST match in the list, which two close wakes can share', () => {
     // Pinned because it is a real consequence, not an accident of the fixture: the search is a plain
     // `find`, so if two wakes fall within a few minutes of each other the same clip satisfies both and
