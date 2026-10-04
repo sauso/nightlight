@@ -6895,7 +6895,7 @@
     "replace": "      if (!s.notified && (all || future || end + GRACE_MS <= now)) closeMinute(cameraId, s);",
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
-    "namePattern": "hold point is at most 16 s"
+    "namePattern": "anchored no later than the minute's end, and fits the ring"
   },
   {
     "label": "#447 A09: no clamp, a small backward clock step re-baselines instead",
@@ -7102,7 +7102,7 @@
     "replace": "  const at = bucketMs(bucketStart);",
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
-    "namePattern": "hold point is at most 16 s"
+    "namePattern": "anchored no later than the minute's end, and fits the ring"
   },
   {
     "label": "#447 A50 (fix round 1): a sample may join a minute already told to the listeners (a backward step re-lives it: the row and the payload disagree)",
@@ -7192,7 +7192,7 @@
     "replace": "  const at = bucketMs(bucketStart) + 2 * MINUTE_MS;",
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
-    "namePattern": "hold point is at most 16 s"
+    "namePattern": "anchored no later than the minute's end, and fits the ring"
   },
   {
     "label": "#447 A60 (fix round 1): the wake run is anchored 30 s after the minute's end",
@@ -7201,7 +7201,7 @@
     "replace": "  const at = bucketMs(bucketStart) + MINUTE_MS + 30000;",
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
-    "namePattern": "hold point is at most 16 s"
+    "namePattern": "anchored no later than the minute's end, and fits the ring"
   },
   {
     "label": "#447 A61 (fix round 1): a re-baseline closes the step's OWN minute (every later sample of it is clamped into the next)",
