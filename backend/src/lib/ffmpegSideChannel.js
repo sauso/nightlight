@@ -153,8 +153,9 @@ const ASHOWINFO_RECORD = new RegExp(
 // `checksum:AAAAAAAAno frame!` (a cut inside the digits with foreign text glued on) is not salvaged. The end
 // of the line is deliberately NOT accepted either (round-1 review): it is unreachable in real data (the first
 // call always ends with its own space, and the line buffer strips only a `\r`), and refusing it keeps the
-// pre-#573 behaviour (a lost record) for any line that does not end in that space. Everything before `checksum:` must still match, so a cut anywhere before it stays a lost
-// record and still opens the hole, exactly as before.
+// pre-#573 behaviour (a lost record) for any line that does not end in that space. Everything before
+// `checksum:` must still match, so a cut anywhere before it stays a lost record and still opens the hole,
+// exactly as before.
 //
 // What is NOT claimed: (1) a cut INSIDE the 8 hex digits followed by hex-looking foreign text can salvage a
 // wrong CHECKSUM, which nothing reads (the five fields the clock reads were right in every case of a
