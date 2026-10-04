@@ -61,7 +61,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   seconds or more reaches the first frame, a shallower one starts the clip up to about a minute minus its depth
   after the first frame (roughly 22 seconds with a 38 second buffer, 37 with a 23 second one; derived, about 4
   seconds either way). A clip is not anchored earlier than the footage the buffer really holds (that would leave
-  nothing to cut and fail it); where the buffer has a gap that leaves nothing at the first frame, the old start
+  nothing to cut and fail it); where the buffer has a gap so that no footage at all falls in the clip's window, the old start
   (the end of the first active minute) is used, as before. The log says when the buffer cost the opening: `[wake]
   "<camera>" the buffer reaches back only to N s after the first movement: the clip starts there`. The clip's
   recorded start is the clip's planned first frame (3 seconds before the first moving or noisy one; with an almost empty buffer, up to 3 seconds before the first footage it holds), so it can be a few seconds before the wake's minute on the

@@ -284,6 +284,10 @@ export function handleMinute(payload) {
       // extractClip's selection is empty and the row fails, where today's anchor (`at`) would have been cut. So
       // an anchor earlier than `at` is kept only when the same selection extractClip will make (shared
       // function, clipRecorder.selectRingSegments) finds footage for it now; otherwise today's anchor stands.
+      // What this proves, and what it does not (Codex, round 1): the WINDOW holds some footage, not that footage
+      // exists AT the first frame (footage resuming later in the window keeps the early anchor and the cut begins
+      // where the footage does). And it is evaluated now with today's wake_clip_seconds: an admin changing that
+      // setting before the capture, on a ring with such a hole, can leave the early anchor with an empty window.
       if (anchor < at) {
         const { clipSeconds } = getWakeClipSettings();
         if (!ringHasFootageFor(cameraId, { at: anchor, preRollSec: WAKE_CLIP_LEAD_SEC, postRollSec: clipSeconds })) {
@@ -314,9 +318,10 @@ export function handleMinute(payload) {
         // by the lead-in), nor when there was no frame to compare against, nor when the ring had no closed
         // segment to measure (`oldest` null: the anchor is then `at` for lack of information, and the line
         // would claim a buffer depth nobody measured).
-        if (f != null && oldest != null && anchor - leadMs > f) {
-          // Whole seconds, and no line for a loss that rounds to 0 s (it would read "reaches back only to 0 s
-          // after the first movement", which says nothing a person can act on).
+        if (f != null && oldest != null) {
+          // Whole seconds, and no line for a loss that rounds to 0 s or below (a clip that still opens at or
+          // before the movement has lost nothing; a 0 s line would read "reaches back only to 0 s after the
+          // first movement", which says nothing a person can act on).
           const lostSec = Math.round((anchor - leadMs - f) / 1000);
           if (lostSec >= 1) {
             logger.info(

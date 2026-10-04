@@ -845,6 +845,18 @@ describe('★ #412 — the wake clip is anchored on the first active frame, clam
       });
     }
 
+    test('a ring whose footage resumes INSIDE the clip\'s window (after the first frame) keeps the early anchor: the post-roll side of the window counts (Codex, round 1)', async () => {
+      db.prepare("UPDATE settings SET wake_clip_seconds = 30 WHERE id = 'app'").run();
+      // Footage up to M, nothing until M + 20 s, then continuous. The first frame is at M + 10 s: the clip's window is
+      // [M + 3 s, M + 44 s], which holds the resumed footage, so extractClip finds something and the clip is cut
+      // (from M + 18 s: its offset clamps to the footage; the recorded start is earlier than the footage, which is the
+      // documented limit). A check that ignored the post-roll (window ending at the first frame) would call this a hole.
+      const r = oneRun({ ring: { mtimeOffsets: [-2000, 0, ...every2s(20_000, 60_000)] }, rises: [[10_000, MOTION_ACTIVE + 0.05]] });
+      assert.equal(r.run.startMs, r.M + 10_000, 'the early anchor is kept');
+      const [atAnchor] = await trySelect([r.run.startMs]);
+      assert.equal(atAnchor, 'selected', 'and extractClip finds footage for it');
+    });
+
     test('control for the gapped ring: the SAME first frame on a continuous ring is anchored at the frame', () => {
       db.prepare("UPDATE settings SET wake_clip_seconds = 30 WHERE id = 'app'").run();
       const r = oneRun({ ring: { mtimeOffsets: every2s(-4000, 60_000) }, rises: [[10_000, MOTION_ACTIVE + 0.05]] });

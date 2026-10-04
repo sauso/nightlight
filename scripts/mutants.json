@@ -11369,19 +11369,19 @@
     "namePattern": "#412 — the wake clip is anchored|C7 \\(#412\\)|#447"
   },
   {
-    "label": "#412 M-412-33: the buffer line is logged whenever the anchor is after the frame (`anchor > f`)",
+    "label": "#412 M-412-33: the buffer line counts a loss that rounds to 1 s as nothing (`lostSec > 1`; replaces the old `anchor > f` mutant, which the 0 s guard made equivalent)",
     "file": "backend/src/lib/wakeWatcher.js",
-    "find": "if (f != null && oldest != null && anchor - leadMs > f) {",
-    "replace": "if (f != null && oldest != null && anchor > f) {",
+    "find": "if (lostSec >= 1) {",
+    "replace": "if (lostSec > 1) {",
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
     "namePattern": "C10 —|C5 —"
   },
   {
-    "label": "#412 M-412-34: the buffer line is logged when the clip opens exactly at the movement (`>=`)",
+    "label": "#412 M-412-34: the buffer line is logged for a clip that opens before the movement (any loss, even negative: the guard is dropped to `lostSec >= -99`)",
     "file": "backend/src/lib/wakeWatcher.js",
-    "find": "if (f != null && oldest != null && anchor - leadMs > f) {",
-    "replace": "if (f != null && oldest != null && anchor - leadMs >= f) {",
+    "find": "if (lostSec >= 1) {",
+    "replace": "if (lostSec >= -99) {",
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
     "namePattern": "C10 —|C5 —"
@@ -11389,8 +11389,8 @@
   {
     "label": "#412 M-412-35: the buffer line is logged even when the ring had no footage to measure",
     "file": "backend/src/lib/wakeWatcher.js",
-    "find": "if (f != null && oldest != null && anchor - leadMs > f) {",
-    "replace": "if (f != null && anchor - leadMs > f) {",
+    "find": "if (f != null && oldest != null) {",
+    "replace": "if (f != null) {",
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
     "namePattern": "C10 —|C5 —"
@@ -11398,8 +11398,8 @@
   {
     "label": "#412 M-412-36: the buffer line is logged for a payload with no first frame",
     "file": "backend/src/lib/wakeWatcher.js",
-    "find": "if (f != null && oldest != null && anchor - leadMs > f) {",
-    "replace": "if (oldest != null && anchor - leadMs > f) {",
+    "find": "if (f != null && oldest != null) {",
+    "replace": "if (oldest != null) {",
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
     "namePattern": "C10 —|C5 —|C8 —"

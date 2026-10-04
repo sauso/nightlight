@@ -554,9 +554,12 @@ buffer still holds if that is later.
 - **How late, by buffer depth.** A continuous buffer of about 70 seconds or more reaches the first frame. With
   less, the clip starts up to roughly a minute minus the buffer depth after it: about 22 seconds after the first
   frame with a 38 second buffer, about 37 with a 23 second one (the same figure the log line below prints, on the
-  day). As an example, a 63 second buffer (on-demand Record on) is nearly exact. If the buffer has a gap that
-  leaves nothing at the first frame (the motion check can read a different stream from the one that is
-  buffered), the clip falls back to the old start, the end of the first active minute. These are
+  day). As an example, a 63 second buffer (on-demand Record on) is nearly exact. If the buffer has a gap so
+  that NO footage at all falls in the clip's window (the motion check can read a different stream from the one
+  that is buffered), the clip falls back to the old start, the end of the first active minute; footage that
+  resumes later inside the window keeps the early start, and the cut then begins where the footage does.
+  Changing the wake clips' "Clip length" setting while a wake is still being detected can, on such a buffer, leave the early start
+  with an empty window and fail that one clip. These are
   derived, not measured, and approximate to about 4 seconds (a 2 second segment plus the 2 second tick that
   prunes the buffer). When the buffer cost the opening, the log says so once per wake: `[wake] "<camera>" the
   buffer reaches back only to N s after the first movement: the clip starts there`. A deeper buffer for wake
