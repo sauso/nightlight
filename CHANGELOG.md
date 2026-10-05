@@ -87,9 +87,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   server started, is a minute the watcher did not see, exactly as on the timeline: no progress toward starting
   to watch, not activity even when loud, and a pause inside a wake like any other. A wake in progress still
   ends at the 4th minute without activity, the same minute 4 quiet minutes would end it, and the log then says
-  `run ended (no video for N min)`. A camera with no video at all keeps using its sound, as before. In about
-  30 days of stored minutes from two cameras in one house (measured 2026-10-05) there were 263 such minutes in
-  one database and 807 in the other. Known limits, in KNOWN-ISSUES: a camera already stalled when the
+  `run ended (video not observed; readings N min apart)`; if the server's clock steps back during a stall, the
+  first stalled minute that shows the step ends the run (`run ended (the clock went back)`), as a minute that
+  was read always did. A camera with no video at all keeps using its sound, as before. In about 30 days of
+  stored minutes from two cameras in one house (measured 2026-10-05) there were 263 such minutes in one
+  database (97 of them loud enough to count as activity) and 807 in the other (251 loud). Known limits, in
+  KNOWN-ISSUES: a camera already stalled when the
   server starts counts as having no video until its first frame; a minute made only of repeated frames still
   counts as watched live (no such minute in the stored data); a child crying through a stall is not recorded
   as a wake; the bed in/out rules are unchanged. Details in `docs/recording.md`. Nothing here assumes a

@@ -12294,7 +12294,7 @@
   {
     "label": "#588 M-588-15: an unobserved minute is a bare early return (it never ends the run: the hold waits for the 20-minute sweep)",
     "file": "backend/src/lib/wakeWatcher.js",
-    "find": "endRunIfGapBroken(false, `no video for ${Math.round(sinceObservedMs / MINUTE_MS)} min`);",
+    "find": "endRunIfGapBroken(false, `video not observed; readings ${Math.round(sinceObservedMs / MINUTE_MS)} min apart`);",
     "replace": "/* #588 mutant: a bare return */",
     "expect": "killed",
     "tests": [
@@ -12364,19 +12364,19 @@
     "note": "Same find as #448 M3 (selected by the #448 controls); this one is scored on the #588 tests alone."
   },
   {
-    "label": "#588 M-588-21: the unobserved path logs the observed path's reason (\"readings N min apart\")",
+    "label": "#588 M-588-21: the unobserved path drops \"video not observed\" (its line reads exactly like an outage on the observed path)",
     "file": "backend/src/lib/wakeWatcher.js",
-    "find": "no video for ${",
+    "find": "video not observed; readings ${",
     "replace": "readings ${",
     "expect": "killed",
     "tests": [
       "wake-watcher.test.js"
     ],
     "namePattern": "R588-W2(a|b):",
-    "note": "Log-only: the sound readings kept arriving during a stall, so \"readings N min apart\" would be false (Opus, plan review)."
+    "note": "Log-only: sound readings kept arriving during the stall, so the line must say the picture, not the readings, was missing (Opus, plan review)."
   },
   {
-    "label": "#588 M-588-22: N in \"no video for N min\" counts from the run's last ACTIVE minute instead of the last observed reading",
+    "label": "#588 M-588-22: N in \"video not observed; readings N min apart\" counts from the run's last ACTIVE minute instead of the last observed reading",
     "file": "backend/src/lib/wakeWatcher.js",
     "find": "const sinceObservedMs = at - st.lastAt;",
     "replace": "const sinceObservedMs = at - st.run?.lastActiveMs;",
@@ -12432,5 +12432,53 @@
     ],
     "namePattern": "R588-T1:",
     "note": "Validates the harness for the #588 tracker mutants. If this is ever KILLED, no other #588 result in the run means anything."
+  },
+  {
+    "label": "#588 M-588-26: an unobserved minute with an OLDER label no longer ends the run (a backward clock step during a stall keeps the stir's ring hold)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (st.run && st.lastAt != null && at < st.lastAt) endRun(cameraId, st, st.run.captured ? null : 'the clock went back');",
+    "replace": "/* #588 mutant: no backward-step check on the unobserved path */",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R588-W(6|9):",
+    "note": "Code review round 2 (Opus, verified by running): the 9d4e370/2a02351 behaviour. The gap rule's arithmetic is negative across a backward step and the sweep's `now - lastActiveMs` is too, so the hold stayed for about the depth of the step."
+  },
+  {
+    "label": "#588 M-588-27: an unobserved minute with the SAME label as the last observed one ends the run (`<` becomes `<=`)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "at < st.lastAt) endRun(cameraId, st, st.run.captured ? null : 'the clock went back');",
+    "replace": "at <= st.lastAt) endRun(cameraId, st, st.run.captured ? null : 'the clock went back');",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R588-W6:",
+    "note": "The ordering guard ignores an equal label rather than treating it as a step back; W6 delivers an unobserved minute with the last observed label and expects the run intact."
+  },
+  {
+    "label": "#588 M-588-28: a run ended by a backward step on the unobserved path logs nothing (the reason is dropped)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "endRun(cameraId, st, st.run.captured ? null : 'the clock went back');",
+    "replace": "endRun(cameraId, st, null);",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R588-W9:",
+    "note": "Log-only. Distinct from #448 M11/W4, whose find is the ordering guard's `st.run?.captured` spelling: the unobserved branch writes `st.run.captured` (it already checked `st.run`) so both anchors stay unique."
+  },
+  {
+    "label": "#588 M-588-29: the unobserved path claims an outage again (\"no video for N min\", the first wording)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "video not observed; readings ${Math.round(sinceObservedMs / MINUTE_MS)} min apart",
+    "replace": "no video for ${Math.round(sinceObservedMs / MINUTE_MS)} min",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R588-W2(a|b):",
+    "note": "Code review round 2 (Opus): a forward clock excursion logged `no video for 61 min`, claiming an outage the watcher cannot see."
   }
 ]

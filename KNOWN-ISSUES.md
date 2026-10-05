@@ -775,15 +775,23 @@ one moves both. They are constants, not settings, so there is no default to chan
   no video at all (its sound counts, quiet minutes help it start watching) until its first frame arrives; and a
   camera whose motion detector is stopped on purpose while its sound detector keeps running reads as stalled
   for as long as that lasts. Inside a tracked child's sleep window the motion detector runs for the whole
-  window, so that takes a settings change in the middle of the night.
+  window, so that takes a settings change in the middle of the night. A narrower case of the same limit: if the
+  server's clock steps back to before the camera's first frame since the server started, the minutes it re-lives
+  before that time are not recognised as a stall while the camera stays stalled (once any frame arrives after the
+  step, the minutes after it are). That can only happen within about the depth of the step after the server
+  starts: a step back of one hour, say, in the server's first hour.
 - **How often a stall with live sound happened, before #588 changed it**: over every stored minute of the two
   cameras of one house (measured 2026-10-05; about 30 days, inside the sleep window or not), minutes with sound
-  but no video on a camera that had had video before: 263 in the production database, all on one camera (89 of
-  them louder than 8 dB over ambient, on 2 calendar days in UTC), and 807 in the staging one (806 on one camera,
-  212 of them loud, on 2 days, and 1 on the other). The watcher read each as watched: a quiet one counted toward
-  the 15 minutes, a loud one as activity. That count reads the stored rows by the sleep timeline's own
-  definition, not the live outcome: the stored frame count is decided a few seconds after the live one, so the
-  two can differ by a minute at the edge of a stall. Unknown on any other install.
+  but no video on a camera that had had video before: 263 in the production database, all on one camera (97 of
+  them louder than 6 dB over ambient, the threshold that makes a minute active, on 2 calendar days in UTC), and
+  807 in the staging one (806 on one camera, 251 of them loud, on 2 days, and 1 on the other). The watcher read
+  each as watched: a quiet one counted toward the 15 minutes, a loud one as activity. That count reads the stored
+  rows, not what the watcher saw live, though both decide from the same input: a stored minute has no movement
+  reading exactly when no frame at all arrived in it, which is what the watcher checks. They can differ in two
+  ways. "Had video before" in the count looks back over all stored days, while the watcher forgets at every
+  server restart, so a stall that was already going on when the server restarted (a deploy, for example) is in
+  the count but not flagged live until the camera's first frame. And a minute of nothing but repeated frames is
+  unwatched in the stored rows but watched live (next point; none measured). Unknown on any other install.
 - **A minute made only of repeated frames still counts as watched live.** When a camera stalls, ffmpeg fills
   the gap by repeating the last real frame, and the sleep timeline leaves out frames that are later proven to be
   repeats (a minute of nothing but repeats is unwatched there). The live watcher decides when the minute ends,
@@ -803,7 +811,9 @@ one moves both. They are constants, not settings, so there is no default to chan
   ordinary clock correction) are absorbed before they reach the watcher and change nothing. A watcher still
   settling also restarts its count; one that is already armed stays armed. The sleep timeline merges the
   repeated minutes; the watcher does not, so it can lose at most the one run (and a clip) that a step of the
-  server's clock interrupted.
+  server's clock interrupted. Since issue #588 the step also ends the run when the first minute that shows it is
+  a minute with sound but no video (a stall), with the same log line (`run ended (the clock went back)`); the
+  settling count is restarted by the next minute that was actually read, as before.
 - **A clock step can release the ring hold of a clip still being cut.** The run ended by an older label, or
   replaced by an active label that jumps far forward, gives up its ring hold even if its clip is still being
   extracted. It needs a step of more than about 2 minutes within about a minute of a wake's 5th active
@@ -816,7 +826,9 @@ one moves both. They are constants, not settings, so there is no default to chan
   receiving readings is ended by the rule above, not by the sweep. Since issue #588 that includes a camera whose
   video stalled while its sound kept arriving: each such minute still applies the rule, so the run and its ring
   hold end at the 4th minute without activity, exactly when 4 quiet minutes would have ended them, not when the
-  video returns or the sweep runs.
+  video returns or the sweep runs; and if the server's clock steps back during the stall, at the first such
+  minute that shows the step (the sweep could not: after a backward step the run's last active minute lies in
+  the future of the clock).
 
 **What to do:** nothing. In the log, `[wake] "<camera>" settled — watching for wakes` marks the start of
 watching. No such line all night means either that the camera never had 15 unbroken minutes, or that the
@@ -844,8 +856,9 @@ and no `settled` line means the child never had 15 quiet minutes, the watcher wa
 before, or only the silent cases above applied. A
 run dropped at a gap logs `run ended (readings N min apart)` when that run had taken a ring hold (N is the
 distance between the two readings, which is also what a forward jump of the server's clock looks like); a run
-ended by a video stall logs `run ended (no video for N min)` instead (since issue #588; N is the minutes since the
-last observed reading, and the line does not say "readings apart" because the sound readings kept arriving); a run
+ended by a video stall logs `run ended (video not observed; readings N min apart)` instead (since issue #588; N is
+the distance in minutes between the last observed reading and the stalled minute that ended the run; it says what
+is known and no more, because a forward jump of the server's clock looks the same as a stall that long); a run
 that already captured a clip logs nothing when it ends, and neither does a run that never took a ring hold.
 
 ## A muted or digitally silent microphone is recorded as a quiet room

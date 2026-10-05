@@ -2291,7 +2291,7 @@ describe('#588: a minute with sound but no video (videoUnobserved) is a hole, no
     }
 
     for (const [what, sound] of [['quiet', 0], ['LOUD', LOUD]]) {
-      test(`R588-W2a: ${WAKE_ACTIVE_MIN - 1} active, then ${what} unobserved minutes: released at the 4th, logged "no video for 4 min"`, () => {
+      test(`R588-W2a: ${WAKE_ACTIVE_MIN - 1} active, then ${what} unobserved minutes: released at the 4th, logged "video not observed; readings 4 min apart"`, () => {
         try {
           heldRun(WAKE_ACTIVE_MIN - 1);
           for (let k = 1; k <= 3; k++) {
@@ -2304,17 +2304,19 @@ describe('#588: a minute with sound but no video (videoUnobserved) is a hole, no
           assert.deepEqual(holdOwners(CAM), [], 'and release its hold NOW: not at the next observed reading, not at the 20-minute sweep');
           const lines = runEndedLines();
           assert.equal(lines.length, 1, JSON.stringify(lines));
-          assert.match(lines[0], /\[wake\] "cam-1" run ended \(no video for 4 min\) — ring released, nothing recorded$/);
+          // The reason says what is known and no more (code review round 2, Opus): the picture was not observed, and the
+          // last observed reading is 4 label-minutes back. Not "no video for 4 min": a forward clock jump looks the same.
+          assert.match(lines[0], /\[wake\] "cam-1" run ended \(video not observed; readings 4 min apart\) — ring released, nothing recorded$/);
         } finally {
           wakeClips(true);
         }
       });
     }
 
-    test('R588-W2b: N in "no video for N min" counts from the last OBSERVED reading, and a missing minute before the stall is part of it', () => {
+    test('R588-W2b: N in "video not observed; readings N min apart" counts from the last OBSERVED reading, and a missing minute before the stall is part of it', () => {
       try {
-        // 4 active, 2 quiet, then unobserved: the 2nd unobserved minute is the 4th non-active one, and the video has been
-        // missing for 2 minutes (not 4: the quiet minutes were watched).
+        // 4 active, 2 quiet, then unobserved: the 2nd unobserved minute is the 4th non-active one, and the last observed
+        // reading is 2 minutes back (not 4: the quiet minutes were watched).
         heldRun(WAKE_ACTIVE_MIN - 1);
         quiet();
         quiet();
@@ -2324,9 +2326,9 @@ describe('#588: a minute with sound but no video (videoUnobserved) is a hole, no
         assert.equal(stateOf().run, null);
         let lines = runEndedLines();
         assert.equal(lines.length, 1, JSON.stringify(lines));
-        assert.match(lines[0], /run ended \(no video for 2 min\)/);
+        assert.match(lines[0], /run ended \(video not observed; readings 2 min apart\)/);
         // 4 active, one minute with no payload at all, then unobserved: ended at the 3rd unobserved minute; the minute
-        // that sent nothing had no video either, so the line says 4.
+        // that sent nothing was not observed either, so the line says 4.
         stopAllSegmenters();
         _state().clear();
         clock = 0;
@@ -2339,7 +2341,7 @@ describe('#588: a minute with sound but no video (videoUnobserved) is a hole, no
         assert.equal(stateOf().run, null);
         lines = runEndedLines();
         assert.equal(lines.length, 1, JSON.stringify(lines));
-        assert.match(lines[0], /run ended \(no video for 4 min\)/);
+        assert.match(lines[0], /run ended \(video not observed; readings 4 min apart\)/);
       } finally {
         wakeClips(true);
       }
@@ -2416,6 +2418,10 @@ describe('#588: a minute with sound but no video (videoUnobserved) is a hole, no
   // labels, backward and forward label jumps, readings exactly AT the thresholds, rises, minutes out of tracking) is
   // replayed through handleMinute, and the watcher's whole state after every payload (asleep, quietRun, lastAt, the
   // run, the return value, the #590 limiter and the `[wake]` lines written) is compared with a GOLDEN TRACE.
+  // What the `[wake]` lines here cover: `settled`, `awake` and `settling restarted`. NOT the `run ended (...)` reasons:
+  // wake clips are off, so no run ever holds the ring and endRun logs nothing (code review round 2, Opus: an earlier
+  // version of this comment claimed otherwise). Those reason texts are pinned by #448 C11 and C17a-f (the observed
+  // path) and by R588-W2a, W2b, W6 and W9 (the unobserved path), each with a real segmenter holding the ring.
   // HOW THE GOLDEN WAS MADE: generated ONCE (2026-10-05) by this very test with R588_WRITE_GOLDEN=1, run in a scratch
   // copy whose backend/src was the pre-#588 code (dev ca51c3f, `git archive ca51c3f backend`), and committed as
   // test/fixtures/wake-watcher-588-golden.json. No old code runs in the suite. The write mode REFUSES to run against a
@@ -2554,33 +2560,82 @@ describe('#588: a minute with sound but no video (videoUnobserved) is a hole, no
     });
   });
 
-  test('R588-W6: an unobserved minute with an OLDER label changes nothing: it does not reset settling, end the run, or move lastAt', () => {
+  test('R588-W6: an unobserved minute with an OLDER label never resets settling or moves lastAt; with a run open it ends the run (the clock went back), as an observed one would', () => {
     for (let i = 0; i < 10; i++) quiet(); // labels 0-9
     const lastAt = stateOf().lastAt;
     clock = 4;
     unobserved(0); // a stale label: older than the last observed one
     clock = 10;
-    assert.equal(stateOf().quietRun, 10, 'a stale unobserved label was taken for a backward clock step');
+    assert.equal(stateOf().quietRun, 10, 'a stale unobserved label reset the settling count');
     assert.equal(stateOf().lastAt, lastAt, 'a stale unobserved label moved lastAt');
     quiet(); // label 10: the very next minute
     assert.equal(stateOf().quietRun, 11, 'the next observed minute saw a hole that is not there');
     assert.deepEqual(restartLines(), []);
 
+    // Armed, with a held run (code review round 2, Opus, verified by running): the ordering guard ends a run on an
+    // older OBSERVED label; an older UNOBSERVED label must end it too, or a backward clock step during a stall keeps
+    // the stir's ring hold for about the depth of the step (the 20-minute sweep cannot see it: `now - lastActiveMs`
+    // is negative). It leaves quietRun, lastAt and asleep alone: the next observed reading re-baselines them.
+    stopAllSegmenters();
     _state().clear();
     clock = 0;
-    settle(); // labels 0-14
-    for (let i = 0; i < 3; i++) moving(); // 15-17
-    const run = stateOf().run;
-    clock = 5;
-    unobserved(LOUD);
-    clock = 17;
-    unobserved(0); // the SAME label as the last active minute
-    clock = 18;
-    assert.equal(stateOf().run, run, 'a stale unobserved label ended the run');
-    assert.equal(run.activeCount, 3);
-    const results = [moving(), moving()];
-    assert.deepEqual(captures(results), [endMs(ONSET_QUIET_MIN)], 'the run went on to its 5th active minute and captured');
+    try {
+      wakeClips(true);
+      armSegmenterNow();
+      settle(); // labels 0-14
+      for (let i = 0; i < 3; i++) moving(); // 15-17
+      const run = stateOf().run;
+      const lastAtArmed = stateOf().lastAt;
+      assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE], 'precondition: the run holds the ring');
+      clock = 17;
+      unobserved(0); // the SAME label as the last observed one: not older, nothing ends
+      assert.equal(stateOf().run, run, 'an unobserved minute with the SAME label ended the run');
+      assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE]);
+      logger.clear();
+      clock = 5;
+      unobserved(LOUD); // older than the last observed label: the clock went back
+      assert.deepEqual(holdOwners(CAM), [], 'a stale unobserved label left the stir\'s ring hold in place');
+      assert.equal(stateOf().run, null, 'a stale unobserved label did not end the run');
+      assert.deepEqual(runEndedLines().map((l) => l.slice(l.indexOf('[wake]'))), ['[wake] "cam-1" run ended (the clock went back) — ring released, nothing recorded']);
+      assert.equal(stateOf().lastAt, lastAtArmed, 'lastAt moved');
+      assert.equal(stateOf().quietRun, 0, 'quietRun changed');
+      assert.equal(stateOf().asleep, true, 'the watcher was disarmed');
+    } finally {
+      wakeClips(true);
+    }
   });
+
+  // R588-W9 (code review round 2, Opus, verified by running): a backward clock step DURING a stall with live sound. The
+  // run is open and holding when the video stalls; the labels then step back. Before this round the unobserved branch
+  // only applied the gap rule, whose arithmetic is negative across a backward step, so the hold stayed for about the
+  // depth of the step (the old code, reading those minutes as watched, ended the run at the ordering guard).
+  for (const back of [5, 30, 60]) {
+    test(`R588-W9: a stall during a held run, then the clock steps back ${back} min: the run and its hold end at the first unobserved minute that shows the step`, () => {
+      try {
+        wakeClips(true);
+        armSegmenterNow();
+        settle(); // labels 0-14
+        moving(); // 15
+        moving(); // 16: a held run, two active minutes
+        const send = (idx) => handleMinute({
+          cameraId: CAM, bucketStart: labelFor(idx), motionPeak: null, soundPeak: LOUD, videoUnobserved: true,
+          motionRises: [], soundRises: [],
+        });
+        assert.equal(send(17), null); // the stall begins, in order
+        assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE], 'precondition: one stalled minute does not end the run');
+        const lastAt = stateOf().lastAt;
+        logger.clear();
+        assert.equal(send(18 - back), null); // the wall clock went back `back` minutes
+        assert.deepEqual(holdOwners(CAM), [], `the hold survived a ${back}-minute step back`);
+        assert.equal(stateOf().run, null);
+        assert.deepEqual(runEndedLines().map((l) => l.slice(l.indexOf('[wake]'))), ['[wake] "cam-1" run ended (the clock went back) — ring released, nothing recorded']);
+        assert.equal(stateOf().lastAt, lastAt, 'lastAt moved');
+        assert.equal(stateOf().asleep, true, 'disarmed');
+      } finally {
+        wakeClips(true);
+      }
+    });
+  }
 
   test('R588-W7: after a stall, the #590 restart line counts the minutes between the two OBSERVED readings', () => {
     for (let i = 0; i < 10; i++) quiet(); // labels 0-9
