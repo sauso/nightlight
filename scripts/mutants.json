@@ -1177,13 +1177,13 @@
   {
     "label": "wake: the occupancy witness window is capped",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt)",
-    "replace": "totalMinExt",
+    "find": "const to = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt);",
+    "replace": "const to = totalMinExt;",
     "expect": "killed",
     "tests": [
       "sleepAnalysis.test.js"
     ],
-    "note": "Uncapped, occupancy hours later vouches for a return that never happened. Survived a green suite until the cap test existed - and it is the same boundary the floor/round index defect lived on."
+    "note": "Uncapped, occupancy hours later vouches for a return that never happened. Survived a green suite until the cap test existed - and it is the same boundary the floor/round index defect lived on. Re-anchored by #598: the bare Math.min(...) now also caps bedQuietlyOccupiedFrom (as `witnessEnd`, its own mutant M-598-06), so the find includes `const to =` to stay unique."
   },
   {
     "label": "redact: no-op replacement publishes the password",
@@ -1388,13 +1388,13 @@
   {
     "label": "jitter: the window boundary is inclusive",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "<= JITTER_REENTRY_MS",
-    "replace": "< JITTER_REENTRY_MS",
+    "find": "&& txMs(t.created_at) - txMs(back.created_at) <= JITTER_REENTRY_MS",
+    "replace": "&& txMs(t.created_at) - txMs(back.created_at) < JITTER_REENTRY_MS",
     "expect": "killed",
     "tests": [
       "sleepAnalysis.test.js"
     ],
-    "note": "A tail at exactly JITTER_REENTRY_MS must still be treated as the same movement."
+    "note": "A tail at exactly JITTER_REENTRY_MS must still be treated as the same movement. Re-anchored by #598: the bare `<= JITTER_REENTRY_MS` had come to match 3 times (detectMidnightEpisodes' copy of the guard and its gap test), so this mutant ABORTED every `--only=jitter:` run and the inclusive-boundary test had no runnable mutant."
   },
   {
     "label": "jitter: the window is one minute, not wider",
@@ -1432,13 +1432,13 @@
   {
     "label": "jitter: a settling tail is believed without an occupied bed behind it",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "&& bedOccupiedFrom(txIdx(back.created_at)));",
+    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at)));",
     "replace": "&& true);",
     "expect": "killed",
     "tests": [
       "sleepAnalysis.test.js"
     ],
-    "note": "Same lesson as the reversal guard's own corroboration mutant: without it a spurious into_bed lets this guard reject a REAL departure and the night reports wake_at = null."
+    "note": "Same lesson as the reversal guard's own corroboration mutant: without it a spurious into_bed lets this guard reject a REAL departure and the night reports wake_at = null. Re-anchored by #598, which gave the guard its own quiet-only witness (bedQuietlyOccupiedFrom); the corroboration itself is unchanged in kind."
   },
   {
     "label": "jitter: control — a comment edit must change nothing",
@@ -1474,15 +1474,15 @@
     "note": "created_at has one-second resolution, so a tie is representable. It is the strongest case for the guard, not an exclusion."
   },
   {
-    "label": "jitter: the return is indexed with a hand-rolled floor instead of txIdx",
+    "label": "jitter: the return is indexed with a hand-rolled round instead of txIdx",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "&& bedOccupiedFrom(txIdx(back.created_at)));",
-    "replace": "&& bedOccupiedFrom(Math.floor((txMs(back.created_at) - analysisStartUtc.getTime()) / 60000)));",
+    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at)));",
+    "replace": "&& bedQuietlyOccupiedFrom(Math.round((txMs(back.created_at) - analysisStartUtc.getTime()) / 60000)));",
     "expect": "killed",
     "tests": [
       "sleepAnalysis.test.js"
     ],
-    "note": "This SURVIVED when a review tried it — the source comment claimed the convention and nothing checked it. txIdx currently rounds, so a return at :29 and one at :31 land on different minutes. When #260 flips it to floor, the wake path must not move silently."
+    "note": "This SURVIVED when a review first tried a hand-rolled conversion: the source comment claimed the convention and nothing checked it. It used to replace txIdx with a hand-rolled FLOOR, written while txIdx still rounded; since #260 txIdx floors, so that mutant became IDENTICAL to the code (an equivalent mutant marked killed, hidden because the `<= JITTER_REENTRY_MS` anchor aborted every jitter run). #598 re-anchored it on the new witness and made it a hand-rolled ROUND, the #260 defect coming back by hand: the txIdx test's witness sits exactly on SETTLING_WITNESS_MIN_QUIET, so a return at :31 indexed one minute late sees 5 quiet minutes, not 6."
   },
   {
     "label": "lingering motion: the next into_bed boundary is ignored",
@@ -11648,5 +11648,133 @@
     "expect": "killed",
     "tests": ["activityTracker.test.js"],
     "namePattern": "read ONCE per sample"
+  },
+  {
+    "label": "#598 M-598-01: the settling-tail witness goes back to bedOccupiedFrom (any motion, active minutes included)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at)));",
+    "replace": "&& bedOccupiedFrom(txIdx(back.created_at)));",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#598 C1:",
+    "note": "The whole fix reverted. The 2026-10-03 shape: a parent's ACTIVE minutes an hour after a real exit vouch for a stray into_bed 51 s before it, and the wake moves 07:12 -> 09:27."
+  },
+  {
+    "label": "#598 M-598-02: the quiet witness counts active minutes too (the quiet condition dropped)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (cribOccExt[i] === true && cribActExt[i] === false && ++still >= SETTLING_WITNESS_MIN_QUIET) return true;",
+    "replace": "if (cribOccExt[i] === true && ++still >= SETTLING_WITNESS_MIN_QUIET) return true;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#598 C1:",
+    "note": "C4: however many ACTIVE minutes the parent leaves (12 and 18 are tested), none may count. With them counted the 2026-10-03 night has 16 occupied minutes, well past 6."
+  },
+  {
+    "label": "#598 M-598-03: the quiet threshold is exclusive (`>` instead of `>=`)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "++still >= SETTLING_WITNESS_MIN_QUIET",
+    "replace": "++still > SETTLING_WITNESS_MIN_QUIET",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#598 C3:"
+  },
+  {
+    "label": "#598 M-598-04: the quiet threshold drops to 3 (OCCUPANCY_MIN_MINUTES reused)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const SETTLING_WITNESS_MIN_QUIET = 6;",
+    "replace": "const SETTLING_WITNESS_MIN_QUIET = 3;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#598 C3:",
+    "note": "Measured: 3 leaves three wrong skips in place (staging 2026-09-13 among them, 3 quiet minutes)."
+  },
+  {
+    "label": "#598 M-598-05: the quiet threshold rises to 8",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const SETTLING_WITNESS_MIN_QUIET = 6;",
+    "replace": "const SETTLING_WITNESS_MIN_QUIET = 8;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#598 C3:",
+    "note": "8 gives the same results as 6 on every stored night (4-10 are indistinguishable there), so this is killed by the boundary pair, not by data: the pair pins the number the comment states."
+  },
+  {
+    "label": "#598 M-598-06: the quiet witness window is not capped",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt);",
+    "replace": "const witnessEnd = totalMinExt;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#598 C5:"
+  },
+  {
+    "label": "#598 M-598-07: detectMidnightEpisodes' settlingBack stops believing an ACTIVE-only witness",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "        bedOccupiedFrom(txIdx(back.created_at))",
+    "replace": "        false",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#598 C7:",
+    "note": "C7: #598 changes the departure scan only. Switching settlingBack to the quiet witness cannot be written as a one-line mutant (cribOccExt is not in scope there), so this states its effect on C7's input, where the bed after the stray marker has no quiet minute: the witness says no. The C7 test then counts a 9-minute wake that the unchanged code does not."
+  },
+  {
+    "label": "#598 M-598-08: the settling-tail guard never believes a return (the witness is always false)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at)));",
+    "replace": "&& false);",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#598 C2:",
+    "note": "The over-correction C1 alone cannot see: the hostile twin (same stream, still sleeper behind it) must still skip the tail."
+  },
+  {
+    "label": "#598 M-598-09: the occupancy witness window is cut to 60 minutes",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const OCCUPANCY_WITNESS_MIN = 150;",
+    "replace": "const OCCUPANCY_WITNESS_MIN = 60;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#598 C10:",
+    "note": "The founding night (prod 2026-09-09) at its real density has its sixth quiet minute 133 minutes after the return; a shorter window loses it and reports an evening."
+  },
+  {
+    "label": "#598 M-598-10: the occupancy witness window is cut to 133 minutes (one short of the founding night)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const OCCUPANCY_WITNESS_MIN = 150;",
+    "replace": "const OCCUPANCY_WITNESS_MIN = 133;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#598 C10:",
+    "note": "Pins the source comment's 'at least 134 minutes' as a number, not a hope."
+  },
+  {
+    "label": "#598 M-598-11: an unobserved minute counts as a quiet occupied one (`!== false` / `!== true` instead of strict)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "cribOccExt[i] === true && cribActExt[i] === false",
+    "replace": "cribOccExt[i] !== false && cribActExt[i] !== true",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#598 C11:",
+    "note": "Issue #350's rule: a missing minute is neither quiet nor occupied. A 12-minute camera outage after a real exit would otherwise read as a still sleeper and skip the exit (07:12 -> 09:27 on the C1 fixture). A 12-minute gap exists in a stored night in both databases."
+  },
+  {
+    "label": "#598 M-598-12: the quiet witness window starts one minute before the return",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "for (let i = Math.max(from, 0); i < witnessEnd; i++) {",
+    "replace": "for (let i = Math.max(from - 1, 0); i < witnessEnd; i++) {",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#598 C12:",
+    "note": "The window's early end, pinned one unit under the threshold: 5 quiet minutes from the return's minute plus one quiet minute just before it (05:49 -> 08:30 if that minute counts)."
+  },
+  {
+    "label": "#598 M-598-13: the reversal guard is switched to the quiet witness too",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& bedOccupiedFrom(txIdx(u.created_at)));",
+    "replace": "&& bedQuietlyOccupiedFrom(txIdx(u.created_at)));",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#598 C13:",
+    "note": "#598 moves the settling-tail guard's witness only; reversedBy is deliberately unchanged. A return read only by ACTIVE minutes over a dead bed must still reverse the exit (07:40 -> 05:50 if switched)."
   }
 ]
