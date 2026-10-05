@@ -786,10 +786,12 @@ minutes of the camera's own minute labels (a backward clock step lets one more t
 that limit are counted onto the next line (`; K more since the last such line, the longest after M quiet
 minutes`), but a count still pending when the camera starts watching, or when its sleep window closes, is
 never printed. How to read a night: restart lines repeating about every 15 minutes with no `settled` line
-after them mean the strict rule is starving that camera (read the M values, not only whether lines appear:
-M close to 15 means it was one minute short each time); no restart line and no `settled` line means the child
-never had 15 quiet minutes, the watcher was still armed from the night before, or only the silent cases above
-applied. A
+after them mean holes keep sending that camera's count back to zero. Read the M values, not only whether lines
+appear: M close to 15 means one missing minute each time was all that stood between the camera and watching
+(the strict rule is what is in the way), while small M values say little on their own, because a restless
+child with active minutes in between would not have settled with every hole filled either. No restart line
+and no `settled` line means the child never had 15 quiet minutes, the watcher was still armed from the night
+before, or only the silent cases above applied. A
 run dropped at a gap logs `run ended (readings N min apart)` when that run had taken a ring hold (N is the
 distance between the two readings, which is also what a forward jump of the server's clock looks like); a run
 that already captured a clip logs nothing when it ends, and neither does a run that never took a ring hold.

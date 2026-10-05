@@ -11912,7 +11912,7 @@
   {
     "label": "#590 M-590-12: reset() keeps the held-back count",
     "file": "backend/src/lib/wakeWatcher.js",
-    "find": "st.restartLogAt = null;\n  st.restartsUnlogged = 0;",
+    "find": "st.restartLogAt = null;\r\n  st.restartsUnlogged = 0;",
     "replace": "st.restartLogAt = null;",
     "expect": "killed",
     "tests": [
@@ -11924,7 +11924,7 @@
   {
     "label": "#590 M-590-13: reset() keeps the longest held-back run",
     "file": "backend/src/lib/wakeWatcher.js",
-    "find": "st.restartsLongest = 0;\n}",
+    "find": "st.restartsLongest = 0;\r\n}",
     "replace": "}",
     "expect": "killed",
     "tests": [
@@ -12027,7 +12027,7 @@
     "label": "#590 M-590-22: the log block also clears the settling count (a behaviour change)",
     "file": "backend/src/lib/wakeWatcher.js",
     "find": "        st.restartLogAt = at;",
-    "replace": "        st.restartLogAt = at;\n        st.quietRun = 0;",
+    "replace": "        st.restartLogAt = at;\r\n        st.quietRun = 0;",
     "expect": "killed",
     "tests": [
       "wake-watcher.test.js"
@@ -12039,7 +12039,7 @@
     "label": "#590 M-590-23: the log block also forgets the last label (a behaviour change)",
     "file": "backend/src/lib/wakeWatcher.js",
     "find": "        st.restartLogAt = at;",
-    "replace": "        st.restartLogAt = at;\n        st.lastAt = null;",
+    "replace": "        st.restartLogAt = at;\r\n        st.lastAt = null;",
     "expect": "killed",
     "tests": [
       "wake-watcher.test.js"
