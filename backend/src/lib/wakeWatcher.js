@@ -48,9 +48,16 @@ const MINUTE_MS = 60 * 1000;
 // payload shows a hole longer than WAKE_GAP_MIN, so only a camera that sends NOTHING more reaches the sweep.
 const STALE_RUN_MS = 20 * 60 * 1000;
 const SWEEP_INTERVAL_MS = 60 * 1000;
+// #590: the `settling restarted` line (see the onset gate in handleMinute): at most once per camera per this long,
+// measured on the minute LABELS (the clock this function already uses), not on Date.now(). 15 minutes = the
+// `[activity]` counters line's cadence (activityTracker REPORT_MS) and the `[obs]` summary's, so the lines read
+// side by side and a camera that flaps all through its onset window cannot write a line a minute. Not
+// calibrated on any night: it bounds the worst case, and the restarts it suppresses are counted into the next
+// line instead of vanishing.
+const RESTART_LOG_MS = 15 * 60 * 1000;
 const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
-// camera_id -> { asleep, quietRun, run, lastAt }
+// camera_id -> { asleep, quietRun, run, lastAt, restartLogAt, restartsUnlogged, restartsLongest }
 // run = { startMs, activeCount, lastActiveMs, captured, holding }
 //   startMs = the clip's anchor (#412: first active frame, clamped to the ring); lastActiveMs = the END label of
 //   the last active minute (the bridge arithmetic and the stale-run sweep read it, so it is NOT the anchor)
@@ -59,12 +66,16 @@ const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 // minute with neither a motion frame nor a sound window (closeMinute: `hasSignal`), so an outage is visible
 // only as a jump in the labels. Cleared by reset() and by a new slot(): a window that opens again must not
 // measure from the night before.
+// restartLogAt / restartsUnlogged / restartsLongest (#590) are bookkeeping for the `settling restarted` log
+// line ONLY: the label (ms) of the last such line (null = none yet), how many restarts since then the rate
+// limit held back, and the most quiet minutes any of those had built up. Nothing in handleMinute's decisions
+// reads them; cleared by reset() like the rest, so a window that opens again starts a fresh limiter.
 const state = new Map();
 
 function slot(cameraId) {
   let st = state.get(cameraId);
   if (!st) {
-    st = { asleep: false, quietRun: 0, run: null, lastAt: null };
+    st = { asleep: false, quietRun: 0, run: null, lastAt: null, restartLogAt: null, restartsUnlogged: 0, restartsLongest: 0 };
     state.set(cameraId, st);
   }
   return st;
@@ -84,6 +95,9 @@ function reset(cameraId, st) {
   st.asleep = false;
   st.quietRun = 0;
   st.lastAt = null;
+  st.restartLogAt = null;
+  st.restartsUnlogged = 0;
+  st.restartsLongest = 0;
 }
 
 const cameraQ = db.prepare('SELECT id, name, child_id, disabled FROM cameras WHERE id = ?');
@@ -231,8 +245,43 @@ export function handleMinute(payload) {
     // days (#448 review): arming differed on exactly one night in four camera-months, 8 minutes later. Unknown on
     // any other install. KNOWN-ISSUES.md says the same. If that is too strict, the nightly 8-of-15 rule is one
     // function away; no new number needed.
+    // #590: what this hole is about to cost, read BEFORE the count is reset. Only a hole that took real progress
+    // away counts: with no quiet minutes yet there was nothing to lose, and an ACTIVE minute zeroes the count
+    // on its own, so the hole is not what cost the progress then.
+    const lostMin = missingMin > 0 && !active ? st.quietRun : 0;
     if (missingMin > 0) st.quietRun = 0;
     st.quietRun = active ? 0 : st.quietRun + 1;
+    // ★ #590: the restart is announced AFTER the count changed (the order the `settled` line below uses), and
+    // writes nothing the decisions read, so when the watcher arms is exactly what it was without this line.
+    // Why it exists: the strict rule above means a camera that drops a minute more often than about every
+    // 15 minutes never arms and records no wake clips, and until now that was SILENT: it looked the same in the
+    // log as a child who never settled. This line, repeating without a `settled` after it, is the evidence for
+    // whether the strict rule is too strict (KNOWN-ISSUES.md). Worded "readings N min apart" like the
+    // `run ended` line: a forward clock jump is indistinguishable from a hole in the labels.
+    // Rate limit (RESTART_LOG_MS) on the labels; `at < restartLogAt` lets a backward clock step through, or the
+    // line would stay silent for as long as the step is deep. What the limit holds back is not dropped: the
+    // next line carries how many and the longest quiet run among them, because the restart that matters most is
+    // the one that came 14 minutes after the last line, after 13 quiet minutes. A count still pending when the
+    // watcher arms or its window closes is never printed (documented).
+    if (lostMin > 0) {
+      if (st.restartLogAt == null || at - st.restartLogAt >= RESTART_LOG_MS || at < st.restartLogAt) {
+        const held =
+          st.restartsUnlogged > 0
+            ? `; ${st.restartsUnlogged} more since the last such line, the longest after ` +
+              `${st.restartsLongest} quiet minute(s)`
+            : '';
+        logger.info(
+          `[wake] "${camera.name}" settling restarted: readings ${elapsedMin} min apart ` +
+            `after ${lostMin} quiet minute(s)${held}`
+        );
+        st.restartLogAt = at;
+        st.restartsUnlogged = 0;
+        st.restartsLongest = 0;
+      } else {
+        st.restartsUnlogged++;
+        st.restartsLongest = Math.max(st.restartsLongest, lostMin);
+      }
+    }
     if (st.quietRun >= ONSET_QUIET_MIN) {
       st.asleep = true;
       st.quietRun = 0;

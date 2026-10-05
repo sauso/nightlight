@@ -11776,5 +11776,310 @@
     "tests": ["sleepAnalysis.test.js"],
     "namePattern": "#598 C13:",
     "note": "#598 moves the settling-tail guard's witness only; reversedBy is deliberately unchanged. A return read only by ACTIVE minutes over a dead bed must still reverse the exit (07:40 -> 05:50 if switched)."
+  },
+  {
+    "label": "#590 M-590-01: an ACTIVE minute after a hole is announced as a restart too",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "const lostMin = missingMin > 0 && !active ? st.quietRun : 0;",
+    "replace": "const lostMin = missingMin > 0 ? st.quietRun : 0;",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "The active minute zeroes the count by itself, so the hole is not what cost the progress."
+  },
+  {
+    "label": "#590 M-590-02: every quiet minute is treated as a hole that cost its progress",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "const lostMin = missingMin > 0 && !active ? st.quietRun : 0;",
+    "replace": "const lostMin = !active ? st.quietRun : 0;",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "Contiguous settling must log nothing."
+  },
+  {
+    "label": "#590 M-590-03: a hole of exactly one missing minute is not announced (`missingMin > 1`)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "const lostMin = missingMin > 0 && !active ? st.quietRun : 0;",
+    "replace": "const lostMin = missingMin > 1 && !active ? st.quietRun : 0;",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "Most holes on the saved snapshots are single missing minutes (#448)."
+  },
+  {
+    "label": "#590 M-590-04: a hole with no progress to lose is announced (the guard is `missingMin > 0 && !active` instead of `lostMin > 0`)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (lostMin > 0) {",
+    "replace": "if (missingMin > 0 && !active) {",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "Active, hole, quiet has nothing to lose: it would log 'after 0 quiet minutes'."
+  },
+  {
+    "label": "#590 M-590-05: the limiter's boundary is `>` (a line EXACTLY 15 minutes after the last is held back)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "at - st.restartLogAt >= RESTART_LOG_MS",
+    "replace": "at - st.restartLogAt > RESTART_LOG_MS",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "R590-4 holes 4 and 19 are exactly 15 minutes apart."
+  },
+  {
+    "label": "#590 M-590-06: the cadence is 14 minutes",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "const RESTART_LOG_MS = 15 * 60 * 1000;",
+    "replace": "const RESTART_LOG_MS = 14 * 60 * 1000;",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "R590-4 hole 33 is 14 minutes after the line at 19 and must be held back."
+  },
+  {
+    "label": "#590 M-590-07: the cadence is 16 minutes",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "const RESTART_LOG_MS = 15 * 60 * 1000;",
+    "replace": "const RESTART_LOG_MS = 16 * 60 * 1000;",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "R590-4 hole 19 is exactly 15 minutes after the first line and must log."
+  },
+  {
+    "label": "#590 M-590-08: a backward clock step is held back like any other restart (`at < restartLogAt` dropped)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": " || at < st.restartLogAt) {",
+    "replace": ") {",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "Without it a step back of N minutes silences the line for N minutes."
+  },
+  {
+    "label": "#590 M-590-09: the held-back count is never reset after a line",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "        st.restartsUnlogged = 0;",
+    "replace": "        /* held-back count never reset */",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "Eight spaces of indent make the find unique: reset() has the same statement at two."
+  },
+  {
+    "label": "#590 M-590-10: the longest held-back run is never reset after a line",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "        st.restartsLongest = 0;",
+    "replace": "        /* longest never reset */",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "R590-4's second window holds runs of 1-4 after a first window whose longest was 6."
+  },
+  {
+    "label": "#590 M-590-11: reset() keeps the label of the last restart line",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "st.restartLogAt = null;",
+    "replace": "/* reset keeps restartLogAt */",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "A window that opens again must not be rate-limited by the night before."
+  },
+  {
+    "label": "#590 M-590-12: reset() keeps the held-back count",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "st.restartLogAt = null;\n  st.restartsUnlogged = 0;",
+    "replace": "st.restartLogAt = null;",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "R590-9 holds a restart back, leaves the window, and expects no 'more' on the first line after re-entry."
+  },
+  {
+    "label": "#590 M-590-13: reset() keeps the longest held-back run",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "st.restartsLongest = 0;\n}",
+    "replace": "}",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "A stale longest only shows on a LATER line that carries a count (R590-9's last line: 1, not the 3 from before the reset)."
+  },
+  {
+    "label": "#590 M-590-14: the line counts the restart it is logging among the held-back ones",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "${st.restartsUnlogged} more since",
+    "replace": "${st.restartsUnlogged + 1} more since",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-"
+  },
+  {
+    "label": "#590 M-590-15: the line prints the held-back count as the longest run",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "`${st.restartsLongest} quiet minute(s)`",
+    "replace": "`${st.restartsUnlogged} quiet minute(s)`",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-"
+  },
+  {
+    "label": "#590 M-590-16: the longest held-back run is the LAST one, not the largest",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "st.restartsLongest = Math.max(st.restartsLongest, lostMin);",
+    "replace": "st.restartsLongest = lostMin;",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "R590-4's first window holds runs of 6 then 2."
+  },
+  {
+    "label": "#590 M-590-17: the longest held-back run is the SMALLEST",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "st.restartsLongest = Math.max(st.restartsLongest, lostMin);",
+    "replace": "st.restartsLongest = Math.min(st.restartsLongest || lostMin, lostMin);",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-"
+  },
+  {
+    "label": "#590 M-590-18: the line is always written with a 'more' clause, even for 0",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "st.restartsUnlogged > 0",
+    "replace": "true",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-"
+  },
+  {
+    "label": "#590 M-590-19: the line names the camera by its id, not its name",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "[wake] \"${camera.name}\" settling restarted",
+    "replace": "[wake] \"${cameraId}\" settling restarted",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "The neighbouring `settled` line uses the name."
+  },
+  {
+    "label": "#590 M-590-20: the line prints the number of MISSING minutes as the distance between readings",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "settling restarted: readings ${elapsedMin} min apart ",
+    "replace": "settling restarted: readings ${missingMin} min apart ",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-"
+  },
+  {
+    "label": "#590 M-590-21: the line prints the count AFTER the restart as the quiet minutes lost",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "after ${lostMin} quiet minute(s)${held}",
+    "replace": "after ${st.quietRun} quiet minute(s)${held}",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-"
+  },
+  {
+    "label": "#590 M-590-22: the log block also clears the settling count (a behaviour change)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "        st.restartLogAt = at;",
+    "replace": "        st.restartLogAt = at;\n        st.quietRun = 0;",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "The line must be bookkeeping beside the decision: R590-1 asserts quietRun 1, R590-10 compares every count with an independent model."
+  },
+  {
+    "label": "#590 M-590-23: the log block also forgets the last label (a behaviour change)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "        st.restartLogAt = at;",
+    "replace": "        st.restartLogAt = at;\n        st.lastAt = null;",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "Only R590-10 reads lastAt after every payload; the next label then reads as a first reading."
+  },
+  {
+    "label": "#590 M-590-24: the limiter's first-line check is dropped (equivalent)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "st.restartLogAt == null || at - st.restartLogAt",
+    "replace": "at - st.restartLogAt",
+    "expect": "equivalent",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "at - null is `at`, an epoch in ms, always >= 15 minutes: the first line logs either way."
+  },
+  {
+    "label": "#590 M-590-25: a new slot starts with restartLogAt 0 instead of null (equivalent)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "lastAt: null, restartLogAt: null,",
+    "replace": "lastAt: null, restartLogAt: 0,",
+    "expect": "equivalent",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "at - 0 is an epoch in ms, always >= 15 minutes: the first line logs either way. reset() sets null explicitly."
+  },
+  {
+    "label": "control: a comment edit in wakeWatcher.js must change nothing (#590)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "// #590: what this hole is about to cost, read BEFORE the count is reset.",
+    "replace": "// #590: what this hole is about to cost, read BEFORE the count is reset. [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "note": "Validates the harness. If this is ever KILLED, no other result in the run means anything."
   }
 ]

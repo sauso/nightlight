@@ -10,6 +10,18 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Added
+- **The log now says when a hole in a camera's readings sends the wake watcher's settling back to zero.**
+  Wake clips are only recorded once the watcher has seen 15 consecutive quiet minutes, and one missing minute
+  restarts that count, so a camera that drops a minute more often than about every 15 minutes never starts
+  watching and records no wake clips; until now that was silent, and looked the same in the log as a child who
+  never settled. A restart that cost real progress now logs `[wake] "<camera>" settling restarted: readings N
+  min apart after M quiet minutes`, **at most once per camera per 15 minutes**: restarts held back by that
+  limit are counted onto the next line (`; K more since the last such line, the longest after M quiet
+  minutes`), and one still pending when the camera starts watching or its window closes is not printed.
+  Nothing else changes: **when the watcher starts watching is exactly what it was**, no setting was added, and
+  a forward jump of the server's clock writes the same line as a dropout. Read it in KNOWN-ISSUES.md ("A wake
+  recording does not bridge a gap in the readings"); restart lines repeating with no `settled` line after them
+  are the evidence for whether the 15-consecutive-minutes rule is too strict (#590).
 - **A "WebRTC UDP Port" setting, so a second instance no longer needs a hand-typed MediaMTX override.**
   Running staging beside production on one server needs each instance on its own WebRTC UDP port, which
   meant adding `MTX_WEBRTCLOCALUDPADDRESS=:8190` yourself: a leading colon nothing explained, and in
