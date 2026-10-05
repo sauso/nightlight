@@ -69,7 +69,7 @@ const buckets = new Map();
 // one: when it is deliberately moved BACK (a clock step), slot() is what keeps a told minute closed.
 const lastClosed = new Map();
 
-// #588: camera_id -> the receipt time (ms: the same `usedAt` recordMotion files the frame under) of the FIRST raw
+// #588: camera_id -> the EARLIEST receipt time (ms: the same `usedAt` recordMotion files the frame under) of any raw
 // motion frame this process received for the camera, a repeat or a real one. It answers one question for
 // closeMinute: was a picture expected from this camera in this minute, i.e. had it delivered video by the minute's
 // END? A minute with sound but no frame on such a camera is a video stall (#369: the sound detector is a separate
@@ -79,9 +79,13 @@ const lastClosed = new Map();
 // minutes as quiet on purpose, and nothing in the schema says a camera is audio-only.
 // Why a TIME and not a plain "has had a frame" set (#588 plan review, Codex): the first frame can arrive after
 // minute M ended but before the tick that closes M (up to one 1 s tick later), and a set would then flag M, which
-// preceded all video, as a stall (pinned by R588-T12). Why the first ARRIVAL and not the smallest time: the same on a
-// clock that only moves forward; after a backward clock step the re-lived minutes before it read "no video
-// expected", which is the safe direction (the behaviour before #588).
+// preceded all video, as a stall (pinned by R588-T12). Why the SMALLEST time and not the first to arrive (code
+// review, Codex, fix round 1, verified by running): the two are the same on a clock that only moves forward, but
+// after a backward clock step the frames arrive stamped earlier than the first one. A frame at 20:00, the clock back
+// an hour, a frame at 19:00 and then sound only from 19:01: those minutes followed a frame delivered at 19:00, so
+// each is a stall, and the first arrival (20:00) left all 59 of them unflagged, an hour of stall read as watched
+// (R588-T14). The minimum answers "had a frame been delivered by this minute's end" on the clock the minutes are
+// labelled with.
 // Never forgotten while the process runs, and not tied to whether the motion detector is running (rejected in the
 // plan: it couples the tracker to the detector module). Known limits, in KNOWN-ISSUES.md: a camera already stalled
 // when the process starts reads as sound-only until its first frame; one whose motion detector is deliberately
@@ -343,8 +347,10 @@ export function recordMotion(cameraId, fraction, sample = null, atMs = Date.now(
   // the rise in the minute AFTER the one the sample was filed under, where wakeWatcher filters it out.
   const usedAt = Number.isFinite(atMs) ? atMs : Date.now();
   // #588: every raw frame counts, whatever its fraction and whether or not the observation clock will classify it
-  // (`sample` null): a camera booting into a stall delivers repeats first, and those are still its video.
-  if (!firstFrameMs.has(cameraId)) firstFrameMs.set(cameraId, usedAt);
+  // (`sample` null): a camera booting into a stall delivers repeats first, and those are still its video. The
+  // EARLIEST receipt time is kept, not the first to arrive (see firstFrameMs; R588-T14).
+  const prev = firstFrameMs.get(cameraId);
+  if (prev === undefined || usedAt < prev) firstFrameMs.set(cameraId, usedAt);
   const s = slot(cameraId, usedAt);
   s.motionSum += fraction;
   if (fraction > s.motionPeak) {

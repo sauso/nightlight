@@ -1610,7 +1610,7 @@ test('R588-T12: a minute that ENDED before the camera\'s first frame is not unob
     }
   }
   // The mirror: a camera that HAD video stalls for 19:01, and its video returns 0.2 s into 19:02, before the tick that
-  // closes 19:01. 19:01 is still a stall: it is the FIRST frame that says "this camera has video", not the latest one.
+  // closes 19:01. 19:01 is still a stall: it is the EARLIEST frame that says "this camera has video", not the latest one.
   at._resetActivityTrackerForTests();
   const seen = [];
   const off = at.onMinuteFlushed((e) => seen.push(e));
@@ -1646,4 +1646,30 @@ test('R588-T13: a clone-heavy minute that still holds one real frame is watched;
   // The contrast, stated where it is pinned: the nightly job reads the STORED observed count and calls 19:02 unwatched
   // (motion_frames 0), the live flag calls it watched. Step 0 (2026-10-05) found no such row on either database.
   assert.deepEqual(rowsOf('cam-1').map((r) => r.motion_frames), [1, 1, 0]);
+});
+
+test('R588-T14: the EARLIEST frame time counts, not the first to arrive: after the clock steps back an hour, the re-lived hour\'s sound-only minutes are still a stall', () => {
+  // Code review (Codex, fix round 1): a frame received at 20:00, then the wall clock steps back an hour and a frame
+  // arrives stamped 19:00, then 19:01-19:59 bring sound only. Keeping the first ARRIVAL (20:00:10) reads every one of
+  // those 59 minutes as "no video expected yet", so an hour of stall goes unflagged; the camera did deliver video
+  // before each of them (19:00:10), so each is a stall.
+  const seen = listenAll();
+  const T20 = M + 60 * MIN; // 20:00
+  at.recordMotion('cam-1', 0.1, null, T20 + 10_000);
+  at.flushActivity(T20 + MIN + 500); // 20:00 told
+  at.flushActivity(T20 + MIN + 8_000); // ...and written, so nothing of it is pending when the clock steps back
+  at.recordMotion('cam-1', 0.1, null, M + 10_000); // the clock stepped back: 19:00
+  at.flushActivity(M + MIN + 500);
+  for (let i = 1; i <= 59; i++) {
+    at.recordSound('cam-1', 1, M + i * MIN + 30_000);
+    at.flushActivity(M + (i + 1) * MIN + 500);
+  }
+  assert.equal(at.activityCounters('cam-1').rebaselined, 1, 'precondition: the tracker saw the hour-long step back');
+  const f = flags588(seen, 'cam-1');
+  assert.equal(f.length, 61, 'precondition: 20:00, 19:00 and the 59 re-lived minutes reached the listener');
+  assert.deepEqual(f.slice(0, 2), [['20:00', 0.1, false], ['19:00', 0.1, false]]);
+  const relived = f.slice(2);
+  assert.deepEqual(relived.map(([, peak]) => peak), Array(59).fill(null), 'precondition: sound only');
+  assert.deepEqual(relived.filter(([, , flag]) => flag !== true).map(([hhmm]) => hhmm), [],
+    'these minutes followed a frame received at 19:00:10, so each is a stall');
 });

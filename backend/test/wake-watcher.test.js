@@ -2359,11 +2359,18 @@ describe('#588: a minute with sound but no video (videoUnobserved) is a hole, no
       });
     }
 
-    test('R588-W2d: a run that ALREADY CAPTURED is ended by the stall without a "nothing recorded" line', () => {
+    test('R588-W2d: a run that ALREADY CAPTURED is ended by the stall, its ring hold released, without a "nothing recorded" line', () => {
       try {
         heldRun(WAKE_ACTIVE_MIN);
         assert.equal(stateOf().run.captured, true, 'precondition: the run captured');
-        for (let k = 0; k < 4; k++) unobserved(LOUD);
+        // The capture is still pending (no await in this test), so the run still holds the ring: the stall must free it.
+        assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE], 'precondition: the captured run still holds the ring');
+        for (let k = 0; k < 3; k++) unobserved(LOUD);
+        assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE], 'released early: three unobserved minutes still bridge');
+        unobserved(LOUD);
+        // Hold first: a captured run logs nothing when it ends, so the hold is the only trace that it really ended.
+        assert.deepEqual(holdOwners(CAM), [], 'the 4th unobserved minute must release the captured run\'s hold');
+        assert.equal(effectiveHold(CAM), null, 'no hold point left on the ring');
         assert.equal(stateOf().run, null, 'the stall ended the captured run');
         assert.deepEqual(runEndedLines(), []);
         assert.deepEqual(logger.getRecent().filter((l) => l.includes('nothing recorded')), []);

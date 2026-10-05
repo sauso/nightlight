@@ -12203,8 +12203,8 @@
   {
     "label": "#588 M-588-08: only a frame that MOVED gives the camera video (a camera booting into a stall, all repeats, never does)",
     "file": "backend/src/lib/activityTracker.js",
-    "find": "if (!firstFrameMs.has(cameraId)) firstFrameMs.set(cameraId, usedAt);",
-    "replace": "if (fraction > 0 && !firstFrameMs.has(cameraId)) firstFrameMs.set(cameraId, usedAt);",
+    "find": "if (prev === undefined || usedAt < prev) firstFrameMs.set(cameraId, usedAt);",
+    "replace": "if (fraction > 0 && (prev === undefined || usedAt < prev)) firstFrameMs.set(cameraId, usedAt);",
     "expect": "killed",
     "tests": [
       "activityTracker.test.js"
@@ -12214,8 +12214,8 @@
   {
     "label": "#588 M-588-09: only a frame with an observation-clock sample gives the camera video (no clock = never)",
     "file": "backend/src/lib/activityTracker.js",
-    "find": "if (!firstFrameMs.has(cameraId)) firstFrameMs.set(cameraId, usedAt);",
-    "replace": "if (sample && !firstFrameMs.has(cameraId)) firstFrameMs.set(cameraId, usedAt);",
+    "find": "if (prev === undefined || usedAt < prev) firstFrameMs.set(cameraId, usedAt);",
+    "replace": "if (sample && (prev === undefined || usedAt < prev)) firstFrameMs.set(cameraId, usedAt);",
     "expect": "killed",
     "tests": [
       "activityTracker.test.js"
@@ -12234,16 +12234,28 @@
     "namePattern": "R588-T7:"
   },
   {
-    "label": "#588 M-588-11: the LATEST frame's time is kept instead of the first (video returning before a stalled minute's tick hides the stall)",
+    "label": "#588 M-588-11: the FIRST frame to ARRIVE is kept instead of the earliest receipt time (after a clock step back, the re-lived minutes' stall goes unflagged)",
     "file": "backend/src/lib/activityTracker.js",
-    "find": "if (!firstFrameMs.has(cameraId)) firstFrameMs.set(cameraId, usedAt);",
-    "replace": "firstFrameMs.set(cameraId, usedAt);",
+    "find": "if (prev === undefined || usedAt < prev) firstFrameMs.set(cameraId, usedAt);",
+    "replace": "if (prev === undefined) firstFrameMs.set(cameraId, usedAt);",
+    "expect": "killed",
+    "tests": [
+      "activityTracker.test.js"
+    ],
+    "namePattern": "R588-T14:",
+    "note": "Code review (Codex, fix round 1): the build shipped exactly this. T14: a frame at 20:00, the clock back an hour, a frame at 19:00, then 59 sound-only minutes, all unflagged under this mutant."
+  },
+  {
+    "label": "#588 M-588-25: the LATEST frame time is kept instead of the earliest (video returning before a stalled minute's tick hides the stall)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "if (prev === undefined || usedAt < prev) firstFrameMs.set(cameraId, usedAt);",
+    "replace": "if (prev === undefined || usedAt > prev) firstFrameMs.set(cameraId, usedAt);",
     "expect": "killed",
     "tests": [
       "activityTracker.test.js"
     ],
     "namePattern": "R588-T12:",
-    "note": "Killed by T12's mirror case: the video returns 0.2 s into 19:02, before the tick that closes the stalled 19:01."
+    "note": "Killed by T12's mirror case: the video returns 0.2 s into 19:02, before the tick that closes the stalled 19:01. `<=` for `<` is equivalent (it rewrites an equal time) and is not added."
   },
   {
     "label": "#588 M-588-12: the payload loses the key (undefined instead of a strict boolean)",
@@ -12288,8 +12300,8 @@
     "tests": [
       "wake-watcher.test.js"
     ],
-    "namePattern": "R588-W2a:",
-    "note": "Plan review round 1 (Codex + Opus): the design this replaced."
+    "namePattern": "R588-W2(a|d):",
+    "note": "Plan review round 1 (Codex + Opus): the design this replaced. W2a kills it for a run that captured nothing; W2d (fix round 1) for a run that ALREADY captured, whose end logs nothing, through the ring hold it would keep."
   },
   {
     "label": "#588 M-588-16: an unobserved minute is judged with its own loudness (`active`) by the bridge-end rule",
