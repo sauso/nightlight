@@ -38,6 +38,13 @@ services:
       # Your public IP or DDNS hostname - only needed for Low Latency (WebRTC) mode
       # to work from outside your home network. Leave unset for LAN-only use.
       - PUBLIC_HOST=${PUBLIC_HOST:-}
+      # Optional. The UDP port Low Latency (WebRTC) video uses - a bare number, 1-65535, blank =
+      # 8189. Change it only to run a second instance on the same host. See .env.example.
+      - WEBRTC_UDP_PORT=${WEBRTC_UDP_PORT:-}
+      # Advanced override of the above, for a bind address a bare port cannot express (it WINS over
+      # WEBRTC_UDP_PORT when both are set). No default on purpose: compose forwards a bare name only
+      # when it is set, so an unset one never reaches MediaMTX as an empty string.
+      - MTX_WEBRTCLOCALUDPADDRESS
       # Optional. Which port the app listens on - defaults to 4000 if unset. Under host
       # networking (below) this is also the port you reach it on. See .env.example.
       - PORT=${PORT:-}

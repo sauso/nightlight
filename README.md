@@ -191,7 +191,11 @@ media needs its own UDP port forwarded **1:1** — the port a browser must reach
 MediaMTX advertises, so a router that *remaps* the port breaks WebRTC:
 
 1. Give each instance a **distinct WebRTC UDP port**: leave one at the default `8189` and set the other
-   with the `MTX_WEBRTCLOCALUDPADDRESS` env var, e.g. `MTX_WEBRTCLOCALUDPADDRESS=:8190`.
+   with the `WEBRTC_UDP_PORT` setting (a bare number between 1 and 65535, **no colon**; blank = `8189`),
+   e.g. `WEBRTC_UDP_PORT=8190`. On Unraid it is the **WebRTC UDP Port** field in the container's
+   advanced view. An invalid value is ignored with a warning in the log and `8189` is used. (The raw
+   MediaMTX override `MTX_WEBRTCLOCALUDPADDRESS` still works for a bind address a bare port cannot
+   express and wins if both are set, but you should not need it.)
 2. **Forward each 1:1** on your router — external UDP `8189` → instance A's `8189`, external UDP `8190` →
    instance B's `8190` (same number in and out).
 3. Set `PUBLIC_HOST` (your public IP or DDNS) on **both**.
@@ -737,8 +741,13 @@ has a toggle to switch between them ("Low latency" / "Compatibility"):
 
 **Low latency (WebRTC)** — near-instant video, same as at home. This requires:
 1. Set up SWAG as described above (HTTPS for the app itself).
-2. Set `PUBLIC_HOST` to your public IP or a DDNS hostname.
-3. Forward **UDP port 8189** on your router to your server's LAN IP.
+2. Set `PUBLIC_HOST` to your public IP or a DDNS hostname. ⚠️ It must **not** be a
+   Cloudflare-proxied (orange cloud) name: Cloudflare's proxy carries only HTTP(S), never the UDP
+   media, so remote Low latency would never connect while the page itself loads fine. Use a
+   separate DNS-only (grey cloud) record, e.g. `rtc.example.com`, for `PUBLIC_HOST` and keep the
+   proxied name for the web page.
+3. Forward **UDP port 8189** (or your `WEBRTC_UDP_PORT`, see "Running more than one instance" above) on your router to your server's
+   LAN IP.
 
 This is a hard requirement of WebRTC, not a workaround — the actual audio/video always
 travels over UDP between your browser and MediaMTX, no matter what. A TURN relay server

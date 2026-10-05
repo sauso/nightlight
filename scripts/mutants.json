@@ -1044,6 +1044,63 @@
     ]
   },
   {
+    "label": "WEBRTC_UDP_PORT: port 0 accepted (lower bound off by one)",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "port >= 1 && port <= 65535",
+    "replace": "port >= 0 && port <= 65535",
+    "expect": "killed",
+    "tests": ["webrtc-udp-port.test.js"]
+  },
+  {
+    "label": "WEBRTC_UDP_PORT: port 65536 accepted (upper bound off by one)",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "port >= 1 && port <= 65535",
+    "replace": "port >= 1 && port <= 65536",
+    "expect": "killed",
+    "tests": ["webrtc-udp-port.test.js"]
+  },
+  {
+    "label": "WEBRTC_UDP_PORT: whole-number check dropped (0x1F, 1e3, 81.5 would reach MediaMTX)",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "/^\\d+$/.test(digits)",
+    "replace": "true",
+    "expect": "killed",
+    "tests": ["webrtc-udp-port.test.js"]
+  },
+  {
+    "label": "WEBRTC_UDP_PORT: a pasted leading colon is no longer tolerated",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "raw.startsWith(':') ? raw.slice(1) : raw",
+    "replace": "raw",
+    "expect": "killed",
+    "tests": ["webrtc-udp-port.test.js"]
+  },
+  {
+    "label": "WEBRTC_UDP_PORT: the raw MTX_ override stops winning",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "(env.MTX_WEBRTCLOCALUDPADDRESS ?? '').trim() !== ''",
+    "replace": "false",
+    "expect": "killed",
+    "tests": ["webrtc-udp-port.test.js"]
+  },
+  {
+    "label": "WEBRTC_UDP_PORT: a whitespace-only MTX_ override suppresses the port",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "(env.MTX_WEBRTCLOCALUDPADDRESS ?? '').trim() !== ''",
+    "replace": "(env.MTX_WEBRTCLOCALUDPADDRESS ?? '') !== ''",
+    "expect": "killed",
+    "tests": ["webrtc-udp-port.test.js"]
+  },
+  {
+    "label": "WEBRTC_UDP_PORT: the bad-port warning repeats on every 3s relaunch",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "udp.warning && udp.warning !== lastUdpWarning",
+    "replace": "udp.warning",
+    "expect": "killed",
+    "tests": ["webrtc-udp-port.test.js"],
+    "namePattern": "reports a bad port once"
+  },
+  {
     "label": "★ sweepClips: the size pass runs BEFORE the age pass",
     "file": "backend/src/lib/clipStorage.js",
     "find": "  if (days > 0) {",
