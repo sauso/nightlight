@@ -343,6 +343,11 @@ measurement**, and (like everything here) never a safety device — see the warn
   it again inside a minute is one movement being read twice, not two trips. This matters most for a
   very still sleeper: once they settle, their bed can look identical to an empty one for hours, so a
   false exit shortly after bedtime would otherwise be reported as the end of the night.
+  That second *got out of bed* is only set aside when the bed then shows a **still sleeper**: at least 6
+  minutes of the slight movement a sleeping child makes (too small to count as the child moving) in the
+  2½ hours after the return. Bigger movement at the bed does not count, because after a child has
+  really got up that is a parent stripping the bed, tidying or reaching in: counting it once turned a
+  real early-morning wake into one more than two hours later.
   A qualifying short trip can still be counted as a wake-up within that same continuing night — see
   "How it estimates" above. It can miss a trip that's interrupted by a data gap or a stray reading,
   and it cannot tell an adult's visit to the bed from the child's own trip out of it.
@@ -350,6 +355,12 @@ measurement**, and (like everything here) never a safety device — see the warn
   because the two are not distinguishable from what the cameras record. Where that is the only *got
   out of bed* of the night it is still used, so the night is never left with no wake time at all; where
   a later one exists, the later one is reported instead.
+  **Known limit:** a child who climbs back in and then lies stiller than that (fewer than 6 minutes of
+  slight movement in those 2½ hours), or a camera whose detection zone only ever registers bigger
+  movement, is treated as having left at that second *got out of bed*: the wake is reported too
+  **early**, never left blank. The 6 was measured on two cameras in one house, where the second exits
+  that were the real wake showed 0-3 such minutes and the ones that were not showed 10 or more; see
+  KNOWN-ISSUES.
 - **Tell it when it got a night wrong.** The morning after, the child's page offers **Was last night
   right?** — confirm the times or correct them, and mark any recorded *got into / out of bed* event as
   right, wrong, or "can't tell" against the still frame it was decided from. It appears once per night
