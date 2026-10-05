@@ -11746,5 +11746,35 @@
     "tests": ["sleepAnalysis.test.js"],
     "namePattern": "#598 C10:",
     "note": "Pins the source comment's 'at least 134 minutes' as a number, not a hope."
+  },
+  {
+    "label": "#598 M-598-11: an unobserved minute counts as a quiet occupied one (`!== false` / `!== true` instead of strict)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "cribOccExt[i] === true && cribActExt[i] === false",
+    "replace": "cribOccExt[i] !== false && cribActExt[i] !== true",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#598 C11:",
+    "note": "Issue #350's rule: a missing minute is neither quiet nor occupied. A 12-minute camera outage after a real exit would otherwise read as a still sleeper and skip the exit (07:12 -> 09:27 on the C1 fixture). A 12-minute gap exists in a stored night in both databases."
+  },
+  {
+    "label": "#598 M-598-12: the quiet witness window starts one minute before the return",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "for (let i = Math.max(from, 0); i < witnessEnd; i++) {",
+    "replace": "for (let i = Math.max(from - 1, 0); i < witnessEnd; i++) {",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#598 C12:",
+    "note": "The window's early end, pinned one unit under the threshold: 5 quiet minutes from the return's minute plus one quiet minute just before it (05:49 -> 08:30 if that minute counts)."
+  },
+  {
+    "label": "#598 M-598-13: the reversal guard is switched to the quiet witness too",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& bedOccupiedFrom(txIdx(u.created_at)));",
+    "replace": "&& bedQuietlyOccupiedFrom(txIdx(u.created_at)));",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#598 C13:",
+    "note": "#598 moves the settling-tail guard's witness only; reversedBy is deliberately unchanged. A return read only by ACTIVE minutes over a dead bed must still reverse the exit (07:40 -> 05:50 if switched)."
   }
 ]
