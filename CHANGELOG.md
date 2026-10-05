@@ -10,6 +10,20 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ## [Unreleased]
 
 ### Added
+- **A "WebRTC UDP Port" setting, so a second instance no longer needs a hand-typed MediaMTX override.**
+  Running staging beside production on one server needs each instance on its own WebRTC UDP port, which
+  meant adding `MTX_WEBRTCLOCALUDPADDRESS=:8190` yourself: a leading colon nothing explained, and in
+  Unraid's "Add Variable" dialog the name went in the wrong box, so MediaMTX silently stayed on `8189` and
+  remote Low latency never connected. Set `WEBRTC_UDP_PORT` (the **WebRTC UDP Port** field in the Unraid
+  template, `.env.example` and `docker-compose.yml`) to a bare number: **1-65535, no colon, blank =
+  `8189`**; the colon is added for you and a pasted `:8190` is accepted. An invalid value is ignored with
+  a warning in the log and `8189` is used, rather than being handed to MediaMTX, which would exit and
+  restart forever. The raw `MTX_WEBRTCLOCALUDPADDRESS` override still works (for a bind address a bare port
+  cannot express) and **wins** if both are set, and `docker-compose.yml` now forwards it. The README and
+  the Unraid **Public Host** description now also say that `PUBLIC_HOST` must be a DNS-only name or an IP,
+  never a Cloudflare-proxied one: the proxy carries neither UDP nor port `8189`. Existing installs are
+  unchanged. The Unraid template only updates for new installs; on an existing container, add the
+  variable by hand (Key `WEBRTC_UDP_PORT`).
 - **The morning review now records "In bed" separately from "Fell asleep".** On a bedtime-story night a
   child can be put down half an hour before they fall asleep, and the review had no way to say both: its
   only frame button, **Put down here**, set the *asleep* time, so marking the put-down overwrote an asleep
