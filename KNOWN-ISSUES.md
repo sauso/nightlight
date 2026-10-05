@@ -1199,6 +1199,75 @@ camera with MQTT or ONVIF motion stays activity-only with alerts on, so the span
 
 ---
 
+## A wake reported too early after a child climbed back into bed (a very still sleeper, or a camera that sees only big movement)
+
+**What you see:** a wake time earlier than the child really got up, at a *got out of bed* that came
+within a minute of a *got into bed*. After upgrading to the version that fixed #598, some past nights' wake
+times, wake counts and sleep totals also come out differently when they are worked out again.
+
+**Why:** the bed classifier often logs one climb back into bed as *got out → got into → got out*. The last
+marker, seconds after the return, is the same movement read twice, so sleep analysis sets it aside, but only
+when something shows the child really is back in the bed. Until #598 that was any 3 minutes of movement in
+the bed in the 2½ hours after the return. Now it is **6 minutes of slight movement**: a reading at or above
+0.0005 and not above 0.01 (the level at which a minute counts as the child moving), which is what a still
+sleeper produces. Bigger movement no longer counts. After a child has got up for the day it is usually a
+parent at the bed (stripping it, tidying, reaching in), and counting it let a parent's visit an hour after a
+real 07:12 exit set that exit aside, so the night reported 09:27 instead.
+
+**What it changes, stated rather than guessed:**
+- **6 is measured on two cameras in one house.** Over every stored night of both children there (two
+  databases, 200 nights), the second exits that really were the wake had 0-3 such minutes in the 2½ hours
+  and the ones a review confirmed were not had 10 or more. (One unreviewed case sits between, at 7-8, and its
+  result is the same for any threshold from 4 to 11.) Any threshold from 4 to 10 gives identical results
+  there; 6 sits in the middle. Scaling every reading by a third to three times (a tighter or looser detection zone)
+  kept those groups at 5 or fewer and 7 or more, so the zone's size matters only a little. Nothing checks
+  the number against your camera.
+- **A very still sleeper loses the benefit.** A child who climbs back in and then lies so still that the bed
+  shows fewer than 6 such minutes in 2½ hours is treated as having left at that last marker: the wake is too
+  early. In that house, a 2½-hour stretch of real sleep showed fewer than 6 in about 1-5% of stretches,
+  depending on the child.
+- **A child who climbs back in and then really gets up within about two hours** has not had time to show 6:
+  the wake lands on the *got out of bed* seconds after the return, not on the later real exit, which the old
+  rule did find. On the night this rule was built for, the sixth slight movement came 133 minutes after the
+  return.
+- **A camera that only ever sees big movement** (its bed readings are either over 0.01 or close to zero,
+  for example a zone that does not cover where the child lies) never shows a still sleeper, so this rule
+  never sets a marker aside there: the same early wake. Draw the zone over a real picture of the child
+  asleep and look at what it covers.
+- **It never leaves a night without a wake.** If no later *got out of bed* backs up a departure, the marker
+  that was set aside is still used, as before. The result is a wrong time at worst, never "still asleep".
+- **Possible regression, unconfirmed:** on one production night (2026-09-05) the wake moved 46 minutes
+  earlier, 07:20 to 06:34. The later time had been accepted in the morning review rather than corrected, and
+  the bed then shows no slight movement at all for 45 minutes, which fits an empty bed as well as a very
+  still sleeper, so which is right is not known.
+- **The opposite camera: an empty bed that reads faint noise.** If the camera's picture of an EMPTY bed
+  flickers between 0.0005 and 0.01 (infrared noise, a moving shadow), the empty bed looks like a still
+  sleeper, so the stray return is believed as it was before and this fix does not help on that camera. It is
+  never worse than before the change there: the old rule would have believed the same return.
+- **Wake times can move either way, and wake counts and asleep/awake minutes move with them.** On the
+  measured nights every night that changed moved earlier, and the stretch after the new wake stopped counting
+  as sleep (on production nights the wake count went from 8 to 5, 6 to 4 and 3 to 1). That is not a rule: a
+  night can also move later, when a real exit the old rule set aside is now found and the old answer was an
+  earlier one (for example an evening marker handed back because the real morning exit had been set aside too).
+- **Not fixed: an early wake with no stray marker at all.** If the child stirs, only a *got out of bed* is
+  logged and the bed then reads empty because the child lies still, the night still ends at that stir. Telling
+  that apart needs a way to tell an adult's movement from a child's, which the detector does not have.
+- **The same check before a mid-night trip is unchanged.** A *got out of bed* within a minute of a *got into
+  bed* is also set aside when counting short trips out of bed during the night, and there any 3 minutes of
+  movement still count. It probably has the same weakness (a missed trip, not a wrong morning); that is to be
+  measured before it is changed. Nor does the other morning check change: a *got into bed* within 20 minutes
+  after a *got out of bed* still cancels that exit on any 3 minutes of movement, because "came back and
+  stayed" is a different question and #598 did not measure it.
+- **Saved nights keep their old answer** on the child's page; the detail view works a night out afresh, so
+  for the nights this changes the two can differ until an admin uses **Recompute this night** (README,
+  "Re-working out a night").
+
+**What to do:** nothing, there is no setting for this. If a reported wake looks too early on a night like
+this, correct it in the morning review ("Was last night right?"): that is what the threshold was checked
+against.
+
+---
+
 ## Confirmed bugs (fix pending)
 
 ### Compatibility (HLS) mode doesn't play when the app is served over plain HTTP

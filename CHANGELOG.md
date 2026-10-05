@@ -66,6 +66,26 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
     is skipped — a push already sent cannot be recalled, but no further one goes out for a flagged night.
 
 ### Fixed
+- **A parent at the bed after a child got up no longer moves the morning wake hours later** (issue #598). A
+  *got out of bed* logged within a minute of a *got into bed* is set aside as the same climb-back-in read
+  twice, but only if the bed then shows the child is really back. That proof was any 3 minutes of movement
+  in the 2½ hours after the return, and a parent stripping or tidying the empty bed provides plenty: on a
+  real night a stray *got into bed* 51 seconds before a child's real 07:12 exit, plus a parent at the bed an
+  hour later, set the real exit aside, and the stored wake moved to the next exit, 09:27, once that one was
+  confirmed. The proof is now **6 minutes of slight movement** (the level a still sleeper produces, below
+  what counts as the child moving) in those 2½ hours; bigger movement no longer counts. Measured on every
+  stored night of two cameras in one house: the exits wrongly set aside had 0-3 such minutes, the ones a
+  review confirmed were rightly set aside 10 or more, and any threshold from 4 to 10 gives the same results
+  there. On the measured nights, every night that changed moved earlier (in principle a night can also move
+  later: a real exit that used to be set aside is now found), and its wake count and sleep totals change
+  with it. Known limits, in the README and KNOWN-ISSUES: a child who climbs back in and lies stiller than
+  that, or really gets up again within about two hours, or a camera that only registers bigger movement,
+  gets a wake that is too early (never a missing one); a camera whose EMPTY bed reads faint noise at that
+  level is not helped by this (and is no worse than before); one production night moved 46 minutes earlier
+  with no way yet to tell which time is right; and a too-early wake with no stray *got into bed* is not
+  fixed by this. The same check before a mid-night trip, and the check on a return straight after a *got
+  out of bed*, are deliberately unchanged. Saved nights keep their old answer until an admin uses
+  **Recompute this night**.
 - **A wake clip now starts at the wake's first moving or noisy frame, not up to a minute after it** (issue
   #412). Since #447 the clip began 3 seconds before the END of the wake's first active minute, so it started
   up to 57 seconds (about 27 on average) after the first frame and could miss the opening it exists to show
