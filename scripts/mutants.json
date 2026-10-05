@@ -1092,6 +1092,14 @@
     "tests": ["webrtc-udp-port.test.js"]
   },
   {
+    "label": "WEBRTC_UDP_PORT: a valid port is never copied into the MediaMTX child's env",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "if (udp.value) env.MTX_WEBRTCLOCALUDPADDRESS = udp.value;",
+    "replace": "void udp.value;",
+    "expect": "killed",
+    "tests": ["webrtc-udp-port-launch.test.js"]
+  },
+  {
     "label": "WEBRTC_UDP_PORT: the bad-port warning repeats on every 3s relaunch",
     "file": "backend/src/lib/mediamtxProcess.js",
     "find": "udp.warning && udp.warning !== lastUdpWarning",
