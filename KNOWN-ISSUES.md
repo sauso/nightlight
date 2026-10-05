@@ -647,6 +647,7 @@ unwatched too). An unwatched minute is handled exactly like a minute with no row
 | Its movement readings | Used as before | Not used (a stalled minute's readings are empty or repeats) |
 | Bedtime search | Normal | Cannot be the bedtime; a stall over bedtime moves bedtime to the first quiet minute after the video returns |
 | "No one was in the bed" | Needs at least **90%** of the window watched (default 0.9, `EMPTY_MIN_COVERAGE_FRAC`; a constant, not a setting; any value above the 0.5 "no data" line and up to 1 is coherent). Window minutes only, never the 3 hours before it; on a night still in progress, 90% of the part elapsed so far, the same basis as the "no data" line | Counts against that 90%; below it the night is "no data" |
+| Live wake watcher (wake clips), since issue #588 | Read normally | A minute it did not see: no progress toward starting to watch, not activity even when loud, and bridged inside a wake like any minute without activity (at most 3 in a row). Only on a camera that has delivered video since the server started; a camera with no video at all keeps its sound (next section, and the limits below) |
 
 **Why sound is not used in an unwatched minute:** a bedroom microphone hears the whole house, and a
 noise nobody saw cannot be told apart from a sibling next door. The cost, stated: a child crying through a
@@ -690,9 +691,17 @@ closing sentence.
   (2026-09-30): 0 such rows, but only about 14 hours of data exist since #493's clone correction reached it, so
   this is "not seen yet", not "cannot happen". If it ever shows up, a minute with any non-zero motion peak
   should count as watched (a repeat's change is exactly 0, so a non-zero peak proves a real frame).
-- **Not yet applied to the live wake watcher or the bed-transition rules.** The live "is the child awake"
-  check and the bed in/out rules still read the movement peak alone, so during a stall the live watcher can
-  still call the room settled. Follow-up issues.
+- **Applied to the live wake watcher since issue #588, not yet to the bed-transition rules.** The live
+  watcher that records wake clips now treats a minute with sound but no video, on a camera that had delivered
+  video, as a minute it did not see (next section). The bed in/out rules still read the movement peak alone, so
+  during a stall they can still read the bed as still: a follow-up issue. The live watcher decides each minute
+  when it ends, from the frames the motion detector *received*, so it differs from this rule in two shapes. A
+  minute whose every frame is later proven a repeat (stored with 0 frames, so unwatched here) still counts as
+  watched live: measured on 2026-10-05 over every stored minute of two cameras in one house, there is no such
+  minute (0 of 87,271 rows on the production database, 0 of 86,227 on the staging one), so that shape is left to
+  this nightly rule and is not handled live. And a camera that has delivered no video since the server started
+  (for example one with no video feed at all) keeps its sound in the live watcher, while this rule counts its
+  minutes as unwatched.
 - **A parent's corrected night** subtracts the night's stored unknown minutes from the corrected span as
   one total (an existing limit of corrections). A recompute that adds many unknown minutes to a corrected
   night can therefore shrink its displayed sleep more than the stall alone explains. Since a corrected
@@ -706,18 +715,27 @@ the Camera history for a `[detector-watchdog]` restart (next section) around tha
 ## A wake recording does not bridge a gap in the readings, and settling needs 15 unbroken minutes
 
 **What you see:** wake clips (README, "Wake clips") are recorded by the live wake watcher, which only
-records and never alerts. Two things about when it decides:
+records and never alerts. Three things about when it decides:
 
 - **Two qualifying bursts of activity (each at least 5 active minutes once short gaps are bridged) with a
   hole in the camera's readings longer than 3 minutes between them are two wakes, and two clips.** Two single
-  active minutes with a hole between them are no wake at all. A "hole" is a minute for which the camera
-  reported nothing at all (the video or sound feed was down; no motion frame and no sound window arrived).
+  active minutes with a hole between them are no wake at all. A "hole" is a minute the watcher did not see:
+  one for which the camera reported nothing at all (the video or sound feed was down; no motion frame and no
+  sound window arrived), or, since issue #588, one with sound but no video on a camera that had delivered video
+  since the server started (its video stalled while its microphone kept working).
   Before issue #448 the watcher counted readings, not minutes, so five active minutes spread over about forty
   minutes of mostly missing readings could be recorded as one wake,
   while the sleep timeline (which has always counted minutes) showed no wake at all.
 - **The watcher starts watching only after 15 consecutive quiet minutes that were actually read.** A hole
   restarts that count. So after an outage in the evening the watcher can start watching later than the
   sleep timeline's bedtime, and a wake in between has no clip.
+- **A video stall is a hole even while the sound keeps arriving (issue #588).** Before #588 the watcher read
+  such a minute as watched: a quiet one counted toward the 15 minutes, so the watcher could start watching a
+  child nobody could see, and a loud one counted as activity, so a noise during a stall could complete a wake
+  that the sleep timeline (which has called these minutes unknown since issue #508) does not show. Now such a
+  minute is no progress toward starting to watch, is not activity even when loud, and inside a wake is a gap
+  like any other: up to 3 in a row are bridged, and a run in progress ends at the 4th minute without activity,
+  the same minute 4 quiet minutes would end it (not later, when the video comes back).
 
 **The rule, in one place:** a run of active minutes bridges at most `WAKE_GAP_MIN` = **3** minutes with no
 active reading, whether those minutes were read as quiet or not read at all, and is a wake once it holds
@@ -731,7 +749,8 @@ progress toward arming restarts, so a wake that follows a camera reconnect is st
 | | Sleep timeline (nightly job) | Live wake watcher |
 |---|---|---|
 | A minute with no reading in a wake | Not active; bridged up to 3 in a row | The same |
-| Deciding the child has settled | 15-minute window with no active minute and at least 8 minutes actually read quiet | **15 consecutive minutes read quiet**; one missing minute starts the count again |
+| A minute with sound but no video (a video stall) | Unknown: not active, its sound not used even when loud; bridged up to 3 in a row | The same since issue #588 (a hole; before #588 it was read as watched). Only on a camera that has delivered video since the server started |
+| Deciding the child has settled | 15-minute window with no active minute and at least 8 minutes actually read quiet | **15 consecutive minutes read quiet**; one missing minute, or one minute of a video stall, starts the count again |
 | Settled, then a hole | n/a | Stays watching |
 
 The live rule is stricter on purpose: its only job is to keep bedtime settling out of the recorder, so the
@@ -750,10 +769,36 @@ one moves both. They are constants, not settings, so there is no default to chan
 
 **Known limits:**
 
-- **A video stall with live sound still counts as watched.** The watcher is told when a minute had no
-  reading at all, not that the picture behind it was frozen, so a stalled camera whose microphone keeps
-  working feeds it sound-only minutes (see "Minutes with no video are unknown in the sleep numbers",
-  which lists this as not yet applied to the live watcher).
+- **A video stall is recognised only on a camera that has delivered video since the server started**
+  (issue #588). The watcher learns that a camera has video from its first frame, and nothing in the settings
+  says a camera is audio-only. So a camera already stalled when the server starts is read like a camera with
+  no video at all (its sound counts, quiet minutes help it start watching) until its first frame arrives; and a
+  camera whose motion detector is stopped on purpose while its sound detector keeps running reads as stalled
+  for as long as that lasts. Inside a tracked child's sleep window the motion detector runs for the whole
+  window, so that takes a settings change in the middle of the night.
+- **How often a stall with live sound happened, before #588 changed it**: over every stored minute of the two
+  cameras of one house (measured 2026-10-05; about 30 days, inside the sleep window or not), minutes with sound
+  but no video on a camera that had had video before: 263 in the production database, all on one camera (89 of
+  them louder than 8 dB over ambient, on 2 calendar days in UTC), and 807 in the staging one (806 on one camera,
+  212 of them loud, on 2 days, and 1 on the other). The watcher read each as watched: a quiet one counted toward
+  the 15 minutes, a loud one as activity. That count reads the stored rows by the sleep timeline's own
+  definition, not the live outcome: the stored frame count is decided a few seconds after the live one, so the
+  two can differ by a minute at the edge of a stall. Unknown on any other install.
+- **A minute made only of repeated frames still counts as watched live.** When a camera stalls, ffmpeg fills
+  the gap by repeating the last real frame, and the sleep timeline leaves out frames that are later proven to be
+  repeats (a minute of nothing but repeats is unwatched there). The live watcher decides when the minute ends,
+  before those proofs arrive, and counts every frame it received, so such a minute is watched for it, and so is
+  a minute whose video returned only in its last seconds (the sleep timeline agrees on that one). Measured
+  2026-10-05 over every stored minute of the two cameras: no minute of nothing but repeats (0 of 87,271 rows and
+  0 of 86,227). Unknown elsewhere; the sleep timeline is unaffected either way.
+- **A frozen picture is still watched.** A camera whose encoder wedges keeps sending real, identical frames, so
+  neither the watcher nor the sleep timeline can tell it from a still room (the same limit as in "Minutes with
+  no video are unknown in the sleep numbers").
+- **A child crying through a video stall is not recorded as a wake**, the same as on the sleep timeline: a
+  bedroom microphone hears the whole house, so a noise nobody saw is not taken as the child. Sound **alerts** are
+  a separate path and still fire.
+- **The bed in/out rules are not changed by #588** and still read a stalled minute's movement as before (a
+  separate follow-up).
 - **A backward clock step of more than about 2 minutes ends the run in progress.** Smaller steps (every
   ordinary clock correction) are absorbed before they reach the watcher and change nothing. A watcher still
   settling also restarts its count; one that is already armed stays armed. The sleep timeline merges the
@@ -768,15 +813,19 @@ one moves both. They are constants, not settings, so there is no default to chan
   was silent for the whole day.
 - **The 20-minute sweep is only a backstop.** A camera that goes silent in the middle of a run keeps its ring
   hold until the sweep ends the run, up to about 20 minutes after its last active minute. A run that keeps
-  receiving readings is ended by the rule above, not by the sweep.
+  receiving readings is ended by the rule above, not by the sweep. Since issue #588 that includes a camera whose
+  video stalled while its sound kept arriving: each such minute still applies the rule, so the run and its ring
+  hold end at the 4th minute without activity, exactly when 4 quiet minutes would have ended them, not when the
+  video returns or the sweep runs.
 
 **What to do:** nothing. In the log, `[wake] "<camera>" settled — watching for wakes` marks the start of
 watching. No such line all night means either that the camera never had 15 unbroken minutes, or that the
 watcher was still armed from the previous night (it settles only once, so it logs nothing the second time).
 To narrow it down, look for the line a hole writes while the watcher is still settling:
-`[wake] "<camera>" settling restarted: readings N min apart after M quiet minute(s)`. N is the distance between
-the two readings around the hole and M is how many quiet minutes it threw away (a forward jump of the server's
-clock looks the same as a dropout, so the line says "readings apart", not "outage"). It is written only when
+`[wake] "<camera>" settling restarted: readings N min apart after M quiet minute(s)`. N is the distance in minutes
+between the two OBSERVED readings around the hole (a minute with sound but no video is not an observed reading, so
+the minutes of a video stall are part of N) and M is how many quiet minutes it threw away (a forward jump of the
+server's clock looks the same as a dropout, so the line says "readings apart", not "outage"). It is written only when
 the hole cost real progress and the minute after it was quiet: a hole followed by an active minute, and a
 backward clock step with progress, also send the count back to zero, but silently (a hole before any quiet
 minute has nothing to lose). It never changes when the watcher starts watching; it only reports. **It differs
@@ -795,6 +844,8 @@ and no `settled` line means the child never had 15 quiet minutes, the watcher wa
 before, or only the silent cases above applied. A
 run dropped at a gap logs `run ended (readings N min apart)` when that run had taken a ring hold (N is the
 distance between the two readings, which is also what a forward jump of the server's clock looks like); a run
+ended by a video stall logs `run ended (no video for N min)` instead (since issue #588; N is the minutes since the
+last observed reading, and the line does not say "readings apart" because the sound readings kept arriving); a run
 that already captured a clip logs nothing when it ends, and neither does a run that never took a ring hold.
 
 ## A muted or digitally silent microphone is recorded as a quiet room

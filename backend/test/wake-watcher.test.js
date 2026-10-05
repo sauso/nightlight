@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { useTempDataDir, cleanupTempDataDirs, makeChild, makeCamera } from './helpers/harness.js';
 
 const DATA_DIR = useTempDataDir();
@@ -2205,6 +2206,634 @@ describe('#590: a hole that restarts the settling count is logged, and nothing e
     assert.ok(count.withMore >= 12, `only ${count.withMore} lines carried a held-back count: ${JSON.stringify(count)}`);
     assert.ok(count.held >= 30, `only ${count.held} restarts were held back: ${JSON.stringify(count)}`);
     assert.ok(count.exactly15 >= 2, `only ${count.exactly15} lines came exactly 15 minutes after the last: ${JSON.stringify(count)}`);
+  });
+});
+
+// ★ #588: a minute whose VIDEO nobody saw is a hole for the live watcher, and it still ends a broken run on time.
+//
+// A camera whose video stalls while its microphone keeps working sends the watcher sound-only minutes
+// (`motionPeak: null`, `soundPeak: n`). Before #588 the watcher read each as WATCHED: a quiet one counted toward the
+// 15 settling minutes and sat inside a run's bridge as quiet, a loud one was ACTIVE. The nightly job calls the same
+// minute unknown and non-active (`motion_frames > 0`, #508), so a clip could exist for a wake the timeline does not
+// show. activityTracker now flags such a minute `videoUnobserved: true` (activityTracker.test.js R588-T*), and the
+// watcher treats it as if no payload had arrived, except that it still ENDS a run whose gap it breaks, on the same
+// minute a quiet gap would have (a bare early return kept a ring hold up to the 20-minute sweep: plan review round 1).
+// A camera that never had video (sound-only by design) sends no flag and keeps working (#453 C3b).
+//
+// ⚠️ Names are `R588-…`, never `C<n>:` (the #448/#412 mutants select on `^C…` name patterns).
+describe('#588: a minute with sound but no video (videoUnobserved) is a hole, not a watched quiet minute', () => {
+  const LOUD = SOUND_ACTIVE + 10;
+  // One unobserved minute at the next label: what activityTracker sends for a stalled camera whose microphone works.
+  // Hostile on purpose: a LOUD one carries a sound rise over SOUND_ACTIVE, so an unobserved branch that fell through
+  // to the active path would also find a "first frame" for it.
+  function unobserved(sound = 0) {
+    const idx = clock++;
+    return handleMinute({
+      cameraId: CAM, bucketStart: labelFor(idx), motionPeak: null, soundPeak: sound, videoUnobserved: true,
+      motionRises: [], soundRises: sound > 0 ? [{ atMs: labelStartMs(idx) + 5_000, value: sound }] : [],
+    });
+  }
+  const runEndedLines = () => logger.getRecent().filter((l) => l.includes('run ended'));
+  const restartLines = () => logger.getRecent().filter((l) => l.includes('settling restarted'));
+  // A REAL segmenter, as the #446 / #448 tests arm one (see those blocks): the entry exists only synchronously, so
+  // every assertion that needs it runs with no `await` in between.
+  function armSegmenterNow() {
+    const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(CAM);
+    startSegmenter(CAM, camera.mediamtx_path, { preRollSec: 5, postRollSec: 15 });
+    assert.equal(isSegmenterRunning(CAM), true, 'precondition: the segmenter armed synchronously');
+  }
+  const wakeClips = (on) => db.prepare("UPDATE settings SET wake_clips_enabled = ? WHERE id = 'app'").run(on ? 1 : 0);
+  // A sleep window that does NOT contain the real clock (the window gate reads the real clock, not the labels).
+  function windowExcludingNow() {
+    const now = Date.now();
+    const pad = (n) => String(n).padStart(2, '0');
+    const hhmm = (d) => `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+    return { start: hhmm(new Date(now + 7 * 3_600_000)), end: hhmm(new Date(now + 8 * 3_600_000)) };
+  }
+  const captures = (results) => results.filter((r) => r?.captured).map((r) => r.startMs);
+
+  beforeEach(() => logger.clear());
+
+  test('R588-W1: an unobserved minute is not settling progress: 14 quiet, 1 unobserved, 1 quiet is NOT armed; 15 consecutive observed minutes arm', () => {
+    for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) quiet();
+    const lastAt = stateOf().lastAt;
+    assert.equal(unobserved(0), null);
+    assert.equal(stateOf().quietRun, ONSET_QUIET_MIN - 1, 'the unobserved minute changed the settling count');
+    assert.equal(stateOf().lastAt, lastAt, 'the unobserved minute moved lastAt (so the next reading would not see the hole)');
+    assert.equal(stateOf().asleep, false, 'an unobserved minute was the 15th quiet minute');
+    quiet();
+    assert.equal(stateOf().asleep, false, 'an unobserved minute counted toward the 15');
+    assert.equal(stateOf().quietRun, 1, 'the next observed minute must see the hole and restart the count');
+    for (let i = 0; i < ONSET_QUIET_MIN - 2; i++) quiet();
+    assert.equal(stateOf().asleep, false, 'fourteen observed minutes since the stall: one short');
+    quiet();
+    assert.equal(stateOf().asleep, true, 'fifteen consecutive observed minutes arm it');
+  });
+
+  test('R588-W1b: a LOUD unobserved minute does not zero the settling count either: it is a hole, not an active minute', () => {
+    for (let i = 0; i < 10; i++) quiet();
+    assert.equal(unobserved(LOUD), null);
+    assert.equal(stateOf().quietRun, 10, 'a loud minute nobody saw was read as active');
+    assert.equal(stateOf().asleep, false);
+    quiet();
+    assert.equal(stateOf().quietRun, 1, 'the hole restarts the count at the next observed minute');
+  });
+
+  describe('R588-W2: the run and its ring hold end on the minute a quiet gap would end them', () => {
+    function heldRun(activeMin) {
+      wakeClips(true);
+      armSegmenterNow();
+      settle();
+      logger.clear();
+      for (let i = 0; i < activeMin; i++) moving();
+      assert.equal(stateOf().run.holding, true, 'precondition: the run holds the ring');
+      assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE]);
+    }
+
+    for (const [what, sound] of [['quiet', 0], ['LOUD', LOUD]]) {
+      test(`R588-W2a: ${WAKE_ACTIVE_MIN - 1} active, then ${what} unobserved minutes: released at the 4th, logged "no video for 4 min"`, () => {
+        try {
+          heldRun(WAKE_ACTIVE_MIN - 1);
+          for (let k = 1; k <= 3; k++) {
+            assert.equal(unobserved(sound), null, `unobserved minute ${k} captured`);
+            assert.equal(stateOf().run?.holding, true, `released early, at unobserved minute ${k}`);
+            assert.equal(stateOf().run.activeCount, WAKE_ACTIVE_MIN - 1, 'an unobserved minute topped the run up');
+          }
+          assert.equal(unobserved(sound), null);
+          assert.equal(stateOf().run, null, 'the 4th unobserved minute must end the run, as the 4th quiet minute does (#448 C4b)');
+          assert.deepEqual(holdOwners(CAM), [], 'and release its hold NOW: not at the next observed reading, not at the 20-minute sweep');
+          const lines = runEndedLines();
+          assert.equal(lines.length, 1, JSON.stringify(lines));
+          assert.match(lines[0], /\[wake\] "cam-1" run ended \(no video for 4 min\) — ring released, nothing recorded$/);
+        } finally {
+          wakeClips(true);
+        }
+      });
+    }
+
+    test('R588-W2b: N in "no video for N min" counts from the last OBSERVED reading, and a missing minute before the stall is part of it', () => {
+      try {
+        // 4 active, 2 quiet, then unobserved: the 2nd unobserved minute is the 4th non-active one, and the video has been
+        // missing for 2 minutes (not 4: the quiet minutes were watched).
+        heldRun(WAKE_ACTIVE_MIN - 1);
+        quiet();
+        quiet();
+        unobserved(0);
+        assert.equal(stateOf().run?.holding, true, 'precondition: three non-active minutes still bridge');
+        unobserved(0);
+        assert.equal(stateOf().run, null);
+        let lines = runEndedLines();
+        assert.equal(lines.length, 1, JSON.stringify(lines));
+        assert.match(lines[0], /run ended \(no video for 2 min\)/);
+        // 4 active, one minute with no payload at all, then unobserved: ended at the 3rd unobserved minute; the minute
+        // that sent nothing had no video either, so the line says 4.
+        stopAllSegmenters();
+        _state().clear();
+        clock = 0;
+        heldRun(WAKE_ACTIVE_MIN - 1);
+        skip(1);
+        unobserved(LOUD);
+        unobserved(0);
+        assert.equal(stateOf().run?.holding, true, 'precondition: a missing minute and two unobserved ones still bridge');
+        unobserved(0);
+        assert.equal(stateOf().run, null);
+        lines = runEndedLines();
+        assert.equal(lines.length, 1, JSON.stringify(lines));
+        assert.match(lines[0], /run ended \(no video for 4 min\)/);
+      } finally {
+        wakeClips(true);
+      }
+    });
+
+    for (const [what, sound] of [['quiet', 0], ['LOUD', LOUD]]) {
+      test(`R588-W2c: up to ${WAKE_GAP_MIN} ${what} unobserved minutes inside a wake still bridge it: the capture comes from the next ACTIVE minute`, () => {
+        try {
+          heldRun(WAKE_ACTIVE_MIN - 1);
+          const firstActive = ONSET_QUIET_MIN; // settle() delivered labels 0..14
+          for (let k = 0; k < 3; k++) assert.equal(unobserved(sound), null, 'an unobserved minute completed the wake');
+          const r = moving();
+          assert.deepEqual(captures([r]), [endMs(firstActive)], 'bridged into ONE wake, captured on its 5th ACTIVE minute');
+        } finally {
+          wakeClips(true);
+        }
+      });
+    }
+
+    test('R588-W2d: a run that ALREADY CAPTURED is ended by the stall without a "nothing recorded" line', () => {
+      try {
+        heldRun(WAKE_ACTIVE_MIN);
+        assert.equal(stateOf().run.captured, true, 'precondition: the run captured');
+        for (let k = 0; k < 4; k++) unobserved(LOUD);
+        assert.equal(stateOf().run, null, 'the stall ended the captured run');
+        assert.deepEqual(runEndedLines(), []);
+        assert.deepEqual(logger.getRecent().filter((l) => l.includes('nothing recorded')), []);
+      } finally {
+        wakeClips(true);
+      }
+    });
+  });
+
+  test('R588-W3: a LOUD unobserved minute is not active: it starts no run, tops none up, and never completes a wake', () => {
+    settle();
+    assert.equal(unobserved(LOUD), null);
+    assert.equal(stateOf().run, null, 'a loud minute nobody saw started a run');
+    for (let i = 0; i < WAKE_ACTIVE_MIN - 1; i++) moving();
+    const lastActiveMs = stateOf().run.lastActiveMs;
+    assert.equal(unobserved(LOUD), null, 'a loud unobserved minute completed the wake (it would have been the 5th active minute)');
+    assert.equal(stateOf().run.activeCount, WAKE_ACTIVE_MIN - 1);
+    assert.equal(stateOf().run.lastActiveMs, lastActiveMs, 'it moved the run\'s last active minute');
+    assert.equal(stateOf().run.captured, false);
+    for (let i = 0; i < 3; i++) assert.equal(unobserved(LOUD), null);
+    assert.equal(stateOf().run, null, 'four loud unobserved minutes are a gap of four: the run is over, nothing captured');
+  });
+
+  for (const [variant, extra] of [['no field', {}], ['videoUnobserved: false', { videoUnobserved: false }]]) {
+    test(`R588-W4: a sound-only camera (${variant}) still settles on 15 quiet minutes and still records a sound wake`, () => {
+      const send = (sound) => {
+        const idx = clock++;
+        return handleMinute({ cameraId: CAM, bucketStart: labelFor(idx), motionPeak: null, soundPeak: sound, ...extra });
+      };
+      for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) send(0);
+      assert.equal(stateOf().asleep, false);
+      send(0);
+      assert.equal(stateOf().asleep, true, '15 quiet sound-only minutes arm the watcher (#453 C3b)');
+      const results = [];
+      for (let i = 0; i < WAKE_ACTIVE_MIN; i++) results.push(send(LOUD));
+      assert.deepEqual(captures(results), [endMs(ONSET_QUIET_MIN)], 'a sound-only wake is recorded');
+    });
+  }
+
+  // ★ R588-W5: NO BEHAVIOUR CHANGE FOR A PAYLOAD WITHOUT THE FLAG, against the code before #588 itself.
+  // #588 moved the bridge-end rule into a helper and computes its log reason earlier, which a reader cannot prove
+  // changed nothing. So a seeded corpus of hostile timelines (quiet, active motion, sound-only minutes, holes, repeated
+  // labels, backward and forward label jumps, readings exactly AT the thresholds, rises, minutes out of tracking) is
+  // replayed through handleMinute, and the watcher's whole state after every payload (asleep, quietRun, lastAt, the
+  // run, the return value, the #590 limiter and the `[wake]` lines written) is compared with a GOLDEN TRACE.
+  // HOW THE GOLDEN WAS MADE: generated ONCE (2026-10-05) by this very test with R588_WRITE_GOLDEN=1, run in a scratch
+  // copy whose backend/src was the pre-#588 code (dev ca51c3f, `git archive ca51c3f backend`), and committed as
+  // test/fixtures/wake-watcher-588-golden.json. No old code runs in the suite. The write mode REFUSES to run against a
+  // wakeWatcher.js that knows `videoUnobserved`, because a golden regenerated from the new code proves nothing; if the
+  // corpus below ever has to change, regenerate it from the pre-#588 source the same way, never from the tree.
+  // Times are recorded in minutes relative to BASE_MS (labels are minute-aligned, and with no ring the anchor is the
+  // label), so the trace does not depend on when the suite runs. Wake clips are off: the decision, not the cut (as C13).
+  describe('R588-W5: the golden trace', () => {
+    const GOLDEN = new URL('./fixtures/wake-watcher-588-golden.json', import.meta.url);
+    const SEEDS = Array.from({ length: 30 }, (_, i) => 588_000 + i);
+    function rng(seed) {
+      let a = seed >>> 0;
+      return () => {
+        a = (a + 0x6d2b79f5) >>> 0;
+        let t = a;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+    // One timeline: a list of payload steps { idx, motionPeak, soundPeak, rises?, untracked? }. Holes and forward jumps
+    // are label indices that never appear; a repeat re-uses the last label; a backward jump re-lives older labels.
+    function corpus(seed) {
+      const rand = rng(seed);
+      const int = (lo, hi) => lo + Math.floor(rand() * (hi - lo + 1));
+      const pick = (a) => a[Math.floor(rand() * a.length)];
+      const steps = [];
+      let idx = 0;
+      let last = null;
+      const push = (step) => { steps.push(step); last = step.idx; };
+      const quietStep = (i) => ({ idx: i, motionPeak: pick([0, 0, 0.004, MOTION_ACTIVE]), soundPeak: pick([0, 0, 3, SOUND_ACTIVE, null]) });
+      if (rand() < 0.85) for (let n = int(14, 20); n > 0; n--) push(quietStep(idx++));
+      const length = int(60, 90);
+      while (steps.length < length) {
+        const r = rand();
+        if (r < 0.28) push(quietStep(idx++));
+        else if (r < 0.50) push({ idx: idx++, motionPeak: pick([MOTION_ACTIVE + 1e-9, 0.05, 0.3]), soundPeak: pick([0, 4, LOUD, null]) });
+        else if (r < 0.56) push({ idx: idx++, motionPeak: null, soundPeak: pick([SOUND_ACTIVE + 1e-9, 20]) });
+        else if (r < 0.62) push({ idx: idx++, motionPeak: null, soundPeak: pick([0, 2]) });
+        else if (r < 0.74) idx += int(1, 6); // a hole: no payload
+        else if (r < 0.79) { if (last !== null) push({ ...quietStep(last), motionPeak: pick([0, 0.3]) }); } // a repeated label
+        else if (r < 0.83) { idx -= pick([1, 2, 3, 5, 60]); push(quietStep(idx++)); } // the clock went back
+        else if (r < 0.86) idx += int(10, 40); // a long hole or a forward jump
+        else if (r < 0.88) push({ ...quietStep(idx++), untracked: true }); // a reading while the child is not tracked
+        else {
+          const i = idx++;
+          const hot = rand() < 0.5;
+          push({
+            idx: i, motionPeak: hot ? 0.05 : 0.004, soundPeak: hot ? LOUD : 2,
+            rises: { motionRises: [{ atMs: labelStartMs(i) + int(0, 59_999), value: hot ? 0.05 : 0.004 }], soundRises: [{ atMs: labelStartMs(i) + 30_000, value: hot ? LOUD : 2 }] },
+          });
+        }
+      }
+      return steps;
+    }
+    const rel = (ms) => (ms == null ? null : (ms - BASE_MS) / 60_000);
+    // Replay one timeline from a fresh watcher. `field`: undefined = no key at all, else the value of videoUnobserved.
+    function trace(steps, field) {
+      _state().clear();
+      const out = [];
+      const realInfo = logger.info;
+      let lines = [];
+      logger.info = (...args) => { lines.push(args.join(' ')); };
+      try {
+        for (const s of steps) {
+          const payload = { cameraId: CAM, bucketStart: labelFor(s.idx), motionPeak: s.motionPeak, soundPeak: s.soundPeak, ...(s.rises || {}) };
+          if (field !== undefined) payload.videoUnobserved = field;
+          lines = [];
+          let r;
+          if (s.untracked) {
+            db.prepare('UPDATE children SET track_sleep = 0 WHERE id = ?').run(CHILD);
+            try { r = handleMinute(payload); } finally { db.prepare('UPDATE children SET track_sleep = 1 WHERE id = ?').run(CHILD); }
+          } else {
+            r = handleMinute(payload);
+          }
+          const st = stateOf();
+          out.push([
+            st.asleep ? 1 : 0, st.quietRun, rel(st.lastAt),
+            st.run ? [rel(st.run.startMs), st.run.activeCount, rel(st.run.lastActiveMs), st.run.captured ? 1 : 0, st.run.holding ? 1 : 0] : 0,
+            r ? [r.captured ? 1 : 0, rel(r.startMs)] : 0,
+            rel(st.restartLogAt), st.restartsUnlogged, st.restartsLongest,
+            lines.filter((l) => l.includes('[wake]')),
+          ]);
+        }
+      } finally {
+        logger.info = realInfo;
+      }
+      return out;
+    }
+
+    test('R588-W5: with the field absent or false, every step of 30 seeded timelines equals the pre-#588 code\'s trace', () => {
+      wakeClips(false);
+      try {
+        if (process.env.R588_WRITE_GOLDEN) {
+          const src = fs.readFileSync(new URL('../src/lib/wakeWatcher.js', import.meta.url), 'utf8');
+          assert.ok(!src.includes('videoUnobserved'), 'refusing to write the golden from a wakeWatcher.js that already handles videoUnobserved');
+          const traces = SEEDS.map((seed) => trace(corpus(seed), undefined));
+          // The old code ignores the key, so both variants must already agree there.
+          SEEDS.forEach((seed, k) => assert.deepEqual(trace(corpus(seed), false), traces[k], `seed ${seed}`));
+          const body = traces.map((t) => JSON.stringify(t)).join(',\r\n');
+          fs.writeFileSync(GOLDEN, `{"seeds":${JSON.stringify(SEEDS)},"traces":[\r\n${body}\r\n]}\r\n`);
+          return;
+        }
+        const golden = JSON.parse(fs.readFileSync(GOLDEN, 'utf8'));
+        assert.deepEqual(golden.seeds, SEEDS, 'the fixture was made from a different corpus');
+        for (const field of [undefined, false]) {
+          SEEDS.forEach((seed, k) => {
+            const steps = corpus(seed);
+            const got = trace(steps, field);
+            assert.equal(got.length, golden.traces[k].length, `seed ${seed}: a different number of payloads`);
+            got.forEach((step, i) => {
+              if (!isDeepStrictEqual(step, golden.traces[k][i])) {
+                assert.deepEqual(step, golden.traces[k][i], `seed ${seed}, payload ${i} (field ${field}): ${JSON.stringify(steps[i])}`);
+              }
+            });
+          });
+        }
+        // Floors, on the GOLDEN itself: a corpus edit that stops exercising what #588 touched fails here rather than
+        // passing vacuously. They sit under what the fixture holds (the counts are in the message).
+        const all = golden.traces.flat();
+        const count = {
+          armed: golden.traces.filter((t) => t.some((s) => s[0] === 1)).length,
+          captures: all.filter((s) => s[4] !== 0 && s[4][0] === 1).length,
+          runsEnded: golden.traces.reduce((n, t) => n + t.filter((s, i) => i > 0 && t[i - 1][3] !== 0 && s[3] === 0).length, 0),
+          restartLines: all.filter((s) => s[8].some((l) => l.includes('settling restarted'))).length,
+        };
+        // The fixture holds (2026-10-05): 2,217 payloads; armed 24 of 30 timelines, captures 19, runsEnded 81,
+        // restartLines 21.
+        assert.ok(count.armed >= 22, JSON.stringify(count));
+        assert.ok(count.captures >= 17, JSON.stringify(count));
+        assert.ok(count.runsEnded >= 70, JSON.stringify(count));
+        assert.ok(count.restartLines >= 18, JSON.stringify(count));
+      } finally {
+        wakeClips(true);
+      }
+    });
+  });
+
+  test('R588-W6: an unobserved minute with an OLDER label changes nothing: it does not reset settling, end the run, or move lastAt', () => {
+    for (let i = 0; i < 10; i++) quiet(); // labels 0-9
+    const lastAt = stateOf().lastAt;
+    clock = 4;
+    unobserved(0); // a stale label: older than the last observed one
+    clock = 10;
+    assert.equal(stateOf().quietRun, 10, 'a stale unobserved label was taken for a backward clock step');
+    assert.equal(stateOf().lastAt, lastAt, 'a stale unobserved label moved lastAt');
+    quiet(); // label 10: the very next minute
+    assert.equal(stateOf().quietRun, 11, 'the next observed minute saw a hole that is not there');
+    assert.deepEqual(restartLines(), []);
+
+    _state().clear();
+    clock = 0;
+    settle(); // labels 0-14
+    for (let i = 0; i < 3; i++) moving(); // 15-17
+    const run = stateOf().run;
+    clock = 5;
+    unobserved(LOUD);
+    clock = 17;
+    unobserved(0); // the SAME label as the last active minute
+    clock = 18;
+    assert.equal(stateOf().run, run, 'a stale unobserved label ended the run');
+    assert.equal(run.activeCount, 3);
+    const results = [moving(), moving()];
+    assert.deepEqual(captures(results), [endMs(ONSET_QUIET_MIN)], 'the run went on to its 5th active minute and captured');
+  });
+
+  test('R588-W7: after a stall, the #590 restart line counts the minutes between the two OBSERVED readings', () => {
+    for (let i = 0; i < 10; i++) quiet(); // labels 0-9
+    unobserved(0); // 10
+    unobserved(LOUD); // 11
+    unobserved(0); // 12
+    assert.deepEqual(restartLines(), [], 'nothing is announced during the stall itself');
+    quiet(); // 13
+    const lines = restartLines();
+    assert.equal(lines.length, 1, lines.join('\n'));
+    assert.ok(lines[0].endsWith('[INFO] [wake] "Kid Room" settling restarted: readings 4 min apart after 10 quiet minute(s)'), lines[0]);
+    assert.equal(stateOf().quietRun, 1);
+  });
+
+  test('R588-W8: an unobserved minute OUTSIDE the sleep window resets the watcher like any other reading, so the next evening\'s settling is not recorded', () => {
+    settle();
+    moving();
+    moving();
+    assert.ok(stateOf().run, 'precondition: armed, with a run in progress');
+    const inside = windowAroundNow();
+    const outside = windowExcludingNow();
+    db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(outside.start, outside.end, CHILD);
+    try {
+      assert.equal(unobserved(0), null);
+    } finally {
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(inside.start, inside.end, CHILD);
+    }
+    assert.equal(stateOf().asleep, false, 'an armed watcher stayed armed through a reading outside its window');
+    assert.equal(stateOf().run, null);
+    assert.equal(stateOf().lastAt, null);
+    const results = [];
+    for (let i = 0; i < WAKE_ACTIVE_MIN; i++) results.push(moving());
+    assert.deepEqual(captures(results), [], 'activity after the window opened again was recorded as a wake: the watcher had stayed armed');
+  });
+
+  // ★ R588-M1: the #448 C13 model, extended with unobserved minutes. C13 SKIPS its holes, so an unobserved minute has
+  // to be DELIVERED (with `videoUnobserved: true`) here: a skipped one would hand the old and the new code identical
+  // calls. U = an unobserved minute with quiet sound, L = one with LOUD sound. The offline reference is the nightly
+  // job's rule (markWakeRuns: an unwatched minute is non-active, its sound unused; a run bridges <= WAKE_GAP_MIN
+  // non-active minutes) plus the live arming rule (15 consecutive OBSERVED quiet payloads; U and L break the streak
+  // like a hole). It shares no state with handleMinute. The floors count timelines where reading U/L the OLD way
+  // (U as quiet, L as active) changes the arming minute, the captures, or the number of runs: if the generator stops
+  // producing those, the comparison could not tell the old code from the new and the floor fails instead.
+  // Honest limit (plan review, Opus): this model alone caught "the check after `st.lastAt = at`" in a handful of
+  // timelines and "the check after the ordering guard" in none; W1 and W6 carry those. It compares captures and
+  // arming, not WHEN a hold is released: that is W2.
+  test('R588-M1: 150 seeded timelines with unobserved minutes delivered: captures and the arming minute equal the nightly rule', () => {
+    const rngM = (seed) => {
+      let a = seed >>> 0;
+      return () => {
+        a = (a + 0x6d2b79f5) >>> 0;
+        let t = a;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    };
+    function build(rand) {
+      const int = (lo, hi) => lo + Math.floor(rand() * (hi - lo + 1));
+      const slots = [];
+      const settleLen = int(15, 25);
+      for (let i = 0; i < settleLen; i++) slots.push('Q');
+      const r = rand();
+      if (r < 0.3) slots[int(0, settleLen - 1)] = 'U';
+      else if (r < 0.45) slots[int(0, settleLen - 1)] = 'L';
+      else if (r < 0.55) slots[int(0, settleLen - 1)] = 'H';
+      // Per timeline: what fills the gaps between bursts (unobserved-heavy, mixed, or the C13 kinds).
+      const fill = [['U', 'L'], ['U', 'L', 'Q', 'H'], ['U', 'Q'], ['L', 'H'], ['Q', 'H']][int(0, 4)];
+      const target = int(60, 100);
+      while (slots.length < target) {
+        const burst = int(1, 8);
+        for (let i = 0; i < burst; i++) slots.push(rand() < 0.12 ? 'L' : 'A');
+        const gap = int(0, 6);
+        for (let i = 0; i < gap; i++) slots.push(fill[int(0, fill.length - 1)]);
+      }
+      slots.length = Math.min(slots.length, 100);
+      return slots.join('');
+    }
+    // The reference. Q/A = observed quiet/active payloads, U/L = unobserved, H = no payload.
+    function reference(timeline) {
+      const n = timeline.length;
+      let armedAt = -1;
+      let streak = 0;
+      for (let i = 0; i < n && armedAt < 0; i++) {
+        streak = timeline[i] === 'Q' ? streak + 1 : 0;
+        if (streak >= ONSET_QUIET_MIN) armedAt = i;
+      }
+      if (armedAt < 0) return { armedAt, startMs: [], runs: 0 };
+      const active = Array.from(timeline, (c, i) => i > armedAt && c === 'A');
+      const startMs = [];
+      let runs = 0;
+      for (let i = armedAt + 1; i < n; ) {
+        if (!active[i]) { i++; continue; }
+        let last = i;
+        let count = 0;
+        let k = i;
+        while (k < n) {
+          if (active[k]) { last = k; count++; k++; continue; }
+          let g = k;
+          while (g < n && !active[g]) g++;
+          if (g < n && g - k <= WAKE_GAP_MIN) { k = g; continue; }
+          break;
+        }
+        runs++;
+        if (count >= WAKE_ACTIVE_MIN) startMs.push(endMs(i));
+        i = last + 1;
+      }
+      return { armedAt, startMs, runs };
+    }
+    // How the code before #588 read the same minutes: U as a watched quiet minute, L as a watched loud (active) one.
+    const oldReading = (t) => t.replace(/U/g, 'Q').replace(/L/g, 'A');
+    const payloadFor = (c, i) => {
+      const base = { cameraId: CAM, bucketStart: labelFor(i) };
+      if (c === 'Q') return { ...base, motionPeak: 0, soundPeak: 0 };
+      if (c === 'A') return { ...base, motionPeak: MOTION_ACTIVE + 0.05, soundPeak: 0 };
+      return { ...base, motionPeak: null, soundPeak: c === 'L' ? LOUD : 0, videoUnobserved: true };
+    };
+    const opposite = { Q: 'A', A: 'Q', U: 'L', L: 'U' };
+    function replay(timeline, dupRand = null) {
+      _state().clear();
+      const startMs = [];
+      let armedAt = -1;
+      for (let i = 0; i < timeline.length; i++) {
+        const c = timeline[i];
+        if (c === 'H') continue;
+        const r = handleMinute(payloadFor(c, i));
+        if (r?.captured) startMs.push(r.startMs);
+        if (armedAt < 0 && stateOf().asleep) armedAt = i;
+        // A repeated label is ignored whatever it says; an unobserved copy of an unobserved minute changes nothing either.
+        if (dupRand && dupRand() < 0.25) {
+          assert.equal(handleMinute(payloadFor(opposite[c], i)), null, `a repeated label captured (minute ${i} of ${timeline})`);
+        }
+      }
+      return { startMs, armedAt };
+    }
+    const SEQUENCES = 150;
+    const count = { armed: 0, withCapture: 0, armingDiffers: 0, capturesDiffer: 0, runsDiffer: 0, unobservedAfterArming: 0 };
+    const realInfo = logger.info;
+    logger.info = () => {};
+    try {
+      wakeClips(false);
+      for (let s = 0; s < SEQUENCES; s++) {
+        const seed = 588_100 + s;
+        const timeline = build(rngM(seed));
+        const want = reference(timeline);
+        const where = `seed ${seed}: ${timeline}`;
+        const got = replay(timeline);
+        assert.equal(got.armedAt, want.armedAt, `arming minute differs from the rule (${where})`);
+        assert.deepEqual(got.startMs, want.startMs, `captures differ from the nightly rule (${where})`);
+        if (s % 4 === 0) assert.deepEqual(replay(timeline, rngM(seed ^ 0x5bd1e995)).startMs, want.startMs, `repeated labels changed the result (${where})`);
+        const old = reference(oldReading(timeline));
+        if (want.armedAt >= 0) count.armed++;
+        if (want.startMs.length) count.withCapture++;
+        if (old.armedAt !== want.armedAt) count.armingDiffers++;
+        if (JSON.stringify(old.startMs) !== JSON.stringify(want.startMs)) count.capturesDiffer++;
+        if (old.runs !== want.runs) count.runsDiffer++;
+        if (want.armedAt >= 0 && /[UL]/.test(timeline.slice(want.armedAt + 1))) count.unobservedAfterArming++;
+      }
+    } finally {
+      logger.info = realInfo;
+      wakeClips(true);
+    }
+    // The fixed seeds give (2026-10-05): armed 114, withCapture 114, armingDiffers 38, capturesDiffer 114, runsDiffer 93,
+    // unobservedAfterArming 114. The floors sit under those; they catch a generator edit, not a code change.
+    assert.ok(count.armed >= 100, JSON.stringify(count));
+    assert.ok(count.withCapture >= 100, JSON.stringify(count));
+    assert.ok(count.armingDiffers >= 30, JSON.stringify(count));
+    assert.ok(count.capturesDiffer >= 90, JSON.stringify(count));
+    assert.ok(count.runsDiffer >= 75, JSON.stringify(count));
+    assert.ok(count.unobservedAfterArming >= 100, JSON.stringify(count));
+  });
+
+  // ★ R588-E1: end to end through the REAL tracker into the REAL watcher (recordMotion / recordSound / excludeClone,
+  // flushActivity's ticks, onMinuteFlushed(handleMinute)), the three shapes SIDE BY SIDE in the same minutes, so a flag
+  // that is true for the wrong shape fails:
+  //   a  (cam-1)  a stall with live sound: frames, then minutes of LOUD sound only, then video again;
+  //   b  (clone)  a clone-heavy minute that still holds ONE real frame (nine of ten frames proven repeats): watched,
+  //               its loud sound counts (activityTracker.test.js R588-T13 pins the tracker side, and that a minute of
+  //               ONLY proven repeats is watched too under this rule: shape 2 is left to the nightly job);
+  //   c  (mic)    a sound-only camera that never delivered a frame: no flag, settles and records a sound wake.
+  // Each camera: 15 quiet minutes (minutes 0-14), 4 active (15-18), then minute 19 is the shape's minute, LOUD.
+  describe('R588-E1: end to end, real tracker into the watcher', () => {
+    const CAM_CLONE = 'cam-588-clone';
+    const CAM_MIC = 'cam-588-mic';
+    function drive() {
+      makeCamera(db, { id: CAM_CLONE, name: 'Clone Room', childId: CHILD });
+      makeCamera(db, { id: CAM_MIC, name: 'Mic Room', childId: CHILD });
+      activity._resetActivityTrackerForTests();
+      const got = { [CAM]: [], [CAM_CLONE]: [], [CAM_MIC]: [] };
+      const off = activity.onMinuteFlushed((p) => {
+        const r = handleMinute(p);
+        const st = _state().get(p.cameraId);
+        got[p.cameraId].push({ minute: (bucketMsOf(p.bucketStart) - M0) / 60_000, flag: p.videoUnobserved, motionPeak: p.motionPeak, captured: r?.captured === true, startMs: r?.startMs ?? null, run: st.run ? { ...st.run } : null, asleep: st.asleep });
+      });
+      const M0 = BASE_MS - 150 * 60_000;
+      const bucketMsOf = (b) => Date.parse(`${b.replace(' ', 'T')}Z`);
+      const at = (i, o) => M0 + i * 60_000 + o;
+      try {
+        wakeClips(false);
+        for (let i = 0; i <= 23; i++) {
+          // cam-1: the stall camera
+          if (i <= 14) { activity.recordMotion(CAM, 0, null, at(i, 10_000)); activity.recordSound(CAM, 0, at(i, 11_000)); }
+          else if (i <= 18) activity.recordMotion(CAM, MOTION_ACTIVE + 0.05, null, at(i, 10_000));
+          else if (i <= 22) activity.recordSound(CAM, LOUD, at(i, 11_000)); // the stall: sound only
+          else activity.recordMotion(CAM, MOTION_ACTIVE + 0.05, null, at(i, 10_000)); // video back
+          // clone: ten still frames in minute 19, nine proven repeats, and a loud sound
+          if (i <= 14 || i >= 20) { activity.recordMotion(CAM_CLONE, 0, null, at(i, 10_000)); activity.recordSound(CAM_CLONE, 0, at(i, 11_000)); }
+          else if (i <= 18) activity.recordMotion(CAM_CLONE, MOTION_ACTIVE + 0.05, null, at(i, 10_000));
+          else {
+            for (let tok = 1; tok <= 10; tok++) activity.recordMotion(CAM_CLONE, 0, { gen: 9, token: tok }, at(i, tok * 1_000));
+            activity.recordSound(CAM_CLONE, LOUD, at(i, 20_000));
+            for (let tok = 1; tok <= 9; tok++) assert.equal(activity.excludeClone(CAM_CLONE, 9, tok), true, 'precondition: a staged repeat');
+          }
+          // mic: sound only, always
+          activity.recordSound(CAM_MIC, i >= 15 && i <= 19 ? LOUD : 0, at(i, 11_000));
+          activity.flushActivity(at(i + 1, 900)); // the tick just after the minute ends
+        }
+      } finally {
+        off();
+        activity._resetActivityTrackerForTests();
+        wakeClips(true);
+        db.prepare('DELETE FROM cameras WHERE id IN (?, ?)').run(CAM_CLONE, CAM_MIC);
+      }
+      return { got, M0 };
+    }
+    const flagsOf = (rows) => rows.map((r) => r.flag);
+
+    test('R588-E1a: the stall with live sound is flagged minute by minute, its LOUD minutes record no wake, and its run ends at the 4th stalled minute', () => {
+      const { got, M0 } = drive();
+      const rows = got[CAM];
+      assert.deepEqual(rows.map((r) => r.minute), Array.from({ length: 24 }, (_, i) => i), 'precondition: every minute reached the watcher');
+      assert.deepEqual(flagsOf(rows), Array.from({ length: 24 }, (_, i) => i >= 19 && i <= 22));
+      assert.equal(rows[14].asleep, true, 'precondition: 15 watched quiet minutes armed it');
+      assert.equal(rows[18].run.activeCount, 4, 'precondition: one active minute short of a wake');
+      assert.deepEqual(rows.filter((r) => r.captured), [], 'a loud stalled minute completed the wake');
+      assert.equal(rows[21].run?.activeCount, 4, 'three stalled minutes still bridge the run');
+      assert.equal(rows[22].run, null, 'the 4th stalled minute ended it');
+      assert.equal(rows[23].run.activeCount, 1, 'video back: a fresh run');
+      assert.equal(rows[23].run.startMs, M0 + 24 * 60_000);
+      // side by side: the other two shapes are never flagged
+      assert.deepEqual(flagsOf(got[CAM_CLONE]), Array(24).fill(false));
+      assert.deepEqual(flagsOf(got[CAM_MIC]), Array(24).fill(false));
+    });
+
+    test('R588-E1b: a clone-heavy minute that still holds a real frame is watched: its loud sound is the 5th active minute and the wake is recorded', () => {
+      const { got, M0 } = drive();
+      const rows = got[CAM_CLONE];
+      assert.deepEqual(flagsOf(rows), Array(24).fill(false), 'a minute with a real frame was flagged as having no video');
+      assert.equal(rows[19].motionPeak, 0, 'precondition: the minute had frames, all still');
+      assert.deepEqual(rows.filter((r) => r.captured).map((r) => [r.minute, r.startMs]), [[19, M0 + 16 * 60_000]]);
+    });
+
+    test('R588-E1c: a sound-only camera (never a frame) is never flagged: it settles on its quiet minutes and records its sound wake', () => {
+      const { got, M0 } = drive();
+      const rows = got[CAM_MIC];
+      assert.deepEqual(flagsOf(rows), Array(24).fill(false), 'a camera that never had video was treated as stalled');
+      assert.ok(rows.every((r) => r.motionPeak === null), 'precondition: no frame ever');
+      assert.equal(rows[14].asleep, true, '15 quiet sound-only minutes arm it (#453 C3b)');
+      assert.deepEqual(rows.filter((r) => r.captured).map((r) => [r.minute, r.startMs]), [[19, M0 + 16 * 60_000]]);
+    });
   });
 });
 

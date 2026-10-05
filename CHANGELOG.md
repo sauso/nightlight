@@ -79,6 +79,21 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
     is skipped — a push already sent cannot be recalled, but no further one goes out for a flagged night.
 
 ### Fixed
+- **Wake clips no longer count minutes whose video nobody saw** (issue #588). When a camera's video stalls
+  while its microphone keeps working, the live wake watcher read each minute of sound as a watched minute: a
+  quiet one counted toward the 15 quiet minutes it needs before it starts watching, and a loud one counted as
+  activity, so a noise during a stall could complete a wake that the sleep timeline (which has called those
+  minutes unknown since #508) does not show. Now such a minute, on a camera that has delivered video since the
+  server started, is a minute the watcher did not see, exactly as on the timeline: no progress toward starting
+  to watch, not activity even when loud, and a pause inside a wake like any other. A wake in progress still
+  ends at the 4th minute without activity, the same minute 4 quiet minutes would end it, and the log then says
+  `run ended (no video for N min)`. A camera with no video at all keeps using its sound, as before. In about
+  30 days of stored minutes from two cameras in one house (measured 2026-10-05) there were 263 such minutes in
+  one database and 807 in the other. Known limits, in KNOWN-ISSUES: a camera already stalled when the
+  server starts counts as having no video until its first frame; a minute made only of repeated frames still
+  counts as watched live (no such minute in the stored data); a child crying through a stall is not recorded
+  as a wake; the bed in/out rules are unchanged. Details in `docs/recording.md`. Nothing here assumes a
+  particular house, child or timezone.
 - **A parent at the bed after a child got up no longer moves the morning wake hours later** (issue #598). A
   *got out of bed* logged within a minute of a *got into bed* is set aside as the same climb-back-in read
   twice, but only if the bed then shows the child is really back. That proof was any 3 minutes of movement

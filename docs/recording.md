@@ -63,16 +63,21 @@ that gap without making alerts noisier.
 - Only for children with **Track sleep** on (per child, under the child's settings).
 - Only **once your child is actually asleep** — settling at bedtime is never recorded. "Asleep" here
   means **15 quiet minutes in a row that the camera actually reported**; a minute the camera reported
-  nothing for starts the count again. That is stricter than the sleep timeline's own rule, so after an
-  outage in the evening recording can start later than the timeline's bedtime (a camera that drops a
-  minute more often than about every 15 minutes never starts). Once started, a gap does not stop it.
+  nothing for starts the count again, and so does a minute with sound but no video when the camera's video
+  has stalled (such a minute is not counted as seen, as on the sleep timeline). That is stricter than the
+  sleep timeline's own rule, so after an outage in the evening recording can start later than the
+  timeline's bedtime (a camera that drops a minute more often than about every 15 minutes never starts).
+  Once started, a gap does not stop it.
 - Only for a real wake-up: a brief **stir is ignored**, using the same threshold the sleep timeline
   uses to decide what counts as a wake-up. Activity that pauses for up to **3 minutes** is still one
   wake-up, and a minute the camera reported nothing for counts as a pause, exactly as on the timeline; a
   longer gap ends the wake-up, so two qualifying stretches of activity either side of an outage are two
-  wake-ups and two clips. The numbers (3 minutes, 5 active minutes, 15 quiet minutes) are fixed, not
-  settings, are the sleep timeline's own, and were tuned on nights from two cameras in one house (not
-  validated elsewhere). See "A wake recording does not bridge a gap in the readings" in
+  wake-ups and two clips. A **video stall** whose sound keeps arriving counts as a pause too: noise heard
+  while the picture is missing does not make a minute active (a bedroom microphone hears the whole house),
+  exactly as on the timeline. This applies to a camera that has delivered video since the server started; a
+  camera with no video at all keeps using its sound. The numbers (3 minutes, 5 active minutes, 15 quiet
+  minutes) are fixed, not settings, are the sleep timeline's own, and were tuned on nights from two cameras in
+  one house (not validated elsewhere). See "A wake recording does not bridge a gap in the readings" in
   [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
 - The clip starts at the **beginning** of the wake-up, not when it was confirmed — the opening is the
   part that explains why. Precisely: it starts about 2 to 3 seconds before the first frame that showed movement or
