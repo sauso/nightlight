@@ -12072,6 +12072,42 @@
     "note": "at - 0 is an epoch in ms, always >= 15 minutes: the first line logs either way. reset() sets null explicitly."
   },
   {
+    "label": "#590 M-590-26: a label EQUAL to the last line's is let through (`<=` on the backward-step clause)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": " || at < st.restartLogAt) {",
+    "replace": " || at <= st.restartLogAt) {",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "R590-8b re-lives exactly the label the last line was written at (Opus code review)."
+  },
+  {
+    "label": "#590 M-590-27: the label of the last line is never remembered",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "        st.restartLogAt = at;",
+    "replace": "        /* restartLogAt never advanced */",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "Without it every restart after the first one logs: R590-4, R590-9 and R590-10 all see the extra lines."
+  },
+  {
+    "label": "#590 M-590-28: the log block returns early, skipping the `settled` check (equivalent)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "        st.restartLogAt = at;",
+    "replace": "        st.restartLogAt = at;\r\n        return null;",
+    "expect": "equivalent",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R590-",
+    "note": "After any restart the count is 1, below ONSET_QUIET_MIN, so the skipped `settled` check could not have armed the watcher and the function returns null anyway (Opus code review, verified by running)."
+  },
+  {
     "label": "control: a comment edit in wakeWatcher.js must change nothing (#590)",
     "file": "backend/src/lib/wakeWatcher.js",
     "find": "// #590: what this hole is about to cost, read BEFORE the count is reset.",

@@ -259,7 +259,9 @@ export function handleMinute(payload) {
     // whether the strict rule is too strict (KNOWN-ISSUES.md). Worded "readings N min apart" like the
     // `run ended` line: a forward clock jump is indistinguishable from a hole in the labels.
     // Rate limit (RESTART_LOG_MS) on the labels; `at < restartLogAt` lets a backward clock step through, or the
-    // line would stay silent for as long as the step is deep. What the limit holds back is not dropped: the
+    // line would stay silent for as long as the step is deep. A label EQUAL to the last line's is held back
+    // (`<`, not `<=`): re-living exactly that minute is not a new restart worth a line (pinned by R590-8b).
+    // What the limit holds back is not dropped: the
     // next line carries how many and the longest quiet run among them, because the restart that matters most is
     // the one that came 14 minutes after the last line, after 13 quiet minutes. A count still pending when the
     // watcher arms or its window closes is never printed (documented).

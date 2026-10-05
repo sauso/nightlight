@@ -773,18 +773,19 @@ one moves both. They are constants, not settings, so there is no default to chan
 **What to do:** nothing. In the log, `[wake] "<camera>" settled — watching for wakes` marks the start of
 watching. No such line all night means either that the camera never had 15 unbroken minutes, or that the
 watcher was still armed from the previous night (it settles only once, so it logs nothing the second time).
-To tell those apart, look for the line a hole writes while the watcher is still settling:
-`[wake] "<camera>" settling restarted: readings N min apart after M quiet minutes`. N is the distance between
+To narrow it down, look for the line a hole writes while the watcher is still settling:
+`[wake] "<camera>" settling restarted: readings N min apart after M quiet minute(s)`. N is the distance between
 the two readings around the hole and M is how many quiet minutes it threw away (a forward jump of the server's
 clock looks the same as a dropout, so the line says "readings apart", not "outage"). It is written only when
 the hole cost real progress and the minute after it was quiet: a hole followed by an active minute, and a
 backward clock step with progress, also send the count back to zero, but silently (a hole before any quiet
-minute has nothing to lose). It never changes when
-the watcher starts watching; it only reports. **It differs from the `settled` line, which is written once when
-the watcher starts watching: this one can repeat while settling is failing**, at most once per camera per 15
-minutes of the camera's own minute labels (a backward clock step lets one more through). Restarts held back by
-that limit are counted onto the next line (`; K more since the last such line, the longest after M quiet
-minutes`), but a count still pending when the camera starts watching, or when its sleep window closes, is
+minute has nothing to lose). It never changes when the watcher starts watching; it only reports. **It differs
+from the `settled` line, which is written once when the watcher starts watching: this one can repeat while
+settling is failing**, at most once per camera per 15 minutes of the camera's own minute labels, so a forward
+jump or a backward step of the server's clock can put two lines closer together in real time (a backward step
+lets one more through, unless its label equals the last line's exactly, which is held back). Restarts held
+back by that limit are counted onto the next line (`; K more since the last such line, the longest after M
+quiet minute(s)`), but a count still pending when the camera starts watching, or when its sleep window closes, is
 never printed. How to read a night: restart lines repeating about every 15 minutes with no `settled` line
 after them mean holes keep sending that camera's count back to zero. Read the M values, not only whether lines
 appear: M close to 15 means one missing minute each time was all that stood between the camera and watching

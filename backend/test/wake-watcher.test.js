@@ -2058,6 +2058,19 @@ describe('#590: a hole that restarts the settling count is logged, and nothing e
     assert.ok(lines[1].endsWith(`[INFO] ${msg('Kid Room', 2, 2)}`), lines[1]);
   });
 
+  test('R590-8b: a restart that lands on EXACTLY the last line\'s label (a step back re-living that minute) is held back, and counted', () => {
+    holeAt(4);
+    assert.equal(restartLines().length, 1);
+    clock = 1; // the labels step back and re-live minutes 1-4
+    quiet();
+    quiet();
+    skip(1);
+    quiet(); // a hole at label 4 again: the same label as the line already written
+    assert.equal(restartLines().length, 1, restartLines().join('\n'));
+    assert.equal(stateOf().restartsUnlogged, 1, 'it was held back, not lost');
+    assert.equal(stateOf().restartsLongest, 2);
+  });
+
   test('R590-9: leaving the sleep window clears the limiter: the first restart after re-entry logs, with no carried count', () => {
     holeAt(4); // logged
     holeAt(8); // held back: 3 quiet minutes lost
