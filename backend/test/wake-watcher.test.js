@@ -1908,6 +1908,306 @@ describe('★ #448 — the watcher counts MINUTES, not callbacks', () => {
   });
 });
 
+// ★ #590: a hole that restarts the settling count is LOGGED, and nothing else about the watcher changes.
+//
+// Why the line exists: the live gate arms only after ONSET_QUIET_MIN consecutive observed quiet minutes (#448), so
+// a camera that drops a minute more often than about every 15 minutes never arms, and until #590 that was silent.
+// These tests pin WHEN the line is written (a hole that cost real progress, rate-limited on the labels, with what
+// the limit held back carried onto the next line) and, as importantly, that writing it changed no decision.
+//
+// ⚠️ Test names are `R590-n`, never `C<n>:`: scripts/mutants.json anchors the #448 and #412 mutants on name
+// patterns such as `^C(6|7):`, and a new `C6:` here would be dragged into their runs (and the other way round).
+describe('#590: a hole that restarts the settling count is logged, and nothing else changes', () => {
+  const restartLines = () => logger.getRecent().filter((l) => l.includes('settling restarted'));
+  const msg = (name, elapsed, lost, held = '') =>
+    `[wake] "${name}" settling restarted: readings ${elapsed} min apart after ${lost} quiet minute(s)${held}`;
+  const more = (k, longest) => `; ${k} more since the last such line, the longest after ${longest} quiet minute(s)`;
+  // Quiet payloads up to label h - 2, label h - 1 MISSING, a quiet payload at label h: a hole at h that cost every
+  // quiet minute read since the previous hole (h - previous - 1 of them).
+  const holeAt = (h) => {
+    while (clock < h - 1) quiet();
+    skip(1);
+    quiet();
+  };
+
+  beforeEach(() => logger.clear());
+
+  test('R590-1: 14 quiet minutes, one missing minute, one more: exactly ONE line, with the elapsed and the lost counts', () => {
+    for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) quiet();
+    assert.deepEqual(restartLines(), [], 'precondition: contiguous settling is silent');
+    skip(1);
+    quiet();
+    const lines = restartLines();
+    assert.equal(lines.length, 1, lines.join('\n'));
+    assert.ok(lines[0].endsWith(`[INFO] ${msg('Kid Room', 2, ONSET_QUIET_MIN - 1)}`), lines[0]);
+    assert.equal(stateOf().asleep, false, 'the behaviour is #448 C6 unchanged');
+    assert.equal(stateOf().quietRun, 1, 'the count restarted at the hole');
+  });
+
+  test('R590-2: a hole that cost NO progress logs nothing (one that follows an active minute), while one that did, does', () => {
+    moving();
+    skip(1);
+    quiet(); // active, hole, quiet: nothing to lose
+    moving();
+    skip(1);
+    moving();
+    skip(1);
+    quiet(); // active, hole, active, hole, quiet
+    assert.deepEqual(restartLines(), []);
+    // The positive control, in the same shape: with two quiet minutes to lose, a two-minute hole logs.
+    _state().clear();
+    clock = 0;
+    quiet();
+    quiet();
+    skip(2);
+    quiet();
+    const lines = restartLines();
+    assert.equal(lines.length, 1);
+    assert.ok(lines[0].endsWith(`[INFO] ${msg('Kid Room', 3, 2)}`), lines[0]);
+  });
+
+  test('R590-3: a hole followed by an ACTIVE minute logs nothing: the active minute, not the hole, ended the progress', () => {
+    for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) quiet();
+    skip(1);
+    moving();
+    assert.deepEqual(restartLines(), []);
+    assert.equal(stateOf().quietRun, 0);
+  });
+
+  test('R590-4: the rate limit, over two windows: at most one line per 15 minutes, exactly 15 logs, the held-back restarts are counted', () => {
+    const holes = [4, 11, 14, 19, 21, 24, 28, 33, 35];
+    const linesAfter = [1, 1, 1, 2, 2, 2, 2, 2, 3];
+    holes.forEach((h, i) => {
+      holeAt(h);
+      assert.equal(restartLines().length, linesAfter[i], `after the hole at label ${h}: ${restartLines().join('\n')}`);
+    });
+    const lines = restartLines();
+    // Hole 4: the first. 11 (+7) and 14 (+10) are held back, with 6 and 2 quiet minutes lost: the longest is 6, which
+    // is neither the first nor the last nor the smallest of what was held. 19 is EXACTLY 15 minutes after 4.
+    assert.ok(lines[0].endsWith(`[INFO] ${msg('Kid Room', 2, 3)}`), lines[0]);
+    assert.ok(lines[1].endsWith(`[INFO] ${msg('Kid Room', 2, 4, more(2, 6))}`), lines[1]);
+    // Window two: 21 (+2), 24 (+5), 28 (+9) and 33 (+14: one minute short of the cadence) are held back, 35 (+16) logs.
+    // 21 would have logged at once if the last line's label had not been remembered; "4 more", not 6, says the count
+    // restarted at the line; "the longest after 4" (the held runs were 1, 2, 3, 4) and not 6 says the longest did too.
+    assert.ok(lines[2].endsWith(`[INFO] ${msg('Kid Room', 2, 1, more(4, 4))}`), lines[2]);
+    assert.equal(stateOf().asleep, false, 'precondition of the whole timeline: it never armed');
+  });
+
+  test('R590-4b: the limit is per camera: a second camera\'s first restart logs inside the first camera\'s window', () => {
+    makeCamera(db, { id: 'cam-2', name: 'Second Room', childId: CHILD });
+    try {
+      holeAt(4);
+      const second = (idx) => handleMinute({ cameraId: 'cam-2', bucketStart: labelFor(idx), motionPeak: 0, soundPeak: 0 });
+      second(0);
+      second(1);
+      second(2);
+      second(4); // label 3 missing: a hole that cost 3 quiet minutes, 0 minutes after the first camera's line
+      const lines = restartLines();
+      assert.equal(lines.length, 2, lines.join('\n'));
+      assert.ok(lines[1].endsWith(`[INFO] ${msg('Second Room', 2, 3)}`), lines[1]);
+    } finally {
+      db.prepare('DELETE FROM cameras WHERE id = ?').run('cam-2');
+    }
+  });
+
+  test('R590-5 (control): contiguous settling logs no restart line, arms on the 15th quiet minute, and an active minute is not a hole', () => {
+    for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) {
+      quiet();
+      assert.equal(stateOf().asleep, false, `armed early, after ${i + 1} minutes`);
+    }
+    quiet();
+    assert.equal(stateOf().asleep, true, 'the 15th contiguous quiet minute arms the watcher');
+    assert.deepEqual(restartLines(), []);
+    _state().clear();
+    clock = 0;
+    for (let i = 0; i < 5; i++) quiet();
+    moving();
+    for (let i = 0; i < ONSET_QUIET_MIN; i++) quiet();
+    assert.equal(stateOf().asleep, true);
+    assert.deepEqual(restartLines(), [], 'an active minute restarts the count by itself and is not announced');
+  });
+
+  test('R590-6 (control): an ARMED watcher logs nothing for a hole: only settling is announced', () => {
+    settle();
+    logger.clear();
+    skip(3);
+    quiet();
+    quiet();
+    assert.deepEqual(restartLines(), []);
+    assert.equal(stateOf().asleep, true);
+  });
+
+  test('R590-7 (control): a backward clock step with progress is not a hole and logs nothing', () => {
+    for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) quiet();
+    clock = 2;
+    quiet();
+    assert.deepEqual(restartLines(), []);
+    assert.equal(stateOf().quietRun, 1, 'the progress was still dropped (#448 C10b)');
+  });
+
+  test('R590-8: a backward clock step does not silence the line for as long as the step is deep', () => {
+    holeAt(4);
+    assert.equal(restartLines().length, 1);
+    clock = 0; // the labels step back 5 minutes: older than the last line's
+    quiet();
+    quiet();
+    skip(1);
+    quiet(); // a hole at label 3, whose label is OLDER than the last line's (label 4): "now - last" is negative
+    const lines = restartLines();
+    assert.equal(lines.length, 2, lines.join('\n'));
+    assert.ok(lines[1].endsWith(`[INFO] ${msg('Kid Room', 2, 2)}`), lines[1]);
+  });
+
+  test('R590-8b: a restart that lands on EXACTLY the last line\'s label (a step back re-living that minute) is held back, and counted', () => {
+    holeAt(4);
+    assert.equal(restartLines().length, 1);
+    clock = 1; // the labels step back and re-live minutes 1-4
+    quiet();
+    quiet();
+    skip(1);
+    quiet(); // a hole at label 4 again: the same label as the line already written
+    assert.equal(restartLines().length, 1, restartLines().join('\n'));
+    assert.equal(stateOf().restartsUnlogged, 1, 'it was held back, not lost');
+    assert.equal(stateOf().restartsLongest, 2);
+  });
+
+  test('R590-9: leaving the sleep window clears the limiter: the first restart after re-entry logs, with no carried count', () => {
+    holeAt(4); // logged
+    holeAt(8); // held back: 3 quiet minutes lost
+    assert.equal(stateOf().restartsUnlogged, 1, 'precondition: one restart held back');
+    assert.equal(stateOf().restartsLongest, 3);
+    db.prepare('UPDATE children SET track_sleep = 0 WHERE id = ?').run(CHILD);
+    try {
+      quiet(); // out of tracking: the watcher resets
+    } finally {
+      db.prepare('UPDATE children SET track_sleep = 1 WHERE id = ?').run(CHILD);
+    }
+    assert.equal(stateOf().restartLogAt, null, 'reset() kept the last line\'s label');
+    assert.equal(stateOf().restartsUnlogged, 0, 'reset() kept the held-back count');
+    assert.equal(stateOf().restartsLongest, 0, 'reset() kept the longest held-back run');
+    holeAt(13); // 9 minutes after the line at label 4: inside the window, but that line belongs to the night before
+    let lines = restartLines();
+    assert.equal(lines.length, 2, lines.join('\n'));
+    assert.ok(lines[1].endsWith(`[INFO] ${msg('Kid Room', 2, 2)}`), `no "more" may come across the reset: ${lines[1]}`);
+    holeAt(15); // held back: 1 quiet minute lost
+    holeAt(28); // exactly 15 minutes after 13: logs, and the longest it carries is THIS night's 1, not the 3 from before
+    lines = restartLines();
+    assert.equal(lines.length, 3, lines.join('\n'));
+    assert.ok(lines[2].endsWith(`[INFO] ${msg('Kid Room', 2, 12, more(1, 1))}`), lines[2]);
+  });
+
+  // ★ NO BEHAVIOUR CHANGE. The log line is bookkeeping beside the decision, so the strongest thing to assert is that
+  // the decision is what an INDEPENDENT model says: consecutive observed quiet minutes, restarted by any hole. The
+  // oracle below shares nothing with wakeWatcher.js except ONSET_QUIET_MIN. It also writes down the restarts the
+  // stated rule names (a hole after progress, before a quiet minute) and applies the stated limiter to them, and the
+  // lines are compared whole: which restart logged, with which numbers, and what the limit held back. Honest limit:
+  // that second half re-implements the rule, so it catches a slip in the code, not a mistake in the rule itself.
+  // Uniform random timelines would almost never produce a restart AFTER progress and then a rate-limited one, so
+  // the generator is structured (short quiet runs, single and long holes, some active minutes) and the floors below
+  // are asserts: a generator edit that makes the comparison vacuous fails here rather than passing quietly.
+  // Fixed seeds, so the counts are exactly reproducible; the floors sit under what the generator produces.
+  test('R590-10: 200 seeded timelines: when the watcher arms, every count and every restart line equal the independent oracle', () => {
+    const rng = (seed) => {
+      let a = seed >>> 0;
+      return () => {
+        a = (a + 0x6d2b79f5) >>> 0;
+        let t = a;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    };
+    // Q = a quiet payload, A = an active one, H = a minute with no payload at all.
+    const build = (rand) => {
+      const n = (lo, hi) => lo + Math.floor(rand() * (hi - lo + 1));
+      let s = '';
+      while (s.length < 110) {
+        const r = rand();
+        if (r < 0.5) s += 'Q'.repeat(n(1, 9));
+        else if (r < 0.58) s += 'Q'.repeat(n(10, 20));
+        else if (r < 0.9) s += 'H'.repeat(rand() < 0.85 ? n(1, 2) : n(3, 25));
+        else s += 'A'.repeat(n(1, 2));
+      }
+      return s;
+    };
+    const model = (timeline) => {
+      let run = 0;
+      let last = null;
+      let armedAt = -1;
+      const events = [];
+      const runs = new Map(); // payload index -> the oracle's quiet count after it
+      for (let i = 0; i < timeline.length && armedAt < 0; i++) {
+        if (timeline[i] === 'H') continue;
+        const hole = last != null && i - last > 1;
+        if (timeline[i] === 'A') {
+          run = 0;
+        } else {
+          if (hole && run > 0) events.push({ idx: i, lost: run, elapsed: i - last });
+          run = hole ? 1 : run + 1;
+        }
+        last = i;
+        runs.set(i, run);
+        if (run >= ONSET_QUIET_MIN) armedAt = i;
+      }
+      const lines = [];
+      let logAt = null;
+      let held = 0;
+      let longest = 0;
+      let exactly15 = 0;
+      for (const e of events) {
+        if (logAt == null || e.idx - logAt >= 15) {
+          if (logAt != null && e.idx - logAt === 15) exactly15++;
+          lines.push(msg('Kid Room', e.elapsed, e.lost, held > 0 ? more(held, longest) : ''));
+          logAt = e.idx;
+          held = 0;
+          longest = 0;
+        } else {
+          held++;
+          longest = Math.max(longest, e.lost);
+        }
+      }
+      return { armedAt, runs, lines, events, exactly15 };
+    };
+
+    const SEQUENCES = 200;
+    const count = { armed: 0, armedAfterRestart: 0, lines: 0, withMore: 0, held: 0, exactly15: 0 };
+    for (let s = 0; s < SEQUENCES; s++) {
+      _state().clear();
+      clock = 0;
+      logger.clear();
+      const timeline = build(rng(590000 + s));
+      const want = model(timeline);
+      const where = `seed ${590000 + s}: ${timeline}`;
+      let armedAt = -1;
+      for (let i = 0; i < timeline.length && armedAt < 0; i++) {
+        if (timeline[i] === 'H') continue;
+        deliver(labelFor(i), timeline[i] === 'A' ? MOTION_ACTIVE + 0.05 : 0, 0);
+        const armed = want.runs.get(i) >= ONSET_QUIET_MIN;
+        assert.equal(stateOf().asleep, armed, `armed at the wrong minute (index ${i}; ${where})`);
+        assert.equal(stateOf().quietRun, armed ? 0 : want.runs.get(i), `quiet count differs (index ${i}; ${where})`);
+        assert.equal(stateOf().lastAt, endMs(i), `lastAt differs (index ${i}; ${where})`);
+        assert.equal(stateOf().run, null, `a run exists before the watcher is armed (index ${i}; ${where})`);
+        if (armed) armedAt = i;
+      }
+      assert.equal(armedAt, want.armedAt, `arming minute differs (${where})`);
+      const got = restartLines().map((l) => l.slice(l.indexOf('[INFO] ') + '[INFO] '.length));
+      assert.deepEqual(got, want.lines, `restart lines differ (${where})`);
+      if (armedAt >= 0) count.armed++;
+      if (armedAt >= 0 && want.lines.length) count.armedAfterRestart++;
+      count.lines += want.lines.length;
+      count.withMore += want.lines.filter((l) => l.includes(' more since')).length;
+      count.held += want.events.length - want.lines.length;
+      count.exactly15 += want.exactly15;
+    }
+    assert.ok(count.armed >= 150, `only ${count.armed} of ${SEQUENCES} timelines armed the watcher: ${JSON.stringify(count)}`);
+    assert.ok(count.armedAfterRestart >= 60, `only ${count.armedAfterRestart} armed after a restart: ${JSON.stringify(count)}`);
+    assert.ok(count.lines >= 100, `only ${count.lines} restart lines: ${JSON.stringify(count)}`);
+    assert.ok(count.withMore >= 12, `only ${count.withMore} lines carried a held-back count: ${JSON.stringify(count)}`);
+    assert.ok(count.held >= 30, `only ${count.held} restarts were held back: ${JSON.stringify(count)}`);
+    assert.ok(count.exactly15 >= 2, `only ${count.exactly15} lines came exactly 15 minutes after the last: ${JSON.stringify(count)}`);
+  });
+});
+
 describe('lifecycle', () => {
   test('start is idempotent and stop clears all state', () => {
     startWakeWatcher();
