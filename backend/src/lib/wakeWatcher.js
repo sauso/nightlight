@@ -46,6 +46,14 @@ const MINUTE_MS = 60 * 1000;
 // is not calibrated against anything (no night set it) and is deliberately far longer than the bridge, so a
 // healthy run is never cut by one late tick. After #448 the data path already ends a run the first time a
 // payload shows a hole longer than WAKE_GAP_MIN, so only a camera that sends NOTHING more reaches the sweep.
+// #588: that includes a camera whose VIDEO stalled while its microphone keeps sending. Its minutes arrive flagged
+// `videoUnobserved` and are holes for every other purpose, but each one still runs the bridge-end rule
+// (endRunIfGapBroken in handleMinute), so its run and ring hold end on the same minute a quiet gap would have ended
+// them. A bare early return for those minutes (the first #588 design) left the hold to this sweep: up to 20 minutes
+// where the code before #588 released it after 4 (plan review round 1, Codex and Opus, verified by running).
+// A BACKWARD clock step is never caught here: `now - lastActiveMs` is negative after it, so a run whose labels went
+// back would sit until the clock caught up plus these 20 minutes. The data path ends such a run instead, at the
+// ordering guard for an observed payload and, since #588 review round 2, in the unobserved branch for a stalled one.
 const STALE_RUN_MS = 20 * 60 * 1000;
 const SWEEP_INTERVAL_MS = 60 * 1000;
 // #590: the `settling restarted` line (see the onset gate in handleMinute): at most once per camera per this long,
@@ -66,6 +74,11 @@ const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 // minute with neither a motion frame nor a sound window (closeMinute: `hasSignal`), so an outage is visible
 // only as a jump in the labels. Cleared by reset() and by a new slot(): a window that opens again must not
 // measure from the night before.
+// ★ A HOLE is a minute the watcher did not SEE: one with no payload at all, or (#588) one whose payload is flagged
+// `videoUnobserved` (sound arrived, the camera had video, but no motion frame did: a video stall). An unobserved
+// payload is never ACCEPTED, so it leaves lastAt where it was and the next observed payload measures the stall as
+// missing minutes, exactly like an outage. That is what "readings N min apart" counts: minutes between OBSERVED
+// readings.
 // restartLogAt / restartsUnlogged / restartsLongest (#590) are bookkeeping for the `settling restarted` log
 // line ONLY: the label (ms) of the last such line (null = none yet), how many restarts since then the rate
 // limit held back, and the most quiet minutes any of those had built up. Nothing in handleMinute's decisions
@@ -189,6 +202,62 @@ export function handleMinute(payload) {
   const active =
     (motionPeak != null && motionPeak > MOTION_ACTIVE) || (soundPeak != null && soundPeak > SOUND_ACTIVE);
 
+  // ★ #588: THE BRIDGE-END RULE, written once for its two callers: the ONE bridge rule below (a payload that was
+  // read) and the unobserved branch right after this (a minute whose video nobody saw). It ends the run when the
+  // non-active minutes since the run's last ACTIVE label exceed WAKE_GAP_MIN (the nightly job's constant, by
+  // reference); see "ONE bridge rule" below for the arithmetic and its off-by-one. `active` here is the argument,
+  // the caller's verdict on THIS minute (always false for an unobserved one), and `why` the reason logged for a run
+  // that took a ring hold and captured nothing (a run that captured logs nothing, as before).
+  // A closure, not a module function: it reads this call's `at`, `cameraId` and `st`, so a caller cannot hand it
+  // another minute's label, and the #448 arithmetic keeps its text and its scope (its mutation-test anchors in
+  // scripts/mutants.json, `#448 M3/M4/M5/M10/M14/W3`, still find and mean what they did).
+  // No separate `at > st.run.lastActiveMs` guard: `nonActive > WAKE_GAP_MIN` already implies it (a label at or before
+  // the last active one gives sinceActiveMin <= 0), so this rule never ends a run on an older label; a backward clock
+  // step is handled where it is seen (the ordering guard, and the unobserved branch's own check below).
+  const endRunIfGapBroken = (active, why) => {
+    if (!st.run) return;
+    const sinceActiveMin = Math.round((at - st.run.lastActiveMs) / MINUTE_MS);
+    const nonActive = active ? sinceActiveMin - 1 : sinceActiveMin;
+    if (nonActive > WAKE_GAP_MIN) {
+      endRun(cameraId, st, st.run.captured ? null : why);
+    }
+  };
+
+  // ★ #588: A MINUTE WHOSE VIDEO NOBODY SAW IS A HOLE. activityTracker flags `videoUnobserved` when this camera had
+  // delivered video and the minute holds no motion frame: a video stall with the microphone still working (#369).
+  // The nightly job calls that minute unknown and non-active (#508, `motion_frames > 0`) and does not use its sound,
+  // even a loud minute (a bedroom microphone hears the whole house), so the watcher handles it as if no payload had
+  // arrived: lastAt, quietRun and asleep are left alone, so it is no settling progress and the next observed payload
+  // sees the hole (restarting the count; #590 logs that), and a loud one is not active (it starts no run, tops none
+  // up, captures nothing). Before #588 it was read as a watched minute: quiet toward the 15, or active if loud.
+  // What it still does is END a run, in two cases, both as an observed payload would have ended it:
+  //  * its label is OLDER than the last observed one (the wall clock went back during the stall): the run ends with
+  //    the ordering guard's own reason, "the clock went back". Code review round 2 (Opus, verified by running): with
+  //    only the gap rule below, whose label arithmetic is negative across a backward step, a stir's ring hold stayed
+  //    for about the depth of the step, and the 20-minute sweep cannot end it either (`now - lastActiveMs` is negative
+  //    too); the code before #588, reading the minute as watched, ended the run at the ordering guard (R588-W9). Only
+  //    the run: quietRun, lastAt and asleep stay as they are, and the next observed payload, older than lastAt too,
+  //    re-baselines them at the ordering guard as before. A label EQUAL to the last observed one is not older and
+  //    ends nothing, as the ordering guard ignores it (R588-W6).
+  //  * the gap it adds breaks the run's bridge, on the same minute a quiet gap would have (endRunIfGapBroken; see
+  //    STALE_RUN_MS). Its log reason is "video not observed; readings N min apart", N = the label distance in minutes
+  //    since the last OBSERVED payload (lastAt). Not "no video for N min" (the first wording): a forward clock jump
+  //    looks the same in the labels, and the log must not claim an outage it cannot see (the #448 rule in the bridge
+  //    comment below; code review round 2, Opus: a forward excursion logged "no video for 61 min").
+  // With a run open, lastAt is never null (a run needs an accepted payload, and reset() clears the two together).
+  // Placed AFTER the window gate on purpose: above it, an armed watcher would stay armed through an unobserved minute
+  // outside its window and record the next evening's settling as a wake (plan review, Opus, verified by running;
+  // R588-W8). Placed BEFORE the ordering guard and the lastAt update: a stale label must not reset settling or move
+  // lastAt (R588-W6), and the stall must stay visible to the next payload (R588-W1).
+  // `=== true`, not truthiness: a payload without the field (a legacy or hand-built one, or a camera that never had
+  // video, whose payloads carry `false`) is handled exactly as before #588 (R588-W5's golden trace).
+  if (payload.videoUnobserved === true) {
+    if (st.run && st.lastAt != null && at < st.lastAt) endRun(cameraId, st, st.run.captured ? null : 'the clock went back');
+    const sinceObservedMs = at - st.lastAt;
+    endRunIfGapBroken(false, `video not observed; readings ${Math.round(sinceObservedMs / MINUTE_MS)} min apart`);
+    return null;
+  }
+
   // --- ordering guard (#448): labels are the only clock this function has, so check they move forward ---
   // activityTracker normally hands over one payload per camera per minute, oldest first, but it has two
   // deliberate ways to repeat or rewind a label (a clock step re-baselines the camera, or closes minutes
@@ -221,6 +290,7 @@ export function handleMinute(payload) {
       st.quietRun = 0;
     }
   }
+  // (#588: an unobserved minute returned above without being accepted, so it counts as missing here.)
   // Whole minutes since the last accepted payload: 1 = the very next minute, 2 = one minute had no payload.
   // Math.round, not floor: labels are minute-aligned so the division is already exact; round only keeps a
   // stray sub-minute label from truncating a real gap down by one.
@@ -307,16 +377,12 @@ export function handleMinute(payload) {
   // The same constant as the nightly job, by reference: a retune of WAKE_GAP_MIN moves both together.
   // An ARMED watcher stays armed across a hole (only the settling progress above is reset): disarming would
   // drop a real wake that follows a reconnect, and the arming gate exists only to keep bedtime settling out.
-  if (st.run) {
-    const sinceActiveMin = Math.round((at - st.run.lastActiveMs) / MINUTE_MS);
-    const nonActive = active ? sinceActiveMin - 1 : sinceActiveMin;
-    if (nonActive > WAKE_GAP_MIN) {
-      // "readings N min apart" and not "no readings for N min": a forward clock jump looks identical to a
-      // hole in the labels, and the log must not claim an outage it cannot see.
-      const why = missingMin > 0 ? `readings ${elapsedMin} min apart` : 'stir, under the wake threshold';
-      endRun(cameraId, st, st.run.captured ? null : why);
-    }
-  }
+  // #588: the rule itself is endRunIfGapBroken (above), shared with the unobserved branch, so a minute whose video
+  // nobody saw ends a run on exactly the minute this rule would. Only the log reason is decided here.
+  // "readings N min apart" and not "no readings for N min": a forward clock jump looks identical to a
+  // hole in the labels, and the log must not claim an outage it cannot see.
+  const why = missingMin > 0 ? `readings ${elapsedMin} min apart` : 'stir, under the wake threshold';
+  endRunIfGapBroken(active, why);
 
   if (active) {
     if (!st.run) {

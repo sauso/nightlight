@@ -393,7 +393,7 @@ test('a listener that throws cannot cost us the rest of the flush', () => {
 // ({ atMs, value } in arrival order), and the watcher applies the thresholds that define `active`. These
 // tests pin what the payload carries; wake-watcher.test.js pins what is DONE with it (C1-C2 of the #412 plan).
 // Every one reads the payload through the real record*/flushActivity path, with explicit receipt times.
-test('#412 C1: the payload keeps its four fields exactly and gains motionRises / soundRises, and nothing else', () => {
+test('#412 C1: the payload keeps its four fields exactly and gains motionRises / soundRises (and, since #588, videoUnobserved), and nothing else', () => {
   const seen = [];
   listen((e) => seen.push(e));
   at.recordMotion('cam-1', 0.1, null, M + 10_000);
@@ -401,6 +401,8 @@ test('#412 C1: the payload keeps its four fields exactly and gains motionRises /
   at.recordSound('cam-1', 7, M + 30_000);
   ticks(M, M + MIN + 8000); // past GRACE_MS, so the row is written too
   assert.equal(seen.length, 1);
+  // #588 (R588-T8): the whole payload, so a key added by accident still fails here. `videoUnobserved` is the one
+  // additive key since #412; it is false because this minute HAS motion frames.
   assert.deepEqual(seen[0], {
     cameraId: 'cam-1',
     bucketStart: label(M),
@@ -408,6 +410,7 @@ test('#412 C1: the payload keeps its four fields exactly and gains motionRises /
     soundPeak: 7,
     motionRises: [{ atMs: M + 10_000, value: 0.1 }, { atMs: M + 20_000, value: 0.3 }],
     soundRises: [{ atMs: M + 30_000, value: 7 }],
+    videoUnobserved: false,
   });
   // The same peaks the row stores (the old contract, unchanged): the new fields are additive.
   const r = rowFor('cam-1');
@@ -1469,4 +1472,204 @@ test('#447: memory stays bounded over three simulated hours of 5 fps staged fram
   assert.ok(expectedLate > 10_000, `the late verdicts were really exercised: ${expectedLate}`);
   assert.equal(at.activityCounters('cam-1').lateVerdicts, expectedLate, 'every one of them was still remembered, and counted');
   assert.equal(rowsOf('cam-1').length, HOURS * 60 - 1, 'one row per minute (the last is still open)');
+});
+
+// --- #588: `videoUnobserved` in the listener payload ---------------------------------------------------------
+// The live wake watcher used to read a minute of sound with NO motion frame (`motionPeak: null`) on a camera whose
+// video had stalled as a watched, quiet minute, while the nightly job calls it unknown (`motion_frames > 0`, #508).
+// The tracker now says so in the payload: `videoUnobserved` is true exactly when this camera had delivered a raw
+// motion frame by the END of the minute (this process) and the minute itself has none. A camera that never delivered
+// a frame is sound-only by design and is never flagged (#453 C3b reads its minutes as quiet on purpose). What the
+// watcher does with the flag is wake-watcher.test.js's R588 block.
+// ⚠️ Names are `R588-…`, never `#412 C<n>` or `C<n>:`: scripts/mutants.json selects the #412 and #448 mutants by those
+// name patterns. T1 and T8 put the shapes SIDE BY SIDE (a camera that had video and one that never did, in the same
+// minutes), so a flag that is true for the wrong shape fails on the same assertion that checks the right one; the
+// others pin one boundary each, and every one asserts the flag of EVERY minute it produced, false ones included.
+
+// Feed whole minutes in order, one tick just after each minute's end (what the running tracker's 1 s tick does), so
+// no sample is ever filed ahead of the clock. `perMinute[i]` = { cameraId: [[kind, value, offsetMs, sample?]] } for
+// minute M + i; kind 'm' = an in-bed motion frame, 's' = a sound window.
+function feed588(perMinute) {
+  perMinute.forEach((cams, i) => {
+    for (const [cam, samples] of Object.entries(cams)) {
+      for (const [kind, v, o, sample = null] of samples) {
+        if (kind === 'm') at.recordMotion(cam, v, sample, M + i * MIN + o);
+        else at.recordSound(cam, v, M + i * MIN + o);
+      }
+    }
+    at.flushActivity(M + (i + 1) * MIN + 500);
+  });
+}
+// [HH:MM, motionPeak, videoUnobserved] per payload of one camera, oldest first.
+const flags588 = (seen, cam) =>
+  seen.filter((e) => e.cameraId === cam).map((e) => [e.bucketStart.slice(11, 16), e.motionPeak, e.videoUnobserved]);
+
+test('R588-T1: a stall with live sound: after the camera had frames, a minute of sound only is videoUnobserved; a camera that never had video, side by side, is not', () => {
+  const seen = listenAll();
+  feed588([
+    { 'cam-1': [['m', 0.002, 10_000], ['s', 1, 11_000]], 'cam-2': [['s', 1, 11_000]] }, // 19:00 cam-1 watched
+    { 'cam-1': [['s', 1, 5_000]], 'cam-2': [['s', 1, 5_000]] }, // 19:01 the stall: sound only
+    { 'cam-1': [['s', 30, 5_000]], 'cam-2': [['s', 30, 5_000]] }, // 19:02 a LOUD minute of the stall
+    { 'cam-1': [['m', 0, 1_000], ['s', 2, 2_000]], 'cam-2': [['s', 2, 2_000]] }, // 19:03 video back (a still frame)
+  ]);
+  assert.deepEqual(flags588(seen, 'cam-1'), [
+    ['19:00', 0.002, false],
+    ['19:01', null, true],
+    ['19:02', null, true],
+    ['19:03', 0, false],
+  ]);
+  assert.deepEqual(flags588(seen, 'cam-2'), [
+    ['19:00', null, false],
+    ['19:01', null, false],
+    ['19:02', null, false],
+    ['19:03', null, false],
+  ], 'a camera that never delivered a frame is sound-only by design, not stalled');
+});
+
+test('R588-T6: a camera that never produced a frame is never flagged, however many minutes of sound (loud or quiet) it sends: sound teaches nothing', () => {
+  const seen = listenAll();
+  const minutes = [];
+  for (let i = 0; i < 20; i++) minutes.push({ 'cam-2': [['s', i % 3 === 0 ? 25 : 0, 2_000], ['s', 1, 40_000]] });
+  feed588(minutes);
+  const f = flags588(seen, 'cam-2');
+  assert.equal(f.length, 20, 'precondition: every minute reached the listener');
+  assert.deepEqual(f.map(([, peak, flag]) => [peak, flag]), Array(20).fill([null, false]));
+});
+
+test('R588-T7: the first frame can be a CLONE (a camera booting into a stall): it still counts as "this camera has video"; the reset seam forgets it', () => {
+  const seen = listenAll();
+  // 19:00: the camera's first frame ever is a still repeat (fraction 0), staged, then PROVEN a clone in the minute's
+  // grace (when the observation clock's verdict would land).
+  at.recordMotion('cam-1', 0, g7(1), M + 5_000);
+  at.recordSound('cam-1', 1, M + 6_000);
+  at.flushActivity(M + MIN + 500);
+  assert.equal(at.excludeClone('cam-1', 7, 1), true, 'precondition: proven a clone in the grace');
+  at.recordSound('cam-1', 1, M + MIN + 5_000);
+  at.flushActivity(M + 2 * MIN + 500);
+  assert.deepEqual(flags588(seen, 'cam-1'), [
+    ['19:00', 0, false], // a raw frame was analysed: watched (the stored row says 0 frames: the nightly's business)
+    ['19:01', null, true], // the camera has had video: this minute's missing picture is a stall
+  ]);
+  // The test seam clears it: the "next process" has never seen a frame from this camera.
+  at._resetActivityTrackerForTests();
+  seen.length = 0;
+  at.recordSound('cam-1', 1, M + 5 * MIN + 5_000);
+  at.flushActivity(M + 6 * MIN + 500);
+  assert.deepEqual(flags588(seen, 'cam-1'), [['19:05', null, false]], '_resetActivityTrackerForTests kept the first frame');
+});
+
+test('R588-T8: the flag is a strict boolean for every shape, and the four original fields are what they always were', () => {
+  const seen = listenAll();
+  feed588([
+    { 'cam-1': [['m', 0.2, 1_000]], 'cam-2': [['s', 3, 1_000]] }, // frames only / sound only (never video)
+    { 'cam-1': [['s', 4, 1_000]], 'cam-2': [['s', 0, 1_000]] }, // sound only after video / sound only again
+    { 'cam-1': [['m', 0, 1_000], ['s', 5, 2_000]], 'cam-2': [['s', 9, 1_000]] }, // both channels
+  ]);
+  assert.equal(seen.length, 6);
+  for (const e of seen) {
+    assert.equal(typeof e.videoUnobserved, 'boolean', `${e.cameraId} ${e.bucketStart}: ${e.videoUnobserved}`);
+    assert.deepEqual(Object.keys(e), ['cameraId', 'bucketStart', 'motionPeak', 'soundPeak', 'motionRises', 'soundRises', 'videoUnobserved']);
+  }
+  assert.deepEqual(seen.filter((e) => e.cameraId === 'cam-1').map((e) => [e.motionPeak, e.soundPeak, e.videoUnobserved]),
+    [[0.2, null, false], [null, 4, true], [0, 5, false]]);
+  assert.deepEqual(seen.filter((e) => e.cameraId === 'cam-2').map((e) => [e.motionPeak, e.soundPeak, e.videoUnobserved]),
+    [[null, 3, false], [null, 0, false], [null, 9, false]]);
+});
+
+test('R588-T11: a frame with no observation-clock sample (no clock, `sample` null) is a raw frame like any other: it gives the camera video and makes its minute watched', () => {
+  const seen = listenAll();
+  feed588([
+    { 'cam-1': [['m', 0, 5_000]] }, // 19:00 the first frame: no sample
+    { 'cam-1': [['m', 0, 5_000], ['s', 2, 6_000]] }, // 19:01 a frame with no sample, and sound: watched
+    { 'cam-1': [['s', 2, 6_000]] }, // 19:02 sound only: the stall
+  ]);
+  assert.deepEqual(flags588(seen, 'cam-1'), [['19:00', 0, false], ['19:01', 0, false], ['19:02', null, true]]);
+});
+
+test('R588-T12: a minute that ENDED before the camera\'s first frame is not unobserved, even when that frame arrives before the minute is closed; the next frameless minute is', () => {
+  // The camera's first frame lands 0.2 s into 19:01, and the tick that closes 19:00 runs 0.9 s into 19:01: a plain
+  // "has this camera ever had a frame" set would call 19:00, which preceded all video, a stall.
+  for (const [firstFrameAt, tickAt, why] of [
+    [M + MIN + 200, M + MIN + 900, 'first frame 0.2 s into the next minute'],
+    [M + MIN, M + MIN, 'first frame at EXACTLY the minute\'s end (it belongs to the next minute), closed on the same ms'],
+  ]) {
+    at._resetActivityTrackerForTests();
+    const seen = [];
+    const off = at.onMinuteFlushed((e) => seen.push(e));
+    try {
+      at.recordSound('cam-1', 1, M + 10_000); // 19:00 sound only, before any video
+      at.recordMotion('cam-1', 0.1, null, firstFrameAt); // 19:01's first frame
+      at.flushActivity(tickAt); // closes 19:00
+      at.recordSound('cam-1', 1, M + MIN + 30_000);
+      at.flushActivity(M + 2 * MIN + 500); // closes 19:01
+      at.recordSound('cam-1', 1, M + 2 * MIN + 30_000); // 19:02 sound only: the camera HAS had video now
+      at.flushActivity(M + 3 * MIN + 500);
+      assert.deepEqual(flags588(seen, 'cam-1'), [['19:00', null, false], ['19:01', 0.1, false], ['19:02', null, true]], why);
+    } finally {
+      off();
+    }
+  }
+  // The mirror: a camera that HAD video stalls for 19:01, and its video returns 0.2 s into 19:02, before the tick that
+  // closes 19:01. 19:01 is still a stall: it is the EARLIEST frame that says "this camera has video", not the latest one.
+  at._resetActivityTrackerForTests();
+  const seen = [];
+  const off = at.onMinuteFlushed((e) => seen.push(e));
+  try {
+    at.recordMotion('cam-1', 0.1, null, M + 10_000);
+    at.flushActivity(M + MIN + 500);
+    at.recordSound('cam-1', 1, M + MIN + 10_000); // 19:01 sound only
+    at.recordMotion('cam-1', 0.1, null, M + 2 * MIN + 200); // the video is back, 19:01 not closed yet
+    at.flushActivity(M + 2 * MIN + 900);
+    at.flushActivity(M + 3 * MIN + 500);
+    assert.deepEqual(flags588(seen, 'cam-1'), [['19:00', 0.1, false], ['19:01', null, true], ['19:02', 0.1, false]]);
+  } finally {
+    off();
+  }
+});
+
+test('R588-T13: a clone-heavy minute that still holds one real frame is watched; so is a minute of nothing but proven clones (Rule A: the RAW count decides, shape 2 is the nightly job\'s)', () => {
+  const seen = listenAll();
+  at.recordMotion('cam-1', 0.05, g7(0), M + 1_000); // 19:00 a real frame that moved
+  at.flushActivity(M + MIN + 500);
+  // 19:01: ten still frames, nine of them proven clones; frame 10 is a real still frame (never proven).
+  for (let tok = 1; tok <= 10; tok++) at.recordMotion('cam-1', 0, g7(tok), M + MIN + tok * 1000);
+  at.recordSound('cam-1', 1, M + MIN + 30_000);
+  for (let tok = 1; tok <= 9; tok++) assert.equal(at.excludeClone('cam-1', 7, tok), true);
+  at.flushActivity(M + 2 * MIN + 500);
+  // 19:02: shape 2, every frame proven a clone (the stored row will say 0 frames).
+  for (let tok = 11; tok <= 15; tok++) at.recordMotion('cam-1', 0, g7(tok), M + 2 * MIN + (tok - 10) * 1000);
+  at.recordSound('cam-1', 1, M + 2 * MIN + 30_000);
+  for (let tok = 11; tok <= 15; tok++) assert.equal(at.excludeClone('cam-1', 7, tok), true);
+  at.flushActivity(M + 3 * MIN + 500);
+  at.flushActivity(M + 3 * MIN + 8_000); // write 19:02's row too
+  assert.deepEqual(flags588(seen, 'cam-1'), [['19:00', 0.05, false], ['19:01', 0, false], ['19:02', 0, false]]);
+  // The contrast, stated where it is pinned: the nightly job reads the STORED observed count and calls 19:02 unwatched
+  // (motion_frames 0), the live flag calls it watched. Step 0 (2026-10-05) found no such row on either database.
+  assert.deepEqual(rowsOf('cam-1').map((r) => r.motion_frames), [1, 1, 0]);
+});
+
+test('R588-T14: the EARLIEST frame time counts, not the first to arrive: after the clock steps back an hour, the re-lived hour\'s sound-only minutes are still a stall', () => {
+  // Code review (Codex, fix round 1): a frame received at 20:00, then the wall clock steps back an hour and a frame
+  // arrives stamped 19:00, then 19:01-19:59 bring sound only. Keeping the first ARRIVAL (20:00:10) reads every one of
+  // those 59 minutes as "no video expected yet", so an hour of stall goes unflagged; the camera did deliver video
+  // before each of them (19:00:10), so each is a stall.
+  const seen = listenAll();
+  const T20 = M + 60 * MIN; // 20:00
+  at.recordMotion('cam-1', 0.1, null, T20 + 10_000);
+  at.flushActivity(T20 + MIN + 500); // 20:00 told
+  at.flushActivity(T20 + MIN + 8_000); // ...and written, so nothing of it is pending when the clock steps back
+  at.recordMotion('cam-1', 0.1, null, M + 10_000); // the clock stepped back: 19:00
+  at.flushActivity(M + MIN + 500);
+  for (let i = 1; i <= 59; i++) {
+    at.recordSound('cam-1', 1, M + i * MIN + 30_000);
+    at.flushActivity(M + (i + 1) * MIN + 500);
+  }
+  assert.equal(at.activityCounters('cam-1').rebaselined, 1, 'precondition: the tracker saw the hour-long step back');
+  const f = flags588(seen, 'cam-1');
+  assert.equal(f.length, 61, 'precondition: 20:00, 19:00 and the 59 re-lived minutes reached the listener');
+  assert.deepEqual(f.slice(0, 2), [['20:00', 0.1, false], ['19:00', 0.1, false]]);
+  const relived = f.slice(2);
+  assert.deepEqual(relived.map(([, peak]) => peak), Array(59).fill(null), 'precondition: sound only');
+  assert.deepEqual(relived.filter(([, , flag]) => flag !== true).map(([hhmm]) => hhmm), [],
+    'these minutes followed a frame received at 19:00:10, so each is a stall');
 });

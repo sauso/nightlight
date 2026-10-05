@@ -12117,5 +12117,368 @@
       "wake-watcher.test.js"
     ],
     "note": "Validates the harness. If this is ever KILLED, no other result in the run means anything."
+  },
+  {
+    "label": "#588 M-588-01: videoUnobserved is always false (the live watcher never learns of a video stall)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "const videoUnobserved = firstFrame !== undefined && firstFrame < s.minuteMs + MINUTE_MS && s.motionFrames === 0;",
+    "replace": "const videoUnobserved = false;",
+    "expect": "killed",
+    "tests": [
+      "activityTracker.test.js"
+    ],
+    "namePattern": "R588-T1:",
+    "note": "T1's stalled camera expects true for its sound-only minutes."
+  },
+  {
+    "label": "#588 M-588-02: videoUnobserved is always true (every minute reads as a stall)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "const videoUnobserved = firstFrame !== undefined && firstFrame < s.minuteMs + MINUTE_MS && s.motionFrames === 0;",
+    "replace": "const videoUnobserved = true;",
+    "expect": "killed",
+    "tests": [
+      "activityTracker.test.js"
+    ],
+    "namePattern": "R588-T(1|6):"
+  },
+  {
+    "label": "#588 M-588-03: the flag reads the OBSERVED frame count (a minute of nothing but proven repeats is flagged, the rule Step 0 did not choose)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "s.motionFrames === 0",
+    "replace": "s.observedMotionFrames === 0",
+    "expect": "killed",
+    "tests": [
+      "activityTracker.test.js"
+    ],
+    "namePattern": "R588-T13:",
+    "note": "T13's 19:02 is shape 2 (every frame proven a repeat): watched under Rule A, flagged by this mutant. Also the observed count is not final when the listener runs (#447 grace)."
+  },
+  {
+    "label": "#588 M-588-04: a minute that ends EXACTLY at the camera's first frame counts as expecting video (`<` becomes `<=`)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "firstFrame < s.minuteMs + MINUTE_MS",
+    "replace": "firstFrame <= s.minuteMs + MINUTE_MS",
+    "expect": "killed",
+    "tests": [
+      "activityTracker.test.js"
+    ],
+    "namePattern": "R588-T12:",
+    "note": "Killed by T12's second case: the first frame at exactly 19:01:00.000 belongs to 19:01, so 19:00 preceded all video."
+  },
+  {
+    "label": "#588 M-588-05: \"has this camera ever had a frame\" as a plain set (the time check is dropped)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "firstFrame !== undefined && firstFrame < s.minuteMs + MINUTE_MS && ",
+    "replace": "firstFrame !== undefined && ",
+    "expect": "killed",
+    "tests": [
+      "activityTracker.test.js"
+    ],
+    "namePattern": "R588-T12:",
+    "note": "Codex's plan-review finding: a first frame that arrives after 19:00 ended but before the tick that closes 19:00 would make 19:00, which preceded all video, a stall."
+  },
+  {
+    "label": "#588 M-588-06: no \"video expected\" condition at all (every frameless minute is flagged, a sound-only camera included)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "firstFrame !== undefined && firstFrame < s.minuteMs + MINUTE_MS && s.motionFrames === 0",
+    "replace": "s.motionFrames === 0",
+    "expect": "killed",
+    "tests": [
+      "activityTracker.test.js"
+    ],
+    "namePattern": "R588-T(1|6):",
+    "note": "The #453 C3b camera that never had video would read as stalled. The `firstFrame !== undefined` conjunct ALONE is not mutated: `undefined < n` is false, so dropping only it is equivalent (declared, not added)."
+  },
+  {
+    "label": "#588 M-588-07: a SOUND window also teaches \"this camera has video\"",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "const usedAt = Number.isFinite(atMs) ? atMs : Date.now(); // read once, see recordMotion (#412)",
+    "replace": "const usedAt = Number.isFinite(atMs) ? atMs : Date.now(); // read once, see recordMotion (#412)\r\n  if (!firstFrameMs.has(cameraId)) firstFrameMs.set(cameraId, usedAt);",
+    "expect": "killed",
+    "tests": [
+      "activityTracker.test.js"
+    ],
+    "namePattern": "R588-T(1|6):"
+  },
+  {
+    "label": "#588 M-588-08: only a frame that MOVED gives the camera video (a camera booting into a stall, all repeats, never does)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "if (prev === undefined || usedAt < prev) firstFrameMs.set(cameraId, usedAt);",
+    "replace": "if (fraction > 0 && (prev === undefined || usedAt < prev)) firstFrameMs.set(cameraId, usedAt);",
+    "expect": "killed",
+    "tests": [
+      "activityTracker.test.js"
+    ],
+    "namePattern": "R588-T(7|11):"
+  },
+  {
+    "label": "#588 M-588-09: only a frame with an observation-clock sample gives the camera video (no clock = never)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "if (prev === undefined || usedAt < prev) firstFrameMs.set(cameraId, usedAt);",
+    "replace": "if (sample && (prev === undefined || usedAt < prev)) firstFrameMs.set(cameraId, usedAt);",
+    "expect": "killed",
+    "tests": [
+      "activityTracker.test.js"
+    ],
+    "namePattern": "R588-T11:"
+  },
+  {
+    "label": "#588 M-588-10: the test seam does not forget which cameras had video",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "  firstFrameMs.clear();",
+    "replace": "  /* #588 mutant: not cleared */",
+    "expect": "killed",
+    "tests": [
+      "activityTracker.test.js"
+    ],
+    "namePattern": "R588-T7:"
+  },
+  {
+    "label": "#588 M-588-11: the FIRST frame to ARRIVE is kept instead of the earliest receipt time (after a clock step back, the re-lived minutes' stall goes unflagged)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "if (prev === undefined || usedAt < prev) firstFrameMs.set(cameraId, usedAt);",
+    "replace": "if (prev === undefined) firstFrameMs.set(cameraId, usedAt);",
+    "expect": "killed",
+    "tests": [
+      "activityTracker.test.js"
+    ],
+    "namePattern": "R588-T14:",
+    "note": "Code review (Codex, fix round 1): the build shipped exactly this. T14: a frame at 20:00, the clock back an hour, a frame at 19:00, then 59 sound-only minutes, all unflagged under this mutant."
+  },
+  {
+    "label": "#588 M-588-25: the LATEST frame time is kept instead of the earliest (video returning before a stalled minute's tick hides the stall)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "if (prev === undefined || usedAt < prev) firstFrameMs.set(cameraId, usedAt);",
+    "replace": "if (prev === undefined || usedAt > prev) firstFrameMs.set(cameraId, usedAt);",
+    "expect": "killed",
+    "tests": [
+      "activityTracker.test.js"
+    ],
+    "namePattern": "R588-T12:",
+    "note": "Killed by T12's mirror case: the video returns 0.2 s into 19:02, before the tick that closes the stalled 19:01. `<=` for `<` is equivalent (it rewrites an equal time) and is not added."
+  },
+  {
+    "label": "#588 M-588-12: the payload loses the key (undefined instead of a strict boolean)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "        videoUnobserved,\r\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "activityTracker.test.js"
+    ],
+    "namePattern": "R588-T8:|#412 C1: the payload keeps"
+  },
+  {
+    "label": "#588 M-588-13: the watcher ignores the flag (an unobserved minute is read as watched again, the bug)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (payload.videoUnobserved === true) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R588-W1:"
+  },
+  {
+    "label": "#588 M-588-14: any payload that carries the key is unobserved (`!= null` instead of `=== true`)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (payload.videoUnobserved === true) {",
+    "replace": "if (payload.videoUnobserved != null) {",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R588-(W4|E1c)",
+    "note": "Killed only by a payload carrying `videoUnobserved: false`: W4's second variant (hand-built) and E1c (the real tracker's sound-only camera). The truthy form `if (payload.videoUnobserved)` is declared equivalent and not added: the tracker only ever sends a boolean."
+  },
+  {
+    "label": "#588 M-588-15: an unobserved minute is a bare early return (it never ends the run: the hold waits for the 20-minute sweep)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "endRunIfGapBroken(false, `video not observed; readings ${Math.round(sinceObservedMs / MINUTE_MS)} min apart`);",
+    "replace": "/* #588 mutant: a bare return */",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R588-W2(a|d):",
+    "note": "Plan review round 1 (Codex + Opus): the design this replaced. W2a kills it for a run that captured nothing; W2d (fix round 1) for a run that ALREADY captured, whose end logs nothing, through the ring hold it would keep."
+  },
+  {
+    "label": "#588 M-588-16: an unobserved minute is judged with its own loudness (`active`) by the bridge-end rule",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "endRunIfGapBroken(false, ",
+    "replace": "endRunIfGapBroken(active, ",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R588-W(2a|3):",
+    "note": "A LOUD unobserved minute would then count as the next active minute for the off-by-one, ending the run one minute late (W2a's LOUD case, W3)."
+  },
+  {
+    "label": "#588 M-588-17: the unobserved check runs AFTER the ordering guard and `lastAt = at` (emulated: the stale-label handling and the lastAt update are applied first)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (payload.videoUnobserved === true) {",
+    "replace": "if (payload.videoUnobserved === true) {\r\n    if (st.lastAt != null && at === st.lastAt) return null;\r\n    if (st.lastAt != null && at < st.lastAt) { endRun(cameraId, st, null); st.quietRun = 0; }\r\n    st.lastAt = at;",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R588-W(1|6):",
+    "note": "A real move would need a find spanning the 40-line ordering-guard block; this applies what that move changes for an unobserved payload, in the same order. W1: the stall stops being a hole for the next reading; W6: a stale label resets settling and ends the run."
+  },
+  {
+    "label": "#588 M-588-18: the unobserved check runs AFTER the ordering guard, before lastAt (emulated)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (payload.videoUnobserved === true) {",
+    "replace": "if (payload.videoUnobserved === true) {\r\n    if (st.lastAt != null && at === st.lastAt) return null;\r\n    if (st.lastAt != null && at < st.lastAt) { endRun(cameraId, st, null); st.quietRun = 0; }",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R588-W6:",
+    "note": "Emulated like M-588-17. The plan-review model found this placement in 0 of 400 unfloored timelines, which is why W6 exists."
+  },
+  {
+    "label": "#588 M-588-19: the unobserved check runs ABOVE the window gate (emulated: an unobserved minute skips the gate)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "  if (!camera || camera.disabled || !camera.child_id || !childTracksSleep(camera.child_id) || !childWindowActiveNow(camera.child_id)) {",
+    "replace": "  if (payload.videoUnobserved !== true && (!camera || camera.disabled || !camera.child_id || !childTracksSleep(camera.child_id) || !childWindowActiveNow(camera.child_id))) {",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R588-W8:",
+    "note": "Opus, plan review (verified by running): an armed watcher would stay armed through an unobserved minute outside its window and record the next evening's settling."
+  },
+  {
+    "label": "#588 M-588-20: the bridge-end rule ends a run AT WAKE_GAP_MIN non-active minutes (`>` becomes `>=`), seen through unobserved minutes",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (nonActive > WAKE_GAP_MIN) {",
+    "replace": "if (nonActive >= WAKE_GAP_MIN) {",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R588-W2a:",
+    "note": "Same find as #448 M3 (selected by the #448 controls); this one is scored on the #588 tests alone."
+  },
+  {
+    "label": "#588 M-588-21: the unobserved path drops \"video not observed\" (its line reads exactly like an outage on the observed path)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "video not observed; readings ${",
+    "replace": "readings ${",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R588-W2(a|b):",
+    "note": "Log-only: sound readings kept arriving during the stall, so the line must say the picture, not the readings, was missing (Opus, plan review)."
+  },
+  {
+    "label": "#588 M-588-22: N in \"video not observed; readings N min apart\" counts from the run's last ACTIVE minute instead of the last observed reading",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "const sinceObservedMs = at - st.lastAt;",
+    "replace": "const sinceObservedMs = at - st.run?.lastActiveMs;",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R588-W2b:"
+  },
+  {
+    "label": "#588 M-588-23: an unobserved minute still counts as settling progress",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "const sinceObservedMs = at - st.lastAt;",
+    "replace": "if (!st.asleep) st.quietRun++;\r\n    const sinceObservedMs = at - st.lastAt;",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R588-W1:"
+  },
+  {
+    "label": "#588 M-588-24: an unobserved minute disarms an armed watcher (a stall forces settling again)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "const sinceObservedMs = at - st.lastAt;",
+    "replace": "st.asleep = false;\r\n    const sinceObservedMs = at - st.lastAt;",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R588-W2c:",
+    "note": "An armed watcher stays armed across a hole (#448 C8); a wake bridged across a short stall must still be recorded."
+  },
+  {
+    "label": "control: a comment edit in wakeWatcher.js must change nothing (#588)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "// ★ #588: A MINUTE WHOSE VIDEO NOBODY SAW IS A HOLE.",
+    "replace": "// ★ #588: A MINUTE WHOSE VIDEO NOBODY SAW IS A HOLE. [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R588-W1:",
+    "note": "Validates the harness for the #588 group. If this is ever KILLED, no other #588 result in the run means anything."
+  },
+  {
+    "label": "control: a comment edit in activityTracker.js must change nothing (#588)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "// #588: additive, a strict boolean; computed above, once for every listener.",
+    "replace": "// #588: additive, a strict boolean; computed above, once for every listener. [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": [
+      "activityTracker.test.js"
+    ],
+    "namePattern": "R588-T1:",
+    "note": "Validates the harness for the #588 tracker mutants. If this is ever KILLED, no other #588 result in the run means anything."
+  },
+  {
+    "label": "#588 M-588-26: an unobserved minute with an OLDER label no longer ends the run (a backward clock step during a stall keeps the stir's ring hold)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (st.run && st.lastAt != null && at < st.lastAt) endRun(cameraId, st, st.run.captured ? null : 'the clock went back');",
+    "replace": "/* #588 mutant: no backward-step check on the unobserved path */",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R588-W(6|9):",
+    "note": "Code review round 2 (Opus, verified by running): the 9d4e370/2a02351 behaviour. The gap rule's arithmetic is negative across a backward step and the sweep's `now - lastActiveMs` is too, so the hold stayed for about the depth of the step."
+  },
+  {
+    "label": "#588 M-588-27: an unobserved minute with the SAME label as the last observed one ends the run (`<` becomes `<=`)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "at < st.lastAt) endRun(cameraId, st, st.run.captured ? null : 'the clock went back');",
+    "replace": "at <= st.lastAt) endRun(cameraId, st, st.run.captured ? null : 'the clock went back');",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R588-W6:",
+    "note": "The ordering guard ignores an equal label rather than treating it as a step back; W6 delivers an unobserved minute with the last observed label and expects the run intact."
+  },
+  {
+    "label": "#588 M-588-28: a run ended by a backward step on the unobserved path logs nothing (the reason is dropped)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "endRun(cameraId, st, st.run.captured ? null : 'the clock went back');",
+    "replace": "endRun(cameraId, st, null);",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R588-W9:",
+    "note": "Log-only. Distinct from #448 M11/W4, whose find is the ordering guard's `st.run?.captured` spelling: the unobserved branch writes `st.run.captured` (it already checked `st.run`) so both anchors stay unique."
+  },
+  {
+    "label": "#588 M-588-29: the unobserved path claims an outage again (\"no video for N min\", the first wording)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "video not observed; readings ${Math.round(sinceObservedMs / MINUTE_MS)} min apart",
+    "replace": "no video for ${Math.round(sinceObservedMs / MINUTE_MS)} min",
+    "expect": "killed",
+    "tests": [
+      "wake-watcher.test.js"
+    ],
+    "namePattern": "R588-W2(a|b):",
+    "note": "Code review round 2 (Opus): a forward clock excursion logged `no video for 61 min`, claiming an outage the watcher cannot see."
   }
 ]

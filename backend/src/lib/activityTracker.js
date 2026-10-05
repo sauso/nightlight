@@ -69,6 +69,34 @@ const buckets = new Map();
 // one: when it is deliberately moved BACK (a clock step), slot() is what keeps a told minute closed.
 const lastClosed = new Map();
 
+// #588: camera_id -> the EARLIEST receipt time (ms: the same `usedAt` recordMotion files the frame under) of any raw
+// motion frame this process received for the camera, a repeat or a real one. It answers one question for
+// closeMinute: was a picture expected from this camera in this minute, i.e. had it delivered video by the minute's
+// END? A minute with sound but no frame on such a camera is a video stall (#369: the sound detector is a separate
+// process and keeps writing), which the nightly job calls unknown (`motion_frames > 0`, #508), and which the live
+// wake watcher must therefore not read as a watched, quiet minute. A camera that has delivered no frame in this
+// process is sound-only BY DESIGN (no video leg, or not started yet) and is never flagged: #453 C3b reads its
+// minutes as quiet on purpose, and nothing in the schema says a camera is audio-only.
+// Why a TIME and not a plain "has had a frame" set (#588 plan review, Codex): the first frame can arrive after
+// minute M ended but before the tick that closes M (up to one 1 s tick later), and a set would then flag M, which
+// preceded all video, as a stall (pinned by R588-T12). Why the SMALLEST time and not the first to arrive (code
+// review, Codex, fix round 1, verified by running): the two are the same on a clock that only moves forward, but
+// after a backward clock step the frames arrive stamped earlier than the first one. A frame at 20:00, the clock back
+// an hour, a frame at 19:00 and then sound only from 19:01: those minutes followed a frame delivered at 19:00, so
+// each is a stall, and the first arrival (20:00) left all 59 of them unflagged, an hour of stall read as watched
+// (R588-T14). The minimum answers "had a frame been delivered by this minute's end" on the clock the minutes are
+// labelled with.
+// Never forgotten while the process runs, and not tied to whether the motion detector is running (rejected in the
+// plan: it couples the tracker to the detector module). Known limits, in KNOWN-ISSUES.md: a camera already stalled
+// when the process starts reads as sound-only until its first frame; one whose motion detector is deliberately
+// stopped while its sound detector keeps running reads as stalled for as long as that lasts (inside a tracked
+// child's sleep window the motion detector is wanted for the whole window, motionDetector.motionLegWanted, so that
+// takes a configuration change in the middle of a night).
+// Cleared by _resetActivityTrackerForTests, NOT by stopActivityTracker: stop is the shutdown path (the process ends
+// right after it) and it keeps lastClosed and the counters as well, so clearing only this there would be arbitrary
+// (plan review, Opus). A test that wants "a new process" uses the reset seam.
+const firstFrameMs = new Map();
+
 // Listeners called once per camera per closed minute, with that minute's peaks. This is how
 // lib/wakeWatcher.js sees activity LIVE: it needs the identical signal the nightly job reads, and
 // re-querying activity_samples every minute would be the same data a second time. Kept as a subscription
@@ -81,11 +109,13 @@ const minuteListeners = new Set();
 
 /**
  * Subscribe to per-minute activity.
- * cb({ cameraId, bucketStart, motionPeak, soundPeak, motionRises, soundRises }).
+ * cb({ cameraId, bucketStart, motionPeak, soundPeak, motionRises, soundRises, videoUnobserved }).
  * `motionRises` / `soundRises` (#412) are the samples that raised the minute's running peak, as
  * { atMs, value } in arrival order ([] for an empty channel, always arrays); the first four fields are
  * unchanged. `atMs` is the receipt time the detector passed, which can lie before `bucketStart` after a small
  * backward clock step (the sample was clamped into this minute), so a consumer filters by the minute's bounds.
+ * `videoUnobserved` (#588) is a boolean, true when the camera had delivered video by the minute's end and this
+ * minute holds no motion frame (a video stall with the sound still arriving); see firstFrameMs and closeMinute.
  */
 export function onMinuteFlushed(cb) {
   minuteListeners.add(cb);
@@ -316,6 +346,11 @@ export function recordMotion(cameraId, fraction, sample = null, atMs = Date.now(
   // Date.now() twice (once inside minuteFor, once for the stamp) could straddle a minute boundary and stamp
   // the rise in the minute AFTER the one the sample was filed under, where wakeWatcher filters it out.
   const usedAt = Number.isFinite(atMs) ? atMs : Date.now();
+  // #588: every raw frame counts, whatever its fraction and whether or not the observation clock will classify it
+  // (`sample` null): a camera booting into a stall delivers repeats first, and those are still its video. The
+  // EARLIEST receipt time is kept, not the first to arrive (see firstFrameMs; R588-T14).
+  const prev = firstFrameMs.get(cameraId);
+  if (prev === undefined || usedAt < prev) firstFrameMs.set(cameraId, usedAt);
   const s = slot(cameraId, usedAt);
   s.motionSum += fraction;
   if (fraction > s.motionPeak) {
@@ -399,6 +434,18 @@ function closeMinute(cameraId, s, notify = true) {
   lastClosed.set(cameraId, s.minuteMs);
   if (!notify || !hasSignal(s)) return;
   const bucketStart = minuteBucketUtc(new Date(s.minuteMs));
+  // #588: did this minute's PICTURE go unobserved? Yes when the camera had delivered video by the minute's end (see
+  // firstFrameMs) and the minute holds no RAW motion frame. Raw, not the observed count: a raw frame means the
+  // detector had a picture to diff in this minute, and the observed count is not final yet when the listeners run
+  // (the clone verdicts for the minute's last ~5-7 s land in the GRACE_MS that follows, #447). Against the nightly
+  // rule (`motion_frames > 0`, the stored OBSERVED count) this differs in two shapes, both deliberate: a camera that
+  // never delivered video (the nightly calls its every minute unwatched; the live watcher keeps reading its sound,
+  // #453 C3b), and a minute whose every frame was later proven a repeat (#493: stored 0 frames, nightly unwatched,
+  // flagged watched here). Step 0 of #588 (2026-10-05) found no row of that second shape on either database
+  // (motion_frames 0 with a motion peak: 0 of 87,271 and 0 of 86,227 rows), so it is left to the nightly job
+  // (KNOWN-ISSUES.md). The safe direction everywhere: what is uncertain reads as watched, as before #588.
+  const firstFrame = firstFrameMs.get(cameraId);
+  const videoUnobserved = firstFrame !== undefined && firstFrame < s.minuteMs + MINUTE_MS && s.motionFrames === 0;
   // Never let a listener's failure cost us the rest of the tick — this runs on a timer with nothing to
   // catch what escapes.
   for (const cb of minuteListeners) {
@@ -412,6 +459,8 @@ function closeMinute(cameraId, s, notify = true) {
         // afterwards. `[]` for an empty channel; wakeWatcher derives the wake's first active frame from these.
         motionRises: s.motionRises.map((r) => ({ ...r })),
         soundRises: s.soundRises.map((r) => ({ ...r })),
+        // #588: additive, a strict boolean; computed above, once for every listener.
+        videoUnobserved,
       });
     } catch (err) {
       logger.error(`[activity] minute listener failed for ${cameraId}: ${err.message}`);
@@ -595,7 +644,8 @@ export function stopActivityTracker(nowMs = Date.now()) {
 // ⚠️ TEST SEAM, not an API (#447 plan, round 2). Every piece of module state a test could inherit from the
 // test before it: the open minutes, the ledger, the last-closed minutes (without this, a test that drained
 // with `{ all: true }` would push the next test's samples for the same minute into the minute after), the
-// late ring, the counters, and the timers. Listeners are NOT touched: each test file owns its subscriptions.
+// late ring, the counters, the timers, and (#588) which cameras have delivered video. Listeners are NOT touched:
+// each test file owns its subscriptions.
 export function _resetActivityTrackerForTests() {
   clearInterval(flushTimer);
   clearInterval(pruneTimer);
@@ -607,6 +657,7 @@ export function _resetActivityTrackerForTests() {
   recentlyClosed.clear();
   counters.clear();
   reported.clear();
+  firstFrameMs.clear();
 }
 
 // Test-only: how much the tracker is holding in memory, for the boundedness test.

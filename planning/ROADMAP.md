@@ -915,9 +915,12 @@ no clock. Every threshold in it came from ONE house's runs (Stage 1: night, over
   in all three `activity_samples` readers of `sleepAnalysis.js`; an unwatched minute is `null` (sound not
   used); `empty` now needs `EMPTY_MIN_COVERAGE_FRAC` (0.9, unmeasured) of the window watched; the Recompute
   409 (API-only) says which reason applied (`aged_out` / `too_little_watched` / `no_longer_scored`). Uses #493's observed frame count, not the `[obs]` line itself. **Follow-ups
-  it deliberately leaves:** `bedTransitions.getActivitySamples`/`bedTransitionRules` and the live
-  `wakeWatcher` still read `motion_peak` alone; `applyCorrection` subtracts the aggregate unknown count; a
-  sparse-minute threshold and a frozen-picture (encoder wedge) detector both need data first.
+  it deliberately leaves:** `bedTransitions.getActivitySamples`/`bedTransitionRules` still read `motion_peak`
+  alone; `applyCorrection` subtracts the aggregate unknown count; a sparse-minute threshold and a
+  frozen-picture (encoder wedge) detector both need data first. The live `wakeWatcher` follow-up is **#588**
+  (on dev, 2026-10-05): a minute with sound but no video on a camera that had delivered video is a hole for the
+  watcher (activityTracker's `videoUnobserved`, raw frame count); a minute of nothing but proven repeats is still
+  watched live (0 such stored rows on either database, Step 0) and left to the nightly rule.
   KNOWN-ISSUES.md "Minutes with no video are unknown in the sleep numbers".
 - ~~**#369** stale-sampler restarts~~ — built on its own branch (`fix/369-detector-watchdog`, plan v5,
   2026-09-27) WITHOUT the observation clock, so the #373 gate below does not apply to it: the detector
