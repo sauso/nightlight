@@ -12096,16 +12096,16 @@
     "note": "Without it every restart after the first one logs: R590-4, R590-9 and R590-10 all see the extra lines."
   },
   {
-    "label": "#590 M-590-28: the log block returns early, skipping the `settled` check (equivalent)",
+    "label": "#590 M-590-28: the log block returns right after the label is remembered, skipping the held-count reset",
     "file": "backend/src/lib/wakeWatcher.js",
     "find": "        st.restartLogAt = at;",
     "replace": "        st.restartLogAt = at;\r\n        return null;",
-    "expect": "equivalent",
+    "expect": "killed",
     "tests": [
       "wake-watcher.test.js"
     ],
     "namePattern": "R590-",
-    "note": "After any restart the count is 1, below ONSET_QUIET_MIN, so the skipped `settled` check could not have armed the watcher and the function returns null anyway (Opus code review, verified by running)."
+    "note": "Killed because the `return` skips the two statements that reset the held-back count and the longest run after a line (R590-4's second window sees stale counts). A return placed AFTER those two statements would be equivalent: after any restart the count is 1, below ONSET_QUIET_MIN, so the skipped `settled` check could not have armed the watcher (Opus code review, verified by running)."
   },
   {
     "label": "control: a comment edit in wakeWatcher.js must change nothing (#590)",
