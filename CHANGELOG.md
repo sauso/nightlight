@@ -9,6 +9,24 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+- **A night's morning wake changes by itself less often as the morning goes on (not never).** When a child's
+  real exit left no "got out of bed" and a parent then handled the bed, the wake read the start of the activity until
+  the last logged exit had 20 quiet minutes, then moved to that exit (2026-10-05: 06:25 became 07:51). A
+  confirmed exit later than the start of the activity is now set aside when the bed was **strictly quiet for 20
+  minutes or more** in between (one minute of movement or of no reading breaks the stretch), and the wake stays
+  at the start of the activity; the set-aside exit is still kept as the night's shadow wake. Nothing changes
+  for an exit earlier than the activity, a child already quiet at the window end, a night still in progress or
+  a night the bed barely moved. Replayed over 60 nights, the share whose wake still moved by more than 15
+  minutes with the clock fell from 12 to 5 on staging and from 17 to 10 on production. **Calibrated on two
+  children in one house with no untouched validation set; a night that is already final (about 3 hours after
+  its window closed) or corrected is not recomputed on its own.** Not fixed: the 2026-09-16 shape (no
+  20-minute quiet stretch before the later exit), a wake that still moves because the empty-bed scan switches
+  to a different exit as the morning goes on, a child who got out, came back and left again later (reported
+  at the first exit), and a bed zone or camera that reads a stirring child as quiet (reported early).
+  KNOWN-ISSUES.md ("A morning wake that changed by itself as the morning went on") has the evidence and the
+  limits (#509).
+
 ## [0.35.0] - 2026-10-06
 
 ### Added

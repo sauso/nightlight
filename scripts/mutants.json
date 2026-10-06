@@ -12480,5 +12480,269 @@
     ],
     "namePattern": "R588-W2(a|b):",
     "note": "Code review round 2 (Opus): a forward clock excursion logged `no video for 61 min`, claiming an outage the watcher cannot see."
+  },
+  {
+    "label": "#509 M-509-01: the veto is removed entirely (the whole fix reverted)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& quietStretchBeforeExit(cribActExt, algoSleepEnd, selectedGapStart, MORNING_ABSENCE_MIN, MAX_POST_EXIT_ACTIVE_MIN)) {",
+    "replace": "&& false) {",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "The 2026-10-05 shape: the wake moves from the movement-only wake to the parent-handled cluster 20 quiet minutes after its last exit."
+  },
+  {
+    "label": "#509 M-509-02: the veto no longer requires an occupied bed (maxBedPeak >= EMPTY_BED_MAX_PEAK dropped)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& selectedGapStart != null && maxBedPeak >= EMPTY_BED_MAX_PEAK",
+    "replace": "&& selectedGapStart != null",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Discarding the exit on a night the bed barely moved leaves 0 wakes / 0 awake minutes and the empty-bed gate calls it `empty`: C12."
+  },
+  {
+    "label": "#509 M-509-03: \"A exists\" is tested as algoSleepEnd != null (it is never null)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& !inProgress && algoSleepEnd < totalMin",
+    "replace": "&& !inProgress && algoSleepEnd != null",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "algoSleepEnd is `totalMin` for a child quiet at the window end, never null: a != null test lets the veto run when no movement-only wake exists. C5."
+  },
+  {
+    "label": "#509 M-509-05: an unobserved minute is allowed INSIDE a stretch",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "while (e < gapStart && cribAct[e] === false) e++;",
+    "replace": "while (e < gapStart && cribAct[e] !== true) e++;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "quietStretchBeforeExit",
+    "note": "Same rule inside the run."
+  },
+  {
+    "label": "#509 M-509-06: the stretch bridges an isolated active minute, as the scan does (R2b)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "while (e < gapStart && cribAct[e] === false) e++;",
+    "replace": "while (e < gapStart && (cribAct[e] === false || (cribAct[e] === true && cribAct[e - 1] === false && cribAct[e + 1] === false))) e++;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Measured: bridging discards the right exit on 2026-10-03 child A (prod), whose 20-minute stretch exists only by bridging four lone minutes. C4."
+  },
+  {
+    "label": "#509 M-509-07: unobserved minutes no longer count as not-quiet trailing minutes",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (cribAct[m] !== false) trailing++;",
+    "replace": "if (cribAct[m] === true) trailing++;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "A missing sample could then ENABLE a veto (verified in plan review). C14."
+  },
+  {
+    "label": "#509 M-509-08: the stretch needs MORE than 20 minutes (>= became >)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (e - s >= minLen) {",
+    "replace": "if (e - s > minLen) {",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Boundary of the one number the rule reuses (MORNING_ABSENCE_MIN). C9."
+  },
+  {
+    "label": "#509 M-509-09: the trailing bound is exclusive (<= became <)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (trailing <= maxTrailing) return [s, e, trailing];",
+    "replace": "if (trailing < maxTrailing) return [s, e, trailing];",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Boundary of MAX_POST_EXIT_ACTIVE_MIN (the scan's own test is <=). C9c."
+  },
+  {
+    "label": "#509 M-509-10: a stretch may lie BEFORE the movement-only wake (the lower bound dropped)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "for (let s = Math.max(fromIdx, 0); s < gapStart; s++) {",
+    "replace": "for (let s = 0; s < gapStart; s++) {",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "The night's own quiet hours before the wake would then qualify as an absence. C9 and the pure-rule test."
+  },
+  {
+    "label": "#509 M-509-11: trailing activity is counted past the adopted gap (the clock-dependent count)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "for (let m = e; m < gapStart; m++) if (cribAct[m] !== false) trailing++;",
+    "replace": "for (let m = e; m < gapStart + 60; m++) if (cribAct[m] !== false) trailing++;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "A count that reaches past the exit grows with the clock and flips the veto between clocks (plan review, round 4). C15."
+  },
+  {
+    "label": "#509 M-509-12: wake_at_shadow no longer keeps the raw exit",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "out.wake_at_shadow = (rawExitMs != null ? toSqlUtc(new Date(rawExitMs)) : null) || algoWakeAt;",
+    "replace": "out.wake_at_shadow = transitionWakeAt || algoWakeAt;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "\"Recorded whether or not adopted\" (plan review, Opus finding 7). C8."
+  },
+  {
+    "label": "#509 M-509-13: the metrics span still ends at the discarded exit (transitionExitIdx not cleared)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    transitionExitIdx = null;",
+    "replace": "    void 0;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Half-applied state: the exit index survives the veto while its time does not, so the wake and the sleep/awake totals disagree (measured in review: the wake reads empty in C8 and the exit's own minute in C8b). Killed by the wake assertions, not by C8's metrics identity, which is true by construction."
+  },
+  {
+    "label": "#509 M-509-14: the discarded exit is still drawn as the adopted one (exitTransitionAt not cleared)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    exitTransitionAt = null;",
+    "replace": "    void 0;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "The detail page would draw a \"got out of bed\" marker for an exit the wake no longer uses. C8."
+  },
+  {
+    "label": "#509 M-509-15: CONTROL: a comment-only edit (must SURVIVE)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "THE MORNING WAKE MUST NOT DEPEND ON THE CLOCK.",
+    "replace": "THE MORNING WAKE MUST NOT DEPEND ON THE CLOCK. (control)",
+    "expect": "control",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Control: if this is KILLED the harness is broken and every result is void."
+  },
+  {
+    "label": "#509 M-509-16: EQUIVALENT: the explicit !inProgress conjunct removed",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& !inProgress && algoSleepEnd < totalMin",
+    "replace": "&& algoSleepEnd < totalMin",
+    "expect": "equivalent",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "In an in-progress night the departure scan never ran, so transitionExitIdx is null and the first conjunct already stops the rule (verified at 03:00 on a synthetic night in plan review). Kept as a readable statement of the rule."
+  },
+  {
+    "label": "#509 M-509-17: the settling-tail fallback records gap start 0 instead of its real gap start",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: i };",
+    "replace": "settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: 0 };",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Code review (Codex, 2026-10-06) predicted this survives: no test pinned the fallback path. C10 does (a stray into_bed 30 s before the final exit, a quietly occupied bed after)."
+  },
+  {
+    "label": "#509 M-509-18: the child-out interval still opens at the raw (discarded) exit",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const upMs = transitionExitMs != null\r\n        ? transitionExitMs",
+    "replace": "const upMs = rawExitMs != null\r\n        ? rawExitMs",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Code review predicted this survives: C8 did not assert the interval. C8b now asserts the in-window cluster visit is typed child_out (with the raw exit it would be typed room)."
+  },
+  {
+    "label": "#509 M-509-19: a bed peak exactly at EMPTY_BED_MAX_PEAK no longer counts as occupied (>= became >)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& selectedGapStart != null && maxBedPeak >= EMPTY_BED_MAX_PEAK",
+    "replace": "&& selectedGapStart != null && maxBedPeak > EMPTY_BED_MAX_PEAK",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Code review predicted this survives: C12 only tried 0.05 and 0.4. It now also lays a peak of exactly 0.1."
+  },
+  {
+    "label": "#509 M-509-20: the occupied-bed threshold of the veto drops to 0.06 (an empty-bed night is then turned into `empty`)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& selectedGapStart != null && maxBedPeak >= EMPTY_BED_MAX_PEAK",
+    "replace": "&& selectedGapStart != null && maxBedPeak >= 0.06",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Opus review (verified by running): survived all of sleepAnalysis.test.js and CREATED `empty` on C12's night with a bedtime peak of 0.06-0.099. C12 now lays 0.099."
+  },
+  {
+    "label": "#509 M-509-21: the stretch may start one minute BEFORE the movement-only wake (call site A - 1)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "quietStretchBeforeExit(cribActExt, algoSleepEnd, selectedGapStart,",
+    "replace": "quietStretchBeforeExit(cribActExt, algoSleepEnd - 1, selectedGapStart,",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Opus review: only the helper's own unit test pinned the lower bound; M-509-10 drops it entirely. Real data matters here: in 5 of 19 vetoed nights the bed was already quiet 10-66 minutes before A. C9b's third case (stretch of 19 from A, quiet before A)."
+  },
+  {
+    "label": "#509 M-509-22: the settling-tail fallback records its gap start 20 minutes late",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: i };",
+    "replace": "settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: i + 20 };",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Opus review: survived while C10 only killed gapStart 0. The stretch search then finds the gap's own quiet minutes. C10 at the 20/21 trailing boundary."
+  },
+  {
+    "label": "#509 M-509-23: the settling-tail fallback records its gap start one minute early",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: i };",
+    "replace": "settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: i - 1 };",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Opus review: one minute shifts the trailing count by one, which only the 20/21 boundary in C10 can see."
   }
 ]
