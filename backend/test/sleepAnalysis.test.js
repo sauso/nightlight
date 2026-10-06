@@ -18,7 +18,7 @@ import path from 'node:path';
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-test-'));
 process.env.DATA_DIR = TMP;
 
-const { computeNight, detectMidnightEpisodes } = await import('../src/lib/sleepAnalysis.js');
+const { computeNight, detectMidnightEpisodes, quietStretchBeforeExit } = await import('../src/lib/sleepAnalysis.js');
 const { default: db } = await import('../src/db.js');
 
 const CHILD = 'test-child';
@@ -2160,6 +2160,222 @@ describe('midnight episode integration', () => {
     assert.equal(night.awake_minutes, 11);
     assert.deepEqual(night.wakes[0], {
       start_at: sqlTime(at(23, 0)), end_at: sqlTime(at(23, 11)), minutes: 11,
+    });
+  });
+});
+
+// ============================================================================================================
+// #509 — a completed night's wake must not depend on the morning clock.
+//
+// The shape (2026-10-05 and 2026-09-27, child B): the child's real exit leaves no out_of_bed, the room stays
+// audible, the bed reads strictly quiet for a long stretch, and a LATER cluster of exits (a parent handling the
+// bed) corroborates a gap once ITS own 20 quiet minutes have elapsed. Before the fix the stored wake was the
+// movement-only wake until that moment and the cluster after it. The fixtures below lay that shape minute by
+// minute (`layTrace`: the helper above cannot set sound or out-zone movement) and every dimension that does
+// work is a parameter, so each hostile twin differs from its sibling in exactly ONE of them.
+// ============================================================================================================
+describe('★★★ #509: a later corroborated exit does not replace the wake behind a strictly quiet bed stretch', () => {
+  const insertTrace = db.prepare(
+    `INSERT INTO activity_samples (camera_id, bucket_start, motion_level, motion_peak, sound_level, sound_peak,
+       motion_out_peak, motion_frames, sound_windows) VALUES (?, ?, ?, ?, 0, ?, ?, 1, 0)`
+  );
+  const plus = (d, n, s = 0) => new Date(d.getTime() + n * 60000 + s * 1000);
+  const A0 = at(6, 25, 1); // A: the first minute of the final awake run (sound only, then a 4-minute stir)
+  const S0 = at(6, 34, 1); // the strictly quiet bed stretch starts here
+  const A_CLOCK = '06:25';
+  const wipe = () => {
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+    db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  };
+
+  // The morning, laid per minute. Returns where things landed so a test can state its expectation from the fixture.
+  //   stretchMin  — length of the quiet-bed stretch (audible throughout: sound 10 dB over ambient)
+  //   restlessMin — bed-ACTIVE minutes between the stretch and the exit cluster (trailing activity)
+  //   blipAt      — offsets into the stretch that read as one isolated active bed minute (a bridging rule would skip them)
+  //   nullAt      — offsets (from S0) whose row is NOT written at all (an unobserved minute)
+  //   soundStopsAt — if set, sound and the run end here (a child quiet at the window end: no movement-only wake)
+  function layMorning({ stretchMin = 42, restlessMin = 0, blipAt = [], nullAt = [], soundStopsAt = null } = {}) {
+    laySamples(at(19, 30), A0, [[at(19, 30), at(19, 40)]], STILL_OCCUPIED);
+    const stretchEnd = plus(S0, stretchMin);
+    const restEnd = plus(stretchEnd, restlessMin);
+    const clusterEnd = plus(restEnd, 10);
+    for (let t = A0; t < plus(clusterEnd, 150); t = plus(t, 1)) {
+      const k = Math.round((t - S0) / 60000); // offset from the stretch start (negative before it)
+      if (nullAt.includes(k)) continue; // an unobserved minute: no row at all
+      let motion = STILL_EMPTY, out = 0, sound = 10;
+      if (t < S0) { if (t >= at(6, 30, 1)) motion = 0.15; } // 06:25-29 sound only, 06:30-33 the stir
+      else if (t < stretchEnd) { if (blipAt.includes(k)) motion = 0.15; }
+      else if (t < restEnd) motion = 0.15; // restless in the bed
+      else if (t < clusterEnd) { motion = 1.0; out = 0.99; } // the parent-handled cluster
+      else sound = 0; // quiet and silent afterwards
+      if (soundStopsAt && t >= soundStopsAt) sound = 0;
+      insertTrace.run(CAM, sqlTime(t), motion, motion, sound, out);
+    }
+    const tOut = plus(clusterEnd, -1, 23); // the final exit, 37 s before the gap it corroborates opens
+    insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(plus(restEnd, 0, 10)));
+    insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(plus(restEnd, 2, 20)));
+    insertTransition.run(CAM, 'into_bed', 0.05, sqlTime(plus(restEnd, 5, 5)));
+    insertTransition.run(CAM, 'into_bed', 0.05, sqlTime(plus(restEnd, 8, 10)));
+    insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(tOut));
+    return { clusterEnd, tClock: hhmm(sqlTime(tOut)), tOut };
+  }
+  const clockAt = (t, mins) => plus(t, mins).getTime();
+
+  test('#509 C1: case-2 shape keeps the movement-only wake at every clock, before AND after the old flip', (t) => {
+    const { clusterEnd, tClock } = layMorning({ stretchMin: 42 });
+    assert.notEqual(tClock, A_CLOCK, 'the fixture must hold two different answers or it proves nothing');
+    // -5: the cluster is still in progress; +19..+40 straddle the old code's flip (20 quiet minutes after the
+    // last exit, rounded); +90 and +150 are long after. Old code: the cluster's exit from about +20 onwards.
+    for (const mins of [-5, 0, 10, 19, 21, 25, 40, 90, 150]) {
+      t.mock.timers.enable({ apis: ['Date'], now: clockAt(clusterEnd, mins) });
+      const night = computeNight(CHILD, DATE);
+      assert.equal(night.status, 'ok');
+      assert.equal(hhmm(night.wake_at), A_CLOCK, `clock ${mins} min after the cluster: the wake must not move`);
+      t.mock.timers.reset();
+    }
+  });
+
+  test('#509 C8: what falls back with the wake, and what does not', (t) => {
+    const { clusterEnd, tClock } = layMorning({ stretchMin: 42 });
+    t.mock.timers.enable({ apis: ['Date'], now: clockAt(clusterEnd, 40) });
+    const night = computeNight(CHILD, DATE, { includeTimeline: true });
+    assert.equal(hhmm(night.wake_at), A_CLOCK);
+    assert.equal(hhmm(night.wake_at_algo), A_CLOCK);
+    assert.equal(hhmm(night.wake_at_shadow), tClock, 'the shadow keeps the RAW exit: "recorded whether or not adopted"');
+    assert.equal(night.transitions.filter((x) => x.type === 'out_of_bed').length, 0, 'no discarded exit is drawn as the adopted one');
+    // The metrics span ends at the wake: nothing after A is counted as sleep or as awake.
+    assert.equal(night.asleep_minutes + night.awake_minutes + night.unknown_minutes, (utcMs(night.wake_at) - utcMs(night.onset_at)) / 60000);
+  });
+
+  test('#509 C9: the stretch must be 20 minutes: 19 keeps the exit, 20 discards it', (t) => {
+    for (const [stretchMin, expectA] of [[19, false], [20, true]]) {
+      wipe();
+      const { clusterEnd, tClock } = layMorning({ stretchMin });
+      t.mock.timers.enable({ apis: ['Date'], now: clockAt(clusterEnd, 40) });
+      const got = hhmm(computeNight(CHILD, DATE).wake_at);
+      assert.equal(got, expectA ? A_CLOCK : tClock, `stretch of ${stretchMin} minutes`);
+      t.mock.timers.reset();
+    }
+  });
+
+  test('#509 C4: ONE isolated active minute inside the stretch breaks it (no bridging): the exit stays', (t) => {
+    // 21 minutes with a blip at offset 10 = 10 + 10 strictly quiet. The scan itself would bridge the blip; this
+    // rule must not (2026-10-03 child A on prod needed four bridged minutes to reach 20).
+    const { clusterEnd, tClock } = layMorning({ stretchMin: 21, blipAt: [10] });
+    t.mock.timers.enable({ apis: ['Date'], now: clockAt(clusterEnd, 40) });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), tClock);
+  });
+
+  test('#509 C9c: the trailing activity bound (20 minutes) is exact, and it counts the cluster too', (t) => {
+    // restlessMin 10 + the 10 cluster minutes = 20 not-quiet minutes between stretch and gap: discarded.
+    // restlessMin 11 = 21: a mid-night-lull shape, the exit stays.
+    for (const [restlessMin, expectA] of [[10, true], [11, false]]) {
+      wipe();
+      const { clusterEnd, tClock } = layMorning({ stretchMin: 30, restlessMin });
+      t.mock.timers.enable({ apis: ['Date'], now: clockAt(clusterEnd, 40) });
+      assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), expectA ? A_CLOCK : tClock, `restless ${restlessMin} min`);
+      t.mock.timers.reset();
+    }
+  });
+
+  test('#509 C14: an UNOBSERVED minute can only prevent the veto, never enable it', (t) => {
+    // restlessMin 10 -> exactly 20 not-quiet minutes (discarded, see C9c). Remove the row of one restless
+    // minute: a count that took only CONFIRMED-active minutes would drop to 19 and still discard; here the
+    // twin is restlessMin 11 (21, kept) with one restless row removed (20 confirmed-active + 1 unobserved):
+    // counting only confirmed minutes reads 20 and would discard it; unobserved counts as not-quiet, so it stays.
+    const stretchMin = 30;
+    const { clusterEnd, tClock } = layMorning({ stretchMin, restlessMin: 11, nullAt: [stretchMin + 3] });
+    t.mock.timers.enable({ apis: ['Date'], now: clockAt(clusterEnd, 40) });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), tClock);
+  });
+
+  test('#509 C5: a child quiet at the window end has no movement-only wake, so the exit is kept', (t) => {
+    // The activity stops at 06:50 (window end 07:00): no run reaches the end, A does not exist, and the
+    // corroborated exit that comes later must still be reported ("knowing they got up beats still asleep").
+    const { clusterEnd, tClock } = layMorning({ stretchMin: 42, soundStopsAt: at(6, 50, 1) });
+    t.mock.timers.enable({ apis: ['Date'], now: clockAt(clusterEnd, 40) });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.wake_at_algo, null, 'precondition: the movement-only wake does not exist');
+    assert.equal(hhmm(night.wake_at), tClock);
+  });
+
+  test('#509 C3: an exit EARLIER than the movement-only wake is untouched (the designed benefit)', (t) => {
+    laySamples(at(19, 30), at(5, 25, 1), [[at(19, 30), at(19, 40)]], STILL_OCCUPIED);
+    // a stir ending at 05:30, quiet and silent from 05:31, then the room wakes at 06:25 and stays active
+    for (let m = at(5, 25, 1); m < at(5, 31, 1); m = plus(m, 1)) insertTrace.run(CAM, sqlTime(m), 0.15, 0.15, 0, 0);
+    for (let m = at(5, 31, 1); m < at(6, 25, 1); m = plus(m, 1)) insertTrace.run(CAM, sqlTime(m), STILL_EMPTY, STILL_EMPTY, 0, 0);
+    for (let m = at(6, 25, 1); m < at(8, 0, 1); m = plus(m, 1)) insertTrace.run(CAM, sqlTime(m), STILL_EMPTY, STILL_EMPTY, 10, 0);
+    insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(at(5, 31, 1, 10)));
+    t.mock.timers.enable({ apis: ['Date'], now: at(8, 0, 1).getTime() });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.wake_at_algo), A_CLOCK, 'precondition: the exit is earlier than A');
+    assert.equal(hhmm(night.wake_at), '05:31');
+  });
+
+  test('#509 C12: a night the bed barely moved is never turned into `empty` by the rule', (t) => {
+    // The shape that would have flipped status: a night whose bed peak stays under EMPTY_BED_MAX_PEAK, a
+    // sound-only final run from 06:00, a quiet bed, one exit at 06:50. Discarding the exit would leave 0
+    // wakes and 0 awake minutes and the empty-bed gate would call it `empty`.
+    const layNight = (settlePeak) => {
+      wipe();
+      laySamples(at(19, 30), at(6, 0, 1), [], STILL_OCCUPIED);
+      for (let m = at(19, 30); m < at(19, 40); m = plus(m, 1)) {
+        db.prepare('UPDATE activity_samples SET motion_level = ?, motion_peak = ? WHERE camera_id = ? AND bucket_start = ?').run(settlePeak, settlePeak, CAM, sqlTime(m));
+      }
+      for (let m = at(6, 0, 1); m < at(9, 0, 1); m = plus(m, 1)) {
+        const stir = m.getTime() === at(6, 50, 1).getTime();
+        insertTrace.run(CAM, sqlTime(m), stir ? 0.05 : STILL_EMPTY, stir ? 0.05 : STILL_EMPTY, m < at(7, 0, 1) ? 10 : 0, 0);
+      }
+      insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(at(6, 50, 1, 20)));
+    };
+    t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+    layNight(0.05); // bed peak 0.05 < EMPTY_BED_MAX_PEAK (0.1)
+    const kept = computeNight(CHILD, DATE);
+    assert.equal(kept.status, 'ok', 'the rule must not create an `empty` night');
+    assert.equal(hhmm(kept.wake_at), '06:50', 'and the exit stays');
+    layNight(0.4); // the twin: the bed moved properly at bedtime, so the veto IS reachable
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:00', 'twin: with a real bed peak the same stream is discarded');
+  });
+
+  test('#509 C15: no clock flip: a bed-active minute AFTER the exit changes nothing', (t) => {
+    // Trailing activity is counted only up to the adopted gap. A count to the end of the night would grow
+    // with the clock and flip the veto between these clocks (found in plan review on exactly this night).
+    laySamples(at(19, 30), at(6, 0, 1), [[at(19, 30), at(19, 40)]], STILL_OCCUPIED);
+    for (let m = at(6, 0, 1); m < at(9, 0, 1); m = plus(m, 1)) {
+      const k = Math.round((m - at(6, 0, 1)) / 60000);
+      const bedActive = (k >= 20 && k < 40) || k === 75; // 06:20-06:39 restless, one parent minute at 07:15
+      insertTrace.run(CAM, sqlTime(m), bedActive ? 0.05 : STILL_EMPTY, bedActive ? 0.05 : STILL_EMPTY, m < at(7, 0, 1) ? 10 : 0, 0);
+    }
+    insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(at(6, 40, 1, 10)));
+    const seen = [];
+    for (const [h, m] of [[7, 10], [7, 30], [8, 30]]) {
+      t.mock.timers.enable({ apis: ['Date'], now: at(h, m, 1).getTime() });
+      seen.push(hhmm(computeNight(CHILD, DATE).wake_at));
+      t.mock.timers.reset();
+    }
+    assert.equal(new Set(seen).size, 1, `the same wake at every clock, got ${seen.join(' ')}`);
+  });
+
+  describe('quietStretchBeforeExit (the pure rule)', () => {
+    const arr = (n, v = false) => new Array(n).fill(v);
+    test('length, bounds, blips, nulls and trailing minutes, each one boundary at a time', () => {
+      assert.deepEqual(quietStretchBeforeExit(arr(40), 0, 40, 20, 20), [0, 40, 0]);
+      assert.equal(quietStretchBeforeExit(arr(19), 0, 19, 20, 20), null, '19 < 20');
+      const withBlip = arr(21); withBlip[10] = true;
+      assert.equal(quietStretchBeforeExit(withBlip, 0, 21, 20, 20), null, 'a blip is NOT bridged');
+      const withNull = arr(21); withNull[10] = null;
+      assert.equal(quietStretchBeforeExit(withNull, 0, 21, 20, 20), null, 'an unobserved minute breaks the stretch');
+      assert.equal(quietStretchBeforeExit(arr(40), 5, 24, 20, 20), null, 'the stretch must start at or after `from` (19 minutes left)');
+      assert.equal(quietStretchBeforeExit(arr(40), 5, 25, 20, 20)[0], 5);
+      const trailing = [...arr(20), ...arr(20, true)];
+      assert.deepEqual(quietStretchBeforeExit(trailing, 0, 40, 20, 20), [0, 20, 20], '20 trailing is allowed');
+      assert.equal(quietStretchBeforeExit(trailing, 0, 40, 20, 19), null, '20 trailing > 19');
+      const nullTrailing = [...arr(20), ...arr(20, null)];
+      assert.equal(quietStretchBeforeExit(nullTrailing, 0, 40, 20, 19), null, 'unobserved minutes count as trailing');
+      assert.deepEqual(quietStretchBeforeExit(nullTrailing, 0, 40, 20, 20), [0, 20, 20]);
+      // a later qualifying stretch is found after a short one
+      const two = [...arr(5), true, ...arr(25)];
+      assert.deepEqual(quietStretchBeforeExit(two, 0, 31, 20, 20), [6, 31, 0]);
     });
   });
 });

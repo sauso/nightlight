@@ -1352,6 +1352,58 @@ against.
 
 ---
 
+## A morning wake that changed by itself as the morning went on (#509)
+
+**What you saw:** a night's wake time that read one thing early in the morning and a different, later one
+an hour or so after. The change came at a fixed moment, about 20 minutes after the last "got out of bed"
+the bed classifier logged, not because anything new happened in the room.
+
+**Why:** the wake is "the start of the last stretch of activity" (movement in the bed or out of it, or
+sound) unless a *got out of bed* confirms an empty-bed stretch of 20 minutes or more, in which case that exit
+is the wake. A child's real exit often leaves no *got out of bed* (movement in the bed zone and outside it at
+the same moment), and the exits that are logged later belong to a parent handling the bed. Once the last of
+those had 20 quiet minutes after it, it confirmed a gap and replaced the earlier wake. Two nights on record,
+one child, both on staging and production: 2026-10-05 (true exit 06:19-06:20, shown as 06:25 until about
+08:11 and then 07:51) and 2026-09-27 (true 05:49, shown as 05:49 and then 07:22).
+
+**What it does now:** a confirmed exit that comes **later** than the start of the last stretch of activity is
+set aside when the bed read **strictly quiet for 20 minutes or more** in between and the bed was then not
+quiet for **at most 20 minutes** before that exit's own gap began. "Strictly quiet" means every one of those
+minutes was observed and under the movement threshold: **a single minute of movement, or a single minute with
+no reading, breaks the stretch** (unlike the empty-bed scan, which bridges one isolated minute: this rule
+removes an exit, so it asks for stricter evidence). The wake is then the start of the activity; the exit that
+was set aside is still stored in the night's shadow wake. Nothing is set aside on a night where no run of
+activity reaches the end of the window (a child already quiet then keeps the exit), on a night still in
+progress, when the exit is earlier than the start of the activity, or on a night the bed barely moved
+(peak under 0.1: those are the empty-bed check's, and discarding the exit there would turn a real wake into
+"nobody slept here").
+
+**Limits, stated rather than hidden:**
+- **Calibrated in one house.** The rule was chosen and checked on the same 60 nights of two cameras in two
+  rooms, with the owner's corrections on staging as the only truth, and **there is no untouched validation
+  set**: the next real mornings are the first out-of-sample test. Staging and production watch the same two
+  rooms, so agreement between them is a consistency check, not independent evidence.
+- **A bed zone that never reads quiet while the child is away, or a microphone that hears the whole house
+  (sound is not per room, and rooms are adjacent), makes the wake EARLY**: it lands on the first activity,
+  never on no wake at all. A child who fusses, falls back asleep for 20 minutes or more and is carried out
+  later is reported at the fuss. None of the 18 nights on record whose exit fell after the window shows that
+  pattern, but 18 nights is what there is.
+- **Not fixed by this:** a night where the right time is the early one but the bed shows no strictly quiet
+  stretch of 20 minutes between it and the later exit (2026-09-16, one child: 06:15 was right, the exit at
+  06:46 stands); a stray early exit that a later night's evidence corrects (#610); a night with no confirmed
+  exit yet, which still shows no wake until 20 quiet minutes have passed.
+- **Nights already stored are not recomputed.** A stored night keeps the wake it was saved with (a corrected
+  night is locked); the new rule applies to nights worked out after the update and to a recompute. A night
+  that has been worked out again reads the wake from the evidence it has *now*: rows older than the 30-day
+  retention are gone.
+- **Where it shows:** the "Woke <earlier time> <later time>" comparison on a night's detail page appears
+  only when the two differ, so it disappears on a night where the exit was set aside; the "got out of bed"
+  marker is not drawn for it; the child counts as out of the bed from the start of the activity, so a parent
+  at the bed afterwards is drawn as the child being out rather than someone in the room.
+- **The window end matters.** The start of the activity can never be later than the window end, and an exit
+  is looked for up to 3 hours past it, so the same night can read differently under a 07:00 and a 07:30
+  window.
+
 ## Confirmed bugs (fix pending)
 
 ### Compatibility (HLS) mode doesn't play when the app is served over plain HTTP
