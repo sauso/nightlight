@@ -229,9 +229,9 @@ saved is what the camera is still using).
 
 | Setting | Default | Range | What it does |
 |---|---|---|---|
-| **Motion sensitivity** | 50 | 1–100 | How much of the detection zone must change between frames. Higher = more sensitive. |
-| **Motion confirm** | 3 s | 0–30 s | Motion must persist this long before alerting. 0 alerts on the first frame. |
-| **Motion cooldown** | 60 s | 1–3600 s | Minimum gap between motion alerts from this camera. |
+| **Motion sensitivity** | 50 | 1–100 | How much of the detection zone must change between frames for a **motion alert**. Higher = more sensitive: roughly **10% of the zone at 1, 5.15% at 50, 1.19% at 90, 0.2% at 100**. It changes **alerts only** (on a camera that alerts and has fallen back to the main stream it can also change how soon the detector returns to the Low stream, see [KNOWN-ISSUES.md](../KNOWN-ISSUES.md)). It does not change sleep tracking, nor the out-of-bed / into-bed detection, which use a fixed 1.19% threshold whatever this is set to (see [Bed exits and entries use a fixed threshold](#bed-exits-and-entries-use-a-fixed-threshold)). |
+| **Motion confirm** | 3 s | 0–30 s | Motion must persist this long before alerting, counted in video that actually arrived: if the camera's video stops for more than about 1.5 s mid-run (a stall, a reboot, a Wi-Fi drop; a camera slower than about 0.67 frames a second learns a wider limit after about 9 frames, and until then every frame restarts the count, so its first alert after a restart of the detector comes later, at about 24 s), the count restarts at the next frame, so a stall can make an alert later, never earlier than it would have come. 0 alerts on the first frame, including the first one after such a gap. See [KNOWN-ISSUES.md](../KNOWN-ISSUES.md). |
+| **Motion cooldown** | 60 s | 1–3600 s (the form's limit; the server raises values below 1 to 1, and turns 0 or a non-number into the 60 s default) | Minimum gap between motion alerts from this camera. **It survives the detector restarting**: a camera reconnect, the detector watchdog, the return to the Low stream, a rename, or saving any camera setting do not start it over, so motion cannot alert again sooner than this after the last alert (before issue #454 a detector restart did). Two things to know. To test alerts right after changing a motion setting, wait out the cooldown (or set a short one): saving a setting no longer lets the next alert fire at once. And it is **lost when the server itself restarts** (nothing is stored), so a container that restarts nightly can alert once more per camera per restart. A one-way backward step of the server's clock silences it for at most one cooldown (a step back that is later corrected forward can let one alert through inside it). The sound cooldown below is separate; MQTT and ONVIF motion alerts keep their own. See [KNOWN-ISSUES.md](../KNOWN-ISSUES.md). |
 | **Sound sensitivity** | 50 | 1–100 | How far above the room's own ambient level a noise must rise. Higher = smaller margin = easier to trigger: roughly **+18 dB at 1, +11 dB at 50, +4 dB at 100**. |
 | **Sound confirm** | 4 s | 0–30 s | Loudness must stay above that margin, *on average*, for this long — so a pulsing cry still counts while a single bang does not. |
 | **Sound cooldown** | 120 s | 1–3600 s | Minimum gap between sound alerts from this camera. |
@@ -280,10 +280,34 @@ Sound is measured **relative to each room's own ambient level**, which the app l
 not as an absolute loudness. A room next to a busy road and a silent room both settle at "0 over
 ambient", so the same sensitivity means the same thing in both.
 
+### Bed exits and entries use a fixed threshold
+
+Sleep tracking reads two kinds of event from the frame-by-frame motion leg: a child leaving the bed
+("out of bed") and being put into it ("into bed"). Both are decided by the same test the motion alert
+uses, "did enough of the area change between two frames", but with a **fixed threshold of 1.19% of the
+area (the bed zone, and separately the area outside it)** instead of the motion sensitivity slider.
+**Motion sensitivity therefore changes alerts only**; it no longer moves the stored exits and entries
+(before issue #368 it did, and the slider is not even shown on a camera that only feeds sleep tracking,
+for example one using MQTT or ONVIF motion or with motion detection switched off).
+
+⚠️ **Known limit: 1.19% is calibrated in one house.** It is the value the sensitivity slider gave at 90,
+which is what every transition rule (the link windows, the confirmation times, the two-minute pause) was
+calibrated at (the saved settings say so; the history of the setting is not stored). It is not derived
+from your room and nothing checks it against your camera. If your
+motion sensitivity was **not** 90, expect your recorded exits and entries to **change after upgrading,
+in either direction**: below 90 the threshold goes down, so movements the old threshold ignored now count,
+which can add exits and entries and can also cancel a pending exit (a movement of 1–5% of the zone, such
+as a child settling, now cancels it, the way it does in the calibrated house); the totals can move in
+either direction. Above 90 the threshold goes up. Whether that is better for your sleep numbers is **not
+known**. Stored history is not
+rewritten. A noisy room (a fan, a curtain, infrared noise) can no longer be quieted for sleep tracking by
+lowering the motion sensitivity: redraw the detection zone instead. See [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
+
 ### ⚠️ Sound sensitivity also changes sleep tracking
 
-This is the one that surprises people, because motion sensitivity does **not** work this way — it only
-affects alerts. Sound sensitivity affects **both**. The same margin that decides when to notify you
+This is the one that surprises people, because motion sensitivity does **not** change sleep tracking
+(the out-of-bed / into-bed threshold above is fixed): it only affects alerts. Sound sensitivity affects
+**both**. The same margin that decides when to notify you
 also decides when a *steady* background noise gets absorbed into the room's ambient level, and sleep
 tracking counts a minute as "awake" partly from sound.
 
@@ -325,6 +349,19 @@ within the times in the table above. If it sits at *exactly* the same value for 
 `maxAvgOver` stays between half and all of the "fires at" figure, you are running a version from
 before that fix.
 
+**A muted microphone still prints this line, and differs in two ways.** A microphone that delivers
+*digital silence* (every audio sample exactly zero: muted, gated, or a codec that encodes silence that way)
+gives `peak=?dB` whenever every window since the last line was silent, and `ambient=?dB` until it has
+learned the room's level from about 5 seconds of real sound in a row (bursts of sound shorter than that,
+separated by silences longer than the **Sound confirm** time, may never teach it one). Silence is treated as
+a moment exactly at the room's ambient level: on its own it never alerts, it is recorded as quiet (0 over
+ambient) in the sleep data, and it breaks up separate noises rather than letting them add up to an alert.
+Unlike real quiet, it cannot lower the ambient level, so `ambient=` normally holds still through a silent
+stretch; that is expected, not the freeze described above. The one exception: a loud sound that had been
+over the margin for almost the 45 seconds of the table above when the silence began can still be absorbed a
+moment into the silence, raising `ambient=`. Limits are in [KNOWN-ISSUES.md](../KNOWN-ISSUES.md), "A muted or
+digitally silent microphone is recorded as a quiet room".
+
 This line reports what the sound detector *decided from*; a separate `[obs]` line every 15 minutes reports
 what it actually *received*: how much of the time was covered, gaps and restarts, and sound that arrived
 late and caught up. It changes nothing about alerts. Every field is explained in
@@ -360,6 +397,39 @@ one follow-up per child per night** — if the wake time still hasn't settled af
 report (the child's sleep card and detail page) keeps catching up, not another push. And if the wake time
 never resolves at all within that window, there is no follow-up to send — the original
 report, with no wake time listed, is what you get.
+
+**Correcting a night stops its follow-up.** Once you have corrected a night in the morning review (for
+that child and that night) — typed or picked an in-bed, asleep or wake time, confirmed it with **That's
+right**, or said "No one was in the bed" — Nightlight will not send a "Sleep report updated" telling you
+when the cameras think they got up. You have already said what happened, so the detector's wake time is
+not pushed over your answer. Until 2026-09-30 only "No one was in the bed" did this; a typed wake time
+could still be followed by the detector's own. Answering only the per-event questions or dismissing the
+card is not a correction and changes nothing here. A note on its own isn't one either, but the review
+form always saves the asleep and wake-up times it shows along with your note (as your confirmation of
+them), so **a note saved from the review form counts as a correction** and stops the follow-up. Only a
+note sent on its own through the API doesn't.
+
+What it will **not** do is take back the report that already went out: a delivered notification can't be
+recalled, so that one still describes the night as the cameras read it. The same applies if you correct
+the night *before* the first report is sent (possible in the first half-hour or so after the window
+closes, from the sleep detail page): the first report still goes out as usual and describes the cameras'
+version. Remove your correction within about 3 hours of the window closing and the follow-up can still
+arrive (once a wake time is known), because the app is showing the cameras' version of the night again.
+After those 3 hours (at most one 30-minute check past them), nothing more is sent either way. That holds
+even when the app has a reason to update the night later: remove your correction hours afterwards (say
+at 1 pm, for a window that closed at 7 am), or have the server off across the morning, and the saved
+summary still catches up on its next check, but no "Sleep report updated" goes out for it. (Before
+2026-09-30 either could send one hours late.)
+
+| | First "Sleep report" | "Sleep report updated" follow-up |
+|---|---|---|
+| Night not corrected | sent when the window closes | sent once, if the wake time was unknown and becomes known within about 3 hours |
+| Night corrected after the first report | already sent, not recalled | not sent |
+| Night corrected before the first report | still sent, with the cameras' figures | not sent |
+| Correction removed after those ~3 hours | already sent | not sent (the saved summary still updates) |
+
+A corrected night is also **locked** (README, "A night you have corrected is locked"): its saved summary
+stops being refined, which is the other half of why no later wake time is pushed.
 
 ## Troubleshooting
 

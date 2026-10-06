@@ -7,7 +7,7 @@ import { upsertPath, removePath, getPathStatus, toPathName, hlsPathName } from '
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
 import { recordCameraEvent, EVENT } from '../lib/cameraEvents.js';
 import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.js';
-import { startMotionDetector, stopMotionDetector, motionLegWanted } from '../lib/motionDetector.js';
+import { startMotionDetector, stopMotionDetector, motionLegWanted, forgetMotionAlert } from '../lib/motionDetector.js';
 import { startOnvifMotion, stopOnvifMotion, onvifMotionWanted } from '../lib/onvifMotion.js';
 import { startSoundDetector, stopSoundDetector } from '../lib/soundDetector.js';
 import { forgetObservationClocks } from '../lib/observationClock.js';
@@ -583,7 +583,9 @@ router.get('/:id/sensor-history', requireAuth, (req, res) => {
 
 // Per-minute motion/sound activity timeline for one camera (the raw signal sleep tracking is built
 // on). Any signed-in user. `hours` (default 24, capped at 7 days); ascending by minute. Empty until
-// the camera has run a detector for a while.
+// the camera has run a detector for a while. `t` is the UTC minute the samples ARRIVED in (#447; before
+// it, the minute a flush timer fired in), and the latest minute appears ~7 s after it ends. Two rows can
+// share a `t` after a big backward clock step (KNOWN-ISSUES.md, "The sleep timeline's minutes...").
 router.get('/:id/activity-history', requireAuth, (req, res) => {
   const hours = Math.min(168, Math.max(1, parseInt(req.query.hours, 10) || 24));
   const rows = db
@@ -1149,6 +1151,13 @@ router.delete('/:id', requireAdmin, async (req, res) => {
   // #373: a deleted camera's observation clocks go, tombstones included (a stopped camera keeps its own
   // until the idle sweep, so its next start still reports the restart).
   forgetObservationClocks(req.params.id);
+  // #454: and its motion alert stamp. DELETE is the ONLY route that clears it: a settings save, a rename, an
+  // assign and an enable/disable all keep the cooldown on purpose (see the header over `motionAlertStamps`), and
+  // this comes AFTER the stop above. That stop waits for the process to exit for at most FORCE_KILL_TIMEOUT_MS
+  // (3 s, then it resolves either way), so a stdout frame can still drain after it and re-stamp a deleted camera
+  // once: a known, documented residual (one number per UUID), not guarded. The ORDER (stop, then forget) is not
+  // covered by a test: the route tests plant a stamp and have no running detector to race.
+  forgetMotionAlert(req.params.id);
   stopClipCapture(req.params.id);
   try {
     await removePath(existing.mediamtx_path);

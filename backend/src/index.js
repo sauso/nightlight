@@ -32,7 +32,7 @@ import { subConfigured, isSubRunning, startSubStream } from './lib/subStream.js'
 import db from './db.js';
 import { upsertPath, isPathConfiguredCorrectly } from './lib/mediamtx.js';
 import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder.js';
-import { startMotionDetector, stopMotionDetector, isDetecting, stopAllMotionDetectors, motionLegWanted } from './lib/motionDetector.js';
+import { stopAllMotionDetectors, reconcileMotionLeg } from './lib/motionDetector.js';
 import { startOnvifMotion, stopOnvifMotion, isOnvifMotion, onvifMotionWanted, stopAllOnvifMotion } from './lib/onvifMotion.js';
 import { startSoundDetector, isSoundDetecting, stopAllSoundDetectors } from './lib/soundDetector.js';
 import { reconcileClipRing, stopAllClipCapture } from './lib/clipCapture.js';
@@ -52,6 +52,7 @@ import { applyTrustProxy } from './lib/trustProxy.js';
 import { safeInterval, installCrashGuards, markBootComplete } from './lib/processGuards.js';
 import {
   createCameraWatchdog, createAudioWatchdog, WATCHDOG_INTERVAL_MS, AUDIO_CHECK_INTERVAL_MS,
+  createDetectorWatchdog, createRestartRequests, DETECTOR_CHECK_INTERVAL_MS,
 } from './lib/cameraWatchdogs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -415,15 +416,23 @@ safeInterval('webrtc-session-reconcile', WEBRTC_KICK_INTERVAL_MS, async () => {
 // The camera watchdog (15s) and the audio watchdog (30s) — the ONLY things that recover a wedged camera
 // stream. Their loop bodies live in lib/cameraWatchdogs.js since #451, so they can be tested through their
 // real logic (this file cannot be imported: it boots the app). Each factory's deps default to the real
-// functions, so nothing is overridden here. The per-camera guard and the "one pending check per camera"
-// rule live in lib/processGuards.js's perTargetRunner; the `[guard:camera-watchdog:<name>]`,
-// `[guard:camera-watchdog:sub:<name>]` and `[guard:audio-watchdog:<name>]` labels are unchanged.
+// functions, so nothing is overridden here except the shared #369 mailbox below. The per-camera guard and
+// the "one pending check per camera" rule live in lib/processGuards.js's perTargetRunner; the
+// `[guard:camera-watchdog:<name>]`, `[guard:camera-watchdog:sub:<name>]` and `[guard:audio-watchdog:<name>]`
+// labels are unchanged (the detector watchdog's are `[guard:detector-watchdog:<name>:motion|sound]`).
 //
 // ⚠️ `.tick` must be what is handed over, not the watchdog object: safeInterval calls its argument, and an
 // object would throw every tick, reported and swallowed, with no watchdog running at all. The wiring
 // tripwire in process-guards.test.js pins this line.
-safeInterval('camera-watchdog', WATCHDOG_INTERVAL_MS, createCameraWatchdog().tick);
+//
+// #369: the DETECTOR watchdog (15s) recovers a motion or sound detector that is alive but receiving nothing.
+// It never starts a publisher itself: when a detector restart is not enough it posts a request, and the camera
+// watchdog consumes it. That only works if both hold the SAME mailbox, so it is built exactly once, here
+// (detector-watchdog.test.js pins this wiring).
+const restartRequests = createRestartRequests();
+safeInterval('camera-watchdog', WATCHDOG_INTERVAL_MS, createCameraWatchdog({ restartRequests }).tick);
 safeInterval('audio-watchdog', AUDIO_CHECK_INTERVAL_MS, createAudioWatchdog().tick);
+safeInterval('detector-watchdog', DETECTOR_CHECK_INTERVAL_MS, createDetectorWatchdog({ restartRequests }).tick);
 
 // MediaMTX only learns about a camera when it's added/edited through our API, or from
 // this reconciliation. Important: every actual config write to MediaMTX forces it to
@@ -457,13 +466,13 @@ async function reconcileCameraPaths(attempt = 1) {
       // Keep the pixel-diff leg alive (reads the stream above). It runs to ALERT for frame-diff
       // cameras, or ACTIVITY-ONLY for child-assigned cameras whose alerts come from MQTT (sleep
       // tracking's motion signal) — motionLegWanted() decides; startMotionDetector picks the mode.
-      // motionLegWanted() also window-gates the activity-only leg, so start it at bedtime and tear it
-      // down after wake (the alert leg is 24/7 and never hits the stop branch).
-      if (motionLegWanted(cam) && !isDetecting(cam.id)) {
-        await startMotionDetector(cam).catch((e) => logger.error(`[detect] start failed: ${e.message}`));
-      } else if (!motionLegWanted(cam) && isDetecting(cam.id)) {
-        await stopMotionDetector(cam.id).catch(() => {});
-      }
+      // motionLegWanted() also gates the activity-only leg on the sleep window: it starts 3 h before
+      // the sleep window opens and is torn down 3 h after it closes (the inference's own lookbehind and
+      // lookahead, #353).
+      // The alert leg is 24/7 and never hits the stop branch. The start/stop decision lives in
+      // motionDetector.js (reconcileMotionLeg), not here, because this file spawns MediaMTX and the
+      // transcoders at import so no test can import it; a decision in here could not be tested.
+      await reconcileMotionLeg(cam);
       // Keep the ONVIF motion subscription alive for cameras on the 'onvif' source (peer to the
       // pixel-diff leg; the camera reports motion over its Event service). Tear one down if the
       // camera has since switched away from ONVIF.
@@ -552,6 +561,10 @@ async function shutdown() {
   // already lost to `process.exit(0)` before this line existed, so writing one here would be a new
   // behaviour smuggled in under a bug fix — see issue #278. If that minute turns out to matter,
   // it is its own change with its own test.
+  // #447 (its own change, with its own tests in activityTracker.test.js): it DOES now write the minutes
+  // that have already ENDED and were only waiting out the clone-verdict grace (GRACE_MS, 7 s), because
+  // those are complete and no later process can write them again. It needs the DB open, and it is: nothing
+  // in shutdown closes the database before `process.exit` below. The minute still receiving is still lost.
   stopActivityTracker();
   // The other periodic jobs, stopped for the same reason and grouped with it (issue #286). All are
   // cheap synchronous clearInterval calls; none writes anything on the way out, so their order

@@ -648,6 +648,15 @@ the fixed `/activity-history` SELECT does not expose these diagnostics. Only the
 the recorded p75/p90/sd will be available for that comparison. A different, unrecorded percentile cannot
 be recovered from these summaries and would require a fresh collection window.
 
+**Data cutoff (issue #453):** digitally silent windows (every sample zero) used to be DROPPED; from the first
+release after 0.34.0 (0.35.0, the one whose CHANGELOG lists #453) each is stored as an excursion of 0. So for a camera
+that delivers digital silence, `sound_level`, `sound_p75`, `sound_p90`, `sound_sd` and `sound_windows` from
+before and after that release are different populations, and a minute of nothing but silence that stored no
+sound (NULL, or no row at all) now stores `sound_peak` 0. Do not mix the two sides of that release in the
+Phase 2 analysis. (`sound_peak` itself only changes from NULL to 0, which no `SOUND_ACTIVE` comparison can
+tell apart.) On the cameras measured so far (G711 A-law) digital silence does not occur, so their rows are
+unaffected; check `[obs] silent=` per camera before relying on that.
+
 **Prerequisite, and it is now DONE**: `soundDetector.js` was untestable (`handleReading` was a closure
 inside `launch()` inside `startSoundDetector`). The reading pipeline was extracted behind an injectable
 clock as `lib/soundBaseline.js`, which is in the `test:core` include list at 100% lines. The
@@ -858,22 +867,66 @@ as a separate durable doc this time — the plan file itself (now implemented) c
 history on `backend/src/lib/sleepAnalysis.js`'s `runNightlySleepJob`/`computeAndStoreNight` and
 `backend/src/lib/sleepReportAlert.js` for the shipped shape. **Options 2 and 3 remain not built.**
 
-### 1.7 Observation time and coverage (#373) — instrument `SHIPPED` (0.34.0), consumers `NEXT`
+### 1.7 Observation time and coverage (#373) — instrument `SHIPPED` (0.34.0), consumers `SHIPPED` (0.35.0), Stage B + owed runs `NEXT`
 
 **What exists after #373 Stage 2:** `lib/observationClock.js` (fed by `lib/ffmpegSideChannel.js`) gives
 every motion frame and sound window a class (REAL / fps clone / CFR dup / UNKNOWN, or observed / UNKNOWN
 for sound), an observation time in monotonic and UTC, and sampler/analysis coverage, and reports them
-as the 15-minute `[obs]` line (KNOWN-ISSUES.md). **Nothing reads it yet** — decisions and stored numbers
+as the 15-minute `[obs]` line (KNOWN-ISSUES.md). **Until 0.35.0 nothing read it** (the consumers below switched over in that release) — decisions and stored numbers
 are unchanged, pinned by `detector-observation-wiring.test.js`'s golden with a working, a throwing and
 no clock. Every threshold in it came from ONE house's runs (Stage 1: night, overnight, day, soak box).
 
-**Open, in the order the plan gives them — each switches ONE consumer over, with its own A/B:**
-- **#493** stop consuming fabricated frames (fps clones, CFR dups) in the motion detector. Changes the
+**Consumers, in the order the plan gave them — each switched ONE consumer over, with its own A/B. All SHIPPED in 0.35.0 except where marked open:**
+- **#493 — SHIPPED (0.35.0)** stop consuming fabricated frames (fps clones, CFR dups) in the motion detector. Changes the
   calibration basis of every motion threshold, so it needs an A/B on real nights.
-- **#447** activity buckets by observation time instead of flush time; must name sampler or analysis
-  coverage and accept FINALIZE_MS (5 s) of latency.
-- **#452** confirmation across an outage (read `restarts`/`gaps`), **#448** the wake watcher, **#369**
-  stale-sampler restarts.
+- **#447 — Stage A SHIPPED (0.35.0), Stage B open** activity buckets by observation time instead of flush time; must name sampler or analysis
+  coverage and accept FINALIZE_MS (5 s) of latency. **Stage A shipped in 0.35.0 (branch
+  `fix/447-observation-minute-buckets`, plan v3, 2026-09-29):** rows keyed by each stdout event's RECEIPT
+  minute (`rx.wall`), closed on a 1 s tick (listeners at the minute's end, the row 7 s = FINALIZE_MS + 2 s
+  later). ⚠️ It reads NO sampler or analysis coverage — the "must name coverage" requirement above is
+  DEFERRED with Stage B (keying by the PTS-derived observation time, which needs samples held for
+  FINALIZE_MS and a sound-leg hook that does not exist). Its second acceptance criterion ("wake-clip
+  timestamps line up") was deferred to #412 and is done there: the clip is anchored on the first active frame,
+  clamped to the ring's real footage (the #447 anchor at the minute's END was the interim, so the 23-63 s ring
+  held it). KNOWN-ISSUES.md "The sleep timeline's minutes are the minutes the samples arrived in".
+- **#452** confirmation across an outage — **SHIPPED (0.35.0)**, built on branch `fix/452-confirmation-across-outage` (T2, plan v2,
+  2026-10-03). Scope A only: a frame that arrives after a GAP (`createFrameGapDetector` in `bedTransitionRules.js`:
+  floor 1500 ms = `ACTIVE_GRACE_MS`, x5 the 9th-longest of the last 16 intervals once 9 are held, all chosen not measured) restarts a
+  motion alert's run and a pending exit/entry's 6 s of quiet (reset, not cancel, not suspend). Candidate opening and the
+  links still bridge a gap on purpose. It does NOT read the observation clock (so a stall ffmpeg fills with repeats as it
+  happens is not caught: scope B, a follow-up), and does not touch sound (`soundBaseline.js` already guards a gap longer
+  than its window). Build-time deviation from the plan: a delta that was itself a gap IS recorded in the window
+  (else a slow camera never learns its bound); code review round 1 then found that ONE stall right after a launch
+  widened the bound (frames 0 / 20 s / 50 s), so the window is read only once K = floor(windowN/2)+1 = 9 deltas are
+  held (a cold 2 s-cadence camera pays ~9 restarts per detector launch: a candidate pending in the first ~18 s
+  confirms at ~launch+24 s, sustained motion alerts at ~24 s instead of 6 s; round 2 corrected the earlier claim that
+  its alert was already broken). "Never impossible" was also wrong: gaps more
+  often than once per ~6 s of received video starve a pending candidate, and there is NO restart cap (expected wait
+  (e^(6L)-1)/L SECONDS OF RECEIVED VIDEO for Poisson gaps of 2-3 s: ~7 s at 3.3 gaps/min, ~38 s at 30, ~400 s at
+  60; wall time ~8 s, ~75-90 s, ~1100-1400 s). After a slow phase the bound also lingers until 8 fast frames have
+  arrived (pinned by a test, an owner design call). "Never earlier than before" holds per candidate, not per stored
+  row. Follow-ups to file: scope B (clone-gated
+  confirmation), #500 pending-candidate refusal, backward-step cooldown clamp, a restart cap / max wait for
+  chronic gaps. Evidence once on staging: count `confirmation restarted` /
+  `motion run restarted` lines per night. KNOWN-ISSUES.md "A motion alert or a bed exit/entry is not confirmed across a
+  gap in the video". **#448** the wake watcher (the same "active, outage, active" shape) is fixed in 0.35.0: a watcher run no longer bridges a hole longer than `WAKE_GAP_MIN`, and settling needs 15 consecutive observed minutes (KNOWN-ISSUES.md "A wake recording does not bridge a gap in the readings").
+- **#508 — SHIPPED (0.35.0)** sleep analysis stops counting zero-frame minutes as watched — built on branch
+  `fix/508-zero-frame-minutes` (plan v2, 2026-09-30). Read-time only: `motionSeen(r) = motion_frames > 0`
+  in all three `activity_samples` readers of `sleepAnalysis.js`; an unwatched minute is `null` (sound not
+  used); `empty` now needs `EMPTY_MIN_COVERAGE_FRAC` (0.9, unmeasured) of the window watched; the Recompute
+  409 (API-only) says which reason applied (`aged_out` / `too_little_watched` / `no_longer_scored`). Uses #493's observed frame count, not the `[obs]` line itself. **Follow-ups
+  it deliberately leaves:** `bedTransitions.getActivitySamples`/`bedTransitionRules` still read `motion_peak`
+  alone; `applyCorrection` subtracts the aggregate unknown count; a sparse-minute threshold and a
+  frozen-picture (encoder wedge) detector both need data first. The live `wakeWatcher` follow-up is **#588**
+  (shipped in 0.35.0, 2026-10-05): a minute with sound but no video on a camera that had delivered video is a hole for the
+  watcher (activityTracker's `videoUnobserved`, raw frame count); a minute of nothing but proven repeats is still
+  watched live (0 such stored rows on either database, Step 0) and left to the nightly rule.
+  KNOWN-ISSUES.md "Minutes with no video are unknown in the sleep numbers".
+- ~~**#369** stale-sampler restarts~~ — SHIPPED (0.35.0), built on its own branch (`fix/369-detector-watchdog`, plan v5,
+  2026-09-27) WITHOUT the observation clock, so the #373 gate below does not apply to it: the detector
+  watchdog (`lib/cameraWatchdogs.js`) reads a plain `performance.now()` stamp taken on each stdout `data`
+  event, not `rx.mono` or any `[obs]` output, and it moves no calibrated number (no detection threshold,
+  no stored sleep figure). It only restarts processes. KNOWN-ISSUES.md "A detector was restarted".
 
 **Owed before those, from the #373 plan's Verification section:**
 - ✅ **24 h on staging after merge — DONE 2026-09-28.** The 10:00 reboot read as one restart per channel

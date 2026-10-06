@@ -199,26 +199,60 @@ describe('★ the WHOLE grammar, anchored (plan v4 refinement 2): glued lines ar
     assert.deepEqual(parseErrors, ['in'], 'and the clock is told a record was lost');
   });
 
-  test('an error glued in at ANY token boundary of a real record is never accepted as a record', () => {
+  // #573 moved this test's expectation ON PURPOSE (the intent, "a glued error is never lost silently", is
+  // kept). It used to say "never accepted as a record" for the audio line too, which pinned the very
+  // behaviour that blinded the sound [obs] measurement: an audio line torn AFTER its first av_log call (the
+  // part the clock reads) is a complete record, and throwing it away opened a permanent hole. Now, for the
+  // audio line: the glued line ALWAYS reaches the log; a cut after the core (the `checksum:HEX ` token and
+  // its space) gives exactly ONE record and no parse error; any earlier cut gives no record and exactly one
+  // parse error. The motion lines are unchanged: never a record. The forwarding assertion is what keeps the
+  // whole-grammar rule honest (it kills M-SC09/M-SC10, which a "record iff after the core" check alone lets
+  // survive).
+  test('an error glued in at ANY token boundary of a real record is never LOST silently: audio recovers after its core, motion never a record', () => {
     const recs = [
-      lines('lean-32x18.err').find((l) => /^\[showinfo@in @ .* n: +3 /.test(l)),
-      lines('lean-32x18.err').find((l) => /^\[showinfo@out @ .* n: +3 /.test(l)),
-      lines('sound-alaw8k.err').find((l) => / n:3 /.test(l)),
+      { tag: 'in', line: lines('lean-32x18.err').find((l) => /^\[showinfo@in @ .* n: +3 /.test(l)) },
+      { tag: 'out', line: lines('lean-32x18.err').find((l) => /^\[showinfo@out @ .* n: +3 /.test(l)) },
+      { tag: 'audio', line: lines('sound-alaw8k.err').find((l) => / n:3 /.test(l)) },
     ];
     const taps = { ...LEAN, ...SOUND };
     const err = 'no frame!';
     let tried = 0;
-    for (const rec of recs) {
+    let audioRecovered = 0;
+    let audioLost = 0;
+    for (const { tag, line: rec } of recs) {
       assert.equal(classifyLine(rec, taps).kind, 'record', rec);
       const prefixEnd = rec.indexOf('] n:') + 2;
+      // The end of the first av_log call, found with this test's own regex: `checksum:HEX ` is 9 + 8 + 1
+      // characters; a cut at or after coreEnd + 1 leaves the whole first call intact.
+      const ck = /checksum:[0-9A-F]{8}/.exec(rec);
+      const coreEnd = ck ? ck.index + ck[0].length : Infinity;
       for (let i = prefixEnd + 1; i <= rec.length; i += 1) {
         if (i < rec.length && rec[i] !== ' ' && rec[i - 1] !== ' ' && rec[i] !== ']') continue;
         const glued = rec.slice(0, i) + err + rec.slice(i);
-        assert.notEqual(classifyLine(glued, taps).kind, 'record', glued);
+        const d = classifyLine(glued, taps);
+        if (tag !== 'audio') {
+          assert.notEqual(d.kind, 'record', glued);
+        } else {
+          const r = route([glued], taps);
+          assert.ok(r.forwarded.includes(glued), `the glued line must reach the log: ${glued}`);
+          if (i > coreEnd) {
+            assert.equal(d.kind, 'record', glued);
+            assert.equal(r.records.length, 1, glued);
+            assert.equal(r.records[0].n, 3, glued);
+            assert.deepEqual(r.parseErrors, [], glued);
+            audioRecovered += 1;
+          } else {
+            assert.notEqual(d.kind, 'record', glued);
+            assert.equal(r.records.length, 0, glued);
+            assert.deepEqual(r.parseErrors, ['audio'], glued);
+            audioLost += 1;
+          }
+        }
         tried += 1;
       }
     }
     assert.ok(tried > 40, `only ${tried} glue points tried`);
+    assert.ok(audioRecovered >= 4 && audioLost >= 4, `audio cases: ${audioRecovered} recovered, ${audioLost} lost`);
   });
 
   test('the real glued COLOUR lines keep their error text; the leftover field fragments are dropped', () => {

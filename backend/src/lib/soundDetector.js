@@ -7,7 +7,7 @@ import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
 import { recordSound } from './activityTracker.js';
 import { createSoundAnalyser, marginDb } from './soundBaseline.js';
-import { killIfSpawned } from './processGuards.js';
+import { killIfSpawned, detectorHealthOf, killStalledDetector } from './processGuards.js';
 import { buildSoundTaps, createStderrRouter, SIDE_CHANNEL_LOG_ARGS } from './ffmpegSideChannel.js';
 import { openObservation } from './observationClock.js';
 
@@ -25,7 +25,8 @@ import { openObservation } from './observationClock.js';
 // that was FACTUALLY FALSE for any step landing inside the dead band, and the comment stated it
 // confidently for months while the opposite shipped. See soundBaseline.js's DEAD_BAND_MAX_MS.
 
-// camera_id -> { proc, stopped }
+// camera_id -> { proc, stopped, path, spawnedMono, lastDataMono, lastInputRecordMono, watchdogKill }
+// The four #369 fields are the detector watchdog's only view of this leg (getSoundDetectorHealth below).
 const detectors = new Map();
 
 // Cameras with a relaunch SCHEDULED but no process yet — the 5s gap between an ffmpeg exit and the
@@ -85,6 +86,19 @@ export function isSoundDetecting(cameraId) {
   return detectors.has(cameraId);
 }
 
+// #369: this leg's freshness for the detector watchdog, as AGES (processGuards.js detectorHealthOf). Bytes, not
+// readings: the stamp is taken on every stdout 'data' event before any window is decoded, so a silent room (all-zero
+// PCM) reads as fresh whatever the analysis makes of it. (Since #453 a silent window is also a READING, which sets
+// `sawReading`; the watchdog never looked at that.) Test the result with `!= null`, never truthiness.
+export function getSoundDetectorHealth(cameraId) {
+  return detectorHealthOf(detectors.get(cameraId));
+}
+
+// #369: the watchdog's lever for this leg (it has no L2: see createDetectorWatchdog). See killStalledDetector.
+export function restartSoundDetector(cameraId, expect) {
+  return killStalledDetector(detectors.get(cameraId), expect, FORCE_KILL_TIMEOUT_MS);
+}
+
 export async function startSoundDetector(camera) {
   await stopSoundDetector(camera.id);
   if (!camera.detect_sound_enabled || camera.disabled) return;
@@ -137,6 +151,9 @@ export async function startSoundDetector(camera) {
     ];
     const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     entry.proc = proc;
+    // #369: freshness stamps for the detector watchdog, monotonic and per process; see motionDetector.js.
+    entry.path = path;
+    entry.spawnedMono = performance.now();
     // One observation generation per ffmpeg process (#373, C3); fail-safe, see motionDetector.js.
     const obs = openObservation(camera.id, 'sound', { label: camera.name, path, windowSeconds: WIN_SAMPLES / WIN_RATE });
 
@@ -167,11 +184,27 @@ export async function startSoundDetector(camera) {
     let lastLevelLog = Date.now();
     const LEVEL_LOG_MS = 15000;
 
-    function handleReading(rms) {
-      if (!Number.isFinite(rms)) return; // -inf / nan (true digital silence) — ignore
+    // `atMs` = the receipt time of the stdout event that delivered this window (`rx.wall`, #447): every window
+    // of one event is filed under the same minute. `now` below stays this handler's own Date.now(), which the
+    // baseline and the alert rules read exactly as before.
+    function handleReading(rms, atMs) {
+      // ★ #453: -Infinity is DIGITAL SILENCE (an all-zero window), and it is an observation, not a missing one:
+      // the stream delivered real bytes and the room was heard. It used to be dropped right here, before
+      // `sawReading`, the analyser and recordSound, so a muted or gated microphone stored no sound at all,
+      // counted toward "does this camera have a microphone?", and was invisible to the confirm window (which
+      // let separate sounds with silence between them add up to an alert). It now takes the SAME path as any
+      // reading: the analyser decides what silence means (a reading at the ambient: soundBaseline.js) and its
+      // `recordDb` is the ONE source of what is stored. Do not call recordSound(…, 0, …) for silence here: that
+      // would bypass the analyser's own silent branch (and its seeding rule) and make it unreachable again.
+      // Anything else non-finite (NaN, +Infinity) is not something 16-bit PCM can produce; ignored as before.
+      if (rms !== -Infinity && !Number.isFinite(rms)) return;
       sawReading = true;
       const now = Date.now();
+      // A silent window never sets the peak (-Infinity is not greater than anything), so the level line's
+      // `peak=` stays the loudest AUDIBLE window, and reads `?` when every window since the last line was silent.
       if (rms > windowPeak) windowPeak = rms;
+      // The level line runs for silent windows too, so a muted microphone still logs `ambient=… peak=?` every
+      // 15 s instead of going quiet in the log as if the detector had stopped.
       if (now - lastLevelLog >= LEVEL_LOG_MS) {
         const b = analyser.baseline;
         logger.info(
@@ -185,7 +218,7 @@ export async function startSoundDetector(camera) {
       }
 
       const r = analyser.push(rms, now);
-      if (r.recordDb !== null) recordSound(camera.id, r.recordDb);
+      if (r.recordDb !== null) recordSound(camera.id, r.recordDb, atMs);
       if (r.confirmed && r.over > windowMaxOver) windowMaxOver = r.over;
       // The analyser reports that the ALERT RULES are satisfied; the quiet-hours schedule is this
       // layer's business. `markAlerted` only runs when a notification actually went out, so the
@@ -197,7 +230,11 @@ export async function startSoundDetector(camera) {
     }
 
     proc.stdout.on('data', (chunk) => {
-      // #373: the receipt time, once per 'data' event (see motionDetector.js).
+      // #369: "a stdout byte arrived", from performance.now() directly, once per event, before the #373 receipt
+      // (see motionDetector.js for why it is not rx.mono).
+      entry.lastDataMono = performance.now();
+      // #373: the receipt time, once per 'data' event (see motionDetector.js). #447: also the minute every
+      // window of this event is filed under in activity_samples.
       const rx = obs.receipt();
       pcm = pcm.length ? Buffer.concat([pcm, chunk]) : chunk;
       while (pcm.length >= WIN_BYTES) {
@@ -209,12 +246,15 @@ export async function startSoundDetector(camera) {
           sumSq += s * s;
         }
         const rms = Math.sqrt(sumSq / WIN_SAMPLES);
-        // dBFS: 0 dB = full scale (32768). True silence (rms 0) -> -Infinity, ignored upstream.
+        // dBFS: 0 dB = full scale (32768). True digital silence (rms 0) -> -Infinity, which handleReading
+        // records as a quiet reading at the ambient (#453).
         const level = rms > 0 ? 20 * Math.log10(rms / 32768) : -Infinity;
-        handleReading(level);
+        handleReading(level, rx.wall);
         // #373: one observation per window, AFTER its decision handler returned (R1-F8). It runs for every
-        // window, silent ones included — the early return inside handleReading cannot skip it — and a
-        // silent window counts as SAMPLED but not ANALYSED coverage (C5).
+        // window, silent ones included, whatever handleReading did with it — and a silent window counts as
+        // SAMPLED but not ANALYSED coverage (C5). ANALYSED is the observation clock's own sense (it had a
+        // measurable loudness); #453 left it alone on purpose, so the `[obs]` line's `silent=` and `cover=`
+        // mean what KNOWN-ISSUES.md documents even though the window is now recorded as quiet.
         obs.onSample(win, rx.mono, rx.wall, { analysed: Number.isFinite(level) });
       }
     });
@@ -223,7 +263,12 @@ export async function startSoundDetector(camera) {
     const router = createStderrRouter({
       taps: TAPS.taps,
       forward: (line) => logger.raw(`sound:${path}`, line),
-      onRecord: obs.onRecord,
+      // #369, DIAGNOSIS ONLY: the leg's input tap is `audio` (the ashowinfo before the downmix); its absence is
+      // inconclusive, exactly as for motion's `in` tap.
+      onRecord: (rec) => {
+        if (rec?.tap === 'audio') entry.lastInputRecordMono = performance.now();
+        obs.onRecord(rec);
+      },
       onConfig: obs.onConfig,
       onParseError: obs.onParseError,
     });
@@ -240,8 +285,17 @@ export async function startSoundDetector(camera) {
       const wasTracked = detectors.get(camera.id) === entry;
       if (wasTracked) detectors.delete(camera.id);
       if (entry.stopped || !wasTracked) return;
-      // A quick exit with no readings ever = almost certainly no audio track on this camera.
-      if (!sawReading && Date.now() - startedAt < 10000) {
+      if (entry.watchdogKill) {
+        // #369: a kill by the detector watchdog is NEVER a no-microphone strike, and it resets the count the way
+        // any exit of a long-lived process does: the lever only kills an entry at least MIN_KILL_AGE_MS old on
+        // the MONOTONIC clock, i.e. not a quick exit. Checked BEFORE the rule below because that rule reads the
+        // WALL clock: a backward clock step makes `Date.now() - startedAt` small or negative, so without this a
+        // stalled leg killed three times could be declared "no microphone" and stopped for good (Astra R2).
+        noAudioStrikes = 0;
+      } else if (!sawReading && Date.now() - startedAt < 10000) {
+        // A quick exit with no readings ever = almost certainly no audio track on this camera. A digitally
+        // silent window IS a reading (#453): a muted or gated microphone delivers real zero bytes, so its quick
+        // exits are ordinary reconnects, never a strike. Only a leg that delivered no complete window strikes.
         noAudioStrikes += 1;
         if (noAudioStrikes >= NO_AUDIO_MAX_STRIKES) {
           logger.error(`[sound:${path}] no audio readings after ${noAudioStrikes} tries — does this camera have a microphone? Sound detection stopped.`);
@@ -250,7 +304,9 @@ export async function startSoundDetector(camera) {
       } else {
         noAudioStrikes = 0;
       }
-      if (code === 0) logger.raw(`sound:${path}`, 'stream ended, reconnecting');
+      // #369: a watchdog kill is a recovery, logged at INFO, keeping "restarting in 5s" (see motionDetector.js).
+      if (entry.watchdogKill) logger.info(`[sound:${path}] stopped by the detector watchdog (no audio data), restarting in 5s`);
+      else if (code === 0) logger.raw(`sound:${path}`, 'stream ended, reconnecting');
       else logger.error(`[sound:${path}] exited (code ${code}), restarting in 5s`);
       pendingRestarts.set(camera.id, setTimeout(() => {
         pendingRestarts.delete(camera.id);

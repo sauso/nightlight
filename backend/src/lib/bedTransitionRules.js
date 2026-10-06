@@ -3,6 +3,43 @@
 // unit test — which is how the exit rule below stayed unable to see a child climbing out unaided for
 // months without a single test going red. Rules that can be stated as a function belong here.
 
+// --- What counts as "the bed moved" / "the outside moved" (#368) ---
+//
+// The per-frame test the tracker reads: a frame is ACTIVE in a channel when the changed fraction of that
+// channel's pixels is at least this. Every window and rule below (the link windows, the confirm quiet times,
+// the 120 s pauses, OOB_SLOW_OUT_MIN) was calibrated with the detector classifying frames at THIS number.
+//
+// WHERE 0.011898989898989899 CAME FROM: it is the value `activeFractionThreshold(90)` in motionDetector.js
+// returns (0.002 + 0.098 * 10/99, about 1.19 % of the zone). Before #368 the tracker used whatever the motion
+// ALERT sensitivity gave, so the number was whatever the owner had set the slider to. The saved configuration of
+// all four cameras in the prod and staging snapshots of 2026-10-03/04 is sensitivity 90, and none of the 4295
+// stored `bed_transitions` rows has a peak below 0.012 (the rounding of 1.19 %, stored to 0.001): consistent with
+// every transition having been recorded at 1.19 %. Sensitivity HISTORY is not stored, so "ran at 90 throughout"
+// is an inference from the current config and the stored peaks, not a proof. It reproduces the pre-#368
+// decision bit for bit on those cameras (same double, same `>=`), so nothing this house recorded moves.
+//
+// WHAT IT IS NOT: not derived from a room (frames are not stored, only per-minute samples, so there is nothing
+// to derive from), not validated outside one house, and not the sleep side's MOTION_ACTIVE (0.01) or
+// MOTION_OUT_ACTIVE (0.03), which are separate numbers and untouched. A literal on purpose, not a call to
+// `activeFractionThreshold(90)`: this issue is about removing the coupling between the alert curve and the
+// transition evidence, and a shared function would let a later edit of the alert curve move the transitions
+// again without anyone deciding to. motionDetector.test.js pins the literal AND (in a separate assertion that
+// says so) the equality with the alert curve at 90; if the curve changes, edit that assertion on purpose,
+// never re-couple.
+//
+// WHO IT CHANGES (stated, not guessed): an install NOT at sensitivity 90 ran the old tracker at its own
+// threshold (the default, 50, is 5.15 %). At any sensitivity below 90 this number is LOWER: movements the old
+// threshold ignored now count, which can add exits and entries AND can cancel a pending exit (a small stir of
+// 1-5 % of the zone, a mattress settling, now cancels it, exactly as in the calibrated house: by design, it is
+// bed movement), so the totals can move in either direction (traced: at 50 a 6 % bed burst + 6 % outside burst
+// + a later 2 % bed frame used to confirm an exit and now cancels it and opens an entry). Above 90 (up to
+// 100 = 0.2 %) it is HIGHER, and transitions can move in either direction (the cancel paths). Whether that is
+// better for those installs' reported sleep is NOT known; nobody has measured one. At the default threshold
+// OOB_SLOW_OUT_MIN (5 %) was inert (an active outside frame was already >= 5.15 %); at this one it is a real
+// filter. A household that quieted a noisy room by lowering the sensitivity loses that lever for transitions
+// (it still works for alerts); the remedy is the zone. KNOWN-ISSUES.md says all of this to the person running it.
+export const BED_TRANSITION_ACTIVE_FRACTION = 0.011898989898989899;
+
 // --- "Out of bed": how long after the bed last moved may an outside burst still be the same body? ---
 //
 // TWO windows, because the two ways a body leaves a bed do not look alike:
@@ -165,19 +202,22 @@ export const LINGERING_WINDOW_MS = 60 * 60 * 1000;
 // report a distribution across 1/2/3/4+, so 4 is the bucket that measurement happened to report, not a
 // threshold independently shown to separate two populations the way OOB_SLOW_OUT_MIN was. Reusing it
 // anyway because it's the only real number on record, and because a single-minute threshold is worse
-// for a documented, independent reason: activityTracker.js's minute flush is not phase-aligned to
-// wall-clock minutes (a plain 60s setInterval from process start), so a departure's own motion lands in
-// the bucket immediately AFTER the exit's own minute for roughly HALF of all exits — near-deterministic
-// on the flush phase, not occasional — which would defeat the "exclude the exit's own minute" guard
-// below by itself. Requiring 4+ DISTINCT minutes (see findLingeringBedMotion's own de-duplication
-// comment — activity_samples has no uniqueness constraint on camera_id+bucket_start, so "distinct"
-// matters, not just "4+ rows") means neither one stray flush-lagged bucket, nor several duplicate rows
-// for it, can ever trigger a flag alone. If this number is ever re-measured (e.g. via the yield/false-
-// positive measurement this ships needing — see bedTransitions.js), move it here, not a new literal.
+// for a documented, independent reason: a departure's own motion spills into the bucket immediately
+// AFTER the exit's own minute for a large share of exits, which would defeat the "exclude the exit's own
+// minute" guard below by itself. When this was written the cause was activityTracker.js's flush phase (a
+// plain 60 s setInterval from process start, not aligned to wall-clock minutes), which moved a
+// departure's motion into the next bucket for roughly HALF of all exits. Since #447 a bucket is the
+// minute its samples were RECEIVED, so that lottery is gone, but the spill is not: an exit confirmed late
+// in its minute still has its departure movement (the seconds after the confirming frame) in the next
+// one. Requiring 4+ DISTINCT minutes (see findLingeringBedMotion's own de-duplication comment —
+// activity_samples has no uniqueness constraint on camera_id+bucket_start, so "distinct" matters, not
+// just "4+ rows") means neither one spilled bucket, nor several duplicate rows for it, can ever trigger
+// a flag alone. If this number is ever re-measured (e.g. via the yield/false-positive measurement this
+// ships needing — see bedTransitions.js), move it here, not a new literal.
 export const LINGERING_MIN_ACTIVE_MINUTES = 4;
 
-// activity_samples.bucket_start is always the exact minute (activityTracker.js's minuteBucketUtc), but
-// bed_transitions.created_at carries the real second. Floor a transition's timestamp to its own minute
+// activity_samples.bucket_start is always the exact minute (activityTracker.js's minuteBucketUtc; since #447
+// the minute the samples were received in), but bed_transitions.created_at carries the real second. Floor a transition's timestamp to its own minute
 // before comparing it to a bucket, or a same-minute bucket can misread relative to the transition
 // depending on the transition's own seconds — see findLingeringBedMotion's own comment for exactly where
 // this matters and where it doesn't.
@@ -233,7 +273,7 @@ export function findLingeringBedMotion(
   // Collapse consecutive same-bucket_start rows into ONE minute, OR-merged (qualifies if ANY row for
   // that minute does) — the same convention sleepAnalysis.js itself already uses for duplicate buckets
   // (state[i] = state[i] === null ? active : state[i] || active), not a new rule invented here. Without
-  // this, several duplicate rows for a single flush-lagged minute would satisfy the 4-minute threshold
+  // this, several duplicate rows for a single spilled minute would satisfy the 4-minute threshold
   // alone — silently defeating the exact guarantee that threshold exists to provide (found in review,
   // 2026-09-14, citing sleepAnalysis.test.js's own "a duplicate activity_samples row for the same
   // minute must not erase real movement" fixture as proof duplicates are real, not hypothetical).
@@ -378,4 +418,139 @@ export function trimOutSamples(samples, nowMs, windowMs) {
 
 export function evidenceFromSamples(samples) {
   return samples.reduce((e, s) => accumulateOutEvidence(e, s.fraction, s.active), EMPTY_EVIDENCE);
+}
+
+// --- Frame-arrival gaps: a confirmation must not span a sampling outage (issue #452) -----------------
+//
+// Both confirmations (a motion ALERT after `detect_confirm_s`, and a bed transition after its 6 s of
+// quiet) used to measure ELAPSED WALL-CLOCK TIME since a candidate began, never how much video was
+// actually received in that time. Two acceptance criteria came out of that:
+//   (a) active frame, long pause, active frame is NOT proof of motion sustained through the pause;
+//   (b) one quiet frame right after a long gap cannot by itself prove several seconds of quiet.
+// Verified by running the tracker before the fix: 5.8 s of quiet, a 60 s hole, then ONE quiet frame
+// confirmed an exit.
+//
+// What a stall looks like to the detector (KNOWN-ISSUES.md, "A stalled camera's repeated pictures"): the
+// motion leg's `fps=5` repeats the last picture to fill a stall, and ffmpeg only writes a picture once
+// the NEXT one exists, so Node sees NO stdout frames for N seconds and then a CLUMP of frames that share
+// one receipt time. The clump's first frame is the held pre-stall picture; the next new picture is the
+// one that differs across the outage. This helper tells the caller "the frame you just got arrived after
+// a gap", and the caller restarts whatever it was timing. It is a pure, stateful, synchronous closure
+// (the same shape as soundBaseline.js's analyser) and does not read the observation clock: that clock
+// proves clones ~5 s after the frame (inside the 6 s bed window) and is documented as absent or
+// throwing-safe, so a decision that must hold for everyone cannot wait on it.
+//
+// ★ THE BOUND IS ADAPTIVE WITH A FLOOR: gapBoundMs = max(floorMs, factor x typicalIntervalMs).
+//   - `floorMs` (the caller passes ACTIVE_GRACE_MS, 1500 ms): the repo already defines "a motion run has
+//     not ended" as gaps no longer than that, so a normal camera gets no new number.
+//   - Why not the floor alone (plan review round 1, Opus, HIGH): a camera slower than ~0.67 fps delivers
+//     its frames in bursts more than 1.5 s apart, so EVERY burst would count as a gap and a motion alert
+//     (confirm > 0) or a bed transition could never confirm at all, a regression from the code before this
+//     one, where such a stream works. At 5 fps (200 ms) the bound stays at the 1500 ms floor
+//     (5 x 200 = 1000), so this house is unchanged; at 0.5 fps (2 s) it is 10 s, so a real 20 s stall still
+//     counts and a 6 s hole does not.
+//   - `typicalIntervalMs` is taken from the last `windowN` (16) inter-frame deltas that exceed `minDeltaMs`
+//     (50). Deltas inside a clump are ~0 and would drag the typical interval to nothing (and the bound
+//     back to the floor on exactly the camera that needs the wider one), so they are not recorded.
+//     ★ It is 0 (so the floor ALONE governs) until the window holds K = floor(windowN / 2) + 1 = 9 recorded
+//     deltas, and from then on it is the K-th LARGEST recorded delta. For a full window of 16 that IS the
+//     lower median (sorted[7]); for 9 to 15 held it is sorted[n - 9], i.e. at least 9 recorded deltas must
+//     be at least that long, so FEWER THAN 9 LONG DELTAS (a stall, or a few) CAN NEVER LIFT THE BOUND.
+//     K is derived from windowN, not typed in. Why not simply the median of whatever the window holds
+//     (code review round 1, Codex and Opus, VERIFIED BY RUNNING): right after a launch the window holds one
+//     or two deltas, so ONE stall IS the median and widens the bound for the very next frame. Frames at
+//     0 / 20 s / 50 s: the 20 s delta became the median, the 30 s delta was judged against a 100 s bound, and
+//     a single quiet frame after a 30 s outage confirmed an exit; a motion alert run active at 200 ms,
+//     2200 ms and 9200 ms alerted once. Reading nothing until K deltas are held closes that.
+//     ★ A delta that WAS a gap IS recorded (a build-time deviation from plan v2, which excluded it so that
+//     "a stall cannot inflate its own bound"): excluded, the window could never learn a slow camera. A
+//     camera that starts at 2 s per burst, or slows from 15 fps to 2 fps, has every one of its deltas flagged
+//     as a gap against the 1500 ms floor, so none would ever be recorded and every burst would restart every
+//     confirmation for the life of the stream, the starvation this adaptive bound exists to prevent. The
+//     protection against a stall inflating its own bound is the K threshold above instead.
+//     COST, reasoned and NOT measured (simulated with realistic clumps in review round 2): a cold slow camera
+//     (2 s cadence from the first frame of a detector launch) needs ~9 slow intervals before the bound widens,
+//     so its first ~9 bursts each restart a pending confirmation or motion run. A candidate pending in the
+//     first ~18 s after the (re)launch therefore confirms at about LAUNCH + 24 s whatever its own open time
+//     (open at 4 s: 20 s later, 7 restarts; 10 s: 14 s, 4; 16 s: 8 s, 1; 20 s or later: 6 s, none), and
+//     sustained motion on such a camera alerts at ~24 s instead of 6 s. It still confirms eventually, and
+//     once the window has learned the camera it behaves as before.
+//     ★ THE MIRROR IMAGE (known limit, pinned by a test, reasoned not measured, an owner design call): after a
+//     slow phase (>= 9 recorded long deltas of S) the bound stays ~5 x S until 8 fast frames have arrived
+//     (~1.6 s at 5 fps), because 9 of the last 16 deltas must be long. A stall up to 5 x S in that window is
+//     NOT seen as a gap, and a quiet frame after it can confirm (13 x 5 s, 3 fast frames, a 20 s stall passes).
+//     Shortening it would re-open the starvation of a slow camera. It applies equally to the motion alert.
+//   - `factor` 5 mirrors observationClock.js GAP_FACTOR ("a rate change is not a run of gaps"; measured
+//     worst ratio there 3.95).
+// ⚠️ HONEST LIMITS: the floor, the factor, the 16-sample window and the 50 ms minimum are CHOSEN, NOT
+// MEASURED. No per-gap data exists: `[obs]` measures input-PTS jumps, not Node receipt gaps. The only
+// evidence is staging `[obs]` lines (428 of ~455 motion periods had no gap over 0.5 s; the bad periods had
+// 7-49 gaps per 15 minutes averaging 0.6-2.1 s, in one camera's wake window), which says the rule WILL fire
+// in production exactly when exits are pending. It makes a confirmation slower on a gappy camera, never
+// earlier PER CANDIDATE (per stored row it can differ: a delayed confirmation can escape the wall-clock
+// cooldown that would have suppressed the next one; 2 of 12,000 simulated gappy comparisons confirmed a
+// second exit earlier than before, and the new rule never confirmed MORE transitions). ⚠️ It CAN make one
+// impossible in practice: gaps that recur more often than once per ~6 s of received video mean a pending
+// candidate rarely gets a full quiet window, and NO restart cap exists (a design decision, filed as a
+// follow-up issue). For random gaps of 2-3 s arriving at lambda per second of received video the expected
+// wait is (e^(6 lambda) - 1) / lambda SECONDS OF RECEIVED VIDEO: about 7 s at 3.3 gaps a minute, 38 s at 30
+// a minute, 400 s at 60 a minute (wall time, which also holds the gaps: ~8 s, ~75-90 s, ~1100-1400 s). For
+// another install these are a hypothesis (KNOWN-ISSUES.md).
+//
+// ★ A stall that ffmpeg fills with repeats AS THEY HAPPEN (arrival continuous) is NOT caught here; that
+// needs the observation clock's proven clones (a separate follow-up). And this leans on #369: a clump of
+// repeats drains in well under 6 s only because the detector watchdog caps a connected stall at about 75 s
+// (60 s stale + a 15 s check, roughly 375 repeats).
+export const FRAME_GAP_FACTOR = 5;
+export const FRAME_DELTA_MIN_MS = 50;
+export const FRAME_GAP_WINDOW_N = 16;
+
+/**
+ * `observe(now)` returns `null` when the frame arrived in time (or is the first one seen), otherwise
+ * `{ gapMs: now - previous }`. A BACKWARD wall-clock step (`now < previous`) ALWAYS counts as a gap and
+ * `gapMs` is then negative: that is conservative (the caller restarts a confirmation once and never
+ * confirms early), and a caller can say "clock stepped back" from the sign. Throws if `floorMs` is not > 0,
+ * so an omitted value is a caller bug and not a silently disabled fix.
+ */
+export function createFrameGapDetector({
+  floorMs,
+  factor = FRAME_GAP_FACTOR,
+  minDeltaMs = FRAME_DELTA_MIN_MS,
+  windowN = FRAME_GAP_WINDOW_N,
+} = {}) {
+  if (!(floorMs > 0)) {
+    throw new Error('createFrameGapDetector requires floorMs > 0 (motionDetector.js passes its ACTIVE_GRACE_MS)');
+  }
+  let prev = null;
+  const deltas = []; // the last windowN inter-frame deltas above minDeltaMs (clump noise left out, gaps IN)
+  // How many recorded deltas must be held before they say anything about the camera's normal spacing: a strict
+  // majority of the window (9 of 16). See the comment above: fewer than this and one stall would be "typical".
+  const minHeld = Math.floor(windowN / 2) + 1;
+
+  function typicalIntervalMs() {
+    if (deltas.length < minHeld) return 0; // too few to trust: the floor alone governs
+    const sorted = deltas.slice().sort((a, b) => a - b);
+    // The minHeld-th LARGEST. A full window gives the lower median; a part-full one needs minHeld deltas at
+    // least this long, so fewer long deltas than that can never lift the bound.
+    return sorted[sorted.length - minHeld];
+  }
+
+  function observe(now) {
+    if (prev === null) { // the first frame has nothing before it to be late after
+      prev = now;
+      return null;
+    }
+    const delta = now - prev;
+    prev = now;
+    const bound = Math.max(floorMs, factor * typicalIntervalMs());
+    // Judged against the bound as it stood BEFORE this delta joins the window, then recorded either way.
+    const isGap = delta < 0 || delta > bound;
+    if (delta > minDeltaMs) {
+      deltas.push(delta);
+      if (deltas.length > windowN) deltas.shift();
+    }
+    return isGap ? { gapMs: delta } : null;
+  }
+
+  return { observe };
 }

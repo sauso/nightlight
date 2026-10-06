@@ -168,6 +168,98 @@ describe('issue #501 columns: sleep_nights.in_bed_at and bed_transitions.wrong_r
   });
 });
 
+describe('sleep_reviews.nobody_in_bed ("no one was in the bed")', () => {
+  // Plan review R6. The loop beside this migration adds its columns as a bare INTEGER, which leaves every
+  // EXISTING review NULL — a third state that `nobody_in_bed = 1` / `= 0` in SQL silently fails to match.
+  // This rewinds a real database to before the column, with a review that already exists, and proves
+  // the upgrade leaves that review as 0 ("not said") with the column NOT NULL DEFAULT 0, not NULL.
+  test('an existing review gains the column as 0, NOT NULL DEFAULT 0, and a reboot changes nothing', () => {
+    const dir = freshDir();
+    assert.equal(bootDbJs(dir).status, 0);
+    const full = columnsOf(dir, 'sleep_reviews');
+    assert.ok(full.includes('nobody_in_bed'), 'a fresh install has it');
+    {
+      const db = new Database(join(dir, 'babymonitor.db'));
+      try {
+        db.exec('ALTER TABLE sleep_reviews DROP COLUMN nobody_in_bed');
+        db.exec(`INSERT INTO sleep_reviews (child_id, night_date, true_wake_at, dismissed)
+                 VALUES ('old-kid', '2026-09-01', '2026-09-01 20:00:00', 0)`);
+      } finally {
+        db.close();
+      }
+    }
+    assert.ok(!columnsOf(dir, 'sleep_reviews').includes('nobody_in_bed'), 'setup: rewound');
+
+    for (let bootNumber = 1; bootNumber <= 2; bootNumber++) {
+      const boot = bootDbJs(dir);
+      assert.equal(boot.status, 0, `upgrade/reboot ${bootNumber}: ${boot.stderr}`);
+      assert.deepEqual(columnsOf(dir, 'sleep_reviews').sort(), [...full].sort(), `after boot ${bootNumber}`);
+      const db = new Database(join(dir, 'babymonitor.db'));
+      try {
+        const def = db.prepare('PRAGMA table_info(sleep_reviews)').all().find((c) => c.name === 'nobody_in_bed');
+        assert.equal(def.type, 'INTEGER');
+        assert.equal(def.notnull, 1, 'NOT NULL: there is no third "never asked" state');
+        assert.equal(def.dflt_value, '0');
+        const old = db.prepare("SELECT nobody_in_bed, true_wake_at FROM sleep_reviews WHERE child_id = 'old-kid'").get();
+        assert.equal(old.nobody_in_bed, 0, 'the review that existed before the upgrade reads "not said", not NULL');
+        assert.equal(old.true_wake_at, '2026-09-01 20:00:00', 'and keeps its answer');
+      } finally {
+        db.close();
+      }
+    }
+  });
+});
+
+describe('sleep_reviews.true_in_bed_at and true_in_bed_transition_id (in bed separate from asleep)', () => {
+  // Added 2026-09-30. Each is in the literal CREATE TABLE (fresh installs) AND a guarded ALTER (upgrades),
+  // so this rewinds a real database to before them, with a review that already exists, and proves the
+  // upgrade path: the TEXT timestamp gets its OWN ALTER (the loop beside it emits INTEGER, plan review R5),
+  // both come back nullable with no default, the old review reads NULL for both (no review before this
+  // ever recorded a put-down, and none may be invented), and a second boot changes nothing.
+  test('an existing review gains both columns, typed and nullable, and a reboot changes nothing', () => {
+    const dir = freshDir();
+    assert.equal(bootDbJs(dir).status, 0);
+    const full = columnsOf(dir, 'sleep_reviews');
+    assert.ok(full.includes('true_in_bed_at') && full.includes('true_in_bed_transition_id'), 'a fresh install has both');
+    {
+      const db = new Database(join(dir, 'babymonitor.db'));
+      try {
+        db.exec('ALTER TABLE sleep_reviews DROP COLUMN true_in_bed_at');
+        db.exec('ALTER TABLE sleep_reviews DROP COLUMN true_in_bed_transition_id');
+        db.exec(`INSERT INTO sleep_reviews (child_id, night_date, true_onset_at, true_onset_transition_id)
+                 VALUES ('old-kid', '2026-09-29', '2026-09-29 08:49:00', 41)`);
+      } finally {
+        db.close();
+      }
+    }
+    const rewound = columnsOf(dir, 'sleep_reviews');
+    assert.ok(!rewound.includes('true_in_bed_at') && !rewound.includes('true_in_bed_transition_id'), 'setup: rewound');
+
+    for (let bootNumber = 1; bootNumber <= 2; bootNumber++) {
+      const boot = bootDbJs(dir);
+      assert.equal(boot.status, 0, `upgrade/reboot ${bootNumber}: ${boot.stderr}`);
+      assert.deepEqual(columnsOf(dir, 'sleep_reviews').sort(), [...full].sort(), `after boot ${bootNumber}`);
+      const db = new Database(join(dir, 'babymonitor.db'));
+      try {
+        const info = db.prepare('PRAGMA table_info(sleep_reviews)').all();
+        for (const [col, type] of [['true_in_bed_at', 'TEXT'], ['true_in_bed_transition_id', 'INTEGER']]) {
+          const def = info.find((c) => c.name === col);
+          assert.equal(def.type, type, `${col} is ${type}`);
+          assert.equal(def.notnull, 0, `${col} must be nullable: "not said" is the answer for every old review`);
+          assert.equal(def.dflt_value, null);
+        }
+        const old = db.prepare("SELECT * FROM sleep_reviews WHERE child_id = 'old-kid'").get();
+        assert.equal(old.true_in_bed_at, null, 'an old onset is NOT reinterpreted as a put-down');
+        assert.equal(old.true_in_bed_transition_id, null);
+        assert.equal(old.true_onset_at, '2026-09-29 08:49:00', 'and the old answer is kept exactly');
+        assert.equal(old.true_onset_transition_id, 41);
+      } finally {
+        db.close();
+      }
+    }
+  });
+});
+
 describe('a migration group that fails partway', () => {
   test('leaves none of its columns behind', () => {
     const dir = freshDir();

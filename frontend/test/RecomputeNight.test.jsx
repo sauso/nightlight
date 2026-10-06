@@ -1,6 +1,6 @@
 // The admin "Recompute this night" control.
 //
-// Three things are worth testing here and none is cosmetic:
+// Four things are worth testing here and none is cosmetic:
 //   1. THE BASELINE IS THE STORED ROW. The first cut of this component compared the page's `night` —
 //      which is already a fresh recompute — against another fresh recompute. The two sides were the
 //      same computation, so the dialog always said "exactly the same numbers" while the child's card
@@ -8,6 +8,11 @@
 //   2. ROLE GATING — a caregiver must not be able to rewrite stored sleep history. The failure mode is
 //      silent, which is the shape of bug this project has shipped before.
 //   3. It PREVIEWS before it writes, because the write is irreversible.
+//   4. THE "AFTER" PICTURE IS THE OVERLAID NIGHT, NOT THE RAW STORE RESPONSE (plan review R3). `?store=1`
+//      answers "what did the detector just save", not "what should the parent see" — a corrected or
+//      flagged night's normal read differs from that raw row. Trusting the store response directly
+//      would repaint the page with the detector's raw answer the instant you recompute, silently
+//      undoing whatever correction was showing. The fix re-fetches the normal route after storing.
 
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
@@ -38,10 +43,17 @@ const STORED = {
 const fmtTime = (utc) => (utc ? String(utc).slice(11, 16) : '');
 
 // api.get is called with different URLs for different things; route by query string.
-function mockApi({ stored = STORED, onStore = FRESH } = {}) {
+// `overlaid` defaults to FRESH so tests that don't care about R3 keep working unchanged; the R3-specific
+// tests below override it to something DIFFERENT from `onStore`, which is what makes the assertion
+// discriminating rather than vacuous (see the ⚠️ on the regression test itself).
+// `locked` is what `?stored=1` says since 2026-09-30 (a parent corrected the night, so the server will not
+// re-store it). `undefined` by default: the shape a server from before the field answers with.
+function mockApi({ stored = STORED, onStore = FRESH, overlaid = FRESH, locked } = {}) {
   vi.spyOn(api, 'get').mockImplementation((url) => {
-    if (url.includes('stored=1')) return Promise.resolve({ night: stored });
+    if (url.includes('stored=1')) return Promise.resolve(locked === undefined ? { night: stored } : { night: stored, locked });
+    // Checked before the plain `detail=1` branch: `?store=1&detail=1` contains both substrings.
     if (url.includes('store=1')) return Promise.resolve(onStore);
+    if (url.includes('detail=1')) return Promise.resolve(overlaid);
     return Promise.reject(new Error(`unexpected call: ${url}`));
   });
 }
@@ -56,17 +68,57 @@ beforeEach(() => mockApi());
 afterEach(() => vi.restoreAllMocks());
 
 describe('a night the person has corrected', () => {
-  test('says why recomputing will not change what is shown', async () => {
-    // A corrected night displays the person's times, so recompute changes the detector's answer
-    // underneath while the display keeps the correction — the button looks broken otherwise. The owner
-    // pressed it expecting a wrong time to be replaced and nothing visible happened.
+  // Rewritten 2026-09-30. The note used to say recomputing "will not change what is shown", which read as
+  // "harmless, go ahead". Since the lock a corrected night is usually not recomputed at all, so the note
+  // now only says what is true of EVERY corrected night, and the dialog says when it is locked.
+  test('says the times are theirs and where to change them, without calling a recompute harmless', async () => {
+    // The owner pressed the button on a corrected night expecting a wrong time to be replaced, and
+    // nothing visible happened. The note is what explains that.
     setup(renderAsAdmin, { night: { ...FRESH, corrected: true } });
-    expect(await screen.findByText(/will\s+not change what is shown/)).toBeInTheDocument();
+    expect(await screen.findByText(/These times are the ones you told us, and recomputing never replaces them/)).toBeInTheDocument();
+    expect(screen.queryByText(/not change what is shown/)).not.toBeInTheDocument();
   });
 
   test('and says nothing of the sort on an ordinary night', () => {
     setup(renderAsAdmin);
-    expect(screen.queryByText(/not change what is shown/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/ones you told us/)).not.toBeInTheDocument();
+  });
+});
+
+describe('a LOCKED night (the server says so in ?stored=1)', () => {
+  test('★ opens on "locked because you corrected it", offers no save, and never stores', async () => {
+    // The saved row differs from the fresh one, so without the lock this dialog WOULD offer "Save the new
+    // numbers" (the tests below prove it does). Locked, it must not: the server would refuse the write.
+    mockApi({ locked: true });
+    const { user } = setup(renderAsAdmin, { night: { ...FRESH, corrected: true } });
+    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+
+    expect(await screen.findByText(/This night is locked because you corrected it/)).toBeInTheDocument();
+    expect(screen.getByText(/Removing your correction unlocks it/)).toBeInTheDocument();
+    expect(screen.queryByText(/no longer matches/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^cancel$/i })).not.toBeInTheDocument(); // nothing to cancel
+    expect(screen.getAllByRole('button', { name: /^close$/i }).length).toBeGreaterThan(0);
+    expect(api.get.mock.calls.filter(([u]) => /[?&]store=1/.test(u))).toHaveLength(0);
+  });
+
+  test('★ keys on the SERVER\'s `locked`, not on `night.corrected`: a corrected night the server calls unlocked can still be fixed', async () => {
+    // A corrected night whose saved row is missing (or unscored) is NOT locked, and Recompute is the only
+    // way to get it saved (plan review R8). Keying on `corrected` would hide that fix.
+    mockApi({ stored: null, locked: false });
+    const { user } = setup(renderAsAdmin, { night: { ...FRESH, corrected: true } });
+    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await waitFor(() => expect(screen.getByText(/nothing is saved for this night yet/i)).toBeInTheDocument());
+    expect(screen.queryByText(/locked/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /save this night/i })).toBeInTheDocument();
+  });
+
+  test('a server that does not send `locked` at all reads as unlocked (an older backend)', async () => {
+    mockApi(); // `{ night }` only
+    const { user } = setup(renderAsAdmin);
+    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await waitFor(() => expect(screen.getByText(/no longer matches/i)).toBeInTheDocument());
+    expect(screen.queryByText(/locked/)).not.toBeInTheDocument();
   });
 });
 
@@ -148,7 +200,31 @@ describe('writing', () => {
 
     await user.click(screen.getByRole('button', { name: /save the new numbers/i }));
     await waitFor(() => expect(onRecomputed).toHaveBeenCalledWith(FRESH));
-    expect(api.get.mock.calls.at(-1)[0]).toMatch(/store=1/);
+    // Both the write AND the re-fetch happened, in that order — storing alone is not enough (R3).
+    const urls = api.get.mock.calls.map(([u]) => u);
+    expect(urls.some((u) => /[?&]store=1/.test(u))).toBe(true);
+    expect(urls.at(-1)).toMatch(/detail=1/);
+    expect(urls.at(-1)).not.toMatch(/store=1/);
+  });
+
+  // ★ THE REGRESSION TEST FOR R3. `onStore` (what `?store=1` answers) and `overlaid` (what the NORMAL
+  // route answers right after) are deliberately DIFFERENT values here — `night__marker` only exists on
+  // the overlaid one. Passing the raw store response straight to `onRecomputed`, the pre-fix shape,
+  // would report `onStore` and this fails; only re-fetching the normal route reports `overlaid`. A
+  // fixture where the two happened to be equal (as in the test above, and in the rest of this file)
+  // could not tell the two code paths apart — this is the one test in the file that can.
+  test('★ the "after" picture is the OVERLAID night (a fresh normal read), not the raw store response', async () => {
+    const onRecomputed = vi.fn();
+    const overlaid = { ...FRESH, corrected: true, night__marker: 'overlay' };
+    mockApi({ overlaid });
+    const { user } = setup(renderAsAdmin, { onRecomputed });
+    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await waitFor(() => expect(screen.getByText(/no longer matches/i)).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /save the new numbers/i }));
+    await waitFor(() => expect(onRecomputed).toHaveBeenCalled());
+    expect(onRecomputed).toHaveBeenCalledWith(overlaid);
+    expect(onRecomputed).not.toHaveBeenCalledWith(FRESH);
   });
 
   test('cancelling closes the dialog and stores nothing', async () => {

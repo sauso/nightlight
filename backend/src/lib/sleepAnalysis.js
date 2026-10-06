@@ -34,8 +34,9 @@ const MOTION_ACTIVE = 0.01; // in-bed per-frame changed-fraction above this = re
 // below the quietest genuine one.
 //
 // NB: this is the per-MINUTE display/analysis threshold, deliberately independent of the per-FRAME
-// threshold the detector uses to open a bed-transition candidate (motionDetector.js, from
-// detect_sensitivity). They answer different questions and are not kept in step.
+// threshold the detector uses to open a bed-transition candidate (motionDetector.js: the fixed
+// BED_TRANSITION_ACTIVE_FRACTION in bedTransitionRules.js since #368, no longer detect_sensitivity, which
+// now only sets the motion alert). They answer different questions and are not kept in step.
 const MOTION_OUT_ACTIVE = 0.03;
 const SOUND_ACTIVE = 6; // dB over ambient above this = a clear noise/cry
 const ONSET_QUIET_MIN = 15; // continuous quiet minutes to call it "asleep"
@@ -53,7 +54,73 @@ export const SLEEP_THRESHOLDS = Object.freeze({
   WAKE_GAP_MIN,
 });
 
-const MIN_COVERAGE_FRAC = 0.5; // need activity samples for at least this fraction of the window, else no_data
+// Exported (with EMPTY_MIN_COVERAGE_FRAC) only so the Recompute refusal in routes/children.js can quote the
+// real lines to a person instead of a copy of them that could drift (issue #508 code review).
+export const MIN_COVERAGE_FRAC = 0.5; // need WATCHED minutes (see motionSeen) for at least this fraction of the window, else no_data
+// `empty` ("no one was in the bed") needs MORE of the window watched than `no_data` does, and the gap
+// between the two matters because `empty` is not a harmless label: it sends the "no one was in the bed"
+// report and QUEUES THE NIGHT'S RAW TIMELAPSE FRAMES FOR DELETION (runNightlySleepJob -> emptyNights ->
+// discardTimelapseFrames), irreversibly. At MIN_COVERAGE_FRAC alone, a night exactly half watched (quiet)
+// and half unwatched passed the no_data gate and could read `empty` from the quiet half — "we saw nobody"
+// said about a night we could not see half of (found by plan review of issue #508, Codex; reachable before
+// #508 too, from a plain row gap). Below this fraction the night is `no_data`, never `empty`; an `ok` night
+// is unaffected (a night with real movement in it was not empty, however much of it we missed). A fraction
+// of the window minutes ELAPSED so far (the whole window once it closes), never counting the lookbehind:
+// the same basis as MIN_COVERAGE_FRAC (see the guard itself for why an open night keeps that basis).
+//
+// ⚠️ 0.9 IS AN UNMEASURED HYPOTHESIS, not a calibrated threshold. It was chosen so that the ~64 s daily
+// camera reboot and scattered dropped minutes can never block a genuinely empty, otherwise-watched night,
+// while anything missing more than about an hour of a 12-hour window cannot. No stored `empty` night had
+// been checked against it when it was written; the pre-merge A/B for #508 checks every stored `empty`
+// night's coverage against it on prod and staging. Default 0.9; any value in (MIN_COVERAGE_FRAC, 1] is
+// coherent (at MIN_COVERAGE_FRAC this guard does nothing, above 1 nothing could ever be `empty`). A
+// constant, not a setting — documented in README "Sleep tracking" and KNOWN-ISSUES alongside #508.
+export const EMPTY_MIN_COVERAGE_FRAC = 0.9;
+// WAS THIS MINUTE WATCHED? (issue #508) — true only when the motion detector actually analysed at least
+// one real frame in it. The ONE definition every `activity_samples` reader in this file uses (the main
+// timeline, the departure scan's extRows, the metrics extension's extraRows), so the three can never
+// disagree about the same minute — the same reason isActiveRow is shared.
+//
+// Why it exists: a row existing used to mean "observed". But the SOUND detector keeps writing rows when
+// the VIDEO has died (issue #369: the motion sampler delivered nothing while audio kept flowing), and every
+// such row read as a watched, quiet minute. Measured on staging (A/B on a copy of its database, 2026-09-30):
+// two stalls, 522 dead-video minutes ending 2026-09-17 10:00 and 284 ending 2026-09-27 10:00, read as covered
+// and quiet. Only the part inside the 19:00-07:00 window changes a night: 342 minutes of the first (night
+// 2026-09-16: coverage 720 -> 378, `unknown_minutes` 0 -> 342) and 104 of the second (night 2026-09-26:
+// coverage 720 -> 616; `unknown_minutes` stays 0 because that stall lies after the analysed sleep span). #442 already made a minute with NO row unknown; a row with no frames
+// is the same absence, and now reads the same way (the whole minute becomes `null`, reusing #442's gap
+// handling end to end: onset, wake runs, metrics, the timeline's `gap`).
+//
+// Why ZERO and not a frame-rate threshold: `motion_frames` counts OBSERVED frames (activityTracker's
+// writeMinute; #493 subtracts proven ffmpeg clones), so 0 means "no video evidence at all" on every
+// camera whatever its frame rate — nothing here assumes 5 fps or 300 frames a minute, so it is per-install
+// safe by construction. Both dead-video shapes the writer can produce store 0: a sound-only minute
+// (motion_peak NULL) and a clone-only minute (#493: motion_peak 0). A LOW but non-zero count is still
+// watched — a daily camera reboot leaves short low-frame runs (measured on staging over 30 days: 36 runs,
+// 22 on one camera and 14 on the other, every one a SINGLE minute, 30 of them starting at the 10:00
+// reboot, so almost none fall inside a night's window; issue #508 said 21, that did not hold; the count
+// on any other install is unknown), and there is no evidence yet that a sparse minute misleads (a peak is a MAXIMUM, so a few real
+// frames still see real movement). A sparse-minute rule needs its own data first.
+//
+// A cost of deciding per WHOLE minute, named (traced in fix round 1): `motion_frames` is the IN-BED
+// channel's observed count, and #493 corrects the two channels separately, so a minute whose every frame
+// the observation clock called a repeat, yet whose picture changed OUTSIDE the bed, stores frames 0 with a
+// real `motion_out_peak` (activityTracker.test.js "#493: ...and the mirror"). This rule discards that
+// out-of-bed movement with the rest of the minute. A true repeat cannot change the picture, so it needs
+// the clock and the pixels to disagree for a whole minute; how often that happens is unmeasured. Left as
+// an owner decision, not changed silently (pinned by the #508 test T9b).
+//
+// Why sound is NOT used in an unwatched minute, even a loud one: a bedroom mic hears the whole house (see
+// ONSET_SOUND_MOTION_WITHIN_MIN), and keeping a loud unwatched minute as `active` breaks two things the
+// plan review traced — the onset view turns it into CONFIRMED QUIET (unwitnessed sound is discounted), and
+// the metrics count a non-wake active minute as ASLEEP. The cost, named: a child crying through a video
+// stall is not shown as awake from the noise alone. Sound alerts are a separate path and still fire.
+//
+// Known limit: a FROZEN picture (an encoder wedge delivering many real, identical frames) has frames > 0
+// and zero movement, so it still reads as a watched, still room. Neither zero nor any frame threshold
+// can catch that. `motion_frames` is `NOT NULL DEFAULT 0` and has been written since the original sampler
+// (#77), so no stored row lacks it.
+const motionSeen = (r) => r.motion_frames > 0;
 // How far PAST the window end to keep looking for the morning "out of bed" — a child can sleep past the
 // window edge, so the terminal exit that marks "up for the day" may fall a couple hours later. The
 // movement-only wake still stops at the window; the transition-derived departure uses this lookahead.
@@ -84,7 +151,7 @@ const MAX_POST_EXIT_ACTIVE_MIN = 20;
 // minute. See the guard in the departure scan for the measured nights; this is the bound itself.
 //
 // ONE MINUTE IS NOT A FITTED NUMBER, it is the resolution of every piece of evidence that could
-// contradict it. All the corroborating data here — `cribAct`, `cribOcc`, `bedOccupiedFrom` — comes from
+// contradict it. All the corroborating data here — `cribAct`, `cribOcc`, `bedQuietlyOccupiedFrom` — comes from
 // `activity_samples`, which is bucketed per minute. Two transitions inside the same minute share a
 // single row, so there is no observation anywhere in this system that can tell them apart. Below that
 // resolution the ordering is unverifiable, and a rule that trusts it is trusting nothing.
@@ -96,6 +163,38 @@ const MAX_POST_EXIT_ACTIVE_MIN = 20;
 // child-nights (22 reviewed nights × prod and staging, which see different `activity_samples`) this
 // removes 311 minutes of wake error and adds 82. See the PR for the per-night table.
 const JITTER_REENTRY_MS = 60 * 1000;
+// What the settling-tail guard accepts as proof that the child really is BACK in the bed after that
+// `into_bed`: this many QUIET occupied minutes in the OCCUPANCY_WITNESS_MIN minutes from it. Quiet means
+// micro-motion at or above OCCUPANCY_MIN_PEAK on a minute that is NOT itself active (MOTION_ACTIVE): the
+// signature of a still sleeper. An ACTIVE minute is somebody moving at the bed, and after a child has
+// really got up that somebody is a parent, so it never counts (issue #598; the guard's comment has the
+// night that showed it).
+//
+// Measured 2026-10-05: every stored night of both tracked children, replayed old-vs-new at 15 frozen
+// clocks on prod and staging snapshots (200 nights), scored against the owner's reviews. Every skip the
+// guard got WRONG (the exit it skipped was the real wake: 2026-09-13, 09-20, 09-29 and one child on
+// 10-03, with prod 09-16 and 09-18 looking the same) had 0-3 quiet minutes in that window; every skip it
+// got RIGHT (2026-09-06, 09-08, 09-09, 09-14, the other child on 10-03) had 10 or more, with the one
+// exception named below. The raw occupied counts overlap (wrong 5-16; labelled right skips 11-30, and an
+// unlabelled one has 43), which is why counting any motion could not separate them. One skip that old and
+// new code both make sits inside the gap: 2026-09-28, 07:09, one child, a 2-minute double exit, with 8
+// (prod) / 7 (staging) quiet minutes. It is unlabelled, and its outcome is the same for every threshold
+// from 4 to 11. Any value from 4 to 10 gives identical results on all 200 nights; 3 leaves three wrong
+// skips in place; 11 breaks the 2026-09-09 night this guard was built for (exactly 10 quiet minutes on
+// prod). 6 sits mid-gap.
+//
+// ⚠️ Two cameras in one house. What happens to everyone else: a child who climbs back in and then lies
+// stiller than this (fewer than 6 quiet minutes in the 150) loses the skip, so the tail exit stands and
+// the wake is reported too EARLY, which is how every such night looked before the guard existed. It is a
+// wrong TIME, never a missing wake (the fallback is untouched). A camera whose bed readings are only ever
+// active or dead (nothing between 0.0005 and 0.01), or a zone painted so a sleeper's micro-motion falls
+// outside it, behaves the same. One night on record may be this case: prod 2026-09-05, a skip whose
+// result the owner's review accepted, with 0 quiet minutes behind it, now reported 46 minutes earlier.
+// Unconfirmed: the review accepted the computed time rather than correcting it, and the bed there may
+// simply have been empty. Scaling every reading by 1/3x to 3x (a tighter or looser zone) kept the wrong
+// skips at 5 quiet minutes or fewer and the right ones at 7 or more, so the zone's size matters only
+// mildly.
+const SETTLING_WITNESS_MIN_QUIET = 6;
 // A bedtime is never a rigid clock time — a tired child can be asleep well before the window opens, and
 // clipping onset to window_start silently loses that sleep (and misreports the night's length). So the
 // timeline is built from this far BEFORE window_start; symmetric with WAKE_LOOKAHEAD_MS at the other
@@ -231,46 +330,88 @@ export function childTracksSleep(childId) {
   return childSleepConfig(childId).track;
 }
 
-// A few minutes of slack on each side of the window so the 5-min reconcile that starts/stops the
-// activity leg never clips the window edges: the leg is running a touch before bedtime and lingers a
-// touch past wake, guaranteeing full coverage of [start, end) even with the reconcile's granularity.
+// Slack for the 5-min reconcile (index.js reconcileCameraPaths) that starts and stops the activity leg.
+// It is the END-edge slack of every gate below, so the leg lingers 5-10 min past the edge it is told to
+// stop at and the final minute before that edge is flushed (activityTracker closes a minute on a 1 s
+// tick) before the leg is torn down. childWindowActiveNow additionally uses it as its LEAD (5 min before
+// the window start). The sampling gate has no start slack: its lead is the 3 h lookbehind, and the leg
+// begins 0-5 min after that edge (plus the wait for the stream path), a known limit in the README.
 const WINDOW_MARGIN_MS = 5 * 60 * 1000;
 
-// Is this child's sleep window open RIGHT NOW (within the small margin above)? The activity-only motion
-// leg is gated on this so it only samples overnight, not all day — there's no point running it outside
-// each child's window. Returns false when the child doesn't track sleep. (Frame-diff ALERT legs are not
-// gated on this; they run 24/7 regardless — see motionDetector.motionLegWanted.)
-function windowOpenNow(childId, leadMs) {
+// Is this child's sleep window open RIGHT NOW, widened by `leadMs` before its start and `trailMs` after
+// its end? The activity-only motion leg is gated on this so it only samples around the sleep window, not
+// all day. Returns false when the child doesn't track sleep. (Frame-diff ALERT legs are not gated on
+// this; they run 24/7 regardless - see motionDetector.motionLegWanted.)
+//
+// Candidate nights are today's (0) and yesterday's (-1), plus tomorrow's (+1) only when `nextNight`.
+// Why that range is enough, and no more: a night two or more days AHEAD cannot reach back to now,
+// because the lead (at most ONSET_LOOKBEHIND_MS, 3 h) is shorter than the shortest local day (23 h, on
+// a spring-forward day); and any night OLDER than yesterday that covers an instant also implies that
+// yesterday's night covers it (it starts before the instant and ends after it). Do not "explain" this
+// as consecutive windows abutting: they do not, a 19:00-07:00 child has a gap every day.
+//
+// Why +1 exists, and why it is sampling-only: a window opening 00:00-02:59 local has its 3 h lookbehind
+// on the PREVIOUS calendar day, so at 22:30 the instant belongs to TOMORROW's night (issue #353; the
+// old loop never tried it). childWindowActiveNow deliberately keeps {0, -1} so the wake watcher (which has
+// no second gate, wakeWatcher.js) behaves exactly as before this fix: its 5-minute lead has a known,
+// harmless gap for a window opening 00:00-00:04 (the wake watcher only arms once sleep has begun), and
+// the leg itself is covered by the 3 h lead of the sampling gate. (The timelapse is not the reason: it
+// also needs currentNightDate non-null, true only inside the configured window, see timelapse.js.)
+//
+// `leadMs` and `trailMs` are ABSOLUTE milliseconds added to real instants from windowBoundsUtc, exactly
+// as computeNight adds ONSET_LOOKBEHIND_MS and WAKE_LOOKAHEAD_MS, so on a DST night the lead and tail
+// are 3 REAL hours (the wall clock may differ by one) - the same horizon the inference reads.
+function windowOpenNow(childId, leadMs, trailMs, nextNight = false) {
   const cfg = childSleepConfig(childId);
   if (!cfg.track) return false;
   const tz = appSettings().timezone || 'UTC';
   const now = Date.now();
-  // Check today's window and yesterday's (a window that wraps midnight is still open in the small hours).
-  for (let delta = 0; delta >= -1; delta--) {
+  for (let delta = nextNight ? 1 : 0; delta >= -1; delta--) {
     const date = localDateStr(tz, delta);
     const { startUtc, endUtc } = windowBoundsUtc(date, tz, cfg.start, cfg.end);
-    if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + WINDOW_MARGIN_MS) return true;
+    if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return true;
   }
   return false;
 }
 
+// Unchanged on purpose by #353: the window itself with a 5-minute slack each side. It gates the wake
+// watcher, which has no second gate, so widening this to the sampling horizon below would move the wake
+// watcher's input (in a core module) for no benefit to #353. The timelapse also calls it, but is already
+// bounded by currentNightDate (non-null only inside the configured window), so it never captures outside
+// the window whatever this returns.
 export function childWindowActiveNow(childId) {
-  return windowOpenNow(childId, WINDOW_MARGIN_MS);
+  return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS);
 }
 
-// Should the activity-only SAMPLING leg be running now? Same window, but opened ONSET_LOOKBEHIND_MS
-// early so a child who goes down before their configured bedtime is already being sampled — otherwise
-// the lookbehind in computeNight has nothing to read and an early night is still clipped.
+// Should the activity-only SAMPLING leg be running now? The window opened ONSET_LOOKBEHIND_MS early and
+// closed WAKE_LOOKAHEAD_MS + WINDOW_MARGIN_MS late.
 //
-// Kept separate from childWindowActiveNow deliberately: that one also gates the timelapse, which should
-// keep starting at the configured bedtime rather than three hours before it. This only widens sampling.
+// Lead: so a child who goes down before their configured bedtime is already being sampled - otherwise the
+// lookbehind in computeNight has nothing to read and an early night is still clipped.
 //
-// It costs nothing on a framediff-ALERTING camera, which is never window-gated (motionLegWanted returns
-// early for those) and already samples 24/7 — measured at ~1437 of a possible 1440 rows/camera/day, or
-// ~10.7 MB at the 30-day retention. It matters for the MQTT-source/alerts-off cameras that DO get gated,
-// where running 24/7 would burn detector CPU all day for no benefit.
+// Tail: the inference's OWN horizon. computeNight reads the morning departure evidence (the departure
+// scan, the bed-transition read, the metrics extension) up to WAKE_LOOKAHEAD_MS after the window end, and
+// isEvidenceFinal / reportableSpanMs close at the same instant; the margin is the reconcile slack above.
+// A tail that stops sooner leaves the morning departure UNOBSERVED for an activity-only camera (issue
+// #353; found by the 2026-09-11 Codex review, reproduced on dev 11236d7: sampling false at 07:06 and
+// 09:59 for a 19:00-07:00 window). No new number: both lengths are the constants the inference uses.
+//
+// Kept separate from childWindowActiveNow deliberately: that one gates the wake watcher (and is checked by
+// the timelapse), which keep the configured window plus 5 minutes. This only widens sampling (and is the
+// only gate with the +1 candidate night, see windowOpenNow).
+//
+// Cost: an activity-only camera runs 3 h more a day (15 h -> 18 h for a 19:00-07:00 child), ONE ffmpeg
+// decoding 320x180 gray at 5 fps (not measured as CPU). It costs nothing on a framediff-ALERTING camera,
+// which is never window-gated (motionLegWanted returns early for those) and already samples 24/7 -
+// measured at ~1437 of a possible 1440 rows/camera/day, or ~10.7 MB at the 30-day retention. It
+// matters for the MQTT-source/alerts-off cameras that DO get gated, where running 24/7 would burn
+// detector CPU all day for no benefit.
+//
+// Known limits: the leg starts 0-5 min after the lead edge (no reconcile slack on a start edge), and
+// the morning review (local noon to noon, plus 1 h of lingering-motion evidence) lacks transitions after
+// about window end + 3 h for such a camera, because nothing past the horizon feeds inference.
 export function childSamplingActiveNow(childId) {
-  return windowOpenNow(childId, ONSET_LOOKBEHIND_MS);
+  return windowOpenNow(childId, ONSET_LOOKBEHIND_MS, WAKE_LOOKAHEAD_MS + WINDOW_MARGIN_MS, true);
 }
 
 // Offset (localWallClock - UTC) in ms for a given instant in a tz.
@@ -314,6 +455,27 @@ function windowBoundsUtc(nightDate, tz, startHM, endHM) {
   const endBase = new Date(Date.UTC(y, mo - 1, d + (wraps ? 1 : 0)));
   const endUtc = zonedToUtc(endBase.getUTCFullYear(), endBase.getUTCMonth(), endBase.getUTCDate(), e.h, e.m, tz);
   return { startUtc, endUtc };
+}
+
+// The span of instants computeNight can REPORT an asleep or wake time in, for this child's night: the night's
+// own window (the child's start/end in the app timezone, exactly as computeNight derives it), opened
+// ONSET_LOOKBEHIND_MS early and closed WAKE_LOOKAHEAD_MS late. Half-open, like the window: the earliest
+// asleep time is the first minute of the lookbehind (minute index 0), and the latest departure is strictly
+// before the end of the lookahead (getBedTransitions reads `created_at < ?`, and a movement-only wake stops
+// at the window end). Derived from these constants and helpers, never a copy of them, so the span moves
+// with them.
+//
+// Why it exists (fix round 4, 2026-10-02, Opus #1 + Codex #1, both reproduced by a test): the morning review
+// trusts the client's echo of what the page showed only for a time the detector could have shown for THIS
+// night (sleepReviews.localHmToUtcSql). Fix round 3 bounded it by calendar day instead, which was wrong both
+// ways: too narrow for a window opening 00:00-02:59, whose lookbehind reaches the PREVIOUS date (the app's
+// own asleep time was refused), and too wide for a hand-made echo, which could put a typed time on the
+// following evening. Every child gets its own window, in whatever timezone the install is set to.
+export function reportableSpanMs(childId, nightDate) {
+  const tz = appSettings().timezone || 'UTC';
+  const cfg = childSleepConfig(childId);
+  const { startUtc, endUtc } = windowBoundsUtc(nightDate, tz, cfg.start, cfg.end);
+  return { fromMs: startUtc.getTime() - ONSET_LOOKBEHIND_MS, toMs: endUtc.getTime() + WAKE_LOOKAHEAD_MS };
 }
 
 // A night's departure evidence is FINAL once real time has caught up to the same horizon the
@@ -606,15 +768,16 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
 
   const rows = db
     .prepare(
-      `SELECT bucket_start AS t, motion_peak, sound_peak, motion_out_peak FROM activity_samples
+      `SELECT bucket_start AS t, motion_peak, sound_peak, motion_out_peak, motion_frames FROM activity_samples
          WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
     )
     .all(...scoreCams, analysisStartSql, asOfSql);
 
-  // Per-minute state over the whole timeline: null = no sample (gap), false = quiet, true = active. A
-  // minute is active if the main camera saw in-bed movement, a clear noise, OR movement outside the bed
-  // (someone in the room / the child out of bed). outAt[] marks the outside-bed minutes so the timeline
-  // can surface them as room activity distinct from stirring in the bed.
+  // Per-minute state over the whole timeline: null = not watched (no row, or only rows with no video —
+  // see motionSeen), false = quiet, true = active. A minute is active if the main camera saw in-bed
+  // movement, a clear noise, OR movement outside the bed (someone in the room / the child out of bed).
+  // outAt[] marks the outside-bed minutes so the timeline can surface them as room activity distinct
+  // from stirring in the bed.
   //
   // One camera, so one row per minute and nothing to combine. This used to OR across cameras; that OR
   // is exactly how a second camera could add activity the child never produced (see scoreCams above).
@@ -645,6 +808,12 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   for (const r of rows) {
     const i = idxOf(r.t);
     if (i < 0 || i >= totalMin) continue;
+    // An unwatched row contributes NOTHING — not to state, and not to outAt/motionAt/soundAt/bedPeakAt/
+    // maxBedPeak either (issue #508). Skipped, not merged: `activity_samples` can hold two rows for one
+    // minute (see the OR-merge note in the departure scan below), and merging an unwatched twin as `null`
+    // would erase a watched row's verdict (`false || null` is `null`). A minute is therefore exactly as
+    // watched as its best row, and a minute with no watched row at all stays `null` (unknown).
+    if (!motionSeen(r)) continue;
     const out = r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE;
     const moved = (r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) || out;
     const heard = r.sound_peak != null && r.sound_peak > SOUND_ACTIVE;
@@ -657,7 +826,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     if (r.motion_peak != null && r.motion_peak > bedPeakAt[i]) bedPeakAt[i] = r.motion_peak;
   }
   // Coverage is a statement about the configured window ("did we watch the night"), so it counts only
-  // window minutes — the lookbehind must never inflate or dilute it.
+  // window minutes — the lookbehind must never inflate or dilute it. "Watched" is literal since #508: a
+  // row with no video (motionSeen) left state[i] null above, so it is not coverage either.
   let coverage = 0;
   for (let i = preMin; i < totalMin; i++) if (state[i] !== null) coverage++;
   const result = { ...base, coverage_minutes: coverage };
@@ -751,6 +921,16 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // or a bedtime close to the morning) is not evidence of an empty bed. That is the safe direction: this
   // guard only ever REJECTS an onset, so failing open leaves today's behaviour untouched rather than
   // inventing a later bedtime from missing data.
+  //
+  // ⚠️ A VIDEO STALL IS NOW A GAP HERE TOO (issue #508), and that changes one real outcome, traced and
+  // kept deliberately. Before #508 a stall's sound-only rows were non-null with an in-bed peak of 0, so a
+  // put-down followed within 150 minutes by a stall read as "watched, and the bed never moved" and this
+  // guard REJECTED the put-down's onset. Now those minutes are unknown, the loop below meets a `null`
+  // and fails open, and the put-down's onset is ACCEPTED (pinned by the #508 test "a stall longer than
+  // the occupancy window after a put-down"). That is the same answer a plain row outage (#442) already
+  // gets, and the old rejection rested on "no movement" readings nobody took. The residual risk, named:
+  // a FALSE put-down over an empty bed followed at once by a stall is no longer caught by this guard. It
+  // still has to pass every other onset guard, and the stall itself is reported as unknown minutes.
   const bedOccupiedAfter = (from) => {
     const to = from + OCCUPANCY_WITNESS_MIN;
     if (to > totalMin) return true; // not enough timeline left to judge
@@ -917,7 +1097,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     totalMinExt = Math.max(totalMin, Math.round((evidenceCutoffMs - analysisStartUtc.getTime()) / 60000));
     const extRows = db
       .prepare(
-        `SELECT bucket_start AS t, motion_peak FROM activity_samples
+        `SELECT bucket_start AS t, motion_peak, motion_frames FROM activity_samples
            WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
       )
       .all(...scoreCams, analysisStartSql, txEndSql);
@@ -934,14 +1114,22 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     for (const r of extRows) {
       const i = idxOf(r.t);
       if (i < 0 || i >= totalMinExt) continue;
-      // A real row sets true OR false — it is evidence either way. Only the absence of any row at all
-      // leaves an index at its null default now.
+      // Only a WATCHED row is evidence here (issue #508, see motionSeen). A clone-only minute (#493:
+      // frames 0, motion_peak 0) used to pass the `motion_peak != null` test below as CONFIRMED QUIET
+      // and not-occupied — proof the bed was empty, from a camera that saw nothing: #350's failure mode
+      // arriving through a dead camera. (A sound-only row has motion_peak NULL and was already skipped
+      // below; this is what catches the clone.) Skipped before the merge, for the same reason as the main
+      // loop: an unwatched twin must never merge over a watched row's verdict.
+      if (!motionSeen(r)) continue;
+      // A real watched row sets true OR false — it is evidence either way. Only the absence of any
+      // watched row at all leaves an index at its null default now.
       //
       // ⚠️ OR-MERGE, NOT LAST-WRITE-WINS (found by adversarial review of #350's own fix).
-      // `activity_samples` has no uniqueness constraint on (camera_id, bucket_start) —
-      // `flushActivity` is explicitly "exported for tests / forced flushes", so a forced flush
-      // landing in the same minute as the interval-driven one can legitimately write a SECOND row
-      // for that bucket. The query above has no ORDER BY, so which row lands last in the loop is
+      // `activity_samples` has no uniqueness constraint on (camera_id, bucket_start), and a SECOND row
+      // for a bucket is real: rows written before #447 were labelled with a flush time, which a forced
+      // flush or a clock step could repeat, and since #447 a wall clock that steps back by more than two
+      // minutes makes activityTracker re-baseline and write the repeated minutes' labels again (its
+      // minuteFor). The query above has no ORDER BY, so which row lands last in the loop is
       // arbitrary. A plain assignment let a later quiet duplicate silently overwrite an earlier
       // active one — manufacturing confirmed-quiet evidence for a minute that had real movement,
       // exactly the failure mode this tri-state conversion exists to prevent. `state[]`'s main
@@ -959,8 +1147,9 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     // real micro-motion in the OCCUPANCY_WITNESS_MIN minutes that follow; a gap in the data supplies no
     // witness either way (returns false, same as finding none).
     //
-    // ⚠️ THREE call sites now, not one, and they do NOT all fail the same safe direction.
-    // `reversedBy` and `settlingTail` below use a true result to REJECT a candidate — a false `true`
+    // ⚠️ TWO call sites, and they do NOT fail the same safe direction. (`settlingTail` was a third until
+    // issue #598 gave it its own witness, bedQuietlyOccupiedFrom below: see there for why it left.)
+    // `reversedBy` below uses a true result to REJECT a candidate — a false `true`
     // there is a safe false-negative, exactly `bedOccupiedAfter`'s own contract.
     // `detectMidnightEpisodes` (above `computeNight`) uses a true result to ADMIT an episode — a false
     // `true` there is a false POSITIVE: the 150-minute window can reach forward into an unrelated later
@@ -973,6 +1162,31 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       let moved = 0;
       for (let i = Math.max(from, 0); i < to; i++) {
         if (cribOccExt[i] === true && ++moved >= OCCUPANCY_MIN_MINUTES) return true;
+      }
+      return false;
+    };
+    // Is a STILL SLEEPER in the bed from minute `from` onwards? The settling-tail guard's witness, and
+    // only that guard's (issue #598). Same window and same cap as bedOccupiedFrom just above, but it
+    // counts only QUIET occupied minutes (micro-motion at or above OCCUPANCY_MIN_PEAK on a minute that is
+    // not itself active) and needs SETTLING_WITNESS_MIN_QUIET of them. Counting active minutes is what let
+    // a parent at the bed an hour after a real exit vouch for a stray return: see the guard, and the
+    // constant for the nights that separate the two kinds of minute.
+    //
+    // Strict `=== true` / `=== false` against both tri-state arrays (issue #350): an unobserved minute is
+    // neither quiet nor occupied, and a duplicate row that OR-merged a minute to active (see the loop
+    // above) is active, not quiet. Both arrays come from the same rows, so an occupied minute is always an
+    // observed one; the strict test states the rule rather than leaning on that.
+    //
+    // ⚠️ Deliberately NOT a change to bedOccupiedFrom. Its callers (the reversal guard, and
+    // detectMidnightEpisodes including its mirrored `settlingBack`) keep counting active minutes: this fix
+    // moves the departure scan's skip decision and nothing else. `settlingBack` probably has the same
+    // flaw (there it would hide a mid-night trip, not move the morning), and that is a follow-up to
+    // MEASURE first, not to copy across on the strength of this one.
+    const bedQuietlyOccupiedFrom = (from) => {
+      const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt);
+      let still = 0;
+      for (let i = Math.max(from, 0); i < witnessEnd; i++) {
+        if (cribOccExt[i] === true && cribActExt[i] === false && ++still >= SETTLING_WITNESS_MIN_QUIET) return true;
       }
       return false;
     };
@@ -1123,17 +1337,59 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
           // three minutes instead of the night.
           //
           // ★ Measured, prod 2026-09-09 (the owner reported it: "he got out but went back to bed a few
-          // minutes later"). Child B: `out 20:41:30`, `into_bed 20:43:57`, `out 20:44:36` — then nothing
-          // until 05:17. His bed reads EXACTLY 0.0000 for the eleven hours after it, because he sleeps
-          // that still, so the gap passes MORNING_ABSENCE_MIN and MAX_POST_EXIT_ACTIVE_MIN on its own
-          // terms. Reported: wake 20:41, **asleep 1h15m**. Proved by ablation on a prod snapshot —
-          // deleting that one row alone moves the night to 05:17 and 9h51m.
+          // minutes later"): `out 20:41:30`, `into_bed 20:43:57`, `out 20:44:36` — then nothing until
+          // 05:17. The child sleeps so still that, once the climb back in is over, the bed has only 2
+          // (prod) / 4 (staging) active minutes before 05:17, the first at 23:17, so the gap passes
+          // MORNING_ABSENCE_MIN and MAX_POST_EXIT_ACTIVE_MIN on its own terms. Reported: wake 20:41,
+          // **asleep 1h15m**. Proved by ablation on a prod snapshot — deleting that one row alone moves
+          // the night to 05:17 and 9h51m.
+          //
+          // ⚠️ That bed does NOT read "EXACTLY 0.0000", as this comment used to say, and the witness below
+          // now depends on the difference. Most minutes are 0, but 10 (prod) / 11 (staging) of the 150
+          // after the return carry micro-motion, sparsely: one (prod) or two (staging) in the first seven
+          // minutes, then none until 91 minutes in; the sixth arrives 133 minutes in on prod. So this
+          // night is only believed while the witness window is at least 134 minutes long (pinned by a
+          // test), and a still child who climbs back in and then REALLY leaves inside about two hours
+          // has no witness yet: that tail stands and the reported wake is too early (also pinned, as the
+          // known limit it is).
           //
           // This is the same predicate as the reversal guard with the window on the other side, and the
           // corroboration requirement is kept for the same reason: an UNCORROBORATED `into_bed` would
           // let this classifier's documented failure mode (62% of transitions are provably wrong)
           // veto a genuine departure and report `wake_at = null` — "still asleep" for a child who got
           // up, which is worse than the bug being fixed.
+          //
+          // ⚠️⚠️ THE CORROBORATION IS A STILL SLEEPER, NOT MERELY AN OCCUPIED BED (issue #598). It used to
+          // be bedOccupiedFrom, the reversal guard's witness: 3 minutes of ANY motion over
+          // OCCUPANCY_MIN_PEAK. That counts ACTIVE minutes, and after a real morning exit the bed's active
+          // minutes are a parent (stripping it, tidying, reaching in), which MAX_POST_EXIT_ACTIVE_MIN
+          // deliberately lets through. Measured on the night of 2026-10-03, both databases: a child's real
+          // 07:12 exit had a stray `into_bed` 51 s before it, and the bed was empty after it apart from a
+          // parent at it from 08:10 to 08:39. Its witness window held 14-16 occupied minutes, every one
+          // ACTIVE (the climb out, that parent, the next exit's own movement), and not one quiet. The
+          // old witness believed the stray return on the strength of that parent an hour later and skipped
+          // the real exit; once the next exit (09:27) had its own 20 quiet minutes, the stored wake moved
+          // from 07:12 to 09:27 and froze there. Over every stored night, the wrong skips had 0-3 QUIET
+          // minutes and the labelled right ones 10 or more, while the raw occupied counts overlap: see
+          // SETTLING_WITNESS_MIN_QUIET (which also names the one unlabelled skip that sits between).
+          // bedQuietlyOccupiedFrom counts only the quiet kind.
+          //
+          // On the measured nights every night this changed moved EARLIER. That is not a rule: in
+          // principle a night can also move later, when a real exit that used to be set aside is now
+          // found where the old answer was an earlier one (for instance an evening tail the fallback
+          // handed back because the real morning exit had been set aside as well).
+          //
+          // That is also why tightening the witness window, which the fallback comment below says was
+          // tried and failed, could not have worked: a shorter window counts the same mixture. On the
+          // 2026-10-03 night the parent's first active minute is 59 minutes after the stray return, and
+          // on the 2026-09-09 night only 2 minutes of any motion fall in the first 90 after the return
+          // on prod (4 on staging), so on prod any window short enough to leave out that parent also
+          // loses the night this guard was built for. The window was never the problem; the kind of
+          // minute was. (The 2026-08-31 real exit that comment cites cannot be split into quiet and
+          // active minutes any more: its samples have aged out of both databases.) That comment is kept
+          // as written, with one note where it says every post-exit active minute corroborates: true of
+          // the old witness only. Its conclusion stands: a bed that keeps micro-moving after the child
+          // has gone still corroborates a stray return, so the guard still must not have a veto.
           //
           // ⚠️⚠️ `<=` ON THE ORDERING, NOT `<`. `bed_transitions.created_at` has one-second resolution,
           // so an `into_bed` and an `out_of_bed` at the IDENTICAL second are representable — and that
@@ -1143,7 +1399,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
             && txMs(back.created_at) <= txMs(t.created_at)
             && txMs(t.created_at) - txMs(back.created_at) <= JITTER_REENTRY_MS
             // ⚠️ txIdx, not a hand-rolled floor — same reason as the reversal guard above.
-            && bedOccupiedFrom(txIdx(back.created_at)));
+            && bedQuietlyOccupiedFrom(txIdx(back.created_at)));
           const dt = Math.abs(txMs(t.created_at) - emptyStartMs);
           if (settlingTail) {
             // ⚠️⚠️ THIS GUARD MUST NEVER BE THE REASON A NIGHT HAS NO WAKE AT ALL — the same rule the
@@ -1155,7 +1411,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
             // the claim is "he was in bed one second ago" — and 150 minutes of hindsight cannot speak
             // to that. Worse, MAX_POST_EXIT_ACTIVE_MIN deliberately ALLOWS up to 20 active minutes
             // after a real departure (the documented parent-handles-the-bed case), and every one of
-            // them corroborates. Demonstrated: a genuine 05:50 exit, a spurious `into_bed` 30 s
+            // them corroborates (under the old witness, any motion; the quiet witness now ignores
+            // them, issue #598). Demonstrated: a genuine 05:50 exit, a spurious `into_bed` 30 s
             // before it, and a parent tidying the bed at 06:30 — the exit was rejected, no later
             // candidate existed, and the night reported `wake_at = null`, "still asleep" for a child
             // who had got up. That is worse than the wrong TIME this guard exists to fix.
@@ -1364,6 +1621,22 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // however still a sleeper — stirs: the quietest occupied night on record still peaked at 0.2883 with
   // 1 awakening and 10 awake minutes.
   if (maxBedPeak < EMPTY_BED_MAX_PEAK && wakeCount === 0 && awake === 0) {
+    // ...but only on a night we actually WATCHED almost all of (see EMPTY_MIN_COVERAGE_FRAC for why this
+    // is stricter than the no_data gate, and why 0.9 is a hypothesis). A night that looks empty in the
+    // part we saw, with too much of it unseen, is "we could not see", never "no one was there".
+    //
+    // `coverage` counts WINDOW minutes only (never the lookbehind, see above), and `winMin` is the ELAPSED
+    // part of the window: the whole window once it has closed, "so far" on a night in progress. That is
+    // the same basis as the no_data gate, kept deliberately after a trace (#508 fix round 1): nothing ACTS
+    // on an in-progress `empty`. Only runNightlySleepJob sends the "no one was in the bed" report or
+    // discards frames, and it only ever computes lastCompletedNightDate, a closed window; RecomputeNight
+    // hides itself while `in_progress`. An in-progress `empty` is DISPLAYED ("Tonight"), and it is
+    // re-decided against the full window once the night closes. The only paths that STORE an open night
+    // are the demo seed and a hand-made admin `?store=1` API call (the UI never makes it); neither sends
+    // a report or discards frames. (A stored open night of ANY status can then be protected by the
+    // downgrade guard when it closes: pre-existing, not specific to `empty` or to #508.) Pinned by the
+    // #508 tests T6g/T6h.
+    if (coverage < winMin * EMPTY_MIN_COVERAGE_FRAC) return { ...result, status: 'no_data' };
     return {
       ...result,
       status: 'empty',
@@ -1389,7 +1662,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       // quiet here too; see the now-rewritten test in sleepAnalysis.test.js).
       const extraRows = db
         .prepare(
-          `SELECT bucket_start AS t, motion_peak, sound_peak, motion_out_peak FROM activity_samples
+          `SELECT bucket_start AS t, motion_peak, sound_peak, motion_out_peak, motion_frames FROM activity_samples
              WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
         )
         .all(...scoreCams, minuteTime(totalMin), minuteTime(metricsEnd));
@@ -1398,13 +1671,17 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
       for (const r of extraRows) {
         const i = idxOf(r.t);
         if (i < totalMin || i >= metricsEnd) continue;
+        // The same rule as the main loop (issue #508): an unwatched row is skipped, never merged, so a
+        // post-window stall between window end and the departure counts as unknown, not asleep.
+        if (!motionSeen(r)) continue;
         const rowActive = isActiveRow(r);
         if (rowActive) activeMetrics[i] = true;
-        // OR-merge, matching the main population loop's own rule for `state` (line ~646) — a forced
-        // flush can write TWO rows for one minute (activity_samples has no uniqueness constraint on
-        // camera_id+bucket_start), and last-write-wins here could let a quiet duplicate silently
-        // downgrade a minute activeMetrics already correctly marked active, disagreeing about the
-        // same minute for no real reason (issue #442, found by adversarial review).
+        // OR-merge, matching the main population loop's own rule for `state` (line ~646) — TWO rows for
+        // one minute are real (activity_samples has no uniqueness constraint on camera_id+bucket_start:
+        // pre-#447 flush-time labels could repeat, and since #447 a big backward clock step re-writes
+        // labels — see the cribActExt comment above), and last-write-wins here could let a quiet
+        // duplicate silently downgrade a minute activeMetrics already correctly marked active,
+        // disagreeing about the same minute for no real reason (issue #442, found by adversarial review).
         stateMetrics[i] = stateMetrics[i] === null ? rowActive : stateMetrics[i] || rowActive;
       }
       metricsState = stateMetrics;
@@ -1748,9 +2025,75 @@ const recordFirstNotified = db.prepare(
 const recordFollowupNotified = db.prepare(
   'UPDATE sleep_nights SET notified_wake_at = ? WHERE child_id = ? AND night_date = ?'
 );
-
 // A night that was actually scored. Anything else is an absence of data, not a measurement.
 const SCORED = new Set(['ok', 'empty']);
+
+// ★ HAS A PARENT CORRECTED THIS NIGHT? One definition, used by every lock and gate below.
+//
+// A review row CORRECTS a night when it carries any of the four things applyCorrection (sleepReviews.js)
+// lays over the detector's answer: "no one was in the bed", or a true asleep, wake or in-bed time. It is
+// NOT "a review row exists": a dismissal, a note, or a save of per-event verdicts alone all write a row
+// with none of those, and none of them change what the night shows, so none of them may lock it.
+// `dismissed` is deliberately absent for the same reason (the overlay ignores it).
+//
+// ⚠️ This SQL and sleepReviews.js's `reviewCorrectsNight` are two spellings of ONE rule and must never
+// drift: a column the overlay starts reading but this ignores would leave a corrected night unlocked, and
+// the reverse would freeze a night whose display nothing changed. The PRAGMA-driven test in
+// review-in-bed-and-lock.test.js plants each sleep_reviews column on its own and fails if the two
+// disagree about any of them. Read directly here rather than through sleepReviews.js, which imports this
+// module.
+//
+// The two read the same VALUES the same way too, not just the same columns (fix round, 2026-09-30): the
+// flag counts only when it is exactly 1 (`saidNobody` in JS), and a time only when it is a non-empty
+// string. `IS NOT NULL` alone read '' as a correction that the overlay (where '' is falsy) ignores, so a
+// row could lock a night whose display nothing had changed. The same test plants '' and 0 / -1 as well.
+const CORRECTED_REVIEW_SQL =
+  "r.nobody_in_bed = 1 OR COALESCE(r.true_onset_at, '') <> '' OR COALESCE(r.true_wake_at, '') <> '' "
+  + "OR COALESCE(r.true_in_bed_at, '') <> ''";
+const parentCorrectedNight = db.prepare(
+  `SELECT 1 FROM sleep_reviews r WHERE r.child_id = ? AND r.night_date = ? AND (${CORRECTED_REVIEW_SQL})`
+);
+
+// ★ THE LOCK: a night a parent has corrected is complete, and nothing recomputes its stored row again.
+//
+// Why (owner's rule, 2026-09-30): a child's wake was corrected to 06:10 on staging, and a couple of hours
+// later the night "recalculated" after the bed was changed. runNightlySleepJob keeps re-storing a night for
+// ~3h after its window closes (issue #351) and never read sleep_reviews, and applyCorrection derives the
+// corrected night's asleep minutes and wake count from whatever that stored row says at read time, so a
+// later pass could change a night the parent had already put right. "Once a parent has corrected a night
+// it is complete and must not be overridden." Nothing here is specific to that house: it is per child
+// and per night, it reads no clock but the row's own, and every install gets the same rule.
+//
+// Locked = the correction above AND a stored row that is SCORED (ok/empty) AND was computed at or after
+// its own window closed. Each extra condition is there for a reason:
+//   - SCORED: a correction on a `no_data` (or missing) row must not freeze it unscored. The job keeps
+//     refining such a night until it scores, which also keeps its timelapse (made on the first SCORED
+//     pass, see the gate at the end of runNightlySleepJob), and the lock takes hold from that pass on.
+//     ⚠️ KNOWN LIMIT (documented in the README): that first scored pass is what locks. If it scores
+//     `empty` where a later pass would have found the child (`ok`, the empty->ok case of #419), the night
+//     stays `empty` under the parent's times, because the later pass never runs. Removing the correction
+//     unlocks it while it is still the last completed night.
+//   - `computed_at >= window_end`: a row written while its window was still open is a snapshot of a night
+//     in progress (only an admin `?store=1` for tonight, or the demo seed, writes one). It is never "the
+//     night as the parent judged it", so it must not freeze. This is plan review R9 ("a nobody flag on an
+//     in-progress night does not lock"; the overlay ignores it there too), done from the row's OWN columns
+//     rather than the wall clock, so it cannot drift into the #351 "gate on now" bug. Both are
+//     'YYYY-MM-DD HH:MM:SS' UTC text, so the string comparison is a time comparison.
+const nightLockedStmt = db.prepare(
+  `SELECT 1 FROM sleep_nights n
+     JOIN sleep_reviews r ON r.child_id = n.child_id AND r.night_date = n.night_date
+    WHERE n.child_id = ? AND n.night_date = ?
+      AND n.status IN (${[...SCORED].map((s) => `'${s}'`).join(', ')})
+      AND n.computed_at >= n.window_end
+      AND (${CORRECTED_REVIEW_SQL})`
+);
+
+// Is this child-night locked against recomputation? Exported for the route's `?stored=1` answer, so the
+// UI keys on the server's own verdict rather than re-deriving it from `night.corrected` (a corrected night
+// whose stored row is missing or `no_data` is NOT locked, and Recompute is its only fix).
+export function nightIsLocked(childId, nightDate) {
+  return !!nightLockedStmt.get(childId, nightDate);
+}
 
 // Compute a night and store it, upserting over whatever was there.
 //
@@ -1764,7 +2107,20 @@ const SCORED = new Set(['ok', 'empty']);
 // no longer exist.
 //
 // So a recompute may improve a night, or re-score it differently, but it may never turn a night that
-// WAS scored into one that isn't. The guard lives here rather than in the route so it protects every
+// WAS scored into one that isn't.
+//
+// ⚠️ Since issue #508 there is a SECOND way to reach this refusal, and the guard is kept for it on
+// purpose: a night stored `ok` before #508 whose video had stalled for more than half the window now
+// computes `no_data` (those minutes are unwatched), so a recompute is refused and the stored `ok` stays
+// until the guard is revisited. The admin route tells the cases apart by the refused summary's `status`
+// first (anything but `no_data`, e.g. a fully watched `ok` that now reads `no_sleep`, is neither "aged
+// out" nor "too little watched") and only then by `coverage_minutes` (0 = nothing left to read, i.e. aged
+// out; > 0 = data present, too little of it watched). In runNightlySleepJob a refusal leaves `computed_at` untouched, so the night is retried on
+// every 30-minute tick — TRACED for #508: bounded, because the job only ever visits
+// lastCompletedNightDate, which moves on when the next night's window closes (at most ~48 ticks, each
+// one computeNight and no write, no notification, no timelapse action). Pinned by the #508 multi-pass
+// test in recompute-night.test.js. Not new with #508: any refused downgrade (a camera deleted mid-window)
+// already behaved this way. The guard lives here rather than in the route so it protects every
 // caller — including `runNightlySleepJob` itself, which passes `allowDowngrade: false` explicitly (found
 // missing by adversarial review of issue #351's own fix). Two DIFFERENT protections are in play and it
 // is easy to conflate them: within a SINGLE computeNight call, status is decided from window-bounded
@@ -1775,6 +2131,16 @@ const SCORED = new Set(['ok', 'empty']);
 // computing `no_data` where the first call saw `ok`. `allowDowngrade: false` is what actually stops that
 // from overwriting a good row — the single-call ordering guarantee above does not reach across two
 // separate job passes at all.
+//
+// ⚠️ A THIRD REFUSAL, `reviewed` (2026-09-30): a night a parent has corrected is never re-stored — see
+// nightIsLocked above for why and for exactly what "corrected" and "locked" mean. It lives in the SAME
+// `!allowDowngrade` path as the other two, so it covers every production caller (the job, the admin
+// `?store=1` route and the demo seed all pass `allowDowngrade: false`), and it is checked FIRST, before
+// `would_downgrade`, so a locked night is never told its data aged out when the real reason is the
+// parent's correction. `allowDowngrade: true` (only tests use it) skips all three. This makes
+// computeAndStoreNight the only writer of the computed summary that the lock has to guard; the
+// notification-ledger updates (recordFirstNotified / recordFollowupNotified) and deleting a child touch
+// sleep_nights separately and are unaffected.
 export function computeAndStoreNight(childId, nightDate, { allowDowngrade = true } = {}) {
   const summary = computeNight(childId, nightDate);
   if (!allowDowngrade) {
@@ -1782,6 +2148,9 @@ export function computeAndStoreNight(childId, nightDate, { allowDowngrade = true
       .prepare('SELECT status, notified_wake_at FROM sleep_nights WHERE child_id = ? AND night_date = ?')
       .get(childId, nightDate);
     if (existing) {
+      if (nightIsLocked(childId, nightDate)) {
+        return { ...summary, stored: false, refused: 'reviewed' };
+      }
       if (!SCORED.has(summary.status) && SCORED.has(existing.status)) {
         return { ...summary, stored: false, refused: 'would_downgrade', stored_status: existing.status };
       }
@@ -1809,6 +2178,71 @@ export function computeAndStoreNight(childId, nightDate, { allowDowngrade = true
     computed_at: toSqlUtc(new Date()),
   });
   return { ...summary, stored: true };
+}
+
+// The refresh the nightly job still owes a night, done NOW, because a parent is about to lock it by
+// saving a correction. Called on EVERY save that leaves the review correcting the night, BEFORE anything of
+// that save is written: by the review route (routes/children.js) after its last refusal and before
+// applyVerdicts writes the event answers, and by saveNightReview itself for any other caller (the route
+// passes `storeFirst: false` so it is not run twice; wording corrected in fix round 3, Opus #4). For the
+// FIRST correction the lock is not yet in force, so computeAndStoreNight lets the store through once; for
+// every later save (a re-edit, a note, a verdict) the night is already locked, and the first check below
+// returns before any compute (see there).
+//
+// Why (both plan reviewers, 2026-09-30): the morning card is offered on the FIRST stored row, and that
+// row stays provisional for ~3h after the window closes (#351) while the job keeps refining it. Locking
+// at review time without this would freeze most corrected nights at their first rough pass, and a plain
+// "That's right" confirmation locks too. So the night is re-stored from a fresh computeNight at the
+// moment of the save, and it is THAT row the lock keeps.
+//
+// ⚠️ KNOWN LIMIT: "fresh at the moment of the save" is not always what the parent was looking at. A page
+// left open shows the night as it was computed when the page loaded, and a completed night's wake keeps
+// drifting until ~10:00 as daytime activity fills the lookahead (measured 2026-08-29: 05:51 at 08:16,
+// 08:31 at 09:50). The row stored and locked here is the SAVE-time compute. The review row still records
+// what was on screen (computed_onset_at / computed_wake_at), so the difference stays visible. README.
+//
+// ⚠️ DELIBERATELY NARROWER than "store on every correction", and each skip is a case where storing would
+// do harm or add nothing:
+//   - already LOCKED: a later save on a night the parent has already corrected. The store would be refused
+//     (`reviewed`) anyway, but only AFTER a full computeNight: every re-edit, note or verdict on a corrected
+//     night paid for one, and a compute that threw would have 500'd a save after applyVerdicts had written
+//     (both reviewers, fix round 2026-09-30). Checked first, before anything else is read.
+//   - no row, or an unscored one (`no_data`/`no_sleep`/`off`): the lock does not hold on those anyway,
+//     and creating or upgrading the row here would take the night's FIRST scored pass away from the job.
+//     That pass is the only one that assembles the night's timelapse (or discards an empty night's
+//     frames), and it sends the first sleep report. The frames directory has no other sweep, so a night
+//     scored here would keep its raw frames on disk forever with no timelapse. The job scores such a
+//     night on its next tick (with its report and timelapse as usual) and the lock takes hold from then.
+//     ⚠️ OWNER DECISION (2026-09-30, fix round 2, raised by both code reviewers): kept this way knowing
+//     its cost. The lock then holds whatever that first scored pass stored, so a corrected night whose
+//     first pass has no wake yet (a departure still being confirmed) keeps that blank wake until the parent
+//     adds one to the review, or removes the correction while it is still the last night. Storing here
+//     instead would cost the timelapse and the first report, which is worse. README, "Known limits".
+//   - not the child's LAST COMPLETED night: the job only ever visits that one night, so it owes no other
+//     night anything. ⚠️ The finality check below cannot stand in for this (found in fix-round review,
+//     2026-09-30): rows written before #351 (0.31.0) were written once and never finalised, and a locked
+//     row's computed_at stays early for good, so an old night's OWN computed_at can still read
+//     "provisional" weeks later. Without this, any signed-in user saving a correction on a ten-day-old
+//     night re-scored it with today's detector.
+//   - the window has not closed yet: storing now would write a night in progress.
+//   - the row is already FINAL: computed at or after its evidence horizon, judged on the row's OWN
+//     computed_at exactly as the job's gate does. ⚠️ NOT on the current time: that is the #351 bug. Between
+//     the horizon and the job's next 30-minute tick, a row last written BEFORE the horizon is still owed
+//     one pass (the one that can see the whole lookahead); judged on "now" it would look final, this
+//     would skip, and the lock would then freeze that early row forever. Re-scoring a truly final row
+//     would also let a caregiver re-score with today's detector, which is what the admin Recompute is for.
+// So this only ever does what the job itself would have done on its next tick, earlier.
+export function storeNightBeforeCorrection(childId, nightDate, nowMs = Date.now()) {
+  if (nightIsLocked(childId, nightDate)) return { stored: false, skipped: 'locked' };
+  const row = db
+    .prepare('SELECT status, window_end, computed_at FROM sleep_nights WHERE child_id = ? AND night_date = ?')
+    .get(childId, nightDate);
+  if (!row || !SCORED.has(row.status)) return { stored: false, skipped: 'unscored' };
+  if (nightDate !== lastCompletedNightDate(childId)) return { stored: false, skipped: 'not_last_night' };
+  const utcMs = (s) => new Date(`${s.replace(' ', 'T')}Z`).getTime();
+  if (nowMs < utcMs(row.window_end)) return { stored: false, skipped: 'in_progress' };
+  if (isEvidenceFinal(row.window_end, utcMs(row.computed_at))) return { stored: false, skipped: 'final' };
+  return computeAndStoreNight(childId, nightDate, { allowDowngrade: false });
 }
 
 export function getStoredNights(childId, limit = 14) {
@@ -1844,15 +2278,23 @@ const mean = (a) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : null);
 // the nights at the median temperature into a warmer half and a cooler half and compares wake-ups + sleep
 // duration, and reports a Pearson r for temp↔wakes. All temperatures are Celsius (the client converts to
 // the user's unit). Returns { status }: 'off' | 'insufficient' | 'ok'. The client renders the wording.
+//
+// ⚠️ A night a parent marked "no one was in the bed" is EXCLUDED, even though its stored row still
+// says 'ok'. This reads sleep_nights directly rather than through applyCorrection, so the overlay never
+// reaches it. Without the NOT EXISTS below, a night the detector scored as sleep in an empty bed would
+// keep its invented wake count and duration in these averages after the parent has said it never
+// happened. Time corrections are NOT applied here (pre-existing: the stored detector figures are used),
+// which is a smaller error of degree, not a whole fictional night.
 export function sleepInsights(childId, { nights = 30 } = {}) {
   if (!childTracksSleep(childId)) return { status: 'off' };
   const rows = db
     .prepare(
-      `SELECT night_date, wake_count, asleep_minutes, avg_temperature, avg_humidity
-         FROM sleep_nights
-         WHERE child_id = ? AND status = 'ok' AND avg_temperature IS NOT NULL
-           AND wake_count IS NOT NULL AND asleep_minutes IS NOT NULL
-         ORDER BY night_date DESC LIMIT ?`
+      `SELECT n.night_date, n.wake_count, n.asleep_minutes, n.avg_temperature, n.avg_humidity
+         FROM sleep_nights n
+         WHERE n.child_id = ? AND n.status = 'ok' AND n.avg_temperature IS NOT NULL
+           AND n.wake_count IS NOT NULL AND n.asleep_minutes IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM sleep_reviews r WHERE r.child_id = n.child_id AND r.night_date = n.night_date AND r.nobody_in_bed = 1)
+         ORDER BY n.night_date DESC LIMIT ?`
     )
     .all(childId, Math.min(60, Math.max(1, nights)));
 
@@ -1906,6 +2348,15 @@ export function sleepInsights(childId, { nights = 30 } = {}) {
     warmer: warm.length ? half(warm) : null,
   };
 }
+
+// How often startSleepJob runs the job. Named because the follow-up's freshness limit below is built on it.
+const SLEEP_JOB_INTERVAL_MS = 30 * 60 * 1000;
+// The latest a "Sleep report updated" follow-up may go out, counted from the window's end: the evidence
+// horizon (WAKE_LOOKAHEAD_MS) plus ONE job tick. That last tick is the only pass that can see a departure
+// confirmed in the final minutes before the horizon (the #351 gate in runNightlySleepJob), so its follow-up
+// is still "within about 3 hours" (docs/notifications.md). Anything later is not news (fix round 2,
+// 2026-09-30): see the gate where the follow-up is decided.
+const FOLLOWUP_FRESH_MS = WAKE_LOOKAHEAD_MS + SLEEP_JOB_INTERVAL_MS;
 
 // Compute + store the most recent completed night for every child, if not already stored. Called from
 // the scheduler (and once at startup) so "last night" is ready without an on-request compute.
@@ -1965,6 +2416,16 @@ export function runNightlySleepJob() {
         // horizon like every other pass) — and only once a write has itself already happened at or after
         // the horizon does every future tick skip for good.
         if (existing && isEvidenceFinal(existing.window_end, new Date(existing.computed_at.replace(' ', 'T') + 'Z').getTime())) continue;
+        // ⚠️ A NIGHT A PARENT HAS CORRECTED IS LEFT ALONE (the lock, see nightIsLocked; a child's night on
+        // staging, 2026-09-30, "recalculated" hours after its wake was corrected). Checked HERE, before
+        // computeNight, and not only inside computeAndStoreNight: that refusal would still cost a full
+        // computeNight every 30-minute tick for as long as the night stays the last completed one (~21h).
+        // Skipped quietly, WITHOUT touching `computed_at`. That is what makes un-locking work: if the
+        // parent later removes their last correction, the gate above still reads the row's own, older
+        // `computed_at`, so a row last written before the evidence horizon is owed one more pass and gets
+        // it on the next tick, even hours after the horizon, for as long as it is still the last completed
+        // night. Gating un-lock on the current time instead would be the #351 bug again.
+        if (existing && nightIsLocked(kid.id, nightDate)) continue;
         // ⚠️ `allowDowngrade: false` (found by adversarial review). Before issue #351, a row was only ever
         // written ONCE, so this call could never see an `existing` scored row and the downgrade guard was
         // moot here. Now that a provisional row can be recomputed several times over its 3h window, a
@@ -2001,7 +2462,30 @@ export function runNightlySleepJob() {
           canNotify &&
           existing.notified_at != null &&
           existing.notified_wake_at == null &&
-          summary.wake_at != null
+          summary.wake_at != null &&
+          // ⚠️ ...and only while it is still news: no later than one job tick past the evidence horizon
+          // (FOLLOWUP_FRESH_MS). Fix round 2, 2026-09-30, Opus #3, verified. The follow-up had no time limit
+          // of its own; it relied on the job never recomputing a night past the horizon. Un-locking breaks
+          // that on purpose (plan review R7): a correction removed at 13:00 lets the owed pass run at 13:30,
+          // and it pushed "Sleep report updated" six and a half hours after the window closed. A container
+          // that was down across the morning did the same on its first tick back. Judged on the CURRENT time
+          // on purpose, unlike the #351 gate above: this decides only whether to SEND, never whether to
+          // recompute or store, so the owed pass still stores the night exactly as before. Skipped WITHOUT
+          // recording notified_wake_at, like the correction gate below: nothing was sent.
+          now - new Date(existing.window_end.replace(' ', 'T') + 'Z').getTime() <= FOLLOWUP_FRESH_MS &&
+          // ⚠️ Not after a parent has CORRECTED the night in any way (plan review R2 for "no one was in
+          // the bed", widened 2026-09-30 to every correction). The follow-up exists to tell a parent the
+          // detector's wake time; a parent who has typed the wake themselves, or said nobody was there,
+          // must not be pushed the detector's "up 07:20" over their own answer. Most corrected nights
+          // never reach here at all (the lock above skips a corrected SCORED row before computing); this
+          // gate is what covers a corrected night whose stored row was still `no_data`, which the lock
+          // deliberately leaves running until it scores.
+          // Skipped WITHOUT recording notified_wake_at: nothing was sent, so recording it would claim
+          // otherwise and arm computeAndStoreNight's `would_blank_notified_wake` guard on a value nobody
+          // was told. The follow-up therefore still goes out if the correction is taken back inside the
+          // window, which is right, because the detector's night is being shown again.
+          // The FIRST report is not recalled; it has already been sent (docs/notifications.md).
+          !parentCorrectedNight.get(kid.id, nightDate)
         ) {
           // Push into `followups` is CONDITIONAL on the write succeeding — the opposite of the
           // first-notify path above, which pushes into `fresh` unconditionally. (Both sends actually
@@ -2063,7 +2547,7 @@ let jobTimer = null;
 export function startSleepJob() {
   if (jobTimer) return;
   runNightlySleepJob(); // backfill the last completed night on boot
-  jobTimer = setInterval(runNightlySleepJob, 30 * 60 * 1000); // and catch the window closing within 30 min
+  jobTimer = setInterval(runNightlySleepJob, SLEEP_JOB_INTERVAL_MS); // and catch the window closing within 30 min
   logger.info('[sleep] Nightly sleep computation scheduled (every 30 min; last completed night).');
 }
 

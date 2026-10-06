@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { useTempDataDir, cleanupTempDataDirs, makeChild, makeCamera } from './helpers/harness.js';
 
 const DATA_DIR = useTempDataDir();
@@ -25,9 +26,13 @@ process.env.PATH = emptyBinDir;
 
 const { default: db } = await import('../src/db.js');
 const { SLEEP_THRESHOLDS } = await import('../src/lib/sleepAnalysis.js');
-const { startSegmenter, stopAllSegmenters, isSegmenterRunning } = await import('../src/lib/clipRecorder.js');
-const { holdOwners, RING_OWNER } = await import('../src/lib/ringHolds.js');
-const { handleMinute, startWakeWatcher, stopWakeWatcher, sweepStaleRuns, _state } =
+const { startSegmenter, stopAllSegmenters, isSegmenterRunning, ringDepthMs, setRingDepth, extractClip, clipCoverStartMs, ringOldestStartMs } =
+  await import('../src/lib/clipRecorder.js');
+const { holdOwners, effectiveHold, RING_OWNER } = await import('../src/lib/ringHolds.js');
+const activity = await import('../src/lib/activityTracker.js');
+const { logger } = await import('../src/lib/logger.js');
+const { WAKE_CLIP_LEAD_SEC, getWakeClipSettings } = await import('../src/lib/recordings.js');
+const { handleMinute, startWakeWatcher, stopWakeWatcher, sweepStaleRuns, firstActiveFrameMs, wakeClipAnchor, _state } =
   await import('../src/lib/wakeWatcher.js');
 
 const { MOTION_ACTIVE, SOUND_ACTIVE, ONSET_QUIET_MIN, WAKE_ACTIVE_MIN, WAKE_GAP_MIN } = SLEEP_THRESHOLDS;
@@ -52,15 +57,34 @@ function windowAroundNow() {
 }
 
 // A minute of activity, `n` minutes after the run's notional start.
+//
+// ⚠️ #448: the labels are measured from ONE minute-aligned instant fixed when the file loads, not from
+// Date.now() at every call. The watcher now treats the distance between two labels as elapsed TIME, so a
+// wall clock that rolled over a minute boundary between two calls of a test would shift the later label by a
+// whole minute and read as a one-minute hole (or a repeated label), breaking settle() about once in every
+// few thousand runs. The window the watcher checks is the real clock's (windowAroundNow), unaffected.
+const BASE_MS = Math.floor(Date.now() / 60_000) * 60_000;
 let clock = 0;
-function minute({ motion = 0, sound = 0 } = {}) {
-  const t = new Date(Date.now() - (200 - clock) * 60 * 1000);
-  clock++;
+// Start (ms) of the minute the label `idx` names; the watcher's own `at` for it is this + 60 s.
+const labelStartMs = (idx) => BASE_MS - (200 - idx) * 60 * 1000;
+function labelFor(idx) {
+  const t = new Date(labelStartMs(idx));
   const p = (x) => String(x).padStart(2, '0');
-  const bucketStart =
-    `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())}:00`;
-  return handleMinute({ cameraId: CAM, bucketStart, motionPeak: motion, soundPeak: sound });
+  return `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())}:00`;
 }
+const deliver = (bucketStart, motion = 0, sound = 0) =>
+  handleMinute({ cameraId: CAM, bucketStart, motionPeak: motion, soundPeak: sound });
+function minute({ motion = 0, sound = 0 } = {}) {
+  const idx = clock;
+  clock++;
+  return deliver(labelFor(idx), motion, sound);
+}
+// The notional clock moves on by `n` minutes without a payload: what an outage looks like to the watcher,
+// because activityTracker sends nothing at all for a minute with neither a motion frame nor a sound window.
+const skip = (n) => { clock += n; };
+// Where the watcher puts a run that starts at label `idx` (the minute's END, #447).
+const endMs = (idx) => labelStartMs(idx) + 60 * 1000;
+const stateOf = () => _state().get(CAM);
 
 const quiet = () => minute({ motion: 0, sound: 0 });
 const loud = () => minute({ sound: SOUND_ACTIVE + 10 });
@@ -302,6 +326,680 @@ describe('★ #446 — a WAKE hold is gated on wake clips actually being enabled
   });
 });
 
+describe('★ #447 — the WAKE hold is taken young enough for every ring size the settings allow', () => {
+  // activityTracker labels a minute by when its samples ARRIVED and hands it over at the minute's END, on a
+  // 1 s tick. handleMinute anchors the run at the wake's first active frame (#412; at the minute's END, `at`,
+  // for a payload that carries no rises) and holds the ring from clipCoverStartMs(anchor, WAKE_CLIP_LEAD_SEC)
+  // = anchor - 7 s (#412; it was a separate `at - 15 s`, #447's HOLD_LEAD_MS, before). The ring is only as deep
+  // as the clip settings make it (clipRecorder.ringDepthMsFor, nothing sizes it for wake clips): 63 s with
+  // on-demand Record on, 38 s with it off, 23 s at the smallest clip settings. A hold point older than the ring
+  // when it is taken protects nothing: the lead-in is already gone.
+  // This drives the REAL chain — samples into the tracker, its ticks, its listener into handleMinute, the hold —
+  // so it fails both on a minute delivered late (at +GRACE, 22.9 s old here) and on a hold anchored at the
+  // minute's START (75.9 s old here: past every ring). Before #447 the hold was 15 s + the flush phase (0-60 s)
+  // old. With no ring files in this test the anchor is `at` (nothing to clamp to), so the hold is 7 s before the
+  // minute's end, 7.9 s old when the 0.9 s-phase tick takes it; the real-footage cases are in the #412 block.
+  for (const { preRollSec, postRollSec, ring, why } of [
+    { preRollSec: 30, postRollSec: 15, ring: 63_000, why: 'on-demand Record on (its 30 s pre-roll)' },
+    { preRollSec: 5, postRollSec: 15, ring: 38_000, why: 'Record off, default clip settings' },
+    { preRollSec: 0, postRollSec: 5, ring: 23_000, why: 'the smallest clip settings allowed' },
+  ]) {
+    test(`${ring / 1000} s ring (${why}): the hold is clipCoverStartMs(anchor), anchored no later than the minute's end, and fits the ring`, () => {
+      db.prepare("UPDATE settings SET wake_clips_enabled = 1 WHERE id = 'app'").run();
+      const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(CAM);
+      startSegmenter(CAM, camera.mediamtx_path, { preRollSec, postRollSec });
+      assert.equal(ringDepthMs(CAM), ring, 'precondition: the ring this case is about');
+      settle();
+      activity._resetActivityTrackerForTests();
+      const off = activity.onMinuteFlushed(handleMinute);
+      try {
+        // The last whole minute: inside the child's window, which is built around the real clock.
+        const M = Math.floor(Date.now() / 60_000) * 60_000 - 60_000;
+        activity.recordMotion(CAM, MOTION_ACTIVE + 0.05, null, M + 20_000); // the wake's first active minute
+        let takenAt = null;
+        // The tracker's 1 s timer on a .9 s phase: the worst case, the minute ends just after a tick.
+        for (let t = M + 900; t < M + 3 * 60_000 && takenAt === null; t += 1000) {
+          activity.flushActivity(t);
+          if (effectiveHold(CAM) !== null) takenAt = t;
+        }
+        assert.ok(takenAt !== null, 'a WAKE hold was taken');
+        assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE]);
+        const age = takenAt - effectiveHold(CAM);
+        assert.ok(age <= ring, `the hold point was ${age} ms old against a ${ring} ms ring: the lead-in is gone`);
+        // #412 C11: the hold is the ONE formula extractClip reads back with, taken from the run's anchor, and the
+        // anchor is never later than the minute's end (today's anchor is the ceiling).
+        const run = stateOf().run;
+        const minuteEnd = M + 60_000;
+        assert.ok(run.startMs <= minuteEnd, `the anchor ${run.startMs - minuteEnd} ms is later than the minute's end`);
+        assert.equal(effectiveHold(CAM), clipCoverStartMs(run.startMs, WAKE_CLIP_LEAD_SEC));
+        // ...and from BELOW (#447 fix round 1: with only the upper bound, an anchor a minute or 30 s LATER than the
+        // minute's end passed, because a hold point in the future has a negative age). The listener hears a minute
+        // at or after its end, so an anchor at or before the end is never later than the tick that took the hold,
+        // and the hold sits 7 s (clipCoverStartMs: 3 s lead + 2 segments either side) before that anchor: at least
+        // 7 s old. Less means the anchor is a moment that had not happened yet, and the clip would open after the
+        // movement.
+        assert.ok(age >= 7_000, `the hold point was ${age} ms old: younger than the cover margin, so anchored in the future`);
+        // ...and an upper bound again (the #412 rewrite had dropped the old `age <= 16 s`, which let the #447 mutant
+        // "the listener is told at +GRACE" survive): with no ring files the anchor is the minute's end, so the hold
+        // is the 7 s cover margin plus the tick that heard the minute (7.9 s here, a 0.9 s phase). A minute heard
+        // late (the tracker's 7 s grace) would be 7 s older, 14.9 s: still inside the 23 s ring, so only this bound
+        // catches it. 9 s = 7 s + one 1 s tick + 1 s of slack.
+        assert.ok(age <= 9_000, `the hold point was ${age} ms old: the minute was heard late (more than 7 s + one tick)`);
+      } finally {
+        off();
+      }
+    });
+  }
+});
+
+// -------------------------------------------------------------------------------------------
+// ★ #412 — THE CLIP STARTS AT THE WAKE'S FIRST ACTIVE FRAME, CLAMPED TO THE FOOTAGE THE RING REALLY HOLDS.
+//
+// What was wrong (and what was NOT): since #447 the clip was anchored at the END of the wake's first active
+// minute, up to 57 s (27 s on average) after the first active frame. The issue's own headline, a hold that
+// lands after the ring pruned the opening, does not occur today (the hold is taken ~1 s after `at` and the
+// clip needs footage from `at - 7 s`; the smallest ring, 23 s, keeps 8 s of margin). The fix anchors on the
+// first frame over the same thresholds that define `active` and clamps to the ring's ACTUAL oldest closed
+// segment, because a clip anchored before the ring's footage has an EMPTY selection in extractClip and the row
+// fails. The claim ids C1..C12 below are the plan's.
+//
+// Fixtures are explicit times relative to each test's own synthetic minute M (a fixed past instant or a
+// labelStartMs), set on ring-dir files with utimes. Nothing here depends on the second of the minute the suite
+// runs in. With no ffmpeg on PATH the segmenter entry only exists SYNCHRONOUSLY, so every chain below runs
+// without an `await` between startSegmenter and its last read.
+describe('★ #412 — the wake clip is anchored on the first active frame, clamped to the ring\'s real footage', () => {
+  const LEAD_MS = WAKE_CLIP_LEAD_SEC * 1000;
+  const sqlTime = (ms) => new Date(ms).toISOString().replace('T', ' ').slice(0, 19);
+  // Closed segment mtimes every 2 s (SEGMENT_SEC, restated only to build fixtures) from `from` to `to`, offsets.
+  const every2s = (from, to) => { const a = []; for (let o = from; o <= to; o += 2000) a.push(o); return a; };
+  // The oldest closed segment's CONTENT start for a fixture list: its mtime minus one segment length.
+  const contentStart = (mtimes) => Math.min(...mtimes) - 2000;
+  const bufferLinesIn = (lines) => lines.filter((l) => l.includes('the buffer reaches back only'));
+
+  beforeEach(() => {
+    db.prepare("UPDATE settings SET wake_clips_enabled = 1, wake_clip_seconds = 30 WHERE id = 'app'").run();
+  });
+  after(() => {
+    db.prepare("UPDATE settings SET wake_clips_enabled = 1, wake_clip_seconds = 30 WHERE id = 'app'").run();
+  });
+
+  // Arm a REAL segmenter and plant closed segments in its ring dir (it wipes the dir on start, so files go in
+  // after). `mtimes` are absolute ms.
+  function startRing({ preRollSec = 30, postRollSec = 15 } = {}, mtimes = []) {
+    const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(CAM);
+    const entry = startSegmenter(CAM, camera.mediamtx_path, { preRollSec, postRollSec });
+    assert.equal(isSegmenterRunning(CAM), true, 'precondition: the segmenter armed synchronously');
+    plant(entry, mtimes);
+    return entry;
+  }
+  let plantedN = 0;
+  function plant(entry, mtimes) {
+    for (const m of mtimes) {
+      const p = path.join(entry.ringDir, `seg-${String(plantedN++).padStart(6, '0')}.mkv`);
+      fs.writeFileSync(p, 'x');
+      fs.utimesSync(p, new Date(m), new Date(m));
+    }
+  }
+
+  // ONE hand-built active minute at the next label, after the watcher is armed. `ring` = { preRollSec,
+  // postRollSec, mtimeOffsets } (offsets from the minute's START M; or `mtimeAbs`, absolute ms, for a segment
+  // that must be "still being written" relative to the real clock; `growTo` = settings to resize the running
+  // ring to afterwards), `rises` / `soundRises` = [[offsetMs, value]] or undefined for a legacy payload that
+  // carries no arrays.
+  function oneRun({ ring = null, rises, soundRises, motionPeak = MOTION_ACTIVE + 0.05, soundPeak = null, clipsEnabled = true }) {
+    db.prepare("UPDATE settings SET wake_clips_enabled = ? WHERE id = 'app'").run(clipsEnabled ? 1 : 0);
+    settle();
+    const idx = clock++;
+    const M = labelStartMs(idx);
+    const entry = ring ? startRing(ring, ring.mtimeAbs ?? ring.mtimeOffsets.map((o) => M + o)) : null;
+    if (ring?.growTo) assert.equal(setRingDepth(CAM, ring.growTo), true);
+    logger.clear();
+    const payload = { cameraId: CAM, bucketStart: labelFor(idx), motionPeak, soundPeak };
+    if (rises) payload.motionRises = rises.map(([o, value]) => ({ atMs: M + o, value }));
+    if (soundRises) payload.soundRises = soundRises.map(([o, value]) => ({ atMs: M + o, value }));
+    const result = handleMinute(payload);
+    return { M, at: M + 60_000, run: stateOf().run, hold: effectiveHold(CAM), lines: logger.getRecent(), entry, result };
+  }
+
+  // Start extractClip's REAL selection for each `at` NOW (the segmenter entry only exists synchronously) and say
+  // whether it found footage: 'empty' (the failure the clamp exists to prevent: "no ring segments covered the
+  // requested window"), 'selected' (it got past selection and failed at the ffmpeg spawn, which is not
+  // installed here by design) or the unexpected message.
+  function trySelect(ats) {
+    const { clipSeconds } = getWakeClipSettings();
+    return Promise.all(ats.map((at, i) =>
+      extractClip(CAM, { preRollSec: WAKE_CLIP_LEAD_SEC, postRollSec: clipSeconds, at, settleMs: 0, outBase: `t412-${i}` })
+        .then(() => 'selected', (err) =>
+          /no ring segments covered/.test(err.message) ? 'empty' : /spawn|ENOENT|ffmpeg/i.test(err.message) ? 'selected' : err.message)));
+  }
+
+  // THE REAL CHAIN: samples into the real tracker, its ticks (synthetic times), its listener into the real
+  // handleMinute, the real holdRing, the real captureWakeClip (its `recordings` row is inserted synchronously
+  // before the cut, so `started_at` is observable). 15 quiet minutes arm the watcher, then `activeMinutes`
+  // consecutive active minutes; `frames` = [[offsetMs into the FIRST active minute, 'm'|'s'|'o', value]].
+  // Ticks at each minute's end + 0.5 s (the first tick at or after the end tells the listener).
+  const CHAIN_M = Date.UTC(2026, 0, 15, 3, 0, 0); // fixed, in the past: the first active minute starts here
+  function runChain({ frames, ring, activeMinutes = WAKE_ACTIVE_MIN }) {
+    db.prepare('DELETE FROM recordings').run();
+    startRing(ring, ring.mtimeOffsets.map((o) => CHAIN_M + o));
+    activity._resetActivityTrackerForTests();
+    logger.clear();
+    const off = activity.onMinuteFlushed(handleMinute);
+    let holdFrom = null;
+    try {
+      const events = [];
+      for (let i = ONSET_QUIET_MIN; i >= 1; i--) events.push([CHAIN_M - i * 60_000 + 20_000, 'm', 0]);
+      for (const [o, kind, v] of frames) events.push([CHAIN_M + o, kind, v]);
+      for (let i = 1; i < activeMinutes; i++) events.push([CHAIN_M + i * 60_000 + 20_000, 'm', MOTION_ACTIVE + 0.05]);
+      events.sort((a, b) => a[0] - b[0]);
+      let k = 0;
+      for (let t = CHAIN_M - ONSET_QUIET_MIN * 60_000 + 60_500; t <= CHAIN_M + activeMinutes * 60_000 + 500; t += 60_000) {
+        while (k < events.length && events[k][0] < t) {
+          const [at, kind, v] = events[k++];
+          if (kind === 'm') activity.recordMotion(CAM, v, null, at);
+          else if (kind === 's') activity.recordSound(CAM, v, at);
+          else activity.recordMotionOut(CAM, v, null, at);
+        }
+        activity.flushActivity(t);
+        if (holdFrom === null && effectiveHold(CAM) !== null) holdFrom = effectiveHold(CAM);
+      }
+    } finally {
+      off();
+      activity._resetActivityTrackerForTests();
+    }
+    const rows = db.prepare("SELECT id, started_at, status FROM recordings WHERE kind = 'wake' ORDER BY id").all();
+    return { rows, holdFrom, run: stateOf().run, lines: logger.getRecent() };
+  }
+
+  describe('C3 — firstActiveFrameMs finds the first frame over the thresholds that define `active`', () => {
+    // Through the REAL tracker, one minute at a time: record the samples, tick, take the payload the listener got.
+    const MIN0 = Date.UTC(2026, 0, 14, 0, 0, 0);
+    function trackerPayload(M, samples) {
+      activity._resetActivityTrackerForTests();
+      let got = null;
+      const off = activity.onMinuteFlushed((p) => { got = p; });
+      try {
+        for (const [kind, v, o] of samples) {
+          if (kind === 'm') activity.recordMotion(CAM, v, null, M + o);
+          else if (kind === 's') activity.recordSound(CAM, v, M + o);
+          else activity.recordMotionOut(CAM, v, null, M + o);
+        }
+        activity.flushActivity(M + 60_500);
+      } finally {
+        off();
+        activity._resetActivityTrackerForTests();
+      }
+      return got;
+    }
+    // The brute force: the earliest sample that is over ITS channel's threshold (out-of-bed motion never counts).
+    const oracle = (samples) => {
+      let best = null;
+      for (const [kind, v, o] of samples) {
+        const hot = (kind === 'm' && v > MOTION_ACTIVE) || (kind === 's' && v > SOUND_ACTIVE);
+        if (hot && (best === null || o < best)) best = o;
+      }
+      return best;
+    };
+
+    const planted = [
+      ['values exactly AT both thresholds do not count', [['m', MOTION_ACTIVE, 5000], ['s', SOUND_ACTIVE, 6000]], null],
+      ['just over the motion threshold counts', [['m', MOTION_ACTIVE + 1e-9, 7000]], 7000],
+      ['just over the sound threshold counts', [['s', SOUND_ACTIVE + 1e-9, 7000]], 7000],
+      ['sub-threshold rises before the first qualifying one are skipped', [['m', 0.002, 1000], ['m', 0.005, 2000], ['m', 0.02, 10_000]], 10_000],
+      ['a sound value between 0.01 and 6 does not count (it would, compared with the MOTION threshold)', [['s', 3, 1000], ['m', 0.02, 20_000]], 20_000],
+      ['sound first, then motion', [['s', SOUND_ACTIVE + 4, 8000], ['m', 0.02, 20_000]], 8000],
+      ['motion first, then sound', [['m', 0.02, 4000], ['s', SOUND_ACTIVE + 4, 30_000]], 4000],
+      ['two qualifying rises: the FIRST', [['m', 0.02, 10_000], ['m', 0.5, 20_000]], 10_000],
+      ['a later, lower frame does not move it', [['m', 0.02, 10_000], ['m', 0.015, 15_000]], 10_000],
+      ['out-of-bed motion first is ignored', [['o', 0.9, 2000], ['m', 0.02, 30_000]], 30_000],
+      ['a frame at the very start of the minute', [['m', 0.3, 0]], 0],
+      ['a frame in the last millisecond of the minute', [['m', 0.3, 59_999]], 59_999],
+      ['sound-only minute', [['s', SOUND_ACTIVE + 1, 41_000]], 41_000],
+    ];
+    for (const [name, samples, want] of planted) {
+      test(`C3: ${name}`, () => {
+        const M = MIN0;
+        const payload = trackerPayload(M, samples);
+        assert.ok(payload, 'precondition: the tracker told the listener about the minute');
+        assert.equal(firstActiveFrameMs(payload, M), want === null ? null : M + want);
+        // The same predicate as handleMinute's `active`: a minute is active exactly when it has an active frame.
+        const active = (payload.motionPeak != null && payload.motionPeak > MOTION_ACTIVE) ||
+          (payload.soundPeak != null && payload.soundPeak > SOUND_ACTIVE);
+        assert.equal(active, want !== null, 'the active frame and the active minute must agree');
+      });
+    }
+
+    test('C3: 400 seeded random minutes through the real tracker equal the brute-force first frame', () => {
+      let s = 412_000;
+      const rand = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+      const pick = (a) => a[Math.floor(rand() * a.length)];
+      const motionValues = [0, 0.0005, 0.004, MOTION_ACTIVE, MOTION_ACTIVE + 1e-9, 0.05, 0.3, 0.9];
+      const soundValues = [0, 2, 5.9, SOUND_ACTIVE, SOUND_ACTIVE + 1e-9, 8, 20];
+      let armed = 0;
+      let none = 0;
+      let nonTrivial = 0;
+      for (let seq = 0; seq < 400; seq++) {
+        const n = Math.floor(rand() * 10);
+        const offs = Array.from({ length: n }, () => Math.floor(rand() * 60_000)).sort((a, b) => a - b);
+        const samples = offs.map((o) => {
+          const kind = pick(['m', 'm', 's', 'o']);
+          return [kind, pick(kind === 's' ? soundValues : motionValues), o];
+        });
+        const payload = trackerPayload(MIN0, samples);
+        const want = oracle(samples);
+        const got = payload ? firstActiveFrameMs(payload, MIN0) : null;
+        assert.equal(got, want === null ? null : MIN0 + want, `seq ${seq}: ${JSON.stringify(samples)}`);
+        if (want === null) none++; else armed++;
+        // A first frame that is NOT the minute's first sample: the cases where "first rise" and "first frame over
+        // the threshold" differ.
+        if (want !== null && samples.length && samples.some(([k, , o]) => o < want && k !== 'o')) nonTrivial++;
+      }
+      // The floors catch a generator edit that makes the comparison vacuous.
+      assert.ok(armed >= 150, `only ${armed} sequences had an active frame`);
+      assert.ok(none >= 40, `only ${none} sequences had none`);
+      assert.ok(nonTrivial >= 60, `only ${nonTrivial} sequences had sub-threshold samples before the active frame`);
+    });
+
+    test('C9: rises outside the minute are filtered BEFORE the minimum: a clamped early sample cannot pull the anchor out (real tracker)', () => {
+      // A small backward clock step: a sample received during minute 1 arrives after minute 1 was told, so the
+      // tracker files it under minute 2 but keeps its own (earlier) receipt time.
+      activity._resetActivityTrackerForTests();
+      const seen = [];
+      const off = activity.onMinuteFlushed((p) => seen.push(p));
+      try {
+        const M1 = MIN0;
+        const M2 = MIN0 + 60_000;
+        const M3 = MIN0 + 120_000;
+        activity.recordMotion(CAM, 0.05, null, M1 + 10_000);
+        activity.flushActivity(M1 + 60_500); // minute 1 told
+        activity.recordMotion(CAM, 0.02, null, M1 + 30_000); // clamped into minute 2, stamped 30 s before it
+        activity.recordMotion(CAM, 0.5, null, M2 + 40_000); // the real first frame over the threshold, inside minute 2
+        activity.flushActivity(M2 + 60_500);
+        // Same again for minute 3, but the clamped sample is the HIGH one: it masks the later, lower, in-bounds frame.
+        activity.recordMotion(CAM, 0.9, null, M2 + 50_000);
+        activity.recordMotion(CAM, 0.03, null, M3 + 40_000);
+        activity.flushActivity(M3 + 60_500);
+        assert.equal(seen.length, 3);
+        assert.deepEqual(seen[1].motionRises.map((r) => r.atMs), [M1 + 30_000, M2 + 40_000], 'precondition: the clamped sample leads the list');
+        assert.equal(firstActiveFrameMs(seen[1], M2), M2 + 40_000, 'the stamp before the minute must not be the anchor');
+        // Known limit, stated: a clamped HIGH sample hides later frames (they are not peak-raising), so nothing is
+        // left inside the minute and the anchor falls back to `at`: today's behaviour, never a wrong early one.
+        assert.deepEqual(seen[2].motionRises.map((r) => r.atMs), [M2 + 50_000]);
+        assert.equal(firstActiveFrameMs(seen[2], M3), null);
+      } finally {
+        off();
+        activity._resetActivityTrackerForTests();
+      }
+    });
+
+    test('C9: only rises inside [minuteStart, minuteStart + 60 s) count: lower bound inclusive, upper exclusive (hand-built payloads)', () => {
+      const M = MIN0;
+      const hot = 1;
+      assert.equal(firstActiveFrameMs({ motionRises: [{ atMs: M, value: hot }] }, M), M, 'the minute\'s first millisecond is inside');
+      assert.equal(firstActiveFrameMs({ motionRises: [{ atMs: M - 1, value: hot }] }, M), null, 'before the minute: not its frame');
+      assert.equal(firstActiveFrameMs({ motionRises: [{ atMs: M + 60_000, value: hot }] }, M), null, 'the next minute\'s first ms: not inside');
+      assert.equal(firstActiveFrameMs({ motionRises: [{ atMs: M + 59_999, value: hot }] }, M), M + 59_999);
+      // Outside rises cannot hide an inside one, on either side, in either channel.
+      assert.equal(
+        firstActiveFrameMs({
+          motionRises: [{ atMs: M - 5000, value: hot }, { atMs: M + 70_000, value: hot }, { atMs: M + 30_000, value: hot }],
+          soundRises: [{ atMs: M - 1, value: 99 }, { atMs: M + 45_000, value: 99 }],
+        }, M),
+        M + 30_000
+      );
+      assert.equal(firstActiveFrameMs({ soundRises: [{ atMs: M - 20_000, value: 99 }, { atMs: M + 45_000, value: 99 }] }, M), M + 45_000);
+    });
+
+    test('C8: a payload with no rises, null, or arrays of the wrong kind yields null (legacy payload: the old anchor)', () => {
+      const M = MIN0;
+      assert.equal(firstActiveFrameMs({ cameraId: CAM, bucketStart: 'x', motionPeak: 1, soundPeak: 99 }, M), null);
+      assert.equal(firstActiveFrameMs({ motionRises: null, soundRises: undefined }, M), null);
+      assert.equal(firstActiveFrameMs({ motionRises: 'nope', soundRises: { length: 1 } }, M), null);
+      assert.equal(firstActiveFrameMs(undefined, M), null);
+      assert.equal(firstActiveFrameMs({ motionRises: [null, { atMs: NaN, value: 1 }, { atMs: M + 1, value: NaN }] }, M), null, 'junk entries are skipped, never thrown on');
+    });
+  });
+
+  describe('wakeClipAnchor — the pure rule', () => {
+    const at = 1_000_000;
+    test('no frame, or no footage to measure: today\'s anchor (`at`)', () => {
+      assert.equal(wakeClipAnchor({ at, frameMs: null, oldestStartMs: at - 50_000, leadMs: LEAD_MS }), at);
+      assert.equal(wakeClipAnchor({ at, frameMs: at - 30_000, oldestStartMs: null, leadMs: LEAD_MS }), at);
+      assert.equal(wakeClipAnchor({ at, frameMs: undefined, oldestStartMs: undefined, leadMs: LEAD_MS }), at);
+    });
+    test('the first frame when the ring reaches back far enough', () => {
+      assert.equal(wakeClipAnchor({ at, frameMs: at - 30_000, oldestStartMs: at - 70_000, leadMs: LEAD_MS }), at - 30_000);
+    });
+    test('the oldest footage plus the lead when the ring does not reach back to the frame', () => {
+      assert.equal(wakeClipAnchor({ at, frameMs: at - 55_000, oldestStartMs: at - 20_000, leadMs: LEAD_MS }), at - 20_000 + LEAD_MS);
+    });
+    test('the boundary: footage that starts exactly lead before the frame does not move it', () => {
+      assert.equal(wakeClipAnchor({ at, frameMs: at - 30_000, oldestStartMs: at - 30_000 - LEAD_MS, leadMs: LEAD_MS }), at - 30_000);
+      assert.equal(wakeClipAnchor({ at, frameMs: at - 30_000, oldestStartMs: at - 30_000 - LEAD_MS + 1, leadMs: LEAD_MS }), at - 30_000 + 1);
+    });
+    test('C6: never later than `at`, even when the footage starts after `at - lead` (a young ring, a late listener)', () => {
+      assert.equal(wakeClipAnchor({ at, frameMs: at - 10_000, oldestStartMs: at + 20_000, leadMs: LEAD_MS }), at);
+      assert.equal(wakeClipAnchor({ at, frameMs: at - 10_000, oldestStartMs: at - LEAD_MS + 1, leadMs: LEAD_MS }), at);
+    });
+    test('C6: 3000 seeded cases: frame <= anchor <= at, and the clip never opens before the footage unless `at` itself is the anchor', () => {
+      let s = 6_000;
+      const rand = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+      let clamped = 0;
+      for (let i = 0; i < 3000; i++) {
+        const frameMs = at - 60_000 + Math.floor(rand() * 60_000);
+        const oldestStartMs = at - 200_000 + Math.floor(rand() * 320_000); // from far older than any ring to after `at`
+        const a = wakeClipAnchor({ at, frameMs, oldestStartMs, leadMs: LEAD_MS });
+        assert.ok(a <= at, `anchor ${a} is after at (${JSON.stringify({ frameMs, oldestStartMs })})`);
+        assert.ok(a >= frameMs, `anchor ${a} is before the first frame ${frameMs}`);
+        if (a < at) assert.ok(a - LEAD_MS >= oldestStartMs, `the clip opens before the oldest footage (${JSON.stringify({ frameMs, oldestStartMs })})`);
+        if (a > frameMs) clamped++;
+      }
+      assert.ok(clamped >= 300, `only ${clamped} cases exercised the clamp`);
+    });
+  });
+
+  describe('C4 — through the real chain, the clip opens at the first frame\'s lead-in (fails on the #447 anchor by +57/+47/+27/-2 s)', () => {
+    // A 63 s ring (on-demand Record on, this house's default) whose oldest footage reaches back to M - 6 s: further
+    // than any first frame's lead-in, so the clamp does not bind.
+    const ring63 = { preRollSec: 30, postRollSec: 15, mtimeOffsets: every2s(-4000, 60_000) };
+    for (const s of [0, 10_000, 30_000, 59_000]) {
+      test(`first frame ${s / 1000} s into the first active minute: started_at = frame - 3 s, hold = clipCoverStartMs(frame)`, () => {
+        const f = CHAIN_M + s;
+        const res = runChain({ frames: [[s, 'm', MOTION_ACTIVE + 0.05]], ring: ring63 });
+        assert.equal(res.rows.length, 1, 'exactly one wake clip row');
+        assert.equal(res.rows[0].started_at, sqlTime(f - LEAD_MS), 'the clip opens 3 s before the first active frame');
+        assert.equal(res.holdFrom, clipCoverStartMs(f, WAKE_CLIP_LEAD_SEC));
+        assert.equal(res.run.startMs, f, 'the run\'s anchor is the first frame itself');
+        assert.equal(res.run.lastActiveMs, CHAIN_M + WAKE_ACTIVE_MIN * 60_000, 'C7: lastActiveMs stays the LABEL of the last active minute');
+        assert.deepEqual(bufferLinesIn(res.lines), [], 'the ring reaches the first frame: nothing to report');
+      });
+    }
+
+    test('the first frame is the first one OVER the threshold: sub-threshold motion and out-of-bed motion before it are skipped; sound can be first', () => {
+      const res = runChain({
+        frames: [
+          [1000, 'o', 0.9], // out-of-bed: never starts a wake
+          [2000, 'm', 0.004], // below the motion threshold
+          [3000, 's', 3], // between the motion threshold and the sound threshold: neither
+          [8000, 's', SOUND_ACTIVE + 4], // the first frame over its threshold
+          [20_000, 'm', 0.3],
+        ],
+        ring: ring63,
+      });
+      assert.equal(res.rows.length, 1);
+      assert.equal(res.rows[0].started_at, sqlTime(CHAIN_M + 8000 - LEAD_MS));
+      assert.equal(res.holdFrom, clipCoverStartMs(CHAIN_M + 8000, WAKE_CLIP_LEAD_SEC));
+    });
+
+    test('C4 (control): the SAME wake with a legacy-shaped anchor would start at the end of the minute: the old value is what the fix moved', () => {
+      // Documents the size of the change in this very fixture: the old anchor `at` is CHAIN_M + 60 s, so the old
+      // clip started at CHAIN_M + 57 s, which for a frame at +10 s is 47 s after the first frame (the plan's
+      // table), and the new clip starts 3 s BEFORE it. (A hand-computed constant on purpose: it is what #447
+      // produced, not something the new code computes.)
+      const f = CHAIN_M + 10_000;
+      const res = runChain({ frames: [[10_000, 'm', MOTION_ACTIVE + 0.05]], ring: ring63 });
+      const oldStart = CHAIN_M + 60_000 - LEAD_MS;
+      const newStart = Date.parse(res.rows[0].started_at.replace(' ', 'T') + 'Z');
+      assert.equal(newStart - f, -3_000, 'what #412 does: it begins 3 s before the first frame');
+      // The size of the change, computed from the CODE's row against #447's hand-written start (the end of the
+      // first active minute minus the lead): 50 s earlier (the 47 s it began after the first frame, plus the 3 s
+      // lead-in it now has before it). (A bare `oldStart - f === 47_000` here was arithmetic
+      // on two constants of this test and could never fail; code review, Opus.)
+      assert.equal(oldStart - newStart, 50_000, 'the clip now opens 50 s earlier than #447 opened it for this wake');
+    });
+  });
+  describe('C5 — a ring that does not reach the first frame clamps the anchor to its real footage, and extractClip still finds footage', () => {
+    // The 5 s minimum clip length (settings: wake_clip_seconds): the post-roll that makes an unclamped anchor's
+    // selection EMPTY soonest (coverEnd = anchor + 9 s), so it is the setting that shows the failure.
+    const MIN_CLIP_S = 5;
+    for (const { name, ring, firstFrame, clampedTo } of [
+      {
+        name: '23 s ring (the smallest clip settings): oldest footage starts at M + 38 s',
+        ring: { preRollSec: 0, postRollSec: 5, mtimeOffsets: every2s(40_000, 60_000) },
+        firstFrame: 0,
+        clampedTo: 38_000,
+      },
+      {
+        name: '38 s ring (Record off, default clip settings): oldest footage starts at M + 23 s',
+        ring: { preRollSec: 5, postRollSec: 15, mtimeOffsets: every2s(25_000, 60_000) },
+        firstFrame: 0,
+        clampedTo: 23_000,
+      },
+      {
+        name: '38 s ring, a first frame the ring DOES reach (M + 30 s): no clamp',
+        ring: { preRollSec: 5, postRollSec: 15, mtimeOffsets: every2s(25_000, 60_000) },
+        firstFrame: 30_000,
+        clampedTo: null,
+      },
+    ]) {
+      test(`${name}`, async () => {
+        db.prepare("UPDATE settings SET wake_clip_seconds = ? WHERE id = 'app'").run(MIN_CLIP_S);
+        assert.equal(getWakeClipSettings().clipSeconds, MIN_CLIP_S, 'precondition: the minimum clip length');
+        const f = CHAIN_M + firstFrame;
+        const res = runChain({ frames: [[firstFrame, 'm', MOTION_ACTIVE + 0.05]], ring });
+        const wantAnchor = clampedTo === null ? f : CHAIN_M + clampedTo + LEAD_MS;
+        assert.equal(res.run.startMs, wantAnchor, 'the anchor');
+        assert.equal(res.rows[0].started_at, sqlTime(wantAnchor - LEAD_MS), 'the clip opens at the oldest footage (or the first frame\'s lead-in)');
+        assert.equal(res.holdFrom, clipCoverStartMs(wantAnchor, WAKE_CLIP_LEAD_SEC));
+        // The real selection on the very files the clamp read: non-empty at the anchor. The control, extractClip
+        // at the UNCLAMPED first frame, is empty on the clamped rings: that is the failed row the clamp prevents.
+        const [atAnchor, atFrame] = await trySelect([res.run.startMs, f]);
+        assert.equal(atAnchor, 'selected', 'extractClip found no footage at the clamped anchor');
+        if (clampedTo !== null) assert.equal(atFrame, 'empty', 'control: the unclamped anchor must fail here, or this test shows nothing');
+        else assert.equal(atFrame, 'selected');
+        // C10: the line is the evidence for whether a deeper ring is worth building: it prints how far after the
+        // first movement the clip starts.
+        const lines = bufferLinesIn(res.lines);
+        if (clampedTo === null) assert.deepEqual(lines, []);
+        else {
+          assert.equal(lines.length, 1);
+          assert.match(lines[0], new RegExp(`only to ${clampedTo / 1000} s after the first movement: the clip starts there`));
+          assert.match(lines[0], /"Kid Room"/);
+        }
+      });
+    }
+
+    test('hostile: a YOUNG ring (restarted mid-minute: only segments younger than its nominal depth) is clamped to its first segment, not to the nominal depth', async () => {
+      // 63 s nominal depth, but the ring started at M + 40 s (a settings save restarts it): the oldest file is M + 42 s.
+      // A clamp on the NOMINAL depth (the rejected design) would anchor at the frame (M + 5 s) and the selection
+      // would be EMPTY; the clamp on the real files anchors at M + 43 s and the selection finds footage.
+      db.prepare("UPDATE settings SET wake_clip_seconds = 5 WHERE id = 'app'").run();
+      const res = runChain({ frames: [[5000, 'm', MOTION_ACTIVE + 0.05]], ring: { preRollSec: 30, postRollSec: 15, mtimeOffsets: every2s(42_000, 60_000) } });
+      assert.equal(ringDepthMs(CAM), 63_000, 'precondition: a nominal depth that would reach the frame');
+      assert.equal(res.run.startMs, CHAIN_M + 40_000 + LEAD_MS);
+      const [atAnchor, atFrame] = await trySelect([res.run.startMs, CHAIN_M + 5000]);
+      assert.equal(atAnchor, 'selected');
+      assert.equal(atFrame, 'empty', 'control: what a clamp on the nominal depth would have produced');
+    });
+
+    test('hostile: a ring GROWN mid-minute (setRingDepth 23 s -> 63 s) is still only as old as its files', async () => {
+      db.prepare("UPDATE settings SET wake_clip_seconds = 5 WHERE id = 'app'").run();
+      const r = oneRun({
+        ring: { preRollSec: 0, postRollSec: 5, mtimeOffsets: every2s(42_000, 60_000), growTo: { preRollSec: 30, postRollSec: 15 } },
+        rises: [[5000, MOTION_ACTIVE + 0.05]],
+      });
+      assert.equal(ringDepthMs(CAM), 63_000, 'precondition: the nominal depth now reaches the frame');
+      assert.equal(ringOldestStartMs(CAM), r.M + 40_000, 'the clamp reads the files, whatever the depth now says');
+      assert.equal(r.run.startMs, r.M + 40_000 + LEAD_MS);
+      const [atAnchor, atFrame] = await trySelect([r.run.startMs, r.M + 5000]);
+      assert.equal(atAnchor, 'selected');
+      assert.equal(atFrame, 'empty', 'control: what a clamp on the nominal depth would have produced');
+    });
+
+    // Code review (Opus), verified by running: the clamp reads only the OLDEST segment, so a ring with a HOLE after it
+    // (the detector reading the sub stream while the ring records the main one, or a relaunch that keeps old segments)
+    // anchors at the first frame, extractClip's selection for that window is EMPTY and the row would fail, where
+    // today's anchor (`at`) is cut. The anchor is kept only when the shared selection finds footage for it.
+    for (const { clipSeconds, after: tail } of [
+      { clipSeconds: 5, after: every2s(24_000, 60_000) },
+      { clipSeconds: 30, after: every2s(50_000, 60_000) },
+    ]) {
+      test(`hostile: a GAPPED ring (footage up to M, then nothing until M + ${tail[0] / 1000} s; ${clipSeconds} s clip): the old anchor, and the cut at it finds footage`, async () => {
+        db.prepare('UPDATE settings SET wake_clip_seconds = ? WHERE id = ?').run(clipSeconds, 'app');
+        const r = oneRun({ ring: { mtimeOffsets: [-2000, 0, ...tail] }, rises: [[10_000, MOTION_ACTIVE + 0.05]] });
+        assert.equal(ringOldestStartMs(CAM), r.M - 4000, 'precondition: the oldest segment reaches back past the first frame');
+        assert.equal(r.run.startMs, r.at, 'nothing covers the first frame\'s window: today\'s anchor');
+        assert.equal(r.hold, clipCoverStartMs(r.at, WAKE_CLIP_LEAD_SEC));
+        const [atAnchor, atFrame] = await trySelect([r.run.startMs, r.M + 10_000]);
+        assert.equal(atAnchor, 'selected', 'the old anchor is cut');
+        assert.equal(atFrame, 'empty', 'control: the first frame\'s window has no footage, the clip would have failed');
+      });
+    }
+
+    test('a ring whose footage resumes INSIDE the clip\'s window (after the first frame) keeps the early anchor: the post-roll side of the window counts (Codex, round 1)', async () => {
+      db.prepare("UPDATE settings SET wake_clip_seconds = 30 WHERE id = 'app'").run();
+      // Footage up to M, nothing until M + 20 s, then continuous. The first frame is at M + 10 s: the clip's window is
+      // [M + 3 s, M + 44 s], which holds the resumed footage, so extractClip finds something and the clip is cut
+      // (from M + 18 s: its offset clamps to the footage; the recorded start is earlier than the footage, which is the
+      // documented limit). A check that ignored the post-roll (window ending at the first frame) would call this a hole.
+      const r = oneRun({ ring: { mtimeOffsets: [-2000, 0, ...every2s(20_000, 60_000)] }, rises: [[10_000, MOTION_ACTIVE + 0.05]] });
+      assert.equal(r.run.startMs, r.M + 10_000, 'the early anchor is kept');
+      const [atAnchor] = await trySelect([r.run.startMs]);
+      assert.equal(atAnchor, 'selected', 'and extractClip finds footage for it');
+    });
+
+    test('control for the gapped ring: the SAME first frame on a continuous ring is anchored at the frame', () => {
+      db.prepare("UPDATE settings SET wake_clip_seconds = 30 WHERE id = 'app'").run();
+      const r = oneRun({ ring: { mtimeOffsets: every2s(-4000, 60_000) }, rises: [[10_000, MOTION_ACTIVE + 0.05]] });
+      assert.equal(r.run.startMs, r.M + 10_000);
+    });
+
+    test('hostile: no closed segment yet, an EMPTY ring: today\'s anchor, no log', () => {
+      const r = oneRun({ ring: { mtimeOffsets: [] }, rises: [[5000, 1]] });
+      assert.equal(ringOldestStartMs(CAM), null);
+      assert.equal(r.run.startMs, r.at, 'nothing to clamp to: the old anchor');
+      assert.equal(r.hold, clipCoverStartMs(r.at, WAKE_CLIP_LEAD_SEC));
+      assert.deepEqual(bufferLinesIn(r.lines), []);
+    });
+
+    test('hostile: no closed segment yet, only the segment still being written: today\'s anchor, no log', () => {
+      // mtime = now: younger than SEGMENT_OPEN_MS, so it is not footage (and a clamp that counted it would
+      // anchor at the end of the minute plus the lead: later than `at`).
+      const r = oneRun({ ring: { mtimeAbs: [Date.now()] }, rises: [[5000, 1]] });
+      assert.equal(ringOldestStartMs(CAM), null);
+      assert.equal(r.run.startMs, r.at);
+      assert.deepEqual(bufferLinesIn(r.lines), []);
+    });
+  });
+
+  describe('C6 — the anchor is never later than `at`', () => {
+    test('60 seeded rings (oldest footage anywhere from 90 s before the minute to 120 s after it) and first frames: frame <= anchor <= at, hold = clipCoverStartMs(anchor)', () => {
+      let s = 66_000;
+      const rand = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+      let clamped = 0;
+      let youngerThanAt = 0;
+      for (let n = 0; n < 60; n++) {
+        stopAllSegmenters();
+        _state().clear();
+        clock = 0;
+        const oldestMtime = -90_000 + Math.floor(rand() * 210_000);
+        const frame = Math.floor(rand() * 60_000);
+        const r = oneRun({ ring: { mtimeOffsets: every2s(oldestMtime, oldestMtime + 20_000) }, rises: [[frame, 1]] });
+        assert.ok(r.run.startMs <= r.at, `case ${n}: anchor after at`);
+        assert.ok(r.run.startMs >= r.M + frame, `case ${n}: anchor before the first frame`);
+        assert.equal(r.hold, clipCoverStartMs(r.run.startMs, WAKE_CLIP_LEAD_SEC), `case ${n}: hold`);
+        if (r.run.startMs > r.M + frame) clamped++;
+        if (oldestMtime - 2000 > 57_000) youngerThanAt++;
+      }
+      assert.ok(clamped >= 15, `only ${clamped} cases exercised the clamp`);
+      assert.ok(youngerThanAt >= 5, `only ${youngerThanAt} cases had footage younger than at - 3 s`);
+    });
+  });
+
+  describe('C8 — a payload with no rises keeps today\'s anchor; only the hold moved (at - 15 s -> clipCoverStartMs(at, 3))', () => {
+    test('legacy payload on a ring that HAS footage: anchor = at, hold = at - 7 s, no buffer line', () => {
+      const r = oneRun({ ring: { mtimeOffsets: every2s(-4000, 60_000) } });
+      assert.equal(r.run.startMs, r.at);
+      assert.equal(r.hold, r.at - 7000);
+      assert.equal(r.hold, clipCoverStartMs(r.at, WAKE_CLIP_LEAD_SEC));
+      assert.deepEqual(bufferLinesIn(r.lines), []);
+      assert.deepEqual(r.result, null, 'the first active minute only starts a run');
+    });
+    test('rises that are all outside the minute (or sub-threshold) also leave the anchor at `at`', () => {
+      const ring = { mtimeOffsets: every2s(-4000, 60_000) };
+      const outside = oneRun({ ring, rises: [[-1, 1], [60_000, 1]] });
+      assert.equal(outside.run.startMs, outside.at);
+      stopAllSegmenters(); _state().clear(); clock = 0;
+      const sub = oneRun({ ring, rises: [[10_000, MOTION_ACTIVE], [20_000, 0.005]], soundRises: [[30_000, SOUND_ACTIVE]] });
+      assert.equal(sub.run.startMs, sub.at);
+    });
+  });
+
+  describe('C7 — the hold is taken and released the same with and without the rises (clips ENABLED; the seeded timeline test runs with them off)', () => {
+    test('one WAKE owner while the run lives, `holding` set, none after the stale sweep, for a legacy payload and for one with rises', () => {
+      for (const rises of [undefined, [[10_000, MOTION_ACTIVE + 0.2]]]) {
+        const r = oneRun({ ring: { mtimeOffsets: every2s(-4000, 60_000) }, rises });
+        assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE], `a hold must be taken (rises: ${!!rises})`);
+        assert.equal(r.run.holding, true);
+        assert.equal(sweepStaleRuns(r.run.lastActiveMs + 60 * 60 * 1000), 1, 'the stale sweep ends the run');
+        assert.deepEqual(holdOwners(CAM), [], `the hold must be released with the run (rises: ${!!rises})`);
+        stopAllSegmenters(); _state().clear(); clock = 0;
+      }
+    });
+  });
+
+  describe('C10 — the "buffer reaches back only" line: only when the clamp cost the opening, with that number', () => {
+    // Oldest closed segment: mtime M + 22 s, so the oldest footage starts at O = M + 20 s and the clamp is O + 3 s.
+    const ring = { preRollSec: 5, postRollSec: 15, mtimeOffsets: every2s(22_000, 60_000) };
+    for (const [frameOffset, anchorOffset, wantN] of [
+      [10_000, 23_000, 10], // the ring starts 10 s after the movement
+      [10_400, 23_000, 10], // 9.6 s rounds to 10
+      [19_000, 23_000, 1],
+      [19_400, 23_000, 1], // 0.6 s lost rounds to 1 s (a mutant that rounds up or needs a full second differs here)
+      [19_600, 23_000, null], // 0.4 s lost rounds to 0: no line rather than "only to 0 s after the first movement"
+      [18_501, 23_000, 1], // 1.499 s
+      [18_500, 23_000, 2], // 1.5 s rounds to 2
+      [20_000, 23_000, null], // the clip (anchor - 3 s) opens EXACTLY at the movement: nothing lost
+      [21_000, 23_000, null], // the 3 s lead-in hides the clamp
+      [22_999, 23_000, null],
+      [23_000, 23_000, null], // the first frame is the anchor: no clamp
+      [40_000, 40_000, null],
+    ]) {
+      test(`first frame at M + ${frameOffset / 1000} s -> anchor M + ${anchorOffset / 1000} s, ${wantN === null ? 'no line' : `"${wantN} s" line`}`, () => {
+        const r = oneRun({ ring, rises: [[frameOffset, MOTION_ACTIVE + 0.05]] });
+        assert.equal(r.run.startMs, r.M + anchorOffset);
+        const lines = bufferLinesIn(r.lines);
+        if (wantN === null) assert.deepEqual(lines, []);
+        else {
+          assert.equal(lines.length, 1);
+          assert.match(lines[0], new RegExp(`only to ${wantN} s after the first movement`));
+        }
+      });
+    }
+    test('no line when wake clips are switched off (no hold is taken, so nothing is protected or clamped for)', () => {
+      const r = oneRun({ ring, rises: [[10_000, MOTION_ACTIVE + 0.05]], clipsEnabled: false });
+      assert.deepEqual(r.hold, null);
+      assert.deepEqual(bufferLinesIn(r.lines), []);
+    });
+    test('no line for a legacy payload (no first frame to compare with), however shallow the ring', () => {
+      const r = oneRun({ ring });
+      assert.equal(r.run.startMs, r.at);
+      assert.deepEqual(bufferLinesIn(r.lines), []);
+    });
+  });
+
+  describe('C11 — the hold is the one formula extractClip reads back with, taken from the anchor (the 15 s lead is gone)', () => {
+    test('the lead is the exported 3 s, and the hold sits clipCoverStartMs(anchor, lead) = anchor - 7 s before it on every case', () => {
+      assert.equal(WAKE_CLIP_LEAD_SEC, 3, 'a deliberate pin: the lead-in and the clamp margin move together');
+      for (const frame of [0, 12_000, 48_000]) {
+        stopAllSegmenters(); _state().clear(); clock = 0;
+        const r = oneRun({ ring: { mtimeOffsets: every2s(-4000, 60_000) }, rises: [[frame, 1]] });
+        assert.equal(r.hold, r.M + frame - 7000);
+        assert.equal(r.hold, clipCoverStartMs(r.run.startMs, WAKE_CLIP_LEAD_SEC));
+        assert.notEqual(r.hold, r.at - 15_000, 'the old at - 15 s hold is gone');
+      }
+    });
+  });
+
+  describe('C12 — the review page still pairs a clip that opens a few seconds before its wake\'s timeline minute (non-regression; see sleepDetailHelpers.test.jsx)', () => {
+    test('started_at can precede the first active minute by up to the lead: the row is the real clip start', () => {
+      const res = runChain({ frames: [[0, 'm', MOTION_ACTIVE + 0.05]], ring: { preRollSec: 30, postRollSec: 15, mtimeOffsets: every2s(-4000, 60_000) } });
+      // The minute starts at CHAIN_M; the clip at CHAIN_M - 3 s (D2: real, not floored to the minute).
+      assert.equal(res.rows[0].started_at, sqlTime(CHAIN_M - LEAD_MS));
+    });
+  });
+});
+
 // -------------------------------------------------------------------------------------------
 // ★ THE NUMBERS THEMSELVES. Everything above this line derives its fixtures, its loop bounds and even
 // its test NAMES from SLEEP_THRESHOLDS, which makes it a good test of the state machine and no test at
@@ -424,6 +1122,1780 @@ describe('★ what the numbers MEAN, in real readings rather than expressions', 
     minute({ motion: 0.05 });
     for (let i = 0; i < 30; i++) quiet();
     assert.equal(_state().get(CAM).run, null, 'a thirty-minute silence did not end the run');
+  });
+
+  // #448 (C16). The bridge limit is in MINUTES, whoever did or did not report them: the literals 3 and 4 are
+  // the WAKE_GAP_MIN boundary spelled out (a gap of 3 non-active minutes bridges, 4 splits, as the nightly
+  // job's markWakeRuns), so a drift of the constant breaks a named test without any fixture being derived
+  // from it. Both kinds of gap: minutes that arrived quiet, and minutes that never arrived at all.
+  for (const [what, fill] of [
+    ['unreported minutes', (n) => { clock += n; }],
+    ['quiet minutes', (n) => { for (let i = 0; i < n; i++) quiet(); }],
+  ]) {
+    test(`C16: five active minutes 3 ${what} apart are one wake; 4 ${what} apart are five stirs`, () => {
+      const wakeWithGap = (between) => {
+        settleLiterally();
+        let captures = 0;
+        for (let i = 0; i < 5; i++) {
+          if (minute({ motion: 0.05 })?.captured) captures++;
+          if (i < 4) fill(between);
+        }
+        return captures;
+      };
+      assert.equal(wakeWithGap(3), 1, `a gap of 3 ${what} should be bridged`);
+      _state().clear();
+      clock = 0;
+      assert.equal(wakeWithGap(4), 0, `a gap of 4 ${what} should split the run`);
+    });
+  }
+});
+
+describe('★ #448 — the watcher counts MINUTES, not callbacks', () => {
+  // The live watcher is the mirror of the nightly job's wake rule (sleepAnalysis.js markWakeRuns), and the
+  // nightly job treats a minute with no reading as NON-ACTIVE: a run bridges at most WAKE_GAP_MIN of them,
+  // observed-quiet or missing. Before #448 the watcher counted callbacks instead of minutes, which broke it
+  // three ways at once: an ACTIVE sample after a hole never checked elapsed time (the issue's repro: five
+  // active minutes ten minutes apart were ONE wake), settling counted callbacks (14 quiet minutes, a
+  // 40-minute outage and 1 more quiet minute armed the watcher), and the 20-minute sweep was never the
+  // bridge enforcer its header comment claimed.
+  //
+  // THE SHAPE OF A HOLE: activityTracker.closeMinute calls its listeners only `if (hasSignal(s))`, so a minute
+  // with neither a motion frame nor a sound window produces NO payload (not a payload of nulls). An outage is
+  // visible only as a jump in `bucketStart`; `skip(n)` is exactly that. C14 pins this premise against the
+  // real tracker instead of assuming it.
+  //
+  // ⚠️ SWEEP TRAP (plan review, verified): this file's labels sit ~200 minutes in the past, so
+  // sweepStaleRuns() with its default Date.now() would end EVERY run here and any test that calls it would
+  // pass on the old code. Every sweep call below takes the SIMULATED time (run.lastActiveMs + k minutes).
+
+  // Deliver `n` active minutes; the startMs of every capture they produced.
+  function actives(n, fn = moving) {
+    const got = [];
+    for (let i = 0; i < n; i++) {
+      const r = fn();
+      if (r?.captured) got.push(r.startMs);
+    }
+    return got;
+  }
+
+  // A REAL segmenter, as the #446 tests arm one (see that block for why): the entry exists only
+  // synchronously, so every call that needs it must run with no `await` in between.
+  function armSegmenterNow() {
+    const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(CAM);
+    startSegmenter(CAM, camera.mediamtx_path, { preRollSec: 5, postRollSec: 15 });
+    assert.equal(isSegmenterRunning(CAM), true, 'precondition: the segmenter armed synchronously');
+  }
+  const wakeClips = (on) => db.prepare("UPDATE settings SET wake_clips_enabled = ? WHERE id = 'app'").run(on ? 1 : 0);
+
+  describe('a hole in the readings is time, not nothing', () => {
+    test('C1: the issue\'s fixture (five active minutes ten minutes apart) is five stirs, not one wake', () => {
+      settle();
+      const got = [];
+      for (let i = 0; i < WAKE_ACTIVE_MIN; i++) {
+        const idx = clock;
+        const r = moving();
+        if (r?.captured) got.push(r.startMs);
+        const run = stateOf().run;
+        assert.equal(run.activeCount, 1, `active minute ${i + 1}: the run must have restarted after the hole`);
+        assert.equal(run.startMs, endMs(idx), `active minute ${i + 1}: the new run starts HERE`);
+        // C15: the 20-minute sweep is not what enforces the bridge. Ten minutes of simulated silence never
+        // reaches it, so a split that only happened because of the sweep would show up as a nonzero count.
+        for (let k = 1; k <= 9; k++) {
+          assert.equal(sweepStaleRuns(run.lastActiveMs + k * 60_000), 0, `C15: the sweep must not be what ends the run (+${k} min)`);
+        }
+        skip(9); // the next active minute is ten minutes after this one
+      }
+      assert.deepEqual(got, [], 'nothing may be recorded: the nightly job sees five one-minute runs, zero wakes');
+    });
+
+    test(`C2 (control): five active minutes ${WAKE_GAP_MIN} unreported minutes apart are still ONE wake`, () => {
+      settle();
+      const got = [];
+      for (let i = 0; i < WAKE_ACTIVE_MIN; i++) {
+        got.push(...actives(1));
+        if (i < WAKE_ACTIVE_MIN - 1) skip(WAKE_GAP_MIN);
+      }
+      assert.deepEqual(got, [endMs(ONSET_QUIET_MIN)], 'a gap of exactly the bridge limit is bridged, whoever did not report it');
+    });
+
+    test(`C3: one minute past the bridge (${WAKE_GAP_MIN + 1} unreported minutes) splits the run`, () => {
+      settle();
+      const got = [];
+      for (let i = 0; i < WAKE_ACTIVE_MIN; i++) {
+        got.push(...actives(1));
+        assert.equal(stateOf().run.activeCount, 1, `active minute ${i + 1}: each one opens a fresh run`);
+        skip(WAKE_GAP_MIN + 1);
+      }
+      assert.deepEqual(got, []);
+    });
+
+    test(`C4a (control): the quiet branch is unchanged — ${WAKE_GAP_MIN} quiet minutes still bridge`, () => {
+      settle();
+      actives(WAKE_ACTIVE_MIN - 1);
+      for (let g = 0; g < WAKE_GAP_MIN; g++) quiet();
+      assert.deepEqual(actives(1), [endMs(ONSET_QUIET_MIN)]);
+    });
+
+    test(`C4b (control): the quiet branch is unchanged — ${WAKE_GAP_MIN + 1} quiet minutes end the run`, () => {
+      settle();
+      actives(WAKE_ACTIVE_MIN - 1);
+      for (let g = 0; g < WAKE_GAP_MIN + 1; g++) quiet();
+      assert.equal(stateOf().run, null, 'ended by the quiet minute that made the gap one too long');
+      assert.deepEqual(actives(1), [], 'the fifth active minute starts a fresh run, it does not complete the old one');
+    });
+
+    test('C5: two real wakes with an outage between them are two captures, not one', () => {
+      settle();
+      const first = actives(WAKE_ACTIVE_MIN);
+      skip(10);
+      const second = actives(WAKE_ACTIVE_MIN);
+      assert.equal(first.length, 1);
+      assert.equal(second.length, 1, 'the second wake was merged into the first');
+      assert.equal(second[0] - first[0], (WAKE_ACTIVE_MIN + 10) * 60_000, 'the second clip starts at the second wake');
+    });
+
+    test('C12b: the bridge is measured from the last ACTIVE minute, not from the last payload', () => {
+      // 4 active, 2 quiet, 2 missing, active: 4 non-active minutes between the actives, which the nightly job
+      // splits. A rule that restarts its clock at every payload sees a gap of only 2 after the last quiet one,
+      // bridges, and records a wake: it passes C1, C3 and C5 and fails only here.
+      settle();
+      actives(WAKE_ACTIVE_MIN - 1);
+      quiet();
+      quiet();
+      skip(2);
+      assert.deepEqual(actives(1), [], 'a hole after quiet payloads extends the same gap');
+      assert.equal(stateOf().run.activeCount, 1);
+    });
+
+    test('C8 (control): a hole does NOT disarm an armed watcher', () => {
+      // Only the settling PROGRESS is reset by a hole. Disarming would drop a real wake that follows a camera
+      // reconnect, and the arming gate exists only to keep bedtime settling out of the recorder.
+      settle();
+      skip(90);
+      assert.deepEqual(actives(WAKE_ACTIVE_MIN), [endMs(ONSET_QUIET_MIN + 90)]);
+      assert.equal(stateOf().asleep, true);
+    });
+  });
+
+  describe('settling needs consecutive OBSERVED minutes', () => {
+    test('C6: 14 quiet minutes, one missing minute, 1 more is NOT asleep; the count restarted at the hole', () => {
+      for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) quiet();
+      skip(1);
+      quiet();
+      assert.equal(stateOf().asleep, false, 'the missing minute counted toward the 15');
+      assert.equal(stateOf().quietRun, 1, 'the count restarted at the hole');
+      for (let i = 0; i < ONSET_QUIET_MIN - 2; i++) quiet();
+      assert.equal(stateOf().asleep, false, 'fourteen consecutive observed minutes since the hole: one short');
+      quiet();
+      assert.equal(stateOf().asleep, true, 'fifteen consecutive observed minutes since the hole');
+    });
+
+    test('C7: a LONG outage is not settled time either (14 quiet, 60 missing, 1 more)', () => {
+      for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) quiet();
+      skip(60);
+      quiet();
+      assert.equal(stateOf().asleep, false, 'an hour nobody saw armed the watcher');
+      for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) quiet();
+      assert.equal(stateOf().asleep, true, 'control half: 15 contiguous observed minutes do arm it');
+    });
+  });
+
+  describe('an ordering guard on the labels', () => {
+    test('C9: a repeated label counts ONCE (defensive branch): five copies of one active minute are not a wake', () => {
+      settle();
+      const idx = clock;
+      moving();
+      for (let i = 0; i < WAKE_ACTIVE_MIN; i++) {
+        assert.equal(deliver(labelFor(idx), MOTION_ACTIVE + 0.05), null, 'a repeated label must never capture');
+      }
+      assert.equal(stateOf().run.activeCount, 1, 'the copies were counted');
+    });
+
+    test('C9b: a repeated QUIET label does not advance settling', () => {
+      for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) quiet();
+      const idx = clock - 1;
+      for (let i = 0; i < 3; i++) deliver(labelFor(idx), 0, 0);
+      assert.equal(stateOf().asleep, false, 'a repeated label counted as a new quiet minute');
+      assert.equal(stateOf().quietRun, ONSET_QUIET_MIN - 1);
+      quiet();
+      assert.equal(stateOf().asleep, true);
+    });
+
+    test('C10: a label that goes BACKWARDS ends the run and re-baselines: not deaf, and no inherited count', () => {
+      settle();
+      actives(3);
+      assert.equal(stateOf().run.activeCount, 3, 'precondition');
+      clock -= 60; // the wall clock steps back an hour
+      const stepIdx = clock;
+      const calls = [];
+      for (let i = 0; i < WAKE_ACTIVE_MIN; i++) {
+        calls.push(moving());
+        if (i === 0) {
+          assert.equal(stateOf().run.activeCount, 1, 'the run before the step was ended, not extended');
+          assert.equal(stateOf().run.startMs, endMs(stepIdx), 'the new run starts at the first label after the step');
+        }
+      }
+      // WHICH call captures and WHICH startMs is what discriminates: today's code carries the old count over and
+      // captures on the 2nd call with the old run's startMs; a "drop older labels" version never captures.
+      assert.deepEqual(calls.map((r) => r?.captured === true), [false, false, false, false, true], 'the 5th call, not an earlier one');
+      assert.equal(calls[4].startMs, endMs(stepIdx), 'startMs is the first of the five re-lived minutes');
+    });
+
+    test('C10b: a backward label resets the settling progress (14 quiet, step back, quiet is not asleep)', () => {
+      for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) quiet();
+      clock = 2;
+      quiet(); // the first minute after the step
+      assert.equal(stateOf().asleep, false, 'progress made before the step was carried across it');
+      assert.equal(stateOf().quietRun, 1);
+      for (let i = 0; i < ONSET_QUIET_MIN - 2; i++) quiet();
+      assert.equal(stateOf().asleep, false);
+      quiet();
+      assert.equal(stateOf().asleep, true, 'fifteen consecutive minutes after the step');
+    });
+
+    // Fix round 1 (#448 review): a SMALL backward step is a backward step too. C10 steps a whole hour, which any
+    // threshold between 0 and 60 minutes passes; these step exactly 1, 2 and 3 minutes (the sizes a `< lastAt - N`
+    // mutant tolerates), so a rule that only notices "big" steps back fails here. activityTracker itself absorbs
+    // steps of up to STEP_CLAMP_MS (2 min) before they reach the watcher, but the watcher must not depend on that:
+    // it is a different module's number and the ordering guard is written against the labels alone.
+    for (const back of [1, 2, 3]) {
+      test(`C10c: a label ${back} min OLDER than the last one still ends the run and re-baselines`, () => {
+        settle();
+        actives(3);
+        const lastIdx = clock - 1; // the label of the 3rd active minute
+        assert.equal(stateOf().run.activeCount, 3, 'precondition');
+        clock = lastIdx - back;
+        const stepIdx = clock;
+        const calls = [];
+        for (let i = 0; i < WAKE_ACTIVE_MIN; i++) {
+          calls.push(moving());
+          if (i === 0) {
+            assert.equal(stateOf().run.activeCount, 1, `a label ${back} min back inherited the old run's count`);
+            assert.equal(stateOf().run.startMs, endMs(stepIdx), 'the new run starts at the first label after the step');
+          }
+        }
+        assert.deepEqual(calls.map((r) => r?.captured === true), [false, false, false, false, true], 'the 5th call, not an earlier one');
+        assert.equal(calls[4].startMs, endMs(stepIdx), 'startMs is the first of the five re-lived minutes');
+      });
+
+      test(`C10d: a label ${back} min OLDER than the last one resets the settling progress`, () => {
+        for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) quiet();
+        clock = clock - 1 - back; // `back` minutes before the last accepted label
+        quiet();
+        assert.equal(stateOf().quietRun, 1, `the ${back}-minute step back carried the settling progress across it`);
+        assert.equal(stateOf().asleep, false);
+        for (let i = 0; i < ONSET_QUIET_MIN - 2; i++) quiet();
+        assert.equal(stateOf().asleep, false, 'fourteen consecutive minutes since the step: one short');
+        quiet();
+        assert.equal(stateOf().asleep, true, 'fifteen consecutive minutes since the step');
+      });
+    }
+
+    test('C12: reset() forgets lastAt: a label re-delivered after the watcher left the window is a NEW minute', () => {
+      // Not "the first sample after returning counts 1": that passes whether or not lastAt was cleared
+      // (plan review verified). Re-delivering the label from just BEFORE the reset is what tells them apart:
+      // cleared, it is a fresh quiet minute; kept, it is a repeated label and is ignored.
+      for (let i = 0; i < 5; i++) quiet();
+      const lastIdx = clock - 1;
+      assert.equal(stateOf().lastAt, endMs(lastIdx), 'precondition: lastAt follows the last accepted label');
+      db.prepare('UPDATE children SET track_sleep = 0 WHERE id = ?').run(CHILD);
+      try {
+        quiet(); // out of tracking: the watcher resets
+      } finally {
+        db.prepare('UPDATE children SET track_sleep = 1 WHERE id = ?').run(CHILD);
+      }
+      assert.equal(stateOf().quietRun, 0);
+      assert.equal(stateOf().lastAt, null, 'reset() left a stale lastAt behind');
+      clock = lastIdx;
+      quiet();
+      assert.equal(stateOf().quietRun, 1, 'the re-delivered label was treated as a repeat of the one before the reset');
+    });
+  });
+
+  describe('the ring hold follows the run', () => {
+    test('C11: after a hole the NEW run holds from ITS first minute, with one WAKE owner and a log line', () => {
+      try {
+        wakeClips(true);
+        armSegmenterNow();
+        settle();
+        logger.clear();
+        const t0 = clock;
+        moving();
+        // #412 C8: a payload with no rises keeps today's ANCHOR (endMs, asserted by the C1-C5 startMs checks above);
+        // the hold is the one deliberate change: clipCoverStartMs(at, 3) = at - 7 s, where it was at - 15 s.
+        assert.equal(effectiveHold(CAM), clipCoverStartMs(endMs(t0), WAKE_CLIP_LEAD_SEC), 'precondition: held from the first minute');
+        skip(10);
+        const t1 = clock;
+        moving();
+        assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE]);
+        assert.equal(effectiveHold(CAM), clipCoverStartMs(endMs(t1), WAKE_CLIP_LEAD_SEC), 'the hold is still anchored on the run the hole ended');
+        assert.ok(
+          logger.getRecent().some((l) => l.includes('run ended (readings 11 min apart)')),
+          'the log must say the READINGS were apart (a forward clock jump looks the same), not claim an outage'
+        );
+      } finally {
+        wakeClips(true);
+      }
+    });
+
+    test('C11 (leak half): the ended run\'s hold is RELEASED even when the new run takes none (wake clips switched off in the hole)', () => {
+      // One hold slot per owner: with wake clips on, the new run's hold would overwrite the old one and hide a
+      // missed release. Switching them off during the hole is what makes a leak visible.
+      try {
+        wakeClips(true);
+        armSegmenterNow();
+        settle();
+        moving();
+        assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE], 'precondition');
+        skip(10);
+        wakeClips(false);
+        moving();
+        assert.deepEqual(holdOwners(CAM), [], 'the old run\'s hold leaked');
+      } finally {
+        wakeClips(true);
+      }
+    });
+
+    test('C11b: the late .finally of an OLD capture cannot release a NEW run\'s hold (run identity, not startMs)', async () => {
+      // Everything up to the first await is synchronous so the segmenter entry exists and the old capture's
+      // promise chain has not run yet. The old run captures (clips switched off just before, so the attempt
+      // resolves at once and its .finally is queued); the clock steps back to exactly the first label, which
+      // starts a NEW run with the SAME startMs and its own hold. A guard on startMs equality releases it.
+      try {
+        wakeClips(true);
+        armSegmenterNow();
+        settle();
+        const firstIdx = clock;
+        moving();
+        assert.equal(stateOf().run.holding, true, 'precondition: the first minute took a hold');
+        wakeClips(false);
+        for (let i = 1; i < WAKE_ACTIVE_MIN; i++) moving();
+        const oldRun = stateOf().run;
+        assert.equal(oldRun.captured, true, 'precondition: the run captured');
+        wakeClips(true);
+        clock = firstIdx;
+        moving();
+        const newRun = stateOf().run;
+        assert.notEqual(newRun, oldRun);
+        assert.equal(newRun.startMs, oldRun.startMs, 'precondition: the same startMs, which is what fooled the old guard');
+        assert.equal(newRun.holding, true, 'precondition: the new run took its own hold');
+        await new Promise((resolve) => setImmediate(resolve)); // NOW the old capture's .finally runs
+        assert.equal(stateOf().run, newRun);
+        assert.equal(newRun.holding, true, 'the old capture released the new run\'s hold');
+        assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE]);
+      } finally {
+        wakeClips(true);
+      }
+    });
+  });
+
+  // Fix round 1 (#448 review): the WORDING of "run ended" is the only trace an operator has of why a run was
+  // dropped, and endRun only logs when the run was HOLDING a ring hold, so these need a REAL segmenter (as the
+  // #446 tests arm one: the entry exists only synchronously, so no await before the last assertion). A mutant
+  // that changes only a log argument is invisible to every assertion on state; these pin the three reasons and
+  // the "a captured run says nothing" rule.
+  describe('what the log says when a held run ends', () => {
+    const runEndedLines = () => logger.getRecent().filter((l) => l.includes('run ended'));
+    const nothingRecordedLines = () => logger.getRecent().filter((l) => l.includes('nothing recorded'));
+    function armedWithHeldRun(activeMin) {
+      wakeClips(true);
+      armSegmenterNow();
+      settle();
+      logger.clear();
+      actives(activeMin);
+      assert.equal(stateOf().run.holding, true, 'precondition: the run holds the ring');
+    }
+
+    test('C17a: a run ended by a hole says the READINGS were N min apart, with the right N', () => {
+      try {
+        armedWithHeldRun(2);
+        skip(10);
+        moving();
+        const lines = runEndedLines();
+        assert.equal(lines.length, 1, `expected exactly one "run ended" line, got ${JSON.stringify(lines)}`);
+        assert.match(lines[0], /run ended \(readings 11 min apart\)/);
+      } finally {
+        wakeClips(true);
+      }
+    });
+
+    test('C17b: ONE missing minute is still a hole, and is named as one (3 quiet reported, 1 missing, active)', () => {
+      // 2 active, 3 quiet payloads (3 non-active minutes: still bridged), 1 missing minute, then an active one:
+      // 4 non-active minutes between the actives, so the run ends, and exactly one of them was a missing minute.
+      // A `missingMin > 1` test for "was there a hole" would call this one a plain stir.
+      try {
+        armedWithHeldRun(2);
+        quiet();
+        quiet();
+        quiet();
+        assert.equal(stateOf().run?.holding, true, 'precondition: 3 reported quiet minutes still bridge');
+        skip(1);
+        moving();
+        const lines = runEndedLines();
+        assert.equal(lines.length, 1, `expected exactly one "run ended" line, got ${JSON.stringify(lines)}`);
+        assert.match(lines[0], /run ended \(readings 2 min apart\)/);
+      } finally {
+        wakeClips(true);
+      }
+    });
+
+    test('C17c: a run ended by REPORTED quiet minutes is a stir, not a hole', () => {
+      try {
+        armedWithHeldRun(2);
+        for (let i = 0; i < WAKE_GAP_MIN + 1; i++) quiet();
+        const lines = runEndedLines();
+        assert.equal(lines.length, 1, `expected exactly one "run ended" line, got ${JSON.stringify(lines)}`);
+        assert.match(lines[0], /run ended \(stir, under the wake threshold\)/);
+        assert.doesNotMatch(lines[0], /readings/);
+      } finally {
+        wakeClips(true);
+      }
+    });
+
+    test('C17d: a run ended by an older label says the clock went back', () => {
+      try {
+        armedWithHeldRun(2);
+        clock -= 30;
+        moving();
+        const lines = runEndedLines();
+        assert.equal(lines.length, 1, `expected exactly one "run ended" line, got ${JSON.stringify(lines)}`);
+        assert.match(lines[0], /run ended \(the clock went back\)/);
+      } finally {
+        wakeClips(true);
+      }
+    });
+
+    test('C17e: a run that ALREADY CAPTURED logs no "nothing recorded" line when a hole ends it', () => {
+      // The capture is still pending (no await), so the run is still holding: endRun releases it, and must not
+      // claim "nothing recorded" about a wake that was recorded.
+      try {
+        armedWithHeldRun(WAKE_ACTIVE_MIN);
+        assert.equal(stateOf().run.captured, true, 'precondition: the run captured');
+        skip(10);
+        moving();
+        assert.equal(stateOf().run.activeCount, 1, 'the hole ended the captured run');
+        assert.deepEqual(nothingRecordedLines(), []);
+        assert.deepEqual(runEndedLines(), []);
+      } finally {
+        wakeClips(true);
+      }
+    });
+
+    test('C17f: a run that ALREADY CAPTURED logs no "nothing recorded" line when an older label ends it', () => {
+      try {
+        armedWithHeldRun(WAKE_ACTIVE_MIN);
+        assert.equal(stateOf().run.captured, true, 'precondition: the run captured');
+        clock -= 30;
+        moving();
+        assert.equal(stateOf().run.activeCount, 1, 'the older label ended the captured run');
+        assert.deepEqual(nothingRecordedLines(), []);
+        assert.deepEqual(runEndedLines(), []);
+      } finally {
+        wakeClips(true);
+      }
+    });
+  });
+
+  describe('the model: the live watcher against the nightly job\'s rule, on hostile timelines', () => {
+    // A small seeded PRNG so a failure names its seed and can be replayed exactly.
+    function mulberry32(seed) {
+      let a = seed >>> 0;
+      return () => {
+        a = (a + 0x6d2b79f5) >>> 0;
+        let t = a;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    // A STRUCTURED timeline, one char per minute: Q = a quiet payload, A = an active payload, H = a hole (no
+    // payload at all). Uniform random slots would almost never arm (15 quiet payloads in a row at 1/3 each),
+    // so the run-splitting code would go unexercised and the test would pass vacuously: a settle block first
+    // (sometimes with one hole or one active inside it), then bursts of 1-8 actives separated by 0-6 holes or
+    // quiet payloads (per timeline: all holes, all quiet, or a mix), so gaps land on both sides of every bridge
+    // limit in both branches.
+    function buildTimeline(rand) {
+      const int = (lo, hi) => lo + Math.floor(rand() * (hi - lo + 1));
+      const slots = [];
+      const settleLen = int(15, 25);
+      for (let i = 0; i < settleLen; i++) slots.push('Q');
+      const r = rand();
+      if (r < 0.3) slots[int(0, settleLen - 1)] = 'H';
+      else if (r < 0.5) slots[int(0, settleLen - 1)] = 'A';
+      const holeProb = [0, 0.5, 1][int(0, 2)];
+      const target = int(60, 100);
+      while (slots.length < target) {
+        const burst = int(1, 8);
+        for (let i = 0; i < burst; i++) slots.push('A');
+        const gap = int(0, 6);
+        for (let i = 0; i < gap; i++) slots.push(rand() < holeProb ? 'H' : 'Q');
+      }
+      slots.length = Math.min(slots.length, 100);
+      return slots.join('');
+    }
+
+    // The OFFLINE reference: the whole timeline at once, the nightly job's semantics (sleepAnalysis.js
+    // markWakeRuns: a minute with no payload is non-active, a run bridges <= WAKE_GAP_MIN non-active minutes,
+    // a run with >= WAKE_ACTIVE_MIN actives is a wake), and the live arming rule (the first
+    // ONSET_QUIET_MIN consecutive payloads that are all quiet). It reads only the timeline array: it shares no
+    // state, no `lastAt`, no bridge arithmetic with handleMinute.
+    function reference(timeline) {
+      const n = timeline.length;
+      let armedAt = -1;
+      let streak = 0;
+      for (let i = 0; i < n && armedAt < 0; i++) {
+        streak = timeline[i] === 'Q' ? streak + 1 : 0;
+        if (streak >= ONSET_QUIET_MIN) armedAt = i;
+      }
+      if (armedAt < 0) return { armedAt, startMs: [] };
+      const active = Array.from(timeline, (c, i) => i > armedAt && c === 'A');
+      const startMs = [];
+      for (let i = armedAt + 1; i < n; ) {
+        if (!active[i]) { i++; continue; }
+        let last = i;
+        let count = 0;
+        let k = i;
+        while (k < n) {
+          if (active[k]) { last = k; count++; k++; continue; }
+          let g = k;
+          while (g < n && !active[g]) g++;
+          if (g < n && g - k <= WAKE_GAP_MIN) { k = g; continue; }
+          break;
+        }
+        if (count >= WAKE_ACTIVE_MIN) startMs.push(endMs(i));
+        i = last + 1;
+      }
+      return { armedAt, startMs };
+    }
+
+    // Feed a timeline to the real handler. `dupRand`, when given, re-delivers some payloads' labels right
+    // after them with the OPPOSITE kind of reading (an active copy of a quiet minute and vice versa): a
+    // repeated label has to be ignored whatever it says.
+    function replay(timeline, dupRand = null) {
+      _state().clear();
+      const startMs = [];
+      for (let i = 0; i < timeline.length; i++) {
+        const c = timeline[i];
+        if (c === 'H') continue;
+        const r = deliver(labelFor(i), c === 'A' ? MOTION_ACTIVE + 0.05 : 0, 0);
+        if (r?.captured) startMs.push(r.startMs);
+        if (dupRand && dupRand() < 0.25) {
+          const copy = deliver(labelFor(i), c === 'A' ? 0 : MOTION_ACTIVE + 0.05, 0);
+          assert.equal(copy, null, `a repeated label captured (minute ${i} of ${timeline})`);
+        }
+      }
+      return startMs;
+    }
+
+    // ⚠️ WHY 250 AND NOT MORE: measured, one handleMinute call costs ~0.65 ms here (childWindowActiveNow builds
+    // several Intl.DateTimeFormat objects per call, and sleepAnalysis.js is not ours to change or mock), so the
+    // 250 timelines of 60-100 minutes (a quarter of them replayed a second time with repeated labels) take
+    // ~15 s. The seeds are fixed, so the counts below are exactly reproducible; the floors sit under what the
+    // generator produces today and exist to catch a generator edit that makes the comparison vacuous.
+    test('C13: 250 seeded timelines: the watcher\'s captures equal the offline reference, with and without repeated labels', () => {
+      const SEQUENCES = 250;
+      const SEED0 = 448000;
+      let armed = 0;
+      let withCapture = 0;
+      let holeSplits = 0;
+      let holeBridges = 0;
+      let holesDecide = 0;
+      const realInfo = logger.info;
+      logger.info = () => {}; // thousands of "settled"/"awake" lines would bury the report
+      try {
+        wakeClips(false); // captureWakeClip resolves at once: this test is about the decision, not the cut
+        for (let s = 0; s < SEQUENCES; s++) {
+          const seed = SEED0 + s;
+          const timeline = buildTimeline(mulberry32(seed));
+          const want = reference(timeline);
+          const where = `seed ${seed}: ${timeline}`;
+          assert.deepEqual(replay(timeline), want.startMs, `captures differ from the nightly rule (${where})`);
+          if (s % 4 === 0) {
+            assert.deepEqual(
+              replay(timeline, mulberry32(seed ^ 0x5bd1e995)), want.startMs,
+              `repeated labels changed the result (${where})`
+            );
+          }
+          if (want.armedAt >= 0) {
+            armed++;
+            const after = timeline.slice(want.armedAt + 1);
+            if (want.startMs.length) withCapture++;
+            // A pure hole longer than the bridge, directly between two active minutes, and one of exactly the bridge.
+            if (new RegExp(`AH{${WAKE_GAP_MIN + 1},}A`).test(after)) holeSplits++;
+            if (new RegExp(`AH{${WAKE_GAP_MIN}}A`).test(after)) holeBridges++;
+            // The old, callback-counting behaviour is the same timeline with the holes squeezed out. How many
+            // timelines does that change the NUMBER of wakes for (or whether it arms)? Those are the ones this
+            // test can fail on the old code with; if the generator stops producing them it proves nothing.
+            if (reference(timeline.replace(/H/g, '')).startMs.length !== want.startMs.length) holesDecide++;
+          }
+        }
+      } finally {
+        logger.info = realInfo;
+        wakeClips(true);
+      }
+      // The coverage floors: if the generator regresses, the comparison above could pass without ever
+      // exercising a split, a bridge or a capture. They are asserts, not logs.
+      assert.ok(armed >= 150, `only ${armed} of ${SEQUENCES} timelines armed the watcher`);
+      assert.ok(withCapture >= 150, `only ${withCapture} timelines produced a capture`);
+      assert.ok(holeSplits >= 40, `only ${holeSplits} timelines had a hole longer than the bridge between two actives`);
+      assert.ok(holeBridges >= 30, `only ${holeBridges} timelines had a hole of exactly the bridge between two actives`);
+      assert.ok(holesDecide >= 20, `only ${holesDecide} timelines where counting callbacks instead of minutes changes the answer`);
+    });
+
+    // ★ #412 C7: carrying the rises changes WHERE a clip starts and nothing else. The same structured timelines as
+    // C13 are replayed twice through the real handler, once with legacy payloads and once with rises planted
+    // (a sub-threshold decoy, then the first frame over the threshold, often at the very start of the minute: the
+    // early first frame that would split a run if the anchor leaked into the bridge arithmetic), on a ring whose
+    // footage is older than any frame so the clamp never binds. Per delivered minute: the capture decision, the
+    // run's activeCount, `lastActiveMs` and `captured` must be identical; only `startMs` may differ, and only by
+    // landing inside the run's first active minute. (A mutant that copies the anchor into lastActiveMs fails it.)
+    test('C7 (#412): 150 seeded timelines: capture decisions, run counts and lastActiveMs are identical with and without rises; only startMs moves, within the first active minute', () => {
+      const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(CAM);
+      const snapshots = (timeline, withRises, rand) => {
+        _state().clear();
+        const out = [];
+        for (let i = 0; i < timeline.length; i++) {
+          const c = timeline[i];
+          if (c === 'H') continue;
+          const M = labelStartMs(i);
+          // Hostile quiet minutes (code review, Opus): a quiet minute that really had sub-threshold readings has
+          // peaks above 0 AND rises at those peaks, on BOTH channels. With `[]` and peaks of 0 a mutant that read the
+          // rises into `active` (any rise, or a threshold a quarter of the real one) could not be told from the
+          // real code. The same peaks go into the legacy payload, so only the arrays differ between the two runs.
+          const subM = MOTION_ACTIVE / 2;
+          const subS = SOUND_ACTIVE / 2;
+          const payload = { cameraId: CAM, bucketStart: labelFor(i), motionPeak: c === 'A' ? MOTION_ACTIVE + 0.05 : subM, soundPeak: subS };
+          if (withRises) {
+            payload.soundRises = [{ atMs: M + 7_000, value: subS }];
+            payload.motionRises = c === 'A' ? [] : [{ atMs: M + 5_000, value: subM }];
+            if (c === 'A') {
+              const decoyAt = M + Math.floor(rand() * 30_000);
+              const frameAt = rand() < 0.4 ? M : decoyAt + 1 + Math.floor(rand() * (59_000 - (decoyAt - M)));
+              if (frameAt > decoyAt) payload.motionRises.push({ atMs: decoyAt, value: MOTION_ACTIVE / 2 });
+              payload.motionRises.push({ atMs: frameAt, value: MOTION_ACTIVE + 0.05 });
+            }
+          }
+          const r = handleMinute(payload);
+          const run = stateOf()?.run;
+          out.push({
+            i,
+            captured: r?.captured === true,
+            run: run ? { activeCount: run.activeCount, lastActiveMs: run.lastActiveMs, captured: run.captured } : null,
+            startMs: r?.captured ? r.startMs : null,
+          });
+        }
+        return out;
+      };
+      const strip = (snaps) => snaps.map(({ startMs, ...rest }) => rest);
+      const realInfo = logger.info;
+      logger.info = () => {};
+      let captures = 0;
+      let earlyFirstFrames = 0;
+      try {
+        db.prepare("UPDATE settings SET wake_clips_enabled = 0 WHERE id = 'app'").run(); // the decision, not the cut (as C13)
+        const entry = startSegmenter(CAM, camera.mediamtx_path, { preRollSec: 30, postRollSec: 15 });
+        // CONTINUOUS footage over the whole timeline (a closed segment every 10 s, from before its first minute to
+        // after its last). It has to cover each first frame's window, not just reach back past it: since the review
+        // round the watcher keeps an earlier anchor only when extractClip's selection finds footage for it, and one
+        // 10-day-old segment (this fixture before) covers nothing, so every anchor would fall back to `at`.
+        for (let t = labelStartMs(0) - 12_000; t <= labelStartMs(100) + 60_000; t += 10_000) {
+          const seg = path.join(entry.ringDir, `seg-${t}.mkv`);
+          fs.writeFileSync(seg, 'x');
+          fs.utimesSync(seg, new Date(t), new Date(t));
+        }
+        assert.equal(ringOldestStartMs(CAM) !== null, true, 'precondition: the ring reports footage, so the anchor is the first frame');
+        for (let s = 0; s < 150; s++) {
+          const timeline = buildTimeline(mulberry32(412_000 + s));
+          const legacy = snapshots(timeline, false, null);
+          const planted = snapshots(timeline, true, mulberry32(0x412 + s));
+          assert.deepEqual(strip(planted), strip(legacy), `rises changed a decision (seed ${412_000 + s}: ${timeline})`);
+          for (let k = 0; k < legacy.length; k++) {
+            if (!legacy[k].captured) continue;
+            captures++;
+            const L = legacy[k].startMs; // the old anchor: the END of the run's first active minute
+            assert.ok(planted[k].startMs <= L, `seed ${412_000 + s}: anchor after the old one`);
+            assert.ok(planted[k].startMs >= L - 60_000, `seed ${412_000 + s}: anchor outside the run's first active minute`);
+            if (planted[k].startMs === L - 60_000) earlyFirstFrames++;
+          }
+        }
+      } finally {
+        logger.info = realInfo;
+        wakeClips(true);
+      }
+      assert.ok(captures >= 150, `only ${captures} captures compared`);
+      assert.ok(earlyFirstFrames >= 20, `only ${earlyFirstFrames} early first frames (a frame at the very start of the minute)`);
+    });
+
+    test('C7 (#412): an early first frame plus a gap of exactly WAKE_GAP_MIN still bridges: one wake, captured on the 5th active minute', () => {
+      // A (frame at the very start of its minute), WAKE_GAP_MIN quiet minutes, then four more actives. If the anchor
+      // (59 s before the label) leaked into the bridge arithmetic, the gap would measure 4 and the run would split.
+      const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(CAM);
+      const entry = startSegmenter(CAM, camera.mediamtx_path, { preRollSec: 30, postRollSec: 15 });
+      wakeClips(false);
+      try {
+        settle();
+        const idxFirst = clock;
+        // Continuous footage around the first active minute (see the seeded test above for why a single old
+        // segment no longer does): a closed segment every 2 s from 10 s before the minute to 40 s after it.
+        for (let t = labelStartMs(idxFirst) - 10_000; t <= labelStartMs(idxFirst) + 40_000; t += 2_000) {
+          const seg = path.join(entry.ringDir, `seg-${t}.mkv`);
+          fs.writeFileSync(seg, 'x');
+          fs.utimesSync(seg, new Date(t), new Date(t));
+        }
+        const risesAt = (idx) => [{ atMs: labelStartMs(idx), value: MOTION_ACTIVE + 0.05 }];
+        const active = () => {
+          const idx = clock++;
+          return handleMinute({
+            cameraId: CAM, bucketStart: labelFor(idx), motionPeak: MOTION_ACTIVE + 0.05, soundPeak: 0,
+            motionRises: risesAt(idx), soundRises: [],
+          });
+        };
+        assert.equal(active(), null);
+        assert.equal(stateOf().run.startMs, labelStartMs(idxFirst), 'precondition: the anchor is the first frame, a whole minute before the label');
+        assert.equal(stateOf().run.lastActiveMs, endMs(idxFirst), 'lastActiveMs stays the label');
+        for (let g = 0; g < WAKE_GAP_MIN; g++) assert.equal(quiet(), null);
+        const captured = [];
+        for (let i = 0; i < WAKE_ACTIVE_MIN - 1; i++) { const r = active(); if (r?.captured) captured.push(r.startMs); }
+        assert.deepEqual(captured, [labelStartMs(idxFirst)], 'bridged into ONE wake, anchored on its first frame');
+      } finally {
+        wakeClips(true);
+      }
+    });
+  });
+
+  describe('the premise, against the real tracker', () => {
+    test('C14: an outage delivers NO payload, and the watcher then does not bridge it (end to end)', () => {
+      activity._resetActivityTrackerForTests();
+      const seen = [];
+      const offSeen = activity.onMinuteFlushed((p) => seen.push(p.bucketStart));
+      const off = activity.onMinuteFlushed(handleMinute);
+      // Explicit receipt times well inside the past: the window the watcher checks is the real clock's, the
+      // labels are not. Same technique as the #447 block above (recordMotion with a receipt time, flushActivity
+      // with the tick's time).
+      const M0 = BASE_MS - 150 * 60_000;
+      const minuteAt = (i) => M0 + i * 60_000;
+      const labelAt = (i) => new Date(minuteAt(i)).toISOString().slice(0, 19).replace('T', ' ');
+      const feed = (i, fraction) => {
+        activity.recordMotion(CAM, fraction, null, minuteAt(i) + 20_000);
+        activity.flushActivity(minuteAt(i + 1) + 900); // the tick just after the minute ends
+      };
+      const outage = (i) => activity.flushActivity(minuteAt(i + 1) + 900); // the tick runs, nothing was received
+      try {
+        for (let i = 0; i < ONSET_QUIET_MIN; i++) feed(i, 0);
+        assert.equal(stateOf().asleep, true, 'precondition: 15 observed quiet minutes arm the watcher');
+        for (let i = 15; i < 15 + WAKE_ACTIVE_MIN - 1; i++) feed(i, MOTION_ACTIVE + 0.05);
+        assert.equal(stateOf().run.activeCount, WAKE_ACTIVE_MIN - 1, 'precondition: one active minute short of a wake');
+        for (let i = 19; i < 29; i++) outage(i); // ten minutes with no motion frame and no sound window
+        feed(29, MOTION_ACTIVE + 0.05);
+
+        // The premise: the tracker skipped the ten minutes instead of sending nulls for them.
+        const expected = [];
+        for (let i = 0; i <= 18; i++) expected.push(labelAt(i));
+        expected.push(labelAt(29));
+        assert.deepEqual(seen, expected, 'the tracker must send nothing for a minute with no signal');
+
+        // The chain: the watcher saw the jump and did not bridge it.
+        const run = stateOf().run;
+        assert.equal(run.activeCount, 1, 'the active minute after a ten-minute outage topped up the old run');
+        assert.equal(run.captured, false);
+        assert.equal(run.startMs, minuteAt(29) + 60_000);
+      } finally {
+        off();
+        offSeen();
+        activity._resetActivityTrackerForTests();
+      }
+    });
+  });
+});
+
+// ★ #590: a hole that restarts the settling count is LOGGED, and nothing else about the watcher changes.
+//
+// Why the line exists: the live gate arms only after ONSET_QUIET_MIN consecutive observed quiet minutes (#448), so
+// a camera that drops a minute more often than about every 15 minutes never arms, and until #590 that was silent.
+// These tests pin WHEN the line is written (a hole that cost real progress, rate-limited on the labels, with what
+// the limit held back carried onto the next line) and, as importantly, that writing it changed no decision.
+//
+// ⚠️ Test names are `R590-n`, never `C<n>:`: scripts/mutants.json anchors the #448 and #412 mutants on name
+// patterns such as `^C(6|7):`, and a new `C6:` here would be dragged into their runs (and the other way round).
+describe('#590: a hole that restarts the settling count is logged, and nothing else changes', () => {
+  const restartLines = () => logger.getRecent().filter((l) => l.includes('settling restarted'));
+  const msg = (name, elapsed, lost, held = '') =>
+    `[wake] "${name}" settling restarted: readings ${elapsed} min apart after ${lost} quiet minute(s)${held}`;
+  const more = (k, longest) => `; ${k} more since the last such line, the longest after ${longest} quiet minute(s)`;
+  // Quiet payloads up to label h - 2, label h - 1 MISSING, a quiet payload at label h: a hole at h that cost every
+  // quiet minute read since the previous hole (h - previous - 1 of them).
+  const holeAt = (h) => {
+    while (clock < h - 1) quiet();
+    skip(1);
+    quiet();
+  };
+
+  beforeEach(() => logger.clear());
+
+  test('R590-1: 14 quiet minutes, one missing minute, one more: exactly ONE line, with the elapsed and the lost counts', () => {
+    for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) quiet();
+    assert.deepEqual(restartLines(), [], 'precondition: contiguous settling is silent');
+    skip(1);
+    quiet();
+    const lines = restartLines();
+    assert.equal(lines.length, 1, lines.join('\n'));
+    assert.ok(lines[0].endsWith(`[INFO] ${msg('Kid Room', 2, ONSET_QUIET_MIN - 1)}`), lines[0]);
+    assert.equal(stateOf().asleep, false, 'the behaviour is #448 C6 unchanged');
+    assert.equal(stateOf().quietRun, 1, 'the count restarted at the hole');
+  });
+
+  test('R590-2: a hole that cost NO progress logs nothing (one that follows an active minute), while one that did, does', () => {
+    moving();
+    skip(1);
+    quiet(); // active, hole, quiet: nothing to lose
+    moving();
+    skip(1);
+    moving();
+    skip(1);
+    quiet(); // active, hole, active, hole, quiet
+    assert.deepEqual(restartLines(), []);
+    // The positive control, in the same shape: with two quiet minutes to lose, a two-minute hole logs.
+    _state().clear();
+    clock = 0;
+    quiet();
+    quiet();
+    skip(2);
+    quiet();
+    const lines = restartLines();
+    assert.equal(lines.length, 1);
+    assert.ok(lines[0].endsWith(`[INFO] ${msg('Kid Room', 3, 2)}`), lines[0]);
+  });
+
+  test('R590-3: a hole followed by an ACTIVE minute logs nothing: the active minute, not the hole, ended the progress', () => {
+    for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) quiet();
+    skip(1);
+    moving();
+    assert.deepEqual(restartLines(), []);
+    assert.equal(stateOf().quietRun, 0);
+  });
+
+  test('R590-4: the rate limit, over two windows: at most one line per 15 minutes, exactly 15 logs, the held-back restarts are counted', () => {
+    const holes = [4, 11, 14, 19, 21, 24, 28, 33, 35];
+    const linesAfter = [1, 1, 1, 2, 2, 2, 2, 2, 3];
+    holes.forEach((h, i) => {
+      holeAt(h);
+      assert.equal(restartLines().length, linesAfter[i], `after the hole at label ${h}: ${restartLines().join('\n')}`);
+    });
+    const lines = restartLines();
+    // Hole 4: the first. 11 (+7) and 14 (+10) are held back, with 6 and 2 quiet minutes lost: the longest is 6, which
+    // is neither the first nor the last nor the smallest of what was held. 19 is EXACTLY 15 minutes after 4.
+    assert.ok(lines[0].endsWith(`[INFO] ${msg('Kid Room', 2, 3)}`), lines[0]);
+    assert.ok(lines[1].endsWith(`[INFO] ${msg('Kid Room', 2, 4, more(2, 6))}`), lines[1]);
+    // Window two: 21 (+2), 24 (+5), 28 (+9) and 33 (+14: one minute short of the cadence) are held back, 35 (+16) logs.
+    // 21 would have logged at once if the last line's label had not been remembered; "4 more", not 6, says the count
+    // restarted at the line; "the longest after 4" (the held runs were 1, 2, 3, 4) and not 6 says the longest did too.
+    assert.ok(lines[2].endsWith(`[INFO] ${msg('Kid Room', 2, 1, more(4, 4))}`), lines[2]);
+    assert.equal(stateOf().asleep, false, 'precondition of the whole timeline: it never armed');
+  });
+
+  test('R590-4b: the limit is per camera: a second camera\'s first restart logs inside the first camera\'s window', () => {
+    makeCamera(db, { id: 'cam-2', name: 'Second Room', childId: CHILD });
+    try {
+      holeAt(4);
+      const second = (idx) => handleMinute({ cameraId: 'cam-2', bucketStart: labelFor(idx), motionPeak: 0, soundPeak: 0 });
+      second(0);
+      second(1);
+      second(2);
+      second(4); // label 3 missing: a hole that cost 3 quiet minutes, 0 minutes after the first camera's line
+      const lines = restartLines();
+      assert.equal(lines.length, 2, lines.join('\n'));
+      assert.ok(lines[1].endsWith(`[INFO] ${msg('Second Room', 2, 3)}`), lines[1]);
+    } finally {
+      db.prepare('DELETE FROM cameras WHERE id = ?').run('cam-2');
+    }
+  });
+
+  test('R590-5 (control): contiguous settling logs no restart line, arms on the 15th quiet minute, and an active minute is not a hole', () => {
+    for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) {
+      quiet();
+      assert.equal(stateOf().asleep, false, `armed early, after ${i + 1} minutes`);
+    }
+    quiet();
+    assert.equal(stateOf().asleep, true, 'the 15th contiguous quiet minute arms the watcher');
+    assert.deepEqual(restartLines(), []);
+    _state().clear();
+    clock = 0;
+    for (let i = 0; i < 5; i++) quiet();
+    moving();
+    for (let i = 0; i < ONSET_QUIET_MIN; i++) quiet();
+    assert.equal(stateOf().asleep, true);
+    assert.deepEqual(restartLines(), [], 'an active minute restarts the count by itself and is not announced');
+  });
+
+  test('R590-6 (control): an ARMED watcher logs nothing for a hole: only settling is announced', () => {
+    settle();
+    logger.clear();
+    skip(3);
+    quiet();
+    quiet();
+    assert.deepEqual(restartLines(), []);
+    assert.equal(stateOf().asleep, true);
+  });
+
+  test('R590-7 (control): a backward clock step with progress is not a hole and logs nothing', () => {
+    for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) quiet();
+    clock = 2;
+    quiet();
+    assert.deepEqual(restartLines(), []);
+    assert.equal(stateOf().quietRun, 1, 'the progress was still dropped (#448 C10b)');
+  });
+
+  test('R590-8: a backward clock step does not silence the line for as long as the step is deep', () => {
+    holeAt(4);
+    assert.equal(restartLines().length, 1);
+    clock = 0; // the labels step back 5 minutes: older than the last line's
+    quiet();
+    quiet();
+    skip(1);
+    quiet(); // a hole at label 3, whose label is OLDER than the last line's (label 4): "now - last" is negative
+    const lines = restartLines();
+    assert.equal(lines.length, 2, lines.join('\n'));
+    assert.ok(lines[1].endsWith(`[INFO] ${msg('Kid Room', 2, 2)}`), lines[1]);
+  });
+
+  test('R590-8b: a restart that lands on EXACTLY the last line\'s label (a step back re-living that minute) is held back, and counted', () => {
+    holeAt(4);
+    assert.equal(restartLines().length, 1);
+    clock = 1; // the labels step back and re-live minutes 1-4
+    quiet();
+    quiet();
+    skip(1);
+    quiet(); // a hole at label 4 again: the same label as the line already written
+    assert.equal(restartLines().length, 1, restartLines().join('\n'));
+    assert.equal(stateOf().restartsUnlogged, 1, 'it was held back, not lost');
+    assert.equal(stateOf().restartsLongest, 2);
+  });
+
+  test('R590-9: leaving the sleep window clears the limiter: the first restart after re-entry logs, with no carried count', () => {
+    holeAt(4); // logged
+    holeAt(8); // held back: 3 quiet minutes lost
+    assert.equal(stateOf().restartsUnlogged, 1, 'precondition: one restart held back');
+    assert.equal(stateOf().restartsLongest, 3);
+    db.prepare('UPDATE children SET track_sleep = 0 WHERE id = ?').run(CHILD);
+    try {
+      quiet(); // out of tracking: the watcher resets
+    } finally {
+      db.prepare('UPDATE children SET track_sleep = 1 WHERE id = ?').run(CHILD);
+    }
+    assert.equal(stateOf().restartLogAt, null, 'reset() kept the last line\'s label');
+    assert.equal(stateOf().restartsUnlogged, 0, 'reset() kept the held-back count');
+    assert.equal(stateOf().restartsLongest, 0, 'reset() kept the longest held-back run');
+    holeAt(13); // 9 minutes after the line at label 4: inside the window, but that line belongs to the night before
+    let lines = restartLines();
+    assert.equal(lines.length, 2, lines.join('\n'));
+    assert.ok(lines[1].endsWith(`[INFO] ${msg('Kid Room', 2, 2)}`), `no "more" may come across the reset: ${lines[1]}`);
+    holeAt(15); // held back: 1 quiet minute lost
+    holeAt(28); // exactly 15 minutes after 13: logs, and the longest it carries is THIS night's 1, not the 3 from before
+    lines = restartLines();
+    assert.equal(lines.length, 3, lines.join('\n'));
+    assert.ok(lines[2].endsWith(`[INFO] ${msg('Kid Room', 2, 12, more(1, 1))}`), lines[2]);
+  });
+
+  // ★ NO BEHAVIOUR CHANGE. The log line is bookkeeping beside the decision, so the strongest thing to assert is that
+  // the decision is what an INDEPENDENT model says: consecutive observed quiet minutes, restarted by any hole. The
+  // oracle below shares nothing with wakeWatcher.js except ONSET_QUIET_MIN. It also writes down the restarts the
+  // stated rule names (a hole after progress, before a quiet minute) and applies the stated limiter to them, and the
+  // lines are compared whole: which restart logged, with which numbers, and what the limit held back. Honest limit:
+  // that second half re-implements the rule, so it catches a slip in the code, not a mistake in the rule itself.
+  // Uniform random timelines would almost never produce a restart AFTER progress and then a rate-limited one, so
+  // the generator is structured (short quiet runs, single and long holes, some active minutes) and the floors below
+  // are asserts: a generator edit that makes the comparison vacuous fails here rather than passing quietly.
+  // Fixed seeds, so the counts are exactly reproducible; the floors sit under what the generator produces.
+  test('R590-10: 200 seeded timelines: when the watcher arms, every count and every restart line equal the independent oracle', () => {
+    const rng = (seed) => {
+      let a = seed >>> 0;
+      return () => {
+        a = (a + 0x6d2b79f5) >>> 0;
+        let t = a;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    };
+    // Q = a quiet payload, A = an active one, H = a minute with no payload at all.
+    const build = (rand) => {
+      const n = (lo, hi) => lo + Math.floor(rand() * (hi - lo + 1));
+      let s = '';
+      while (s.length < 110) {
+        const r = rand();
+        if (r < 0.5) s += 'Q'.repeat(n(1, 9));
+        else if (r < 0.58) s += 'Q'.repeat(n(10, 20));
+        else if (r < 0.9) s += 'H'.repeat(rand() < 0.85 ? n(1, 2) : n(3, 25));
+        else s += 'A'.repeat(n(1, 2));
+      }
+      return s;
+    };
+    const model = (timeline) => {
+      let run = 0;
+      let last = null;
+      let armedAt = -1;
+      const events = [];
+      const runs = new Map(); // payload index -> the oracle's quiet count after it
+      for (let i = 0; i < timeline.length && armedAt < 0; i++) {
+        if (timeline[i] === 'H') continue;
+        const hole = last != null && i - last > 1;
+        if (timeline[i] === 'A') {
+          run = 0;
+        } else {
+          if (hole && run > 0) events.push({ idx: i, lost: run, elapsed: i - last });
+          run = hole ? 1 : run + 1;
+        }
+        last = i;
+        runs.set(i, run);
+        if (run >= ONSET_QUIET_MIN) armedAt = i;
+      }
+      const lines = [];
+      let logAt = null;
+      let held = 0;
+      let longest = 0;
+      let exactly15 = 0;
+      for (const e of events) {
+        if (logAt == null || e.idx - logAt >= 15) {
+          if (logAt != null && e.idx - logAt === 15) exactly15++;
+          lines.push(msg('Kid Room', e.elapsed, e.lost, held > 0 ? more(held, longest) : ''));
+          logAt = e.idx;
+          held = 0;
+          longest = 0;
+        } else {
+          held++;
+          longest = Math.max(longest, e.lost);
+        }
+      }
+      return { armedAt, runs, lines, events, exactly15 };
+    };
+
+    const SEQUENCES = 200;
+    const count = { armed: 0, armedAfterRestart: 0, lines: 0, withMore: 0, held: 0, exactly15: 0 };
+    for (let s = 0; s < SEQUENCES; s++) {
+      _state().clear();
+      clock = 0;
+      logger.clear();
+      const timeline = build(rng(590000 + s));
+      const want = model(timeline);
+      const where = `seed ${590000 + s}: ${timeline}`;
+      let armedAt = -1;
+      for (let i = 0; i < timeline.length && armedAt < 0; i++) {
+        if (timeline[i] === 'H') continue;
+        deliver(labelFor(i), timeline[i] === 'A' ? MOTION_ACTIVE + 0.05 : 0, 0);
+        const armed = want.runs.get(i) >= ONSET_QUIET_MIN;
+        assert.equal(stateOf().asleep, armed, `armed at the wrong minute (index ${i}; ${where})`);
+        assert.equal(stateOf().quietRun, armed ? 0 : want.runs.get(i), `quiet count differs (index ${i}; ${where})`);
+        assert.equal(stateOf().lastAt, endMs(i), `lastAt differs (index ${i}; ${where})`);
+        assert.equal(stateOf().run, null, `a run exists before the watcher is armed (index ${i}; ${where})`);
+        if (armed) armedAt = i;
+      }
+      assert.equal(armedAt, want.armedAt, `arming minute differs (${where})`);
+      const got = restartLines().map((l) => l.slice(l.indexOf('[INFO] ') + '[INFO] '.length));
+      assert.deepEqual(got, want.lines, `restart lines differ (${where})`);
+      if (armedAt >= 0) count.armed++;
+      if (armedAt >= 0 && want.lines.length) count.armedAfterRestart++;
+      count.lines += want.lines.length;
+      count.withMore += want.lines.filter((l) => l.includes(' more since')).length;
+      count.held += want.events.length - want.lines.length;
+      count.exactly15 += want.exactly15;
+    }
+    assert.ok(count.armed >= 150, `only ${count.armed} of ${SEQUENCES} timelines armed the watcher: ${JSON.stringify(count)}`);
+    assert.ok(count.armedAfterRestart >= 60, `only ${count.armedAfterRestart} armed after a restart: ${JSON.stringify(count)}`);
+    assert.ok(count.lines >= 100, `only ${count.lines} restart lines: ${JSON.stringify(count)}`);
+    assert.ok(count.withMore >= 12, `only ${count.withMore} lines carried a held-back count: ${JSON.stringify(count)}`);
+    assert.ok(count.held >= 30, `only ${count.held} restarts were held back: ${JSON.stringify(count)}`);
+    assert.ok(count.exactly15 >= 2, `only ${count.exactly15} lines came exactly 15 minutes after the last: ${JSON.stringify(count)}`);
+  });
+});
+
+// ★ #588: a minute whose VIDEO nobody saw is a hole for the live watcher, and it still ends a broken run on time.
+//
+// A camera whose video stalls while its microphone keeps working sends the watcher sound-only minutes
+// (`motionPeak: null`, `soundPeak: n`). Before #588 the watcher read each as WATCHED: a quiet one counted toward the
+// 15 settling minutes and sat inside a run's bridge as quiet, a loud one was ACTIVE. The nightly job calls the same
+// minute unknown and non-active (`motion_frames > 0`, #508), so a clip could exist for a wake the timeline does not
+// show. activityTracker now flags such a minute `videoUnobserved: true` (activityTracker.test.js R588-T*), and the
+// watcher treats it as if no payload had arrived, except that it still ENDS a run whose gap it breaks, on the same
+// minute a quiet gap would have (a bare early return kept a ring hold up to the 20-minute sweep: plan review round 1).
+// A camera that never had video (sound-only by design) sends no flag and keeps working (#453 C3b).
+//
+// ⚠️ Names are `R588-…`, never `C<n>:` (the #448/#412 mutants select on `^C…` name patterns).
+describe('#588: a minute with sound but no video (videoUnobserved) is a hole, not a watched quiet minute', () => {
+  const LOUD = SOUND_ACTIVE + 10;
+  // One unobserved minute at the next label: what activityTracker sends for a stalled camera whose microphone works.
+  // Hostile on purpose: a LOUD one carries a sound rise over SOUND_ACTIVE, so an unobserved branch that fell through
+  // to the active path would also find a "first frame" for it.
+  function unobserved(sound = 0) {
+    const idx = clock++;
+    return handleMinute({
+      cameraId: CAM, bucketStart: labelFor(idx), motionPeak: null, soundPeak: sound, videoUnobserved: true,
+      motionRises: [], soundRises: sound > 0 ? [{ atMs: labelStartMs(idx) + 5_000, value: sound }] : [],
+    });
+  }
+  const runEndedLines = () => logger.getRecent().filter((l) => l.includes('run ended'));
+  const restartLines = () => logger.getRecent().filter((l) => l.includes('settling restarted'));
+  // A REAL segmenter, as the #446 / #448 tests arm one (see those blocks): the entry exists only synchronously, so
+  // every assertion that needs it runs with no `await` in between.
+  function armSegmenterNow() {
+    const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(CAM);
+    startSegmenter(CAM, camera.mediamtx_path, { preRollSec: 5, postRollSec: 15 });
+    assert.equal(isSegmenterRunning(CAM), true, 'precondition: the segmenter armed synchronously');
+  }
+  const wakeClips = (on) => db.prepare("UPDATE settings SET wake_clips_enabled = ? WHERE id = 'app'").run(on ? 1 : 0);
+  // A sleep window that does NOT contain the real clock (the window gate reads the real clock, not the labels).
+  function windowExcludingNow() {
+    const now = Date.now();
+    const pad = (n) => String(n).padStart(2, '0');
+    const hhmm = (d) => `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+    return { start: hhmm(new Date(now + 7 * 3_600_000)), end: hhmm(new Date(now + 8 * 3_600_000)) };
+  }
+  const captures = (results) => results.filter((r) => r?.captured).map((r) => r.startMs);
+
+  beforeEach(() => logger.clear());
+
+  test('R588-W1: an unobserved minute is not settling progress: 14 quiet, 1 unobserved, 1 quiet is NOT armed; 15 consecutive observed minutes arm', () => {
+    for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) quiet();
+    const lastAt = stateOf().lastAt;
+    assert.equal(unobserved(0), null);
+    assert.equal(stateOf().quietRun, ONSET_QUIET_MIN - 1, 'the unobserved minute changed the settling count');
+    assert.equal(stateOf().lastAt, lastAt, 'the unobserved minute moved lastAt (so the next reading would not see the hole)');
+    assert.equal(stateOf().asleep, false, 'an unobserved minute was the 15th quiet minute');
+    quiet();
+    assert.equal(stateOf().asleep, false, 'an unobserved minute counted toward the 15');
+    assert.equal(stateOf().quietRun, 1, 'the next observed minute must see the hole and restart the count');
+    for (let i = 0; i < ONSET_QUIET_MIN - 2; i++) quiet();
+    assert.equal(stateOf().asleep, false, 'fourteen observed minutes since the stall: one short');
+    quiet();
+    assert.equal(stateOf().asleep, true, 'fifteen consecutive observed minutes arm it');
+  });
+
+  test('R588-W1b: a LOUD unobserved minute does not zero the settling count either: it is a hole, not an active minute', () => {
+    for (let i = 0; i < 10; i++) quiet();
+    assert.equal(unobserved(LOUD), null);
+    assert.equal(stateOf().quietRun, 10, 'a loud minute nobody saw was read as active');
+    assert.equal(stateOf().asleep, false);
+    quiet();
+    assert.equal(stateOf().quietRun, 1, 'the hole restarts the count at the next observed minute');
+  });
+
+  describe('R588-W2: the run and its ring hold end on the minute a quiet gap would end them', () => {
+    function heldRun(activeMin) {
+      wakeClips(true);
+      armSegmenterNow();
+      settle();
+      logger.clear();
+      for (let i = 0; i < activeMin; i++) moving();
+      assert.equal(stateOf().run.holding, true, 'precondition: the run holds the ring');
+      assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE]);
+    }
+
+    for (const [what, sound] of [['quiet', 0], ['LOUD', LOUD]]) {
+      test(`R588-W2a: ${WAKE_ACTIVE_MIN - 1} active, then ${what} unobserved minutes: released at the 4th, logged "video not observed; readings 4 min apart"`, () => {
+        try {
+          heldRun(WAKE_ACTIVE_MIN - 1);
+          for (let k = 1; k <= 3; k++) {
+            assert.equal(unobserved(sound), null, `unobserved minute ${k} captured`);
+            assert.equal(stateOf().run?.holding, true, `released early, at unobserved minute ${k}`);
+            assert.equal(stateOf().run.activeCount, WAKE_ACTIVE_MIN - 1, 'an unobserved minute topped the run up');
+          }
+          assert.equal(unobserved(sound), null);
+          assert.equal(stateOf().run, null, 'the 4th unobserved minute must end the run, as the 4th quiet minute does (#448 C4b)');
+          assert.deepEqual(holdOwners(CAM), [], 'and release its hold NOW: not at the next observed reading, not at the 20-minute sweep');
+          const lines = runEndedLines();
+          assert.equal(lines.length, 1, JSON.stringify(lines));
+          // The reason says what is known and no more (code review round 2, Opus): the picture was not observed, and the
+          // last observed reading is 4 label-minutes back. Not "no video for 4 min": a forward clock jump looks the same.
+          assert.match(lines[0], /\[wake\] "cam-1" run ended \(video not observed; readings 4 min apart\) — ring released, nothing recorded$/);
+        } finally {
+          wakeClips(true);
+        }
+      });
+    }
+
+    test('R588-W2b: N in "video not observed; readings N min apart" counts from the last OBSERVED reading, and a missing minute before the stall is part of it', () => {
+      try {
+        // 4 active, 2 quiet, then unobserved: the 2nd unobserved minute is the 4th non-active one, and the last observed
+        // reading is 2 minutes back (not 4: the quiet minutes were watched).
+        heldRun(WAKE_ACTIVE_MIN - 1);
+        quiet();
+        quiet();
+        unobserved(0);
+        assert.equal(stateOf().run?.holding, true, 'precondition: three non-active minutes still bridge');
+        unobserved(0);
+        assert.equal(stateOf().run, null);
+        let lines = runEndedLines();
+        assert.equal(lines.length, 1, JSON.stringify(lines));
+        assert.match(lines[0], /run ended \(video not observed; readings 2 min apart\)/);
+        // 4 active, one minute with no payload at all, then unobserved: ended at the 3rd unobserved minute; the minute
+        // that sent nothing was not observed either, so the line says 4.
+        stopAllSegmenters();
+        _state().clear();
+        clock = 0;
+        heldRun(WAKE_ACTIVE_MIN - 1);
+        skip(1);
+        unobserved(LOUD);
+        unobserved(0);
+        assert.equal(stateOf().run?.holding, true, 'precondition: a missing minute and two unobserved ones still bridge');
+        unobserved(0);
+        assert.equal(stateOf().run, null);
+        lines = runEndedLines();
+        assert.equal(lines.length, 1, JSON.stringify(lines));
+        assert.match(lines[0], /run ended \(video not observed; readings 4 min apart\)/);
+      } finally {
+        wakeClips(true);
+      }
+    });
+
+    for (const [what, sound] of [['quiet', 0], ['LOUD', LOUD]]) {
+      test(`R588-W2c: up to ${WAKE_GAP_MIN} ${what} unobserved minutes inside a wake still bridge it: the capture comes from the next ACTIVE minute`, () => {
+        try {
+          heldRun(WAKE_ACTIVE_MIN - 1);
+          const firstActive = ONSET_QUIET_MIN; // settle() delivered labels 0..14
+          for (let k = 0; k < 3; k++) assert.equal(unobserved(sound), null, 'an unobserved minute completed the wake');
+          const r = moving();
+          assert.deepEqual(captures([r]), [endMs(firstActive)], 'bridged into ONE wake, captured on its 5th ACTIVE minute');
+        } finally {
+          wakeClips(true);
+        }
+      });
+    }
+
+    test('R588-W2d: a run that ALREADY CAPTURED is ended by the stall, its ring hold released, without a "nothing recorded" line', () => {
+      try {
+        heldRun(WAKE_ACTIVE_MIN);
+        assert.equal(stateOf().run.captured, true, 'precondition: the run captured');
+        // The capture is still pending (no await in this test), so the run still holds the ring: the stall must free it.
+        assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE], 'precondition: the captured run still holds the ring');
+        for (let k = 0; k < 3; k++) unobserved(LOUD);
+        assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE], 'released early: three unobserved minutes still bridge');
+        unobserved(LOUD);
+        // Hold first: a captured run logs nothing when it ends, so the hold is the only trace that it really ended.
+        assert.deepEqual(holdOwners(CAM), [], 'the 4th unobserved minute must release the captured run\'s hold');
+        assert.equal(effectiveHold(CAM), null, 'no hold point left on the ring');
+        assert.equal(stateOf().run, null, 'the stall ended the captured run');
+        assert.deepEqual(runEndedLines(), []);
+        assert.deepEqual(logger.getRecent().filter((l) => l.includes('nothing recorded')), []);
+      } finally {
+        wakeClips(true);
+      }
+    });
+  });
+
+  test('R588-W3: a LOUD unobserved minute is not active: it starts no run, tops none up, and never completes a wake', () => {
+    settle();
+    assert.equal(unobserved(LOUD), null);
+    assert.equal(stateOf().run, null, 'a loud minute nobody saw started a run');
+    for (let i = 0; i < WAKE_ACTIVE_MIN - 1; i++) moving();
+    const lastActiveMs = stateOf().run.lastActiveMs;
+    assert.equal(unobserved(LOUD), null, 'a loud unobserved minute completed the wake (it would have been the 5th active minute)');
+    assert.equal(stateOf().run.activeCount, WAKE_ACTIVE_MIN - 1);
+    assert.equal(stateOf().run.lastActiveMs, lastActiveMs, 'it moved the run\'s last active minute');
+    assert.equal(stateOf().run.captured, false);
+    for (let i = 0; i < 3; i++) assert.equal(unobserved(LOUD), null);
+    assert.equal(stateOf().run, null, 'four loud unobserved minutes are a gap of four: the run is over, nothing captured');
+  });
+
+  for (const [variant, extra] of [['no field', {}], ['videoUnobserved: false', { videoUnobserved: false }]]) {
+    test(`R588-W4: a sound-only camera (${variant}) still settles on 15 quiet minutes and still records a sound wake`, () => {
+      const send = (sound) => {
+        const idx = clock++;
+        return handleMinute({ cameraId: CAM, bucketStart: labelFor(idx), motionPeak: null, soundPeak: sound, ...extra });
+      };
+      for (let i = 0; i < ONSET_QUIET_MIN - 1; i++) send(0);
+      assert.equal(stateOf().asleep, false);
+      send(0);
+      assert.equal(stateOf().asleep, true, '15 quiet sound-only minutes arm the watcher (#453 C3b)');
+      const results = [];
+      for (let i = 0; i < WAKE_ACTIVE_MIN; i++) results.push(send(LOUD));
+      assert.deepEqual(captures(results), [endMs(ONSET_QUIET_MIN)], 'a sound-only wake is recorded');
+    });
+  }
+
+  // ★ R588-W5: NO BEHAVIOUR CHANGE FOR A PAYLOAD WITHOUT THE FLAG, against the code before #588 itself.
+  // #588 moved the bridge-end rule into a helper and computes its log reason earlier, which a reader cannot prove
+  // changed nothing. So a seeded corpus of hostile timelines (quiet, active motion, sound-only minutes, holes, repeated
+  // labels, backward and forward label jumps, readings exactly AT the thresholds, rises, minutes out of tracking) is
+  // replayed through handleMinute, and the watcher's whole state after every payload (asleep, quietRun, lastAt, the
+  // run, the return value, the #590 limiter and the `[wake]` lines written) is compared with a GOLDEN TRACE.
+  // What the `[wake]` lines here cover: `settled`, `awake` and `settling restarted`. NOT the `run ended (...)` reasons:
+  // wake clips are off, so no run ever holds the ring and endRun logs nothing (code review round 2, Opus: an earlier
+  // version of this comment claimed otherwise). Those reason texts are pinned by #448 C11 and C17a-f (the observed
+  // path) and by R588-W2a, W2b, W6 and W9 (the unobserved path), each with a real segmenter holding the ring.
+  // HOW THE GOLDEN WAS MADE: generated ONCE (2026-10-05) by this very test with R588_WRITE_GOLDEN=1, run in a scratch
+  // copy whose backend/src was the pre-#588 code (dev ca51c3f, `git archive ca51c3f backend`), and committed as
+  // test/fixtures/wake-watcher-588-golden.json. No old code runs in the suite. The write mode REFUSES to run against a
+  // wakeWatcher.js that knows `videoUnobserved`, because a golden regenerated from the new code proves nothing; if the
+  // corpus below ever has to change, regenerate it from the pre-#588 source the same way, never from the tree.
+  // Times are recorded in minutes relative to BASE_MS (labels are minute-aligned, and with no ring the anchor is the
+  // label), so the trace does not depend on when the suite runs. Wake clips are off: the decision, not the cut (as C13).
+  describe('R588-W5: the golden trace', () => {
+    const GOLDEN = new URL('./fixtures/wake-watcher-588-golden.json', import.meta.url);
+    const SEEDS = Array.from({ length: 30 }, (_, i) => 588_000 + i);
+    function rng(seed) {
+      let a = seed >>> 0;
+      return () => {
+        a = (a + 0x6d2b79f5) >>> 0;
+        let t = a;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+    // One timeline: a list of payload steps { idx, motionPeak, soundPeak, rises?, untracked? }. Holes and forward jumps
+    // are label indices that never appear; a repeat re-uses the last label; a backward jump re-lives older labels.
+    function corpus(seed) {
+      const rand = rng(seed);
+      const int = (lo, hi) => lo + Math.floor(rand() * (hi - lo + 1));
+      const pick = (a) => a[Math.floor(rand() * a.length)];
+      const steps = [];
+      let idx = 0;
+      let last = null;
+      const push = (step) => { steps.push(step); last = step.idx; };
+      const quietStep = (i) => ({ idx: i, motionPeak: pick([0, 0, 0.004, MOTION_ACTIVE]), soundPeak: pick([0, 0, 3, SOUND_ACTIVE, null]) });
+      if (rand() < 0.85) for (let n = int(14, 20); n > 0; n--) push(quietStep(idx++));
+      const length = int(60, 90);
+      while (steps.length < length) {
+        const r = rand();
+        if (r < 0.28) push(quietStep(idx++));
+        else if (r < 0.50) push({ idx: idx++, motionPeak: pick([MOTION_ACTIVE + 1e-9, 0.05, 0.3]), soundPeak: pick([0, 4, LOUD, null]) });
+        else if (r < 0.56) push({ idx: idx++, motionPeak: null, soundPeak: pick([SOUND_ACTIVE + 1e-9, 20]) });
+        else if (r < 0.62) push({ idx: idx++, motionPeak: null, soundPeak: pick([0, 2]) });
+        else if (r < 0.74) idx += int(1, 6); // a hole: no payload
+        else if (r < 0.79) { if (last !== null) push({ ...quietStep(last), motionPeak: pick([0, 0.3]) }); } // a repeated label
+        else if (r < 0.83) { idx -= pick([1, 2, 3, 5, 60]); push(quietStep(idx++)); } // the clock went back
+        else if (r < 0.86) idx += int(10, 40); // a long hole or a forward jump
+        else if (r < 0.88) push({ ...quietStep(idx++), untracked: true }); // a reading while the child is not tracked
+        else {
+          const i = idx++;
+          const hot = rand() < 0.5;
+          push({
+            idx: i, motionPeak: hot ? 0.05 : 0.004, soundPeak: hot ? LOUD : 2,
+            rises: { motionRises: [{ atMs: labelStartMs(i) + int(0, 59_999), value: hot ? 0.05 : 0.004 }], soundRises: [{ atMs: labelStartMs(i) + 30_000, value: hot ? LOUD : 2 }] },
+          });
+        }
+      }
+      return steps;
+    }
+    const rel = (ms) => (ms == null ? null : (ms - BASE_MS) / 60_000);
+    // Replay one timeline from a fresh watcher. `field`: undefined = no key at all, else the value of videoUnobserved.
+    function trace(steps, field) {
+      _state().clear();
+      const out = [];
+      const realInfo = logger.info;
+      let lines = [];
+      logger.info = (...args) => { lines.push(args.join(' ')); };
+      try {
+        for (const s of steps) {
+          const payload = { cameraId: CAM, bucketStart: labelFor(s.idx), motionPeak: s.motionPeak, soundPeak: s.soundPeak, ...(s.rises || {}) };
+          if (field !== undefined) payload.videoUnobserved = field;
+          lines = [];
+          let r;
+          if (s.untracked) {
+            db.prepare('UPDATE children SET track_sleep = 0 WHERE id = ?').run(CHILD);
+            try { r = handleMinute(payload); } finally { db.prepare('UPDATE children SET track_sleep = 1 WHERE id = ?').run(CHILD); }
+          } else {
+            r = handleMinute(payload);
+          }
+          const st = stateOf();
+          out.push([
+            st.asleep ? 1 : 0, st.quietRun, rel(st.lastAt),
+            st.run ? [rel(st.run.startMs), st.run.activeCount, rel(st.run.lastActiveMs), st.run.captured ? 1 : 0, st.run.holding ? 1 : 0] : 0,
+            r ? [r.captured ? 1 : 0, rel(r.startMs)] : 0,
+            rel(st.restartLogAt), st.restartsUnlogged, st.restartsLongest,
+            lines.filter((l) => l.includes('[wake]')),
+          ]);
+        }
+      } finally {
+        logger.info = realInfo;
+      }
+      return out;
+    }
+
+    test('R588-W5: with the field absent or false, every step of 30 seeded timelines equals the pre-#588 code\'s trace', () => {
+      wakeClips(false);
+      try {
+        if (process.env.R588_WRITE_GOLDEN) {
+          const src = fs.readFileSync(new URL('../src/lib/wakeWatcher.js', import.meta.url), 'utf8');
+          assert.ok(!src.includes('videoUnobserved'), 'refusing to write the golden from a wakeWatcher.js that already handles videoUnobserved');
+          const traces = SEEDS.map((seed) => trace(corpus(seed), undefined));
+          // The old code ignores the key, so both variants must already agree there.
+          SEEDS.forEach((seed, k) => assert.deepEqual(trace(corpus(seed), false), traces[k], `seed ${seed}`));
+          const body = traces.map((t) => JSON.stringify(t)).join(',\r\n');
+          fs.writeFileSync(GOLDEN, `{"seeds":${JSON.stringify(SEEDS)},"traces":[\r\n${body}\r\n]}\r\n`);
+          return;
+        }
+        const golden = JSON.parse(fs.readFileSync(GOLDEN, 'utf8'));
+        assert.deepEqual(golden.seeds, SEEDS, 'the fixture was made from a different corpus');
+        for (const field of [undefined, false]) {
+          SEEDS.forEach((seed, k) => {
+            const steps = corpus(seed);
+            const got = trace(steps, field);
+            assert.equal(got.length, golden.traces[k].length, `seed ${seed}: a different number of payloads`);
+            got.forEach((step, i) => {
+              if (!isDeepStrictEqual(step, golden.traces[k][i])) {
+                assert.deepEqual(step, golden.traces[k][i], `seed ${seed}, payload ${i} (field ${field}): ${JSON.stringify(steps[i])}`);
+              }
+            });
+          });
+        }
+        // Floors, on the GOLDEN itself: a corpus edit that stops exercising what #588 touched fails here rather than
+        // passing vacuously. They sit under what the fixture holds (the counts are in the message).
+        const all = golden.traces.flat();
+        const count = {
+          armed: golden.traces.filter((t) => t.some((s) => s[0] === 1)).length,
+          captures: all.filter((s) => s[4] !== 0 && s[4][0] === 1).length,
+          runsEnded: golden.traces.reduce((n, t) => n + t.filter((s, i) => i > 0 && t[i - 1][3] !== 0 && s[3] === 0).length, 0),
+          restartLines: all.filter((s) => s[8].some((l) => l.includes('settling restarted'))).length,
+        };
+        // The fixture holds (2026-10-05): 2,217 payloads; armed 24 of 30 timelines, captures 19, runsEnded 81,
+        // restartLines 21.
+        assert.ok(count.armed >= 22, JSON.stringify(count));
+        assert.ok(count.captures >= 17, JSON.stringify(count));
+        assert.ok(count.runsEnded >= 70, JSON.stringify(count));
+        assert.ok(count.restartLines >= 18, JSON.stringify(count));
+      } finally {
+        wakeClips(true);
+      }
+    });
+  });
+
+  test('R588-W6: an unobserved minute with an OLDER label never resets settling or moves lastAt; with a run open it ends the run (the clock went back), as an observed one would', () => {
+    for (let i = 0; i < 10; i++) quiet(); // labels 0-9
+    const lastAt = stateOf().lastAt;
+    clock = 4;
+    unobserved(0); // a stale label: older than the last observed one
+    clock = 10;
+    assert.equal(stateOf().quietRun, 10, 'a stale unobserved label reset the settling count');
+    assert.equal(stateOf().lastAt, lastAt, 'a stale unobserved label moved lastAt');
+    quiet(); // label 10: the very next minute
+    assert.equal(stateOf().quietRun, 11, 'the next observed minute saw a hole that is not there');
+    assert.deepEqual(restartLines(), []);
+
+    // Armed, with a held run (code review round 2, Opus, verified by running): the ordering guard ends a run on an
+    // older OBSERVED label; an older UNOBSERVED label must end it too, or a backward clock step during a stall keeps
+    // the stir's ring hold for about the depth of the step (the 20-minute sweep cannot see it: `now - lastActiveMs`
+    // is negative). It leaves quietRun, lastAt and asleep alone: the next observed reading re-baselines them.
+    stopAllSegmenters();
+    _state().clear();
+    clock = 0;
+    try {
+      wakeClips(true);
+      armSegmenterNow();
+      settle(); // labels 0-14
+      for (let i = 0; i < 3; i++) moving(); // 15-17
+      const run = stateOf().run;
+      const lastAtArmed = stateOf().lastAt;
+      assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE], 'precondition: the run holds the ring');
+      clock = 17;
+      unobserved(0); // the SAME label as the last observed one: not older, nothing ends
+      assert.equal(stateOf().run, run, 'an unobserved minute with the SAME label ended the run');
+      assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE]);
+      logger.clear();
+      clock = 5;
+      unobserved(LOUD); // older than the last observed label: the clock went back
+      assert.deepEqual(holdOwners(CAM), [], 'a stale unobserved label left the stir\'s ring hold in place');
+      assert.equal(stateOf().run, null, 'a stale unobserved label did not end the run');
+      assert.deepEqual(runEndedLines().map((l) => l.slice(l.indexOf('[wake]'))), ['[wake] "cam-1" run ended (the clock went back) — ring released, nothing recorded']);
+      assert.equal(stateOf().lastAt, lastAtArmed, 'lastAt moved');
+      assert.equal(stateOf().quietRun, 0, 'quietRun changed');
+      assert.equal(stateOf().asleep, true, 'the watcher was disarmed');
+    } finally {
+      wakeClips(true);
+    }
+  });
+
+  // R588-W9 (code review round 2, Opus, verified by running): a backward clock step DURING a stall with live sound. The
+  // run is open and holding when the video stalls; the labels then step back. Before this round the unobserved branch
+  // only applied the gap rule, whose arithmetic is negative across a backward step, so the hold stayed for about the
+  // depth of the step (the old code, reading those minutes as watched, ended the run at the ordering guard).
+  for (const back of [5, 30, 60]) {
+    test(`R588-W9: a stall during a held run, then the clock steps back ${back} min: the run and its hold end at the first unobserved minute that shows the step`, () => {
+      try {
+        wakeClips(true);
+        armSegmenterNow();
+        settle(); // labels 0-14
+        moving(); // 15
+        moving(); // 16: a held run, two active minutes
+        const send = (idx) => handleMinute({
+          cameraId: CAM, bucketStart: labelFor(idx), motionPeak: null, soundPeak: LOUD, videoUnobserved: true,
+          motionRises: [], soundRises: [],
+        });
+        assert.equal(send(17), null); // the stall begins, in order
+        assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE], 'precondition: one stalled minute does not end the run');
+        const lastAt = stateOf().lastAt;
+        logger.clear();
+        assert.equal(send(18 - back), null); // the wall clock went back `back` minutes
+        assert.deepEqual(holdOwners(CAM), [], `the hold survived a ${back}-minute step back`);
+        assert.equal(stateOf().run, null);
+        assert.deepEqual(runEndedLines().map((l) => l.slice(l.indexOf('[wake]'))), ['[wake] "cam-1" run ended (the clock went back) — ring released, nothing recorded']);
+        assert.equal(stateOf().lastAt, lastAt, 'lastAt moved');
+        assert.equal(stateOf().asleep, true, 'disarmed');
+      } finally {
+        wakeClips(true);
+      }
+    });
+  }
+
+  test('R588-W7: after a stall, the #590 restart line counts the minutes between the two OBSERVED readings', () => {
+    for (let i = 0; i < 10; i++) quiet(); // labels 0-9
+    unobserved(0); // 10
+    unobserved(LOUD); // 11
+    unobserved(0); // 12
+    assert.deepEqual(restartLines(), [], 'nothing is announced during the stall itself');
+    quiet(); // 13
+    const lines = restartLines();
+    assert.equal(lines.length, 1, lines.join('\n'));
+    assert.ok(lines[0].endsWith('[INFO] [wake] "Kid Room" settling restarted: readings 4 min apart after 10 quiet minute(s)'), lines[0]);
+    assert.equal(stateOf().quietRun, 1);
+  });
+
+  test('R588-W8: an unobserved minute OUTSIDE the sleep window resets the watcher like any other reading, so the next evening\'s settling is not recorded', () => {
+    settle();
+    moving();
+    moving();
+    assert.ok(stateOf().run, 'precondition: armed, with a run in progress');
+    const inside = windowAroundNow();
+    const outside = windowExcludingNow();
+    db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(outside.start, outside.end, CHILD);
+    try {
+      assert.equal(unobserved(0), null);
+    } finally {
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(inside.start, inside.end, CHILD);
+    }
+    assert.equal(stateOf().asleep, false, 'an armed watcher stayed armed through a reading outside its window');
+    assert.equal(stateOf().run, null);
+    assert.equal(stateOf().lastAt, null);
+    const results = [];
+    for (let i = 0; i < WAKE_ACTIVE_MIN; i++) results.push(moving());
+    assert.deepEqual(captures(results), [], 'activity after the window opened again was recorded as a wake: the watcher had stayed armed');
+  });
+
+  // ★ R588-M1: the #448 C13 model, extended with unobserved minutes. C13 SKIPS its holes, so an unobserved minute has
+  // to be DELIVERED (with `videoUnobserved: true`) here: a skipped one would hand the old and the new code identical
+  // calls. U = an unobserved minute with quiet sound, L = one with LOUD sound. The offline reference is the nightly
+  // job's rule (markWakeRuns: an unwatched minute is non-active, its sound unused; a run bridges <= WAKE_GAP_MIN
+  // non-active minutes) plus the live arming rule (15 consecutive OBSERVED quiet payloads; U and L break the streak
+  // like a hole). It shares no state with handleMinute. The floors count timelines where reading U/L the OLD way
+  // (U as quiet, L as active) changes the arming minute, the captures, or the number of runs: if the generator stops
+  // producing those, the comparison could not tell the old code from the new and the floor fails instead.
+  // Honest limit (plan review, Opus): this model alone caught "the check after `st.lastAt = at`" in a handful of
+  // timelines and "the check after the ordering guard" in none; W1 and W6 carry those. It compares captures and
+  // arming, not WHEN a hold is released: that is W2.
+  test('R588-M1: 150 seeded timelines with unobserved minutes delivered: captures and the arming minute equal the nightly rule', () => {
+    const rngM = (seed) => {
+      let a = seed >>> 0;
+      return () => {
+        a = (a + 0x6d2b79f5) >>> 0;
+        let t = a;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    };
+    function build(rand) {
+      const int = (lo, hi) => lo + Math.floor(rand() * (hi - lo + 1));
+      const slots = [];
+      const settleLen = int(15, 25);
+      for (let i = 0; i < settleLen; i++) slots.push('Q');
+      const r = rand();
+      if (r < 0.3) slots[int(0, settleLen - 1)] = 'U';
+      else if (r < 0.45) slots[int(0, settleLen - 1)] = 'L';
+      else if (r < 0.55) slots[int(0, settleLen - 1)] = 'H';
+      // Per timeline: what fills the gaps between bursts (unobserved-heavy, mixed, or the C13 kinds).
+      const fill = [['U', 'L'], ['U', 'L', 'Q', 'H'], ['U', 'Q'], ['L', 'H'], ['Q', 'H']][int(0, 4)];
+      const target = int(60, 100);
+      while (slots.length < target) {
+        const burst = int(1, 8);
+        for (let i = 0; i < burst; i++) slots.push(rand() < 0.12 ? 'L' : 'A');
+        const gap = int(0, 6);
+        for (let i = 0; i < gap; i++) slots.push(fill[int(0, fill.length - 1)]);
+      }
+      slots.length = Math.min(slots.length, 100);
+      return slots.join('');
+    }
+    // The reference. Q/A = observed quiet/active payloads, U/L = unobserved, H = no payload.
+    function reference(timeline) {
+      const n = timeline.length;
+      let armedAt = -1;
+      let streak = 0;
+      for (let i = 0; i < n && armedAt < 0; i++) {
+        streak = timeline[i] === 'Q' ? streak + 1 : 0;
+        if (streak >= ONSET_QUIET_MIN) armedAt = i;
+      }
+      if (armedAt < 0) return { armedAt, startMs: [], runs: 0 };
+      const active = Array.from(timeline, (c, i) => i > armedAt && c === 'A');
+      const startMs = [];
+      let runs = 0;
+      for (let i = armedAt + 1; i < n; ) {
+        if (!active[i]) { i++; continue; }
+        let last = i;
+        let count = 0;
+        let k = i;
+        while (k < n) {
+          if (active[k]) { last = k; count++; k++; continue; }
+          let g = k;
+          while (g < n && !active[g]) g++;
+          if (g < n && g - k <= WAKE_GAP_MIN) { k = g; continue; }
+          break;
+        }
+        runs++;
+        if (count >= WAKE_ACTIVE_MIN) startMs.push(endMs(i));
+        i = last + 1;
+      }
+      return { armedAt, startMs, runs };
+    }
+    // How the code before #588 read the same minutes: U as a watched quiet minute, L as a watched loud (active) one.
+    const oldReading = (t) => t.replace(/U/g, 'Q').replace(/L/g, 'A');
+    const payloadFor = (c, i) => {
+      const base = { cameraId: CAM, bucketStart: labelFor(i) };
+      if (c === 'Q') return { ...base, motionPeak: 0, soundPeak: 0 };
+      if (c === 'A') return { ...base, motionPeak: MOTION_ACTIVE + 0.05, soundPeak: 0 };
+      return { ...base, motionPeak: null, soundPeak: c === 'L' ? LOUD : 0, videoUnobserved: true };
+    };
+    const opposite = { Q: 'A', A: 'Q', U: 'L', L: 'U' };
+    function replay(timeline, dupRand = null) {
+      _state().clear();
+      const startMs = [];
+      let armedAt = -1;
+      for (let i = 0; i < timeline.length; i++) {
+        const c = timeline[i];
+        if (c === 'H') continue;
+        const r = handleMinute(payloadFor(c, i));
+        if (r?.captured) startMs.push(r.startMs);
+        if (armedAt < 0 && stateOf().asleep) armedAt = i;
+        // A repeated label is ignored whatever it says; an unobserved copy of an unobserved minute changes nothing either.
+        if (dupRand && dupRand() < 0.25) {
+          assert.equal(handleMinute(payloadFor(opposite[c], i)), null, `a repeated label captured (minute ${i} of ${timeline})`);
+        }
+      }
+      return { startMs, armedAt };
+    }
+    const SEQUENCES = 150;
+    const count = { armed: 0, withCapture: 0, armingDiffers: 0, capturesDiffer: 0, runsDiffer: 0, unobservedAfterArming: 0 };
+    const realInfo = logger.info;
+    logger.info = () => {};
+    try {
+      wakeClips(false);
+      for (let s = 0; s < SEQUENCES; s++) {
+        const seed = 588_100 + s;
+        const timeline = build(rngM(seed));
+        const want = reference(timeline);
+        const where = `seed ${seed}: ${timeline}`;
+        const got = replay(timeline);
+        assert.equal(got.armedAt, want.armedAt, `arming minute differs from the rule (${where})`);
+        assert.deepEqual(got.startMs, want.startMs, `captures differ from the nightly rule (${where})`);
+        if (s % 4 === 0) assert.deepEqual(replay(timeline, rngM(seed ^ 0x5bd1e995)).startMs, want.startMs, `repeated labels changed the result (${where})`);
+        const old = reference(oldReading(timeline));
+        if (want.armedAt >= 0) count.armed++;
+        if (want.startMs.length) count.withCapture++;
+        if (old.armedAt !== want.armedAt) count.armingDiffers++;
+        if (JSON.stringify(old.startMs) !== JSON.stringify(want.startMs)) count.capturesDiffer++;
+        if (old.runs !== want.runs) count.runsDiffer++;
+        if (want.armedAt >= 0 && /[UL]/.test(timeline.slice(want.armedAt + 1))) count.unobservedAfterArming++;
+      }
+    } finally {
+      logger.info = realInfo;
+      wakeClips(true);
+    }
+    // The fixed seeds give (2026-10-05): armed 114, withCapture 114, armingDiffers 38, capturesDiffer 114, runsDiffer 93,
+    // unobservedAfterArming 114. The floors sit under those; they catch a generator edit, not a code change.
+    assert.ok(count.armed >= 100, JSON.stringify(count));
+    assert.ok(count.withCapture >= 100, JSON.stringify(count));
+    assert.ok(count.armingDiffers >= 30, JSON.stringify(count));
+    assert.ok(count.capturesDiffer >= 90, JSON.stringify(count));
+    assert.ok(count.runsDiffer >= 75, JSON.stringify(count));
+    assert.ok(count.unobservedAfterArming >= 100, JSON.stringify(count));
+  });
+
+  // ★ R588-E1: end to end through the REAL tracker into the REAL watcher (recordMotion / recordSound / excludeClone,
+  // flushActivity's ticks, onMinuteFlushed(handleMinute)), the three shapes SIDE BY SIDE in the same minutes, so a flag
+  // that is true for the wrong shape fails:
+  //   a  (cam-1)  a stall with live sound: frames, then minutes of LOUD sound only, then video again;
+  //   b  (clone)  a clone-heavy minute that still holds ONE real frame (nine of ten frames proven repeats): watched,
+  //               its loud sound counts (activityTracker.test.js R588-T13 pins the tracker side, and that a minute of
+  //               ONLY proven repeats is watched too under this rule: shape 2 is left to the nightly job);
+  //   c  (mic)    a sound-only camera that never delivered a frame: no flag, settles and records a sound wake.
+  // Each camera: 15 quiet minutes (minutes 0-14), 4 active (15-18), then minute 19 is the shape's minute, LOUD.
+  describe('R588-E1: end to end, real tracker into the watcher', () => {
+    const CAM_CLONE = 'cam-588-clone';
+    const CAM_MIC = 'cam-588-mic';
+    function drive() {
+      makeCamera(db, { id: CAM_CLONE, name: 'Clone Room', childId: CHILD });
+      makeCamera(db, { id: CAM_MIC, name: 'Mic Room', childId: CHILD });
+      activity._resetActivityTrackerForTests();
+      const got = { [CAM]: [], [CAM_CLONE]: [], [CAM_MIC]: [] };
+      const off = activity.onMinuteFlushed((p) => {
+        const r = handleMinute(p);
+        const st = _state().get(p.cameraId);
+        got[p.cameraId].push({ minute: (bucketMsOf(p.bucketStart) - M0) / 60_000, flag: p.videoUnobserved, motionPeak: p.motionPeak, captured: r?.captured === true, startMs: r?.startMs ?? null, run: st.run ? { ...st.run } : null, asleep: st.asleep });
+      });
+      const M0 = BASE_MS - 150 * 60_000;
+      const bucketMsOf = (b) => Date.parse(`${b.replace(' ', 'T')}Z`);
+      const at = (i, o) => M0 + i * 60_000 + o;
+      try {
+        wakeClips(false);
+        for (let i = 0; i <= 23; i++) {
+          // cam-1: the stall camera
+          if (i <= 14) { activity.recordMotion(CAM, 0, null, at(i, 10_000)); activity.recordSound(CAM, 0, at(i, 11_000)); }
+          else if (i <= 18) activity.recordMotion(CAM, MOTION_ACTIVE + 0.05, null, at(i, 10_000));
+          else if (i <= 22) activity.recordSound(CAM, LOUD, at(i, 11_000)); // the stall: sound only
+          else activity.recordMotion(CAM, MOTION_ACTIVE + 0.05, null, at(i, 10_000)); // video back
+          // clone: ten still frames in minute 19, nine proven repeats, and a loud sound
+          if (i <= 14 || i >= 20) { activity.recordMotion(CAM_CLONE, 0, null, at(i, 10_000)); activity.recordSound(CAM_CLONE, 0, at(i, 11_000)); }
+          else if (i <= 18) activity.recordMotion(CAM_CLONE, MOTION_ACTIVE + 0.05, null, at(i, 10_000));
+          else {
+            for (let tok = 1; tok <= 10; tok++) activity.recordMotion(CAM_CLONE, 0, { gen: 9, token: tok }, at(i, tok * 1_000));
+            activity.recordSound(CAM_CLONE, LOUD, at(i, 20_000));
+            for (let tok = 1; tok <= 9; tok++) assert.equal(activity.excludeClone(CAM_CLONE, 9, tok), true, 'precondition: a staged repeat');
+          }
+          // mic: sound only, always
+          activity.recordSound(CAM_MIC, i >= 15 && i <= 19 ? LOUD : 0, at(i, 11_000));
+          activity.flushActivity(at(i + 1, 900)); // the tick just after the minute ends
+        }
+      } finally {
+        off();
+        activity._resetActivityTrackerForTests();
+        wakeClips(true);
+        db.prepare('DELETE FROM cameras WHERE id IN (?, ?)').run(CAM_CLONE, CAM_MIC);
+      }
+      return { got, M0 };
+    }
+    const flagsOf = (rows) => rows.map((r) => r.flag);
+
+    test('R588-E1a: the stall with live sound is flagged minute by minute, its LOUD minutes record no wake, and its run ends at the 4th stalled minute', () => {
+      const { got, M0 } = drive();
+      const rows = got[CAM];
+      assert.deepEqual(rows.map((r) => r.minute), Array.from({ length: 24 }, (_, i) => i), 'precondition: every minute reached the watcher');
+      assert.deepEqual(flagsOf(rows), Array.from({ length: 24 }, (_, i) => i >= 19 && i <= 22));
+      assert.equal(rows[14].asleep, true, 'precondition: 15 watched quiet minutes armed it');
+      assert.equal(rows[18].run.activeCount, 4, 'precondition: one active minute short of a wake');
+      assert.deepEqual(rows.filter((r) => r.captured), [], 'a loud stalled minute completed the wake');
+      assert.equal(rows[21].run?.activeCount, 4, 'three stalled minutes still bridge the run');
+      assert.equal(rows[22].run, null, 'the 4th stalled minute ended it');
+      assert.equal(rows[23].run.activeCount, 1, 'video back: a fresh run');
+      assert.equal(rows[23].run.startMs, M0 + 24 * 60_000);
+      // side by side: the other two shapes are never flagged
+      assert.deepEqual(flagsOf(got[CAM_CLONE]), Array(24).fill(false));
+      assert.deepEqual(flagsOf(got[CAM_MIC]), Array(24).fill(false));
+    });
+
+    test('R588-E1b: a clone-heavy minute that still holds a real frame is watched: its loud sound is the 5th active minute and the wake is recorded', () => {
+      const { got, M0 } = drive();
+      const rows = got[CAM_CLONE];
+      assert.deepEqual(flagsOf(rows), Array(24).fill(false), 'a minute with a real frame was flagged as having no video');
+      assert.equal(rows[19].motionPeak, 0, 'precondition: the minute had frames, all still');
+      assert.deepEqual(rows.filter((r) => r.captured).map((r) => [r.minute, r.startMs]), [[19, M0 + 16 * 60_000]]);
+    });
+
+    test('R588-E1c: a sound-only camera (never a frame) is never flagged: it settles on its quiet minutes and records its sound wake', () => {
+      const { got, M0 } = drive();
+      const rows = got[CAM_MIC];
+      assert.deepEqual(flagsOf(rows), Array(24).fill(false), 'a camera that never had video was treated as stalled');
+      assert.ok(rows.every((r) => r.motionPeak === null), 'precondition: no frame ever');
+      assert.equal(rows[14].asleep, true, '15 quiet sound-only minutes arm it (#453 C3b)');
+      assert.deepEqual(rows.filter((r) => r.captured).map((r) => [r.minute, r.startMs]), [[19, M0 + 16 * 60_000]]);
+    });
   });
 });
 

@@ -107,3 +107,78 @@ Restore: `mv /usr/local/bin/mediamtx.hidden $(which mediamtx)`.
 
 A stall-injection relay (`scripts/stall-proxy.mjs`), for simulating a camera going slow rather than
 disappearing outright, is planned as part of #373 — it is not part of this stack yet.
+
+### The detector watchdog (#369)
+
+On staging, one camera's motion detector received **zero frames for 285 and 523 minutes** while its ffmpeg
+stayed alive, its path stayed ready and its sound detector kept working. Nothing noticed until the daily
+camera reboot. The detector watchdog (`backend/src/lib/cameraWatchdogs.js`, every 15 s) now restarts a
+detector whose ffmpeg has written nothing to stdout for 60 s, and escalates to a publisher restart if that
+does not help. Unit tests drive its logic with fakes; **these recipes are the only place it meets a real
+ffmpeg and a real MediaMTX.** Use the bundled fake camera (`rtsp://fakecam:8554/test`, which carries video
+and a G.711 tone), with motion detection and sound detection both switched on.
+
+Find the detector processes inside the `nightlight` container (one per camera and leg):
+
+```
+ps -o pid,args | grep '[r]awvideo'    # motion detectors
+ps -o pid,args | grep '[s]16le'       # sound detectors
+```
+
+**(a) Stall a detector: `kill -STOP`.** The closest reproduction of the staging failure: the process is
+alive and connected, and delivers nothing.
+
+```
+kill -STOP <pid of the motion detector's ffmpeg>
+```
+
+What a pass looks like, within about **105 s** (60 s stale + up to 15 s to the next check + the probe's up
+to 8 s + a 3 s SIGKILL + the 5 s relaunch + the reconnect):
+
+- ONE `[WARN] [detector-watchdog] "<camera>" motion on <path>: no data for NNs; path ready, …; probe: …;
+  input tap: …; attempt 1; lever: detector` line. That line is the diagnosis: on a real incident, it is
+  what finally tells us which path the detector was reading and whether the restream still carried video.
+- About 3 s later, `[INFO] [detect:<path>] stopped by the detector watchdog (no frames), restarting in 5s`.
+  A stopped process cannot act on SIGTERM, so this also exercises the SIGKILL fallback.
+- A NEW pid for the motion detector 5 s after that, and still exactly one `rawvideo` process per motion leg.
+- ONE row in **Settings → Logs → Camera history**: *restart — motion detector getting no frames (…) - motion
+  detector restarted by the detector watchdog*.
+- No second action on that camera for at least 60 s (the backoff).
+
+Repeat with the `s16le` process for the sound leg. The line then says `sound … no audio data`, and the sound
+leg is only restarted while the audio probe hears audio on the main path (the fake camera's tone), so that a
+camera that sends no audio in a quiet room is left to the audio watchdog.
+
+**(b) A path whose VIDEO stops while its AUDIO keeps flowing** (no app code involved). This is the condition
+the staging incident most likely was: the path stays ready, audio keeps flowing (so the audio watchdog is
+satisfied), and the motion detector gets nothing. `e2e/fakecam/mediamtx.yml` keeps an idle `videogap` path
+for this. Publish to it from inside the `fakecam` container, with a video input that ends after 60 s and an
+audio input that never ends:
+
+```
+ffmpeg -hide_banner -loglevel warning -re \
+  -f lavfi -i testsrc=size=640x480:rate=15:duration=60 \
+  -f lavfi -i sine=frequency=500:sample_rate=8000 \
+  -c:v libx264 -profile:v baseline -pix_fmt yuv420p -preset ultrafast -tune zerolatency -g 30 \
+  -c:a pcm_mulaw -ar 8000 -ac 1 \
+  -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/videogap
+```
+
+Add a camera pointing at `rtsp://fakecam:8554/videogap` with motion detection on (no sub-stream), then
+watch. Expected: the first `[detector-watchdog]` line about 60–75 s after the video ends, with
+`probe: audio but NO video packets` and `lever: detector`; the relaunched detector gets nothing either, so
+after its 90 s startup grace the second line says `lever: detector + main publisher`, and the camera
+watchdog logs `restarting its transcoder at the detector watchdog's request`. That costs the live view a
+brief interruption: expected, and documented. Nothing can fix a publisher that really stopped sending video,
+so after that the actions back off: 4, 8, 16, then every 30 minutes, one Camera history row each. Stop the
+`ffmpeg` above to end it.
+
+**(c) On STAGING, after a merge and deploy: save the logs FIRST** (`docker logs <staging container> >
+somewhere-safe.log`: a redeploy destroys them, and that is how the evidence of the original incident was
+lost). Then run (a) once against staging's own detector, in the daytime and outside any child's tracked sleep
+window (the stalled minutes are a real gap in that camera's activity data), and read the `[obs]` lines around
+it. After that, watch passively: staging had two natural stalls in 30 days, and the diagnosis line of the
+next one names the path, the layer (`input tap` age), and what the probe saw.
+
+Not built (plan v5 marked it optional): a channel-0-only mode for `scripts/stall-proxy.mjs`, which would
+stall one RTSP channel of a camera and not the other.

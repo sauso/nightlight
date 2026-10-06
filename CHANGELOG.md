@@ -9,6 +9,426 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-10-06
+
+### Added
+- **The log now says when a hole in a camera's readings sends the wake watcher's settling back to zero.**
+  Wake clips are only recorded once the watcher has seen 15 consecutive quiet minutes, and one missing minute
+  restarts that count, so a camera that drops a minute more often than about every 15 minutes never starts
+  watching and records no wake clips; until now that was silent, and looked the same in the log as a child who
+  never settled. A restart that cost real progress now logs `[wake] "<camera>" settling restarted: readings N
+  min apart after M quiet minute(s)`, **at most once per camera per 15 minutes of the camera's own minute
+  labels**: restarts held back by that limit are counted onto the next line (`; K more since the last such
+  line, the longest after M quiet minute(s)`), and one still pending when the camera starts watching or its
+  window closes is not printed.
+  Nothing else changes: **when the watcher starts watching is exactly what it was**, no setting was added, and
+  a forward jump of the server's clock writes the same line as a dropout. Read it in KNOWN-ISSUES.md ("A wake
+  recording does not bridge a gap in the readings"); restart lines repeating with no `settled` line after them
+  are the evidence for whether the 15-consecutive-minutes rule is too strict (#590).
+- **A "WebRTC UDP Port" setting, so a second instance no longer needs a hand-typed MediaMTX override.**
+  Running staging beside production on one server needs each instance on its own WebRTC UDP port, which
+  meant adding `MTX_WEBRTCLOCALUDPADDRESS=:8190` yourself: a leading colon nothing explained, and in
+  Unraid's "Add Variable" dialog the name went in the wrong box, so MediaMTX silently stayed on `8189` and
+  remote Low latency never connected. Set `WEBRTC_UDP_PORT` (the **WebRTC UDP Port** field in the Unraid
+  template, `.env.example` and `docker-compose.yml`) to a bare number: **1-65535, no colon, blank =
+  `8189`**; the colon is added for you and a pasted `:8190` is accepted. An invalid value is ignored with
+  a warning in the log and `8189` is used, rather than being handed to MediaMTX, which would exit and
+  restart forever. The raw `MTX_WEBRTCLOCALUDPADDRESS` override still works (for a bind address a bare port
+  cannot express) and **wins** if both are set, and `docker-compose.yml` now forwards it. The README and
+  the Unraid **Public Host** description now also say that `PUBLIC_HOST` must be a DNS-only name or an IP,
+  never a Cloudflare-proxied one: the proxy carries neither UDP nor port `8189`. Existing installs are
+  unchanged. The Unraid template only updates for new installs; on an existing container, add the
+  variable by hand (Key `WEBRTC_UDP_PORT`).
+- **The morning review now records "In bed" separately from "Fell asleep".** On a bedtime-story night a
+  child can be put down half an hour before they fall asleep, and the review had no way to say both: its
+  only frame button, **Put down here**, set the *asleep* time, so marking the put-down overwrote an asleep
+  time the detector had right (found correcting a real night: put down 18:49, asleep 19:13, and the card
+  ended up saying asleep 18:49). A recorded *got into bed* event now has two buttons: **Put down here**
+  fills a new **In bed** time and never touches the asleep time, and **Asleep here** fills "Fell asleep". A
+  short line above the event list says which is which. A corrected in-bed time moves only the "in bed"
+  time. The asleep and wake-up times the form saves alongside it (as your confirmation) no longer
+  recalculate the total asleep on a screen that was already showing those times; a screen recalculates
+  only where a saved time differs from its own, which is normally a time you changed (the README explains
+  when the review page and the child's card start from different versions of the night, and what that
+  does). Tapping a picked frame's button a second time now undoes the pick and puts the field back as it
+  was, for all three buttons (it
+  used to leave the frame's time in the field and save it). The card, detail page and receipt ("You said in bed 6:49, asleep 7:13 to 6:37") show your in-bed
+  time next to your asleep time. "In bed" can't be saved later than "Fell asleep" (a picked frame may be
+  up to a minute after a typed asleep time), or, when the review is left with no asleep time (none given,
+  or "Fell asleep" emptied), later than the asleep time the night already has; "Fell asleep" can't be
+  later than "Got up for the day" either, or, when you give no wake-up time, later than the wake-up time
+  the night already has. Each is checked against what was saved before as well as what is being saved, a
+  refused save stores nothing, event answers included, and a later note, event answer or dismissal is
+  never refused because the night changed after you answered. Reviews saved before this are kept as they
+  were: none is reinterpreted as an in-bed time. Nothing here assumes a particular house, child or
+  timezone. Details in the README's morning-review section.
+- **The morning review can now say "No one was in the bed" for the whole night**, not just correct a
+  time. Previously the only option was to type times, so a night the detector scored as hours of sleep
+  in an empty bed could only be saved with nothing in it. The new option sits next to the usual times on
+  the review screen ("Was this right?") and, once saved, changes the child's card and the sleep detail
+  page to say "You said no one was in the bed" instead of the detector's night — the same way a corrected
+  night already shows your own times instead of the detector's. It is reversible ("Someone was in the
+  bed" undoes it), and per-night: it never assumes a particular child, camera or timezone.
+  - The detector's own answer for that night is kept, never overwritten — a future improvement still has
+    it to compare against, and un-flagging restores it exactly. What is **not** restored is any time you
+    had typed before flagging the night: the flag clears them, so after an undo you may need to re-enter
+    them, and until you do, the morning card shows neither "ask" nor "done" for that night (a stated
+    limit, not a bug).
+  - The night's timelapse and any recorded transition frames are **kept**, unlike a night the detector
+    itself scores empty (which discards its frames) — the flag is reversible and a tap here should never
+    destroy video that undoing it could not bring back.
+  - Excluded from the sleep ↔ temperature insight averages, and its automatic "up at such-and-such" push
+    is skipped — a push already sent cannot be recalled, but no further one goes out for a flagged night.
+
+### Changed
+- **Neutral example text in two form fields.** The child form's name field now suggests "Alex", and the camera
+  form's MQTT topic example reads "zigbee2mqtt/Child B Room Temp"; both used to show a real person's first name
+  as the example. Placeholder text only: nothing is saved or behaves differently. The add-camera screenshots
+  under `docs/screenshots/` were repainted to match.
+
+### Fixed
+- **Wake clips no longer count minutes whose video nobody saw** (issue #588). When a camera's video stalls
+  while its microphone keeps working, the live wake watcher read each minute of sound as a watched minute: a
+  quiet one counted toward the 15 quiet minutes it needs before it starts watching, and a loud one counted as
+  activity, so a noise during a stall could complete a wake that the sleep timeline (which has called those
+  minutes unknown since #508) does not show. Now such a minute, on a camera that has delivered video since the
+  server started, is a minute the watcher did not see, exactly as on the timeline: no progress toward starting
+  to watch, not activity even when loud, and a pause inside a wake like any other. A wake in progress still
+  ends at the 4th minute without activity, the same minute 4 quiet minutes would end it, and the log then says
+  `run ended (video not observed; readings N min apart)`; if the server's clock steps back during a stall, the
+  first stalled minute that shows the step ends the run (`run ended (the clock went back)`), as a minute that
+  was read always did. A camera with no video at all keeps using its sound, as before. In about 30 days of
+  stored minutes from two cameras in one house (measured 2026-10-05) there were 263 such minutes in one
+  database (97 of them loud enough to count as activity) and 807 in the other (251 loud). Known limits, in
+  KNOWN-ISSUES: a camera already stalled when the
+  server starts counts as having no video until its first frame; a minute made only of repeated frames still
+  counts as watched live (no such minute in the stored data); a child crying through a stall is not recorded
+  as a wake; the bed in/out rules are unchanged. Details in `docs/recording.md`. Nothing here assumes a
+  particular house, child or timezone.
+- **A parent at the bed after a child got up no longer moves the morning wake hours later** (issue #598). A
+  *got out of bed* logged within a minute of a *got into bed* is set aside as the same climb-back-in read
+  twice, but only if the bed then shows the child is really back. That proof was any 3 minutes of movement
+  in the 2½ hours after the return, and a parent stripping or tidying the empty bed provides plenty: on a
+  real night a stray *got into bed* 51 seconds before a child's real 07:12 exit, plus a parent at the bed an
+  hour later, set the real exit aside, and the stored wake moved to the next exit, 09:27, once that one was
+  confirmed. The proof is now **6 minutes of slight movement** (the level a still sleeper produces, below
+  what counts as the child moving) in those 2½ hours; bigger movement no longer counts. Measured on every
+  stored night of two cameras in one house: the exits wrongly set aside had 0-3 such minutes, the ones a
+  review confirmed were rightly set aside 10 or more, and any threshold from 4 to 10 gives the same results
+  there. On the measured nights, every night that changed moved earlier (in principle a night can also move
+  later: a real exit that used to be set aside is now found), and its wake count and sleep totals change
+  with it. Known limits, in the README and KNOWN-ISSUES: a child who climbs back in and lies stiller than
+  that, or really gets up again within about two hours, or a camera that only registers bigger movement,
+  gets a wake that is too early (never a missing one); a camera whose EMPTY bed reads faint noise at that
+  level is not helped by this (and is no worse than before); one production night moved 46 minutes earlier
+  with no way yet to tell which time is right; and a too-early wake with no stray *got into bed* is not
+  fixed by this. The same check before a mid-night trip, and the check on a return straight after a *got
+  out of bed*, are deliberately unchanged. Saved nights keep their old answer until an admin uses
+  **Recompute this night**.
+- **A wake clip now starts at the wake's first moving or noisy frame, not up to a minute after it** (issue
+  #412). Since #447 the clip began 3 seconds before the END of the wake's first active minute, so it started
+  up to 57 seconds (about 27 on average) after the first frame and could miss the opening it exists to show
+  (#447's entry said "starting them at the first moving frame is #412": that is now done). The clip now opens about 2 to 3
+  seconds before the first frame that was over the same motion or sound threshold that makes a minute active,
+  or at the oldest footage the recording buffer still holds, if that is later: a continuous buffer of about 70
+  seconds or more reaches the first frame, a shallower one starts the clip up to about a minute minus its depth
+  after the first frame (roughly 22 seconds with a 38 second buffer, 37 with a 23 second one; derived, about 4
+  seconds either way). A clip is not anchored earlier than the footage the buffer really holds (that would leave
+  nothing to cut and fail it); where the buffer has a gap so that no footage at all falls in the clip's window, the old start
+  (the end of the first active minute) is used, as before. The log says when the buffer cost the opening: `[wake]
+  "<camera>" the buffer reaches back only to N s after the first movement: the clip starts there`. The clip's
+  recorded start is the clip's planned first frame (3 seconds before the first moving or noisy one; with an almost empty buffer, up to 3 seconds before the first footage it holds), so it can be a few seconds before the wake's minute on the
+  timeline; the review page still pairs them. Which minutes count as a wake, what is recorded and what the
+  sleep numbers read are unchanged. Details in `docs/recording.md` and KNOWN-ISSUES ("Where a wake clip
+  starts"). Nothing here assumes a particular house, child or timezone.
+- **A camera with motion alerts off (or MQTT/ONVIF motion) now keeps sampling until 3 hours after the
+  sleep window closes, so the morning wake can be found** (issue #353). Its motion leg runs only to feed
+  sleep tracking, and it used to stop 5 minutes after the window ends, although the sleep numbers look for
+  the morning departure up to 3 hours after it: that departure was never observed, so such a night had no
+  wake time. A bedtime shortly after midnight (a window opening 00:00 to 02:59) is now also sampled from 3
+  hours before it, which is the previous evening; before, that lookbehind was missed. The 3 + 3 hours are
+  the sleep detector's own, and are real hours across a daylight-saving change. The cost is about 3 more
+  hours a day of one low-resolution video decode for such a camera (15 hours a day becomes 18 for a
+  19:00-07:00 window; CPU not measured). A frame-diff camera with motion alerts on already samples around
+  the clock and is unchanged, and so are the timelapse, wake clips and the wake watcher. The morning
+  review for such a camera still has no events past about 3 hours after the window's end. Details in the
+  README ("When the motion camera samples") and KNOWN-ISSUES. Nothing assumes a particular house or
+  timezone.
+- **A garbled ffmpeg log line no longer leaves the sound `[obs]` measurement blind for hours** (issue #573).
+  The `[obs]` line's sound side could suddenly read `observed=0 unknown=4500 side=unavailable` and stay that
+  way until the camera reconnected or rebooted, while the sound detector itself kept working (`[sound]`
+  level lines printed, alerts fired, stored `sound_windows` stayed at about 300 a minute). The cause was one
+  timestamp line in ffmpeg's output with another message glued onto its end (the muxer's `Application
+  provided invalid, non monotonically increasing dts`): the parser threw the whole line away although the
+  part it needs was intact, and one lost line blinds the rest of that ffmpeg run. It happened about once per
+  camera per day on a two-camera install and was seen on a production install. Such a line is now
+  recovered (sound only), and the glued message is still logged exactly as before. Nothing the detector
+  decides or stores changes: nothing reads the sound side of `[obs]` yet, so this only fixes what the
+  line says. A timestamp line that is truly lost still blinds the rest of its ffmpeg run, as designed, but
+  now logs one warning when the run goes blind, at most once per camera per 15 minutes (`[obs] "<camera>"
+  sound gen=N timestamp sequence broke (<why>) …`), so a blind measurement can be told from a dead microphone. Motion timestamp
+  lines are not changed. See KNOWN-ISSUES, "The `[obs]` line".
+- **Motion sensitivity no longer changes which bed exits and entries are recorded** (issue #368). The
+  sensitivity slider set one threshold that the motion alert and the out-of-bed / into-bed detection
+  both used, so tuning how many notifications you wanted also changed the stored `out_of_bed` and
+  `into_bed` rows that sleep analysis reads as bedtime and wake evidence, and a camera that only feeds
+  sleep tracking (MQTT or ONVIF motion, or motion detection off) used a sensitivity whose slider the screen
+  does not show. The alert keeps the slider exactly as before; exits and entries now use a **fixed 1.19% of
+  the zone**, which is the value the slider gives at 90. **Differs from the neighbours:** the detector's
+  return to the Low stream (#500) waits until the room has been quiet by both definitions on a camera that
+  alerts (the alert's and the exit rules'), and by the fixed one alone on a camera that does not; a camera
+  with no bed zone that alerts keeps only the alert's definition. At the default sensitivity (50) "quiet"
+  now means under 1.19% in both channels instead of under 5.15%, so a picture with 1.19-5.15% noise (a fan,
+  a curtain, infrared noise) keeps the detector on the main stream for as long as that noise lasts (the
+  return has no forced timeout). **What you may notice:** if your
+  sensitivity was not 90, the exits and entries recorded from now on can change, in either
+  direction: below 90 (the default is 50, 5.15%) the threshold goes down, so movements the old threshold
+  ignored now count, which can add exits and entries and can also cancel a pending exit (a movement of 1-5%
+  of the zone, such as a child settling, now cancels it), so the totals can move in either direction; above
+  90 it goes up. Whether that is better for your reported sleep is not known. 1.19% was calibrated in one house, is not derived from your room, and
+  there is no setting for it; a noisy room can no longer be quieted for sleep tracking by lowering the
+  sensitivity, so redraw the detection zone. Stored rows and sleep nights already computed are not
+  rewritten. See KNOWN-ISSUES.md and the motion sensitivity row of docs/notifications.md.
+- **A motion alert can no longer fire sooner than the Motion cooldown after the last one just because the
+  detector restarted** (issue #454). The time of the last frame-diff motion alert lived inside one run of the
+  detector's ffmpeg, so every relaunch (a camera reconnect or "stream ended", a transport restart, the detector
+  watchdog's kill, the return to the Low stream) started a cooldown from zero, and sustained motion could alert
+  again straight away. It is now kept per camera for as long as the server runs, so those relaunches, and the
+  detector being started again by a detection-settings save, any camera edit (a rename too), assigning the
+  camera or switching it off and on, all keep it. **Differs from the neighbours:** it is **lost when the server
+  itself restarts** (nothing is stored; a container that restarts nightly can alert once more per camera per
+  restart, only if motion is sustained within the cooldown of the last alert); the **sound** cooldown was
+  already kept across an ffmpeg relaunch and is not changed here; MQTT and ONVIF motion keep their own
+  cooldowns; and the bed-exit/entry rules (their 2-minute pause and a pending exit) still start afresh on a
+  relaunch. **What you may notice:** after changing a motion setting, the next alert is no longer immediate,
+  so to retest wait out the cooldown (60 s by default; 1 s minimum, the form allows up to 3600 s) or set a
+  short one. A one-way backward step of the server's clock now silences the frame-diff alert for at most one
+  cooldown (it used to be the step plus a cooldown); a step back followed by a correction forward can let one
+  alert through inside the cooldown, and a clock that jumps by hours between frames can alert repeatedly (a known
+  limit, not what time sync does); the other cooldowns are unchanged. A deleted camera's time is
+  forgotten with it. No number or threshold was added or changed. In 30 days of one house's saved data no
+  two motion alerts were closer than the cooldown and no relaunch followed an alert within 60 s, so no stored
+  alert or sleep number changes. An ffmpeg exit and any restart of the detector by a settings save or camera
+  edit re-armed the cooldown at any setting; the watchdog kill and the return to the Low stream only mattered
+  with a cooldown above about 70 s and 95 s.
+  Details and limits: [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "What a restart keeps", and
+  [docs/notifications.md](docs/notifications.md).
+- **Wake clips no longer treat a gap in the camera's readings as part of one wake** (issue #448). The live
+  wake watcher counted readings instead of minutes, so five active minutes spread over about forty minutes of
+  mostly missing readings were recorded as one wake, while the sleep timeline (which counts minutes) showed none.
+  A wake now bridges at most 3 minutes with no active reading, whether the camera reported them quiet or
+  reported nothing, the same rule and the same constant as the nightly job, so two qualifying bursts of
+  activity either side of an outage are two wakes and two clips. The watcher also starts watching only after
+  15 *consecutive* quiet minutes that were actually reported (a missing minute restarts the count), where
+  before 14 quiet minutes, a long outage and one more counted as 15. This is deliberately stricter than the
+  sleep timeline's own "settled" rule: the cost is that a camera that drops a minute more often than about every
+  15 minutes never starts watching and records no wake clips. On the saved 30 days of two cameras in one house,
+  replaying the old and the new rule, the start of watching differed on exactly one night in four camera-months
+  (8 minutes later), so a night is rarely delayed; unknown on other installs. An already-watching watcher is
+  not stopped by a gap. A server clock that steps backwards by more than about 2 minutes (smaller steps were
+  already absorbed) now ends the run in progress, and restarts the count toward watching if the watcher was
+  still settling, instead of silently mixing the repeated minutes in; a repeated minute is counted once. The
+  wake clip's ring hold is still released when a run ends, and a late clip-cut can no longer release the hold
+  of a newer wake. A wake that starts after a gap has its clip anchored at its own first minute. The 3, 5 and
+  15 are the same numbers as before: the nightly job's own constants, shared with the live watcher (a retune
+  moves both), tuned on nights from two cameras in one house and not validated elsewhere. No stored sleep
+  number changes: only the wake clips can differ (fewer for sparse activity, more where one run used to span
+  an outage). Known limits are in
+  [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "A wake recording does not bridge a gap in the readings".
+- **Camera history no longer shows a detector restart that did not happen** (issue #578). When a detector
+  stopped receiving video or audio, the detector watchdog wrote "detector restarted by the detector watchdog"
+  (and a `[WARN]` log line) *before* asking for the stop, and never checked whether the stop was refused (for
+  example because the motion detector was already on its way back from the main stream to the Low one). Now the
+  row and the `[WARN]` line follow the answer and name only what happened. A refused stop writes no row and one
+  `[INFO]` line containing `lever refused` (and the likely reasons); if a stream restart was requested in the same step, the row says only
+  that. A refused stop still counts as an attempt, so it still advances the backoff (1, 2, 4 ... 30 minutes)
+  and, for motion, the second attempt still asks for the stream restart (stated in KNOWN-ISSUES.md as a limit).
+  The row wording `no data through N restart(s)` is now `N attempt(s)` for the same reason. The sound detector
+  is covered the same way. Nothing here assumes a particular camera, child or timezone.
+- **A motion alert or a bed exit/entry is no longer confirmed across a gap in the camera's video** (issue #452).
+  Both used to count *time elapsed* rather than video received: motion that was active, then silent for 20 seconds,
+  then active again was alerted on at once as "sustained", and a single quiet frame arriving after a long hole
+  confirmed a bed exit or entry as if its 6 quiet seconds had been watched. Now a frame that reaches Nightlight
+  after a gap (longer than 1.5 s, or 5 times the camera's own frame interval if that is larger, learnt only
+  once 9 intervals are held so a lone stall right after a start cannot widen it) restarts the count: a motion
+  alert needs its *Motion confirm* time of frames received after
+  the gap, and a pending exit or entry needs its full 6 seconds of received quiet. A pending exit or entry is
+  restarted, not cancelled, so a real exit during an outage is still recorded, just later; activity on the
+  first frame after the gap still cancels it, as before. A restart is logged (`motion run restarted` /
+  `confirmation restarted`, with the length of the gap), only when something was actually waiting.
+  *Motion confirm* 0 still alerts on the first frame. **Differs from the neighbours:** candidate opening, the
+  bed/outside links, the alert cooldown, sound alerts, stored counts and peaks are unchanged, and a stored
+  `out_of_bed`/`into_bed` after a gap is stamped later, with a `peak` and `out_frames` that can differ. The
+  numbers (1.5 s, factor 5, 16 intervals, 9 held) are chosen, not measured. A camera that keeps stalling confirms
+  more slowly (expected wait, in seconds of received video, about 7 s for the 6 s exit with 3.3 gaps a minute,
+  38 s at 30 a minute, 400 s at 60 a minute, assuming random gaps of 2-3 s; in wall time roughly 8 s, 75-90 s and
+  1100-1400 s), and gaps more frequent than once per 6 s of received video starve a pending exit: there is no
+  cap on restarts (a follow-up decision). A healthy camera at its normal rate never prints the restart lines. A
+  cold camera that delivers every 2 s restarts a pending exit or a motion run about 9 times before its bound has
+  learnt: a candidate pending in the first ~18 s after a detector (re)launch confirms at about launch + 24 s, and
+  sustained motion alerts at about 24 s instead of 6 s (up to ~18 s later than before; a warm camera is
+  unchanged, intermittent motion is unaffected). After a slow phase the bound also stays wide until 8 fast
+  frames have arrived, so a stall shorter than 5 times the old interval in that window is not seen. Per
+  candidate a confirmation is never earlier than before (per stored row it can differ). A stall ffmpeg fills with
+  repeats as it happens is not caught. Details and limits: [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "A motion alert or a bed
+  exit/entry is not confirmed across a gap in the video".
+- **Motion detection now goes back to the Low stream after an outage, instead of staying on the main stream
+  until it next restarted** (issue #500). A motion detector waits up to 45 seconds for the camera's Low
+  (sub) stream, then settles for the main stream. After any outage longer than that (a scheduled camera
+  reboot, a Wi-Fi drop, a server restart) both streams return within about a second of each other and the
+  main one is usually first, so the detector stayed on it, which could be a day or more, and nothing said so.
+  Every motion threshold was measured on the Low stream, and the main one costs more CPU. A detector that
+  fell back now says so in the log (`reading the MAIN stream`) and, once the Low stream has been ready on 3
+  checks 20 seconds apart **and** neither the bed nor the area outside it has moved for 90 seconds, relaunches
+  itself onto the Low stream (`returning the motion detector from main to sub`), at most once per 10 minutes.
+  The switch is an ordinary detector relaunch: about 5 seconds with no motion samples, the bed-transition
+  rules (a half-seen exit or entry, and the 2-minute pause after a logged one) start afresh, while the motion
+  alert cooldown (issue #454) and the belief about whether the child is in bed are kept.
+  The 90-second quiet period is derived from the bed-exit rules so a switch cannot lose an exit. The numbers
+  are fixed, not settings, and were chosen rather than measured. A camera with no Low stream, and the sound
+  detector, are unchanged. See KNOWN-ISSUES for the limits.
+- **A muted or silent microphone is now recorded as a quiet room instead of as missing sound, and silence
+  between separate noises no longer adds them up into a sound alert** (issue #453). When a microphone
+  delivers digital silence (every audio sample exactly zero: a muted or gated microphone, or a codec that
+  encodes silence that way), each 200 ms window of it was thrown away as if nothing had been heard. So the
+  sleep timeline stored no sound for those minutes; a sound detector reconnecting during the silence could be
+  stopped as "does this camera have a microphone?"; and the silence between separate noises was skipped, so a
+  few short noises seconds apart could average out as one long loud sound and send an alert that the same
+  noises in an ordinary quiet room would not. A silent window now counts as heard and quiet, exactly like a
+  reading at the room's own learned ambient level: it is stored as 0 over ambient and included in the
+  minute's sound average and spread, it dilutes the alert's average over the **Sound confirm** time (4 s by
+  default, 0–30 s) like any quiet moment, and it never counts toward "no microphone". A minute of nothing but silence now writes a per-minute row (sound 0)
+  even with no movement, where before it wrote none; a stream that delivers no audio at all still stores
+  nothing, so the two stay distinguishable. The `[sound]` level line keeps printing for a silent microphone
+  (`peak=?`). Sleep numbers are unchanged (a minute only counts as noisy above 6 dB over ambient, and a minute
+  without video is not used); the live wake check now hears a silent minute as a quiet one, as it already did
+  a quiet room. No setting or threshold changed. Known limits (silence cannot teach the app a room's ambient
+  level, and short bursts of sound between silences may never teach it one; silence never lowers the level,
+  though a long loud sound can still be absorbed into it just after the sound stops; and stored per-minute
+  sound averages from before and after this change are not comparable): [KNOWN-ISSUES.md](KNOWN-ISSUES.md),
+  "A muted or digitally silent microphone is recorded as a quiet room".
+- **A detected wake-up after midday, or asleep time before midnight, is saved on the right day in the
+  morning review.** A time in the review is dated by the clock: before 12:00 is the morning after the
+  night's date, 12:00 or later the night's own evening. But the app's own times can fall on the other side
+  of that line: a wake-up after midday when the sleep window ends after 09:00 (a wake-up is looked for up
+  to 3 hours past the window's end), or an asleep time before midnight when the window opens just after
+  it (an asleep time is looked for from 3 hours before the window opens). **That's right**, or saving the
+  form with that time left as it was, then put it a day off, so the corrected night ended before it began.
+  Now a time saved exactly as the app showed it is saved as that exact time, as long as it is one the app
+  could have worked out for that night (inside the child's sleep window widened by those 3 hours each
+  side); anything else is dated by the clock as before, so a time sent from outside the app can at most be
+  moved to another day inside that same span, never to an arbitrary one. The same goes for the hour that happens twice on the night the clocks go back:
+  the app's own time in it keeps the occurrence the page showed, instead of whichever one the timezone
+  arithmetic picked (the second at or east of UTC, the first west of it), which could be an hour off. A
+  time you type yourself is still dated by the clock (a known limit in the README). Any timezone, any
+  install.
+- **A night you have corrected is no longer recalculated afterwards.** After a parent corrected a wake
+  time, the nightly update kept re-saving the night for up to about 3 hours after its window closed and
+  never looked at the correction, so the corrected night's total asleep and wake-ups could change hours
+  later (seen when a bed was changed after the corrected wake-up). Now any correction in the morning review
+  (an in-bed, asleep or wake time, "No one was in the bed", or a plain **That's right**) **locks** the
+  night's saved summary: the nightly update leaves it alone and **Recompute this night** refuses it
+  (`409`, `reason: "reviewed"`; the dialog says the night is locked). So an early rough pass is not what
+  gets locked, saving a correction on last night while it is still being refined first saves it freshly
+  worked out at that moment; any older or already-settled night is locked as it is and never re-scored by
+  a correction. Editing or removing the correction always works, and removing the last one unlocks the
+  night. Answering only per-event questions or dismissing the card locks nothing. A note saved from the
+  review form does lock the night, because the form always saves the asleep and wake-up times it shows
+  with it, as a confirmation; only a note sent on its own through the API doesn't. The automatic "Sleep
+  report updated" push is now skipped after any correction, not only after "No one was in the bed", and it
+  no longer goes out late: nothing is pushed more than about 3 hours (at most one 30-minute check past
+  them) after the window closed. Before, removing a correction hours later, or a server that had been off
+  across the morning, could send "Sleep report updated" for a night the parent had been looking at all
+  morning; now that pass only updates the saved summary. Known limits (the locked night is the one worked
+  out when you press save, an uncorrected time freezes at its value then, a night corrected before its
+  first summary keeps that summary's missing wake-up until you add one, the sleep detail page still works
+  the night out fresh, the review page and the card can start from different versions of the night,
+  nights corrected before this update are locked as last saved, an old open page can be refused a save
+  until reloaded, the repeated hour on the night the clocks go back) are in the README; the notification
+  change is in [docs/notifications.md](docs/notifications.md).
+- **The morning review no longer saves times in the wrong timezone when used the moment it opens.** Until
+  the app has loaded the timezone set in Settings (usually a moment after the page opens, or never that
+  visit if loading it fails) it shows times in UTC. Tapping a frame button or typing in that moment kept
+  "Fell asleep" and "Got up for the day" in UTC even after the real timezone arrived, and saving then
+  stored them: on a Sydney night of 7:13 pm to 6:37 am, 09:13 and 20:37, a wake-up before the asleep time.
+  **That's right** sent the UTC times straight away. Now the time controls stay greyed out, with a line
+  saying why, until the timezone has loaded; event answers and "No one was in the bed" carry no time and
+  work at once. Any timezone, any install.
+- **The audio-liveness check no longer reads a failed run as "no audio"** (issue #515). The check that
+  decides whether a camera's audio is really flowing counted its probe's output before the output had
+  finished arriving, and read a probe that failed to run as "confirmed no audio"; two of those in a row
+  restart the camera's transcoder. It now waits for the probe to finish before counting, and a failed run is
+  "could not tell", which resets the count. This is a correctness fix for a rare case: the probe reads the
+  local MediaMTX and only runs on a stream that was just reported ready, so a failure needs the stream to drop
+  in between. A real audio stall, where the stream stays up but carries no audio packets for 6 seconds, is
+  caught exactly as before. One visible side effect: when a camera's sound detector has gone quiet and that
+  same check keeps failing, the detector watchdog can now restart the sound detector on its usual backoff
+  (it appears in the camera's history), where before it left the case to the audio watchdog.
+- **A motion or sound detector that stops receiving anything is now restarted, instead of staying silent
+  for hours.** A detector's ffmpeg could stay alive and connected while getting no frames at all, and
+  nothing noticed: on one install a motion detector got nothing for 4h45 and 8h43 in the same month, both
+  times ended only by the camera's daily reboot, and the night's sleep timeline had a hole in it (issue
+  #369). A new detector watchdog checks every 15 seconds whether each running detector has written
+  anything in the last minute (a still, silent room still counts as writing, so a quiet night never
+  triggers it). A dark detector is restarted. If a MOTION detector goes dark again, the Low sub-stream it
+  reads is restarted too, or the main stream when it reads that, which briefly interrupts live view (a
+  sound detector is only ever restarted itself: its stream is the audio watchdog's job). Attempts back
+  off from 1 to 30 minutes. A new detector gets 90 seconds to start delivering. Each restart is one row
+  in **Camera history** saying "detector", plus one log line that records where the stream stopped. None
+  of it is configurable. The minutes before a restart are still lost from that night's sleep data (issue
+  #508). A restart no longer resets the motion alert cooldown either (issue #454, above).
+  Details, defaults and limits: [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "A detector was restarted".
+- **The sleep timeline no longer counts the pictures ffmpeg repeats during a camera stall as watched
+  time.** When a camera stalls, or runs slower than 5 frames a second, the motion detector's ffmpeg
+  repeats the last picture to keep five a second going, and each repeat read as a perfectly still room. A
+  3-second stall made about 15 of them. The `[obs]` measurement added in 0.34.0 can prove which frames were
+  repeats, and those frames are now left out of each minute's stored frame count and average movement
+  (`motion_frames`, `motion_level`, `motion_out_level`), so a minute's average can only go up. The peaks,
+  which every sleep threshold reads, and motion alerts, in/out-of-bed detection and the sleep numbers are
+  all unchanged (issue #493, narrowed: bed transitions and alerts are left to #452). No screen shows these
+  three numbers yet; this is groundwork for later sleep-analysis work. Only proven repeats are left out,
+  never frames `[obs]` reports as `unknown`, so when its timestamps are unavailable nothing changes. Repeats
+  judged after their minute was stored stay counted; since #447 (next entry) that happens only on a camera
+  that keeps stalling. Details and limits: [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "A stalled camera's repeated
+  pictures are left out of the per-minute motion count".
+- **Each minute of the sleep timeline now holds the samples that arrived in that minute.** The per-minute
+  motion and sound rows (`activity_samples`) were labelled with the minute a once-a-minute timer fired in,
+  and that timer's second depended on when Nightlight started, so a row labelled 19:01 held 19:00:35 to
+  19:01:35 on one boot and 19:00:10 to 19:01:10 on the next (issue #447). A row now holds exactly what
+  arrived in its UTC minute, and is stored 7 seconds after that minute ends. That wait also lets the stall
+  repeats of a minute's last seconds be left out in time: none of a steady camera's stay counted now, where
+  about 1 in 12 did. The live wake check hears each minute within a second of its end instead of up to a
+  minute later. Each row moves by less than a minute, but on a borderline night a computed bedtime or wake
+  time can move by more; nights already stored are not recomputed. Wake clips still start just before the
+  end of the wake's first active minute, which keeps them inside the recording ring on every clip setting
+  (starting them at the first moving frame is #412). A restart still loses only the minute being received,
+  as before: a minute still waiting its 7 seconds is stored on the way out. A new `[activity]` log line
+  reports repeats judged too late and clock steps.
+  Details and limits (clock steps, stalling cameras, what a restart loses): [KNOWN-ISSUES.md](KNOWN-ISSUES.md),
+  "The sleep timeline's minutes are the minutes the samples arrived in".
+- **Minutes where the camera's video stalled but its sound kept running are now "no data" in the sleep
+  numbers, instead of counted as quiet sleep.** When the motion detector stopped receiving video, the sound
+  detector kept writing a row every minute, and every one of those minutes counted as watched and still:
+  on one install two stalls (522 and 284 minutes) reported full coverage and hours of sleep nobody saw
+  (issue #508; on that install's real nights the change touches only the part of a stall inside the 19:00
+  to 07:00 window). A minute now counts as watched only
+  if the motion detector analysed at least one real frame in it, whatever the camera's frame rate; a
+  minute with no video is treated exactly like a minute with no data at all, and its sound is not used
+  (a bedroom mic hears the whole house). What changes on a night with a stall: lower coverage, more
+  unknown minutes and less sleep counted; the timeline shows the stall as "No data"; a cry during the
+  stall is no longer shown as a wake-up from the noise alone; if the stall covers bedtime, the reported
+  bedtime moves to the first quiet minute after the video came back; a night more than half unwatched is
+  "no data". **"No one was in the bed" now needs at least 90% of the window watched** (below that the
+  night is "no data"), because that answer also discards the night's timelapse frames; this also applies
+  to nights with ordinary gaps in the data. The 90% is a first estimate, not a measured value. Nights
+  already stored change only when recomputed, and **Recompute** still never turns a scored night into
+  "no data": a night stored before this update whose video stalled for most of it keeps its old numbers.
+  That refusal is only reachable through the API (the page offers Recompute only on a night that still
+  scores); its 409 now says which reason applied instead of always claiming the data aged out, and adds
+  `reason`, `status` and `coverage_minutes`. Known limits (a
+  frozen picture still reads as a still room; the live wake watcher and bed-transition rules do not use
+  this yet): [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "Minutes with no video are unknown in the sleep numbers".
+
 ## [0.34.0] - 2026-09-28
 
 ### Added

@@ -16,6 +16,10 @@ heading — don't append a second one.** Duplicate headings are invisible in a P
 [Unreleased] collected four of them across #179-#186 before anyone noticed;
 `node scripts/check-changelog.mjs` now fails CI on that (structure only — it never touches wording).
 
+> **Privacy: never write a child's name, or any other identifying household detail, into this repo** —
+> code, comments, tests, docs, CHANGELOG, commit messages, PR or issue text. This repo is public. Say
+> "a child", "child A", or describe the behaviour.
+
 ## Definition of done
 
 Every change ships its tests, its docs and its changelog entry **in the same commit as the code** —
@@ -28,7 +32,8 @@ database and real HTTP with **no mocks**; `frontend/test/helpers/render.jsx` ren
 you have watched fail without the fix.
 
 **Docs** live in `docs/`, one file per user-facing area (`recording.md`, `notifications.md`, `mfa.md`,
-`design-language.md`), with `README.md` for anything that changes setup or deployment. Rules of thumb:
+`design-language.md`), with `README.md` for anything that changes setup or deployment, and
+`docs/architecture.md` for how the subsystems fit together (update it when you change one). Rules of thumb:
 - A new **setting** is documented where its neighbours are, **with its default and its range**.
 - When a new thing behaves *differently* from the thing beside it — kept for a different length of
   time, notifies when the other doesn't, appears somewhere else — **say so explicitly**. That contrast
@@ -38,9 +43,8 @@ you have watched fail without the fix.
 
 **Comments** carry the **why**, in the code, beside the code — and where a number or a rule came from a
 measurement or an incident, they say which. `sleepAnalysis.js` is the reference: it is still readable
-after a dozen threshold changes precisely because every constant states the night that set it. This is
-not "comment every line" — `// increment i` is noise. The test is whether the next person can tell a
-deliberate choice from an accident.
+after a dozen threshold changes precisely because every constant states the night that set it. Not
+"comment every line" — the test is whether the next person can tell a deliberate choice from an accident.
 
 **Before opening a PR:**
 ```bash
@@ -49,22 +53,19 @@ cd ../frontend && npm test
 node scripts/check-changelog.mjs              # from the repo root
 git show HEAD                                 # READ IT: is the reasoning actually in the code?
 ```
-That last line is not ceremony. PR #229 shipped eight lines of bare index arithmetic with its whole
-rationale in the commit message only — the comments were written, then lost to a `git checkout --` that
-reverted an over-fitted attempt, and nothing caught it.
+That last line is not ceremony: a `git checkout --` once silently lost a PR's comments, leaving only
+bare index arithmetic with the rationale in the commit message.
 
 **It has to work for someone else.** This image is publicly distributed, and every threshold in
 `sleepAnalysis.js` / `bedTransitionRules.js` was measured on **two cameras in one house**. Before
 shipping, ask what the change assumes about whoever installs it:
 - **Environment** — never hard-code a timezone, offset or locale. Read `settings.timezone` and use the
   DST-safe `zonedToUtc` / `toSqlUtc` in `sleepAnalysis.js`. A review window anchored on a literal
-  `04:00Z` shipped once; it is midday only in Melbourne, and on a default install (`timezone` defaults
-  to `'UTC'`) it hid every morning transition.
+  `04:00Z` once hid every morning transition on a default install (`timezone` defaults to `'UTC'`, and
+  that literal is only midday in a single timezone).
 - **Per-installation setup** — the detector only sees what the painted `detect_zone` covers, and nothing
-  validates that the zone sits on the bed. Child A's is 38.5% of frame (larger than Child B's), so every
-  number said it was fine; drawn over a real frame it includes a moving curtain and stops short of the
-  foot end of the bed, which is exactly where he climbs out. Area and rect count prove nothing —
-  **draw the zone over a transition snapshot and look at it.**
+  validates that the zone sits on the bed. Area and rect count prove nothing — **draw the zone over a
+  transition snapshot and look at it.**
 - **Calibrated numbers** — fine to ship, but say which nights set them, and prefer deriving a threshold
   from the room over hard-coding it.
 
@@ -84,23 +85,17 @@ what happens to everyone else. "Known limit, documented" is an acceptable answer
   the disk how full it is needs the answer INJECTED — see the `mounts` / `free` seams in
   `lib/clipStorage.js`, and the empty-PATH technique in `spawn-failure.test.js`.
 
-**Then have a subagent attack it.** Required for anything touching the `test:core` include list,
-non-trivial control flow, or detection/sleep analysis; skippable for docs-only or a one-line config
-change, but say so in the PR. Point it at the PR body and tell it to *falsify* the claims, not confirm
-them — and to **mutate the source and check the tests actually kill the mutants**. The full contract is
-in the workspace `CLAUDE.md`.
-
-★ Why this earns its keep: it found two real defects in #229 that a green 231-test suite and **99.54%
-line coverage on those exact lines** did not — an out-of-bounds read that let a 19-minute absence
-measure 20, and a test whose *name* stated the invariant the entire change rested on while its fixture
-sat eight minutes clear of that boundary, so an implementation violating the invariant passed it.
-**Coverage measures execution; mutation testing measures discrimination.**
+**Review.** Every change gets an adversarial review sized to its risk: core-logic, detection/sleep,
+auth and concurrency changes get the most; docs-only changes get a read-through (say which in the PR).
+The workspace `CLAUDE.md` has the tiers and the reviewer brief. Point the reviewer at the PR body, tell
+it to *falsify* the claims, not confirm them, and to **mutate the source and check the tests actually
+kill the mutants** — coverage measures execution; mutation testing measures discrimination.
 
 ## Commands
 
 There is no root-level build — `backend/` and `frontend/` are independent npm projects. No linter is
 configured in either. `backend/` has a unit test suite (Node's built-in runner, no dependencies);
-`frontend/` has its own (Vitest + Testing Library, 850+ tests, coverage-gated in CI). End-to-end
+`frontend/` has its own (Vitest + Testing Library, coverage-gated in CI). End-to-end
 coverage lives separately in `e2e/` (Playwright, needs Docker).
 
 ```bash
@@ -159,127 +154,29 @@ Because MediaMTX and FFmpeg are spawned as child processes of the backend (see
 Docker image will fail unless both binaries are installed and on `PATH`. When iterating on
 backend logic, prefer building and running the Docker image over running `npm start` bare.
 
-## Architecture
+## Architecture — the invariants
 
-**Everything ships as one Docker image, one container** — no multi-container orchestration to
-reason about. The container needs its own routable LAN IP so WebRTC has no NAT/ICE problems
-(MediaMTX advertises that IP to browsers). There are two supported ways to give it one: **host
-networking** (the README quick-start default — the container shares the host's IP), or an
-**ipvlan network with a dedicated IP**. The Unraid prod + staging deployments both use the latter
-(both on `br0.10` — see Branching and deploy pipeline below); the host-networking path is what an
-out-of-the-box `docker run` uses.
+**The full description is in [`docs/architecture.md`](docs/architecture.md); read the relevant section
+before touching that subsystem.** These are the rules that must not be broken:
 
-### The video pipeline (the core thing to understand before touching camera code)
-
-RTSP cannot be played directly in a browser, and many IP cameras send audio as G711 (a codec
-HLS can't carry at all — WebRTC can). This drives a specific pipeline, in order:
-
-1. **FFmpeg** (`backend/src/lib/transcoder.js`, one process per camera) pulls each camera's
-   RTSP feed, copies video untouched, and produces **two audio tracks**: track 0 copied as-is
-   (for WebRTC, which can't decode AAC), track 1 transcoded to AAC (for HLS, which can't carry
-   the original codec). It publishes the result into MediaMTX via RTSP on `127.0.0.1:8554`.
-2. **MediaMTX** (`backend/src/lib/mediamtxProcess.js`, spawned as a child process, config baked
-   into the image at `mediamtx/mediamtx.yml`) re-publishes that stream as WebRTC (WHEP) and HLS.
-   Each camera's path has no pull source configured — it's publisher-only; FFmpeg pushes into
-   it rather than MediaMTX pulling the camera directly (`backend/src/lib/mediamtx.js`).
-3. **Backend** (`backend/src/index.js`) reverse-proxies `/live` (WHEP) and `/hls` to MediaMTX's
-   local ports, and serves the built frontend + REST API on the single public port (4000).
-4. **Frontend** picks WebRTC (`WhepPlayer.jsx`, "Low latency") or HLS (`HlsPlayer.jsx`,
-   "Compatibility") per camera tile, toggled by the user.
-
-### ONVIF, PTZ, and camera credentials (`backend/src/lib/onvif.js`, `rtspProbe.js`)
-
-Cameras are added/edited by **components** (IP / port / path / username / password), not a
-raw RTSP URL. The route layer (`routes/cameras.js`) assembles those into the stored
-`rtsp_url` that the transcoder uses, and splits an existing `rtsp_url` back into fields for
-the edit form. **The password is never returned to the client** — GET responses carry the
-address in fields plus a credential-free display URL and a `rtsp_has_password` flag; on edit,
-a blank password means "keep the existing one." Keep that invariant.
-
-- **`lib/onvif.js`** — `onvif@0.8.1` client, deliberately resilient to minimal ONVIF servers
-  (the sonoff-hack Sonoff faults on `GetCapabilities`/`GetServices`): it tries the normal
-  connect, then falls back to hitting the media service directly at known paths, and
-  reconstructs the RTSP URL from the connect host + user's creds + the discovered path (never
-  the host/creds the camera returns — often empty/bogus). `probeOnvifCamera()` powers
-  add-by-IP (`POST /api/cameras/onvif-probe`) and also reports two-way-audio (`getAudioOutput-
-  Configurations`) and PTZ capability. **Discovery is add-by-IP, not multicast** — WS-Discovery
-  doesn't cross VLANs.
-- **PTZ** — `ptzNudge()` does start → hold `PTZ_NUDGE_MS` → stop in one call, so each press
-  moves a fixed distance regardless of tap/network timing (`POST /api/cameras/:id/ptz/nudge`;
-  the tile sends one per tap and repeats while held). ONVIF creds for control are the same
-  single credential set stored with the camera; capability/creds/profile-token are captured
-  at add time (`ptz_supported`, `onvif_*` columns) so control reconnects without re-querying.
-- **`lib/rtspProbe.js`** — `validateRtspStream()` (ffprobe over TCP) runs on add/edit so a
-  camera that can't be reached (bad creds/path/IP) isn't silently saved; the UI can override
-  with `force` for a camera that's just momentarily offline.
-
-### Self-healing / reconciliation (`backend/src/index.js`)
-
-MediaMTX only learns about a camera when it's added/edited through the API, or via periodic
-reconciliation. Three independent mechanisms keep the pipeline alive without manual restarts:
-- `reconcileCameraPaths()` runs at startup and every 5 minutes: re-creates any MediaMTX path
-  that's missing/misconfigured and restarts any camera whose transcoder isn't running. It only
-  *writes* to MediaMTX when something is actually wrong, since every write forces a path reload
-  that disconnects the current publisher.
-- A watchdog (15s interval) tracks how long each camera's MediaMTX path has been "not ready"
-  and force-restarts that camera's transcoder past a 30s threshold — a second, independent
-  layer of defense beyond FFmpeg's own stream error handling.
-- FFmpeg and MediaMTX processes both auto-restart on unexpected exit (`transcoder.js`,
-  `mediamtxProcess.js`), and `transcoder.js` also watches for a specific known bad-camera
-  symptom ("DTS discontinuity") and proactively restarts rather than let a session run poisoned.
-
-When editing this area, preserve the "only write when actually broken" invariant — an
-unconditional reconcile-on-every-tick would cause constant disconnects.
-
-### Auth (`backend/src/middleware/auth.js`, `backend/src/routes/auth.js`)
-
-JWT-based, but a valid JWT alone isn't sufficient — every request also checks a `sessions` row
-in SQLite still exists (`backend/src/db.js`). This is what makes "sign out this device" and
-"delete this caregiver" take effect immediately rather than waiting for token expiry. Two auth
-middlewares exist: `requireAuth` (Bearer header) and `requireAuthQueryOrHeader` (also accepts
-`?token=`, needed because Safari's native `<video>` fetches HLS segments itself with no way to
-attach headers). Roles are `admin` / `caregiver`; `requireAdmin` gates account/settings management.
-
-The JWT signing secret is auto-generated and persisted to `DATA_DIR/.jwt_secret` if
-`JWT_SECRET` isn't set — deliberately avoiding a hardcoded fallback, since this image is
-publicly distributed and a baked-in secret would be a shared key across every install.
-
-### Data layer (`backend/src/db.js`)
-
-better-sqlite3, single file in `DATA_DIR` (default `/app/data`). Schema is created with
-`CREATE TABLE IF NOT EXISTS`, and columns added after initial release are migrated by hand at
-the bottom of `db.js` (`PRAGMA table_info` + conditional `ALTER TABLE`) — there is no migration
-framework. Follow this same pattern for new columns: check `table_info`, `ALTER TABLE` if
-missing, keep it idempotent.
-
-### Runtime identity (`backend/entrypoint.sh`, `Dockerfile`)
-
-Container starts as root, remaps a pre-baked user to `PUID`/`PGID` (default 99/100, Unraid's
-"nobody"/"users" convention) via `usermod`/`groupmod`, `chown`s the data dir, then execs the
-app via `su-exec` — the app process itself never runs as root. `tini` is PID 1 to reap zombies
-from the MediaMTX + per-camera-FFmpeg child process tree and forward signals correctly.
-
-### Frontend structure (`frontend/src/`)
-
-React + react-router, no Redux/state library — three context providers (`AuthContext`,
-`SettingsContext`, `CamerasContext` in `lib/`) cover global state. `LiveMonitor.jsx` is the
-main dashboard; `pages/` holds the four management screens (Children, Cameras, Account,
-Settings). The Settings **hub itself is reachable by caregivers** — its route carries no admin
-guard (`App.jsx`) — but it's role-aware internally: admin-only rows are hidden for a caregiver,
-and every Settings *sub*-route (general, camera, recording, mqtt, push providers, users, logs,
-clips) is individually `AdminProtected`. `lib/api.js` is a thin fetch wrapper that attaches the
-JWT and redirects to `#/login` on a 401.
-
-### CSP is enforced — keep it that way
-
-`backend/src/index.js` serves an **enforcing** Content-Security-Policy via helmet (it was
-deliberately disabled until 2026-08-24, when it was rolled out report-only across every feature
-first, then switched to enforcing). The directives are tuned to this app and the reasoning is in
-the inline comment above the policy — read it before changing anything there. Two things that
-bite: hls.js needs `worker-src blob:` + `media-src blob:`, and WebRTC's STUN server is gated by
-`connect-src`. Never add `unsafe-inline`/`unsafe-eval` to `script-src`; theming is safe because it
-uses CSSOM `setProperty`, which CSP doesn't police. Violations are logged to the container log via
-`POST /api/csp-report`, so check there if a new dependency breaks.
+- **One image, one container**, three processes: the Node backend, MediaMTX, one FFmpeg per camera. The
+  container needs its own routable LAN IP so WebRTC has no NAT/ICE problems.
+- **Video pipeline order**: FFmpeg → MediaMTX → backend reverse-proxy → frontend. FFmpeg emits **two audio
+  tracks** (original codec for WebRTC, AAC for HLS) because WebRTC can't decode AAC and HLS can't carry
+  G711. MediaMTX camera paths are **publisher-only** — FFmpeg pushes, MediaMTX never pulls.
+- **Camera passwords are never returned to the client.** GET carries address fields, a credential-free
+  display URL and `rtsp_has_password`; a blank password on edit means "keep the existing one."
+- **Reconciliation only writes to MediaMTX when something is actually broken** — every write forces a
+  path reload that disconnects the publisher. Never reconcile unconditionally on a tick.
+- **A valid JWT is not enough**: every request also checks that its `sessions` row still exists. The JWT
+  secret is generated and persisted, **never a hardcoded fallback** (the image is public).
+- **Schema changes are hand-written, idempotent migrations** at the bottom of `db.js` (`PRAGMA table_info`
+  + conditional `ALTER TABLE`). There is no migration framework.
+- **The app process never runs as root** (entrypoint remaps `PUID`/`PGID`, then `su-exec`).
+- **The Settings hub is reachable by caregivers**; every Settings *sub*-route is individually
+  `AdminProtected`.
+- **The CSP is enforcing.** Never add `unsafe-inline` / `unsafe-eval` to `script-src`; read the inline
+  comment above the policy before changing it.
 
 ### CI/CD
 
@@ -305,11 +202,12 @@ See the workspace `CLAUDE.md` for the branch model. In short: work on `dev`, rel
   prod's), separate data dir (`/mnt/user/appdata/nightlight-dev`), container name `nightlight-dev`,
   runs `sauso/nightlight:dev`. Test dev builds here.
 
-Deploys/log-checks are done over SSH to the Unraid host, using the guard script (see the workspace
-`CLAUDE.md`). The actual host/container IP addresses are kept out of this repo — they live in the
+Deploys/log-checks are done over SSH to the Unraid host, using the guard script documented in
+`planning/deploy-runbook.md`. The actual host/container IP addresses are kept out of this repo — they live in the
 agent's private deployment notes, not in version control.
 
 Deploys are **not** automated — after CI publishes an image, pull it and recreate the relevant
 container on Unraid (prod pulls `:latest`, staging pulls `:dev`). A push/merge does NOT mean the
 change is live. Verify via the Actions tab / Docker Hub tag, then the running container's
-`org.opencontainers.image.revision` label.
+`NIGHTLIGHT_GIT_SHA` environment variable (`docker inspect`). Not the
+`org.opencontainers.image.revision` label: it exists only on CI-built images.

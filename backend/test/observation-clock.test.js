@@ -584,10 +584,17 @@ describe('planted motion streams (plan §Tests 3)', () => {
   test('R3-2: a 10 s identical (static) run with a dup at second 6 — nothing finalized at second 5 is revised', () => {
     const rig = motionRig();
     const B = 100_000;
-    const seen = new Map();
+    // Record, never assert, inside the hook: record() hands each observation to notify(), whose try/catch
+    // swallows any throw and only bumps period.warn — so an assert.ok in here can never fail the test directly (#514;
+    // it was inert since #373). Assert after rig.end() instead, the same pattern as "Recorded, not asserted
+    // inside the stub" in detector-observation-wiring.test.js:1151. `first` is deliberately not overwritten
+    // on a repeat: keeping the FIRST value is what lets `dups` show was-vs-now (a revision), rather than a
+    // map that always agrees with itself.
+    const first = new Map();
+    const dups = [];
     rig.clock.onObservation = (x) => {
-      assert.ok(!seen.has(x.idx), `sample ${x.idx} observed twice`);
-      seen.set(x.idx, { cls: x.cls, reason: x.reason, at: rig.t.mono });
+      if (first.has(x.idx)) dups.push({ idx: x.idx, was: first.get(x.idx), now: { cls: x.cls, reason: x.reason } });
+      else first.set(x.idx, { cls: x.cls, reason: x.reason, at: rig.t.mono });
     };
     // 60 inputs at 5 fps; outputs 1..50 are the same static picture; a CFR dup of output 30 (second 6).
     for (let n = 0; n < 60; n += 1) {
@@ -596,10 +603,20 @@ describe('planted motion streams (plan §Tests 3)', () => {
       if (n >= 2) rig.sample(n - 2 >= 1 && n - 2 <= 50 ? 'STILL' : `S${n - 2}`, B + n * 200 + 0.2);
       if (n === 32) rig.sample('STILL', B + n * 200 + 0.3);
     }
-    const beforeDup = [...seen.entries()].filter(([, v]) => v.at < B + 6400 + 5000).map(([k, v]) => [k, v.cls, v.reason]);
+    const beforeDup = [...first.entries()].filter(([, v]) => v.at < B + 6400 + 5000).map(([k, v]) => [k, v.cls, v.reason]);
     rig.end(B + 30_000);
-    for (const [k, cls, reason] of beforeDup) assert.deepEqual([seen.get(k).cls, seen.get(k).reason], [cls, reason]);
+    // No sample is observed twice — in particular nothing finalized before the dup is revised once it lands.
+    assert.deepEqual(dups, [], 'an observation was emitted twice');
+    // notify() also counts a throwing listener as a warn; none of the run's warn sites should fire here.
+    assert.equal(rig.clock.summary().warn, 0);
     assert.ok(beforeDup.some(([k]) => k >= 1 && k <= 20), 'some of the run WAS finalized before the dup');
+    // The R3-2 property that makes "nothing needs revising" true: a static run of DISTINCT
+    // sources is ambiguous from the moment it is finalized, so the late dup has no already-emitted REAL to
+    // contradict. (Not true of a same-source run of fps clones, which reads REAL + clone — not this fixture.)
+    // 1..29 is exactly what beforeDup holds of the run: idx 30 finalizes after the cutoff, idx 0 is not static.
+    for (const [k, cls, reason] of beforeDup.filter(([k]) => k >= 1 && k <= 29)) {
+      assert.deepEqual([cls, reason], ['unknown', 'ambiguous'], `sample ${k} finalized as ${cls}/${reason}`);
+    }
     assert.equal(rig.clock.summary().cfrDup, 1, 'the run reports its net dup once it closes');
   });
 
@@ -2030,5 +2047,144 @@ describe('fix round 3: the net count of a run the stream ends inside (finding (a
       const s = endInsideRun(samples);
       assert.deepEqual([s.cfrDup, s.cfrDrop], [dup, drop], `${samples} samples for 3 records`);
     }
+  });
+});
+
+// --- #493 ----------------------------------------------------------------------------------------------------
+// What the motion detector's clone ledger needs from the clock: its own name for each frame back on that
+// frame's verdict (`token`), the generation id on the handle it gets at launch, its listener actually wired
+// to the clock it will be heard on (also through the test factory), and room for more than one listener.
+// PLANTED oracle: every token, listener and launch is the test's own.
+describe('#493: the per-sample token, the handle\'s generation id, and the clock\'s listeners', () => {
+  // Drives a handle the way motionDetector.js does: config lines, then per frame its `in` record, the `out`
+  // record it releases and the sample before it (the CFR hold), each sample with a token, then the end.
+  // With `t`, the clock's injected time moves; without it, the clock runs on real time.
+  function feedHandle(h, t, count, tokenOf = (k) => `t${k}`) {
+    const B = 100_000;
+    const set = (ms) => { if (t) t.mono = ms; };
+    h.onConfig({ tap: 'in', dir: 'in', tbNum: 1, tbDen: 90000 });
+    h.onConfig({ tap: 'out', dir: 'in', tbNum: 1, tbDen: 5 });
+    for (let n = 0; n < count; n += 1) {
+      set(B + n * 200);
+      h.onRecord({ tap: 'in', n, pts: n * 18000 });
+      if (n >= 1) {
+        set(B + n * 200 + 0.1);
+        h.onRecord({ tap: 'out', n: n - 1, pts: n - 1, checksum: zlibAdler0(frameOf(`S${n - 1}`)) });
+      }
+      if (n >= 2) {
+        set(B + n * 200 + 0.2);
+        const rx = h.receipt();
+        h.onSample(frameOf(`S${n - 2}`), rx.mono, rx.wall, { token: tokenOf(n - 2) });
+      }
+    }
+    set(B + count * 200 + 10_000);
+    h.end('exit', { code: 0 });
+  }
+  function injectedClock(cameraId) {
+    const t = { mono: 100_000 };
+    const clocks = { monoNow: () => t.mono, wallNow: () => t.mono + WALL0 };
+    const clock = getObservationClock(cameraId, 'motion', { clocks, label: 'Cam', log: () => {} });
+    return { t, clock };
+  }
+
+  test('a sample\'s token comes back verbatim on its own observation: 0 stays 0, a string stays a string, none reads null', () => {
+    const rig = motionRig();
+    const B = 100_000;
+    const tokens = [0, 'frame-b', undefined, 7.5];
+    for (let n = 0; n <= 5; n += 1) {
+      rig.inRec(n, n * 18000, B + n * 200);
+      if (n >= 1) rig.outRec(n - 1, n - 1, `S${n - 1}`, B + n * 200 + 0.1);
+      if (n >= 2) rig.sample(`S${n - 2}`, B + n * 200 + 0.2, tokens[n - 2] === undefined ? undefined : { token: tokens[n - 2] });
+    }
+    rig.end(B + 10_000);
+    assert.deepEqual(rig.byIdx().map((o) => o.token), [0, 'frame-b', null, 7.5]);
+  });
+
+  test('the handle carries its generation id — the `gen` on every observation it produces — and ids only go up, across a relaunch and a delete', () => {
+    const { t } = injectedClock('cam-gen');
+    const seen = [];
+    const h1 = openObservation('cam-gen', 'motion', { path: 'p', fps: 5, onObservation: (o) => seen.push(o) });
+    assert.equal(typeof h1.gen, 'number');
+    feedHandle(h1, t, 8);
+    assert.equal(seen.length, 6);
+    assert.ok(seen.every((o) => o.gen === h1.gen), 'what a caller stages under h1.gen is what its verdicts name');
+    const h2 = openObservation('cam-gen', 'motion', { path: 'p', fps: 5 });
+    assert.ok(h2.gen > h1.gen, 'a relaunch never reuses an id: its token 0 cannot collide with the old launch\'s');
+    forgetObservationClocks('cam-gen'); // the camera deleted: its clock and tombstone go, the counter does not
+    const h3 = openObservation('cam-gen', 'motion', { path: 'p', fps: 5 });
+    assert.ok(h3.gen > h2.gen);
+  });
+
+  test('no working generation, no id: null for no clock, a throwing one, or a clock-shaped object without a numeric id', () => {
+    for (const [what, factory] of [
+      ['no clock', () => null],
+      ['a factory that throws', () => { throw new Error('down'); }],
+      ['beginGeneration throws', () => ({ beginGeneration() { throw new Error('down'); } })],
+      ['a generation without an id', () => ({ beginGeneration: () => ({ onSample() {} }) })],
+      ['an id that is not a number', () => ({ beginGeneration: () => ({ id: '3', onSample() {} }) })],
+    ]) {
+      _setObservationClockFactoryForTests(factory);
+      assert.equal(openObservation('cam-x', 'motion', { path: 'p' }).gen, null, what);
+    }
+    _setObservationClockFactoryForTests(null);
+  });
+
+  test('openObservation wires its listener to the clock it creates, and REFRESHES it on a clock that already existed', () => {
+    // Fresh: the clock is created by openObservation itself (real time; end() finalizes everything).
+    const fresh = [];
+    const onFresh = (o) => fresh.push(o);
+    const h0 = openObservation('cam-fresh', 'motion', { path: 'p', fps: 5, onObservation: onFresh });
+    assert.equal(getObservationClock('cam-fresh', 'motion').onObservation, onFresh);
+    feedHandle(h0, null, 6);
+    assert.equal(fresh.length, 4, 'every sample of the launch reached the listener');
+
+    // Existing: made first by something that only reads it (no listener), then a detector launches on it.
+    const { t, clock } = injectedClock('cam-old');
+    assert.equal(clock.onObservation, null);
+    const b = [];
+    const h1 = openObservation('cam-old', 'motion', { path: 'p', fps: 5, onObservation: (o) => b.push(o) });
+    feedHandle(h1, t, 6);
+    assert.equal(b.length, 4, 'without the refresh, whoever created the clock first decides forever who hears it');
+
+    // A relaunch REPLACES the listener (one per clock, whatever the number of reconnects)...
+    const c = [];
+    const h2 = openObservation('cam-old', 'motion', { path: 'p', fps: 5, onObservation: (o) => c.push(o) });
+    feedHandle(h2, t, 6);
+    assert.deepEqual([b.length, c.length], [4, 4], 'launch 2 is heard by its own listener only');
+    // ...and a launch that passes none (the sound leg's shape) leaves the one in place.
+    const h3 = openObservation('cam-old', 'motion', { path: 'p', fps: 5 });
+    feedHandle(h3, t, 6);
+    assert.equal(c.length, 8);
+  });
+
+  test('a test factory receives the listener as its third argument (the seam the #373 golden\'s working clock depends on)', () => {
+    const got = [];
+    _setObservationClockFactoryForTests((cameraId, leg, opts) => { got.push([cameraId, leg, opts]); return null; });
+    const fn = () => {};
+    openObservation('cam-f', 'motion', { path: 'p', onObservation: fn });
+    _setObservationClockFactoryForTests(null);
+    assert.equal(got.length, 1);
+    assert.deepEqual(got[0].slice(0, 2), ['cam-f', 'motion']);
+    assert.equal(got[0][2].onObservation, fn);
+  });
+
+  test('every listener hears every observation, each in its own guard; the same function added twice hears it once; unsubscribe stops it', () => {
+    const rig = motionRig();
+    const extra = [];
+    const capture = (o) => extra.push(o);
+    rig.clock.addObservationListener(() => { throw new Error('listener down'); });
+    rig.clock.addObservationListener(capture);
+    const off = rig.clock.addObservationListener(capture); // a factory called again on the next launch
+    const own = rig.clock.onObservation;
+    rig.clock.onObservation = (o) => { own(o); throw new Error('own listener down'); };
+    feedStream(rig, steadyFrames({ fps: 5, count: 12 })).flush(110_000);
+    const beforeOff = extra.length;
+    assert.equal(beforeOff, rig.obs.length, 'once each, and a throwing listener before it (twice over) did not stop it');
+    assert.ok(beforeOff >= 10);
+    assert.equal(rig.clock.summary().warn, 2 * beforeOff, 'both throws counted, per observation');
+    off();
+    rig.end(120_000);
+    assert.ok(rig.obs.length > beforeOff, 'the end finalized more');
+    assert.equal(extra.length, beforeOff, 'unsubscribed: heard nothing more');
   });
 });

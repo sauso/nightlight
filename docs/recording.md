@@ -61,11 +61,38 @@ that gap without making alerts noisier.
 **What is and isn't recorded**
 
 - Only for children with **Track sleep** on (per child, under the child's settings).
-- Only **once your child is actually asleep** — settling at bedtime is never recorded.
+- Only **once your child is actually asleep** — settling at bedtime is never recorded. "Asleep" here
+  means **15 quiet minutes in a row that the camera actually reported**; a minute the camera reported
+  nothing for starts the count again, and so does a minute with sound but no video when the camera's video
+  has stalled (such a minute is not counted as seen, as on the sleep timeline). That is stricter than the
+  sleep timeline's own rule, so after an outage in the evening recording can start later than the
+  timeline's bedtime (a camera that drops a minute more often than about every 15 minutes never starts).
+  Once started, a gap does not stop it.
 - Only for a real wake-up: a brief **stir is ignored**, using the same threshold the sleep timeline
-  uses to decide what counts as a wake-up.
+  uses to decide what counts as a wake-up. Activity that pauses for up to **3 minutes** is still one
+  wake-up, and a minute the camera reported nothing for counts as a pause, exactly as on the timeline; a
+  longer gap ends the wake-up, so two qualifying stretches of activity either side of an outage are two
+  wake-ups and two clips. A **video stall** whose sound keeps arriving counts as a pause too: noise heard
+  while the picture is missing does not make a minute active (a bedroom microphone hears the whole house),
+  exactly as on the timeline. This applies to a camera that has delivered video since the server started; a
+  camera with no video at all keeps using its sound. The numbers (3 minutes, 5 active minutes, 15 quiet
+  minutes) are fixed, not settings, are the sleep timeline's own, and were tuned on nights from two cameras in
+  one house (not validated elsewhere). See "A wake recording does not bridge a gap in the readings" in
+  [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
 - The clip starts at the **beginning** of the wake-up, not when it was confirmed — the opening is the
-  part that explains why.
+  part that explains why. Precisely: it starts about 2 to 3 seconds before the first frame that showed movement or
+  noise (the same threshold that makes a minute count as active in the live wake check, in-bed movement or
+  sound; unlike the sleep timeline, out-of-bed movement does not count), or at the oldest footage the buffer
+  still holds, if that is later. A continuous buffer of about 70 seconds or more reaches the first frame; with
+  a shallower one the clip starts up to roughly a minute minus the buffer depth after it (about 22 seconds
+  after the first frame with a 38 second buffer, about 37 with a 23 second one). If the buffer has a gap so that
+  no footage at all falls in the clip's window, the clip starts where it did before, at the end of that first
+  minute. The buffer's depth comes from the clip pre-roll and post-roll and the on-demand pre-roll
+  settings: 23 seconds at the smallest clip settings, 38 on the defaults with on-demand recording off, 63
+  with it on, and more with larger settings. The figures are derived, approximate to about 4 seconds, not measured. The clip's recorded start is its planned
+  first frame (3 seconds before the first moving or noisy one; with an almost empty buffer, up to 3 seconds
+  before the first footage it holds), so it can be a few seconds before the wake's minute on the timeline; the review page still
+  matches it to that wake. See "Where a wake clip starts" in [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
 
 **Settings → Recording → Wake clips**
 
@@ -107,6 +134,9 @@ They exist so that a sleep timeline which looks wrong can be *looked at* rather 
   kept indefinitely.* A frame somebody has looked at and labelled is the scarce thing here; deleting
   one on a timer would throw away the only record of what the camera actually saw. Unjudged frames
   still age out, so the folder stays bounded in normal use.
+- **Marking a night "No one was in the bed"** in the morning review changes nothing here. That night's
+  frames age out, or are kept once judged, exactly like any other night's. The mark hides the
+  detector's version of the night; it does not delete anything, so taking it back loses nothing.
 - **Stored in `transition-snapshots/` in your data directory**, named by the transition's id. Deleting
   the folder is safe — the app recreates it and simply has no pictures for older transitions.
 
@@ -265,6 +295,19 @@ Each kind ages out differently — this is the part most worth reading twice:
   it to **0** to keep them forever. Deleting one removes only the video; the wake-up itself stays on the
   sleep timeline.
 - **On-demand recordings are never swept.** They persist until you delete them from the child's page.
+- **Nightly timelapses** (the sped-up "memories" video of each night): each child keeps their **30 most
+  recent**, and older ones are deleted automatically (not configurable). ⚠️ Two kinds of "nobody was in
+  the bed" night are treated **differently**:
+  - A night the **detector** scores as *no one in the bed* gets no timelapse. The frames sampled
+    overnight show an empty room, so they are thrown away when the night is first scored.
+  - A night **you** mark *No one was in the bed* in the morning review keeps its timelapse. It is made
+    and kept like any other night's, and marking the night deletes nothing. This is deliberate: the mark
+    can be taken back, and a tap in a review should never destroy video that taking it back could not
+    restore. If you don't want that night's timelapse, an admin can delete it from the child's page.
+  - Correcting a night's times, or the **lock** that a correction puts on the night's summary (README,
+    "A night you have corrected is locked"), changes nothing here either. A timelapse is made once, the
+    first time the nightly update scores the night, and a correction never takes that pass away: a night
+    corrected before it was first scored still gets its timelapse when it is.
 
 There is also a **minimum-free-space guard** across all three: if the volume is nearly full, new video
 is skipped, so recording can never be the thing that fills your disk.

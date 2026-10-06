@@ -43,6 +43,48 @@ function detectHostIPv4s() {
   return out;
 }
 
+// The last WebRTC-port warning we logged, so a crash-looping MediaMTX (launch() re-runs every 3s)
+// does not repeat it forever - same pattern as lastAdvertised above.
+let lastUdpWarning = '';
+
+// Turns the WEBRTC_UDP_PORT setting (a bare port number) into the value of MediaMTX's own
+// MTX_WEBRTCLOCALUDPADDRESS override (":<port>"). Returns { value, warning }; value is null when
+// MediaMTX should keep the default (:8189 from mediamtx.yml).
+//
+// WHY THIS EXISTS (2026-10-05): running a second instance on one host needs a distinct WebRTC UDP
+// port, which used to mean hand-typing MTX_WEBRTCLOCALUDPADDRESS=:8190. The owner lost an evening to
+// it: the leading colon is easy to miss, and in Unraid's "Add Variable" dialog the name went into the
+// wrong box, so MediaMTX silently stayed on :8189. A template field that takes only the number, with
+// the colon added HERE, removes both traps.
+//
+// ⚠️ VALIDATE, NEVER PASS THROUGH: a malformed MTX_ value makes MediaMTX exit at startup, and
+// launch() retries every 3s forever. So anything that is not a whole number in 1-65535 falls back to
+// the default with a warning instead of reaching MediaMTX.
+//
+// A pasted ":8190" is accepted (the exact mistake this setting exists to prevent, one level up).
+//
+// An explicit MTX_WEBRTCLOCALUDPADDRESS WINS: it can carry a host part ("fly-global-services:8189",
+// which the hosted demo needs) that a bare port cannot express. Both set => the port is ignored.
+export function resolveWebrtcUdpAddress(env) {
+  const raw = (env.WEBRTC_UDP_PORT ?? '').trim();
+  if (raw === '') return { value: null, warning: null };
+  if ((env.MTX_WEBRTCLOCALUDPADDRESS ?? '').trim() !== '') {
+    return {
+      value: null,
+      warning: `WEBRTC_UDP_PORT=${raw} ignored: MTX_WEBRTCLOCALUDPADDRESS is set and takes precedence`,
+    };
+  }
+  const digits = raw.startsWith(':') ? raw.slice(1) : raw;
+  const port = /^\d+$/.test(digits) ? Number(digits) : NaN;
+  if (!(port >= 1 && port <= 65535)) {
+    return {
+      value: null,
+      warning: `WEBRTC_UDP_PORT=${raw} is not a port number between 1 and 65535 - using the default (8189)`,
+    };
+  }
+  return { value: `:${port}`, warning: null };
+}
+
 // Manages the MediaMTX binary as a child process of this app - same restart-on-exit
 // pattern as transcoder.js uses for FFmpeg. Combining the two into one image means
 // this app is now responsible for both, rather than Docker/compose supervising two
@@ -81,6 +123,13 @@ export async function startMediaMTX(configPath) {
       logger.error('[mediamtx] no routable host IP found - WebRTC may only advertise loopback');
     }
     lastAdvertised = advertisedKey;
+
+    // The WebRTC media port. Only set when WEBRTC_UDP_PORT is valid; otherwise MediaMTX keeps the
+    // mediamtx.yml default and the (already-inherited) raw MTX_ override, if any, is left untouched.
+    const udp = resolveWebrtcUdpAddress(process.env);
+    if (udp.value) env.MTX_WEBRTCLOCALUDPADDRESS = udp.value;
+    if (udp.warning && udp.warning !== lastUdpWarning) logger.warn(`[mediamtx] ${udp.warning}`);
+    lastUdpWarning = udp.warning ?? '';
 
     // Both streams piped (not 'ignore'/'inherit') so every line can be forwarded
     // through our own logger - this is what makes MediaMTX's output show up in both

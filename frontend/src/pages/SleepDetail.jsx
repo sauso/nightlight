@@ -124,7 +124,28 @@ export default function SleepDetail() {
     // had assumed rather than the one the route returns. Only e2e, which talks to the real server,
     // could tell the difference.
     api.get(`/children/${id}/review/${date}`)
-      .then((r) => { if (alive) setReceipt(r?.review?.true_onset_at || r?.review?.true_wake_at ? r.review : null); })
+      .then((r) => {
+        if (!alive) return;
+        // ⚠️ Gated on the flag TOO (plan review R4), not only the two times: "no one was in the bed"
+        // carries neither, so the original `true_onset_at || true_wake_at` check alone showed nothing
+        // after a flag-only save — a successful save that reads exactly like a failed one, the same
+        // class of bug the receipt exists to prevent in the first place. `nobody_in_bed` here is the
+        // RAW stored column (0/1, same as `dismissed`), not reviewCardState's boolean, hence truthiness.
+        // An in-bed-only answer (2026-09-30) is an answer too, and gets a receipt of its own: the gate is
+        // no longer "raw onset or wake present" (plan review R1).
+        //
+        // The receipt reads back RESOLVED times: the parent's where they gave one, otherwise `computed`,
+        // the detector's own answer from this same response (what the review screen showed, and what this
+        // page's night is computed from). Without that an in-bed-only save read "asleep — to —".
+        const rev = r?.review;
+        setReceipt(rev && (rev.true_onset_at || rev.true_wake_at || rev.true_in_bed_at || rev.nobody_in_bed)
+          ? {
+            ...rev,
+            shown_onset_at: rev.true_onset_at || r.computed?.onset_at || null,
+            shown_wake_at: rev.true_wake_at || r.computed?.wake_at || null,
+          }
+          : null);
+      })
       .catch(() => { /* the receipt is confirmation, not function — never block the night on it */ });
     return () => { alive = false; };
   }, [id, date, searchParams]);
@@ -174,8 +195,9 @@ export default function SleepDetail() {
         </div>
 
         {receipt && (
-          <ReviewReceipt onsetAt={receipt.true_onset_at} wakeAt={receipt.true_wake_at} fmtTime={fmtTime}
-            onOpen={() => navigate(`/children/${id}/review/${date}`)} />
+          <ReviewReceipt onsetAt={receipt.shown_onset_at} wakeAt={receipt.shown_wake_at} inBedAt={receipt.true_in_bed_at}
+            nobodyInBed={!!receipt.nobody_in_bed}
+            fmtTime={fmtTime} onOpen={() => navigate(`/children/${id}/review/${date}`)} />
         )}
 
         <NightBody night={night} fmtTime={fmtTime} tz={tz} tempUnit={settings.temp_unit}
@@ -221,12 +243,32 @@ function NightBody({ night, fmtTime, tz, tempUnit, childId, date, onRecomputed }
     return <div className="card"><div className="camera-tile__sub" style={{ padding: 14 }}>No clear sleep detected in this night’s window.</div></div>;
   }
   if (night.status === 'empty') {
+    // `nobody_in_bed` splits the copy, deliberately NOT `corrected` (code-review finding, 2026-09-29):
+    // a detector-empty night can honestly claim full camera coverage, but a PARENT-flagged one cannot —
+    // the cameras may have seen the whole night just fine, the parent is simply overruling what the
+    // detector made of it, so the coverage claim would be false here. `corrected` alone is too broad a
+    // test for that split: a plain TIME correction on a night that was ALREADY `status: 'empty'` also
+    // sets `corrected: true` (sleepReviews.js's other `applyCorrection` branch, not `asNobodyInBed`), so
+    // keying on `corrected` told a parent who had only fixed a time "You said no one was in the bed" —
+    // false. `nobody_in_bed` is true ONLY on the flag path.
     return (
       <div className="card">
         <div className="camera-tile__sub" style={{ padding: 14 }}>
-          No one in the bed for this night. The cameras watched the whole window
-          ({night.coverage_minutes} minutes covered) and saw no one sleeping here, so there’s no sleep to report.
+          {night.nobody_in_bed
+            ? 'You said no one was in the bed for this night.'
+            : `No one in the bed for this night. The cameras watched the whole window `
+              + `(${night.coverage_minutes} minutes covered) and saw no one sleeping here, so there’s no sleep to report.`}
         </div>
+        {/* A flagged night MUST stay reachable here, or the flag could never be taken back — an `empty`
+            night otherwise returns above `ReviewNightButton` (see the `ok`-night render further down)
+            and has no way into the review at all. Deliberately NOT shown for a genuine detector-empty
+            night: that is the unrelated "reverse error" (detector says empty, child was really there),
+            which has no correction path anywhere yet — out of scope here, tracked separately. */}
+        {night.corrected && (
+          <div style={{ padding: '0 14px 14px' }}>
+            <ReviewNightButton childId={childId} date={date} corrected={night.corrected} />
+          </div>
+        )}
       </div>
     );
   }

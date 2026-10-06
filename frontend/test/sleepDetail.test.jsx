@@ -74,6 +74,22 @@ const lastNightPath = (get) =>
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe('which night it opens on', () => {
+  // ⚠️ THE CLOCK IS PINNED FOR THIS WHOLE GROUP (#534, 2026-10-02: CI had been red on every PR since
+  // 2026-10-01). The newest night the screen allows is the later of the live night and YESTERDAY by the
+  // real clock, so a fixture that names a fixed "future" date stops being in the future the day the real
+  // date reaches it. `never past the newest browsable night` asked for 2026-09-30 against a live night of
+  // 2026-08-30 and began returning 09-30 once yesterday WAS 09-30. Nothing in the app was wrong; the
+  // fixture had a shelf life. The `moving between nights` group below was fixed the same way on 2026-09-29.
+  //
+  // Same instant as that group, for the same reason (NIGHT's times assume Melbourne's +10, which changes
+  // in October, so a derived date would exercise a different offset by season): 02:00Z on the 31st is noon
+  // there, so yesterday is 2026-08-30 and the newest browsable night is exactly the live night. Only `Date`
+  // is faked, so waitFor keeps working; the afterEach at the top of the file restores it.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-08-31T02:00:00Z'));
+  });
+
   test('the night the server calls live', async () => {
     const get = mockSleep({ live: { scope: 'tonight', night: { night_date: '2026-08-30' } } });
     mount();
@@ -155,10 +171,74 @@ describe('which night it opens on', () => {
     expect(get.mock.calls.map((c) => c[0]).some((p) => p.includes('/review/'))).toBe(false);
   });
 
+  // ★ THE R4 REGRESSION TEST. A flag-only save has NEITHER `true_onset_at` NOR `true_wake_at` — that is
+  // the whole point of the flag, it carries no times — so the original gate
+  // `r?.review?.true_onset_at || r?.review?.true_wake_at` is false here and the receipt shows nothing,
+  // which reads exactly like a failed save (the class of bug the receipt exists to prevent in the first
+  // place). Gating on `nobody_in_bed` too is what this test pins.
+  test('★ arriving from a FLAG-ONLY save still shows the receipt (R4) — a flag carries no times', async () => {
+    const get = vi.fn((path) => {
+      if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'tonight', night: { night_date: '2026-08-30' } });
+      if (path.includes('/sleep/insights')) return Promise.resolve(null);
+      if (path.includes('/review/')) {
+        return Promise.resolve({
+          child_id: 'kid-1',
+          night_date: '2026-08-24',
+          computed: { status: 'ok', onset_at: '2026-08-24 09:28:00', wake_at: '2026-08-24 20:14:00' },
+          review: { true_onset_at: null, true_wake_at: null, nobody_in_bed: 1 },
+          transitions: [],
+        });
+      }
+      if (path.includes('/sleep/')) return Promise.resolve({ ...NIGHT, night_date: '2026-08-24', status: 'empty', corrected: true, nobody_in_bed: true });
+      return Promise.resolve(null);
+    });
+    vi.spyOn(api, 'get').mockImplementation(get);
+    mountAt('/children/kid-1/sleep?date=2026-08-24&saved=1');
+
+    expect(await screen.findByText('Thanks — that’s recorded')).toBeVisible();
+    expect(screen.getByText('You said no one was in the bed. Tap to change it.')).toBeInTheDocument();
+  });
+
+  // ★ Plan review R1 (2026-09-30). An in-bed-only save has neither true_onset_at nor true_wake_at, so the
+  // old gate showed no receipt at all, and reading the raw times would have said "asleep — to —". It must
+  // read back the put-down they gave, with the detector's asleep and wake times from the same response.
+  test('★ arriving from an IN-BED-ONLY save shows "in bed …, asleep … to …" with the resolved times', async () => {
+    const get = vi.fn((path) => {
+      if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'tonight', night: { night_date: '2026-08-30' } });
+      if (path.includes('/sleep/insights')) return Promise.resolve(null);
+      if (path.includes('/review/')) {
+        return Promise.resolve({
+          ...REVIEW_RESPONSE,
+          review: { true_onset_at: null, true_wake_at: null, true_in_bed_at: '2026-08-24 08:49:00', nobody_in_bed: 0 },
+        });
+      }
+      if (path.includes('/sleep/')) return Promise.resolve(NIGHT);
+      return Promise.resolve(null);
+    });
+    vi.spyOn(api, 'get').mockImplementation(get);
+    mountAt('/children/kid-1/sleep?date=2026-08-24&saved=1');
+
+    expect(await screen.findByText('Thanks — that’s recorded')).toBeVisible();
+    // 08:49Z / 09:28Z / 20:14Z are 6:49 pm, 7:28 pm and 6:14 am in Melbourne (the locale is pinned to
+    // en-AU in test/setup.js, so this exact string is deterministic).
+    expect(screen.getByText('You said in bed 6:49 pm, asleep 7:28 pm to 6:14 am. Tap to change it.')).toBeInTheDocument();
+  });
+
   test('★ but never past the newest browsable night', async () => {
-    // 2026-09-30 is beyond the live night, so the picker could not reach it. A URL must not either.
+    // With the clock pinned (above) the newest night is 2026-08-30, so 08-31 is exactly ONE day past it:
+    // the picker could not reach it, and a URL must not either. One day, not a month, so a clamp widened
+    // by a day fails here. (#534 — the old fixture asked for 2026-09-30 and went stale with the real clock.)
     const get = mockSleep({ live: { scope: 'tonight', night: { night_date: '2026-08-30' } } });
-    mountAt('/children/kid-1/sleep?date=2026-09-30');
+    mountAt('/children/kid-1/sleep?date=2026-08-31');
+    await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-30?detail=1'));
+  });
+
+  // The other side of the same boundary: the newest night itself IS allowed. Without it, a clamp that
+  // became `<` instead of `<=` would pass the test above. The live night is set a day EARLIER than the
+  // newest browsable night so the answer cannot be the live-night fallback by coincidence.
+  test('★ and the newest browsable night itself is honoured', async () => {
+    const get = mockSleep({ live: { scope: 'tonight', night: { night_date: '2026-08-29' } } });
+    mountAt('/children/kid-1/sleep?date=2026-08-30');
     await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-30?detail=1'));
   });
 
@@ -210,6 +290,23 @@ describe('which night it opens on', () => {
 });
 
 describe('moving between nights', () => {
+  // ⚠️ THE CLOCK IS PINNED FOR THIS WHOLE GROUP (2026-09-29, CI went red on a PR that touched no
+  // frontend). The fixture night is a fixed 2026-08-30, but the screen's maximum comes from the REAL
+  // clock — yesterday in the app timezone, or the live night if later — and its floor is 29 nights
+  // before that. Once real time moved on, the fixture stopped being the latest night, and on
+  // 2026-09-29 it fell exactly ON the floor, so `Previous night` was disabled and both the arrows
+  // test and the latest-night test failed. Nothing in the app was wrong; the fixtures had a shelf life.
+  //
+  // Pinned to a fixed instant rather than derived from now on purpose: NIGHT's times assume
+  // Melbourne's +10, and Melbourne changes offset in October, so a derived date would exercise a
+  // different offset by season. Only `Date` is faked (timers stay real, so waitFor and userEvent
+  // keep working); the afterEach at the top of the file restores it.
+  // 02:00Z on the 31st is noon there, so 2026-08-30 is "yesterday".
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-08-31T02:00:00Z'));
+  });
+
   test('the arrows step one night at a time', async () => {
     const get = mockSleep();
     const { user } = mount();
@@ -224,9 +321,15 @@ describe('moving between nights', () => {
   test('★ you cannot go past the latest night', async () => {
     // The next arrow is disabled at the maximum. Without it the screen would ask for a night that
     // does not exist yet and show "no data" for tomorrow.
-    mockSleep();
+    //
+    // ⚠️ The wait is for the night's own request, NOT for `Next night` to be disabled: that arrow is
+    // ALSO disabled before anything has loaded (no maximum yet), so the old wait passed on the loading
+    // state and proved nothing about the latest night. The request is made in the same step that sets
+    // the maximum, so once it appears both arrows are in their real state.
+    const get = mockSleep();
     mount();
-    await waitFor(() => expect(screen.getByLabelText('Next night').disabled).toBe(true));
+    await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-30'));
+    expect(screen.getByLabelText('Next night').disabled).toBe(true);
     expect(screen.getByLabelText('Previous night').disabled).toBe(false);
   });
 
@@ -414,6 +517,48 @@ describe('★ the empty states each say a different thing', () => {
       expect(await screen.findByText(pattern)).toBeTruthy();
     });
   }
+
+  // A detector-empty night and a PARENT-flagged one share `status: 'empty'`, but the honest claims they
+  // can make differ (the detector one really did watch the whole window; the flagged one is a parent
+  // overruling the detector, and the cameras may have seen something else entirely) — and only the
+  // flagged one can be undone, so only it may reach the review form at all. `nobody_in_bed: true` is
+  // what a real `asNobodyInBed` overlay carries (sleepReviews.js) — see the next test for why `corrected`
+  // alone is not a safe stand-in for it here.
+  test('a PARENT-flagged empty night says so, and stays reachable to undo — unlike a detector-empty one', async () => {
+    mockSleep({ night: { ...NIGHT, status: 'empty', corrected: true, nobody_in_bed: true, coverage_minutes: 720 } });
+    mount();
+    expect(await screen.findByText('You said no one was in the bed for this night.')).toBeInTheDocument();
+    // The false claim a detector-empty night is allowed to make ("the cameras watched...") must not
+    // survive onto a night that is actually a parent's statement, not a coverage report.
+    expect(screen.queryByText(/cameras watched the whole window/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /change what you told us about this night/i })).toBeInTheDocument();
+  });
+
+  test('a genuine detector-empty night keeps the old copy and gets NO review button', async () => {
+    mockSleep({ night: { ...NIGHT, status: 'empty', coverage_minutes: 720 } });
+    mount();
+    expect(await screen.findByText(/No one in the bed for this night. The cameras watched the whole window/)).toBeInTheDocument();
+    expect(screen.queryByText('You said no one was in the bed for this night.')).not.toBeInTheDocument();
+    // Out of scope here on purpose (the "reverse error" — detector says empty, child was really there —
+    // has no correction path anywhere yet): a detector-empty night must not grow a way into the review
+    // form as a side effect of fixing the flagged case.
+    expect(screen.queryByRole('button', { name: /was this night right/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /change what you told us/i })).not.toBeInTheDocument();
+  });
+
+  // ★ REGRESSION (code-review finding, 2026-09-29): a plain TIME correction on a night that was already
+  // `status: 'empty'` ALSO sets `corrected: true` (sleepReviews.js's OTHER `applyCorrection` branch —
+  // not `asNobodyInBed`, which is the only path that sets `nobody_in_bed`). Keying this copy on
+  // `corrected` alone told a parent who had only typed a time that they had said no one was in the bed
+  // at all — false. `nobody_in_bed` is absent here on purpose, mirroring that branch's real output.
+  test('a TIME correction on an already-empty night is NOT read as "no one was in the bed"', async () => {
+    mockSleep({ night: { ...NIGHT, status: 'empty', corrected: true, coverage_minutes: 720 } });
+    mount();
+    expect(await screen.findByText(/No one in the bed for this night. The cameras watched the whole window/)).toBeInTheDocument();
+    expect(screen.queryByText('You said no one was in the bed for this night.')).not.toBeInTheDocument();
+    // Still reachable to change, same as any other corrected night — only the WORDING was wrong.
+    expect(screen.getByRole('button', { name: /change what you told us about this night/i })).toBeInTheDocument();
+  });
 
   test('a null night reads as no data, not as an error', async () => {
     mockSleep({ night: null });
