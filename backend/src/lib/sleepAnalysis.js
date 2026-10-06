@@ -684,12 +684,7 @@ export function detectMidnightEpisodes(transitions, cribActExt, bedOccupiedFrom,
 // quiet, and the cluster 07:42-07:51 became the wake once its own 20 quiet minutes elapsed; 2026-09-27
 // child B the same, with a quiet stretch of 20 minutes or more). The conditions are the scan's own gap
 // test minus its corroboration, with the stretch cut off at A (a quiet run that began before A counts
-// only from A), and add no new number.
-// ⚠️ Two things this does NOT look at, both found in review (2026-10-06) and both documented in
-// KNOWN-ISSUES: the stretch may itself be a gap the scan corroborated and adopted at an EARLIER clock
-// (the scan later drops it once more than 20 bed-active minutes follow, and the rule then falls back to A
-// instead of to that exit); and a corroborated RETURN to bed after the stretch (the scan's own reversal
-// guard would reject such an absence) is not consulted. Neither was measured, so neither is guessed at:
+// only from A), and add no new number:
 //   * `minLen` consecutive minutes CONFIRMED quiet (`=== false`): NO isolated-blip bridging. The scan
 //     bridges so that one parent's arm in a dead-flat bed cannot chop a real absence; this rule VETOES a
 //     departure, which needs the stricter evidence (a guard's two directions are not symmetric, #342).
@@ -701,6 +696,11 @@ export function detectMidnightEpisodes(transitions, cribActExt, bedOccupiedFrom,
 //     review built that night: the veto flipped between 07:10 and 07:30); and an unobserved minute can
 //     only PREVENT a veto here, never enable one.
 // The stretch must lie wholly between `fromIdx` and `gapStart`.
+// ⚠️ Two things this does NOT look at, both found in review (2026-10-06) and both documented in
+// KNOWN-ISSUES (#618): the stretch may itself be a gap the scan corroborated and adopted at an EARLIER clock
+// (the scan later drops it once more than 20 bed-active minutes follow, and the rule then falls back to A
+// instead of to that exit); and a corroborated RETURN to bed after the stretch (the scan's own reversal
+// guard would reject such an absence) is not consulted. Neither was measured, so neither is guessed at.
 export function quietStretchBeforeExit(cribAct, fromIdx, gapStart, minLen, maxTrailing) {
   for (let s = Math.max(fromIdx, 0); s < gapStart; s++) {
     if (cribAct[s] !== false) continue;
