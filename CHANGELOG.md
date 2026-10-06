@@ -78,6 +78,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   - Excluded from the sleep ↔ temperature insight averages, and its automatic "up at such-and-such" push
     is skipped — a push already sent cannot be recalled, but no further one goes out for a flagged night.
 
+### Changed
+- **Neutral example text in two form fields.** The child form's name field now suggests "Alex", and the camera
+  form's MQTT topic example reads "zigbee2mqtt/Child B Room Temp"; both used to show a real person's first name
+  as the example. Placeholder text only: nothing is saved or behaves differently. The add-camera screenshots
+  under `docs/screenshots/` were repainted to match.
+
 ### Fixed
 - **Wake clips no longer count minutes whose video nobody saw** (issue #588). When a camera's video stalls
   while its microphone keeps working, the live wake watcher read each minute of sound as a watched minute: a
