@@ -2344,6 +2344,10 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
     const kept = computeNight(CHILD, DATE);
     assert.equal(kept.status, 'ok', 'the rule must not create an `empty` night');
     assert.equal(hhmm(kept.wake_at), '06:50', 'and the exit stays');
+    layNight(0.099); // just UNDER the threshold: still an empty-bed night, still kept (a threshold of 0.06 would call it `empty`)
+    const justUnder = computeNight(CHILD, DATE);
+    assert.equal(justUnder.status, 'ok', 'a bed peak of 0.099 is under EMPTY_BED_MAX_PEAK: the rule must not run');
+    assert.equal(hhmm(justUnder.wake_at), '06:50');
     layNight(0.4); // the twin: the bed moved properly at bedtime, so the veto IS reachable
     assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:00', 'twin: with a real bed peak the same stream is discarded');
     layNight(0.1); // the boundary itself: a peak EXACTLY at EMPTY_BED_MAX_PEAK (0.1) counts as an occupied bed (>=)
@@ -2371,24 +2375,33 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
 
   test('#509 C10: the veto reads the REAL gap start when the adopted exit is the settling-tail fallback', (t) => {
     // A stray `into_bed` 30 s before the final exit and a quietly occupied bed afterwards: the settling-tail guard
-    // skips that exit, there is no other candidate, and it is handed back as `settlingFallback`. The veto must
-    // then measure to that fallback's gap start. (Killed by the mutant that records gapStart 0 there.)
-    const { clusterEnd, tClock } = layMorning({ stretchMin: 42, strayTail: true });
-    t.mock.timers.enable({ apis: ['Date'], now: clockAt(clusterEnd, 40) });
-    const night = computeNight(CHILD, DATE);
-    assert.equal(hhmm(night.wake_at_shadow), tClock, 'precondition: the final exit was adopted (here via the fallback)');
-    assert.equal(hhmm(night.wake_at), A_CLOCK);
+    // skips that exit, there is no other candidate, and it is handed back as `settlingFallback` (verified by an
+    // instrumented run in review). The veto must then measure to that fallback's REAL gap start, to the minute:
+    // restless 10 + the 10-minute cluster = exactly 20 not-quiet minutes before the gap (discarded), restless 11
+    // = 21 (kept). A gap start one minute early or late, or 0, flips one of the two (mutants M-509-17 and the
+    // review's i-1 / i+20 / exit-minute variants).
+    for (const [restlessMin, expectA] of [[10, true], [11, false]]) {
+      wipe();
+      const { clusterEnd, tClock } = layMorning({ stretchMin: 30, restlessMin, strayTail: true });
+      t.mock.timers.enable({ apis: ['Date'], now: clockAt(clusterEnd, 40) });
+      const night = computeNight(CHILD, DATE);
+      assert.equal(hhmm(night.wake_at_shadow), tClock, 'precondition: the final exit was adopted (here via the fallback)');
+      assert.equal(hhmm(night.wake_at), expectA ? A_CLOCK : tClock, `fallback exit, restless ${restlessMin} min`);
+      t.mock.timers.reset();
+    }
   });
 
   // An in-window exit: a sound-only run from 06:00 (A), 10 restless bed minutes at 06:20-06:29, one exit at
   // 06:29:50 whose gap opens at 06:30, silence and a quiet bed after. `blipAt`: one isolated bed minute (offset
   // from 06:00); `lateActivity`: 22 bed-active minutes at 07:10-07:31 and a second exit at 07:31:50.
   //   outZone: movement OUTSIDE the bed zone during the 10 restless minutes (a parent at the bed), for the visit type
-  function layInWindow({ blipAt = null, lateActivity = false, outZone = false } = {}) {
+  //   restlessFrom: offset (minutes after 06:00) at which the restless bed minutes start; 20 = a strictly quiet
+  //                 stretch of exactly 20 from A, 19 = one minute short (the bed was ALSO quiet before A)
+  function layInWindow({ blipAt = null, lateActivity = false, outZone = false, restlessFrom = 20 } = {}) {
     laySamples(at(19, 30), at(6, 0, 1), [[at(19, 30), at(19, 40)]], STILL_OCCUPIED);
     for (let m = at(6, 0, 1); m < at(9, 0, 1); m = plus(m, 1)) {
       const k = Math.round((m - at(6, 0, 1)) / 60000);
-      const bed = ((k >= 20 && k < 30) || k === blipAt || (lateActivity && k >= 70 && k < 92)) ? 0.15 : STILL_EMPTY;
+      const bed = ((k >= restlessFrom && k < 30) || k === blipAt || (lateActivity && k >= 70 && k < 92)) ? 0.15 : STILL_EMPTY;
       insertTrace.run(CAM, sqlTime(m), bed, bed, k < 60 ? 10 : 0, outZone && k >= 20 && k < 30 ? 0.99 : 0);
     }
     insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(at(6, 29, 1, 50)));
@@ -2406,6 +2419,13 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
     layInWindow({ blipAt: 10 }); // 06:00-06:09 + 06:11-06:19: no strictly quiet stretch of 20
     t.mock.timers.enable({ apis: ['Date'], now: at(8, 0, 1).getTime() });
     assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:29', 'twin: the stretch is broken, the exit stands');
+    t.mock.timers.reset();
+    wipe();
+    // The stretch counts from A, not from where the bed went quiet: the bed was already quiet before 06:00, so a
+    // lower bound of A - 1 would make this 19-minute stretch 20 and discard the exit (found in review).
+    layInWindow({ restlessFrom: 19 });
+    t.mock.timers.enable({ apis: ['Date'], now: at(8, 0, 1).getTime() });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:29', 'quiet before A does not count towards the stretch');
   });
 
   test('#509 C8b: the child-out interval opens at the wake, not at the discarded exit', (t) => {
@@ -2447,15 +2467,20 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
     }
   });
 
-  test('#509 C13b: a short window (ending 06:50) keeps the movement-only wake too', (t) => {
-    db.prepare("UPDATE children SET sleep_window_end = '06:50' WHERE id = ?").run(CHILD);
+  test('#509 C13b: a short window keeps the movement-only wake too, also when the quiet stretch lies wholly AFTER it', (t) => {
+    // 06:50: the stretch (06:34-07:16) straddles the window end. 06:32: it lies wholly after it, which is the real
+    // 2026-10-05 shape on production (stretch 07:00-07:41, window end 07:00) and what a window-bounded rule misses.
     try {
-      const { clusterEnd, tClock } = layMorning({ stretchMin: 42 });
-      assert.notEqual(tClock, A_CLOCK);
-      for (const mins of [10, 40, 150]) {
-        t.mock.timers.enable({ apis: ['Date'], now: clockAt(clusterEnd, mins) });
-        assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), A_CLOCK, `short window, clock ${mins} min after the cluster`);
-        t.mock.timers.reset();
+      for (const windowEnd of ['06:50', '06:32']) {
+        wipe();
+        db.prepare('UPDATE children SET sleep_window_end = ? WHERE id = ?').run(windowEnd, CHILD);
+        const { clusterEnd, tClock } = layMorning({ stretchMin: 42 });
+        assert.notEqual(tClock, A_CLOCK);
+        for (const mins of [10, 40, 150]) {
+          t.mock.timers.enable({ apis: ['Date'], now: clockAt(clusterEnd, mins) });
+          assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), A_CLOCK, `window end ${windowEnd}, clock ${mins} min after the cluster`);
+          t.mock.timers.reset();
+        }
       }
     } finally {
       db.prepare("UPDATE children SET sleep_window_end = '07:00' WHERE id = ?").run(CHILD);

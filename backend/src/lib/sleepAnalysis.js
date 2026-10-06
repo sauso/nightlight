@@ -672,10 +672,8 @@ export function detectMidnightEpisodes(transitions, cribActExt, bedOccupiedFrom,
 
 // --- the inference itself ---
 
-// Compute (but do not store) a child's sleep summary for the night starting on local date `nightDate`.
-// Returns { status, ...metrics, timeline? } — timeline only when includeTimeline is set (for tuning).
-// #509: is there an UNCORROBORATED empty-bed departure between the movement-only wake and the exit the
-// scan adopted? Returns the stretch [start, end, trailing] or null.
+// #509: is there a long, strictly quiet bed stretch between the movement-only wake and the exit the scan
+// adopted? Returns the stretch [start, end, trailing] or null.
 //
 // The movement-only wake (A, `fromIdx`) is the start of the final awake run, so a corroborated exit that
 // comes LATER than A says the child was still in (or only later left) the bed while the room was
@@ -684,8 +682,14 @@ export function detectMidnightEpisodes(transitions, cribActExt, bedOccupiedFrom,
 // and the exit that DID corroborate a later gap is typically the parent-handled cluster after the real
 // exit (2026-10-05 child B: the real exit at 06:19 left no transition, the stretch 07:00-07:41 was
 // quiet, and the cluster 07:42-07:51 became the wake once its own 20 quiet minutes elapsed; 2026-09-27
-// child B the same with a 22-minute stretch). The conditions are the scan's own gap test minus its
-// corroboration, restricted to gaps that begin inside the final run, and add no new number:
+// child B the same, with a quiet stretch of 20 minutes or more). The conditions are the scan's own gap
+// test minus its corroboration, with the stretch cut off at A (a quiet run that began before A counts
+// only from A), and add no new number.
+// ⚠️ Two things this does NOT look at, both found in review (2026-10-06) and both documented in
+// KNOWN-ISSUES: the stretch may itself be a gap the scan corroborated and adopted at an EARLIER clock
+// (the scan later drops it once more than 20 bed-active minutes follow, and the rule then falls back to A
+// instead of to that exit); and a corroborated RETURN to bed after the stretch (the scan's own reversal
+// guard would reject such an absence) is not consulted. Neither was measured, so neither is guessed at:
 //   * `minLen` consecutive minutes CONFIRMED quiet (`=== false`): NO isolated-blip bridging. The scan
 //     bridges so that one parent's arm in a dead-flat bed cannot chop a real absence; this rule VETOES a
 //     departure, which needs the stricter evidence (a guard's two directions are not symmetric, #342).
@@ -712,6 +716,8 @@ export function quietStretchBeforeExit(cribAct, fromIdx, gapStart, minLen, maxTr
   return null;
 }
 
+// Compute (but do not store) a child's sleep summary for the night starting on local date `nightDate`.
+// Returns { status, ...metrics, timeline? } — timeline only when includeTimeline is set (for tuning).
 export function computeNight(childId, nightDate, { includeTimeline = false } = {}) {
   const tz = appSettings().timezone || 'UTC';
   const cfg = childSleepConfig(childId);
@@ -1618,9 +1624,13 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // is then set aside: the wake is EARLY (the start of the activity), never missing. A zone painted so a
   // departure never reads quiet has the opposite effect: no stretch exists, so the rule does nothing and
   // the later exit stands, as before. A child who fusses, falls back asleep and is carried out later is
-  // reported at the fuss. It judges ONE selected gap: the scan can still switch to a different gap as the
-  // morning goes on (it drops a gap once more than 20 minutes of bed activity follow it, and that count
-  // grows with the clock), which is inherited behaviour, pinned by the '#509 known limit' test. Calibrated
+  // reported at the fuss, and so is one who got out, was logged back in bed, and left again later (the scan's
+  // reversal guard would reject that first absence; this rule does not look for the return, unmeasured, #509
+  // review). It judges ONE selected gap: the scan can still switch to a different gap as the morning goes on
+  // (it drops a gap once more than 20 minutes of bed activity follow it, and that count grows with the
+  // clock). The switch is inherited, but the veto does NOT leave it as it was: it can turn "the first gap,
+  // then the later exit" into "the movement-only wake, then the later exit", a longer move in the other
+  // direction (pinned by the '#509 known limit' test; measured on 2026-10-01 and 2026-09-19). Calibrated
   // on two children in one house over 30 nights (no untouched validation set); see KNOWN-ISSUES.
   const rawExitMs = transitionExitMs;
   if (USE_TRANSITION_TIMES && transitionExitIdx != null && !inProgress && algoSleepEnd < totalMin
@@ -1851,7 +1861,9 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     }
 
     // The transition-derived times, recorded whether or not they were adopted. When USE_TRANSITION_TIMES
-    // is on these match onset_at/wake_at; the pair worth comparing is then *_algo vs the headline.
+    // is on these match onset_at/wake_at (except on a night where #509 set the exit aside: the headline is
+    // then the movement-only wake and the shadow keeps the raw exit); the pair worth comparing is then
+    // *_algo vs the headline.
     out.onset_at_shadow = transitionOnset != null ? minuteTime(transitionOnset) : minuteTime(algoOnset);
     out.wake_at_shadow = (rawExitMs != null ? toSqlUtc(new Date(rawExitMs)) : null) || algoWakeAt; // raw exit even when #509 discarded it
 
