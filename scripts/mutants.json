@@ -12660,5 +12660,41 @@
     ],
     "namePattern": "#509",
     "note": "In an in-progress night the departure scan never ran, so transitionExitIdx is null and the first conjunct already stops the rule (verified at 03:00 on a synthetic night in plan review). Kept as a readable statement of the rule."
+  },
+  {
+    "label": "#509 M-509-17: the settling-tail fallback records gap start 0 instead of its real gap start",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: i };",
+    "replace": "settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: 0 };",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Code review (Codex, 2026-10-06) predicted this survives: no test pinned the fallback path. C10 does (a stray into_bed 30 s before the final exit, a quietly occupied bed after)."
+  },
+  {
+    "label": "#509 M-509-18: the child-out interval still opens at the raw (discarded) exit",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "? transitionExitMs",
+    "replace": "? rawExitMs",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Code review predicted this survives: C8 did not assert the interval. C8b now asserts the in-window cluster visit is typed child_out (with the raw exit it would be typed room)."
+  },
+  {
+    "label": "#509 M-509-19: a bed peak exactly at EMPTY_BED_MAX_PEAK no longer counts as occupied (>= became >)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& selectedGapStart != null && maxBedPeak >= EMPTY_BED_MAX_PEAK",
+    "replace": "&& selectedGapStart != null && maxBedPeak > EMPTY_BED_MAX_PEAK",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Code review predicted this survives: C12 only tried 0.05 and 0.4. It now also lays a peak of exactly 0.1."
   }
 ]

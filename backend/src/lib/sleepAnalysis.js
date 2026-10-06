@@ -1614,10 +1614,14 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // (a real wake turned into "nobody slept here"; verified on a synthetic night in plan review).
   //
   // What this means for someone else's house: the rule trusts "a strictly quiet bed inside the final awake
-  // run is an absence". A mic that hears the whole house, or a zone painted so a departure never reads
-  // quiet, makes the wake EARLY (the start of the activity), never missing. A child who fusses, falls
-  // back asleep and is carried out later is reported at the fuss. Calibrated on two children in one
-  // house over 30 nights (no untouched validation set); see KNOWN-ISSUES.
+  // run is an absence". A mic that hears the whole house starts that run early, and the later, correct exit
+  // is then set aside: the wake is EARLY (the start of the activity), never missing. A zone painted so a
+  // departure never reads quiet has the opposite effect: no stretch exists, so the rule does nothing and
+  // the later exit stands, as before. A child who fusses, falls back asleep and is carried out later is
+  // reported at the fuss. It judges ONE selected gap: the scan can still switch to a different gap as the
+  // morning goes on (it drops a gap once more than 20 minutes of bed activity follow it, and that count
+  // grows with the clock), which is inherited behaviour, pinned by the '#509 known limit' test. Calibrated
+  // on two children in one house over 30 nights (no untouched validation set); see KNOWN-ISSUES.
   const rawExitMs = transitionExitMs;
   if (USE_TRANSITION_TIMES && transitionExitIdx != null && !inProgress && algoSleepEnd < totalMin
       && selectedGapStart != null && maxBedPeak >= EMPTY_BED_MAX_PEAK
