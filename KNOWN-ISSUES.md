@@ -1393,7 +1393,7 @@ progress, when the exit is earlier than the start of the activity, or on a night
   asleep for 20 minutes or more and is carried out later is reported at the fuss. So is a child who got out
   of bed, was logged back in (a *got into bed*) and left again later: the scan's own check would refuse the
   first absence because the child came back, but this rule does not look for the return, and that was not
-  measured, so it was not guessed at. **Sensitivity matters the same way:** a bed zone that is large, or a
+  measured, so it was not guessed at (#618). **Sensitivity matters the same way:** a bed zone that is large, or a
   camera that reads a child stirring in bed as under the movement threshold, produces strictly quiet
   stretches while the child is still there. The one night on record that is exactly this pattern (2026-10-03,
   one child, production: the bed read 0.002 to 0.0098 against a threshold of 0.01 while the child was in it,
@@ -1416,7 +1416,7 @@ progress, when the exit is earlier than the start of the activity, or on a night
   minutes of bed activity follow it, and the count grows with the clock), and the rule then judges the new
   gap. The switch is inherited and not fixed, **and the rule does not leave it as it was**: where the scan
   moved from an early exit to a later one, the rule can turn that into the start of the activity and then the
-  later exit's own time (a larger move, in the other direction). Replayed over the 60 nights, the share whose
+  later exit's own time (a larger move, in the other direction; #618). Replayed over the 60 nights, the share whose
   wake still moved by more than 15 minutes with the clock fell from 12 to 5 on staging and from 17 to 10 on
   production; it did not fall to none, and nights that gain a wake only later (none at first) are counted
   separately and unchanged. Examples on production: 2026-10-01 (one child: 06:09, then 06:55, then 06:09
