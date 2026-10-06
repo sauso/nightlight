@@ -674,6 +674,44 @@ export function detectMidnightEpisodes(transitions, cribActExt, bedOccupiedFrom,
 
 // Compute (but do not store) a child's sleep summary for the night starting on local date `nightDate`.
 // Returns { status, ...metrics, timeline? } — timeline only when includeTimeline is set (for tuning).
+// #509: is there an UNCORROBORATED empty-bed departure between the movement-only wake and the exit the
+// scan adopted? Returns the stretch [start, end, trailing] or null.
+//
+// The movement-only wake (A, `fromIdx`) is the start of the final awake run, so a corroborated exit that
+// comes LATER than A says the child was still in (or only later left) the bed while the room was
+// active. When a long, strictly quiet bed stretch sits between the two, that claim is not believable:
+// the scan would have called that stretch the departure had an `out_of_bed` happened to land beside it,
+// and the exit that DID corroborate a later gap is typically the parent-handled cluster after the real
+// exit (2026-10-05 child B: the real exit at 06:19 left no transition, the stretch 07:00-07:41 was
+// quiet, and the cluster 07:42-07:51 became the wake once its own 20 quiet minutes elapsed; 2026-09-27
+// child B the same with a 22-minute stretch). The conditions are the scan's own gap test minus its
+// corroboration, restricted to gaps that begin inside the final run, and add no new number:
+//   * `minLen` consecutive minutes CONFIRMED quiet (`=== false`): NO isolated-blip bridging. The scan
+//     bridges so that one parent's arm in a dead-flat bed cannot chop a real absence; this rule VETOES a
+//     departure, which needs the stricter evidence (a guard's two directions are not symmetric, #342).
+//     Measured: bridging discards the right exit on 2026-10-03 child A (prod), whose 20-minute stretch
+//     only exists by bridging four lone minutes at 0.014-0.029 (full movement, not micro-motion).
+//   * at most `maxTrailing` minutes that are not confirmed quiet (active OR unobserved) between the
+//     stretch and the START of the adopted gap. Counted only up to that gap, never to the end of the
+//     night: a count that grows with the clock re-introduces the very clock dependence being fixed (a
+//     review built that night: the veto flipped between 07:10 and 07:30); and an unobserved minute can
+//     only PREVENT a veto here, never enable one.
+// The stretch must lie wholly between `fromIdx` and `gapStart`.
+export function quietStretchBeforeExit(cribAct, fromIdx, gapStart, minLen, maxTrailing) {
+  for (let s = Math.max(fromIdx, 0); s < gapStart; s++) {
+    if (cribAct[s] !== false) continue;
+    let e = s;
+    while (e < gapStart && cribAct[e] === false) e++;
+    if (e - s >= minLen) {
+      let trailing = 0;
+      for (let m = e; m < gapStart; m++) if (cribAct[m] !== false) trailing++;
+      if (trailing <= maxTrailing) return [s, e, trailing];
+    }
+    s = e - 1; // resume after this run (the loop's s++ steps onto the minute that ended it)
+  }
+  return null;
+}
+
 export function computeNight(childId, nightDate, { includeTimeline = false } = {}) {
   const tz = appSettings().timezone || 'UTC';
   const cfg = childSleepConfig(childId);
@@ -1069,6 +1107,10 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // its minute, and rounding to the nearest index instead would report 05:10 for an exit recorded at
   // 05:09:31. The index derived from it (for the metrics span) therefore FLOORS.
   let transitionExitMs = null;
+  // Start index of the gap the scan adopted (#509): the morning-exit veto measures its quiet stretch up to
+  // here, and it is carried through BOTH the normal pick and the settling-tail fallback (the two can
+  // select different gaps for the same exit time) rather than rebuilt from the exit's timestamp.
+  let selectedGapStart = null;
   // The out_of_bed that corroborated it — the only exit marker the timeline is entitled to draw.
   let exitTransitionAt = null;
   // Hoisted out of the `!inProgress` block below (still only ever set there) so issue #352's metrics
@@ -1422,13 +1464,13 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
             // guard keeps its reach and gives up its veto instead — it may SKIP an exit in favour of a
             // later one, but if there is no later one it hands this one back.
             if (dt <= WAKE_SNAP_MS && (settlingFallback == null || dt < settlingFallback.dt)) {
-              settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at };
+              settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: i };
             }
             continue;
           }
-          if (dt <= WAKE_SNAP_MS && (best == null || dt < best.dt)) best = { dt, ms: txMs(t.created_at), at: t.created_at };
+          if (dt <= WAKE_SNAP_MS && (best == null || dt < best.dt)) best = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: i };
         }
-        if (best) { transitionExitMs = best.ms; exitTransitionAt = best.at; break; } // corroborated departure - the morning exit
+        if (best) { transitionExitMs = best.ms; exitTransitionAt = best.at; selectedGapStart = best.gapStart; break; } // corroborated departure - the morning exit
       }
 
     // Nothing survived, and the settling-tail guard is the only reason: hand back what it skipped
@@ -1438,11 +1480,12 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     if (transitionExitMs == null && settlingFallback != null) {
       transitionExitMs = settlingFallback.ms;
       exitTransitionAt = settlingFallback.at;
+      selectedGapStart = settlingFallback.gapStart;
     }
     }
   }
 
-  const transitionExitIdx =
+  let transitionExitIdx =
     transitionExitMs == null ? null : Math.floor((transitionExitMs - analysisStartUtc.getTime()) / 60000);
 
   if (USE_TRANSITION_TIMES && transitionOnset != null) onset = transitionOnset;
@@ -1555,6 +1598,34 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // plain number can never change as a result (issue #352). Do not derive wake_at_algo from `inWake`
   // after this point.
   const algoSleepEnd = sleepEnd;
+  // ⚠️ #509 — THE MORNING WAKE MUST NOT DEPEND ON THE CLOCK. Here, and only here, is A (algoSleepEnd) known
+  // (it is captured just above, after onset moved and the wake runs were marked), so the check cannot sit
+  // inside the departure scan. A corroborated exit T that is later than A is discarded when the bed was
+  // strictly quiet for MORNING_ABSENCE_MIN minutes in between (see quietStretchBeforeExit for the nights
+  // and the evidence); the wake, the metrics span, the timeline marker and the child-out interval then
+  // all fall back to A together, because they all read these three variables. `wake_at_shadow` keeps the
+  // raw exit (it is documented as "recorded whether or not adopted").
+  //
+  // Reached only when: the night is complete (the scan ran), A exists (`< totalMin`: a child quiet at the
+  // window end has no A and keeps T, "knowing they got up beats still asleep"), an exit was adopted, and
+  // the bed moved enough all night to be an occupied one (`maxBedPeak >= EMPTY_BED_MAX_PEAK`). That last
+  // condition is not cosmetic: discarding T shortens the metrics span to A, and on a night the bed barely
+  // moved that leaves 0 wakes and 0 awake minutes, which the empty-bed gate below would call `empty`
+  // (a real wake turned into "nobody slept here"; verified on a synthetic night in plan review).
+  //
+  // What this means for someone else's house: the rule trusts "a strictly quiet bed inside the final awake
+  // run is an absence". A mic that hears the whole house, or a zone painted so a departure never reads
+  // quiet, makes the wake EARLY (the start of the activity), never missing. A child who fusses, falls
+  // back asleep and is carried out later is reported at the fuss. Calibrated on two children in one
+  // house over 30 nights (no untouched validation set); see KNOWN-ISSUES.
+  const rawExitMs = transitionExitMs;
+  if (USE_TRANSITION_TIMES && transitionExitIdx != null && !inProgress && algoSleepEnd < totalMin
+      && selectedGapStart != null && maxBedPeak >= EMPTY_BED_MAX_PEAK
+      && quietStretchBeforeExit(cribActExt, algoSleepEnd, selectedGapStart, MORNING_ABSENCE_MIN, MAX_POST_EXIT_ACTIVE_MIN)) {
+    transitionExitMs = null;
+    exitTransitionAt = null;
+    transitionExitIdx = null;
+  }
   if (USE_TRANSITION_TIMES && transitionExitIdx != null) {
     // Clamped because the metrics can only count minutes we hold per-minute state for, while the
     // departure scan deliberately looks PAST the window end (a child can sleep past it). The reported
@@ -1778,7 +1849,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     // The transition-derived times, recorded whether or not they were adopted. When USE_TRANSITION_TIMES
     // is on these match onset_at/wake_at; the pair worth comparing is then *_algo vs the headline.
     out.onset_at_shadow = transitionOnset != null ? minuteTime(transitionOnset) : minuteTime(algoOnset);
-    out.wake_at_shadow = transitionWakeAt || algoWakeAt;
+    out.wake_at_shadow = (rawExitMs != null ? toSqlUtc(new Date(rawExitMs)) : null) || algoWakeAt; // raw exit even when #509 discarded it
 
     // "In bed": the put-down that began this sleep, as a headline field beside onset_at ("asleep").
     // On a bedtime-story night the two are minutes apart and the owner wants both — the app was
