@@ -2292,7 +2292,7 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
   test('#509 C5: a child quiet at the window end has no movement-only wake, so the exit is kept', (t) => {
     // The activity stops at 06:50 (window end 07:00): no run reaches the end, A does not exist, and the
     // corroborated exit that comes later must still be reported ("knowing they got up beats still asleep").
-    const { clusterEnd, tClock } = layMorning({ stretchMin: 42, soundStopsAt: at(6, 50, 1) });
+    const { clusterEnd, tClock } = layMorning({ stretchMin: 60, soundStopsAt: at(6, 50, 1) }); // 60: the quiet bed runs 26 minutes past the window end, enough for the veto to fire if it wrongly ran
     t.mock.timers.enable({ apis: ['Date'], now: clockAt(clusterEnd, 40) });
     const night = computeNight(CHILD, DATE);
     assert.equal(night.wake_at_algo, null, 'precondition: the movement-only wake does not exist');
