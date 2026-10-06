@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-10-06
+
 ### Added
 - **The log now says when a hole in a camera's readings sends the wake watcher's settling back to zero.**
   Wake clips are only recorded once the watcher has seen 15 consecutive quiet minutes, and one missing minute
