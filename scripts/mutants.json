@@ -12676,8 +12676,8 @@
   {
     "label": "#509 M-509-18: the child-out interval still opens at the raw (discarded) exit",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "? transitionExitMs",
-    "replace": "? rawExitMs",
+    "find": "const upMs = transitionExitMs != null\r\n        ? transitionExitMs",
+    "replace": "const upMs = rawExitMs != null\r\n        ? rawExitMs",
     "expect": "killed",
     "tests": [
       "sleepAnalysis.test.js"
