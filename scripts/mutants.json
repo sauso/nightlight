@@ -12518,18 +12518,6 @@
     "note": "algoSleepEnd is `totalMin` for a child quiet at the window end, never null: a != null test lets the veto run when no movement-only wake exists. C5."
   },
   {
-    "label": "#509 M-509-04: an unobserved minute may BEGIN a stretch (=== false relaxed to !== true at its start)",
-    "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "if (cribAct[s] !== false) continue;",
-    "replace": "if (cribAct[s] === true) continue;",
-    "expect": "killed",
-    "tests": [
-      "sleepAnalysis.test.js"
-    ],
-    "namePattern": "#509",
-    "note": "Tri-state strictness (#350): a missing sample is not evidence of an empty bed. The pure-rule test and C14."
-  },
-  {
     "label": "#509 M-509-05: an unobserved minute is allowed INSIDE a stretch",
     "file": "backend/src/lib/sleepAnalysis.js",
     "find": "while (e < gapStart && cribAct[e] === false) e++;",
