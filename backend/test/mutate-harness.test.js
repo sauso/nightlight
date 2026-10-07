@@ -141,7 +141,9 @@ describe('#617 a mutant that loops forever', () => {
 
     const res = await runHarness(dir, [], { SPIN_PID_FILE: pidFile });
 
-    assert.match(res.stdout, /HANG\s+fixture: the loop never ends/, `no HANG verdict in:\n${res.stdout}\n${res.stderr}`);
+    // " ok " at the start of the line, not the "★★★" a surprise gets: for an `expect: killed` mutant a HANG
+    // is an accepted kill. The exit code does not depend on this marker, so only the line itself can pin it.
+    assert.match(res.stdout, /^ ok HANG\s+fixture: the loop never ends/m, `no accepted HANG verdict in:\n${res.stdout}\n${res.stderr}`);
     // The run went ON after the hang: the next mutant was scored, and the control survived as it must.
     assert.match(res.stdout, /KILLED\s+fixture: add subtracts/);
     assert.match(res.stdout, /SURVIVED\s+fixture: control/);
