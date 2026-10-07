@@ -26,6 +26,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   at the first exit), and a bed zone or camera that reads a stirring child as quiet (reported early).
   KNOWN-ISSUES.md ("A morning wake that changed by itself as the morning went on") has the evidence and the
   limits (#509).
+- **ntfy alerts no longer stop for a camera or child whose name contains a line break.** A stray newline
+  pasted into a name made every ntfy alert for it fail silently as "send failed (network)" while the other
+  channels still worked. In the title (and in the message when a snapshot is attached, because it then travels
+  in a header too) a line break or other control character is now sent as a space. The message body keeps its line breaks, so the multi-line
+  nightly sleep report is unchanged (#551).
+- **Saving a child with a name that is not text returns a readable error instead of a failure.** Creating or
+  editing a child through the API with a number, list or object as the name answered with a server error whose
+  message Cloudflare strips; it is now a 400 "Name must be text". Leaving the name out of an edit, or sending
+  it blank, behaves as before (#541).
 
 ## [0.35.0] - 2026-10-06
 

@@ -41,7 +41,14 @@ function authHeader(c) {
 // ntfy carries title/message in HTTP headers, which are effectively latin1 — Node's fetch throws on
 // a non-latin1 header value. Strip anything outside that range so an emoji or CJK camera name can't
 // make the whole request fail (the ASCII/Western text still goes through).
-const headerSafe = (s) => String(s || '').replace(/[^\x00-\xFF]/g, '').trim();
+const latin1 = (s) => String(s || '').replace(/[^\x00-\xFF]/g, '').trim();
+
+// ⚠️ A HEADER value must also be a single line, and \r and \n are inside latin1: fetch throws on them, so one
+// stray newline pasted into a camera or child name (the title is "<name> - motion") made every ntfy alert for it
+// fail as "send failed (network)" while the other channels carried on (#551). Control characters become a
+// space, not nothing, so "Nursery\nCam" stays two words. NOT applied to the BODY below: the sleep report is a
+// multi-line message ("<child>: asleep ...\n<child>: ...") and a body may legitimately contain newlines.
+const headerSafe = (s) => latin1(s).replace(/[\x00-\x1F\x7F]+/g, ' ').trim();
 
 // Fire-and-forget. Never throws into the caller. `image` (JPEG Buffer) is attached inline; `click`
 // is a URL opened when the notification is tapped; `priority` is ntfy's 1..5.
@@ -62,7 +69,7 @@ export async function sendNtfy({ title, message, click, image, priority } = {}) 
       headers.Message = headerSafe(message);
       body = image;
     } else {
-      body = headerSafe(message);
+      body = latin1(message);
     }
 
     const res = await postWithTimeout(

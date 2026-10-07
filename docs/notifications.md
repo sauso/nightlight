@@ -142,6 +142,13 @@ your own server (e.g. on the same NAS).
 Motion/sound alerts arrive with the **snapshot attached inline**, and tapping one deep-links into the
 Nightlight app. Only the short message + snapshot pass through ntfy — never your live video/audio.
 
+ntfy carries the alert's **title** (and, when a snapshot is attached, the whole message too) in an HTTP header,
+which cannot hold a line break or any other control character, and which only carries Latin-1 text. Nightlight
+therefore sends a line break in a camera or child name, or in a message that travels as a header, as a
+**space**, and drops characters outside Latin-1
+(an emoji in a camera name does not appear in the ntfy title). The message **body** is not affected: the
+multi-line nightly sleep report keeps its line breaks.
+
 ## Option D: Gotify
 
 [Gotify](https://gotify.net) is a lightweight **self-hosted** push server with its own Android app.
