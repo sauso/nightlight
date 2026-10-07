@@ -83,7 +83,12 @@ _setObservationClockFactoryForTests(() => null);
 // (the detector-watchdog-levers.test.js technique). The test's own waits use the NATIVE clock.
 const nativeNow = performance.now.bind(performance);
 let monoOffset = 0;
-performance.now = () => nativeNow() + monoOffset;
+// #609: a case that has to pin a quiet-gate BOUNDARY must not let real time move it. `frozenMono`, when set, IS the
+// monotonic clock until the case sets another value or `afterEach` clears it (null = the offset clock above). The
+// case then advances logical time by hand and only waits for real timer ticks, so a loaded machine cannot change
+// what it measures.
+let frozenMono = null;
+performance.now = () => (frozenMono ?? nativeNow() + monoOffset);
 
 after(async () => {
   await motion.stopAllMotionDetectors();
@@ -93,6 +98,7 @@ after(async () => {
   cleanupTempDataDirs();
 });
 afterEach(async () => {
+  frozenMono = null;
   motion._resetReturnTimingForTests();
   setMediamtxApiTimeoutForTest(null);
   await motion.stopAllMotionDetectors();
@@ -659,14 +665,29 @@ describe('#500: returning from main to the sub', { concurrency: false }, () => {
   });
 
   test('#500 R2e: with no active frame at all, quiet is counted from the process start, not from "forever"', async () => {
+    // ⚠️ LOGICAL TIME, NOT A STOPWATCH (#609). This used to assert that real time elapsed between the spawn and the
+    // switch was >= 350 ms for a 400 ms gate. The stopwatch started AFTER startOnMain returned, so every ms the
+    // spawn took was missing from it, and under load (a full core-coverage run) it read 349 once. Widening the margin
+    // would only move the flake. The detector reads its quiet from performance.now(), so freeze that clock, put it
+    // exactly at the edge, and the answer no longer depends on how fast the machine ran.
     fast({ quietMs: 400, minGapMs: 0 });
     const cam = camera('r2e');
     const onMain = await startOnMain(cam);
-    const spawnedAt = realNow();
+    const spawnedMono = motion._detectorEntryForTests(cam.id).spawnedMono;
+    const subChecks = () => requests.filter((n) => n === SUB(cam.id)).length;
     subAnswers(cam.id).dflt = true; // ready from the very first check; only the quiet gate can hold it back
-    await waitFor(() => onMain.signals.includes('SIGTERM'), 'the switch', 4_000);
-    assert.ok(realNow() - spawnedAt >= 350,
-      `it switched ${Math.round(realNow() - spawnedAt)} ms after the spawn: a fresh process was treated as already quiet for 400 ms`);
+
+    // 399 ms after the process start, nothing active seen: still inside the gate. The wait proves the detector HAD
+    // the chance to switch (it polled the ready sub several times) and chose not to.
+    frozenMono = spawnedMono + 399;
+    const seen = subChecks();
+    await waitFor(() => subChecks() >= seen + 5, 'five more sub checks while the gate is one ms short');
+    assert.ok(!onMain.signals.includes('SIGTERM'), 'it switched with 399 ms of quiet on a 400 ms gate');
+
+    // Exactly the gate: quiet is counted from the process start (a fresh process is NOT "quiet forever"), so this is
+    // the first instant it may go.
+    frozenMono = spawnedMono + 400;
+    await waitFor(() => onMain.signals.includes('SIGTERM'), 'the switch once 400 ms of quiet had passed', 4_000);
   });
 
   test('#500 R2c: premise: a relaunch loses a slow-link exit that the un-relaunched tracker confirms, and SUB_QUIET_MS outlasts that window', () => {
