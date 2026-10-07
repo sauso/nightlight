@@ -161,7 +161,9 @@ export function mqttStatus() {
 //
 // The host check is "does it survive being put in an mqtt:// URL unchanged": a `/`, `?`, `#` or `@` in it would
 // not throw, it would be silently read as a path, a query or a user name, and the client would connect somewhere
-// the admin did not type. A host containing one is refused instead.
+// the admin did not type. A host containing one is refused instead. (A path, query or fragment also changes the port
+// that URL parses, so the `u.port` comparison alone would catch them; the explicit checks are listed so the intent
+// is readable, and a mutant that drops only `u.pathname` is therefore equivalent.)
 export function mqttBrokerUrl(host, port) {
   const p = port || 1883; // the default the settings screen documents for a blank port
   if (!Number.isInteger(Number(p)) || Number(p) < 1 || Number(p) > 65535) {

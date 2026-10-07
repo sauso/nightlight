@@ -168,7 +168,12 @@ describe('#543 a bad value that is ALREADY stored must not take the process down
   test('a save that does not touch the broker, with a bad value already stored and MQTT enabled, succeeds instead of answering 500', async () => {
     // refreshMqttConnection is what every settings save and camera edit calls. It used to throw out of the handler
     // AFTER the write, so the client saw a 500 for a save that had in fact been applied.
-    storeBad('broker.local', 188333);
+    //
+    // ⚠️ A port NO EARLIER TEST USES, on purpose. The old code set its "already configured" cache key BEFORE the
+    // connect that threw, so a second refresh with the identical bad config returned early and did not throw. Reusing
+    // 188333 here made this test pass against the old source (found when it was run there): it only discriminates
+    // when this is the first attempt at this configuration.
+    storeBad('broker.local', 199999);
     const res = await put({ app_name: 'Saved Anyway' });
     assert.equal(res.status, 200, JSON.stringify(res.body));
     assert.equal(db.prepare("SELECT app_name FROM settings WHERE id = 'app'").get().app_name, 'Saved Anyway');
