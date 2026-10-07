@@ -150,6 +150,31 @@ export function mqttStatus() {
   };
 }
 
+// The broker URL for a saved host and port, or an Error whose message says what is wrong (#543). One place, used
+// both to REFUSE a bad value at save time (routes/settings.js) and to build the connection, so the two cannot
+// disagree about what a usable broker is.
+//
+// Why it exists: `mqtt.connect` throws synchronously on a port outside 1-65535 ("Port should be >= 0 and < 65536")
+// and on a host that is not a URL authority (an unbalanced `[` is "Invalid URL"). Both used to reach the database
+// untouched, and then `refreshMqttConnection()` at boot, at the top level of index.js and before the crash guards,
+// threw on every start: a container that exits and restarts forever, with the UI that could fix it unreachable.
+//
+// The host check is "does it survive being put in an mqtt:// URL unchanged": a `/`, `?`, `#` or `@` in it would
+// not throw, it would be silently read as a path, a query or a user name, and the client would connect somewhere
+// the admin did not type. A host containing one is refused instead.
+export function mqttBrokerUrl(host, port) {
+  const p = port || 1883; // the default the settings screen documents for a blank port
+  if (!Number.isInteger(Number(p)) || Number(p) < 1 || Number(p) > 65535) {
+    throw new Error(`the port ${JSON.stringify(p)} is not a whole number between 1 and 65535`);
+  }
+  let u;
+  try { u = new URL(`mqtt://${host}:${p}`); } catch { throw new Error(`the host ${JSON.stringify(host)} is not a valid hostname or address`); }
+  if (!u.hostname || u.username || u.password || u.pathname || u.search || u.hash || u.port !== String(Number(p))) {
+    throw new Error(`the host ${JSON.stringify(host)} must be just a hostname or address, with no user name, path or query`);
+  }
+  return `mqtt://${host}:${Number(p)}`;
+}
+
 export function refreshMqttConnection() {
   const cfg = getMqttSettings();
 
@@ -178,11 +203,22 @@ export function refreshMqttConnection() {
   currentConfigKey = key;
   readings.clear();
 
-  client = mqtt.connect(`mqtt://${cfg.mqtt_host}:${cfg.mqtt_port || 1883}`, {
-    username: cfg.mqtt_username || undefined,
-    password: cfg.mqtt_password || undefined,
-    reconnectPeriod: 5000,
-  });
+  // ⚠️ MUST NOT THROW (#543). This runs at boot before the crash guards are installed, and after every settings
+  // save and camera edit. A bad value that is ALREADY stored (saved by an older version, or written by hand) has to
+  // leave MQTT off and the app up, not take the process down on every start. The cache key is reset so that the
+  // next call, after the admin fixes the value, tries again instead of treating the failed attempt as connected.
+  try {
+    client = mqtt.connect(mqttBrokerUrl(cfg.mqtt_host, cfg.mqtt_port), {
+      username: cfg.mqtt_username || undefined,
+      password: cfg.mqtt_password || undefined,
+      reconnectPeriod: 5000,
+    });
+  } catch (e) {
+    client = null;
+    currentConfigKey = null;
+    logger.error(`[mqtt] Not connecting: ${e.message}. MQTT stays off until the broker host and port are fixed in Settings.`);
+    return;
+  }
 
   client.on('connect', () => {
     logger.info('[mqtt] Connected to broker.');
