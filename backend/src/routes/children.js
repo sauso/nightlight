@@ -57,8 +57,18 @@ router.get('/', (req, res) => {
   res.json(children.map(withCameras));
 });
 
+// A JSON body can carry any type for `name`, and `.trim()` on a number or an object threw a TypeError, which
+// Express turned into a 500 (#541). Cloudflare strips 5xx bodies, so the client saw an empty failure instead of
+// a readable message: a bad input is a 400. Absent (`undefined`) and `null` are NOT "not text": a partial PUT
+// that omits the name keeps the stored one, and `null` has always been treated like a blank (kept on PUT,
+// "required" on POST). The only answers that change are the ones that used to crash (a truthy non-string)
+// and a POST of `0` or `false`, which was already a 400 and now says "must be text" instead of "required".
+const NAME_NOT_TEXT = 'Name must be text';
+const isNotText = (name) => name !== undefined && name !== null && typeof name !== 'string';
+
 router.post('/', (req, res) => {
   const { name, birthday, color, track_sleep, sleep_window_start, sleep_window_end } = req.body || {};
+  if (isNotText(name)) return res.status(400).json({ error: NAME_NOT_TEXT });
   if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
   let photo;
   try { photo = normalizePhoto(req.body?.photo, null); } catch (e) { return res.status(400).json({ error: e.message }); }
@@ -85,6 +95,7 @@ router.put('/:id', (req, res) => {
   const existing = db.prepare('SELECT * FROM children WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Child not found' });
   const { name, birthday, color, track_sleep, sleep_window_start, sleep_window_end } = req.body || {};
+  if (isNotText(name)) return res.status(400).json({ error: NAME_NOT_TEXT });
   let photo;
   try { photo = normalizePhoto(req.body?.photo, existing.photo); } catch (e) { return res.status(400).json({ error: e.message }); }
   if (sleep_window_start !== undefined && !HHMM.test(sleep_window_start)) return res.status(400).json({ error: 'Bedtime must be a time like 19:00' });
