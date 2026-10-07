@@ -15,8 +15,8 @@ Neither requires the other — use one, both, or neither.
 
 | Field | Notes |
 |---|---|
-| Broker host | Required. IP or hostname. |
-| Broker port | Default **1883** if left blank. |
+| Broker host | Required. IP or hostname, **only** (no `user@`, path or query). A host that is not a valid address is refused when you press Save, with the reason. |
+| Broker port | Default **1883** if left blank. Otherwise a whole number from **1 to 65535**; anything else is refused when you press Save, and nothing is stored. |
 | Username / password | Optional, only if your broker requires auth. |
 
 ⚠️ **The connection is always plain `mqtt://` — TLS (`mqtts://`) is not supported.** If your
@@ -31,6 +31,10 @@ Saving reconnects automatically (retry every 5 seconds while down) — no restar
 - **Disconnected** (red) — MQTT is enabled but the broker isn't reachable (wrong host/port,
   broker down, or auth rejected — check the container logs for `[mqtt] Connection error:`).
 - **Off** (grey) — MQTT isn't enabled.
+
+If a broker host or port that is not usable is **already stored** (saved by an older version, or edited
+into the database by hand), Nightlight no longer fails to start: it logs `[mqtt] Not connecting: <reason>`,
+leaves MQTT off (the badge shows Disconnected) and keeps running. Correct the value under **Settings → MQTT**.
 
 A green "Connected" badge only means the broker connection itself is up — it says nothing about
 whether any camera's topic is actually being published to. See "Troubleshooting" below.

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import db from '../db.js';
 import { requireAuth, requireAdmin, optionalAuth, isAdminRequest } from '../middleware/auth.js';
-import { refreshMqttConnection, mqttStatus } from '../lib/mqttClient.js';
+import { refreshMqttConnection, mqttStatus, mqttBrokerUrl } from '../lib/mqttClient.js';
 import { applyRecordingSettingsChange } from '../lib/clipCapture.js';
 import { clipStorageStats, sweepClips } from '../lib/clipStorage.js';
 import { wakeClipStats } from '../lib/recordings.js';
@@ -266,6 +266,31 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     offlineAlertMinutes = n;
   }
 
+  // MQTT broker host and port (#543). Validated HERE, before anything is written: a bad value used to be stored,
+  // then make `mqtt.connect` throw, so the request answered 500 with the value already saved and the rest of this
+  // handler skipped, and on every later boot the same call took the process down. A blank port means "the default
+  // (1883)" and is stored as NULL, exactly as before; a blank host means "not configured".
+  let mqttPortVal = existing.mqtt_port;
+  if (mqtt_port !== undefined) {
+    // Only a string or a number can be a port. `String(['1883'])` is "1883", so without this an array would pass.
+    const s = typeof mqtt_port === 'string' || typeof mqtt_port === 'number' ? String(mqtt_port).trim() : 'not a number';
+    if (!mqtt_port || s === '') {
+      mqttPortVal = null;
+    } else {
+      const n = /^\d+$/.test(s) ? parseInt(s, 10) : NaN;
+      if (!(n >= 1 && n <= 65535)) {
+        return res.status(400).json({ error: 'The MQTT port must be a whole number between 1 and 65535 (leave it blank for 1883)' });
+      }
+      mqttPortVal = n;
+    }
+  }
+  const mqttHostVal = mqtt_host !== undefined ? (mqtt_host || '').trim() || null : existing.mqtt_host;
+  if ((mqtt_host !== undefined || mqtt_port !== undefined) && mqttHostVal) {
+    try { mqttBrokerUrl(mqttHostVal, mqttPortVal); } catch (e) {
+      return res.status(400).json({ error: `The MQTT broker is not usable: ${e.message}` });
+    }
+  }
+
   db.prepare(
     `UPDATE settings
      SET app_name = ?, accent_color = ?, live_color = ?, offline_color = ?, timezone = ?, font_choice = ?,
@@ -284,8 +309,8 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     font_choice || existing.font_choice,
     temp_unit || existing.temp_unit,
     mqtt_enabled !== undefined ? (mqtt_enabled ? 1 : 0) : existing.mqtt_enabled,
-    mqtt_host !== undefined ? (mqtt_host || '').trim() || null : existing.mqtt_host,
-    mqtt_port !== undefined ? (mqtt_port ? parseInt(mqtt_port, 10) : null) : existing.mqtt_port,
+    mqttHostVal,
+    mqttPortVal,
     mqtt_username !== undefined ? (mqtt_username || '').trim() || null : existing.mqtt_username,
     mqtt_password ? mqtt_password : existing.mqtt_password, // blank submission keeps the existing one
     ptzStepVal,

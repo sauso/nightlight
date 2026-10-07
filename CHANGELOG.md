@@ -35,6 +35,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   editing a child through the API with a number, list or object as the name answered with a server error whose
   message Cloudflare strips; it is now a 400 "Name must be text". Leaving the name out of an edit, or sending
   it blank, behaves as before (#541).
+- **A mistyped MQTT port can no longer lock you out of Nightlight.** Saving a port outside 1-65535 (for example
+  `188333`, one digit too many) stored it, failed with a server error, and then made the container exit on
+  **every** start, so the Settings screen that could fix it was unreachable; the only cure was editing the
+  database by hand. The port must now be a whole number from 1 to 65535 (blank still means 1883) and the host a
+  plain hostname or address, and a bad value is refused when you press Save with the reason, **before anything is
+  stored**. A bad value that is already stored (from an older version) no longer stops Nightlight starting: it logs
+  `[mqtt] Not connecting: <reason>`, leaves MQTT off and keeps running, so you can correct it in Settings → MQTT
+  (#543).
 
 ## [0.35.0] - 2026-10-06
 
