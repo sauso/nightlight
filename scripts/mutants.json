@@ -265,15 +265,15 @@
     "namePattern": "what the numbers MEAN"
   },
   {
-    "label": "txIdx: round -> floor (#260's one-word fix; the pin must notice)",
+    "label": "txIdx: floor -> round (a regression of #260/#417; the pin must notice)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "const txIdx = (t) => Math.round((txMs(t) - analysisStartUtc.getTime()) / 60000);",
-    "replace": "const txIdx = (t) => Math.floor((txMs(t) - analysisStartUtc.getTime()) / 60000);",
+    "find": "const txIdx = (t) => Math.floor((txMs(t) - analysisStartUtc.getTime()) / 60000);",
+    "replace": "const txIdx = (t) => Math.round((txMs(t) - analysisStartUtc.getTime()) / 60000);",
     "expect": "killed",
     "tests": [
       "sleepAnalysis.test.js"
     ],
-    "note": "Not a defect being guarded against — the OPPOSITE. #260 is still open and its fix is held for the detection holdout; this proves the suite will now say so the moment it lands."
+    "note": "#260 is FIXED (#417): the minute index floors a transition's second. Written the other way round (round -> floor) while the fix was held for the detection holdout; the anchor went stale when it landed (#575), so it now guards the fix against being undone. A transition at :31 s must land in the minute it happened in."
   },
   {
     "label": "★ sweepClips: the whole sweeper becomes a no-op",
@@ -1155,8 +1155,8 @@
   {
     "label": "wake: the reversal window is MORNING_ABSENCE_MIN, not wider",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "MORNING_ABSENCE_MIN * 60000",
-    "replace": "MORNING_ABSENCE_MIN * 150000",
+    "find": "- txMs(t.created_at) <= MORNING_ABSENCE_MIN * 60000",
+    "replace": "- txMs(t.created_at) <= MORNING_ABSENCE_MIN * 150000",
     "expect": "killed",
     "tests": [
       "sleepAnalysis.test.js"
@@ -1166,8 +1166,8 @@
   {
     "label": "wake: the reversal window is MORNING_ABSENCE_MIN, not narrower",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "MORNING_ABSENCE_MIN * 60000",
-    "replace": "MORNING_ABSENCE_MIN * 6000",
+    "find": "- txMs(t.created_at) <= MORNING_ABSENCE_MIN * 60000",
+    "replace": "- txMs(t.created_at) <= MORNING_ABSENCE_MIN * 6000",
     "expect": "killed",
     "tests": [
       "sleepAnalysis.test.js"
@@ -5494,8 +5494,8 @@
   {
     "label": "#369 M13e (claim 13): a second kill can be armed while the first is in flight",
     "file": "backend/src/lib/processGuards.js",
-    "find": "  if (!entry || entry.watchdogKill) return false;",
-    "replace": "  if (!entry) return false;",
+    "find": "  if (!entry || entry.watchdogKill || entry.returning) return false;",
+    "replace": "  if (!entry || entry.returning) return false;",
     "expect": "killed",
     "tests": ["detector-watchdog-levers.test.js"],
     "namePattern": "^C13c"

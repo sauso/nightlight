@@ -127,6 +127,13 @@ node scripts/mutate.mjs            # MUTATION TESTING. Breaks the source one way
                                    #   --only=<substring>  just the mutants whose label matches
                                    #   --full              every mutant against the WHOLE suite
                                    #   --list              print the catalogue
+                                   #   --check             run NO tests; fail if any `find` no longer
+                                   #                       matches exactly once (stale anchor, #575)
+                                   #   --timeout=<ms>      per-mutant wall-clock limit (default 5 min,
+                                   #                       or an entry's `timeoutMs`). A mutant that
+                                   #                       outlives it is killed as a whole process
+                                   #                       tree and reported HANG: counted as killed,
+                                   #                       listed apart, a weaker kill (#617)
                                    # It restores every file from an in-memory byte copy and verifies
                                    # the round-trip; it never shells out to git. See the header.
 npm start                    # node src/index.js — expects MediaMTX/ffmpeg binaries on PATH,
