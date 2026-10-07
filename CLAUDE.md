@@ -98,6 +98,11 @@ configured in either. `backend/` has a unit test suite (Node's built-in runner, 
 `frontend/` has its own (Vitest + Testing Library, coverage-gated in CI). End-to-end
 coverage lives separately in `e2e/` (Playwright, needs Docker).
 
+**Node 24.** CI, the Docker image and `.nvmrc` are all on Node 24, and `engines` in both `package.json`
+files says `>=24` (npm only warns). Only 24 is tested: on Node 22 three backend suites fail
+(`detector-observation-wiring`, `transcoder-log-redaction`, `sleepInsights`; the cause was never
+established, #565). `backend/test/node-version-pin.test.js` fails if the five places drift apart.
+
 ```bash
 # Backend (Node/Express, ESM, port 4000)
 cd backend && npm install

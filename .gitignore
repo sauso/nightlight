@@ -7,6 +7,9 @@ backend/node_modules/
 frontend/dist/
 backend/public/
 
+# Coverage reports (`npm run test:coverage` in backend/ or frontend/ writes a coverage/ folder).
+coverage/
+
 # vitest 5's --reporter=json writes here instead of stdout (breaks scripts/mutate.mjs's frontend
 # runner — see that finding, filed separately). Not build output worth keeping either way.
 frontend/.vitest/
