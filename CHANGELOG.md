@@ -43,6 +43,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   stored**. A bad value that is already stored (from an older version) no longer stops Nightlight starting: it logs
   `[mqtt] Not connecting: <reason>`, leaves MQTT off and keeps running, so you can correct it in Settings → MQTT
   (#543).
+- **Developer tooling: a killed mutation run no longer leaves a mutant in the source, and a drifted catalogue is caught
+  in CI.** `node scripts/mutate.mjs` now writes a restore journal (`scripts/.mutate-restore.json`, git-ignored) before
+  it mutates a file; Ctrl-C, SIGTERM and SIGHUP restore the file and stop the whole test process tree, and the next
+  run restores from the journal after a hard kill (Windows cannot catch SIGTERM, so there the journal is the only
+  protection) (#599). A mutant that runs no test now aborts the run instead of being printed as SURVIVED, and a
+  new CI test checks that every catalogue anchor still occurs once and every `namePattern` still selects a test
+  (#604, #575). A catalogue entry may be written with LF or CRLF line endings whichever the checkout uses (#597).
+  Not a product change: nothing in the app or its data is affected.
 
 ## [0.35.0] - 2026-10-06
 
