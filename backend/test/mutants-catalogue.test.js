@@ -90,9 +90,15 @@ describe('--check and namePattern (#604)', () => {
   test('an entry with no namePattern is not asked for one, and a pattern is judged against the files the entry names only', async () => {
     const ok = await check([entry({ tests: ['one.test.js'] })]);
     assert.equal(ok.code, 0, `${ok.stdout}\n${ok.stderr}`);
-    // 'case' exists in dynamic.test.js's template, but this entry runs one.test.js only.
+    // dynamic.test.js names its tests with a template (`case ${n}`), so a pattern that matches none of its
+    // literal pieces cannot be judged against it.
     const wrongFile = await check([entry({ namePattern: 'is exactly one', tests: ['dynamic.test.js'] })]);
     assert.equal(wrongFile.code, 0, 'a file that builds its names at run time cannot be judged, so it is accepted (the run-time abort still covers it)');
+    assert.match(wrongFile.stdout, /1 namePatterns could not be proved statically/, 'an unproved pattern must be admitted, not silently passed');
+    // ...but the literal pieces of a template title are still checked: this pattern is provable, so no admission.
+    const piece = await check([entry({ namePattern: '^case', tests: ['dynamic.test.js'] })]);
+    assert.equal(piece.code, 0, `${piece.stdout}\n${piece.stderr}`);
+    assert.doesNotMatch(piece.stdout, /could not be proved/);
     const other = await check([entry({ namePattern: 'double-quoted names count', tests: ['ui.test.jsx'], file: 'frontend/src/ui.js' })]);
     assert.equal(other.code, 3, 'a frontend entry must be judged against frontend/test, not backend/test');
   });

@@ -124,11 +124,22 @@ function testNamesIn(text) {
     if (!literal) { dynamic = true; continue; } // `test(name, ...)`, `test.each(...)(...)`: the name is not in the source
     literal.lastIndex = call.lastIndex;
     const name = literal.exec(text);
-    if (!name || name[1].includes('${')) { dynamic = true; continue; }
-    (hit[1] === 'describe' || hit[1] === 'suite' ? suites : tests).push(name[1]);
+    if (!name) { dynamic = true; continue; }
+    const into = hit[1] === 'describe' || hit[1] === 'suite' ? suites : tests;
+    if (name[1].includes('${')) {
+      // A title with holes (`burst boundary: ${n} of 300`) is not a name, but its literal pieces are what a
+      // pattern is written against. Offer each piece, and the pieces run together, as candidates.
+      dynamic = true;
+      const pieces = name[1].split(/\$\{[^}]*\}/).filter((p) => p.trim());
+      into.push(pieces.join(''), ...pieces);
+      continue;
+    }
+    into.push(name[1]);
   }
   return { tests, suites, dynamic };
 }
+// Patterns accepted without proof because a file they name builds some test titles at run time (counted so --check can say so).
+let unverifiedPatterns = 0;
 function namePatternProblem(m, cache) {
   if (!m.namePattern) return null;
   const frontend = m.file.startsWith('frontend/');
@@ -151,7 +162,8 @@ function namePatternProblem(m, cache) {
     if (candidates.some((c) => re.test(c))) return null;
     if (info.dynamic) unverifiable = true;
   }
-  return unverifiable ? null : `its namePattern ${JSON.stringify(m.namePattern)} matches no test name in ${files.join(', ')}`;
+  if (unverifiable) { unverifiedPatterns++; return null; }
+  return `its namePattern ${JSON.stringify(m.namePattern)} matches no test name in ${files.join(', ')}`;
 }
 
 if (flag('list')) {
@@ -191,6 +203,10 @@ if (flag('check')) {
     if (problems.length) bad++;
   }
   console.log(`${catalogue.length} catalogue entries, ${bad} that would not apply.`);
+  if (unverifiedPatterns) {
+    console.log(`(${unverifiedPatterns} namePatterns could not be proved statically: their test files build titles at run time. A stale one ` +
+      'still aborts the run: it runs no test.)');
+  }
   process.exit(bad ? 3 : 0);
 }
 // Before anything reads a source file: undo what a previous, killed run left behind (#599). Ahead of the
