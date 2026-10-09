@@ -21,8 +21,9 @@ if (process.env.NIGHTLIGHT_CLOCK_SHIFT_DAYS) await import('../../scripts/clock-s
 // helpers/render.jsx) and this keeps the next one from growing back unnoticed.
 // Only `mockResolvedValue` on a spy is delayed: promises made some other way, fake-timer tests and
 // rejections are untouched, so a failure here is a test that depends on timing it did not state.
-// ⚠️ KNOWN LIMIT: at 20 ms and above a handful more still fail (account backup codes, EventLog "Clear
-// log", ...). 10 ms is the line this suite holds today, not a claim about every latency.
+// ⚠️ KNOWN LIMIT: the suite holds at 10 and 20 ms (CI went red at 10 ms on three more tests once the first dozen were
+// fixed: a test that ends before its PUT resolves leaks into the next one). At 40 ms ten fail (cameras reassign,
+// settingsPush x7, mediaCards refresh nonce): not a claim about every latency.
 const LATENCY_MS = Number(process.env.NIGHTLIGHT_TEST_LATENCY_MS) || 0;
 if (LATENCY_MS > 0) {
   const realSpyOn = vi.spyOn.bind(vi);

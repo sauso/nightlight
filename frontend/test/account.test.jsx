@@ -346,7 +346,10 @@ describe('two-factor authentication', () => {
     await user.type(await screen.findByLabelText(/Enter the 6-digit code/), '123456');
     await user.click(screen.getByRole('button', { name: 'Turn on' }));
 
-    const dialog = await screen.findByRole('dialog');
+    // Wait for a CODE, not for "a dialog": the set-up dialog is still on screen when "Turn on" is clicked,
+    // so `findByRole('dialog')` returns it at once and the codes are read before the response lands (#570).
+    await screen.findByText(CODES[0]);
+    const dialog = screen.getByRole('dialog');
     for (const code of CODES) expect(within(dialog).getByText(code)).toBeTruthy();
     expect(within(dialog).getByText(/won.{0,3}t be shown again/i)).toBeTruthy();
     expect(within(dialog).getByText(/once/i)).toBeTruthy();

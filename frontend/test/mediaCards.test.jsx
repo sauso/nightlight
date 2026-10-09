@@ -300,8 +300,9 @@ describe('ClipPlayerModal', () => {
 
     await user.click(screen.getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(api.del).toHaveBeenCalledWith('/cameras/alerts/ev-1/clip'));
-    expect(onClose).toHaveBeenCalled();
-    expect(onDeleted).toHaveBeenCalled();
+    // waitFor: the callbacks run when the DELETE resolves, which is after it was called (#570).
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    await waitFor(() => expect(onDeleted).toHaveBeenCalled());
   });
 
   test('cancelling the delete returns to the player without a request', async () => {
