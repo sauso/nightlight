@@ -2,6 +2,40 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import { afterEach, vi } from 'vitest';
 
+// Opt-in "as if it were later" run (issue #570): `NIGHTLIGHT_CLOCK_SHIFT_DAYS=365 npm test` moves
+// `new Date()` / `Date.now()` a year ahead (or to an ISO instant), and NIGHTLIGHT_CLOCK_TZ changes the
+// zone, to find fixtures with a shelf life BEFORE the calendar does. Dynamic and conditional on purpose:
+// the ordinary run, and the coverage gate, must not load it. Everything about what moves and what does
+// not is in scripts/clock-shift.mjs.
+if (process.env.NIGHTLIGHT_CLOCK_SHIFT_DAYS) await import('../../scripts/clock-shift.mjs');
+
+// Opt-in "slow server" run (issue #570): `NIGHTLIGHT_TEST_LATENCY_MS=10 npm test` makes every
+// `vi.spyOn(api, 'get').mockResolvedValue(x)` settle after a real 10 ms instead of in a microtask.
+//
+// WHY. A mocked request that settles instantly hides a whole family of tests that are RACES: they find a
+// control, then read it or click it before the data it depends on has arrived. A form renders empty and
+// disabled, `findByLabelText` resolves at once, `.value` is read straight away — and it passes only
+// because the mock beat the assertion. On a loaded CI runner it does not always (settingsSecrets "loads
+// the stored broker details" went red that way). Measured 2026-10-09: with 10 ms, eleven tests failed;
+// they are fixed (the wait is now for the VALUE, or for the button to ENABLE — see `enabledButton` in
+// helpers/render.jsx) and this keeps the next one from growing back unnoticed.
+// Only `mockResolvedValue` on a spy is delayed: promises made some other way, fake-timer tests and
+// rejections are untouched, so a failure here is a test that depends on timing it did not state.
+// ⚠️ KNOWN LIMIT: at 20 ms and above a handful more still fail (account backup codes, EventLog "Clear
+// log", ...). 10 ms is the line this suite holds today, not a claim about every latency.
+const LATENCY_MS = Number(process.env.NIGHTLIGHT_TEST_LATENCY_MS) || 0;
+if (LATENCY_MS > 0) {
+  const realSpyOn = vi.spyOn.bind(vi);
+  vi.spyOn = (obj, method, ...rest) => {
+    const spy = realSpyOn(obj, method, ...rest);
+    if (spy && typeof spy.mockResolvedValue === 'function') {
+      spy.mockResolvedValue = (value) =>
+        spy.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(value), LATENCY_MS)));
+    }
+    return spy;
+  };
+}
+
 // jsdom has no layout engine and no media stack, so a few browser APIs the app legitimately uses
 // simply do not exist. Stub the ones whose absence would throw during a render — never the ones whose
 // BEHAVIOUR is under test.

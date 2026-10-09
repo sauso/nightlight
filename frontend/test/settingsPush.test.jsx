@@ -190,7 +190,11 @@ describe('Pushover settings', () => {
 
   test('loads the config with both secrets blank and their masked previews shown', async () => {
     renderAsAdmin(<SettingsPushPushover />);
-    const token = await screen.findByLabelText('Application API token');
+    // Wait for the stored config (its masked preview), not for the field: the form renders at once, empty,
+    // so an empty-value assertion straight after `findByLabelText` passes whether or not anything loaded
+    // (#570: the same race is guarded in every load/type test below).
+    await screen.findByText('a1b…c3d');
+    const token = screen.getByLabelText('Application API token');
     expect(token.value, 'a saved token is never sent to the browser').toBe('');
     expect(screen.getByLabelText('User or group key').value).toBe('');
     // The masks are the only evidence either secret is stored — without them the empty boxes read as
@@ -225,7 +229,7 @@ describe('Pushover settings', () => {
 
   test('an edited device reaches the payload', async () => {
     const { user } = renderAsAdmin(<SettingsPushPushover />);
-    const device = await screen.findByLabelText(/^Device/);
+    const device = await screen.findByDisplayValue('nachos-phone'); // the stored value, so the config has landed
     await user.clear(device);
     await user.type(device, 'kitchen-tablet');
     const body = await save(user);
@@ -237,7 +241,8 @@ describe('Pushover settings', () => {
     // leaving the typed values in them would resend them on the next save and put a live secret on
     // screen in the meantime.
     const { user } = renderAsAdmin(<SettingsPushPushover />);
-    await user.type(await screen.findByLabelText('Application API token'), 'atoken123');
+    await screen.findByText('a1b…c3d'); // the stored config has landed; typing earlier is overwritten by it
+    await user.type(screen.getByLabelText('Application API token'), 'atoken123');
     await user.type(screen.getByLabelText('User or group key'), 'ukey456');
     const body = await save(user);
     expect(body.app_token).toBe('atoken123');
@@ -333,7 +338,7 @@ describe('Gotify settings', () => {
 
   test('loads the stored server, priority and masked token', async () => {
     renderAsAdmin(<SettingsPushGotify />);
-    expect((await screen.findByLabelText('Server URL')).value).toBe('https://gotify.example.com');
+    await screen.findByDisplayValue('https://gotify.example.com'); // the value, not the field: see Pushover above
     expect(screen.getByLabelText('Priority (0–10)').value).toBe('7');
     expect(screen.getByLabelText('Application token').value).toBe('');
     expect(screen.getByText('A1b…z9')).toBeTruthy();
@@ -346,14 +351,18 @@ describe('Gotify settings', () => {
     vi.restoreAllMocks();
     mockGotify({ ...CONFIG, priority: 0 });
     renderAsAdmin(<SettingsPushGotify />);
-    expect((await screen.findByLabelText('Priority (0–10)')).value).toBe('0');
+    // waitFor, not find-then-read: the priority box is on screen before the config arrives.
+    await waitFor(() => expect(screen.getByLabelText('Priority (0–10)').value).toBe('0'));
   });
 
   test('offers 5 when the server sends no priority at all', async () => {
     vi.restoreAllMocks();
     mockGotify({ ...CONFIG, priority: undefined });
     renderAsAdmin(<SettingsPushGotify />);
-    expect((await screen.findByLabelText('Priority (0–10)')).value).toBe('5');
+    // Wait for the config to land FIRST (its server URL): before it does the box shows 5 anyway, so
+    // asserting 5 straight away could not fail and proved nothing about the `?? 5` default.
+    await screen.findByDisplayValue('https://gotify.example.com');
+    expect(screen.getByLabelText('Priority (0–10)').value).toBe('5');
   });
 
   test('the priority input enforces the documented 0–10 range', async () => {
@@ -378,7 +387,8 @@ describe('Gotify settings', () => {
 
   test('a typed token is sent and the field clears afterwards', async () => {
     const { user } = renderAsAdmin(<SettingsPushGotify />);
-    await user.type(await screen.findByLabelText('Application token'), 'AnewToken');
+    await screen.findByDisplayValue('https://gotify.example.com'); // config landed; typing earlier is overwritten
+    await user.type(screen.getByLabelText('Application token'), 'AnewToken');
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(putSpy).toHaveBeenCalled());
     expect(putSpy.mock.calls[0][1].app_token).toBe('AnewToken');

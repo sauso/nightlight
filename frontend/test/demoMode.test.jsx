@@ -16,6 +16,10 @@ import { ADMIN, renderAs } from './helpers/render.jsx';
 
 const realFetch = globalThis.fetch;
 const SESSION = { token: 'demo-token', user: { ...ADMIN, username: 'demo-guest' } };
+// ⚠️ A FIXED endsAt, so every banner test below pins the clock to a moment just before it
+// (vi.setSystemTime). Left on the real clock this date is simply in the past, and "ends in 3 min" would
+// read "Demo ended" on every run from the day after it was written (issue #570: fixtures with a shelf
+// life). A faked clock is also immune to the future-clock run (scripts/clock-shift.mjs), as intended.
 const DEMO = {
   endsAt: '2026-09-21T10:20:00.000Z',
   lobbyUrl: 'https://lobby.example.test/start',
@@ -239,7 +243,10 @@ describe('install prompt in demo mode', () => {
     await act(async () => { window.dispatchEvent(installEvent); });
 
     expect(installEvent.defaultPrevented).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Install' }));
+    // findBy, not getBy: the component listens at once (so it never misses the one-shot event) but only
+    // RENDERS the button after the demo-status request says this is not a demo, so a synchronous lookup
+    // here races that request (#570: red whenever the request takes ~10 ms).
+    fireEvent.click(await screen.findByRole('button', { name: 'Install' }));
     await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByText(/Install this app on your device/i)).not.toBeInTheDocument());
     expect(localStorage.getItem('nightlight_install_dismissed')).toBe('1');

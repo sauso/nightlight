@@ -123,6 +123,13 @@ npm run test:core            # THE CORE-LOGIC COVERAGE GATE. Fails if the module
                               # A module at 88% can sit under a green gate. To see one module, read
                               # its own row: npm run test:core 2>&1 | grep -E '^ℹ +<file>\.js'
 npm run test:coverage        # full coverage report, no thresholds (for finding the next gap)
+npm run test:future          # the same suite with the wall clock a YEAR AHEAD (scripts/clock-shift.mjs, #570):
+                              # finds fixtures with a shelf life (the #534 shape) before the calendar does.
+                              # NIGHTLIGHT_CLOCK_SHIFT_DAYS=30 (or an ISO instant, to land on a month end or a
+                              # DST changeover) changes the amount; NIGHTLIGHT_CLOCK_TZ=America/Los_Angeles the
+                              # zone. Moves new Date(), Date.now() and SQLite's datetime('now'); NOT timers.
+                              # Weekly in CI (future-clock.yml), not on every PR: its verdict depends on today's
+                              # date. A fixture that must stay put should pin its OWN clock, with a comment why.
 
 # Repo-level checks (no install needed, run from the repo root)
 node scripts/check-changelog.mjs   # CHANGELOG.md structure: one heading per type per version, in
@@ -163,6 +170,12 @@ cd frontend && npm install
 npm run dev
 npm test                     # vitest run — component tests, coverage-gated in CI (see CI/CD below)
 npm run test:coverage        # same suite, with the coverage report printed
+                              # Two opt-in stress runs, both weekly in CI (future-clock.yml) and both off by default (#570):
+                              #   NIGHTLIGHT_CLOCK_SHIFT_DAYS=365 npm test   clock a year ahead (see backend test:future)
+                              #   NIGHTLIGHT_TEST_LATENCY_MS=10 npm test    every mocked request takes 10 ms, which fails a
+                              #     test that reads a control or clicks a button BEFORE its data arrived. Wait for the
+                              #     VALUE (findByDisplayValue) or the button to ENABLE (enabledButton in helpers/render.jsx),
+                              #     not for the element to exist.
 npm run build                # outputs to frontend/dist, copied into the image as ./public
 
 # Full stack, matching production.

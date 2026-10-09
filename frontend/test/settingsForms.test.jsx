@@ -251,8 +251,11 @@ describe('Settings → Push → ntfy', () => {
   test('loads the saved config into every field', async () => {
     vi.spyOn(api, 'get').mockResolvedValue(CONFIG);
     renderAsAdmin(<SettingsPushNtfy />);
-    await waitFor(() => expect(screen.getByLabelText('Server URL')).toHaveValue('https://ntfy.sh'));
-    expect(screen.getByLabelText('Topic')).toHaveValue('nightlight-alerts-x8k2');
+    // Wait on the one field whose value ONLY the stored config supplies: 'https://ntfy.sh' is also the
+    // form's default, so waiting on Server URL passes before anything has loaded and the reads below race
+    // the request (#570).
+    await waitFor(() => expect(screen.getByLabelText('Topic')).toHaveValue('nightlight-alerts-x8k2'));
+    expect(screen.getByLabelText('Server URL')).toHaveValue('https://ntfy.sh');
     expect(screen.getByLabelText('Username (optional)')).toHaveValue('me');
     // ⚠️ A saved password is never sent back to the client — the placeholder is the only thing that
     // says one exists.
