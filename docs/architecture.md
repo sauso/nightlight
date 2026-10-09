@@ -90,6 +90,20 @@ in SQLite still exists (`backend/src/db.js`). This is what makes "sign out this 
 middlewares exist: `requireAuth` (Bearer header) and `requireAuthQueryOrHeader` (also accepts
 `?token=`, needed because Safari's native `<video>` fetches HLS segments itself with no way to
 attach headers). Roles are `admin` / `caregiver`; `requireAdmin` gates account/settings management.
+`cameras.js` and `children.js` gate the whole router with `router.use(requireAuth)`, which covers only
+the routes registered *after* it: cameras.js's four media routes sit above that line on purpose, so
+moving a route across it changes who can reach it.
+
+**Every route's gate is pinned** by `backend/test/route-permissions.test.js` (issue #563). It enumerates
+the real route table (index.js's registrations read from its source, and every mounted router's actual
+`router.stack`), classifies each route as public / optional / media / signed-in / signed-in+admin, and
+compares that with a hand-written table in both directions. It then checks over real HTTP that anonymous
+callers get 401, an admin's media-scoped token gets 401 on every session route, and a caregiver gets 403
+on every admin route. Adding a route, or adding, removing or reordering a `requireAuth`/`requireAdmin`,
+fails that test until the table is edited on purpose, which puts every permission change in a diff a
+reviewer reads. Routes whose caregiver access is an open question (#538, #542, #552) are pinned at
+today's behaviour and marked pending. Role checks made *inside* a handler (deleting another user's
+session, the admin-only fields of `GET /api/settings`) are not gates: their own test files cover them.
 
 The JWT signing secret is auto-generated and persisted to `DATA_DIR/.jwt_secret` if
 `JWT_SECRET` isn't set — deliberately avoiding a hardcoded fallback, since this image is

@@ -28,8 +28,11 @@ see the workspace `CLAUDE.md` for the rule and why it exists. What that means co
 **Tests** live in `backend/test/*.test.js` (Node's built-in runner, no dependencies — keep it that way)
 and `frontend/test/**/*.test.{js,jsx}` (vitest + RTL). `test/helpers/harness.js` gives you a real temp
 database and real HTTP with **no mocks**; `frontend/test/helpers/render.jsx` renders a screen as
-**both** an admin and a caregiver, which is where role-gating bugs hide. A fix gets a regression test
-you have watched fail without the fix.
+**both** an admin and a caregiver, which is where role-gating bugs hide. On the backend,
+`backend/test/route-permissions.test.js` pins every API route's gate (public / signed-in / admin-only and
+so on): a new route, or an added or removed `requireAuth`/`requireAdmin`, fails it until you edit its table
+on purpose (issue #563; see `docs/architecture.md`, Auth). A fix gets a regression test you have watched
+fail without the fix.
 
 **Docs** live in `docs/`, one file per user-facing area (`recording.md`, `notifications.md`, `mfa.md`,
 `design-language.md`), with `README.md` for anything that changes setup or deployment, and
