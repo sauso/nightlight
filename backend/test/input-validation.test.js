@@ -126,8 +126,9 @@ describe('PUT /api/settings: every numeric setting keeps to its documented range
 describe('PUT /api/settings: the three colours must be #RRGGBB', () => {
   // MUTANT THIS KILLS (#563): the hex check disabled survived the whole suite. It matters beyond tidiness:
   // the colours reach EVERY visitor's page as CSS custom properties (frontend SettingsContext.jsx), the
-  // unauthenticated login screen included, so the pattern is what keeps the value a colour and not, say, a
-  // url() the browser goes off and fetches.
+  // unauthenticated login screen included, so the pattern is what keeps the value a colour rather than
+  // arbitrary CSS. (The enforcing CSP's img-src is a second layer: it would still block a url() pointing at
+  // another origin.)
   const BAD = [
     '#FFF', 'F5D9A8', '#F5D9A', '#F5D9A8A', '#GGGGGG', 'red', '', ' #F5D9A8', '#F5D9A8 ', '#F5D9A8\n',
     '#F5D9A8;background:url(https://example.invalid/x)', 'url(https://example.invalid/x)', 123456,
