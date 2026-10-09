@@ -3,7 +3,8 @@
 // Standalone Node, no dependencies (so it can be `docker cp`'d anywhere ffmpeg runs). It reproduces
 // motionDetector.js's / soundDetector.js's exact ffmpeg args (see motionFfmpegArgs/soundFfmpegArgs
 // below for exactly what differs and why) and records everything needed to answer plan questions
-// Q1-Q7 (see `C:\Users\nacho\.claude\plans\lexical-hopping-fiddle.md`, "Stage 1: evidence").
+// Q1-Q7 (the questions in the issue #373 plan, "Stage 1: evidence"; that plan was a private working
+// file and is not kept in this repo, so the questions are answered by what this script records).
 //
 // Record a run against a real MediaMTX path:
 //   docker cp scripts/probe-sample-timing.mjs <container>:/tmp/probe-sample-timing.mjs
