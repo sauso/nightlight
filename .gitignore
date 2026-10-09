@@ -14,6 +14,11 @@ coverage/
 # runner — see that finding, filed separately). Not build output worth keeping either way.
 frontend/.vitest/
 
+# The restore journal of scripts/mutate.mjs (#599): exists only while a mutant is on disk, or after a run that
+# was killed hard enough to skip its handlers. Machine-local state, never to be committed.
+scripts/.mutate-restore.json
+scripts/.mutate-restore.json.*.tmp
+
 # Local data (SQLite DB, logs, MediaMTX runtime config) - never commit this
 data/
 

@@ -133,7 +133,9 @@ node scripts/mutate.mjs            # MUTATION TESTING. Breaks the source one way
                                    #   --full              every mutant against the WHOLE suite
                                    #   --list              print the catalogue
                                    #   --check             run NO tests; fail if any `find` no longer
-                                   #                       matches exactly once (stale anchor, #575)
+                                   #                       matches exactly once and every namePattern still
+                                   #                       selects a test (stale entries, #575, #604). CI runs
+                                   #                       this via backend/test/mutants-catalogue.test.js.
                                    #   --timeout=<ms>      per-mutant wall-clock limit (default 5 min,
                                    #                       or an entry's `timeoutMs`). A mutant that
                                    #                       outlives it is killed as a whole process
@@ -141,6 +143,11 @@ node scripts/mutate.mjs            # MUTATION TESTING. Breaks the source one way
                                    #                       listed apart, a weaker kill (#617)
                                    # It restores every file from an in-memory byte copy and verifies
                                    # the round-trip; it never shells out to git. See the header.
+                                   # A killed run is undone too: SIGINT/SIGTERM/SIGHUP restore, and a
+                                   # journal (scripts/.mutate-restore.json, gitignored) lets the NEXT run
+                                   # restore after a hard kill (Windows cannot catch SIGTERM, #599). A
+                                   # mutant that runs no test ABORTS the run (#604); line endings in a
+                                   # catalogue entry may be LF or CRLF (#597).
 npm start                    # node src/index.js — expects MediaMTX/ffmpeg binaries on PATH,
                               # so in practice this is normally run inside the Docker image
                               # rather than bare on a dev machine

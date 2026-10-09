@@ -1059,7 +1059,8 @@ the four ways such a run lies: a mutant that never applied, a restore that rever
 broken harness (a no-op control mutant must SURVIVE, or the whole run is declared void), and a
 name-pattern that matched nothing. **Deliberately not in CI** — ~12 minutes, and this repo's own rule
 is that a check people skim is worse than no check. Run it when adding tests to core logic, and add the
-mutants your change should be killing.
+mutants your change should be killing. (The catalogue itself IS checked in CI, cheaply: every anchor must still
+match once and every name-pattern still select a test, #604 — only the mutation run is not.)
 
 ⚠️ **Four "trap tests" were found and rewritten** in the same pass, all the same shape: *the test's
 NAME stated the invariant, and its FIXTURE guaranteed the invariant could not be violated.* One
