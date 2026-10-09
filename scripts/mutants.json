@@ -13041,5 +13041,309 @@
     "tests": ["route-permissions.test.js"],
     "namePattern": "lets through the weakest caller",
     "note": "The caregiver-403 test alone cannot tell requireAdmin from a gate that refuses everyone. The sentinel probe is what proves an admin gets through each admin route's middleware (the 'non-403 for admin' half of #563)."
+  },
+  {
+    "label": "#563 validation: PUT /settings hex-colour check disabled",
+    "file": "backend/src/routes/settings.js",
+    "find": "if (value !== undefined && !HEX_COLOR.test(value)) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "Survived the whole suite before #563's validation half."
+  },
+  {
+    "label": "#563 validation: HEX_COLOR loses its end anchor ('#F5D9A8;background:url(...)' accepted)",
+    "file": "backend/src/routes/settings.js",
+    "find": "const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;",
+    "replace": "const HEX_COLOR = /^#[0-9a-fA-F]{6}/;",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "The colours reach every visitor's page as CSS custom properties, the login screen included."
+  },
+  {
+    "label": "#563 validation: PUT /settings timezone check disabled",
+    "file": "backend/src/routes/settings.js",
+    "find": "if (timezone !== undefined && !isValidTimezone(timezone)) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "Survived the whole suite before #563's validation half."
+  },
+  {
+    "label": "#563 validation: post-roll ceiling 120 raised to 12000",
+    "file": "backend/src/routes/settings.js",
+    "find": "n > 120) {\n      return res.status(400).json({ error: 'Post-roll",
+    "replace": "n > 12000) {\n      return res.status(400).json({ error: 'Post-roll",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "The mutant #563 names. docs/recording.md documents 5-120."
+  },
+  {
+    "label": "#563 validation: PTZ step ceiling 100 raised to 1000",
+    "file": "backend/src/routes/settings.js",
+    "find": "n < 1 || n > 100) {",
+    "replace": "n < 1 || n > 1000) {",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "One of the ten bounds the table in input-validation.test.js takes from docs/camera-controls.md and docs/recording.md."
+  },
+  {
+    "label": "#563 validation: on-demand maximum length floor 5 lowered to 0",
+    "file": "backend/src/routes/settings.js",
+    "find": "n < 5 || n > 600) {",
+    "replace": "n < 0 || n > 600) {",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "A floor, not a ceiling: the table checks one below the lowest documented value as well as one above the highest."
+  },
+  {
+    "label": "#563 secret: GET /settings/mqtt returns the MQTT password",
+    "file": "backend/src/routes/settings.js",
+    "find": "mqtt_password_set: !!s.mqtt_password,",
+    "replace": "mqtt_password_set: !!s.mqtt_password, mqtt_password: s.mqtt_password,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"],
+    "note": "Survived the whole suite before #563's secret half."
+  },
+  {
+    "label": "#563 secret: GET /settings/mqtt says a password is set whether or not one is",
+    "file": "backend/src/routes/settings.js",
+    "find": "mqtt_password_set: !!s.mqtt_password,",
+    "replace": "mqtt_password_set: true,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"],
+    "namePattern": "GET /mqtt says no password is set"
+  },
+  {
+    "label": "#563 secret: PUT /settings with a blank MQTT password wipes the stored one",
+    "file": "backend/src/routes/settings.js",
+    "find": "mqtt_password ? mqtt_password : existing.mqtt_password,",
+    "replace": "mqtt_password ?? existing.mqtt_password,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"],
+    "note": "The settings form sends a blank password to mean 'unchanged'."
+  },
+  {
+    "label": "#563 secret: maskSecret returns the whole secret",
+    "file": "backend/src/lib/secretMask.js",
+    "find": "return `${str.slice(0, 4)}${'•'.repeat(6)}`;",
+    "replace": "return str;",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"],
+    "note": "Survived the whole suite before #563: no test mentioned secretMask."
+  },
+  {
+    "label": "#563 secret: maskSecret shows four characters of an eight-character secret",
+    "file": "backend/src/lib/secretMask.js",
+    "find": "if (str.length <= 8) return",
+    "replace": "if (str.length < 8) return",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"],
+    "note": "Survived the whole suite before #563. Killed by the unit test AND by the through-the-route short-secret test."
+  },
+  {
+    "label": "#563 secret: maskSecret shows eight characters instead of four",
+    "file": "backend/src/lib/secretMask.js",
+    "find": "str.slice(0, 4)",
+    "replace": "str.slice(0, 8)",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"]
+  },
+  {
+    "label": "#563 secret: maskSecret's dots give away the secret's length",
+    "file": "backend/src/lib/secretMask.js",
+    "find": "${'•'.repeat(6)}",
+    "replace": "${'•'.repeat(str.length - 4)}",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"],
+    "namePattern": "FIXED six dots"
+  },
+  {
+    "label": "#563 secret: ntfy config returns the access token unmasked",
+    "file": "backend/src/routes/ntfy.js",
+    "find": "token_masked: maskSecret(c.token)",
+    "replace": "token_masked: c.token",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"]
+  },
+  {
+    "label": "#563 secret: ntfy config returns the basic-auth password",
+    "file": "backend/src/routes/ntfy.js",
+    "find": "password_set: !!c.password,",
+    "replace": "password_set: !!c.password, password: c.password,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"]
+  },
+  {
+    "label": "#563 secret: a blank ntfy token on save wipes the stored one",
+    "file": "backend/src/routes/ntfy.js",
+    "find": "const token = (req.body?.token || '').trim() || existing.token;",
+    "replace": "const token = (req.body?.token || '').trim();",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"],
+    "namePattern": "a blank secret keeps the stored one"
+  },
+  {
+    "label": "#563 secret: Pushover config returns the user key unmasked",
+    "file": "backend/src/routes/pushover.js",
+    "find": "user_key_masked: maskSecret(c.userKey),",
+    "replace": "user_key_masked: c.userKey,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"]
+  },
+  {
+    "label": "#563 secret: Gotify config returns the app token unmasked",
+    "file": "backend/src/routes/gotify.js",
+    "find": "app_token_masked: maskSecret(c.appToken),",
+    "replace": "app_token_masked: c.appToken,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"]
+  },
+  {
+    "label": "#563 secret: the diagnostics bundle carries the MQTT password (a route this file was not written for)",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "mqtt_password_set: !!settings.mqtt_password,",
+    "replace": "mqtt_password_set: !!settings.mqtt_password, mqtt_password: settings.mqtt_password,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"],
+    "namePattern": "admin: no GET route returns",
+    "note": "Killed by the GET sweep alone: the sweep enumerates every GET route, so a leak in a route nobody thought to check is still caught."
+  },
+  {
+    "label": "#563 secret: every user object carries the TOTP secret",
+    "file": "backend/src/routes/auth.js",
+    "find": "    mfa_enabled: !!u.mfa_enabled,",
+    "replace": "    mfa_enabled: !!u.mfa_enabled,\n    mfa_secret: u.mfa_secret,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"]
+  },
+  {
+    "label": "#563 secret: every user object says MFA is off",
+    "file": "backend/src/routes/auth.js",
+    "find": "    mfa_enabled: !!u.mfa_enabled,",
+    "replace": "    mfa_enabled: false,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"]
+  },
+  {
+    "label": "#563 secret: GET /me/mfa carries the TOTP secret",
+    "file": "backend/src/routes/auth.js",
+    "find": "    enabled: !!u?.mfa_enabled,",
+    "replace": "    enabled: !!u?.mfa_enabled,\n    secret: u?.mfa_secret,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"]
+  },
+  {
+    "label": "#563 secret: GET /me/mfa says MFA is on for everyone",
+    "file": "backend/src/routes/auth.js",
+    "find": "    enabled: !!u?.mfa_enabled,",
+    "replace": "    enabled: true,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"],
+    "namePattern": "says OFF for an account without MFA"
+  },
+  {
+    "label": "#563 MFA: /me/mfa/setup replaces the secret of an account that already has MFA on",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (user.mfa_enabled) return res.status(400).json({ error: 'Two-factor is already on. Turn it off first to re-enrol.' });",
+    "replace": "/* #563 mutant: guard removed */",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "/setup needs only a session, not the password: without this guard a signed-in device could swap in its own second factor. Had no test before #563's validation half."
+  },
+  {
+    "label": "#563 MFA: /me/mfa/enable regenerates the backup codes of an account that already has MFA on",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (user.mfa_enabled) return res.status(400).json({ error: 'Two-factor is already on.' });",
+    "replace": "/* #563 mutant: guard removed */",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"]
+  },
+  {
+    "label": "#563 MFA: /me/mfa/enable before setup no longer says to start setup",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (!user.mfa_secret) return res.status(400).json({ error: 'Start setup first.' });",
+    "replace": "/* #563 mutant: guard removed */",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "Killed only by the message: without the guard verifyToken(null, code) is false and the route still answers 400, so nothing is turned on either way. The message is what tells the user what to do."
+  },
+  {
+    "label": "#563 MFA: verifyToken's up-front refusal of an empty secret or token removed",
+    "file": "backend/src/lib/mfa.js",
+    "find": "  if (!secret || !token) return false;",
+    "replace": "  /* #563 mutant: guard removed */",
+    "expect": "equivalent",
+    "tests": ["input-validation.test.js", "mfa.test.js"],
+    "note": "otplib v13 refuses the case itself: its guardrails throw on a secret under 16 bytes (10 for a legacy one) and on a malformed token, and verifyToken's catch turns the throw into false. input-validation.test.js pins the OUTCOME (a real RFC 6238 code for the empty key does not verify), so an otplib change that stopped throwing would turn this into a kill."
+  },
+  {
+    "label": "#563 validation: a photo only has to start with data:",
+    "file": "backend/src/lib/photo.js",
+    "find": "!photo.startsWith('data:image/')",
+    "replace": "!photo.startsWith('data:')",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "Before #563's validation half this was killed only by accident, by an unrelated timelapse test."
+  },
+  {
+    "label": "#563 validation: the photo size cap removed",
+    "file": "backend/src/lib/photo.js",
+    "find": "if (photo.length > MAX_PHOTO_LEN) throw",
+    "replace": "if (false) throw",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "Survived the whole suite before #563. Pinned at the function: over HTTP, index.js's express.json() 100 KB body limit refuses a larger photo first."
+  },
+  {
+    "label": "#563 validation: the photo cap is off by one",
+    "file": "backend/src/lib/photo.js",
+    "find": "if (photo.length > MAX_PHOTO_LEN) throw",
+    "replace": "if (photo.length >= MAX_PHOTO_LEN) throw",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"]
+  },
+  {
+    "label": "#563 validation: the 12-hour snooze cap removed",
+    "file": "backend/src/routes/cameras.js",
+    "find": "Math.max(0, Math.min(720, Math.round(Number(req.body?.minutes) || 0)))",
+    "replace": "Math.max(0, Math.round(Number(req.body?.minutes) || 0))",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "Survived the whole suite before #563. Any signed-in caregiver can mute all of a camera's alerts with this route."
+  },
+  {
+    "label": "#563 validation: the snooze cap raised to 5 days",
+    "file": "backend/src/routes/cameras.js",
+    "find": "Math.min(720, Math.round(Number(req.body?.minutes) || 0))",
+    "replace": "Math.min(7200, Math.round(Number(req.body?.minutes) || 0))",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"]
+  },
+  {
+    "label": "#563 validation: snooze minutes no longer rounded",
+    "file": "backend/src/routes/cameras.js",
+    "find": "Math.round(Number(req.body?.minutes) || 0)",
+    "replace": "(Number(req.body?.minutes) || 0)",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"]
+  },
+  {
+    "label": "#563 validation: the push snapshot id-format check removed",
+    "file": "backend/src/routes/push.js",
+    "find": "/^[a-f0-9]{64}$/.test(req.params.id || '') ? getSnapshot(req.params.id) : null",
+    "replace": "getSnapshot(req.params.id)",
+    "expect": "equivalent",
+    "tests": ["input-validation.test.js", "push.test.js"],
+    "note": "The snapshot store is an in-memory Map whose keys are always 64 lowercase hex characters (pushSnapshots.js), so a malformed id misses it with or without the check. Defence in depth for a future store keyed by something else (a file name, say)."
+  },
+  {
+    "label": "#563 validation: isAdminRequest reads an inherited role",
+    "file": "backend/src/middleware/auth.js",
+    "find": "user != null && Object.hasOwn(user, 'role') && user.role === 'admin'",
+    "replace": "user != null && user.role === 'admin'",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "Survived the whole suite before #563: every real req.user has an own `role` from the database, so only a direct call can reach the branch."
   }
 ]
