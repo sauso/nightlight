@@ -31,8 +31,10 @@ database and real HTTP with **no mocks**; `frontend/test/helpers/render.jsx` ren
 **both** an admin and a caregiver, which is where role-gating bugs hide. On the backend,
 `backend/test/route-permissions.test.js` pins every API route's gate (public / signed-in / admin-only and
 so on): a new route, or an added or removed `requireAuth`/`requireAdmin`, fails it until you edit its table
-on purpose (issue #563; see `docs/architecture.md`, Auth). A fix gets a regression test you have watched
-fail without the fix.
+on purpose (issue #563; see `docs/architecture.md`, Auth). `backend/test/secrets-never-returned.test.js`
+plants a marker in every credential column it finds in the schema and asks every GET route, as every role,
+for it. A new column named like a secret is covered automatically, and a new table holding one fails until
+you teach the test to create a row in it. A fix gets a regression test you have watched fail without the fix.
 
 **Docs** live in `docs/`, one file per user-facing area (`recording.md`, `notifications.md`, `mfa.md`,
 `design-language.md`), with `README.md` for anything that changes setup or deployment, and

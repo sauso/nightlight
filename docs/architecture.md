@@ -105,6 +105,21 @@ reviewer reads. Routes whose caregiver access is an open question (#538, #542, #
 today's behaviour and marked pending. Role checks made *inside* a handler (deleting another user's
 session, the admin-only fields of `GET /api/settings`) are not gates: their own test files cover them.
 
+**Stored secrets are never returned, and that is pinned too** (#563's second half),
+by `backend/test/secrets-never-returned.test.js`. It finds every column whose *name* marks a credential
+(password, secret, token, key, hash, backup code) by reading the schema, so a column added later is covered
+without editing the test, and plants a marker in each one. It then asks **every GET route in the app** (the
+same enumeration as above) as an anonymous visitor, a caregiver and an admin, and fails if any part of a
+marker comes back. The routes that save an integration secret (MQTT, ntfy, Pushover, Gotify) are also
+checked for "a blank field keeps the stored secret". The account routes (login, the second factor, MFA
+enrolment, user management) are checked against a real account for a password hash, TOTP secret or
+backup-code hash in their answers. Masked previews must be exactly `lib/secretMask.js`'s
+shape: four characters and six dots, and a secret of eight characters or fewer is masked completely.
+Credentials embedded in a URL column (a camera's RTSP or snapshot URL) are not found by a column name; the
+camera-specific exposure tests cover those. The validation behind the settings, photo, snooze and MFA-enrolment
+routes (documented ranges, `#RRGGBB` colours, known timezones, the 12-hour snooze cap, no second enrolment
+while MFA is on) is pinned in `backend/test/input-validation.test.js`.
+
 The JWT signing secret is auto-generated and persisted to `DATA_DIR/.jwt_secret` if
 `JWT_SECRET` isn't set — deliberately avoiding a hardcoded fallback, since this image is
 publicly distributed and a baked-in secret would be a shared key across every install.
