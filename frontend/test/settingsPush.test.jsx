@@ -19,7 +19,7 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import { Routes, Route, useLocation } from 'react-router-dom';
-import { renderAsAdmin } from './helpers/render.jsx';
+import { renderAsAdmin, enabledButton } from './helpers/render.jsx';
 import SettingsPush from '../src/pages/SettingsPush.jsx';
 import SettingsPushPushover from '../src/pages/SettingsPushPushover.jsx';
 import SettingsPushGotify from '../src/pages/SettingsPushGotify.jsx';
@@ -208,7 +208,7 @@ describe('Pushover settings', () => {
     // both. Both are accepted today, so nothing fails if they are confused — until one side changes
     // and a routine edit to the device name silently wipes an app token.
     const { user } = renderAsAdmin(<SettingsPushPushover />);
-    await screen.findByLabelText('Application API token');
+    await screen.findByDisplayValue('nachos-phone'); // config landed (#570)
     const body = await save(user);
     expect(body.app_token).toBe('');
     expect(body.user_key).toBe('');
@@ -253,7 +253,8 @@ describe('Pushover settings', () => {
 
   test('the enable switch is sent as a boolean', async () => {
     const { user } = renderAsAdmin(<SettingsPushPushover />);
-    await user.click(await screen.findByRole('switch'));
+    await screen.findByDisplayValue('nachos-phone'); // config landed: the switch is disabled until then (#570)
+    await user.click(screen.getByRole('switch'));
     const body = await save(user);
     expect(body.enabled).toBe(false);
   });
@@ -266,7 +267,7 @@ describe('Pushover settings', () => {
     vi.spyOn(api, 'get').mockResolvedValue({ ...CONFIG, enabled: false });
     putSpy = vi.spyOn(api, 'put').mockRejectedValue(new Error('user key is invalid'));
     const { user } = renderAsAdmin(<SettingsPushPushover />);
-    await screen.findByLabelText('Application API token');
+    await screen.findByDisplayValue('nachos-phone'); // config landed (#570)
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     expect(await screen.findByText('user key is invalid')).toBeTruthy();
@@ -280,13 +281,13 @@ describe('Pushover settings', () => {
     vi.restoreAllMocks();
     mockPushover({ ...CONFIG, configured: false, app_token_set: false, user_key_set: false });
     renderAsAdmin(<SettingsPushPushover />);
-    await screen.findByLabelText('Application API token');
+    await screen.findByDisplayValue('nachos-phone'); // config landed (#570)
     expect(screen.getByRole('button', { name: /Send test/i }).disabled).toBe(true);
   });
 
   test('sending a test reports success', async () => {
     const { user } = renderAsAdmin(<SettingsPushPushover />);
-    await screen.findByLabelText('Application API token');
+    await screen.findByDisplayValue('nachos-phone'); // config landed (#570)
     await user.click(screen.getByRole('button', { name: /Send test/i }));
     await waitFor(() => expect(postSpy).toHaveBeenCalledWith('/pushover/test'));
     expect(await screen.findByText(/Test sent/i)).toBeTruthy();
@@ -297,7 +298,7 @@ describe('Pushover settings', () => {
     vi.spyOn(api, 'get').mockResolvedValue(CONFIG);
     vi.spyOn(api, 'post').mockRejectedValue(new Error('Pushover: application token is invalid'));
     const { user } = renderAsAdmin(<SettingsPushPushover />);
-    await screen.findByLabelText('Application API token');
+    await screen.findByDisplayValue('nachos-phone'); // config landed (#570)
     await user.click(screen.getByRole('button', { name: /Send test/i }));
     expect(await screen.findByText('Pushover: application token is invalid')).toBeTruthy();
   });
@@ -376,8 +377,9 @@ describe('Gotify settings', () => {
     // Asserted as an exact key set: a field added to the form but forgotten in this hand-written
     // payload would appear to save and silently never persist.
     const { user } = renderAsAdmin(<SettingsPushGotify />);
-    await screen.findByLabelText('Server URL');
-    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    // The Save button is disabled until the config lands; clicking it earlier is a silent no-op (#570).
+    await screen.findByDisplayValue('https://gotify.example.com');
+    await user.click(await enabledButton('Save changes'));
     await waitFor(() => expect(putSpy).toHaveBeenCalled());
     const [path, body] = putSpy.mock.calls[0];
     expect(path).toBe('/gotify/config');
@@ -431,7 +433,7 @@ describe('Gotify settings', () => {
     vi.restoreAllMocks();
     mockGotify({ ...CONFIG, configured: false });
     renderAsAdmin(<SettingsPushGotify />);
-    await screen.findByLabelText('Server URL');
+    await screen.findByDisplayValue('https://gotify.example.com'); // config landed (#570)
     expect(screen.getByRole('button', { name: /Send test/i }).disabled).toBe(true);
   });
 
@@ -440,7 +442,7 @@ describe('Gotify settings', () => {
     vi.spyOn(api, 'get').mockResolvedValue(CONFIG);
     vi.spyOn(api, 'post').mockRejectedValue(new Error('Gotify returned 401'));
     const { user } = renderAsAdmin(<SettingsPushGotify />);
-    await screen.findByLabelText('Server URL');
+    await screen.findByDisplayValue('https://gotify.example.com'); // config landed (#570)
     await user.click(screen.getByRole('button', { name: /Send test/i }));
     expect(await screen.findByText('Gotify returned 401')).toBeTruthy();
   });
@@ -450,7 +452,7 @@ describe('Gotify settings', () => {
     vi.spyOn(api, 'get').mockResolvedValue(CONFIG);
     putSpy = vi.spyOn(api, 'put').mockRejectedValue(new Error('Server URL is not reachable'));
     const { user } = renderAsAdmin(<SettingsPushGotify />);
-    await screen.findByLabelText('Server URL');
+    await screen.findByDisplayValue('https://gotify.example.com'); // config landed (#570)
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     expect(await screen.findByText('Server URL is not reachable')).toBeTruthy();
     expect(screen.queryByText('Saved ✓')).toBeNull();
