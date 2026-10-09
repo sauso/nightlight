@@ -110,8 +110,10 @@ by `backend/test/secrets-never-returned.test.js`. It finds every column whose *n
 (password, secret, token, key, hash, backup code) by reading the schema, so a column added later is covered
 without editing the test, and plants a marker in each one. It then asks **every GET route in the app** (the
 same enumeration as above) as an anonymous visitor, a caregiver and an admin, and fails if any part of a
-marker comes back. The routes that save a secret (MQTT, ntfy, Pushover, Gotify, passwords, MFA) are also
-checked for "a blank field keeps the stored secret". Masked previews must be exactly `lib/secretMask.js`'s
+marker comes back. The routes that save an integration secret (MQTT, ntfy, Pushover, Gotify) are also
+checked for "a blank field keeps the stored secret". The account routes (login, the second factor, MFA
+enrolment, user management) are checked against a real account for a password hash, TOTP secret or
+backup-code hash in their answers. Masked previews must be exactly `lib/secretMask.js`'s
 shape: four characters and six dots, and a secret of eight characters or fewer is masked completely.
 Credentials embedded in a URL column (a camera's RTSP or snapshot URL) are not found by a column name; the
 camera-specific exposure tests cover those. The validation behind the settings, photo, snooze and MFA-enrolment
