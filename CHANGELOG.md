@@ -51,6 +51,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   new CI test checks that every catalogue anchor still occurs once and every `namePattern` still selects a test
   (#604, #575). A catalogue entry may be written with LF or CRLF line endings whichever the checkout uses (#597).
   Not a product change: nothing in the app or its data is affected.
+- **Developer tooling: the mutation script can score frontend mutants again.** vitest 5 no longer prints its JSON
+  report to stdout, so `node scripts/mutate.mjs` read nothing and all 103 frontend mutants ended ERROR whatever the
+  mutation did. The script now has vitest write the report to a fresh file in the OS temp directory
+  (`--outputFile`), reads it back, and deletes it; a missing or malformed report is still ERROR, never a verdict
+  (#520, #503). Not a product change: nothing in the app or its data is affected.
 
 ## [0.35.0] - 2026-10-06
 

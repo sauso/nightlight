@@ -65,8 +65,9 @@
 // A mutant is KILLED if the chosen tests fail with it applied. SURVIVED means the suite cannot tell
 // the mutated code from the real code — that is the finding, and it needs either a new test or a
 // written reason why it does not matter.
-import { existsSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -390,26 +391,48 @@ function runCommand(command, cwd, timeoutMs) {
 async function runTests(testFiles, namePattern, frontend = false, timeoutMs = DEFAULT_TIMEOUT_MS) {
   const target = testFiles?.length ? testFiles.map((f) => path.join('test', f)) : ['test/*.test.js'];
   const nameArgs = namePattern ? [frontend ? '--testNamePattern' : '--test-name-pattern', namePattern] : [];
+  // #520: vitest 5's `--reporter=json` no longer prints the report to stdout; with no target it writes
+  // `frontend/.vitest/json/output.json` and prints only "JSON report written to ..." (measured on 5.0.1, which
+  // made all 103 frontend mutants ERROR). So the report goes to a file we name: `--outputFile=<path>`, in a
+  // directory made fresh for THIS run. Fresh matters: a fixed path would let a run that wrote nothing (a crash
+  // before the reporter ran, a mutant that breaks the config) be read as the PREVIOUS mutant's report, which is
+  // a stale verdict, the worst kind. The OS temp dir, not the checkout, so no stray directory is left behind
+  // and a hard kill leaves nothing in the working tree to mistake for source (the journal covers that).
+  const reportDir = frontend ? mkdtempSync(path.join(os.tmpdir(), 'nl-mutate-vitest-')) : null;
+  const reportFile = frontend ? path.join(reportDir, 'report.json') : null;
   const command = frontend
-    ? [path.join(FRONTEND, 'node_modules/vitest/vitest.mjs'), 'run', '--reporter=json', ...nameArgs, ...(testFiles?.length ? target : [])]
+    ? [path.join(FRONTEND, 'node_modules/vitest/vitest.mjs'), 'run', '--reporter=json', `--outputFile=${reportFile}`, ...nameArgs, ...(testFiles?.length ? target : [])]
     : ['--experimental-test-module-mocks', '--test', '--test-reporter=spec', ...nameArgs, ...target];
-  const res = await runCommand(command, frontend ? FRONTEND : BACKEND, timeoutMs);
-  const out = `${res.stdout || ''}${res.stderr || ''}`;
-  // A run the clock ended says nothing about the tests (the JSON/spec output is cut off mid-way), so it is
-  // reported as its own thing and never parsed as a pass or a fail.
-  if (res.hung) return { failed: true, cancelled: 0, ran: 0, out, hung: true };
-  if (frontend) {
-    // Vitest's JSON counts completed assertions. Startup failures or missing reports must be
-    // ERROR, not a spurious kill; use the same no-tests-ran guard as the backend runner.
-    let report;
-    try { report = JSON.parse(res.stdout); } catch { return { failed: true, cancelled: 0, ran: 0, out }; }
-    return {
-      failed: res.status !== 0 || !report.success,
-      cancelled: 0,
-      ran: report.numPassedTests + report.numFailedTests,
-      out,
-    };
+  try {
+    const res = await runCommand(command, frontend ? FRONTEND : BACKEND, timeoutMs);
+    const out = `${res.stdout || ''}${res.stderr || ''}`;
+    // A run the clock ended says nothing about the tests (the JSON/spec output is cut off mid-way), so it is
+    // reported as its own thing and never parsed as a pass or a fail.
+    if (res.hung) return { failed: true, cancelled: 0, ran: 0, out, hung: true };
+    if (frontend) {
+      // Vitest's JSON counts completed assertions. Startup failures or a missing/garbled report must be
+      // ERROR, not a spurious kill; use the same no-tests-ran guard as the backend runner. The counts are
+      // checked to be numbers because `undefined + undefined` is NaN, and NaN === 0 is false: a report of the
+      // wrong shape (a vitest that renamed its fields) would otherwise slip past the guard as SURVIVED or KILLED.
+      let report;
+      try { report = JSON.parse(readFileSync(reportFile, 'utf8')); } catch { return { failed: true, cancelled: 0, ran: 0, out }; }
+      if (!Number.isFinite(report?.numPassedTests) || !Number.isFinite(report?.numFailedTests)) {
+        return { failed: true, cancelled: 0, ran: 0, out };
+      }
+      return {
+        failed: res.status !== 0 || !report.success,
+        cancelled: 0,
+        ran: report.numPassedTests + report.numFailedTests,
+        out,
+      };
+    }
+    return parseBackendRun(res, out);
+  } finally {
+    if (reportDir) rmSync(reportDir, { recursive: true, force: true });
   }
+}
+
+function parseBackendRun(res, out) {
   const num = (label) => Number(new RegExp(`^ℹ ${label} (\\d+)$`, 'm').exec(out)?.[1] ?? 0);
   // ⚠️ A `--test-name-pattern` that matches nothing SKIPS every test and exits 0, which would be
   // recorded as "the mutant survived" — the same lie as a mutant that never applied, arriving from the
