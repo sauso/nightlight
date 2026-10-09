@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.35.1] - 2026-10-10
+
 ### Changed
 
 - Dependency maintenance: **ws 8.21.3 → 8.22.0** (the WebSocket library behind two-way talk), and the build/test
