@@ -9,6 +9,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+
+- Dependency maintenance: **ws 8.21.3 → 8.22.0** (the WebSocket library behind two-way talk), and the build/test
+  tooling **vite 8.2.2 → 8.3.4**, **vitest and @vitest/coverage-v8 5.0.1 → 5.0.2**, **jsdom 30.0.1 → 30.1.1**. No
+  behaviour change intended: ws 8.22.0 adds a `protocols` option and stops a `close()` call with invalid
+  arguments from leaving a socket half-closed, neither of which Nightlight relies on, and a new backend test now
+  loads the real ws library (nothing did before). The vite advisories fixed in 8.3.3 concern the Vite dev server
+  only, which is not part of the deployed image.
+
 ### Fixed
 - **A night's morning wake changes by itself less often as the morning goes on (not never).** When a child's
   real exit left no "got out of bed" and a parent then handled the bed, the wake read the start of the activity until
