@@ -12791,5 +12791,255 @@
     ],
     "namePattern": "no event id, no clip",
     "note": "The old assertion (no detection_events rows) held whatever the guard did: enqueueClip never inserts one."
+  },
+  {
+    "label": "#563 gate: POST /api/cameras without requireAdmin (a caregiver can add a camera)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.post('/', requireAdmin, async (req, res) => {",
+    "replace": "router.post('/', async (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "One of the eleven requireAdmin deletions that left the whole suite green before route-permissions.test.js (#563)."
+  },
+  {
+    "label": "#563 gate: PUT /api/cameras/:id/enabled without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.put('/:id/enabled', requireAdmin, async",
+    "replace": "router.put('/:id/enabled', async",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Survived the whole suite before #563."
+  },
+  {
+    "label": "#563 gate: DELETE /api/cameras/:id without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.delete('/:id', requireAdmin, async",
+    "replace": "router.delete('/:id', async",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Before #563 this was killed only by accident, by an unrelated timelapse test."
+  },
+  {
+    "label": "#563 gate: cameras.js loses its router-wide requireAuth (every route after it goes public)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.use(requireAuth);",
+    "replace": "router.use((req, res, next) => next());",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "The routes that rely on the router-level use() alone (record, PTZ, reorder, assign, the admin routes' authentication) become anonymous."
+  },
+  {
+    "label": "#563 CONTROL: the inline requireAuth on POST /api/cameras/:id/restart is redundant",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.post('/:id/restart', requireAuth, async",
+    "replace": "router.post('/:id/restart', async",
+    "expect": "survives",
+    "tests": ["route-permissions.test.js"],
+    "note": "EQUIVALENT BY DESIGN: router.use(requireAuth) earlier in cameras.js already gates this route, so the inline copy changes nothing a caller can observe. Recorded so its survival is not read as a gap. If the router-level use() is ever removed or moved below this route, this becomes killable: change expect to killed."
+  },
+  {
+    "label": "#563 gate: GET /api/cameras/alerts/:id/clip loses requireAuthQueryOrHeader (alert clips go public)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.get('/alerts/:id/clip', requireAuthQueryOrHeader, (req, res) => {",
+    "replace": "router.get('/alerts/:id/clip', (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "A media route sits ABOVE the router-wide requireAuth, so its own gate is the only one."
+  },
+  {
+    "label": "#563 gate: DELETE /api/children/:id without requireAdmin",
+    "file": "backend/src/routes/children.js",
+    "find": "router.delete('/:id', requireAdmin, (req, res) => {",
+    "replace": "router.delete('/:id', (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Survived the whole suite before #563. Deletes the child's media too."
+  },
+  {
+    "label": "#563 gate: children.js loses its router-wide requireAuth",
+    "file": "backend/src/routes/children.js",
+    "find": "router.use(requireAuth);",
+    "replace": "router.use((req, res, next) => next());",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"]
+  },
+  {
+    "label": "#563 gate: GET /api/logs without requireAdmin (server logs readable by caregivers)",
+    "file": "backend/src/routes/logs.js",
+    "find": "router.get('/', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.get('/', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Survived the whole suite before #563."
+  },
+  {
+    "label": "#563 gate: a NEW unguarded route in logs.js (GET /api/logs/raw)",
+    "file": "backend/src/routes/logs.js",
+    "find": "router.delete('/', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.get('/raw', (req, res) => res.json({ lines: logger.getRecent() }));\nrouter.delete('/', requireAuth, requireAdmin, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "namePattern": "no route is unpinned",
+    "note": "The pin is compared in both directions: a route nobody pinned fails until someone decides its gate."
+  },
+  {
+    "label": "#563 gate: DELETE /api/events without requireAdmin (history wipe)",
+    "file": "backend/src/routes/events.js",
+    "find": "router.delete('/', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.delete('/', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Survived the whole suite before #563."
+  },
+  {
+    "label": "#563 gate: GET /api/diagnostics without requireAdmin",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "router.get('/', requireAuth, requireAdmin, async (req, res) => {",
+    "replace": "router.get('/', requireAuth, async (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Survived the whole suite before #563."
+  },
+  {
+    "label": "#563 gate: GET /api/ntfy/config without requireAdmin",
+    "file": "backend/src/routes/ntfy.js",
+    "find": "router.get('/config', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.get('/config', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Survived the whole suite before #563."
+  },
+  {
+    "label": "#563 gate: PUT /api/pushover/config without requireAdmin",
+    "file": "backend/src/routes/pushover.js",
+    "find": "router.put('/config', requireAuth, requireAdmin, async (req, res) => {",
+    "replace": "router.put('/config', requireAuth, async (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Survived the whole suite before #563."
+  },
+  {
+    "label": "#563 gate: POST /api/gotify/test without requireAdmin",
+    "file": "backend/src/routes/gotify.js",
+    "find": "router.post('/test', requireAuth, requireAdmin, async (req, res) => {",
+    "replace": "router.post('/test', requireAuth, async (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Survived the whole suite before #563."
+  },
+  {
+    "label": "#563 gate: PUT /api/push/enable without requireAdmin",
+    "file": "backend/src/routes/push.js",
+    "find": "router.put('/enable', requireAuth, requireAdmin, async (req, res) => {",
+    "replace": "router.put('/enable', requireAuth, async (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Survived the whole suite before #563."
+  },
+  {
+    "label": "#563 gate: GET /api/settings/mqtt without requireAdmin",
+    "file": "backend/src/routes/settings.js",
+    "find": "router.get('/mqtt', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.get('/mqtt', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"]
+  },
+  {
+    "label": "#563 gate order: DELETE /api/timelapses/:id runs requireAdmin BEFORE requireAuth",
+    "file": "backend/src/routes/timelapses.js",
+    "find": "router.delete('/:id', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.delete('/:id', requireAdmin, requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "With no router-wide requireAuth, requireAdmin reads an unpopulated req.user and refuses everyone, admins included; anonymous then gets 403 where it should get 401 (timelapses.js's own comment)."
+  },
+  {
+    "label": "#563 gate: GET /api/auth/users without requireAdmin",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.get('/users', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.get('/users', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"]
+  },
+  {
+    "label": "#563 gate: DELETE /api/recordings/:id takes a media token (requireAuth -> requireAuthQueryOrHeader)",
+    "file": "backend/src/routes/recordings.js",
+    "find": "router.delete('/:id', requireAuth, (req, res) => {",
+    "replace": "router.delete('/:id', requireAuthQueryOrHeader, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "A leaked <img>/<video> URL carries a media token; it must never authenticate a write."
+  },
+  {
+    "label": "#563 app gate: /live proxied without requireAuth",
+    "file": "backend/src/index.js",
+    "find": "  '/live',\n  requireAuth,\n  whepOnlyGuard,",
+    "replace": "  '/live',\n  whepOnlyGuard,",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "index.js cannot be booted in a unit test, so its own gates are pinned structurally (APP_REGISTRATIONS)."
+  },
+  {
+    "label": "#563 app gate: a NEW unguarded app-level route in index.js",
+    "file": "backend/src/index.js",
+    "find": "app.get('/api/health', (req, res) => res.json({ ok: true }));",
+    "replace": "app.get('/api/health', (req, res) => res.json({ ok: true }));\napp.get('/api/debug/logs', (req, res) => res.json(logger.getRecent()));",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"]
+  },
+  {
+    "label": "#563 enumerator: the index.js tokenizer forgets regex literals (a `//` inside one eats the rest of the line)",
+    "file": "backend/test/helpers/routeTable.js",
+    "find": "if (c === '/' && regexMayStart(toks.at(-1))) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "index.js has exactly that line (keepUnderPrefix's /^https?:\\/\\//i); the hostile scanner fixture puts a registration after one."
+  },
+  {
+    "label": "#563 enumerator: requireAdmin counts as admin-only even in front of authentication",
+    "file": "backend/test/helpers/routeTable.js",
+    "find": "admin = rank[auth] >= rank.media ? '+admin' : '+admin-before-auth';",
+    "replace": "admin = '+admin';",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"]
+  },
+  {
+    "label": "#563 enumerator: guards compared by NAME instead of identity",
+    "file": "backend/test/helpers/routeTable.js",
+    "find": "else if (fn === requireAdmin) admin",
+    "replace": "else if (fn.name === 'requireAdmin') admin",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "The look-alike fixture: a function that is merely NAMED requireAdmin must not make a route admin-only."
+  },
+  {
+    "label": "#563 HTTP layer alone: GET /api/logs without requireAdmin, judged only by the caregiver-403 test",
+    "file": "backend/src/routes/logs.js",
+    "find": "router.get('/', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.get('/', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "namePattern": "requireAdmin's 403 on every route",
+    "note": "Same mutation as the GET /api/logs entry above, narrowed to the HTTP test: the real-router checks must catch a deleted gate on their own, not only through the structural pin, so a bug in the enumerator cannot hide one."
+  },
+  {
+    "label": "#563 HTTP layer alone: children.js loses its router-wide requireAuth, judged only by the anonymous-401 test",
+    "file": "backend/src/routes/children.js",
+    "find": "router.use(requireAuth);",
+    "replace": "router.use((req, res, next) => next());",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "namePattern": "anonymous: 401 on every route"
+  },
+  {
+    "label": "#563 probe: requireAdmin refuses admins too (every admin-only 403 would then be vacuous)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "if (req.user?.role !== 'admin') {",
+    "replace": "if (req.user?.role !== 'admin' || true) {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "namePattern": "lets through the weakest caller",
+    "note": "The caregiver-403 test alone cannot tell requireAdmin from a gate that refuses everyone. The sentinel probe is what proves an admin gets through each admin route's middleware (the 'non-403 for admin' half of #563)."
   }
 ]
