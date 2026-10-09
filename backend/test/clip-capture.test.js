@@ -448,7 +448,14 @@ describe('★ enqueueClip refuses in every case where a clip would be empty or u
     startClipCapture(c);
     enqueueClip(c, null);
     enqueueClip(c, undefined);
-    assert.equal(db.prepare('SELECT COUNT(*) n FROM detection_events').get().n, 0, 'no throw, and nothing recorded');
+    // ⚠️ The old assertion (no detection_events rows) could not fail: enqueueClip never inserts one, so it
+    // held whatever the guard did (#564). What a missing guard DOES leave behind is the capture's lease on
+    // the ring (a `clip:null` hold taken before the job is queued, released only when the job ends, which
+    // is asynchronous) — and, once it had run, a camera marked busy. The ring IS running in this test
+    // (startClipCapture above, precondition below), so the hold is what makes the mutant visible.
+    assert.equal(isSegmenterRunning('cam-1'), true, 'precondition: the ring is running, so a missing guard WOULD take a hold');
+    assert.deepEqual(holdOwners('cam-1'), [], 'a clip was queued for an event that does not exist');
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM detection_events').get().n, 0, 'nothing recorded');
   });
 
   test('★ no segmenter means no clip — an empty ring would produce an empty file', () => {

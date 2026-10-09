@@ -220,8 +220,18 @@ describe('★ the janitor prunes the ring, and a hold stops it', () => {
     t.mock.timers.enable({ apis: ['setInterval'] });
     startSegmenter(CAM, 'somepath');
     fs.rmSync(ringDir(), { recursive: true, force: true });
+    t.mock.timers.tick(2000); // under mocked timers a throw in the callback propagates out of tick(), failing here
+    // ⚠️ This used to end in `assert.ok(true, 'no throw')` (#564), which only proved the throw half. "Survived"
+    // also means the janitor is STILL WORKING afterwards: a janitor that handled the missing directory by
+    // stopping itself (or dropping its ring entry) would pass a bare no-throw check and then leave the
+    // ring unbounded for the rest of the process's life. So: the ring is still registered, and once the
+    // directory exists again an expired segment is collected by the very same timer.
+    assert.equal(isSegmenterRunning(CAM), true, 'the janitor tore the segmenter down because its directory vanished');
+    const old = segment('seg-old.mkv', DEPTH_MS + 30_000); // segment() recreates the directory
+    const fresh = segment('seg-new.mkv', 5_000);
     t.mock.timers.tick(2000);
-    assert.ok(true, 'no throw');
+    assert.equal(fs.existsSync(old), false, 'the janitor stopped pruning after its directory vanished once');
+    assert.equal(fs.existsSync(fresh), true, 'the janitor pruned a segment inside the ring depth');
   });
 });
 
