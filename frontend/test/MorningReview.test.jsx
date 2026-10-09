@@ -1594,5 +1594,34 @@ describe('the review screen', () => {
       expect(screen.getByText('You said no one was in the bed.')).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /That.s right/ })).not.toBeInTheDocument();
     });
+
+    // ★ #631 (found when #520 made the frontend mutants run for the first time): the bottom "Save review"
+    // is gated `editing && !nobody`, and the `!nobody` half had no test. `editing` stays true after a
+    // person typed times and THEN tapped "No one was in the bed" (the mocked save succeeds, `nobody`
+    // flips, and `editing` is never reset), so without the guard the flag view would sit above a live
+    // "Save review" offering to save the times the flag just abandoned. The positive half (the button
+    // IS there in the ordinary editing view) is asserted first, in the SAME test, so a button that
+    // simply never renders cannot satisfy the absence check.
+    test('★ the bottom "Save review" is absent under the flag view even though edit mode is still on (#631)', async () => {
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: /Not quite/ }));
+      const wake = await screen.findByLabelText(/Got up for the day/);
+      await user.clear(wake);
+      await user.type(wake, '06:10');
+      // Ordinary editing view: the button exists.
+      expect(screen.getByRole('button', { name: /Save review/ })).toBeInTheDocument();
+      expect(document.querySelector('main .btn-primary.btn-block')).not.toBeNull(); // the selector below really finds it
+
+      await user.click(screen.getByRole('button', { name: /No one was in the bed/ }));
+      await screen.findByText('You said no one was in the bed.');
+      // The flag view is showing (and edit mode was entered), yet no Save review button.
+      expect(screen.queryByRole('button', { name: /Save review/ })).not.toBeInTheDocument();
+      // ...and not in its busy spelling either. The mocked save succeeds and the real screen would
+      // navigate away, so `busy` is still true here and the mutant's button would read "Saving…", which
+      // the name check above cannot see (first draft of this test passed against the mutant for exactly
+      // that reason). The bottom button is the only primary full-width one on this screen; the flag
+      // view's own "Someone was in the bed" is secondary.
+      expect(document.querySelector('main .btn-primary.btn-block')).toBeNull();
+    });
   });
 });

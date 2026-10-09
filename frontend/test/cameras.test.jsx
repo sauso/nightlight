@@ -130,7 +130,8 @@ describe('the Cameras tab', () => {
     const select = within(card('Hallway')).getByRole('combobox');
     await user.selectOptions(select, 'kid-2');
     await waitFor(() => expect(api.put).toHaveBeenCalledWith('/cameras/cam-b/assign', { child_id: 'kid-2' }));
-    expect(camerasValue.refresh).toHaveBeenCalled();
+    // waitFor: refresh runs when the PUT resolves, which is after it was called (#570).
+    await waitFor(() => expect(camerasValue.refresh).toHaveBeenCalled());
   });
 
   test('unassigning sends null, not an empty string', async () => {

@@ -339,9 +339,22 @@ test('the control: a path INSIDE CLIPS_DIR really is deleted', () => {
 test('unlinkClip tolerates a missing file and a null path', () => {
   // Must not throw in either case — it runs inside the retention sweeper, which has no error handling
   // of its own per clip and would abandon the rest of the sweep.
+  //
+  // ⚠️ "Does not throw" alone cannot fail for the failure that matters (#564): a bad input that is handled by
+  // DELETING THE WRONG THING does not throw either. `''` is the dangerous one: it resolves to CLIPS_DIR itself,
+  // which the containment guard below ALLOWS (`abs !== CLIPS_DIR`), so today only the early `!relPath` return and the
+  // NON-recursive rm keep it harmless. A refactor that dropped the first and made the rm recursive would clear every
+  // clip with no error. So plant a real clip and a thumbnail, make the tolerant calls, and require both, and the
+  // directory, to survive. (That two-part change is the mutant this was checked against; either half alone is
+  // harmless today, so neither half alone is claimed to be caught here.)
+  const keep = makeClipFile('survives-the-tolerant-calls.mp4');
+  const keepJpg = path.join(CLIPS_DIR, keep).replace(/\.mp4$/, '.jpg');
+  fs.writeFileSync(keepJpg, 'thumb');
   ev.unlinkClip('clips-test/does-not-exist.mp4');
   ev.unlinkClip(null);
   ev.unlinkClip('');
   ev.unlinkClip(undefined);
-  assert.ok(true, 'no throw');
+  assert.equal(fs.existsSync(path.join(CLIPS_DIR, keep)), true, 'a tolerant call deleted a clip it was not asked about');
+  assert.equal(fs.existsSync(keepJpg), true, 'a tolerant call deleted a thumbnail it was not asked about');
+  assert.equal(fs.existsSync(CLIPS_DIR), true, 'a tolerant call removed CLIPS_DIR itself');
 });

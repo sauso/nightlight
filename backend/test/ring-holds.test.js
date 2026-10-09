@@ -183,10 +183,26 @@ describe('the wiring in clipRecorder', () => {
     assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE]);
   });
 
-  test('releaseRing on a camera with no segmenter does not throw', () => {
+  test('releaseRing on a camera with no segmenter still lets go of that owner’s hold', () => {
     // It deliberately does NOT require a live segmenter: a recording that fails must be able to let go
-    // of its hold even after the segmenter died underneath it.
-    releaseRing('no-such-camera', RING_OWNER.ONDEMAND);
+    // of its hold even after the segmenter died underneath it. ⚠️ This used to be a bare call with no
+    // assertion (#564): a releaseRing that bailed out when no segmenter exists — leaving the lease behind
+    // for good, since nothing else ever releases it — stayed green. The hold is planted straight in the
+    // registry (addHold) because holdRing refuses to take one without a running segmenter, which is the
+    // exact situation being modelled; the bystander proves it released ONE owner, not the camera.
+    const GONE = 'no-such-camera';
+    addHold(GONE, RING_OWNER.ONDEMAND, SHALLOW);
+    addHold(GONE, RING_OWNER.WAKE, DEEP);
+    assert.deepEqual(holdOwners(GONE).sort(), [RING_OWNER.ONDEMAND, RING_OWNER.WAKE].sort(), 'precondition: both holds planted');
+
+    releaseRing(GONE, RING_OWNER.ONDEMAND);
+
+    assert.deepEqual(holdOwners(GONE), [RING_OWNER.WAKE], 'releaseRing did not release the hold of a camera whose segmenter is gone');
+    assert.equal(effectiveHold(GONE), DEEP);
+    // ...and releasing an owner that holds nothing, on a camera nothing knows, is a harmless no-op.
+    releaseRing('never-heard-of-it', RING_OWNER.ONDEMAND);
+    assert.deepEqual(holdOwners('never-heard-of-it'), []);
+    clearHolds(GONE); // the registry is module-level; beforeEach only clears CAM and OTHER
   });
 
   test('holdRing records the hold under its owner, and refuses when nothing is buffering', () => {

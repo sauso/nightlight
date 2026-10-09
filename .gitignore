@@ -7,9 +7,18 @@ backend/node_modules/
 frontend/dist/
 backend/public/
 
-# vitest 5's --reporter=json writes here instead of stdout (breaks scripts/mutate.mjs's frontend
-# runner — see that finding, filed separately). Not build output worth keeping either way.
+# Coverage reports (`npm run test:coverage` in backend/ or frontend/ writes a coverage/ folder).
+coverage/
+
+# vitest 5's --reporter=json writes here when given no --outputFile (it no longer prints to stdout, #520).
+# scripts/mutate.mjs now names its own temp file, so the harness leaves nothing here; this stays for anyone
+# who runs `vitest --reporter=json` by hand. Not build output worth keeping either way.
 frontend/.vitest/
+
+# The restore journal of scripts/mutate.mjs (#599): exists only while a mutant is on disk, or after a run that
+# was killed hard enough to skip its handlers. Machine-local state, never to be committed.
+scripts/.mutate-restore.json
+scripts/.mutate-restore.json.*.tmp
 
 # Local data (SQLite DB, logs, MediaMTX runtime config) - never commit this
 data/

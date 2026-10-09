@@ -1,0 +1,104 @@
+name: Future-clock and slow-request tests
+
+# Runs both suites with the wall clock moved forward (scripts/clock-shift.mjs, issue #570), to catch a
+# fixture with a shelf life BEFORE the calendar does. #534 failed every PR from 2026-10-01 with no code
+# change; `moving between nights` and `which night it opens on` did the same in the weeks before. A suite
+# that is green today says nothing about next month.
+#
+# WHY SCHEDULED, NOT ON EVERY PR. The verdict of this job depends on today's date, not only on the diff:
+# a fixture that is fine now becomes a failure when "a year ahead" crosses its date. Run on every PR it
+# would turn red for a PR that touched nothing, which is the failure it exists to prevent, one level up.
+# Weekly (and on demand) it is a smoke alarm that gives a fix a few weeks of notice instead of a morning.
+# It also runs on a PR that changes the tool or this file, so those cannot rot unnoticed.
+#
+# WHAT EACH SHIFT IS FOR
+#   30 days   the near-term bomb (a "recent" fixture falling out of a 14- or 29-day window) — the #534 shape
+#   365 days  a year of drift: retention sweeps, "this date is in the future" fixtures, the age label
+# The clock moves; timers do not, so the shifted jobs find calendar dependence only. Request speed is the
+# separate `frontend-slow-requests` job below (the backend's sleep-based timing tests are NOT covered by
+# either; see the #570 PR for the list).
+on:
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - 'scripts/clock-shift.mjs'
+      - '.github/workflows/future-clock.yml'
+      - 'backend/test/clock-shift.test.js'
+      - 'frontend/test/setup.js'
+
+concurrency:
+  group: future-clock-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend, clock +${{ matrix.days }} days
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        days: [30, 365]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Run the suite with the clock moved forward
+        working-directory: backend
+        env:
+          NIGHTLIGHT_CLOCK_SHIFT_DAYS: ${{ matrix.days }}
+        run: npm run test:future
+
+  frontend:
+    name: Front end, clock +${{ matrix.days }} days
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        days: [30, 365]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install front-end dependencies
+        working-directory: frontend
+        run: npm ci
+      # The shift is loaded by test/setup.js when the variable is set; the zone stays the suite's own
+      # pinned Pacific/Auckland (vite.config.js).
+      - name: Run the suite with the clock moved forward
+        working-directory: frontend
+        env:
+          NIGHTLIGHT_CLOCK_SHIFT_DAYS: ${{ matrix.days }}
+        run: npm test
+
+  # The other kind of time-dependence the #570 audit found: not the calendar but the SPEED of a request.
+  # A mocked request that settles instantly hides tests that read a control, or click a button, before the
+  # data it depends on has arrived; on a slow runner they flake. Every mocked request takes 10 ms here.
+  frontend-slow-requests:
+    name: Front end, every mocked request takes 10 ms
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install front-end dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run the suite with slow mocked requests
+        working-directory: frontend
+        env:
+          NIGHTLIGHT_TEST_LATENCY_MS: '10'
+        run: npm test

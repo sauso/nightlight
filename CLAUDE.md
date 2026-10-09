@@ -28,8 +28,13 @@ see the workspace `CLAUDE.md` for the rule and why it exists. What that means co
 **Tests** live in `backend/test/*.test.js` (Node's built-in runner, no dependencies — keep it that way)
 and `frontend/test/**/*.test.{js,jsx}` (vitest + RTL). `test/helpers/harness.js` gives you a real temp
 database and real HTTP with **no mocks**; `frontend/test/helpers/render.jsx` renders a screen as
-**both** an admin and a caregiver, which is where role-gating bugs hide. A fix gets a regression test
-you have watched fail without the fix.
+**both** an admin and a caregiver, which is where role-gating bugs hide. On the backend,
+`backend/test/route-permissions.test.js` pins every API route's gate (public / signed-in / admin-only and
+so on): a new route, or an added or removed `requireAuth`/`requireAdmin`, fails it until you edit its table
+on purpose (issue #563; see `docs/architecture.md`, Auth). `backend/test/secrets-never-returned.test.js`
+plants a marker in every credential column it finds in the schema and asks every GET route, as every role,
+for it. A new column named like a secret is covered automatically, and a new table holding one fails until
+you teach the test to create a row in it. A fix gets a regression test you have watched fail without the fix.
 
 **Docs** live in `docs/`, one file per user-facing area (`recording.md`, `notifications.md`, `mfa.md`,
 `design-language.md`), with `README.md` for anything that changes setup or deployment, and
@@ -98,6 +103,11 @@ configured in either. `backend/` has a unit test suite (Node's built-in runner, 
 `frontend/` has its own (Vitest + Testing Library, coverage-gated in CI). End-to-end
 coverage lives separately in `e2e/` (Playwright, needs Docker).
 
+**Node 24.** CI, the Docker image and `.nvmrc` are all on Node 24, and `engines` in both `package.json`
+files says `>=24` (npm only warns). Only 24 is tested: on Node 22 three backend suites fail
+(`detector-observation-wiring`, `transcoder-log-redaction`, `sleepInsights`; the cause was never
+established, #565). `backend/test/node-version-pin.test.js` fails if the five places drift apart.
+
 ```bash
 # Backend (Node/Express, ESM, port 4000)
 cd backend && npm install
@@ -115,6 +125,13 @@ npm run test:core            # THE CORE-LOGIC COVERAGE GATE. Fails if the module
                               # A module at 88% can sit under a green gate. To see one module, read
                               # its own row: npm run test:core 2>&1 | grep -E '^ℹ +<file>\.js'
 npm run test:coverage        # full coverage report, no thresholds (for finding the next gap)
+npm run test:future          # the same suite with the wall clock a YEAR AHEAD (scripts/clock-shift.mjs, #570):
+                              # finds fixtures with a shelf life (the #534 shape) before the calendar does.
+                              # NIGHTLIGHT_CLOCK_SHIFT_DAYS=30 (or an ISO instant, to land on a month end or a
+                              # DST changeover) changes the amount; NIGHTLIGHT_CLOCK_TZ=America/Los_Angeles the
+                              # zone. Moves new Date(), Date.now() and SQLite's datetime('now'); NOT timers.
+                              # Weekly in CI (future-clock.yml), not on every PR: its verdict depends on today's
+                              # date. A fixture that must stay put should pin its OWN clock, with a comment why.
 
 # Repo-level checks (no install needed, run from the repo root)
 node scripts/check-changelog.mjs   # CHANGELOG.md structure: one heading per type per version, in
@@ -127,8 +144,25 @@ node scripts/mutate.mjs            # MUTATION TESTING. Breaks the source one way
                                    #   --only=<substring>  just the mutants whose label matches
                                    #   --full              every mutant against the WHOLE suite
                                    #   --list              print the catalogue
+                                   #   --check             run NO tests; fail if any `find` no longer
+                                   #                       matches exactly once and every namePattern still
+                                   #                       selects a test (stale entries, #575, #604). CI runs
+                                   #                       this via backend/test/mutants-catalogue.test.js.
+                                   #   --timeout=<ms>      per-mutant wall-clock limit (default 5 min,
+                                   #                       or an entry's `timeoutMs`). A mutant that
+                                   #                       outlives it is killed as a whole process
+                                   #                       tree and reported HANG: counted as killed,
+                                   #                       listed apart, a weaker kill (#617)
                                    # It restores every file from an in-memory byte copy and verifies
                                    # the round-trip; it never shells out to git. See the header.
+                                   # A killed run is undone too: SIGINT/SIGTERM/SIGHUP restore, and a
+                                   # journal (scripts/.mutate-restore.json, gitignored) lets the NEXT run
+                                   # restore after a hard kill (Windows cannot catch SIGTERM, #599). A
+                                   # mutant that runs no test ABORTS the run (#604); line endings in a
+                                   # catalogue entry may be LF or CRLF (#597). Frontend mutants
+                                   # run vitest with --reporter=json --outputFile=<fresh temp file>
+                                   # and read the verdict from that file: vitest 5 does not print
+                                   # the report to stdout (#520).
 npm start                    # node src/index.js — expects MediaMTX/ffmpeg binaries on PATH,
                               # so in practice this is normally run inside the Docker image
                               # rather than bare on a dev machine
@@ -138,6 +172,12 @@ cd frontend && npm install
 npm run dev
 npm test                     # vitest run — component tests, coverage-gated in CI (see CI/CD below)
 npm run test:coverage        # same suite, with the coverage report printed
+                              # Two opt-in stress runs, both weekly in CI (future-clock.yml) and both off by default (#570):
+                              #   NIGHTLIGHT_CLOCK_SHIFT_DAYS=365 npm test   clock a year ahead (see backend test:future)
+                              #   NIGHTLIGHT_TEST_LATENCY_MS=10 npm test    every mocked request takes 10 ms, which fails a
+                              #     test that reads a control or clicks a button BEFORE its data arrived. Wait for the
+                              #     VALUE (findByDisplayValue) or the button to ENABLE (enabledButton in helpers/render.jsx),
+                              #     not for the element to exist.
 npm run build                # outputs to frontend/dist, copied into the image as ./public
 
 # Full stack, matching production.

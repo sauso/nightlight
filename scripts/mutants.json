@@ -265,15 +265,15 @@
     "namePattern": "what the numbers MEAN"
   },
   {
-    "label": "txIdx: round -> floor (#260's one-word fix; the pin must notice)",
+    "label": "txIdx: floor -> round (a regression of #260/#417; the pin must notice)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "const txIdx = (t) => Math.round((txMs(t) - analysisStartUtc.getTime()) / 60000);",
-    "replace": "const txIdx = (t) => Math.floor((txMs(t) - analysisStartUtc.getTime()) / 60000);",
+    "find": "const txIdx = (t) => Math.floor((txMs(t) - analysisStartUtc.getTime()) / 60000);",
+    "replace": "const txIdx = (t) => Math.round((txMs(t) - analysisStartUtc.getTime()) / 60000);",
     "expect": "killed",
     "tests": [
       "sleepAnalysis.test.js"
     ],
-    "note": "Not a defect being guarded against — the OPPOSITE. #260 is still open and its fix is held for the detection holdout; this proves the suite will now say so the moment it lands."
+    "note": "#260 is FIXED (#417): the minute index floors a transition's second. Written the other way round (round -> floor) while the fix was held for the detection holdout; the anchor went stale when it landed (#575), so it now guards the fix against being undone. A transition at :31 s must land in the minute it happened in."
   },
   {
     "label": "★ sweepClips: the whole sweeper becomes a no-op",
@@ -1155,8 +1155,8 @@
   {
     "label": "wake: the reversal window is MORNING_ABSENCE_MIN, not wider",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "MORNING_ABSENCE_MIN * 60000",
-    "replace": "MORNING_ABSENCE_MIN * 150000",
+    "find": "- txMs(t.created_at) <= MORNING_ABSENCE_MIN * 60000",
+    "replace": "- txMs(t.created_at) <= MORNING_ABSENCE_MIN * 150000",
     "expect": "killed",
     "tests": [
       "sleepAnalysis.test.js"
@@ -1166,8 +1166,8 @@
   {
     "label": "wake: the reversal window is MORNING_ABSENCE_MIN, not narrower",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "MORNING_ABSENCE_MIN * 60000",
-    "replace": "MORNING_ABSENCE_MIN * 6000",
+    "find": "- txMs(t.created_at) <= MORNING_ABSENCE_MIN * 60000",
+    "replace": "- txMs(t.created_at) <= MORNING_ABSENCE_MIN * 6000",
     "expect": "killed",
     "tests": [
       "sleepAnalysis.test.js"
@@ -5494,8 +5494,8 @@
   {
     "label": "#369 M13e (claim 13): a second kill can be armed while the first is in flight",
     "file": "backend/src/lib/processGuards.js",
-    "find": "  if (!entry || entry.watchdogKill) return false;",
-    "replace": "  if (!entry) return false;",
+    "find": "  if (!entry || entry.watchdogKill || entry.returning) return false;",
+    "replace": "  if (!entry || entry.returning) return false;",
     "expect": "killed",
     "tests": ["detector-watchdog-levers.test.js"],
     "namePattern": "^C13c"
@@ -12480,5 +12480,870 @@
     ],
     "namePattern": "R588-W2(a|b):",
     "note": "Code review round 2 (Opus): a forward clock excursion logged `no video for 61 min`, claiming an outage the watcher cannot see."
+  },
+  {
+    "label": "#509 M-509-01: the veto is removed entirely (the whole fix reverted)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& quietStretchBeforeExit(cribActExt, algoSleepEnd, selectedGapStart, MORNING_ABSENCE_MIN, MAX_POST_EXIT_ACTIVE_MIN)) {",
+    "replace": "&& false) {",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "The 2026-10-05 shape: the wake moves from the movement-only wake to the parent-handled cluster 20 quiet minutes after its last exit."
+  },
+  {
+    "label": "#509 M-509-02: the veto no longer requires an occupied bed (maxBedPeak >= EMPTY_BED_MAX_PEAK dropped)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& selectedGapStart != null && maxBedPeak >= EMPTY_BED_MAX_PEAK",
+    "replace": "&& selectedGapStart != null",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Discarding the exit on a night the bed barely moved leaves 0 wakes / 0 awake minutes and the empty-bed gate calls it `empty`: C12."
+  },
+  {
+    "label": "#509 M-509-03: \"A exists\" is tested as algoSleepEnd != null (it is never null)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& !inProgress && algoSleepEnd < totalMin",
+    "replace": "&& !inProgress && algoSleepEnd != null",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "algoSleepEnd is `totalMin` for a child quiet at the window end, never null: a != null test lets the veto run when no movement-only wake exists. C5."
+  },
+  {
+    "label": "#509 M-509-05: an unobserved minute is allowed INSIDE a stretch",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "while (e < gapStart && cribAct[e] === false) e++;",
+    "replace": "while (e < gapStart && cribAct[e] !== true) e++;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "quietStretchBeforeExit",
+    "note": "Same rule inside the run."
+  },
+  {
+    "label": "#509 M-509-06: the stretch bridges an isolated active minute, as the scan does (R2b)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "while (e < gapStart && cribAct[e] === false) e++;",
+    "replace": "while (e < gapStart && (cribAct[e] === false || (cribAct[e] === true && cribAct[e - 1] === false && cribAct[e + 1] === false))) e++;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Measured: bridging discards the right exit on 2026-10-03 child A (prod), whose 20-minute stretch exists only by bridging four lone minutes. C4."
+  },
+  {
+    "label": "#509 M-509-07: unobserved minutes no longer count as not-quiet trailing minutes",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (cribAct[m] !== false) trailing++;",
+    "replace": "if (cribAct[m] === true) trailing++;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "A missing sample could then ENABLE a veto (verified in plan review). C14."
+  },
+  {
+    "label": "#509 M-509-08: the stretch needs MORE than 20 minutes (>= became >)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (e - s >= minLen) {",
+    "replace": "if (e - s > minLen) {",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Boundary of the one number the rule reuses (MORNING_ABSENCE_MIN). C9."
+  },
+  {
+    "label": "#509 M-509-09: the trailing bound is exclusive (<= became <)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (trailing <= maxTrailing) return [s, e, trailing];",
+    "replace": "if (trailing < maxTrailing) return [s, e, trailing];",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Boundary of MAX_POST_EXIT_ACTIVE_MIN (the scan's own test is <=). C9c."
+  },
+  {
+    "label": "#509 M-509-10: a stretch may lie BEFORE the movement-only wake (the lower bound dropped)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "for (let s = Math.max(fromIdx, 0); s < gapStart; s++) {",
+    "replace": "for (let s = 0; s < gapStart; s++) {",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "The night's own quiet hours before the wake would then qualify as an absence. C9 and the pure-rule test."
+  },
+  {
+    "label": "#509 M-509-11: trailing activity is counted past the adopted gap (the clock-dependent count)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "for (let m = e; m < gapStart; m++) if (cribAct[m] !== false) trailing++;",
+    "replace": "for (let m = e; m < gapStart + 60; m++) if (cribAct[m] !== false) trailing++;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "A count that reaches past the exit grows with the clock and flips the veto between clocks (plan review, round 4). C15."
+  },
+  {
+    "label": "#509 M-509-12: wake_at_shadow no longer keeps the raw exit",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "out.wake_at_shadow = (rawExitMs != null ? toSqlUtc(new Date(rawExitMs)) : null) || algoWakeAt;",
+    "replace": "out.wake_at_shadow = transitionWakeAt || algoWakeAt;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "\"Recorded whether or not adopted\" (plan review, Opus finding 7). C8."
+  },
+  {
+    "label": "#509 M-509-13: the metrics span still ends at the discarded exit (transitionExitIdx not cleared)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    transitionExitIdx = null;",
+    "replace": "    void 0;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Half-applied state: the exit index survives the veto while its time does not, so the wake and the sleep/awake totals disagree (measured in review: the wake reads empty in C8 and the exit's own minute in C8b). Killed by the wake assertions, not by C8's metrics identity, which is true by construction."
+  },
+  {
+    "label": "#509 M-509-14: the discarded exit is still drawn as the adopted one (exitTransitionAt not cleared)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    exitTransitionAt = null;",
+    "replace": "    void 0;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "The detail page would draw a \"got out of bed\" marker for an exit the wake no longer uses. C8."
+  },
+  {
+    "label": "#509 M-509-15: CONTROL: a comment-only edit (must SURVIVE)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "THE MORNING WAKE MUST NOT DEPEND ON THE CLOCK.",
+    "replace": "THE MORNING WAKE MUST NOT DEPEND ON THE CLOCK. (control)",
+    "expect": "control",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Control: if this is KILLED the harness is broken and every result is void."
+  },
+  {
+    "label": "#509 M-509-16: EQUIVALENT: the explicit !inProgress conjunct removed",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& !inProgress && algoSleepEnd < totalMin",
+    "replace": "&& algoSleepEnd < totalMin",
+    "expect": "equivalent",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "In an in-progress night the departure scan never ran, so transitionExitIdx is null and the first conjunct already stops the rule (verified at 03:00 on a synthetic night in plan review). Kept as a readable statement of the rule."
+  },
+  {
+    "label": "#509 M-509-17: the settling-tail fallback records gap start 0 instead of its real gap start",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: i };",
+    "replace": "settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: 0 };",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Code review (Codex, 2026-10-06) predicted this survives: no test pinned the fallback path. C10 does (a stray into_bed 30 s before the final exit, a quietly occupied bed after)."
+  },
+  {
+    "label": "#509 M-509-18: the child-out interval still opens at the raw (discarded) exit",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const upMs = transitionExitMs != null\r\n        ? transitionExitMs",
+    "replace": "const upMs = rawExitMs != null\r\n        ? rawExitMs",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Code review predicted this survives: C8 did not assert the interval. C8b now asserts the in-window cluster visit is typed child_out (with the raw exit it would be typed room)."
+  },
+  {
+    "label": "#509 M-509-19: a bed peak exactly at EMPTY_BED_MAX_PEAK no longer counts as occupied (>= became >)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& selectedGapStart != null && maxBedPeak >= EMPTY_BED_MAX_PEAK",
+    "replace": "&& selectedGapStart != null && maxBedPeak > EMPTY_BED_MAX_PEAK",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Code review predicted this survives: C12 only tried 0.05 and 0.4. It now also lays a peak of exactly 0.1."
+  },
+  {
+    "label": "#509 M-509-20: the occupied-bed threshold of the veto drops to 0.06 (an empty-bed night is then turned into `empty`)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& selectedGapStart != null && maxBedPeak >= EMPTY_BED_MAX_PEAK",
+    "replace": "&& selectedGapStart != null && maxBedPeak >= 0.06",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Opus review (verified by running): survived all of sleepAnalysis.test.js and CREATED `empty` on C12's night with a bedtime peak of 0.06-0.099. C12 now lays 0.099."
+  },
+  {
+    "label": "#509 M-509-21: the stretch may start one minute BEFORE the movement-only wake (call site A - 1)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "quietStretchBeforeExit(cribActExt, algoSleepEnd, selectedGapStart,",
+    "replace": "quietStretchBeforeExit(cribActExt, algoSleepEnd - 1, selectedGapStart,",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Opus review: only the helper's own unit test pinned the lower bound; M-509-10 drops it entirely. Real data matters here: in 5 of 19 vetoed nights the bed was already quiet 10-66 minutes before A. C9b's third case (stretch of 19 from A, quiet before A)."
+  },
+  {
+    "label": "#509 M-509-22: the settling-tail fallback records its gap start 20 minutes late",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: i };",
+    "replace": "settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: i + 20 };",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Opus review: survived while C10 only killed gapStart 0. The stretch search then finds the gap's own quiet minutes. C10 at the 20/21 trailing boundary."
+  },
+  {
+    "label": "#509 M-509-23: the settling-tail fallback records its gap start one minute early",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: i };",
+    "replace": "settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: i - 1 };",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509",
+    "note": "Opus review: one minute shifts the trailing count by one, which only the 20/21 boundary in C10 can see."
+  },
+  {
+    "label": "#564 startSleepJob: a second start arms a second interval",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  if (jobTimer) return;",
+    "replace": "  ;",
+    "expect": "killed",
+    "tests": [
+      "sleepInsights.test.js"
+    ],
+    "namePattern": "starting the job twice",
+    "note": "The old test only asserted that a second start did not throw, which a second timer does not do either."
+  },
+  {
+    "label": "#564 stopSleepJob: the interval is never cleared",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  clearInterval(jobTimer);",
+    "replace": "  ;",
+    "expect": "killed",
+    "tests": [
+      "sleepInsights.test.js"
+    ],
+    "namePattern": "starting the job twice"
+  },
+  {
+    "label": "#564 clipRecorder janitor: it stops itself when the ring directory vanishes",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "entry.janitor = setInterval(() => pruneRing(ringDir, entry.ringDepthMs, effectiveHold(cameraId)), SEGMENT_SEC * 1000);",
+    "replace": "entry.janitor = setInterval(() => { if (!fs.existsSync(ringDir)) { clearInterval(entry.janitor); return; } pruneRing(ringDir, entry.ringDepthMs, effectiveHold(cameraId)); }, SEGMENT_SEC * 1000);",
+    "expect": "killed",
+    "tests": [
+      "clip-recorder.test.js"
+    ],
+    "namePattern": "ring directory that has vanished",
+    "note": "Survived the old assert.ok(true, 'no throw'): stopping quietly is not throwing."
+  },
+  {
+    "label": "#564 clipCapture: an event with no id still takes a ring hold and queues a clip",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": " || !eventId) return;",
+    "replace": ") return;",
+    "expect": "killed",
+    "tests": [
+      "clip-capture.test.js"
+    ],
+    "namePattern": "no event id, no clip",
+    "note": "The old assertion (no detection_events rows) held whatever the guard did: enqueueClip never inserts one."
+  },
+  {
+    "label": "#563 gate: POST /api/cameras without requireAdmin (a caregiver can add a camera)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.post('/', requireAdmin, async (req, res) => {",
+    "replace": "router.post('/', async (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "One of the eleven requireAdmin deletions that left the whole suite green before route-permissions.test.js (#563)."
+  },
+  {
+    "label": "#563 gate: PUT /api/cameras/:id/enabled without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.put('/:id/enabled', requireAdmin, async",
+    "replace": "router.put('/:id/enabled', async",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Survived the whole suite before #563."
+  },
+  {
+    "label": "#563 gate: DELETE /api/cameras/:id without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.delete('/:id', requireAdmin, async",
+    "replace": "router.delete('/:id', async",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Before #563 this was killed only by accident, by an unrelated timelapse test."
+  },
+  {
+    "label": "#563 gate: cameras.js loses its router-wide requireAuth (every route after it goes public)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.use(requireAuth);",
+    "replace": "router.use((req, res, next) => next());",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "The routes that rely on the router-level use() alone (record, PTZ, reorder, assign, the admin routes' authentication) become anonymous."
+  },
+  {
+    "label": "#563 CONTROL: the inline requireAuth on POST /api/cameras/:id/restart is redundant",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.post('/:id/restart', requireAuth, async",
+    "replace": "router.post('/:id/restart', async",
+    "expect": "survives",
+    "tests": ["route-permissions.test.js"],
+    "note": "EQUIVALENT BY DESIGN: router.use(requireAuth) earlier in cameras.js already gates this route, so the inline copy changes nothing a caller can observe. Recorded so its survival is not read as a gap. If the router-level use() is ever removed or moved below this route, this becomes killable: change expect to killed."
+  },
+  {
+    "label": "#563 gate: GET /api/cameras/alerts/:id/clip loses requireAuthQueryOrHeader (alert clips go public)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.get('/alerts/:id/clip', requireAuthQueryOrHeader, (req, res) => {",
+    "replace": "router.get('/alerts/:id/clip', (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "A media route sits ABOVE the router-wide requireAuth, so its own gate is the only one."
+  },
+  {
+    "label": "#563 gate: DELETE /api/children/:id without requireAdmin",
+    "file": "backend/src/routes/children.js",
+    "find": "router.delete('/:id', requireAdmin, (req, res) => {",
+    "replace": "router.delete('/:id', (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Survived the whole suite before #563. Deletes the child's media too."
+  },
+  {
+    "label": "#563 gate: children.js loses its router-wide requireAuth",
+    "file": "backend/src/routes/children.js",
+    "find": "router.use(requireAuth);",
+    "replace": "router.use((req, res, next) => next());",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"]
+  },
+  {
+    "label": "#563 gate: GET /api/logs without requireAdmin (server logs readable by caregivers)",
+    "file": "backend/src/routes/logs.js",
+    "find": "router.get('/', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.get('/', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Survived the whole suite before #563."
+  },
+  {
+    "label": "#563 gate: a NEW unguarded route in logs.js (GET /api/logs/raw)",
+    "file": "backend/src/routes/logs.js",
+    "find": "router.delete('/', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.get('/raw', (req, res) => res.json({ lines: logger.getRecent() }));\nrouter.delete('/', requireAuth, requireAdmin, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "namePattern": "no route is unpinned",
+    "note": "The pin is compared in both directions: a route nobody pinned fails until someone decides its gate."
+  },
+  {
+    "label": "#563 gate: DELETE /api/events without requireAdmin (history wipe)",
+    "file": "backend/src/routes/events.js",
+    "find": "router.delete('/', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.delete('/', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Survived the whole suite before #563."
+  },
+  {
+    "label": "#563 gate: GET /api/diagnostics without requireAdmin",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "router.get('/', requireAuth, requireAdmin, async (req, res) => {",
+    "replace": "router.get('/', requireAuth, async (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Survived the whole suite before #563."
+  },
+  {
+    "label": "#563 gate: GET /api/ntfy/config without requireAdmin",
+    "file": "backend/src/routes/ntfy.js",
+    "find": "router.get('/config', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.get('/config', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Survived the whole suite before #563."
+  },
+  {
+    "label": "#563 gate: PUT /api/pushover/config without requireAdmin",
+    "file": "backend/src/routes/pushover.js",
+    "find": "router.put('/config', requireAuth, requireAdmin, async (req, res) => {",
+    "replace": "router.put('/config', requireAuth, async (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Survived the whole suite before #563."
+  },
+  {
+    "label": "#563 gate: POST /api/gotify/test without requireAdmin",
+    "file": "backend/src/routes/gotify.js",
+    "find": "router.post('/test', requireAuth, requireAdmin, async (req, res) => {",
+    "replace": "router.post('/test', requireAuth, async (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Survived the whole suite before #563."
+  },
+  {
+    "label": "#563 gate: PUT /api/push/enable without requireAdmin",
+    "file": "backend/src/routes/push.js",
+    "find": "router.put('/enable', requireAuth, requireAdmin, async (req, res) => {",
+    "replace": "router.put('/enable', requireAuth, async (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Survived the whole suite before #563."
+  },
+  {
+    "label": "#563 gate: GET /api/settings/mqtt without requireAdmin",
+    "file": "backend/src/routes/settings.js",
+    "find": "router.get('/mqtt', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.get('/mqtt', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"]
+  },
+  {
+    "label": "#563 gate order: DELETE /api/timelapses/:id runs requireAdmin BEFORE requireAuth",
+    "file": "backend/src/routes/timelapses.js",
+    "find": "router.delete('/:id', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.delete('/:id', requireAdmin, requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "With no router-wide requireAuth, requireAdmin reads an unpopulated req.user and refuses everyone, admins included; anonymous then gets 403 where it should get 401 (timelapses.js's own comment)."
+  },
+  {
+    "label": "#563 gate: GET /api/auth/users without requireAdmin",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.get('/users', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.get('/users', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"]
+  },
+  {
+    "label": "#563 gate: DELETE /api/recordings/:id takes a media token (requireAuth -> requireAuthQueryOrHeader)",
+    "file": "backend/src/routes/recordings.js",
+    "find": "router.delete('/:id', requireAuth, (req, res) => {",
+    "replace": "router.delete('/:id', requireAuthQueryOrHeader, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "A leaked <img>/<video> URL carries a media token; it must never authenticate a write."
+  },
+  {
+    "label": "#563 app gate: /live proxied without requireAuth",
+    "file": "backend/src/index.js",
+    "find": "  '/live',\n  requireAuth,\n  whepOnlyGuard,",
+    "replace": "  '/live',\n  whepOnlyGuard,",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "index.js cannot be booted in a unit test, so its own gates are pinned structurally (APP_REGISTRATIONS)."
+  },
+  {
+    "label": "#563 app gate: a NEW unguarded app-level route in index.js",
+    "file": "backend/src/index.js",
+    "find": "app.get('/api/health', (req, res) => res.json({ ok: true }));",
+    "replace": "app.get('/api/health', (req, res) => res.json({ ok: true }));\napp.get('/api/debug/logs', (req, res) => res.json(logger.getRecent()));",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"]
+  },
+  {
+    "label": "#563 enumerator: the index.js tokenizer forgets regex literals (a `//` inside one eats the rest of the line)",
+    "file": "backend/test/helpers/routeTable.js",
+    "find": "if (c === '/' && regexMayStart(toks.at(-1))) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "index.js has exactly that line (keepUnderPrefix's /^https?:\\/\\//i); the hostile scanner fixture puts a registration after one."
+  },
+  {
+    "label": "#563 enumerator: requireAdmin counts as admin-only even in front of authentication",
+    "file": "backend/test/helpers/routeTable.js",
+    "find": "admin = rank[auth] >= rank.media ? '+admin' : '+admin-before-auth';",
+    "replace": "admin = '+admin';",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"]
+  },
+  {
+    "label": "#563 enumerator: guards compared by NAME instead of identity",
+    "file": "backend/test/helpers/routeTable.js",
+    "find": "else if (fn === requireAdmin) admin",
+    "replace": "else if (fn.name === 'requireAdmin') admin",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "The look-alike fixture: a function that is merely NAMED requireAdmin must not make a route admin-only."
+  },
+  {
+    "label": "#563 HTTP layer alone: GET /api/logs without requireAdmin, judged only by the caregiver-403 test",
+    "file": "backend/src/routes/logs.js",
+    "find": "router.get('/', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.get('/', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "namePattern": "requireAdmin's 403 on every route",
+    "note": "Same mutation as the GET /api/logs entry above, narrowed to the HTTP test: the real-router checks must catch a deleted gate on their own, not only through the structural pin, so a bug in the enumerator cannot hide one."
+  },
+  {
+    "label": "#563 HTTP layer alone: children.js loses its router-wide requireAuth, judged only by the anonymous-401 test",
+    "file": "backend/src/routes/children.js",
+    "find": "router.use(requireAuth);",
+    "replace": "router.use((req, res, next) => next());",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "namePattern": "anonymous: 401 on every route"
+  },
+  {
+    "label": "#563 probe: requireAdmin refuses admins too (every admin-only 403 would then be vacuous)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "if (req.user?.role !== 'admin') {",
+    "replace": "if (req.user?.role !== 'admin' || true) {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "namePattern": "lets through the weakest caller",
+    "note": "The caregiver-403 test alone cannot tell requireAdmin from a gate that refuses everyone. The sentinel probe is what proves an admin gets through each admin route's middleware (the 'non-403 for admin' half of #563)."
+  },
+  {
+    "label": "#563 validation: PUT /settings hex-colour check disabled",
+    "file": "backend/src/routes/settings.js",
+    "find": "if (value !== undefined && !HEX_COLOR.test(value)) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "Survived the whole suite before #563's validation half."
+  },
+  {
+    "label": "#563 validation: HEX_COLOR loses its end anchor ('#F5D9A8;background:url(...)' accepted)",
+    "file": "backend/src/routes/settings.js",
+    "find": "const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;",
+    "replace": "const HEX_COLOR = /^#[0-9a-fA-F]{6}/;",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "The colours reach every visitor's page as CSS custom properties, the login screen included."
+  },
+  {
+    "label": "#563 validation: PUT /settings timezone check disabled",
+    "file": "backend/src/routes/settings.js",
+    "find": "if (timezone !== undefined && !isValidTimezone(timezone)) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "Survived the whole suite before #563's validation half."
+  },
+  {
+    "label": "#563 validation: post-roll ceiling 120 raised to 12000",
+    "file": "backend/src/routes/settings.js",
+    "find": "n > 120) {\n      return res.status(400).json({ error: 'Post-roll",
+    "replace": "n > 12000) {\n      return res.status(400).json({ error: 'Post-roll",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "The mutant #563 names. docs/recording.md documents 5-120."
+  },
+  {
+    "label": "#563 validation: PTZ step ceiling 100 raised to 1000",
+    "file": "backend/src/routes/settings.js",
+    "find": "n < 1 || n > 100) {",
+    "replace": "n < 1 || n > 1000) {",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "One of the ten bounds the table in input-validation.test.js takes from docs/camera-controls.md and docs/recording.md."
+  },
+  {
+    "label": "#563 validation: on-demand maximum length floor 5 lowered to 0",
+    "file": "backend/src/routes/settings.js",
+    "find": "n < 5 || n > 600) {",
+    "replace": "n < 0 || n > 600) {",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "A floor, not a ceiling: the table checks one below the lowest documented value as well as one above the highest."
+  },
+  {
+    "label": "#563 secret: GET /settings/mqtt returns the MQTT password",
+    "file": "backend/src/routes/settings.js",
+    "find": "mqtt_password_set: !!s.mqtt_password,",
+    "replace": "mqtt_password_set: !!s.mqtt_password, mqtt_password: s.mqtt_password,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"],
+    "note": "Survived the whole suite before #563's secret half."
+  },
+  {
+    "label": "#563 secret: GET /settings/mqtt says a password is set whether or not one is",
+    "file": "backend/src/routes/settings.js",
+    "find": "mqtt_password_set: !!s.mqtt_password,",
+    "replace": "mqtt_password_set: true,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"],
+    "namePattern": "GET /mqtt says no password is set"
+  },
+  {
+    "label": "#563 secret: PUT /settings with a blank MQTT password wipes the stored one",
+    "file": "backend/src/routes/settings.js",
+    "find": "mqtt_password ? mqtt_password : existing.mqtt_password,",
+    "replace": "mqtt_password ?? existing.mqtt_password,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"],
+    "note": "The settings form sends a blank password to mean 'unchanged'."
+  },
+  {
+    "label": "#563 secret: maskSecret returns the whole secret",
+    "file": "backend/src/lib/secretMask.js",
+    "find": "return `${str.slice(0, 4)}${'•'.repeat(6)}`;",
+    "replace": "return str;",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"],
+    "note": "Survived the whole suite before #563: no test mentioned secretMask."
+  },
+  {
+    "label": "#563 secret: maskSecret shows four characters of an eight-character secret",
+    "file": "backend/src/lib/secretMask.js",
+    "find": "if (str.length <= 8) return",
+    "replace": "if (str.length < 8) return",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"],
+    "note": "Survived the whole suite before #563. Killed by the unit test AND by the through-the-route short-secret test."
+  },
+  {
+    "label": "#563 secret: maskSecret shows eight characters instead of four",
+    "file": "backend/src/lib/secretMask.js",
+    "find": "str.slice(0, 4)",
+    "replace": "str.slice(0, 8)",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"]
+  },
+  {
+    "label": "#563 secret: maskSecret's dots give away the secret's length",
+    "file": "backend/src/lib/secretMask.js",
+    "find": "${'•'.repeat(6)}",
+    "replace": "${'•'.repeat(str.length - 4)}",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"],
+    "namePattern": "FIXED six dots"
+  },
+  {
+    "label": "#563 secret: ntfy config returns the access token unmasked",
+    "file": "backend/src/routes/ntfy.js",
+    "find": "token_masked: maskSecret(c.token)",
+    "replace": "token_masked: c.token",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"]
+  },
+  {
+    "label": "#563 secret: ntfy config returns the basic-auth password",
+    "file": "backend/src/routes/ntfy.js",
+    "find": "password_set: !!c.password,",
+    "replace": "password_set: !!c.password, password: c.password,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"]
+  },
+  {
+    "label": "#563 secret: a blank ntfy token on save wipes the stored one",
+    "file": "backend/src/routes/ntfy.js",
+    "find": "const token = (req.body?.token || '').trim() || existing.token;",
+    "replace": "const token = (req.body?.token || '').trim();",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"],
+    "namePattern": "a blank secret keeps the stored one"
+  },
+  {
+    "label": "#563 secret: Pushover config returns the user key unmasked",
+    "file": "backend/src/routes/pushover.js",
+    "find": "user_key_masked: maskSecret(c.userKey),",
+    "replace": "user_key_masked: c.userKey,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"]
+  },
+  {
+    "label": "#563 secret: Gotify config returns the app token unmasked",
+    "file": "backend/src/routes/gotify.js",
+    "find": "app_token_masked: maskSecret(c.appToken),",
+    "replace": "app_token_masked: c.appToken,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"]
+  },
+  {
+    "label": "#563 secret: the diagnostics bundle carries the MQTT password (a route this file was not written for)",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "mqtt_password_set: !!settings.mqtt_password,",
+    "replace": "mqtt_password_set: !!settings.mqtt_password, mqtt_password: settings.mqtt_password,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"],
+    "namePattern": "admin: no GET route returns",
+    "note": "Killed by the GET sweep alone: the sweep enumerates every GET route, so a leak in a route nobody thought to check is still caught."
+  },
+  {
+    "label": "#563 secret: every user object carries the TOTP secret",
+    "file": "backend/src/routes/auth.js",
+    "find": "    mfa_enabled: !!u.mfa_enabled,",
+    "replace": "    mfa_enabled: !!u.mfa_enabled,\n    mfa_secret: u.mfa_secret,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"]
+  },
+  {
+    "label": "#563 secret: every user object says MFA is off",
+    "file": "backend/src/routes/auth.js",
+    "find": "    mfa_enabled: !!u.mfa_enabled,",
+    "replace": "    mfa_enabled: false,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"]
+  },
+  {
+    "label": "#563 secret: GET /me/mfa carries the TOTP secret",
+    "file": "backend/src/routes/auth.js",
+    "find": "    enabled: !!u?.mfa_enabled,",
+    "replace": "    enabled: !!u?.mfa_enabled,\n    secret: u?.mfa_secret,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"]
+  },
+  {
+    "label": "#563 secret: GET /me/mfa says MFA is on for everyone",
+    "file": "backend/src/routes/auth.js",
+    "find": "    enabled: !!u?.mfa_enabled,",
+    "replace": "    enabled: true,",
+    "expect": "killed",
+    "tests": ["secrets-never-returned.test.js"],
+    "namePattern": "says OFF for an account without MFA"
+  },
+  {
+    "label": "#563 MFA: /me/mfa/setup replaces the secret of an account that already has MFA on",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (user.mfa_enabled) return res.status(400).json({ error: 'Two-factor is already on. Turn it off first to re-enrol.' });",
+    "replace": "/* #563 mutant: guard removed */",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "/setup needs only a session, not the password: without this guard a signed-in device could swap in its own second factor. Had no test before #563's validation half."
+  },
+  {
+    "label": "#563 MFA: /me/mfa/enable regenerates the backup codes of an account that already has MFA on",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (user.mfa_enabled) return res.status(400).json({ error: 'Two-factor is already on.' });",
+    "replace": "/* #563 mutant: guard removed */",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"]
+  },
+  {
+    "label": "#563 MFA: /me/mfa/enable before setup no longer says to start setup",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (!user.mfa_secret) return res.status(400).json({ error: 'Start setup first.' });",
+    "replace": "/* #563 mutant: guard removed */",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "Killed only by the message: without the guard verifyToken(null, code) is false and the route still answers 400, so nothing is turned on either way. The message is what tells the user what to do."
+  },
+  {
+    "label": "#563 MFA: verifyToken's up-front refusal of an empty secret or token removed",
+    "file": "backend/src/lib/mfa.js",
+    "find": "  if (!secret || !token) return false;",
+    "replace": "  /* #563 mutant: guard removed */",
+    "expect": "equivalent",
+    "tests": ["input-validation.test.js", "mfa.test.js"],
+    "note": "otplib v13 refuses the case itself: its guardrails throw on a secret under 16 bytes (10 for a legacy one) and on a malformed token, and verifyToken's catch turns the throw into false. input-validation.test.js pins the OUTCOME (a real RFC 6238 code for the empty key does not verify), so an otplib change that stopped throwing would turn this into a kill."
+  },
+  {
+    "label": "#563 validation: a photo only has to start with data:",
+    "file": "backend/src/lib/photo.js",
+    "find": "!photo.startsWith('data:image/')",
+    "replace": "!photo.startsWith('data:')",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "Before #563's validation half this was killed only by accident, by an unrelated timelapse test."
+  },
+  {
+    "label": "#563 validation: the photo size cap removed",
+    "file": "backend/src/lib/photo.js",
+    "find": "if (photo.length > MAX_PHOTO_LEN) throw",
+    "replace": "if (false) throw",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "Survived the whole suite before #563. Pinned at the function: over HTTP, index.js's express.json() 100 KB body limit refuses a larger photo first."
+  },
+  {
+    "label": "#563 validation: the photo cap is off by one",
+    "file": "backend/src/lib/photo.js",
+    "find": "if (photo.length > MAX_PHOTO_LEN) throw",
+    "replace": "if (photo.length >= MAX_PHOTO_LEN) throw",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"]
+  },
+  {
+    "label": "#563 validation: the 12-hour snooze cap removed",
+    "file": "backend/src/routes/cameras.js",
+    "find": "Math.max(0, Math.min(720, Math.round(Number(req.body?.minutes) || 0)))",
+    "replace": "Math.max(0, Math.round(Number(req.body?.minutes) || 0))",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "Survived the whole suite before #563. Any signed-in caregiver can mute all of a camera's alerts with this route."
+  },
+  {
+    "label": "#563 validation: the snooze cap raised to 5 days",
+    "file": "backend/src/routes/cameras.js",
+    "find": "Math.min(720, Math.round(Number(req.body?.minutes) || 0))",
+    "replace": "Math.min(7200, Math.round(Number(req.body?.minutes) || 0))",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"]
+  },
+  {
+    "label": "#563 validation: snooze minutes no longer rounded",
+    "file": "backend/src/routes/cameras.js",
+    "find": "Math.round(Number(req.body?.minutes) || 0)",
+    "replace": "(Number(req.body?.minutes) || 0)",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"]
+  },
+  {
+    "label": "#563 validation: the push snapshot id-format check removed",
+    "file": "backend/src/routes/push.js",
+    "find": "/^[a-f0-9]{64}$/.test(req.params.id || '') ? getSnapshot(req.params.id) : null",
+    "replace": "getSnapshot(req.params.id)",
+    "expect": "equivalent",
+    "tests": ["input-validation.test.js", "push.test.js"],
+    "note": "The snapshot store is an in-memory Map whose keys are always 64 lowercase hex characters (pushSnapshots.js), so a malformed id misses it with or without the check. Defence in depth for a future store keyed by something else (a file name, say)."
+  },
+  {
+    "label": "#563 validation: isAdminRequest reads an inherited role",
+    "file": "backend/src/middleware/auth.js",
+    "find": "user != null && Object.hasOwn(user, 'role') && user.role === 'admin'",
+    "replace": "user != null && user.role === 'admin'",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "note": "Survived the whole suite before #563: every real req.user has an own `role` from the database, so only a direct call can reach the branch."
   }
 ]

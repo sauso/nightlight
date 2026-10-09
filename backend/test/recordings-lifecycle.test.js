@@ -399,9 +399,28 @@ describe('★ stopping everything, on the way down', () => {
   });
 
   test('...and with nothing in flight it is a quiet no-op', async () => {
-    await stopAllRecordings({ settleMs: 0 });
-    await stopAllRecordings({ settleMs: 0, budgetMs: 50 });
-    assert.ok(true, 'no throw');
+    // ⚠️ Was `assert.ok(true, 'no throw')` (#564). "Quiet" is the claim, so assert nothing changed: not a single
+    // recordings row, and nothing reported as recording. A shutdown that marked an unrelated row failed, or
+    // invented one, would not throw either.
+    //
+    // HOSTILE ROWS: one finished recording and one in the live 'recording' state with NO in-flight entry (the debris
+    // a crash leaves, which only the boot sweep may touch). A shutdown that swept stale rows, or marked everything
+    // failed, would change one of them; the bare "no rows changed" check would not notice with an empty table.
+    const ins = db.prepare("INSERT INTO recordings (camera_id, child_id, status, kind, started_at) VALUES (?, ?, ?, 'manual', datetime('now'))");
+    const readyId = ins.run(CAM, CHILD, 'ready').lastInsertRowid;
+    const liveId = ins.run(CAM, CHILD, 'recording').lastInsertRowid;
+    try {
+      const snapshot = () => db.prepare('SELECT id, status FROM recordings ORDER BY id').all();
+      const before = snapshot();
+      assert.ok(before.some((r) => r.id === readyId && r.status === 'ready') && before.some((r) => r.id === liveId && r.status === 'recording'), 'premise: the hostile rows are in place');
+      assert.equal(isRecording(CAM), false, 'premise: nothing is in flight');
+      await stopAllRecordings({ settleMs: 0 });
+      await stopAllRecordings({ settleMs: 0, budgetMs: 50 });
+      assert.deepEqual(snapshot(), before, 'stopping with nothing in flight changed recordings rows');
+      assert.equal(isRecording(CAM), false);
+    } finally {
+      db.prepare('DELETE FROM recordings WHERE id IN (?, ?)').run(readyId, liveId);
+    }
   });
 
   test('★ the budget RESOLVES rather than rejecting when a cut overruns it', async () => {

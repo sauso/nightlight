@@ -19,7 +19,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-insights-'));
 process.env.DATA_DIR = TMP;
 
 const { sleepInsights, runNightlySleepJob, lastCompletedNightDate, currentNightDate,
-  childWindowActiveNow, childSamplingActiveNow, startSleepJob, getStoredNights } =
+  childWindowActiveNow, childSamplingActiveNow, startSleepJob, stopSleepJob, getStoredNights } =
   await import('../src/lib/sleepAnalysis.js');
 const { default: db } = await import('../src/db.js');
 
@@ -696,17 +696,40 @@ test('starting the job runs it once immediately and then schedules it', () => {
     assert.ok(db.prepare('SELECT 1 FROM sleep_nights WHERE child_id = ?').get(KID),
       'startSleepJob must backfill the last completed night on boot');
   } finally {
+    // stopSleepJob BEFORE the reset: the module keeps its (mocked) handle in `jobTimer`, and resetting the
+    // mock alone leaves it set, so the next test's first startSleepJob() would silently be a no-op (#564).
+    stopSleepJob();
     mock.timers.reset();
   }
 });
 
-test('starting the job twice does not schedule it twice', () => {
+test('starting the job twice does not schedule it twice; stop disarms it; a restart re-arms', () => {
   // Two intervals would mean two concurrent passes over every child, racing on the same rows.
+  // ⚠️ This used to be `assert.doesNotThrow(() => startSleepJob())` (#564): a second start that DID arm a
+  // second timer does not throw either, so mutating the `if (jobTimer) return` guard away stayed green.
+  // The count is observable: wrap setInterval (mocked, so nothing real is armed) and count the module's calls.
   mock.timers.enable({ apis: ['setInterval'] });
+  const mockedSetInterval = globalThis.setInterval;
+  let armed = 0;
+  globalThis.setInterval = (...args) => { armed += 1; return mockedSetInterval(...args); };
   try {
     startSleepJob();
-    assert.doesNotThrow(() => startSleepJob(), 'a second start must be a no-op, not a second timer');
+    startSleepJob();
+    assert.equal(armed, 1, `two starts armed ${armed} intervals, so every pass over the children would run twice per tick`);
+
+    stopSleepJob();
+    stopSleepJob(); // idempotent, and safe when never started
+    // Stopped for real, not merely forgotten: with the stored nights wiped, a tick that still fires would
+    // recompute (and so re-store) the last completed night, exactly as the first test shows a start does.
+    db.prepare('DELETE FROM sleep_nights WHERE child_id = ?').run(KID);
+    mock.timers.tick(2 * 30 * 60 * 1000);
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM sleep_nights WHERE child_id = ?').get(KID).n, 0,
+      'the nightly job kept running after stopSleepJob');
+    startSleepJob();
+    assert.equal(armed, 2, 'a restart after stop did not arm a new interval (a stale handle left in jobTimer?)');
   } finally {
+    stopSleepJob();
+    globalThis.setInterval = mockedSetInterval;
     mock.timers.reset();
   }
 });

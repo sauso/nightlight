@@ -9,6 +9,74 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.35.1] - 2026-10-10
+
+### Changed
+
+- Dependency maintenance: **ws 8.21.3 → 8.22.0** (the WebSocket library behind two-way talk), and the build/test
+  tooling **vite 8.2.2 → 8.3.4**, **vitest and @vitest/coverage-v8 5.0.1 → 5.0.2**, **jsdom 30.0.1 → 30.1.1**. No
+  behaviour change intended: ws 8.22.0 adds a `protocols` option and stops a `close()` call with invalid
+  arguments from leaving a socket half-closed, neither of which Nightlight relies on, and a new backend test now
+  loads the real ws library (nothing did before). The vite advisories fixed in 8.3.3 concern the Vite dev server
+  only, which is not part of the deployed image.
+
+### Fixed
+- **A night's morning wake changes by itself less often as the morning goes on (not never).** When a child's
+  real exit left no "got out of bed" and a parent then handled the bed, the wake read the start of the activity until
+  the last logged exit had 20 quiet minutes, then moved to that exit (2026-10-05: 06:25 became 07:51). A
+  confirmed exit later than the start of the activity is now set aside when the bed was **strictly quiet for 20
+  minutes or more** in between (one minute of movement or of no reading breaks the stretch), and the wake stays
+  at the start of the activity; the set-aside exit is still kept as the night's shadow wake. Nothing changes
+  for an exit earlier than the activity, a child already quiet at the window end, a night still in progress or
+  a night the bed barely moved. Replayed over 60 nights, the share whose wake still moved by more than 15
+  minutes with the clock fell from 12 to 5 on staging and from 17 to 10 on production. **Calibrated on two
+  children in one house with no untouched validation set; a night that is already final (about 3 hours after
+  its window closed) or corrected is not recomputed on its own.** Not fixed: the 2026-09-16 shape (no
+  20-minute quiet stretch before the later exit), a wake that still moves because the empty-bed scan switches
+  to a different exit as the morning goes on, a child who got out, came back and left again later (reported
+  at the first exit), and a bed zone or camera that reads a stirring child as quiet (reported early).
+  KNOWN-ISSUES.md ("A morning wake that changed by itself as the morning went on") has the evidence and the
+  limits (#509).
+- **ntfy alerts no longer stop for a camera or child whose name contains a line break.** A stray newline
+  pasted into a name made every ntfy alert for it fail silently as "send failed (network)" while the other
+  channels still worked. In the title (and in the message when a snapshot is attached, because it then travels
+  in a header too) a line break or other control character is now sent as a space. The message body keeps its line breaks, so the multi-line
+  nightly sleep report is unchanged (#551).
+- **Saving a child with a name that is not text returns a readable error instead of a failure.** Creating or
+  editing a child through the API with a number, list or object as the name answered with a server error whose
+  message Cloudflare strips; it is now a 400 "Name must be text". Leaving the name out of an edit, or sending
+  it blank, behaves as before (#541).
+- **A mistyped MQTT port can no longer lock you out of Nightlight.** Saving a port outside 1-65535 (for example
+  `188333`, one digit too many) stored it, failed with a server error, and then made the container exit on
+  **every** start, so the Settings screen that could fix it was unreachable; the only cure was editing the
+  database by hand. The port must now be a whole number from 1 to 65535 (blank still means 1883) and the host a
+  plain hostname or address, and a bad value is refused when you press Save with the reason, **before anything is
+  stored**. A bad value that is already stored (from an older version) no longer stops Nightlight starting: it logs
+  `[mqtt] Not connecting: <reason>`, leaves MQTT off and keeps running, so you can correct it in Settings → MQTT
+  (#543).
+- **Developer tooling: a killed mutation run no longer leaves a mutant in the source, and a drifted catalogue is caught
+  in CI.** `node scripts/mutate.mjs` now writes a restore journal (`scripts/.mutate-restore.json`, git-ignored) before
+  it mutates a file; Ctrl-C, SIGTERM and SIGHUP restore the file and stop the whole test process tree, and the next
+  run restores from the journal after a hard kill (Windows cannot catch SIGTERM, so there the journal is the only
+  protection) (#599). A mutant that runs no test now aborts the run instead of being printed as SURVIVED, and a
+  new CI test checks that every catalogue anchor still occurs once and every `namePattern` still selects a test
+  (#604, #575). A catalogue entry may be written with LF or CRLF line endings whichever the checkout uses (#597).
+  Not a product change: nothing in the app or its data is affected.
+- **Developer tooling: the mutation script can score frontend mutants again.** vitest 5 no longer prints its JSON
+  report to stdout, so `node scripts/mutate.mjs` read nothing and all 103 frontend mutants ended ERROR whatever the
+  mutation did. The script now has vitest write the report to a fresh file in the OS temp directory
+  (`--outputFile`), reads it back, and deletes it; a missing or malformed report is still ERROR, never a verdict
+  (#520, #503). Not a product change: nothing in the app or its data is affected.
+- **Developer tooling: the test suites can now be run as if it were next month, and a dozen front-end tests that raced
+  a slow request were fixed.** `cd backend && npm run test:future` (and `NIGHTLIGHT_CLOCK_SHIFT_DAYS=365 npm test`
+  in `frontend/`) moves `new Date()`, `Date.now()` and SQLite's `datetime('now')` forward by a number of days or to an
+  ISO instant, and `NIGHTLIGHT_CLOCK_TZ` changes the zone, to find fixtures with a shelf life before the calendar
+  does (the #534 shape); a new weekly CI job, `future-clock.yml`, runs both suites at +30 and +365 days. No test
+  was found failing under any shifted clock (month ends, a leap day, four DST changeovers; details in the PR). The
+  audit's finding was the other kind of time-dependence: `NIGHTLIGHT_TEST_LATENCY_MS=10 npm test` makes mocked
+  requests take 10 ms, which failed 11 tests that read a control before its data arrived or clicked a button that was
+  still disabled; they now wait for the value or for the button to enable. Not a product change (#570).
+
 ## [0.35.0] - 2026-10-06
 
 ### Added

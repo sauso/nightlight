@@ -526,12 +526,34 @@ describe('start/stop', () => {
     }
   });
 
-  test('start is idempotent, and stop leaves nothing to hold the process open', () => {
-    startClipStorage({ mounts: MOUNTED });
-    startClipStorage({ mounts: MOUNTED }); // must not stack a second interval
-    stopClipStorage();
-    stopClipStorage(); // idempotent, and safe when never started
-    assert.ok(true, 'no throw');
+  test('start is idempotent (ONE interval however often it is called), stop really disarms it, and a restart re-arms', (t) => {
+    // ⚠️ This used to end in `assert.ok(true, 'no throw')` under a comment saying "must not stack a second
+    // interval", and mutating startClipStorage to arm a second one stayed green (#564). The count is observable:
+    // wrap setInterval (under mocked timers, so nothing real is armed) and count what the module asks for.
+    t.mock.timers.enable({ apis: ['setInterval'] });
+    const mockedSetInterval = globalThis.setInterval;
+    let armed = 0;
+    globalThis.setInterval = (...args) => { armed += 1; return mockedSetInterval(...args); };
+    try {
+      startClipStorage({ mounts: MOUNTED });
+      startClipStorage({ mounts: MOUNTED });
+      assert.equal(armed, 1, `two starts armed ${armed} intervals, so every sweep would run twice per tick`);
+
+      stopClipStorage();
+      stopClipStorage(); // idempotent, and safe when never started
+      // Stopped for real, not merely forgotten: a backlog that arrives now must survive the next tick.
+      setRetention(14, 5);
+      const old = makeClip('after-stop.mp4', { ageDays: 40 });
+      t.mock.timers.tick(15 * 60 * 1000);
+      assert.deepEqual(liveClipIds(), [old.id], 'the sweep kept running after stopClipStorage');
+
+      // "Nulled, not merely cleared" (see stopClipStorage): a stale handle would make every restart a no-op.
+      startClipStorage({ mounts: MOUNTED });
+      assert.equal(armed, 2, 'a restart after stop did not arm a new interval');
+    } finally {
+      stopClipStorage();
+      globalThis.setInterval = mockedSetInterval;
+    }
   });
 
   test('★ the interval keeps sweeping — a backlog that arrives later is still collected', (t) => {

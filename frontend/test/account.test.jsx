@@ -18,7 +18,7 @@
 // coverage for the same reason and is exercised by the Playwright suite.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
-import { renderAs, ADMIN } from './helpers/render.jsx';
+import { renderAs, ADMIN, enabledButton } from './helpers/render.jsx';
 import Account from '../src/pages/Account.jsx';
 import TwoFactorSection from '../src/components/TwoFactorSection.jsx';
 import { api } from '../src/lib/api.js';
@@ -309,7 +309,7 @@ describe('two-factor authentication', () => {
     // browser, which is exactly the case on a phone.
     const { user } = mountMfa({ enabled: false, backup_codes_remaining: 0 });
     postSpy.mockResolvedValue(SETUP);
-    await user.click(await screen.findByRole('button', { name: 'Set up two-factor' }));
+    await user.click(await enabledButton('Set up two-factor'));
 
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByAltText('Two-factor setup QR code').src).toBe(SETUP.qr);
@@ -321,7 +321,10 @@ describe('two-factor authentication', () => {
     // unmodified fails as "invalid", which reads as the app being wrong rather than the paste.
     const { user } = mountMfa({ enabled: false, backup_codes_remaining: 0 });
     postSpy.mockResolvedValue(SETUP);
-    await user.click(await screen.findByRole('button', { name: 'Set up two-factor' }));
+    await user.click(await enabledButton('Set up two-factor'));
+    // Let the set-up request settle (the dialog is its result) BEFORE swapping the mock for the next step;
+    // re-mocking while it is in flight hands the NEXT step's answer to the first call on a slow run (#570).
+    await screen.findByLabelText(/Enter the 6-digit code/);
     postSpy.mockResolvedValue({ backup_codes: CODES });
 
     await user.type(await screen.findByLabelText(/Enter the 6-digit code/), ' 123456 ');
@@ -335,12 +338,18 @@ describe('two-factor authentication', () => {
     // no way back into their own account after a lost phone.
     const { user } = mountMfa({ enabled: false, backup_codes_remaining: 0 });
     postSpy.mockResolvedValue(SETUP);
-    await user.click(await screen.findByRole('button', { name: 'Set up two-factor' }));
+    await user.click(await enabledButton('Set up two-factor'));
+    // Let the set-up request settle (the dialog is its result) BEFORE swapping the mock for the next step;
+    // re-mocking while it is in flight hands the NEXT step's answer to the first call on a slow run (#570).
+    await screen.findByLabelText(/Enter the 6-digit code/);
     postSpy.mockResolvedValue({ backup_codes: CODES });
     await user.type(await screen.findByLabelText(/Enter the 6-digit code/), '123456');
     await user.click(screen.getByRole('button', { name: 'Turn on' }));
 
-    const dialog = await screen.findByRole('dialog');
+    // Wait for a CODE, not for "a dialog": the set-up dialog is still on screen when "Turn on" is clicked,
+    // so `findByRole('dialog')` returns it at once and the codes are read before the response lands (#570).
+    await screen.findByText(CODES[0]);
+    const dialog = screen.getByRole('dialog');
     for (const code of CODES) expect(within(dialog).getByText(code)).toBeTruthy();
     expect(within(dialog).getByText(/won.{0,3}t be shown again/i)).toBeTruthy();
     expect(within(dialog).getByText(/once/i)).toBeTruthy();
@@ -351,7 +360,10 @@ describe('two-factor authentication', () => {
     // the authenticator app — all because of one mistyped digit.
     const { user } = mountMfa({ enabled: false, backup_codes_remaining: 0 });
     postSpy.mockResolvedValue(SETUP);
-    await user.click(await screen.findByRole('button', { name: 'Set up two-factor' }));
+    await user.click(await enabledButton('Set up two-factor'));
+    // Let the set-up request settle (the dialog is its result) BEFORE swapping the mock for the next step;
+    // re-mocking while it is in flight hands the NEXT step's answer to the first call on a slow run (#570).
+    await screen.findByLabelText(/Enter the 6-digit code/);
     postSpy.mockRejectedValue(new Error('That code is not valid'));
 
     await user.type(await screen.findByLabelText(/Enter the 6-digit code/), '000000');
@@ -365,7 +377,7 @@ describe('two-factor authentication', () => {
     // Without this, anyone who found an unlocked, signed-in device could strip the second factor off
     // the account in two clicks — which is precisely what the second factor exists to prevent.
     const { user } = mountMfa({ enabled: true, backup_codes_remaining: 5 });
-    await user.click(await screen.findByRole('button', { name: 'Turn off two-factor' }));
+    await user.click(await enabledButton('Turn off two-factor'));
 
     const dialog = await screen.findByRole('dialog');
     const pw = within(dialog).getByLabelText('Password');
@@ -380,7 +392,7 @@ describe('two-factor authentication', () => {
   test('a wrong password leaves two-factor ON and says why', async () => {
     const { user } = mountMfa({ enabled: true, backup_codes_remaining: 5 });
     postSpy.mockRejectedValue(new Error('Password is incorrect'));
-    await user.click(await screen.findByRole('button', { name: 'Turn off two-factor' }));
+    await user.click(await enabledButton('Turn off two-factor'));
     const dialog = await screen.findByRole('dialog');
     await user.type(within(dialog).getByLabelText('Password'), 'wrong');
     await user.click(within(dialog).getByRole('button', { name: 'Turn off two-factor' }));
