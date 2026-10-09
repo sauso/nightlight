@@ -147,7 +147,10 @@ node scripts/mutate.mjs            # MUTATION TESTING. Breaks the source one way
                                    # journal (scripts/.mutate-restore.json, gitignored) lets the NEXT run
                                    # restore after a hard kill (Windows cannot catch SIGTERM, #599). A
                                    # mutant that runs no test ABORTS the run (#604); line endings in a
-                                   # catalogue entry may be LF or CRLF (#597).
+                                   # catalogue entry may be LF or CRLF (#597). Frontend mutants
+                                   # run vitest with --reporter=json --outputFile=<fresh temp file>
+                                   # and read the verdict from that file: vitest 5 does not print
+                                   # the report to stdout (#520).
 npm start                    # node src/index.js — expects MediaMTX/ffmpeg binaries on PATH,
                               # so in practice this is normally run inside the Docker image
                               # rather than bare on a dev machine
