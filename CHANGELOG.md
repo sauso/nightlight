@@ -56,6 +56,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   mutation did. The script now has vitest write the report to a fresh file in the OS temp directory
   (`--outputFile`), reads it back, and deletes it; a missing or malformed report is still ERROR, never a verdict
   (#520, #503). Not a product change: nothing in the app or its data is affected.
+- **Developer tooling: the test suites can now be run as if it were next month, and a dozen front-end tests that raced
+  a slow request were fixed.** `cd backend && npm run test:future` (and `NIGHTLIGHT_CLOCK_SHIFT_DAYS=365 npm test`
+  in `frontend/`) moves `new Date()`, `Date.now()` and SQLite's `datetime('now')` forward by a number of days or to an
+  ISO instant, and `NIGHTLIGHT_CLOCK_TZ` changes the zone, to find fixtures with a shelf life before the calendar
+  does (the #534 shape); a new weekly CI job, `future-clock.yml`, runs both suites at +30 and +365 days. No test
+  was found failing under any shifted clock (month ends, a leap day, four DST changeovers; details in the PR). The
+  audit's finding was the other kind of time-dependence: `NIGHTLIGHT_TEST_LATENCY_MS=10 npm test` makes mocked
+  requests take 10 ms, which failed 11 tests that read a control before its data arrived or clicked a button that was
+  still disabled; they now wait for the value or for the button to enable. Not a product change (#570).
 
 ## [0.35.0] - 2026-10-06
 

@@ -251,8 +251,11 @@ describe('Settings → Push → ntfy', () => {
   test('loads the saved config into every field', async () => {
     vi.spyOn(api, 'get').mockResolvedValue(CONFIG);
     renderAsAdmin(<SettingsPushNtfy />);
-    await waitFor(() => expect(screen.getByLabelText('Server URL')).toHaveValue('https://ntfy.sh'));
-    expect(screen.getByLabelText('Topic')).toHaveValue('nightlight-alerts-x8k2');
+    // Wait on the one field whose value ONLY the stored config supplies: 'https://ntfy.sh' is also the
+    // form's default, so waiting on Server URL passes before anything has loaded and the reads below race
+    // the request (#570).
+    await waitFor(() => expect(screen.getByLabelText('Topic')).toHaveValue('nightlight-alerts-x8k2'));
+    expect(screen.getByLabelText('Server URL')).toHaveValue('https://ntfy.sh');
     expect(screen.getByLabelText('Username (optional)')).toHaveValue('me');
     // ⚠️ A saved password is never sent back to the client — the placeholder is the only thing that
     // says one exists.
@@ -343,6 +346,11 @@ describe('Settings → Recording', () => {
     expect(body.ondemand_pre_roll_s).toBe('15');
     expect(body.ondemand_max_duration_s).toBe('300');
     expect(body).not.toHaveProperty('app_name');
+    // Let the save FINISH before the test ends. The page keeps working after the PUT resolves (it refetches
+    // the storage readout and arms a timer); a test that ends first leaves that continuation running
+    // into the NEXT test, where it competes for the same mocked `api.get` and made "storage is shown in
+    // human units" fail whenever the request took more than a few ms (#570).
+    await screen.findAllByText('Saved ✓');
   });
 
   test('the on-demand switch applies IMMEDIATELY, without waiting for Save', async () => {
@@ -400,6 +408,9 @@ describe('Settings → Recording', () => {
     await waitFor(() => expect(screen.queryByLabelText('Capture before (seconds)')).not.toBeInTheDocument());
     // The wake-clip fields belong to the OTHER feature and must be untouched by that.
     expect(screen.getByLabelText('Clip length (seconds)')).toBeInTheDocument();
+    // The switch shows its new state optimistically, before the PUT has returned. End the test only once
+    // the write has finished, or its continuation runs into the next test (see the Save test above, #570).
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'Show a Record button on each camera' })).toBeEnabled());
   });
 
   test('storage is shown in human units, and an unknown size reads as a dash', async () => {

@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { vi } from 'vitest';
@@ -119,4 +119,14 @@ export const renderAsCaregiver = (ui, opts) => renderAs(CAREGIVER, ui, opts);
 // puts two copies of the screen on the page and every query becomes ambiguous.
 export async function forEachRole(fn) {
   for (const [name, who] of [['admin', ADMIN], ['caregiver', CAREGIVER]]) await fn(name, who);
+}
+
+// A button that EXISTS is not a button that WORKS: screens render their controls disabled until their
+// first request settles, so `findByRole('button')` resolves at once and `user.click` on it is then a
+// silent no-op (a click on a disabled button does nothing and throws nothing). The test goes red only
+// when the request is slow, which is why it looked fine for months (#570). Wait for it to be enabled.
+export async function enabledButton(name) {
+  const button = await screen.findByRole('button', { name });
+  await waitFor(() => expect(button).toBeEnabled());
+  return button;
 }

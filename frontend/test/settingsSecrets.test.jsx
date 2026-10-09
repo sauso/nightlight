@@ -93,7 +93,11 @@ describe('MQTT settings', () => {
 
   test('loads the stored broker details, and the password box arrives empty', async () => {
     renderAsAdmin(<SettingsMqtt />);
-    expect((await screen.findByLabelText('Broker host')).value).toBe('broker.local');
+    // ⚠️ WAIT FOR THE VALUE, NOT FOR THE FIELD. The form renders at once with an empty host and the stored
+    // config fills it in when the request settles, so `findByLabelText` resolves before the data is
+    // there and a synchronous `.value` read after it is a race with the mocked request (#570: it went red
+    // on a busy machine, and always does when the request takes 10 ms).
+    await screen.findByDisplayValue('broker.local');
     const pw = screen.getByLabelText('Password (optional)');
     expect(pw.value, 'a stored password is never sent to the browser').toBe('');
     expect(pw.placeholder).toBe('Leave blank to keep current password');
@@ -104,7 +108,9 @@ describe('MQTT settings', () => {
     // the server never sent the secret, so posting that blank would clear a working password. Editing
     // the host must not cost you the login.
     const { user } = renderAsAdmin(<SettingsMqtt />);
-    const host = await screen.findByLabelText('Broker host');
+    // Wait for the stored host, not just the field: clearing and typing before the config lands means the
+    // arriving config overwrites what was typed (see the first MQTT test).
+    const host = await screen.findByDisplayValue('broker.local');
     await user.clear(host);
     await user.type(host, 'broker2.local');
     await user.click(screen.getByRole('button', { name: /Save/ }));
@@ -194,8 +200,8 @@ describe('ntfy push settings', () => {
 
   test('a typed token is sent and the field clears afterwards', async () => {
     const { user } = renderAsAdmin(<SettingsPushNtfy />);
-    const token = await screen.findByLabelText('Access token (optional)');
-    await user.type(token, 'tk_newvalue');
+    await screen.findByDisplayValue('nursery-abc'); // the config has landed; typing before it does is lost
+    await user.type(screen.getByLabelText('Access token (optional)'), 'tk_newvalue');
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => expect(putSpy).toHaveBeenCalled());

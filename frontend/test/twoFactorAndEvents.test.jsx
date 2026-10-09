@@ -13,7 +13,7 @@
 //     that keeps dropping — i.e. the thing you clear it while investigating.
 import { describe, test, expect, vi, afterEach, beforeEach } from 'vitest';
 import { screen, waitFor, within, act } from '@testing-library/react';
-import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
+import { renderAsAdmin, renderAsCaregiver, enabledButton } from './helpers/render.jsx';
 import TwoFactorSection from '../src/components/TwoFactorSection.jsx';
 import EventLog from '../src/components/EventLog.jsx';
 import { api } from '../src/lib/api.js';
@@ -32,7 +32,9 @@ describe('TwoFactorSection', () => {
     withStatus({ enabled: false });
     renderAsAdmin(<TwoFactorSection />);
     expect(await screen.findByText(/Require a 6-digit code from an authenticator app at login\./)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Set up two-factor' })).toBeEnabled();
+    // waitFor, not a bare read: the button is disabled until the status request settles, and the text
+    // above is on screen before that (#570: a slow request made this fail).
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Set up two-factor' })).toBeEnabled());
   });
 
   test('an enrolled account is told how many backup codes are LEFT, pluralised', async () => {
@@ -65,7 +67,7 @@ describe('TwoFactorSection', () => {
     withStatus({ enabled: false });
     vi.spyOn(api, 'post').mockResolvedValue(SETUP);
     const { user } = renderAsAdmin(<TwoFactorSection />);
-    await user.click(await screen.findByRole('button', { name: 'Set up two-factor' }));
+    await user.click(await enabledButton('Set up two-factor'));
 
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByAltText('Two-factor setup QR code')).toHaveAttribute('src', SETUP.qr);
@@ -79,7 +81,7 @@ describe('TwoFactorSection', () => {
     withStatus({ enabled: false });
     vi.spyOn(api, 'post').mockRejectedValue(new Error('Two-factor is disabled on this server'));
     const { user } = renderAsAdmin(<TwoFactorSection />);
-    await user.click(await screen.findByRole('button', { name: 'Set up two-factor' }));
+    await user.click(await enabledButton('Set up two-factor'));
     expect(await screen.findByText('Two-factor is disabled on this server')).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
@@ -90,7 +92,7 @@ describe('TwoFactorSection', () => {
       .mockResolvedValueOnce(SETUP)
       .mockResolvedValueOnce({ backup_codes: CODES });
     const { user } = renderAsAdmin(<TwoFactorSection />);
-    await user.click(await screen.findByRole('button', { name: 'Set up two-factor' }));
+    await user.click(await enabledButton('Set up two-factor'));
 
     api.get.mockResolvedValue({ enabled: true, backup_codes_remaining: 4 });
     await user.type(screen.getByLabelText('Enter the 6-digit code to confirm'), '  123456  ');
@@ -109,7 +111,7 @@ describe('TwoFactorSection', () => {
       .mockResolvedValueOnce(SETUP)
       .mockRejectedValueOnce(new Error('That code is not right'));
     const { user } = renderAsAdmin(<TwoFactorSection />);
-    await user.click(await screen.findByRole('button', { name: 'Set up two-factor' }));
+    await user.click(await enabledButton('Set up two-factor'));
     await user.type(screen.getByLabelText('Enter the 6-digit code to confirm'), '000000');
     await user.click(screen.getByRole('button', { name: 'Turn on' }));
 
@@ -129,7 +131,7 @@ describe('TwoFactorSection', () => {
     // stub, so a clipboard defined earlier is silently replaced and the spy is never called — the
     // assertion then fails against perfectly good code.
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-    await user.click(await screen.findByRole('button', { name: 'Set up two-factor' }));
+    await user.click(await enabledButton('Set up two-factor'));
     await user.type(screen.getByLabelText('Enter the 6-digit code to confirm'), '123456');
     await user.click(screen.getByRole('button', { name: 'Turn on' }));
     await screen.findByText(CODES[0]);
@@ -151,7 +153,7 @@ describe('TwoFactorSection', () => {
     vi.spyOn(api, 'post').mockResolvedValueOnce(SETUP).mockResolvedValueOnce({ backup_codes: CODES });
     const { user } = renderAsAdmin(<TwoFactorSection />);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined }); // after setup(), as above
-    await user.click(await screen.findByRole('button', { name: 'Set up two-factor' }));
+    await user.click(await enabledButton('Set up two-factor'));
     await user.type(screen.getByLabelText('Enter the 6-digit code to confirm'), '123456');
     await user.click(screen.getByRole('button', { name: 'Turn on' }));
     await screen.findByText(CODES[0]);
@@ -165,7 +167,7 @@ describe('TwoFactorSection', () => {
     withStatus({ enabled: true, backup_codes_remaining: 4 });
     const post = vi.spyOn(api, 'post').mockResolvedValue({});
     const { user } = renderAsAdmin(<TwoFactorSection />);
-    await user.click(await screen.findByRole('button', { name: 'Turn off two-factor' }));
+    await user.click(await enabledButton('Turn off two-factor'));
 
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText('Enter your password to confirm.')).toBeInTheDocument();
@@ -183,7 +185,7 @@ describe('TwoFactorSection', () => {
     withStatus({ enabled: true, backup_codes_remaining: 4 });
     vi.spyOn(api, 'post').mockRejectedValue(new Error('Password is not correct'));
     const { user } = renderAsAdmin(<TwoFactorSection />);
-    await user.click(await screen.findByRole('button', { name: 'Turn off two-factor' }));
+    await user.click(await enabledButton('Turn off two-factor'));
     const dialog = await screen.findByRole('dialog');
     await user.type(within(dialog).getByLabelText(/password/i), 'wrong');
     // Scoped to the dialog: the card's own "Turn off two-factor" button is still on the page behind
@@ -200,7 +202,8 @@ describe('TwoFactorSection', () => {
     // caregivers unable to protect the accounts that can see the cameras.
     withStatus({ enabled: false });
     renderAsCaregiver(<TwoFactorSection />);
-    expect(await screen.findByRole('button', { name: 'Set up two-factor' })).toBeEnabled();
+    // The button exists (disabled) before the status request settles, so wait for it to ENABLE.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Set up two-factor' })).toBeEnabled());
   });
 });
 
@@ -271,7 +274,9 @@ describe('EventLog', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Clear log' }));
     await waitFor(() => expect(api.del).toHaveBeenCalledWith('/events'));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    expect(screen.queryByText('just now')).not.toBeInTheDocument();
+    // waitFor: the emptied list arrives with the REFETCH after the delete, which is a request like any
+    // other; closing the dialog does not mean it has landed (#570).
+    await waitFor(() => expect(screen.queryByText('just now')).not.toBeInTheDocument());
   });
 
   test('cancelling deletes nothing', async () => {
