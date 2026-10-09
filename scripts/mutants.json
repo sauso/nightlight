@@ -12744,5 +12744,52 @@
     ],
     "namePattern": "#509",
     "note": "Opus review: one minute shifts the trailing count by one, which only the 20/21 boundary in C10 can see."
+  },
+  {
+    "label": "#564 startSleepJob: a second start arms a second interval",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  if (jobTimer) return;",
+    "replace": "  ;",
+    "expect": "killed",
+    "tests": [
+      "sleepInsights.test.js"
+    ],
+    "namePattern": "starting the job twice",
+    "note": "The old test only asserted that a second start did not throw, which a second timer does not do either."
+  },
+  {
+    "label": "#564 stopSleepJob: the interval is never cleared",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  clearInterval(jobTimer);",
+    "replace": "  ;",
+    "expect": "killed",
+    "tests": [
+      "sleepInsights.test.js"
+    ],
+    "namePattern": "starting the job twice"
+  },
+  {
+    "label": "#564 clipRecorder janitor: it stops itself when the ring directory vanishes",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "entry.janitor = setInterval(() => pruneRing(ringDir, entry.ringDepthMs, effectiveHold(cameraId)), SEGMENT_SEC * 1000);",
+    "replace": "entry.janitor = setInterval(() => { if (!fs.existsSync(ringDir)) { clearInterval(entry.janitor); return; } pruneRing(ringDir, entry.ringDepthMs, effectiveHold(cameraId)); }, SEGMENT_SEC * 1000);",
+    "expect": "killed",
+    "tests": [
+      "clip-recorder.test.js"
+    ],
+    "namePattern": "ring directory that has vanished",
+    "note": "Survived the old assert.ok(true, 'no throw'): stopping quietly is not throwing."
+  },
+  {
+    "label": "#564 clipCapture: an event with no id still takes a ring hold and queues a clip",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": " || !eventId) return;",
+    "replace": ") return;",
+    "expect": "killed",
+    "tests": [
+      "clip-capture.test.js"
+    ],
+    "namePattern": "no event id, no clip",
+    "note": "The old assertion (no detection_events rows) held whatever the guard did: enqueueClip never inserts one."
   }
 ]
