@@ -26,6 +26,7 @@ useTempDataDir();
 const answers = new Map();
 const requests = []; // every /v3/paths/get/<name> the detector made, in order
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let delayedLanded = 0; // #650: how many { delayMs } answers the fake has finally sent (see answersConsumed)
 const mediamtx = await startFakeMediamtx({
   isReady: (name) => {
     requests.push(name);
@@ -33,7 +34,7 @@ const mediamtx = await startFakeMediamtx({
     if (!a) return false;
     if (a.queue.length) {
       const v = a.queue.shift();
-      if (v && typeof v === 'object') return sleep(v.delayMs).then(() => v.ready);
+      if (v && typeof v === 'object') return sleep(v.delayMs).then(() => { delayedLanded += 1; return v.ready; });
       return v;
     }
     return a.dflt;
@@ -112,6 +113,41 @@ async function waitFor(pred, what, capMs = 6_000) {
     if (realNow() > deadline) assert.fail(`timed out waiting for ${what}`);
     await sleep(10);
   }
+}
+// #650: LOGICAL, NOT WALL-CLOCK, WAITS for the scripted sub answers. A case that queues N answers used to
+// `sleep(recheckMs * N + slack)` and then assert nothing had switched, which assumes every tick's HTTP round trip to the
+// fake MediaMTX finishes inside one recheck interval. Under load (a core-coverage run next to other suites) a round trip
+// takes longer, the next tick is then a SKIPPED observation and consumes no answer, so after the sleep the queue was only
+// half-eaten: the next phase REPLACED it while the detector still carried a ready run from this one, and the run
+// reached stableChecks on answers the case never meant to count ("an unknown counted as ready", 3 of 6 loaded runs).
+// `answersConsumed` returns once the queue is empty AND one further request has arrived: a tick sends its request only
+// after the previous tick finished (`checking` is cleared in a `finally` and the decision is made in the same
+// synchronous continuation), so that further request proves the last scripted answer has been DECIDED on, not merely
+// handed out. No tolerance, no sleep: a slow machine takes longer and asserts the same thing.
+// `delayed` = how many { delayMs } answers the script holds: they must also have LANDED, and two more requests must
+// follow that landing. Without that, a detector with no in-flight guard (mutant M15) passes: its overlapping ticks make
+// the queue run dry and the further request arrive while the slow answer is still in the air, before it can be
+// counted (or wrongly counted) at all.
+const subRequests = (id) => requests.filter((n) => n === SUB(id)).length;
+async function answersConsumed(id, what, { delayed = 0 } = {}) {
+  const landedBefore = delayedLanded;
+  await waitFor(() => subAnswers(id).queue.length === 0, `${what}: every scripted answer to be requested`, 15_000);
+  await waitFor(() => delayedLanded >= landedBefore + delayed, `${what}: the slow answer to land`, 15_000);
+  const seen = subRequests(id); // already counts the request that took the last scripted answer
+  await waitFor(() => subRequests(id) >= seen + (delayed ? 2 : 1), `${what}: the tick after the last scripted answer`, 15_000);
+}
+// #650: the first reading of the (frozen) monotonic clock at which `reading - start >= ms` HOLDS IN FLOATING POINT, which
+// is what the detector evaluates (`nowMono - spawnedMono >= quietMs`). `start + ms` is not always that reading: when the
+// sum lands in a higher binade than `start` it is rounded, and `(start + ms) - start` can come back as 399.9999999999999 for
+// a 400 ms gate, so the quiet gate stays shut for ever. R2e did exactly that in about 1 in 30 full-file runs (#609's
+// frozen clock was set to `spawnedMono + 400`): the clock here is the mocked `performance.now()` = process uptime plus
+// the file's accumulated `monoOffset` (211 000 ms by then), so the sum crosses the 262 144 binade edge only in the few
+// hundred ms of uptime around 51 s, i.e. only on a slower-than-usual run. It is not a timing tolerance: the answer is the
+// same instant, written so that the comparison the detector makes is true there.
+function clockReadingForQuiet(start, ms) {
+  let reading = start + ms;
+  while (reading - start < ms) reading += Math.max(Number.EPSILON * Math.abs(reading), Number.MIN_VALUE);
+  return reading;
 }
 const urlOf = (p) => `rtsp://127.0.0.1:8554/${p}`;
 const procsFor = (p) => procs.filter((x) => x.args.includes(urlOf(p)));
@@ -252,14 +288,17 @@ describe('#500: returning from main to the sub', { concurrency: false }, () => {
     const onMain = await startOnMain(cam);
     // 2 ready, a not-ready, 2 ready, a not-ready, 2 ready: the run never reaches 3.
     subAnswers(cam.id).queue = [true, true, false, true, true, false, true, true];
-    await sleep(40 * 10 + 100);
+    // #650: wait for the answers to be CONSUMED (see answersConsumed), not for a number of recheck intervals to pass.
+    await answersConsumed(cam.id, 'the broken-run script');
     assert.deepEqual(onMain.signals, [], 'a broken run switched');
 
     // An UNKNOWN (the API timed out): MediaMTX never answers, the client's deadline turns that into
     // { ready: false, unknown: true } (lib/mediamtx.js). 2 ready, unknown, 2 ready: still no switch.
+    // (The previous script must be fully consumed first: a ready run left over from its tail would otherwise add to
+    // this script's 2 and reach 3 without any unknown being miscounted.)
     setMediamtxApiTimeoutForTest(20);
     subAnswers(cam.id).queue = [true, true, 'hang', true, true];
-    await sleep(40 * 8 + 100);
+    await answersConsumed(cam.id, 'the unknown script');
     assert.deepEqual(onMain.signals, [], 'an unknown counted as ready');
 
     // And the positive control: three consecutive ready samples DO switch.
@@ -275,7 +314,8 @@ describe('#500: returning from main to the sub', { concurrency: false }, () => {
     // ONE ready answer that takes 150 ms, three ticks long. With a single sample enough to switch, honouring it
     // would switch at once; as a skipped observation it must be discarded, and everything after it is not ready.
     subAnswers(cam.id).queue = [{ ready: true, delayMs: 150 }];
-    await sleep(500);
+    // #650: the slow answer has been decided on once a LATER request arrives (no tick requests while one is awaiting).
+    await answersConsumed(cam.id, 'the slow answer', { delayed: 1 });
     assert.deepEqual(onMain.signals, [], 'a skipped (overlapped) tick extended the run');
     // Control: the same single sample, answered at once, switches.
     subAnswers(cam.id).dflt = true;
@@ -289,17 +329,24 @@ describe('#500: returning from main to the sub', { concurrency: false }, () => {
     // ready (run 1), then a ready answer that takes 150 ms and overlaps three ticks (so it is discarded), then a
     // ready. Honouring the slow one would make 2 and switch; discarding it leaves the last ready at 1.
     subAnswers(cam.id).queue = [true, { ready: true, delayMs: 150 }, true];
-    await sleep(600);
+    await answersConsumed(cam.id, 'the ready / slow / ready script', { delayed: 1 }); // #650: not a fixed 600 ms
     assert.deepEqual(onMain.signals, [], 'a skipped tick left an existing run intact');
   });
 
   test('#500 R4: a second return waits out the 10-minute gap (here 600 ms); the first one is not held back by it', async () => {
+    // ⚠️ LOGICAL TIME, NOT A STOPWATCH (#650, the same fix as R2e's #609). This used to take `t1 = realNow()` after
+    // seeing the first SIGTERM and assert that the second one came >= 550 ms later for a 600 ms gap. The detector stamps
+    // the first switch when its tick runs, but `t1` was taken only when the 10 ms poll NOTICED the SIGTERM, so every ms
+    // of lag between the two was missing from the stopwatch; under load it read 523. The gap is measured on
+    // performance.now(), so freeze that clock before the first return: the first switch is stamped at exactly T, and the
+    // case then moves the clock by hand and only waits for real timer ticks, which a loaded machine cannot reorder.
     fast({ stableChecks: 1, quietMs: 0, minGapMs: 600 });
     const cam = camera('r4');
     const first = await startOnMain(cam);
+    const T = nativeNow() + monoOffset;
+    frozenMono = T; // quietMs is 0 and every spawn is stamped <= T, so only the gap can hold a return back
     subAnswers(cam.id).dflt = true;
-    await waitFor(() => first.signals.includes('SIGTERM'), 'the first return');
-    const t1 = realNow();
+    await waitFor(() => first.signals.includes('SIGTERM'), 'the first return'); // not held back: no switch yet (null)
     await waitFor(() => procsFor(SUB(cam.id)).length === 1, 'the relaunch onto the sub');
     // The sub flaps: the process on it dies and the sub is down, so the detector falls back to main again.
     subAnswers(cam.id).dflt = false;
@@ -307,10 +354,16 @@ describe('#500: returning from main to the sub', { concurrency: false }, () => {
     await waitFor(() => procsFor(MAIN(cam.id)).length === 2, 'the fall back to main');
     const second = procsFor(MAIN(cam.id))[1];
     subAnswers(cam.id).dflt = true; // ... and the sub is back at once
-    await waitFor(() => second.signals.includes('SIGTERM'), 'the second return');
-    const gap = realNow() - t1;
-    // A gap check that is missing or reset on relaunch would switch at ~250 ms (grace 150 + delays).
-    assert.ok(gap >= 550, `the second return came ${Math.round(gap)} ms after the first; the gap is 600 ms`);
+
+    // 599 ms after the first switch: still inside the gap. The wait proves the detector HAD the chance (it polled the
+    // ready sub several times) and chose not to. A gap check that is missing, or reset on relaunch, switches here.
+    frozenMono = T + 599;
+    const seen = subRequests(cam.id);
+    await waitFor(() => subRequests(cam.id) >= seen + 5, 'five more sub checks while the gap is one ms short');
+    assert.ok(!second.signals.includes('SIGTERM'), 'the second return came 599 ms after the first; the gap is 600 ms');
+    // Exactly the gap: the first instant it may go.
+    frozenMono = clockReadingForQuiet(T, 600);
+    await waitFor(() => second.signals.includes('SIGTERM'), 'the second return once the 600 ms gap had passed', 4_000);
   });
 
   test('#500 R6: stop() in the arming window leaves no timer and no relaunch', async () => {
@@ -664,30 +717,47 @@ describe('#500: returning from main to the sub', { concurrency: false }, () => {
     await gateIgnores('c6i', { activityOnly: true, sens: 100 }, { allPx: 288 }, 'a 0.5 % whole-frame burst');
   });
 
-  test('#500 R2e: with no active frame at all, quiet is counted from the process start, not from "forever"', async () => {
-    // ⚠️ LOGICAL TIME, NOT A STOPWATCH (#609). This used to assert that real time elapsed between the spawn and the
-    // switch was >= 350 ms for a 400 ms gate. The stopwatch started AFTER startOnMain returned, so every ms the
-    // spawn took was missing from it, and under load (a full core-coverage run) it read 349 once. Widening the margin
-    // would only move the flake. The detector reads its quiet from performance.now(), so freeze that clock, put it
-    // exactly at the edge, and the answer no longer depends on how fast the machine ran.
+  // ⚠️ LOGICAL TIME, NOT A STOPWATCH (#609). This used to assert that real time elapsed between the spawn and the
+  // switch was >= 350 ms for a 400 ms gate. The stopwatch started AFTER startOnMain returned, so every ms the
+  // spawn took was missing from it, and under load (a full core-coverage run) it read 349 once. Widening the margin
+  // would only move the flake. The detector reads its quiet from performance.now(), so freeze that clock, put it
+  // exactly at the edge, and the answer no longer depends on how fast the machine ran.
+  // `spawnReading`, when given, is the frozen clock reading the process is spawned at (#650: the binade-edge case).
+  async function quietIsCountedFromTheProcessStart(id, spawnReading = null) {
     fast({ quietMs: 400, minGapMs: 0 });
-    const cam = camera('r2e');
+    const cam = camera(id);
+    if (spawnReading != null) frozenMono = spawnReading;
     const onMain = await startOnMain(cam);
     const spawnedMono = motion._detectorEntryForTests(cam.id).spawnedMono;
-    const subChecks = () => requests.filter((n) => n === SUB(cam.id)).length;
+    if (spawnReading != null) assert.equal(spawnedMono, spawnReading, 'premise: the process was stamped at the frozen reading');
     subAnswers(cam.id).dflt = true; // ready from the very first check; only the quiet gate can hold it back
 
     // 399 ms after the process start, nothing active seen: still inside the gate. The wait proves the detector HAD
     // the chance to switch (it polled the ready sub several times) and chose not to.
     frozenMono = spawnedMono + 399;
-    const seen = subChecks();
-    await waitFor(() => subChecks() >= seen + 5, 'five more sub checks while the gate is one ms short');
+    const seen = subRequests(cam.id);
+    await waitFor(() => subRequests(cam.id) >= seen + 5, 'five more sub checks while the gate is one ms short');
     assert.ok(!onMain.signals.includes('SIGTERM'), 'it switched with 399 ms of quiet on a 400 ms gate');
 
     // Exactly the gate: quiet is counted from the process start (a fresh process is NOT "quiet forever"), so this is
     // the first instant it may go.
-    frozenMono = spawnedMono + 400;
+    frozenMono = clockReadingForQuiet(spawnedMono, 400); // NOT `spawnedMono + 400`: see clockReadingForQuiet (#650)
     await waitFor(() => onMain.signals.includes('SIGTERM'), 'the switch once 400 ms of quiet had passed', 4_000);
+  }
+
+  test('#500 R2e: with no active frame at all, quiet is counted from the process start, not from "forever"', async () => {
+    await quietIsCountedFromTheProcessStart('r2e');
+  });
+
+  test('#650 R2e (regression): the same, when the gate edge is a clock reading whose sum with the process start is not exact', async () => {
+    // The deterministic form of the intermittent R2e failure. 261 745 + 2^-35 sits in the binade below 2^18 on its finest
+    // grid (the clock here is uptime + the file's accumulated 211 000 ms offset, so it really does cross 2^18 about 51 s
+    // into a run); adding 400 crosses into the binade above, where the sum is rounded and read back as 399.99999999997. The
+    // premise line pins that, so the case cannot quietly stop testing what it claims to. Without clockReadingForQuiet
+    // (`spawnedMono + 400`) the quiet gate never opens and the last wait times out.
+    const spawnReading = 261_745 + 2 ** -35;
+    assert.ok(spawnReading + 400 - spawnReading < 400, 'premise: the naive edge (start + 400) reads back short of 400 ms');
+    await quietIsCountedFromTheProcessStart('r2e-edge', spawnReading);
   });
 
   test('#500 R2c: premise: a relaunch loses a slow-link exit that the un-relaunched tracker confirms, and SUB_QUIET_MS outlasts that window', () => {
