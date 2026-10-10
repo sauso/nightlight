@@ -15,7 +15,7 @@ Neither requires the other — use one, both, or neither.
 
 | Field | Notes |
 |---|---|
-| Broker host | Required. IP or hostname, **only** (no `user@`, path or query). A host that is not a valid address is refused when you press Save, with the reason. |
+| Broker host | Required. IP or hostname, **only** (no `user@`, path or query). Letters, digits, `.`, `-` and `_` are accepted (an internationalised name such as `bücher.example` too), and an IPv6 address goes in square brackets (`[fe80::1]`); spaces before or after the host are removed. Anything else (a space or line break inside the name, `;`, `'`, `%`, `:` and so on) is refused when you press Save, with the reason, and nothing is stored. |
 | Broker port | Default **1883** if left blank. Otherwise a whole number from **1 to 65535**; anything else is refused when you press Save, and nothing is stored. |
 | Username / password | Optional, only if your broker requires auth. |
 
