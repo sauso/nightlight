@@ -13,6 +13,7 @@ import { getRecentDetectionEvents } from '../lib/detectionEvents.js';
 import { pushConfigured, pushEnabled } from '../lib/push.js';
 import { pushoverConfigured, pushoverEnabled } from '../lib/pushover.js';
 import { findCredentialLeak } from '../lib/urlCredentials.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -115,7 +116,7 @@ function bundleCameraEvent({ actor_user_id, actor_username, ...ev }) {
 
 const router = Router();
 
-router.get('/', requireAuth, requireAdmin, async (req, res) => {
+router.get('/', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
   try {
     const settings = db.prepare('SELECT * FROM settings WHERE id = ?').get('app') || {};
     const cameras = db.prepare('SELECT * FROM cameras ORDER BY sort_order, created_at').all();
@@ -218,6 +219,6 @@ router.get('/', requireAuth, requireAdmin, async (req, res) => {
     // 4xx (not 5xx): a reverse proxy replaces origin 5xx bodies, hiding the message.
     res.status(400).json({ error: `Failed to build diagnostics: ${err.message}` });
   }
-});
+}));
 
 export default router;

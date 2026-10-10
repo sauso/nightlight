@@ -136,6 +136,38 @@ the bottom of `db.js` (`PRAGMA table_info` + conditional `ALTER TABLE`) — ther
 framework. Follow this same pattern for new columns: check `table_info`, `ALTER TABLE` if
 missing, keep it idempotent.
 
+## API errors (`backend/src/lib/asyncHandler.js`, `backend/src/middleware/errorHandler.js`)
+
+Every API error is JSON in the same shape the routes already use, `{ "error": "<message>" }`, and a
+request never goes unanswered. Express 4 ignores the promise an `async` handler returns, so **every
+`async` route handler is wrapped in `asyncHandler(...)`**: a rejection (or a throw before the handler's
+own `try/catch`) is passed to `next(err)` and ends at `errorHandler`, which is mounted **last** in
+`index.js` (after every router and the SPA fallback; Express only delivers an error to handlers
+registered after it). `backend/test/async-errors.test.js` walks every router's real stack and fails for an
+`async` function registered without the wrapper, so a new route cannot bring the hang back. A handler
+that returns a promise without being `async` is not seen by that guard; write route handlers as `async`
+and wrap them.
+
+The status follows one rule, because Cloudflare (and some other proxies) replace a 5xx body with their own
+page and only a 4xx message reaches the person:
+
+- **4xx: the request was wrong and the person can fix it; the message is readable.** Validate and answer
+  a 4xx *before* any write (`PUT /api/cameras/:id` answers 400 `Child not found` for a deleted child,
+  like `/assign`). The safety nets behind that: a SQLite foreign-key failure (typically a stale tab
+  saving a reference to something another tab deleted) is a 409; an error that carries its own 4xx
+  `status`/`statusCode` keeps it (malformed JSON is 400, an oversized body 413) and its message is shown
+  only when the error is marked `expose: true` (the `http-errors` / body-parser convention), otherwise a
+  generic message for that status is used. A 401 or 403 on a thrown error is **not** honoured (the web UI
+  reads those as "signed out" / "not allowed", and a library error can carry its upstream's status); those
+  come only from `middleware/auth.js`.
+- **5xx: a server bug.** The response is `500` with a generic message. The real error (message and stack)
+  is written to the log with the method and path (never the query string, which can hold a media token) and
+  is never sent to the client, because a SQLite message names tables and columns and a stack names source
+  files.
+- If the response has already started streaming when the error happens, Express's default handler closes
+  the connection so the client sees a failure rather than a truncated body that looks complete. If the
+  reply already finished, the error is only logged.
+
 ## Runtime identity (`backend/entrypoint.sh`, `Dockerfile`)
 
 Container starts as root, remaps a pre-baked user to `PUID`/`PGID` (default 99/100, Unraid's
