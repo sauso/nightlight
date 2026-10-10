@@ -154,7 +154,7 @@ const ROUTE_GATES = {
   'GET /api/cameras/:id/sensor-history': SIGNED_IN,
   'GET /api/cameras/:id/activity-history': SIGNED_IN,
   'POST /api/cameras/clips/delete': ADMIN,
-  'PUT /api/cameras/reorder': SIGNED_IN, //                     the tile order on the live grid
+  'PUT /api/cameras/reorder': ADMIN, //                         #552: sort_order picks the scoring, timelapse and review camera
   'POST /api/cameras/verify-talk': ADMIN,
   'POST /api/cameras': ADMIN,
   'PUT /api/cameras/:id': ADMIN,

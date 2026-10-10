@@ -1,5 +1,6 @@
-// What a caregiver can no longer destroy or rearrange (#538, #552; owner decision 2026-10-10: a caregiver
-// can watch and act in the moment, but cannot destroy or reconfigure).
+// What a caregiver can no longer destroy (an alert clip, #538) or rearrange (the camera order, #552; it
+// picks the camera a child's sleep is measured from). Owner decision 2026-10-10: a caregiver can watch and
+// act in the moment, but cannot destroy or reconfigure.
 //
 // route-permissions.test.js already proves each of these routes answers a caregiver with requireAdmin's
 // 403. That is a status code. This file proves the CONSEQUENCE, over real HTTP against the real router:
@@ -11,7 +12,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  useTempDataDir, cleanupTempDataDirs, makeUser, makeSession, signToken, mountRouter, call,
+  useTempDataDir, cleanupTempDataDirs, makeUser, makeSession, makeCamera, signToken, mountRouter, call,
 } from './helpers/harness.js';
 
 useTempDataDir();
@@ -76,5 +77,37 @@ describe('DELETE /api/cameras/alerts/:id/clip (#538)', () => {
     assert.equal(res.status, 204);
     assert.deepEqual(clipRow(clip.id), { clip_status: null, clip_path: null });
     assert.equal(fs.existsSync(clip.abs), false, 'the admin delete left the mp4 on disk');
+  });
+});
+
+describe('PUT /api/cameras/reorder (#552)', () => {
+  // `sort_order` is not only layout: the first enabled camera in it is the one a child's sleep is scored
+  // from, the timelapse camera and the first in the review's list. So a caregiver's drag would
+  // reconfigure sleep tracking; it is refused, and nothing in the order moves.
+  const order = () => db.prepare('SELECT id, sort_order FROM cameras ORDER BY id').all();
+  const reorder = (ids, token) => call(`${server.url}/api/cameras/reorder`, { method: 'PUT', token, body: { order: ids } });
+
+  beforeEach(() => {
+    db.prepare('DELETE FROM cameras').run();
+    // Disabled: nothing about the order touches a stream, but nothing here should ever spawn one either.
+    for (const [id, i] of [['cam-1', 0], ['cam-2', 1], ['cam-3', 2]]) {
+      makeCamera(db, { id, extra: { sort_order: i, disabled: 1 } });
+    }
+  });
+
+  test('a caregiver gets 403 and every sort_order is unchanged', async () => {
+    const before = order();
+    const res = await reorder(['cam-3', 'cam-1', 'cam-2'], caregiverToken);
+    assert.equal(res.status, 403);
+    assert.deepEqual(res.body, { error: 'Admin access required' });
+    assert.deepEqual(order(), before);
+  });
+
+  test('an admin reorders: 200, and the new order is stored', async () => {
+    const res = await reorder(['cam-3', 'cam-1', 'cam-2'], adminToken);
+    assert.equal(res.status, 200);
+    assert.deepEqual(order(), [
+      { id: 'cam-1', sort_order: 1 }, { id: 'cam-2', sort_order: 2 }, { id: 'cam-3', sort_order: 0 },
+    ]);
   });
 });

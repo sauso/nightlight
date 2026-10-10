@@ -617,7 +617,13 @@ router.post('/clips/delete', requireAdmin, (req, res) => {
 
 // Persists a custom drag-and-drop order for the Nursery page. Mounted before /:id so
 // Express matches this literal path first, rather than treating "reorder" as an :id.
-router.put('/reorder', (req, res) => {
+// Admin-only (owner decision 2026-10-10, #552). `sort_order` is not only layout: the first enabled camera
+// in it is the ONE a child's sleep is scored from (lib/sleepAnalysis.js, the main-camera query), the one
+// the nightly timelapse is built from (lib/timelapse.js) and the first in the morning review's camera
+// list (lib/sleepReviews.js). A caregiver's drag would therefore reconfigure sleep tracking. The cost: a
+// caregiver can no longer rearrange the tiles, and the order is shared by every viewer anyway (one
+// sort_order per camera, not per person).
+router.put('/reorder', requireAdmin, (req, res) => {
   const { order } = req.body || {};
   if (!Array.isArray(order) || order.some((id) => typeof id !== 'string')) {
     return res.status(400).json({ error: 'order must be an array of camera ids' });

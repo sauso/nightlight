@@ -314,7 +314,8 @@ measurement**, and (like everything here) never a safety device — see the warn
   then nothing is an empty one, and the bedtime it seemed to start is discarded. The same applies at the other end: a morning wake
   is still found if it comes after the configured wake time.
 - **One camera does the measuring.** If a child has several cameras, sleep is worked out from their
-  **main camera** — the first one in the order you've arranged them, skipping any that are turned off.
+  **main camera** — the first one in the order an admin has arranged them on the live grid (drag the
+  tiles; only an admin can, for this reason), skipping any that are turned off.
   The others carry on streaming, alerting and recording as normal; they just don't affect the numbers.
   This is deliberate: if every camera were combined, the *noisiest* one would decide the night — a
   camera facing the doorway would push bedtime later and add wake-ups that never happened, with nothing
@@ -711,7 +712,7 @@ destroy or reconfigure.**
 | View live cameras; watch and download alert clips, recordings, wake clips and timelapses | Yes | Yes |
 | Record, move a PTZ camera, talk through a camera | Yes | Yes |
 | Restart, reboot, or snooze camera alerts | Yes | Yes |
-| Reorder cameras on the live grid | Yes | Yes |
+| Reorder cameras on the live grid (the order also picks each child's measuring camera) | No | Yes |
 | Assign a camera to a child | No | Yes |
 | Add / edit / enable / delete a camera | No | Yes |
 | Change a child's name, birthday, colour and photo | Yes | Yes |

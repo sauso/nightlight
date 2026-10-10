@@ -13722,5 +13722,23 @@
     "expect": "killed",
     "tests": ["mediaCards.test.jsx"],
     "namePattern": "told an admin can remove it"
+  },
+  {
+    "label": "W5 role gate M5: PUT /api/cameras/reorder loses requireAdmin (a caregiver's drag changes the scoring camera)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.put('/reorder', requireAdmin, (req, res) => {",
+    "replace": "router.put('/reorder', (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js", "role-gates-destroy.test.js"],
+    "note": "#552: sort_order picks the camera a child's sleep is scored from, the timelapse camera and the review's camera list."
+  },
+  {
+    "label": "W5 role UI M24: a caregiver's live tiles get the drag handle again",
+    "file": "frontend/src/components/LiveMonitor.jsx",
+    "find": "  const canReorder = user?.role === 'admin';",
+    "replace": "  const canReorder = true;",
+    "expect": "killed",
+    "tests": ["liveMonitor.test.jsx"],
+    "namePattern": "no drag handle"
   }
 ]

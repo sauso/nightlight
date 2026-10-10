@@ -18,7 +18,7 @@
 // needs real pointer gestures against real scroll position. Those are e2e's job.
 import { describe, test, expect, vi, afterEach } from 'vitest';
 import { screen, within } from '@testing-library/react';
-import { renderAsAdmin } from './helpers/render.jsx';
+import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
 import LiveMonitor from '../src/components/LiveMonitor.jsx';
 import { api } from '../src/lib/api.js';
 
@@ -125,6 +125,26 @@ describe('the screen as a whole', () => {
     const grid = container.querySelector('.live-monitor');
     expect(grid.getAttribute('aria-hidden')).toBe('false');
     expect(grid.className).toContain('live-monitor--active');
+  });
+});
+
+describe('★★ who can reorder the grid (#552)', () => {
+  // The camera order also picks the camera each child's sleep is measured from, the timelapse camera and
+  // the review's camera list, so reordering is admin-only and the server refuses a caregiver's PUT. What
+  // jsdom CAN show is the affordance: the drag handle is the only thing a drag starts from.
+  test('an admin gets a drag handle on every tile on the grid', () => {
+    mount();
+    expect(screen.getByRole('button', { name: 'Reorder Nursery' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Reorder Playroom' })).toBeTruthy();
+  });
+
+  test('★ a caregiver gets the same tiles with no drag handle', () => {
+    // The `canReorder` guard in handleDragEnd (no PUT for a caregiver) is NOT reached here: a drop needs
+    // real pointer events (see the note below). It is a second line behind the missing handle.
+    renderAsCaregiver(<LiveMonitor />, { cameras: CAMS, kids: KIDS });
+    expect(screen.getByText('Nursery')).toBeTruthy();
+    expect(screen.getByText('Playroom')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Reorder / })).toBeNull();
   });
 });
 
