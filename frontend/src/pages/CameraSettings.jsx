@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Zap, AudioLines, Clock, ChevronRight } from 'lucide-react';
-import { api } from '../lib/api.js';
+import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Modal from '../components/Modal.jsx';
@@ -78,7 +78,7 @@ export default function CameraSettings() {
       const r = await api.post('/cameras/onvif-probe', {
         host, username: form.rtsp_username || undefined, password: form.rtsp_password || undefined,
         id: isNew ? undefined : id,
-      });
+      }, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS }); // the server allows the probe up to 18 s itself
       setForm((f) => ({
         ...f,
         rtsp_host: r.rtspHost || host,
@@ -116,7 +116,7 @@ export default function CameraSettings() {
     try {
       const r = await api.post('/cameras/verify-talk', {
         host, username: form.talk_username.trim(), password: form.talk_password || undefined, id: isNew ? undefined : id,
-      });
+      }, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });
       setTalkVerifyMsg({ ok: true, text: `Talk login works${r.codec ? ` — ${r.codec}` : ''}` });
     } catch (err) {
       setTalkVerifyMsg({ ok: false, text: err.message });
@@ -149,7 +149,10 @@ export default function CameraSettings() {
     // would silently turn two-way audio off on any unrelated edit.
     if (talkOverStream) { delete payload.talk_username; delete payload.talk_password; }
     try {
-      const saved = isNew ? await api.post('/cameras', payload) : await api.put(`/cameras/${id}`, payload);
+      // A camera save probes each of its streams (and the talk backchannel) server-side before it
+      // answers, so it is one of the calls allowed to run long.
+      const slow = { timeoutMs: SLOW_REQUEST_TIMEOUT_MS };
+      const saved = isNew ? await api.post('/cameras', payload, slow) : await api.put(`/cameras/${id}`, payload, slow);
       await refresh();
       // New camera: drop into its own settings so motion/sound can be configured next.
       navigate(isNew ? `/cameras/${saved.id}` : back.to, isNew ? { state: { from: back } } : { state: { from: back } });

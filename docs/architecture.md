@@ -148,7 +148,10 @@ Settings). The Settings **hub itself is reachable by caregivers** — its route 
 guard (`App.jsx`) — but it's role-aware internally: admin-only rows are hidden for a caregiver,
 and every Settings *sub*-route (general, camera, recording, mqtt, push providers, users, logs,
 clips) is individually `AdminProtected`. `lib/api.js` is a thin fetch wrapper that attaches the
-JWT and redirects to `#/login` on a 401.
+JWT and redirects to `#/login` on a 401. Every request also carries a timeout (30 s by default, so a
+stalled connection fails with a "took too long to respond" error instead of hanging); a call the server
+is allowed to run long (camera probes and saves, recomputing a night, photo uploads, stopping a recording, diagnostics, the clip list and bulk delete) passes
+`{ timeoutMs: SLOW_REQUEST_TIMEOUT_MS }` (90 s) as its last argument.
 
 ## CSP is enforced — keep it that way
 

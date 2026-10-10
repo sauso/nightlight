@@ -6497,8 +6497,8 @@
   {
     "label": "nobody-in-bed frontend R3: RecomputeNight trusts the raw store response again",
     "file": "frontend/src/components/RecomputeNight.jsx",
-    "find": "      await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1`);\r\n      const overlaid = await api.get(`/children/${childId}/sleep/${date}?detail=1`);\r\n      onRecomputed?.(overlaid);",
-    "replace": "      const result = await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1`);\r\n      onRecomputed?.(result);",
+    "find": "      await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1`, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });\r\n      const overlaid = await api.get(`/children/${childId}/sleep/${date}?detail=1`);\r\n      onRecomputed?.(overlaid);",
+    "replace": "      const result = await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1`, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });\r\n      onRecomputed?.(result);",
     "expect": "killed",
     "tests": ["RecomputeNight.test.jsx"],
     "namePattern": "OVERLAID night"

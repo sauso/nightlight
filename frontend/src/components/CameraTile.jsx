@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet, Zap, AudioLines, Bell, Square, Play, RotateCcw, Power, BellOff, Circle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../lib/api.js';
+import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { startTalk } from '../lib/twoWayTalk.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { useAuth } from '../lib/AuthContext.jsx';
@@ -175,7 +175,8 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
     try {
       if (recording) {
         setRecording(false); // stop feels instant; the server is still cutting the clip
-        await api.post(`/cameras/${camera.id}/record/stop`, {});
+        // Slow-allowed (#556): the server answers only once ffmpeg has cut the whole recording into a clip.
+        await api.post(`/cameras/${camera.id}/record/stop`, {}, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });
         refreshCameras?.(); // pick up the server's authoritative state
         onRecordingSaved?.(); // let a recordings list know there's a new one
       } else {

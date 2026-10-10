@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, Link } from 'react-router-dom';
-import { api } from '../lib/api.js';
+import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
@@ -53,7 +53,7 @@ export default function ChildSettings() {
     if (isNew) return;
     setPhotoStatus('saving');
     try {
-      await api.put(`/children/${id}`, { name: form.name, birthday: form.birthday, color: form.color, photo });
+      await api.put(`/children/${id}`, { name: form.name, birthday: form.birthday, color: form.color, photo }, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });
       await refresh();
       setPhotoStatus('saved');
       setTimeout(() => setPhotoStatus(''), 2000);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Sun, Moon, Monitor } from 'lucide-react';
-import { api } from '../lib/api.js';
+import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { getTheme, setTheme } from '../lib/theme.js';
 import Modal from '../components/Modal.jsx';
@@ -46,7 +46,7 @@ export default function Account() {
     setError('');
     setPhotoStatus('saving');
     try {
-      await api.put('/auth/me', { photo });
+      await api.put('/auth/me', { photo }, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });
       await refresh();
       setPhotoStatus('saved');
       setTimeout(() => setPhotoStatus(''), 2000);
