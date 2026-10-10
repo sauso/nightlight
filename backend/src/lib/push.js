@@ -20,6 +20,11 @@ const CLIENT_CONFIG_PATH = process.env.FIREBASE_CLIENT_CONFIG || path.join(DATA_
 // notification is delivered to the right channel on Android 8+.
 const ANDROID_CHANNEL = 'nightlight_alerts';
 
+// firebase-admin's hard cap on messages per sendEach call (its FCM_MAX_BATCH_SIZE). A larger list
+// throws before anything is sent, so sendToAll chunks to this size. Measured by calling sendEach
+// with 500 (accepted) and 501 (throws messaging/invalid-argument) messages, issue #546.
+export const FCM_MAX_BATCH = 500;
+
 let messaging = null;
 
 // Idempotent: initializes firebase-admin from the mounted service-account key the first time it
@@ -311,22 +316,45 @@ export async function sendToAll(title, body, data = {}, imageBuffer = null, { ta
     }
     return msg;
   });
-  try {
-    const res = await messaging.sendEach(messages);
-    res.responses.forEach((r, i) => {
-      if (r.success) return;
-      const code = r.error?.code || '';
-      if (
-        code.includes('registration-token-not-registered') ||
-        code.includes('invalid-registration-token') ||
-        code.includes('invalid-argument')
-      ) {
-        removeToken(rows[i].token);
-      }
-    });
+  // Send in chunks of at most FCM_MAX_BATCH. firebase-admin's sendEach rejects a list of more than
+  // 500 messages up front (it throws before sending anything), so a single call over every token
+  // meant that once 501+ rows were deliverable EVERY alert failed for EVERY device, and the junk
+  // rows were never pruned because pruning only runs on a successful response (issue #546).
+  // Sequential on purpose: each chunk is already a parallel fan-out inside the SDK, an alert is
+  // not so time-critical that a few extra round trips matter, and awaiting in turn keeps FCM
+  // from seeing thousands of simultaneous requests from one alert. Each chunk has its own
+  // try/catch so one failing chunk (a network blip, a rejected request) costs only its own devices.
+  let sent = 0;
+  let chunksReturned = 0;
+  const chunkCount = Math.ceil(messages.length / FCM_MAX_BATCH);
+  for (let start = 0; start < messages.length; start += FCM_MAX_BATCH) {
+    const chunkNo = start / FCM_MAX_BATCH + 1;
+    try {
+      const res = await messaging.sendEach(messages.slice(start, start + FCM_MAX_BATCH));
+      chunksReturned++;
+      sent += res.successCount;
+      res.responses.forEach((r, i) => {
+        if (r.success) return;
+        const code = r.error?.code || '';
+        if (
+          code.includes('registration-token-not-registered') ||
+          code.includes('invalid-registration-token') ||
+          code.includes('invalid-argument')
+        ) {
+          // `start + i` maps the chunk-local response back to its row; without the offset a
+          // later chunk would prune the wrong (live) tokens from the first chunk.
+          removeToken(rows[start + i].token);
+        }
+      });
+    } catch (e) {
+      const size = Math.min(FCM_MAX_BATCH, messages.length - start);
+      logger.error(`[push] send failed for batch ${chunkNo}/${chunkCount} (${size} device(s)):`, e.message);
+    }
+  }
+  // Same line as before for the normal case (M = every device we tried, not per batch). When every
+  // batch threw there is nothing to report as "sent"; the per-batch errors above already say so.
+  if (chunksReturned > 0) {
     const withImg = snapshotId ? (rows.some((r) => r.base_url) ? ' with image' : ' (image skipped — no device base URL)') : '';
-    logger.info(`[push] alert sent to ${res.successCount}/${rows.length} device(s)${withImg}`);
-  } catch (e) {
-    logger.error('[push] send failed:', e.message);
+    logger.info(`[push] alert sent to ${sent}/${rows.length} device(s)${withImg}`);
   }
 }

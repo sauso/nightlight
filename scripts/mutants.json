@@ -1742,6 +1742,105 @@
     "note": "Validates the harness for this file. If this is ever KILLED, no other push public URL result means anything."
   },
   {
+    "label": "push batching: control - a comment edit must change nothing",
+    "file": "backend/src/lib/push.js",
+    "find": "// Sequential on purpose: each chunk is already a parallel fan-out inside the SDK",
+    "replace": "// Sequential on purpose [CONTROL MUTANT]: each chunk is already a parallel fan-out inside the SDK",
+    "expect": "survives",
+    "tests": [
+      "push-batching.test.js"
+    ],
+    "note": "Validates the harness for the push batching mutants (issue #546)."
+  },
+  {
+    "label": "push batching: the batch size is 501, one over the SDK limit",
+    "file": "backend/src/lib/push.js",
+    "find": "export const FCM_MAX_BATCH = 500;",
+    "replace": "export const FCM_MAX_BATCH = 501;",
+    "expect": "killed",
+    "tests": [
+      "push-batching.test.js"
+    ],
+    "note": "The fake sendEach throws on more than 500 messages exactly as firebase-admin does, so an off-by-one batch size fails the 501 and 1234 cases."
+  },
+  {
+    "label": "push batching: a batch drops its last message",
+    "file": "backend/src/lib/push.js",
+    "find": "messaging.sendEach(messages.slice(start, start + FCM_MAX_BATCH))",
+    "replace": "messaging.sendEach(messages.slice(start, start + FCM_MAX_BATCH - 1))",
+    "expect": "killed",
+    "tests": [
+      "push-batching.test.js"
+    ],
+    "note": "A slice one short skips a device per batch; caught by the every-token-exactly-once check."
+  },
+  {
+    "label": "push batching: later batches prune by position in the batch, not the row",
+    "file": "backend/src/lib/push.js",
+    "find": "removeToken(rows[start + i].token);",
+    "replace": "removeToken(rows[i].token);",
+    "expect": "killed",
+    "tests": [
+      "push-batching.test.js"
+    ],
+    "note": "Without the offset a dead token in batch 2 would delete a LIVE token from batch 1."
+  },
+  {
+    "label": "push batching: the sent count is the last batch's, not the total",
+    "file": "backend/src/lib/push.js",
+    "find": "sent += res.successCount;",
+    "replace": "sent = res.successCount;",
+    "expect": "killed",
+    "tests": [
+      "push-batching.test.js"
+    ],
+    "note": "The 'alert sent to N/M' line must aggregate every batch."
+  },
+  {
+    "label": "push batching: the 'alert sent' line is logged even when every batch failed",
+    "file": "backend/src/lib/push.js",
+    "find": "if (chunksReturned > 0) {",
+    "replace": "if (true) {",
+    "expect": "killed",
+    "tests": [
+      "push-batching.test.js"
+    ],
+    "note": "When every batch threw, claiming 'sent to 0/M' would hide that the send failed outright."
+  },
+  {
+    "label": "push batching: a failed batch reports the full batch size instead of its own",
+    "file": "backend/src/lib/push.js",
+    "find": "const size = Math.min(FCM_MAX_BATCH, messages.length - start);",
+    "replace": "const size = FCM_MAX_BATCH;",
+    "expect": "killed",
+    "tests": [
+      "push-batching.test.js"
+    ],
+    "note": "The short last batch (1 device of 501) must be reported as 1."
+  },
+  {
+    "label": "push batching: the failed batch number is zero-based in the log",
+    "file": "backend/src/lib/push.js",
+    "find": "const chunkNo = start / FCM_MAX_BATCH + 1;",
+    "replace": "const chunkNo = start / FCM_MAX_BATCH;",
+    "expect": "killed",
+    "tests": [
+      "push-batching.test.js"
+    ],
+    "note": "An operator reading 'batch 0/3' would be misled about how many batches failed."
+  },
+  {
+    "label": "push batching: one failing batch stops the remaining batches",
+    "file": "backend/src/lib/push.js",
+    "find": "logger.error(`[push] send failed for batch ${chunkNo}/${chunkCount} (${size} device(s)):`, e.message);",
+    "replace": "logger.error(`[push] send failed for batch ${chunkNo}/${chunkCount} (${size} device(s)):`, e.message); break;",
+    "expect": "killed",
+    "tests": [
+      "push-batching.test.js"
+    ],
+    "note": "The batch after a failure must still be sent."
+  },
+  {
     "label": "push public URL: any device, not just an admin's, may set the global address",
     "file": "backend/src/lib/push.js",
     "find": "if (origin && isAdminUser(userId)) {",
