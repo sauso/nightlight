@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Zap, AudioLines, Play, Trash2 } from 'lucide-react';
-import { api } from '../lib/api.js';
+import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Modal from '../components/Modal.jsx';
 import ClipDatePicker from '../components/ClipDatePicker.jsx';
@@ -33,7 +33,8 @@ export default function ClipManagement() {
 
   async function load() {
     try {
-      const rows = await api.get('/cameras/clips');
+      // Slow-allowed (#556): returns up to 5000 rows (getClips caps there), which is a large body on a slow link.
+      const rows = await api.get('/cameras/clips', { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });
       setClips(Array.isArray(rows) ? rows : []);
     } catch (e) {
       setError(e.message || 'Failed to load clips');
@@ -88,7 +89,8 @@ export default function ClipManagement() {
     setBusy(true);
     try {
       const ids = [...selected];
-      await api.post('/cameras/clips/delete', { ids });
+      // Slow-allowed (#556): the route deletes each clip file one by one, synchronously, so thousands take a while.
+      await api.post('/cameras/clips/delete', { ids }, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });
       setSelected(new Set());
       setConfirming(false);
       await load();
