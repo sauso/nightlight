@@ -440,12 +440,13 @@ stops being refined, which is the other half of why no later wake time is pushed
 
 ## Long-silence notifications (admins)
 
-Separate again: when a camera's alerts are kept silenced for longer than the admins allow (on by default,
-60 minutes, under **Settings → Camera controls → Long silence alerts**), one notification goes out for that
-silence. Unlike everything above, it is meant for the **admins**, not the person who silenced the camera, and
-only the Nightlight app's own push (Firebase) can do that: Pushover, ntfy and Gotify cannot address one
-person, so everyone on them receives it too. What counts as one silence, who receives it on each channel, and
-the known limits are in [camera-controls.md](camera-controls.md#long-silence-alerts).
+Separate again: when a camera's alerts are kept silenced, on and off, for longer than the admins allow (on by
+default, 60 minutes, under **Settings → Camera controls → Long silence alerts**), one notification goes out for
+that silence. It says how long, never who: no username goes to any provider. Unlike everything above, it is
+meant for the **admins**, not the person who silenced the camera, and only the Nightlight app's own push
+(Firebase) can do that: Pushover, ntfy and Gotify cannot address one person, so everyone on them receives it
+too. What counts as one silence, who receives it on each channel, and the known limits are in
+[camera-controls.md](camera-controls.md#long-silence-alerts).
 
 ## Troubleshooting
 

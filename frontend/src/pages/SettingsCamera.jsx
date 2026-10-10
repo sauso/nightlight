@@ -125,10 +125,11 @@ export default function SettingsCamera() {
                 <div>Notify admins when a camera's alerts stay silenced for a long time</div>
                 <div className="camera-tile__sub">
                   Anyone signed in can silence a camera's alerts from its tile. Admins get one notification
-                  when a camera's alerts are kept silenced for longer than the time below. In the Nightlight
-                  app (Firebase) it goes to admins only, not to the person who set the silence. Pushover, ntfy
-                  and Gotify can't send to one person, so everyone on those receives it too, including whoever
-                  set the silence.
+                  when a camera's alerts are kept silenced, on and off, for longer than the time below. In the
+                  Nightlight app (Firebase) it goes to admins only, not to the person who set the silence.
+                  Pushover, ntfy and Gotify can't send to one person, so everyone on those receives it too,
+                  including whoever set the silence. It names no one: the camera's tile and Camera history show
+                  who set each silence.
                 </div>
               </div>
               <Switch
@@ -151,9 +152,9 @@ export default function SettingsCamera() {
                 onChange={(e) => setForm({ ...form, snooze_alert_minutes: e.target.value })}
               />
               <div className="camera-tile__sub">
-                Silences set within 30 minutes of the last one ending count as one, so renewing a silence
-                keeps adding up. One notification per silence, sent as soon as a silence takes it past this
-                time.
+                Silences set within 30 minutes of the last one ending count as one, and those short gaps
+                count toward the time too, so renewing a silence keeps adding up. One notification per
+                silence, sent as soon as a silence takes it past this time.
               </div>
             </div>
           </div>

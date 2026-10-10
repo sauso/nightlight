@@ -122,8 +122,8 @@ describe('C1: back-to-back silences over the threshold notify once per silence',
     // The tile hides its buttons while muted, so this is how a renewal from the tile arrives: after it ran out.
     assert.equal(mute(T0 + 65 * MIN, 60), true);
     assert.deepEqual(episode(), { started_at: T0, ended_at: T0 + 125 * MIN, notified: 1 }, 'one episode, from the first start');
-    assert.deepEqual(notices, [[CAM_ROW, 125, 'carer-login', 'u-carer']],
-      'one notice: the camera, its length in minutes, who set the latest silence, and whose devices to leave out');
+    assert.deepEqual(notices, [[CAM_ROW, 125, 'u-carer']],
+      'one notice: the camera, its length in minutes, and whose devices to leave out (no username: PR #664 review)');
   });
 
   test('★ a third renewal in the same silence sends no second notice', () => {
@@ -185,10 +185,24 @@ describe('C1: back-to-back silences over the threshold notify once per silence',
     assert.equal(notices[0][1], 61);
   });
 
-  test('an actor with no username or id is passed on as null, not invented', () => {
+  test('an actor with no id is passed on as null, not invented', () => {
     noteSilence(CAM, T0, T0 + 120 * MIN);
     sendLongSilenceNotice(CAM_ROW, { user_id: null, username: null });
-    assert.deepEqual(notices[0].slice(2), [null, null]);
+    assert.deepEqual(notices[0].slice(2), [null]);
+  });
+
+  test('★ the clock set BACK before the silence began: the next mute starts a new silence, never a negative one', () => {
+    // PR #664 review, the exact timeline it reproduced: a 60-minute silence set at T0, then (the server clock having
+    // been set back by just over an hour) a mute at T0 - 61 min. Continuing would store an end BEFORE the start, a
+    // negative length that never notifies however long the renewals go on.
+    assert.equal(T0, 1_900_000_000_000);
+    mute(T0, 60);
+    const back = 1_899_996_340_000; // T0 - 61 minutes
+    assert.equal(mute(back, 60), false);
+    assert.deepEqual(episode(), { started_at: back, ended_at: back + 60 * MIN, notified: 0 }, 'a new silence from the earlier time');
+    assert.ok(episode().ended_at > episode().started_at, 'never a negative length');
+    assert.equal(mute(back + 65 * MIN, 60), true, 'and it adds up and notifies as usual from there');
+    assert.deepEqual(notices.map((n) => n[1]), [125]);
   });
 });
 
@@ -244,7 +258,7 @@ describe('C6: un-muting does not reset the count', () => {
     mute(T0, 60);
     unmute(T0 + 10 * MIN);
     assert.deepEqual(episode(), { started_at: T0, ended_at: T0 + 10 * MIN, notified: 0 }, 'the un-mute brought the end forward');
-    assert.equal(mute(T0 + 11 * MIN, 60), true, '71 minutes in a row');
+    assert.equal(mute(T0 + 11 * MIN, 60), true, '71 minutes, on and off (the one-minute gap counts)');
     assert.deepEqual(notices.map((n) => n[1]), [71]);
   });
 
@@ -277,16 +291,40 @@ describe('through POST /api/cameras/:id/snooze', () => {
     const res = await snooze(carerToken, 720);
     assert.equal(res.status, 200);
     assert.equal(notices.length, 1);
-    const [cam, minutes, username, userId] = notices[0];
-    assert.deepEqual([cam.id, cam.name, minutes, username, userId], [CAM, CAM_ROW.name, 720, 'carer-login', 'u-carer']);
+    const [cam, minutes, userId] = notices[0];
+    assert.deepEqual([cam.id, cam.name, minutes, userId], [CAM, CAM_ROW.name, 720, 'u-carer']);
     assert.equal((await snooze(adminToken, 720)).status, 200);
     assert.equal(notices.length, 1, 'the same silence, already notified');
     assert.equal(episode().notified, 1);
   });
 
-  test('★ an admin\'s silence names the admin, so the admin\'s own devices are the ones left out', async () => {
+  test('★ an admin\'s silence passes the admin\'s id, so the admin\'s own devices are the ones left out', async () => {
     await snooze(adminToken, 120);
-    assert.deepEqual(notices[0].slice(2), ['admin-login', 'u-admin']);
+    assert.deepEqual(notices[0].slice(2), ['u-admin']);
+  });
+
+  test('★ C3, "after the commit": a silence whose COMMIT fails sends no notice (and is not applied)', async () => {
+    // The one failure that tells "notice after the commit" from "notice inside the transaction, after its writes"
+    // (PR #664 review, mutant R05): every write succeeds and only COMMIT fails. A deferred foreign key does exactly
+    // that: a row naming a camera that does not exist is allowed until COMMIT, which then refuses the transaction.
+    // A test-only table and trigger plant one inside the snooze's own transaction.
+    db.exec(`CREATE TABLE IF NOT EXISTS commit_tripwire (
+               cam TEXT REFERENCES cameras(id) DEFERRABLE INITIALLY DEFERRED)`);
+    db.exec(`CREATE TRIGGER trip_commit AFTER INSERT ON camera_silences
+             BEGIN INSERT INTO commit_tripwire (cam) VALUES ('no-such-camera'); END`);
+    try {
+      const res = await snooze(carerToken, 720);
+      assert.equal(res.status, 500, JSON.stringify(res.body));
+      assert.deepEqual(camRow(), { alerts_snoozed_until: null, alerts_snoozed_by: null }, 'the silence rolled back');
+      assert.equal(episode(), undefined);
+      assert.equal(notices.length, 0, 'no notice about a silence that never happened');
+    } finally {
+      db.exec('DROP TRIGGER IF EXISTS trip_commit');
+      db.exec('DROP TABLE IF EXISTS commit_tripwire');
+    }
+    // Control: without the tripwire the same silence notifies, so the 0 above is the commit, not something else.
+    assert.equal((await snooze(carerToken, 720)).status, 200);
+    assert.equal(notices.length, 1);
   });
 
   test('one press of the tile\'s longest button (60 minutes) does not notify at the default threshold', async () => {
@@ -412,17 +450,35 @@ describe('C5: Long silence alerts settings', () => {
     assert.deepEqual(settingsRow(), { snooze_alert_enabled: 1, snooze_alert_minutes: 95 });
   });
 
-  test('★ the range is 1-719: 0, 720, -5, "abc" and an empty string are refused and nothing is written', async () => {
+  test('★ the range is 1-719, whole numbers only: anything else is refused and nothing is written', async () => {
+    // PR #664 review, reproduced: parseInt stored 59.5 as 59 and 1e100 as 1 (a huge value silently became a
+    // one-minute threshold). Every one of these must be a 400 with the readable message, and change nothing.
     setAlert(1, 42);
-    for (const bad of [0, 720, -5, 'abc', '']) {
+    const BAD = [0, 720, -5, 'abc', '', 59.5, '59.5', 1e100, '1e3', '60abc', [60], null, true, '0x10', ' 60', {}];
+    for (const bad of BAD) {
       const r = await put(adminToken, { snooze_alert_minutes: bad, snooze_alert_enabled: false });
       assert.equal(r.status, 400, `${JSON.stringify(bad)} was accepted`);
       assert.equal(r.body.error, 'Long-silence alert threshold must be between 1 and 719 minutes');
       assert.deepEqual(settingsRow(), { snooze_alert_enabled: 1, snooze_alert_minutes: 42 }, `${JSON.stringify(bad)}: nothing written`);
     }
-    for (const good of [1, 719, '30']) {
+    for (const good of [1, 719, '60', '30']) {
       assert.equal((await put(adminToken, { snooze_alert_minutes: good })).status, 200, `${good} refused`);
       assert.equal(settingsRow().snooze_alert_minutes, Number(good));
+    }
+  });
+
+  test('★ the switch takes only true/false/1/0: the string "false" is refused, never stored as on', async () => {
+    // Truthiness (what the older switches on this route use) would store "false", "0" and "no" as ON.
+    setAlert(0, 42);
+    for (const bad of ['false', '0', 'no', 'true', '1', 2, null, [], {}]) {
+      const r = await put(adminToken, { snooze_alert_enabled: bad });
+      assert.equal(r.status, 400, `${JSON.stringify(bad)} was accepted`);
+      assert.equal(r.body.error, 'Long-silence alerts must be switched on or off (true or false)');
+      assert.equal(settingsRow().snooze_alert_enabled, 0, `${JSON.stringify(bad)}: nothing written`);
+    }
+    for (const [good, stored] of [[true, 1], [false, 0], [1, 1], [0, 0]]) {
+      assert.equal((await put(adminToken, { snooze_alert_enabled: good })).status, 200, `${good} refused`);
+      assert.equal(settingsRow().snooze_alert_enabled, stored);
     }
   });
 

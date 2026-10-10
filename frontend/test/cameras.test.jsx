@@ -415,8 +415,10 @@ describe('Settings → Camera controls', () => {
     mockApi();
     renderAsAdmin(<SettingsCamera />, { settings: SETTINGS });
     expect(screen.getByText(/goes to admins only, not to the person who set the silence/)).toBeInTheDocument();
-    expect(screen.getByText(/Pushover, ntfy\s+and Gotify can't send to one person, so everyone on those receives it too, including whoever\s+set the silence/)).toBeInTheDocument();
-    expect(screen.getByText(/within 30 minutes of the last one ending count as one/)).toBeInTheDocument();
+    expect(screen.getByText(/Pushover, ntfy and Gotify can't send to one person, so everyone on those receives it too,\s+including whoever set the silence/)).toBeInTheDocument();
+    expect(screen.getByText(/kept silenced, on and off, for longer than the time below/)).toBeInTheDocument();
+    expect(screen.getByText(/It names no one: the camera's tile and Camera history show\s+who set each silence/)).toBeInTheDocument();
+    expect(screen.getByText(/within 30 minutes of the last one ending count as one, and those short gaps\s+count toward the time too/)).toBeInTheDocument();
   });
 
   test('shows Saved ✓ and refreshes the context on success', async () => {

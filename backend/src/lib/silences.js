@@ -50,6 +50,9 @@ const claimStmt = db.prepare('UPDATE camera_silences SET notified = 1 WHERE came
  *     silence continues it, keeping its start and whether it was already notified; otherwise a new episode starts
  *     at `now`, not yet notified. Either way the episode now ends at `until`, which can be EARLIER than before (a
  *     15-minute silence set over a 60-minute one replaces it, exactly as the mute itself does).
+ *     A mute whose `now` is EARLIER than the episode's start (the server clock was set back: NTP, a host whose
+ *     clock was wrong at boot) also starts a new episode (PR #664 review, reproduced): continuing would store an
+ *     end before the start, a negative length that can never notify, for as long as the renewals keep coming.
  *   un-mute (`until` null): bring the end forward to `now`, never later. The episode is NOT closed, so a re-mute
  *     within the gap continues it: un-mute then re-mute cannot reset the count. An un-mute of an episode that has
  *     already ended, or of a camera with none, writes nothing (the route does not even call this then: since
@@ -61,7 +64,7 @@ const claimStmt = db.prepare('UPDATE camera_silences SET notified = 1 WHERE came
 export function noteSilence(cameraId, now, until) {
   if (until) {
     const row = selectStmt.get(cameraId);
-    if (row && now <= row.ended_at + REJOIN_GAP_MS) continueStmt.run(until, cameraId);
+    if (row && now >= row.started_at && now <= row.ended_at + REJOIN_GAP_MS) continueStmt.run(until, cameraId);
     else startStmt.run(cameraId, now, until);
     return;
   }
@@ -102,8 +105,9 @@ export function sendLongSilenceNotice(cam, actor) {
   try {
     const length = claimLongSilenceNotice(cam.id);
     if (length === null) return false;
-    // Rounded UP, so the minutes shown are never at or below a threshold the episode was strictly above.
-    notifyLongSilence(cam, Math.ceil(length / 60_000), actor?.username ?? null, actor?.user_id ?? null);
+    // Rounded UP, so the minutes shown are never at or below a threshold the episode was strictly above. Only the
+    // account id goes on (to leave that person's own devices out); no username, see notifyLongSilence.
+    notifyLongSilence(cam, Math.ceil(length / 60_000), actor?.user_id ?? null);
     return true;
   } catch (err) {
     logger.error(`[silence-alert] "${cam.name}": the long-silence notice was not sent (${err.message})`);

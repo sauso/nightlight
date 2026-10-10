@@ -275,14 +275,23 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
   // the longest single silence still notifies. At 720 or above only silences chained by renewals could, and the
   // setting would read like "off" to anyone who tried one long silence. 0 is refused rather than meaning "off":
   // the switch is the off.
+  //
+  // Both are validated STRICTLY, unlike the parseInt / truthiness of the fields above (PR #664 review, reproduced):
+  // parseInt reads 59.5 as 59 and 1e100 as 1, and truthiness stores the string "false" as ON, so a mistyped or
+  // hostile value would silently become a different setting. Only a whole number (a number, or a string of digits)
+  // and only true/false/1/0 are accepted. The older fields keep their behaviour; tightening them is out of scope.
   let snoozeAlertEnabled = existing.snooze_alert_enabled;
   if (snooze_alert_enabled !== undefined) {
+    if (![true, false, 1, 0].includes(snooze_alert_enabled)) {
+      return res.status(400).json({ error: 'Long-silence alerts must be switched on or off (true or false)' });
+    }
     snoozeAlertEnabled = snooze_alert_enabled ? 1 : 0;
   }
   let snoozeAlertMinutes = existing.snooze_alert_minutes;
   if (snooze_alert_minutes !== undefined) {
-    const n = parseInt(snooze_alert_minutes, 10);
-    if (!Number.isFinite(n) || n < 1 || n > 719) {
+    const v = snooze_alert_minutes;
+    const n = Number.isInteger(v) ? v : typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : NaN;
+    if (!(n >= 1 && n <= 719)) {
       return res.status(400).json({ error: 'Long-silence alert threshold must be between 1 and 719 minutes' });
     }
     snoozeAlertMinutes = n;

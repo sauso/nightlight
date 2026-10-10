@@ -51,13 +51,17 @@ there's no per-camera override.
 
 Anyone signed in can silence a camera's alerts from its tile (see
 [Silencing a camera's alerts](#silencing-a-cameras-alerts-and-who-did-what) below). This tells the
-admins when one camera's alerts are **kept** silenced for longer than the threshold, so a camera that
-has been silenced again and again does not go unnoticed.
+admins when one camera's alerts are **kept** silenced, on and off, for longer than the threshold, so a
+camera that has been silenced again and again does not go unnoticed.
 
 - **What counts as one silence.** Silences of the same camera count as one when each is set no more
   than **30 minutes** after the previous one ended (ran out, or was un-muted). The length runs from
-  the start of the first to the end of the latest, so those short breaks are counted too. Un-muting and
-  silencing again within the 30 minutes does not reset the count.
+  the start of the first to the end of the latest, so **those short gaps count toward it too**, even
+  though alerts were on during them: three 15-minute silences, each set 30 minutes after the last one
+  ran out, count as 1 h 45 min, of which 45 minutes were silenced. That is why the notification says
+  "on and off", not "in a row". Un-muting and silencing again within the 30 minutes does not reset the
+  count. If the server's clock is set back to before the silence began, the next silence starts a new
+  count.
 - **When it is sent.** At the moment a silence is set that takes the total past the threshold —
   strictly *more than* it — not when that much time has passed. So at the default 60, one press of the
   tile's longest button (1 hour) never notifies, and silencing it again within 30 minutes of that
@@ -66,15 +70,20 @@ has been silenced again and again does not go unnoticed.
   it early does not take the notification back.
 - **One notification per silence.** Renewing the same silence again does not send another. A new
   silence, after a break of more than 30 minutes, can notify again.
-- **What it says.** `Alerts silenced on <camera>`, then `Alerts from "<camera>" are silenced for 2 h 5
-  min in a row, counting renewals (latest by <username>).` A length of time, never a clock time, and
-  the username of whoever set the latest silence (as in Camera history). The server log notes the
-  notification without the username.
+- **What it says.** `Alerts silenced on <camera>`, then `Alerts from "<camera>" have been silenced on
+  and off for 2 h 5 min. Camera history shows who set each silence.` A length of time, never a clock
+  time. **It names no one**, on any channel: Pushover, ntfy (the public ntfy.sh unless you run your
+  own) and Gotify are services outside your house, and Nightlight keeps login names out of anything
+  that leaves it. Who set a silence is on the camera's tile while it lasts (`Muted until <time> by
+  <username>`) and in Camera history (admin only), below. The server log notes the notification
+  without any name either.
 - **Not affected by the camera's alert schedule** (quiet hours): it is about the camera's alerts being
   off, not an alert from the camera.
 - **Why the range stops at 719.** One silence can be at most 720 minutes, and the notification needs
   *more than* the threshold, so 719 is the highest value at which the longest single silence still
-  notifies. There is no 0: the switch is how to turn it off.
+  notifies. There is no 0: the switch is how to turn it off. The threshold must be a whole number
+  (`59.5`, `1e3` or `60abc` is refused, not rounded), and the switch only takes on or off (`true`,
+  `false`, `1`, `0`); this is stricter than the older settings on this page, on purpose.
 
 **Who receives it depends on the channel** (the providers are set up under **Settings → Push
 notifications**):
@@ -114,9 +123,9 @@ Not a setting: this is a control on every camera tile, described here because it
 alerts above. In a tile's menu (the gear button), **Silence alerts** mutes every alert from that one
 camera (motion, sound, ONVIF and MQTT) for 15 minutes, 30 minutes or an hour, and the same button then
 un-mutes it early. Anyone signed in can use it, caregivers included. The server accepts at most 720
-minutes (12 hours) for one silence; the tile only offers up to an hour. Keeping a camera silenced in a
-row for longer than the admins' threshold (an hour by default, so by renewing it) tells the admins: see
-[Long-silence alerts](#long-silence-alerts) above.
+minutes (12 hours) for one silence; the tile only offers up to an hour. Keeping a camera silenced, on
+and off, for longer than the admins' threshold (an hour by default, so by renewing it) tells the
+admins: see [Long-silence alerts](#long-silence-alerts) above.
 
 **Who did it is recorded, by username.** That is the login name an admin sets for each account, never
 the first name, which anyone can change on their own account (so it cannot be used to put someone
@@ -139,7 +148,7 @@ not change what was recorded.
 
 | Action | If the Camera history row can't be written |
 |---|---|
-| Silence or un-mute alerts | **Nothing happens.** The camera keeps (or stays in) its previous state and the tile does not change. Not muting is the safe direction: a silence is the one action here that can hide something from everyone else. The same holds if the record the long-silence alert counts from cannot be written: a silence that cannot be counted is not applied. (The long-silence *notification* itself is different: it is sent after the silence is applied, and if sending it fails the silence still stands.) |
+| Silence or un-mute alerts | **Nothing happens.** The camera keeps (or stays in) its previous state and the tile does not change. Not muting is the safe direction: a silence is the one action here that can hide something from everyone else. The same holds if the record the long-silence alert counts from cannot be written: a silence that cannot be counted is not applied. (The long-silence *notification* itself is different: it is sent only after the silence has been saved, so a silence that fails to save sends none, and if sending it fails the silence still stands.) |
 | Restart the stream, reboot the camera | **It still happens**, without a row. By the time the row is written the camera has already acted, and that cannot be undone. |
 
 A failed restart or reboot is recorded too, because a failure can still have acted: a restart may have

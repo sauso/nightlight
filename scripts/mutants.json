@@ -14320,21 +14320,21 @@
     "namePattern": "narrowed to admins"
   },
   {
-    "label": "#552 PR3 M21: the username goes into the log line (logs reach the diagnostics bundle)",
+    "label": "#552 PR3 M21: the person's account id goes into the log line (logs reach the diagnostics bundle)",
     "file": "backend/src/lib/cameraStatusAlert.js",
     "find": "notifying the admins`);",
-    "replace": "notifying the admins (latest by ${username})`);",
+    "replace": "notifying the admins (latest by ${actorUserId})`);",
     "expect": "killed",
     "tests": [
       "long-silence-notice.test.js"
     ],
-    "namePattern": "NOT in the log"
+    "namePattern": "absent from every channel"
   },
   {
     "label": "#552 PR3 M22: the threshold ceiling raised from 719 to 720",
     "file": "backend/src/routes/settings.js",
-    "find": "n < 1 || n > 719) {",
-    "replace": "n < 1 || n > 720) {",
+    "find": "n >= 1 && n <= 719",
+    "replace": "n >= 1 && n <= 720",
     "expect": "killed",
     "tests": [
       "input-validation.test.js",
@@ -14345,8 +14345,8 @@
   {
     "label": "#552 PR3 M23: the threshold floor loosened from 1 to 0",
     "file": "backend/src/routes/settings.js",
-    "find": "n < 1 || n > 719) {",
-    "replace": "n < 0 || n > 719) {",
+    "find": "n >= 1 && n <= 719",
+    "replace": "n >= 0 && n <= 719",
     "expect": "killed",
     "tests": [
       "input-validation.test.js",
@@ -14463,5 +14463,93 @@
       "cameras.test.jsx"
     ],
     "namePattern": "falls back to the documented defaults"
+  },
+  {
+    "label": "#552 PR3 M34: the threshold is read with parseInt again (59.5 stored as 59, 1e100 as 1)",
+    "file": "backend/src/routes/settings.js",
+    "find": "const n = Number.isInteger(v) ? v : typeof v === 'string' &&",
+    "replace": "const n = parseInt(v, 10); const unused = typeof v === 'string' &&",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "whole numbers only"
+  },
+  {
+    "label": "#552 PR3 M35: any string is read as a number (\"59.5\" and \"0x10\" accepted)",
+    "file": "backend/src/routes/settings.js",
+    "find": "/.test(v) ? Number(v) : NaN;",
+    "replace": "/.test(v) || typeof v === 'string' ? Number(v) : NaN;",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "whole numbers only"
+  },
+  {
+    "label": "#552 PR3 M36: any number is accepted, not only a whole one (59.5 stored)",
+    "file": "backend/src/routes/settings.js",
+    "find": "const n = Number.isInteger(v) ? v :",
+    "replace": "const n = typeof v === 'number' ? v :",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "whole numbers only"
+  },
+  {
+    "label": "#552 PR3 M37: the switch is read by truthiness again (the string \"false\" stored as ON)",
+    "file": "backend/src/routes/settings.js",
+    "find": "if (![true, false, 1, 0].includes(snooze_alert_enabled)) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "takes only true/false/1/0"
+  },
+  {
+    "label": "#552 PR3 M38: a mute after the clock was set back continues the old silence (a negative length that never notifies)",
+    "file": "backend/src/lib/silences.js",
+    "find": "now >= row.started_at && ",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "clock set BACK"
+  },
+  {
+    "label": "#552 PR3 M39: the notice text names the account that set the silence (it leaves the house on Pushover/ntfy/Gotify)",
+    "file": "backend/src/lib/cameraStatusAlert.js",
+    "find": "have been silenced on and off for ${length}.",
+    "replace": "have been silenced on and off for ${length} (by ${actorUserId}).",
+    "expect": "killed",
+    "tests": [
+      "long-silence-notice.test.js"
+    ],
+    "namePattern": "absent from every channel"
+  },
+  {
+    "label": "#552 PR3 M40: the username is handed to the notice instead of the account id",
+    "file": "backend/src/lib/silences.js",
+    "find": "notifyLongSilence(cam, Math.ceil(length / 60_000), actor?.user_id ?? null);",
+    "replace": "notifyLongSilence(cam, Math.ceil(length / 60_000), actor?.username ?? null);",
+    "expect": "killed",
+    "tests": [
+      "long-silence-notice.test.js"
+    ],
+    "namePattern": "absent from every channel"
+  },
+  {
+    "label": "#552 PR3 M41 (review R05): the notice is sent INSIDE the transaction, before its commit",
+    "file": "backend/src/routes/cameras.js",
+    "find": "noteSilence(cam.id, now, until);",
+    "replace": "noteSilence(cam.id, now, until); if (until) sendLongSilenceNotice(cam, actor);",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "COMMIT fails"
   }
 ]

@@ -592,8 +592,8 @@ if (!settingsColumns.includes('camera_offline_alert_enabled')) {
   db.exec('ALTER TABLE settings ADD COLUMN camera_offline_alert_minutes INTEGER NOT NULL DEFAULT 5');
 }
 
-// Long-silence notice (#552): tell the admins when one camera's alerts are kept silenced for longer than
-// snooze_alert_minutes in a row (lib/silences.js). ON by default, unlike the offline alert above: a silence is
+// Long-silence notice (#552): tell the admins when one camera's alerts are kept silenced, on and off (short gaps
+// between silences count, lib/silences.js), for longer than snooze_alert_minutes. ON by default, unlike the offline alert above: a silence is
 // a person switching every alert from a camera off, and the admins finding out is the point of the feature,
 // so an install should not have to discover a setting to get it. 60 minutes is the tile's longest single
 // silence (CameraTile.jsx offers 15, 30 and 60), so one press of the tile never notifies and a renewal does.

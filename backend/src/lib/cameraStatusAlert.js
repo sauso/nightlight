@@ -59,17 +59,20 @@ export function formatSilenceLength(minutes) {
   return m === 0 ? `${h} h` : `${h} h ${m} min`;
 }
 
-// `minutes` is the silence's length so far, counted as lib/silences.js counts it (renewals included);
-// `username` is who set the latest silence (the admin-set login name, as Camera history records it), or null;
-// `actorUserId` is that account, whose own devices are left out of the app's push (see fanOut).
-// The username goes into the notification, which the admins are meant to read, but NOT into the log line:
-// server logs go into the diagnostics bundle, which is meant for a public issue (same rule as the snooze route).
-export function notifyLongSilence(camera, minutes, username, actorUserId) {
+// `minutes` is the silence's length, counted as lib/silences.js counts it: from the first silence's start to the
+// latest one's end, the gaps of under 30 minutes between them INCLUDED. Hence "on and off", never "in a row":
+// three 15-minute silences 30 minutes apart count as 1 h 45 min, of which only 45 minutes were silenced (PR #664
+// review). `actorUserId` is who set the latest silence, whose own devices are left out of the app's push.
+//
+// ⚠️ NO USERNAME in the text, on any channel (PR #664 review, privacy). Pushover, ntfy (the public ntfy.sh by
+// default) and Gotify are third-party or shared services, and this repo keeps login names out of anything that can
+// leave the house (the same reason the snooze route and this log line carry none). Who set a silence is on the
+// camera's tile while it lasts and in Camera history (admin-only), which is where the notice points.
+export function notifyLongSilence(camera, minutes, actorUserId) {
   const length = formatSilenceLength(minutes);
   const title = `Alerts silenced on ${camera.name}`;
-  const by = username ? ` (latest by ${username})` : '';
-  const body = `Alerts from "${camera.name}" are silenced for ${length} in a row, counting renewals${by}.`;
-  logger.warn(`[silence-alert] "${camera.name}": alerts silenced for ${length} in a row; notifying the admins`);
+  const body = `Alerts from "${camera.name}" have been silenced on and off for ${length}. Camera history shows who set each silence.`;
+  logger.warn(`[silence-alert] "${camera.name}": alerts silenced on and off for ${length}; notifying the admins`);
   fanOut(title, body, camera.id, 'silence', {
     // One tag per camera: on the app's own push a later notice for the same camera replaces the earlier one.
     // `silence_` + a camera id (a UUID) is 44 bytes, inside APNs' 64-byte collapse-id limit (lib/push.js).

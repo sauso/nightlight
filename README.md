@@ -737,9 +737,9 @@ an admin sets, never the first name, which anyone can change on their own accoun
 that failed is recorded too. While a camera is silenced, its tile shows who silenced it, to everyone. The
 morning review shows who last answered it (above). Details, including what happens when the history
 cannot be written, are in [docs/camera-controls.md](docs/camera-controls.md#silencing-a-cameras-alerts-and-who-did-what).
-If a camera's alerts are kept silenced for a long time (more than an hour in a row by default, renewals
-included), the admins are sent one notification for it; on Pushover, ntfy and Gotify everyone on them gets it
-too. See [Long-silence alerts](docs/camera-controls.md#long-silence-alerts).
+If a camera's alerts are kept silenced, on and off, for a long time (more than an hour by default, short gaps
+between renewals included), the admins are sent one notification for it, which names no one; on Pushover, ntfy
+and Gotify everyone on them gets it too. See [Long-silence alerts](docs/camera-controls.md#long-silence-alerts).
 
 On a caregiver's screen the admin-only controls are not shown (sleep tracking and the window are shown,
 greyed out, with a note); the server refuses them too, so a page opened before an update that changed a
