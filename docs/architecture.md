@@ -101,9 +101,13 @@ compares that with a hand-written table in both directions. It then checks over 
 callers get 401, an admin's media-scoped token gets 401 on every session route, and a caregiver gets 403
 on every admin route. Adding a route, or adding, removing or reordering a `requireAuth`/`requireAdmin`,
 fails that test until the table is edited on purpose, which puts every permission change in a diff a
-reviewer reads. Routes whose caregiver access is an open question (#538, #542, #552) are pinned at
-today's behaviour and marked pending. Role checks made *inside* a handler (deleting another user's
-session, the admin-only fields of `GET /api/settings`) are not gates: their own test files cover them.
+reviewer reads. The split between the roles follows one rule (owner decision 2026-10-10, #538, #542,
+#552): a caregiver can watch and act in the moment, but cannot destroy or reconfigure; every route a
+caregiver can still reach says why on its line of the table. Role checks made *inside* a handler
+(deleting another user's session, the admin-only fields of `GET /api/settings`, and `PUT
+/api/children/:id`, where a caregiver may change a child's name, birthday, colour and photo but not
+`track_sleep` or the sleep window) are not gates: their own test files cover them
+(`children-role-fields.test.js` for the last).
 
 **Stored secrets are never returned, and that is pinned too** (#563's second half),
 by `backend/test/secrets-never-returned.test.js`. It finds every column whose *name* marks a credential

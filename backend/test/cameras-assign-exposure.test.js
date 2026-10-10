@@ -1,13 +1,18 @@
-// What PUT /cameras/:id/assign is allowed to tell a caregiver.
+// What PUT /cameras/:id/assign tells a caregiver (nothing) and an admin (no raw credential).
 //
-// Assignment is deliberately open to caregivers — attaching a camera to a child is day-to-day
-// caregiving, not administration — so this is one of the few camera routes a non-admin can reach. It
-// was also the only site in routes/cameras.js that returned the raw database row instead of going
-// through publicCamera(), which handed out rtsp_url with the stream password embedded in it, plus the
-// ONVIF and talk credentials (GHSA-43c3-wrx8-fq39).
+// HISTORY. Assignment used to be open to caregivers, and this route was the only site in
+// routes/cameras.js that returned the raw database row instead of going through publicCamera(), which
+// handed out rtsp_url with the stream password embedded in it, plus the ONVIF and talk credentials
+// (GHSA-43c3-wrx8-fq39). The ONVIF account on typical consumer cameras is the camera's own administrator
+// account, so that crossed out of the app entirely: the credentials reach the camera's web UI and firmware.
 //
-// The ONVIF account on typical consumer cameras is the camera's own administrator account, so this
-// crossed out of the app entirely: the credentials reach the camera's web UI and firmware.
+// Since the owner's decision of 2026-10-10 (#552) assignment is ADMIN-ONLY: which child a camera belongs
+// to decides whether its nights are tracked, so unassigning one is the same act as switching tracking off.
+// A caregiver now gets requireAdmin's 403 and nothing else. The tests that pinned the caregiver's 200
+// RESPONSE SHAPE (no admin edit-form keys, the tile's fields still present) were removed rather than kept:
+// that response can no longer be produced, so they could only pass vacuously. What stays is the part that
+// still means something: the refusal leaks nothing and changes nothing, and the admin's response carries
+// no raw credential.
 //
 // These tests assert the SHAPE of the mistake — that no response carries a credential-bearing field —
 // rather than naming the fields that leaked, so a column added to `cameras` later fails them too.
@@ -53,7 +58,9 @@ beforeEach(() => {
   caregiverToken = signToken({ id: care.id, username: care.username, role: 'caregiver', sid: makeSession(db, care.id) });
 
   makeChild(db, { id: 'kid-1' });
-  makeCamera(db, { id: 'cam-1', childId: 'kid-1' });
+  // Disabled, so a request that DOES get through (an admin's, or a caregiver's under a mutant that drops the
+  // gate) skips the detector/ring reconcile entirely and never spawns ffmpeg from a unit test.
+  makeCamera(db, { id: 'cam-1', childId: 'kid-1', extra: { disabled: 1 } });
   // Plant a recognisable value in every credential column. On a fresh row most are NULL, and a NULL
   // that leaks looks identical to a field that was correctly stripped — which is how this kind of bug
   // survives review.
@@ -81,44 +88,32 @@ after(async () => {
 const unassign = (token) =>
   call(`${server.url}/api/cameras/cam-1/assign`, { method: 'PUT', token, body: { child_id: null } });
 
-describe('PUT /cameras/:id/assign as a caregiver', () => {
-  test('succeeds — assignment is intentionally open to caregivers', async () => {
+const childOf = () => db.prepare('SELECT child_id FROM cameras WHERE id = ?').get('cam-1').child_id;
+
+describe('PUT /cameras/:id/assign as a caregiver (admin-only since #552)', () => {
+  test('is refused with requireAdmin\'s 403, and the camera stays assigned', async () => {
     const r = await unassign(caregiverToken);
-    assert.equal(r.status, 200, `expected 200, got ${r.status} ${JSON.stringify(r.body)}`);
-    assert.equal(db.prepare('SELECT child_id FROM cameras WHERE id = ?').get('cam-1').child_id, null);
+    assert.equal(r.status, 403, `expected 403, got ${r.status} ${JSON.stringify(r.body)}`);
+    assert.deepEqual(r.body, { error: 'Admin access required' });
+    assert.equal(childOf(), 'kid-1', 'a caregiver unassigned the camera (which stops its sleep tracking)');
   });
 
-  test('returns no credential-bearing field', async () => {
+  test('assigning to a different child is refused too', async () => {
+    makeChild(db, { id: 'kid-2' });
+    const r = await call(`${server.url}/api/cameras/cam-1/assign`, { method: 'PUT', token: caregiverToken, body: { child_id: 'kid-2' } });
+    assert.equal(r.status, 403);
+    assert.equal(childOf(), 'kid-1');
+  });
+
+  test('the refusal carries no credential-bearing field and no planted secret', async () => {
     const r = await unassign(caregiverToken);
     for (const field of CREDENTIAL_FIELDS) {
-      assert.equal(r.body[field], undefined, `${field} was returned to a caregiver`);
+      assert.equal(r.body?.[field], undefined, `${field} was returned to a caregiver`);
     }
-  });
-
-  test('no planted secret appears anywhere in the payload', async () => {
-    const r = await unassign(caregiverToken);
     assert.ok(
       !JSON.stringify(r.body).includes(PLANTED),
       `a camera credential reached a caregiver: ${JSON.stringify(r.body)}`
     );
-  });
-
-  test('does not get the admin edit-form view', async () => {
-    // Hard-coding publicCamera(updated, true) leaks no planted marker to a caregiver — it hands them
-    // the admin SHAPE. The marker sweep cannot see that, so assert on the admin-only keys directly, or
-    // that mutant survives.
-    const r = await unassign(caregiverToken);
-    for (const field of ['rtsp_host', 'rtsp_port', 'rtsp_path', 'rtsp_username', 'rtsp_display',
-                         'rtsp_has_password', 'talk_has_password', 'sub_rtsp_path']) {
-      assert.equal(r.body[field], undefined, `${field} is admin-only but reached a caregiver`);
-    }
-  });
-
-  test('still returns the fields the tile needs', async () => {
-    const r = await unassign(caregiverToken);
-    for (const field of ['id', 'name', 'child_id']) {
-      assert.ok(field in r.body, `${field} missing — the camera tile needs it`);
-    }
   });
 });
 
@@ -172,6 +167,7 @@ describe('PUT /cameras/:id/assign as an admin', () => {
   test('gets the edit-form fields, but never a raw credential', async () => {
     const r = await unassign(adminToken);
     assert.equal(r.status, 200);
+    assert.equal(childOf(), null, 'the admin unassign did not take effect');
     // publicCamera gives an admin the address broken into fields plus has_password flags — never the
     // password itself, and never the credentialed URL.
     assert.ok('rtsp_host' in r.body, 'admin should get the address components for the edit form');

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Zap, AudioLines, Play } from 'lucide-react';
 import { api } from '../lib/api.js';
+import { useAuth } from '../lib/AuthContext.jsx';
 import ClipPlayerModal from './ClipPlayerModal.jsx';
 
 // A single-card alert list (matching the design mockup): one row per alert — snapshot thumbnail,
@@ -25,6 +26,11 @@ function relTime(d) {
 
 export default function AlertList({ alerts, onChanged, title }) {
   const [clipFor, setClipFor] = useState(null); // the alert whose clip is open in the player
+  // Deleting a clip is admin-only (#538; the server refuses a caregiver), so only an admin's player gets
+  // the delete action. Everyone can still watch and download. `|| {}`: rendered outside an AuthContext
+  // (some tests), nobody is signed in, so nobody is an admin.
+  const { user } = useAuth() || {};
+  const isAdmin = user?.role === 'admin';
 
   if (!alerts || alerts.length === 0) return null;
   return (
@@ -76,7 +82,7 @@ export default function AlertList({ alerts, onChanged, title }) {
       </div>
 
       {clipFor && (
-        <ClipPlayerModal ev={clipFor} onClose={() => setClipFor(null)} onDeleted={onChanged} />
+        <ClipPlayerModal ev={clipFor} onClose={() => setClipFor(null)} onDeleted={isAdmin ? onChanged : undefined} />
       )}
     </>
   );

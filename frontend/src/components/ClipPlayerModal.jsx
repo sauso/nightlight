@@ -9,12 +9,22 @@ import MediaPlayerModal from './MediaPlayerModal.jsx';
 // MediaPlayerModal, shared with the nightly timelapse. `ev` is a detection event row (id, camera_name,
 // type, snapshot, created_at, clip_duration_s). Pass onDeleted to enable the delete action (the caller
 // refreshes its own data); omit it for read-only contexts like the sleep view, where the clips belong
-// to the alert feed and shouldn't be torn out from under a sleep timeline.
+// to the alert feed and shouldn't be torn out from under a sleep timeline, and for a caregiver (deleting
+// a clip is admin-only, #538; AlertList decides).
 const TYPE_LABEL = { motion: 'Motion', sound: 'Sound' };
 const parseUtc = (s) => new Date(String(s).replace(' ', 'T') + 'Z');
 
+// The text for a failed delete. A 403 carries the server's own reason (deleting a clip is admin-only,
+// #538, or the public demo is read-only) and retrying cannot change it, so "try again" would be untrue:
+// show the reason. Any other failure may be transient, so it keeps the retry wording. Shared with
+// RecordingsCard, whose deletes fail the same way.
+export function deleteFailureText(err, fallback) {
+  return err?.status === 403 && err.message ? err.message : fallback;
+}
+
 export default function ClipPlayerModal({ ev, onClose, onDeleted }) {
   const [del, setDel] = useState(''); // '' | 'confirm' | 'deleting' | 'error'
+  const [delError, setDelError] = useState('');
 
   function close() {
     setDel('');
@@ -28,7 +38,8 @@ export default function ClipPlayerModal({ ev, onClose, onDeleted }) {
       await api.del(`/cameras/alerts/${ev.id}/clip`);
       close();
       onDeleted?.();
-    } catch {
+    } catch (err) {
+      setDelError(deleteFailureText(err, 'Couldn’t delete — try again.'));
       setDel('error');
     }
   }
@@ -54,7 +65,7 @@ export default function ClipPlayerModal({ ev, onClose, onDeleted }) {
       footer={
         confirming ? (
           <div className="clip-confirm">
-            <span>{del === 'error' ? 'Couldn’t delete — try again.' : 'Delete this clip? The alert stays.'}</span>
+            <span>{del === 'error' ? delError : 'Delete this clip? The alert stays.'}</span>
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="button" className="btn" onClick={() => setDel('')} disabled={del === 'deleting'}>Cancel</button>
               <button type="button" className="btn btn-danger" onClick={deleteClipNow} disabled={del === 'deleting'}>

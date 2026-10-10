@@ -260,8 +260,10 @@ same as adding.
 **Removing** — Remove asks for confirmation, then stops the stream and deletes the camera.
 You can always add it again.
 
-**Assigning to a child** — use the "Assigned to" dropdown on each camera. (This is just for
-grouping the dashboard; any signed-in user can change it.)
+**Assigning to a child** — use the "Assigned to" dropdown on each camera (admin only; a caregiver
+sees the assignment as text). It is more than grouping: a camera's nights are tracked only while it is
+assigned to a child who has sleep tracking on, so unassigning a camera stops its tracking just as
+turning tracking off does.
 
 ### Where to put the camera
 
@@ -296,8 +298,10 @@ hear — no wearables, no extra hardware. It's a **sleep-pattern guide, not a me
 measurement**, and (like everything here) never a safety device — see the warning at the top.
 
 - **Turn it on per child.** Each child has a **Track sleep** toggle in their settings, with
-  their own **bedtime** and **wake time**. Turning tracking off stops it entirely. A child can
-  have more than one camera — their movement and sound are combined.
+  their own **bedtime** and **wake time**. Turning tracking off stops it entirely. Only an
+  **admin** can turn tracking on or off or change those times (a caregiver sees them, greyed out).
+  A child can have more than one camera; the night is measured from one of them (see "One camera
+  does the measuring" below).
 - **Bedtime is a guide, not a boundary.** Real bedtimes move night to night, and you shouldn't
   have to edit the setting each evening. The bedtime that gets reported is the one the camera
   actually saw — the **put-down**, and the child settling after it — whether that happens before
@@ -699,16 +703,31 @@ measurement**, and (like everything here) never a safety device — see the warn
 Once signed in as admin, go to **Settings → Caregivers** to create additional logins (e.g. for a
 partner or babysitter).
 
+The rule (owner decision, 2026-10-10): **a caregiver can watch and act in the moment, but cannot
+destroy or reconfigure.**
+
 | Capability | Caregiver | Admin |
 |---|:---:|:---:|
-| View live cameras and media | Yes | Yes |
-| Reorder / assign cameras to a child | Yes | Yes |
+| View live cameras; watch and download alert clips, recordings, wake clips and timelapses | Yes | Yes |
+| Record, move a PTZ camera, talk through a camera | Yes | Yes |
 | Restart, reboot, or snooze camera alerts | Yes | Yes |
+| Reorder cameras on the live grid | Yes | Yes |
+| Assign a camera to a child | No | Yes |
 | Add / edit / enable / delete a camera | No | Yes |
-| Add / edit a child and review sleep | Yes | Yes |
+| Change a child's name, birthday, colour and photo | Yes | Yes |
+| Add a child; turn a child's sleep tracking on or off; change their bedtime and wake time | No | Yes |
+| Answer the morning sleep review | Yes | Yes |
+| Delete an alert clip, a recording or a wake clip | No | Yes |
+| Delete a timelapse | No | Yes |
 | Delete a child and its media | No | Yes |
-| Change global settings (detection, notifications, providers) | No | Yes |
+| Change global settings (detection, notifications, providers, recording retention) | No | Yes |
 | Manage caregiver/admin accounts and sessions | No | Yes |
+
+Deleting by hand is not the same as **retention**: the automatic sweep of old alert clips and wake clips
+(Settings → Recording, admin only to configure) runs on a timer on every install, whoever is signed in.
+On a caregiver's screen the admin-only controls are not shown (sleep tracking and the window are shown,
+greyed out, with a note); the server refuses them too, so a page opened before an update that changed a
+permission gets a refusal rather than a change.
 
 The **Settings** hub itself is visible to caregivers too — its admin-only pages (general,
 camera controls, recording, MQTT, push providers, users, logs, clip storage) are simply hidden

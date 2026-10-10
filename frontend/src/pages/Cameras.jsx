@@ -92,10 +92,16 @@ export default function Cameras() {
             </div>
             <div className="field" style={{ marginBottom: 0, marginTop: 12 }}>
               <label>Assigned to</label>
-              <select value={cam.child_id || ''} onChange={(e) => assign(cam, e.target.value)}>
-                <option value="">Unassigned</option>
-                {children.map((child) => <option key={child.id} value={child.id}>{child.name}</option>)}
-              </select>
+              {/* Admin-only (#552): which child a camera belongs to decides whether its nights are tracked,
+                  so a caregiver sees the assignment but cannot change it (the server refuses it). */}
+              {isAdmin ? (
+                <select value={cam.child_id || ''} onChange={(e) => assign(cam, e.target.value)}>
+                  <option value="">Unassigned</option>
+                  {children.map((child) => <option key={child.id} value={child.id}>{child.name}</option>)}
+                </select>
+              ) : (
+                <div>{children.find((child) => child.id === cam.child_id)?.name || 'Unassigned'}</div>
+              )}
             </div>
           </div>
         ))}

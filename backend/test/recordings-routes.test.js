@@ -267,9 +267,25 @@ describe('DELETE /:id', () => {
     assert.equal(fs.existsSync(r.thumbAbs), false, 'the thumbnail was left on disk');
   });
 
-  test('a caregiver can delete too — one household, one trust level', async () => {
+  test('★ a caregiver cannot delete one: 403, and the row, the mp4 and the thumbnail all stay (#552)', async () => {
+    // Owner decision 2026-10-10: a caregiver can watch and act in the moment, but not destroy. This used
+    // to pin the opposite ("one household, one trust level"). A manual recording has no automatic
+    // retention, so a delete is permanent; the same route deletes a wake clip, so one is checked too.
+    for (const kind of ['manual', 'wake']) {
+      const r = makeRecording({ kind });
+      const res = await call(url(`/${r.id}`), { method: 'DELETE', token: caregiverToken });
+      assert.equal(res.status, 403, `${kind}: ${JSON.stringify(res.body)}`);
+      assert.deepEqual(res.body, { error: 'Admin access required' });
+      assert.ok(db.prepare('SELECT 1 FROM recordings WHERE id = ?').get(r.id), `${kind}: the row was deleted anyway`);
+      assert.equal(fs.existsSync(r.abs), true, `${kind}: the video was deleted anyway`);
+      assert.equal(fs.existsSync(r.thumbAbs), true, `${kind}: the thumbnail was deleted anyway`);
+    }
+  });
+
+  test('a caregiver can still watch one (the media route is unchanged)', async () => {
     const r = makeRecording();
-    assert.equal((await call(url(`/${r.id}`), { method: 'DELETE', token: caregiverToken })).status, 200);
+    const res = await call(url(`/${r.id}/video`), { token: caregiverToken });
+    assert.equal(res.status, 200);
   });
 
   test('signed out cannot', async () => {
