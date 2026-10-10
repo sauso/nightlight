@@ -1,4 +1,5 @@
-// The small shared components — AppHeader, BackLink, CameraRow, DetectionRow, AlertList — and the
+// The small shared components — AppHeader, BackLink, CameraRow, DetectionRow, AlertList (whose clip
+// delete is admin-only since #538) — and the
 // route table in App.jsx.
 //
 // These are small enough to look not worth testing, which is exactly why several of them were the
@@ -343,18 +344,37 @@ describe('AlertList', () => {
 
   test('the delete action is offered only when the caller can handle the change', async () => {
     vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}`);
-    const user = userEvent.setup();
     const alerts = [base({ snapshot: 1, clip_status: 'ready' })];
-    const { unmount } = render(<AlertList alerts={alerts} />);
-    await user.click(screen.getByRole('button', { name: /Play clip/ }));
+    const first = renderAsAdmin(<AlertList alerts={alerts} />);
+    await first.user.click(screen.getByRole('button', { name: /Play clip/ }));
     // Without `onChanged` the list has no way to refresh itself, so offering a delete would leave a
-    // row on screen pointing at a clip that no longer exists.
+    // row on screen pointing at a clip that no longer exists — even for an admin.
     expect(screen.queryByRole('button', { name: 'Delete clip' })).not.toBeInTheDocument();
-    unmount();
+    first.unmount();
 
+    const second = renderAsAdmin(<AlertList alerts={alerts} onChanged={vi.fn()} />);
+    await second.user.click(screen.getByRole('button', { name: /Play clip/ }));
+    expect(await screen.findByRole('button', { name: 'Delete clip' })).toBeInTheDocument();
+  });
+
+  test('★ a caregiver can play a clip but is never offered the delete (#538)', async () => {
+    // Deleting a clip is admin-only on the server. Even with `onChanged`, a caregiver's player must not
+    // carry a button that can only end in a refusal. Rendered with NO auth provider as well: that is
+    // nobody signed in, so nobody is an admin.
+    vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}`);
+    const alerts = [base({ snapshot: 1, clip_status: 'ready' })];
+    const carer = renderAsCaregiver(<AlertList alerts={alerts} onChanged={vi.fn()} />);
+    await carer.user.click(screen.getByRole('button', { name: /Play clip/ }));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Download' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete clip' })).not.toBeInTheDocument();
+    carer.unmount();
+
+    const user = userEvent.setup();
     render(<AlertList alerts={alerts} onChanged={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: /Play clip/ }));
-    expect(await screen.findByRole('button', { name: 'Delete clip' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete clip' })).not.toBeInTheDocument();
   });
 
   test('the timestamp carries a machine-readable dateTime, not just prose', () => {

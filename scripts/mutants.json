@@ -1742,6 +1742,105 @@
     "note": "Validates the harness for this file. If this is ever KILLED, no other push public URL result means anything."
   },
   {
+    "label": "push batching: control - a comment edit must change nothing",
+    "file": "backend/src/lib/push.js",
+    "find": "// Sequential on purpose: each chunk is already a parallel fan-out inside the SDK",
+    "replace": "// Sequential on purpose [CONTROL MUTANT]: each chunk is already a parallel fan-out inside the SDK",
+    "expect": "survives",
+    "tests": [
+      "push-batching.test.js"
+    ],
+    "note": "Validates the harness for the push batching mutants (issue #546)."
+  },
+  {
+    "label": "push batching: the batch size is 501, one over the SDK limit",
+    "file": "backend/src/lib/push.js",
+    "find": "export const FCM_MAX_BATCH = 500;",
+    "replace": "export const FCM_MAX_BATCH = 501;",
+    "expect": "killed",
+    "tests": [
+      "push-batching.test.js"
+    ],
+    "note": "The fake sendEach throws on more than 500 messages exactly as firebase-admin does, so an off-by-one batch size fails the 501 and 1234 cases."
+  },
+  {
+    "label": "push batching: a batch drops its last message",
+    "file": "backend/src/lib/push.js",
+    "find": "messaging.sendEach(messages.slice(start, start + FCM_MAX_BATCH))",
+    "replace": "messaging.sendEach(messages.slice(start, start + FCM_MAX_BATCH - 1))",
+    "expect": "killed",
+    "tests": [
+      "push-batching.test.js"
+    ],
+    "note": "A slice one short skips a device per batch; caught by the every-token-exactly-once check."
+  },
+  {
+    "label": "push batching: later batches prune by position in the batch, not the row",
+    "file": "backend/src/lib/push.js",
+    "find": "removeToken(rows[start + i].token);",
+    "replace": "removeToken(rows[i].token);",
+    "expect": "killed",
+    "tests": [
+      "push-batching.test.js"
+    ],
+    "note": "Without the offset a dead token in batch 2 would delete a LIVE token from batch 1."
+  },
+  {
+    "label": "push batching: the sent count is the last batch's, not the total",
+    "file": "backend/src/lib/push.js",
+    "find": "sent += res.successCount;",
+    "replace": "sent = res.successCount;",
+    "expect": "killed",
+    "tests": [
+      "push-batching.test.js"
+    ],
+    "note": "The 'alert sent to N/M' line must aggregate every batch."
+  },
+  {
+    "label": "push batching: the 'alert sent' line is logged even when every batch failed",
+    "file": "backend/src/lib/push.js",
+    "find": "if (chunksReturned > 0) {",
+    "replace": "if (true) {",
+    "expect": "killed",
+    "tests": [
+      "push-batching.test.js"
+    ],
+    "note": "When every batch threw, claiming 'sent to 0/M' would hide that the send failed outright."
+  },
+  {
+    "label": "push batching: a failed batch reports the full batch size instead of its own",
+    "file": "backend/src/lib/push.js",
+    "find": "const size = Math.min(FCM_MAX_BATCH, messages.length - start);",
+    "replace": "const size = FCM_MAX_BATCH;",
+    "expect": "killed",
+    "tests": [
+      "push-batching.test.js"
+    ],
+    "note": "The short last batch (1 device of 501) must be reported as 1."
+  },
+  {
+    "label": "push batching: the failed batch number is zero-based in the log",
+    "file": "backend/src/lib/push.js",
+    "find": "const chunkNo = start / FCM_MAX_BATCH + 1;",
+    "replace": "const chunkNo = start / FCM_MAX_BATCH;",
+    "expect": "killed",
+    "tests": [
+      "push-batching.test.js"
+    ],
+    "note": "An operator reading 'batch 0/3' would be misled about how many batches failed."
+  },
+  {
+    "label": "push batching: one failing batch stops the remaining batches",
+    "file": "backend/src/lib/push.js",
+    "find": "logger.error(`[push] send failed for batch ${chunkNo}/${chunkCount} (${size} device(s)):`, e.message);",
+    "replace": "logger.error(`[push] send failed for batch ${chunkNo}/${chunkCount} (${size} device(s)):`, e.message); break;",
+    "expect": "killed",
+    "tests": [
+      "push-batching.test.js"
+    ],
+    "note": "The batch after a failure must still be sent."
+  },
+  {
     "label": "push public URL: any device, not just an admin's, may set the global address",
     "file": "backend/src/lib/push.js",
     "find": "if (origin && isAdminUser(userId)) {",
@@ -2200,6 +2299,15 @@
     "expect": "killed",
     "tests": ["demoMode.test.jsx"],
     "namePattern": "friendly, actionable copy"
+  },
+  {
+    "label": "request timeout: a LATE 401 after the timeout is acted on (aborted-signal check removed)",
+    "file": "frontend/src/lib/api.js",
+    "find": "if (signal.aborted) {",
+    "replace": "if (false && signal.aborted) {",
+    "expect": "killed",
+    "tests": ["lib/requestTimeout.test.jsx"],
+    "namePattern": "LATE 401"
   },
   {
     "label": "demo frontend: banner is removed from the signed-in app shell",
@@ -6013,8 +6121,8 @@
   {
     "label": "0.34.0 review F1: NightReview gates on !loading, which a FAILED settings load also satisfies",
     "file": "frontend/src/pages/NightReview.jsx",
-    "find": "  const { settings, loaded: settingsLoaded } = useSettings();",
-    "replace": "  const { settings, loading } = useSettings();\r\n  const settingsLoaded = !loading;",
+    "find": "  const { settings, loaded: settingsLoaded, loading: settingsLoading } = useSettings();",
+    "replace": "  const { settings, loading } = useSettings();\r\n  const settingsLoaded = !loading;\r\n  const settingsLoading = loading;",
     "expect": "killed",
     "tests": ["MorningReview.test.jsx"]
   },
@@ -6398,8 +6506,8 @@
   {
     "label": "nobody-in-bed frontend R3: RecomputeNight trusts the raw store response again",
     "file": "frontend/src/components/RecomputeNight.jsx",
-    "find": "      await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1`);\r\n      const overlaid = await api.get(`/children/${childId}/sleep/${date}?detail=1`);\r\n      onRecomputed?.(overlaid);",
-    "replace": "      const result = await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1`);\r\n      onRecomputed?.(result);",
+    "find": "      await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1`, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });\r\n      const overlaid = await api.get(`/children/${childId}/sleep/${date}?detail=1`);\r\n      onRecomputed?.(overlaid);",
+    "replace": "      const result = await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1`, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });\r\n      onRecomputed?.(result);",
     "expect": "killed",
     "tests": ["RecomputeNight.test.jsx"],
     "namePattern": "OVERLAID night"
@@ -8268,6 +8376,42 @@
     "expect": "killed",
     "tests": ["MorningReview.test.jsx"],
     "namePattern": "placeholder zone"
+  },
+  {
+    "label": "#512: the same missing gate, caught by the replays through the REAL SettingsProvider (a chip tapped before /settings resolves sends 09:20 / 09:33 / 19:48 instead of 19:20 / 19:33 / 05:48)",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "  const timesReady = settingsLoaded;",
+    "replace": "  const timesReady = true;",
+    "expect": "killed",
+    "tests": ["nightReviewTimezoneGate.test.jsx"],
+    "namePattern": "replayed against the real SettingsProvider"
+  },
+  {
+    "label": "#512: the gate keys on the zone value, so a UTC install (UTC is a real configured zone, and also the placeholder) stays greyed out",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "  const timesReady = settingsLoaded;",
+    "replace": "  const timesReady = tz !== 'UTC';",
+    "expect": "killed",
+    "tests": ["nightReviewTimezoneGate.test.jsx"],
+    "namePattern": "a UTC install is a real configured zone"
+  },
+  {
+    "label": "#512: a failed /settings is never reported (the page says 'Waiting' for the whole visit)",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "  const settingsFailed = !settingsLoaded && !settingsLoading;",
+    "replace": "  const settingsFailed = false;",
+    "expect": "killed",
+    "tests": ["nightReviewTimezoneGate.test.jsx"],
+    "namePattern": "FAILS for the whole visit"
+  },
+  {
+    "label": "#512: the failure is reported while /settings is still in flight",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "  const settingsFailed = !settingsLoaded && !settingsLoading;",
+    "replace": "  const settingsFailed = !settingsLoaded;",
+    "expect": "killed",
+    "tests": ["nightReviewTimezoneGate.test.jsx"],
+    "namePattern": "the error appears only once the request has settled"
   },
   {
     "label": "in-bed/lock fix2 T2: \"That's right\" is usable before the real timezone arrives",
@@ -10418,8 +10562,8 @@
   {
     "label": "#454 M7c: PUT /:id/assign forgets the camera's stamp",
     "file": "backend/src/routes/cameras.js",
-    "find": "router.put('/:id/assign', async (req, res) => {",
-    "replace": "router.put('/:id/assign', async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
+    "find": "router.put('/:id/assign', requireAdmin, async (req, res) => {",
+    "replace": "router.put('/:id/assign', requireAdmin, async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
     "expect": "killed",
     "tests": ["motion-alert-cooldown-routes.test.js"],
     "namePattern": "^#454 C5:"
@@ -12642,7 +12786,7 @@
     "file": "backend/src/lib/sleepAnalysis.js",
     "find": "THE MORNING WAKE MUST NOT DEPEND ON THE CLOCK.",
     "replace": "THE MORNING WAKE MUST NOT DEPEND ON THE CLOCK. (control)",
-    "expect": "control",
+    "expect": "survives",
     "tests": [
       "sleepAnalysis.test.js"
     ],
@@ -12964,8 +13108,8 @@
   {
     "label": "#563 gate: DELETE /api/recordings/:id takes a media token (requireAuth -> requireAuthQueryOrHeader)",
     "file": "backend/src/routes/recordings.js",
-    "find": "router.delete('/:id', requireAuth, (req, res) => {",
-    "replace": "router.delete('/:id', requireAuthQueryOrHeader, (req, res) => {",
+    "find": "router.delete('/:id', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.delete('/:id', requireAuthQueryOrHeader, requireAdmin, (req, res) => {",
     "expect": "killed",
     "tests": ["route-permissions.test.js"],
     "note": "A leaked <img>/<video> URL carries a media token; it must never authenticate a write."
@@ -13345,5 +13489,274 @@
     "expect": "killed",
     "tests": ["input-validation.test.js"],
     "note": "Survived the whole suite before #563: every real req.user has an own `role` from the database, so only a direct call can reach the branch."
+  },
+  {
+    "label": "#545 CLIPS_DIR: path.resolve dropped from the one place it is normalised",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "return path.resolve(v || path.join(dataDir, 'clips'));",
+    "replace": "return v || path.join(dataDir, 'clips');",
+    "expect": "killed",
+    "tests": ["clips-dir-normalisation.test.js"]
+  },
+  {
+    "label": "#545 CLIPS_DIR: a whitespace-only value no longer means unset (blank test dropped)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "typeof raw === 'string' && raw.trim() !== '' ? raw : ''",
+    "replace": "typeof raw === 'string' ? raw : ''",
+    "expect": "killed",
+    "tests": ["clips-dir-normalisation.test.js"]
+  },
+  {
+    "label": "#545 CLIPS_DIR: a non-blank value is trimmed again (a folder name ending in a space moves on upgrade)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "typeof raw === 'string' && raw.trim() !== '' ? raw : ''",
+    "replace": "typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : ''",
+    "expect": "killed",
+    "tests": ["clips-dir-normalisation.test.js"],
+    "namePattern": "keeps surrounding spaces"
+  },
+  {
+    "label": "#545 CLIPS_DIR: recordings containment guard deleted (traversal row would be served)",
+    "file": "backend/src/lib/recordings.js",
+    "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
+    "replace": "if (false) return null;",
+    "expect": "killed",
+    "tests": ["clips-dir-normalisation.test.js"]
+  },
+  {
+    "label": "#545 CLIPS_DIR: timelapse containment guard deleted (traversal row would be served)",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
+    "replace": "if (false) return null;",
+    "expect": "killed",
+    "tests": ["clips-dir-normalisation.test.js"]
+  },
+  {
+    "label": "W5 role gate M1: DELETE /api/cameras/alerts/:id/clip loses requireAdmin (a caregiver deletes a clip)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.delete('/alerts/:id/clip', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.delete('/alerts/:id/clip', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js", "role-gates-destroy.test.js"],
+    "note": "#538, owner decision 2026-10-10. role-gates-destroy also proves the mp4 survives, not only the status."
+  },
+  {
+    "label": "W5 role gate M2: DELETE /api/recordings/:id loses requireAdmin (a caregiver deletes a recording)",
+    "file": "backend/src/routes/recordings.js",
+    "find": "router.delete('/:id', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.delete('/:id', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js", "recordings-routes.test.js"],
+    "note": "#552. recordings-routes pins the row, the mp4 and the thumbnail surviving, for a manual recording and a wake clip."
+  },
+  {
+    "label": "W5 role gate M3: POST /api/children loses requireAdmin (a caregiver adds a child)",
+    "file": "backend/src/routes/children.js",
+    "find": "router.post('/', requireAdmin, (req, res) => {",
+    "replace": "router.post('/', (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js", "children-role-fields.test.js"],
+    "note": "#542: a new child starts with sleep tracking on, so adding one is the same decision as turning tracking on."
+  },
+  {
+    "label": "W5 role gate M4: PUT /api/cameras/:id/assign loses requireAdmin (a caregiver unassigns a camera)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.put('/:id/assign', requireAdmin, async (req, res) => {",
+    "replace": "router.put('/:id/assign', async (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js", "cameras-assign-exposure.test.js"],
+    "note": "#552: unassigning stops tracking like track_sleep off. cameras-assign-exposure pins child_id unchanged after the 403."
+  },
+  {
+    "label": "W5 role fields M6: the children PUT gate is inverted (admins refused, caregivers waved through)",
+    "file": "backend/src/routes/children.js",
+    "find": "  if (!isAdminRequest(req)) {\r\n    const fields = [];",
+    "replace": "  if (isAdminRequest(req)) {\r\n    const fields = [];",
+    "expect": "killed",
+    "tests": ["children-role-fields.test.js"]
+  },
+  {
+    "label": "W5 role fields M7: the gate forgets track_sleep (a caregiver turns tracking off)",
+    "file": "backend/src/routes/children.js",
+    "find": "    if (newTrack !== existing.track_sleep) fields.push('track_sleep');",
+    "replace": "    // track_sleep comparison dropped",
+    "expect": "killed",
+    "tests": ["children-role-fields.test.js"],
+    "namePattern": "turning tracking off"
+  },
+  {
+    "label": "W5 role fields M8: the gate forgets the wake time",
+    "file": "backend/src/routes/children.js",
+    "find": "    if (nextEnd !== existing.sleep_window_end) fields.push('sleep_window_end');",
+    "replace": "    // sleep_window_end comparison dropped",
+    "expect": "killed",
+    "tests": ["children-role-fields.test.js"],
+    "namePattern": "only the wake time"
+  },
+  {
+    "label": "W5 role fields M8b: the gate forgets the bedtime",
+    "file": "backend/src/routes/children.js",
+    "find": "    if (nextStart !== existing.sleep_window_start) fields.push('sleep_window_start');",
+    "replace": "    // sleep_window_start comparison dropped",
+    "expect": "killed",
+    "tests": ["children-role-fields.test.js"],
+    "namePattern": "only the bedtime"
+  },
+  {
+    "label": "W5 role fields M9: the gate compares the RAW track_sleep (an open page's rename, true vs 1, is refused)",
+    "file": "backend/src/routes/children.js",
+    "find": "    if (newTrack !== existing.track_sleep) fields.push('track_sleep');",
+    "replace": "    if (track_sleep !== undefined && track_sleep !== existing.track_sleep) fields.push('track_sleep');",
+    "expect": "killed",
+    "tests": ["children-role-fields.test.js"],
+    "namePattern": "re-sending the stored sleep values",
+    "note": "Guarded against undefined on purpose, so only the SPA's whole-form re-send can kill it."
+  },
+  {
+    "label": "W5 role fields M10: the gate compares loosely with != (\"0\", [] and \" \" turn tracking ON against a stored 0)",
+    "file": "backend/src/routes/children.js",
+    "find": "    if (newTrack !== existing.track_sleep) fields.push('track_sleep');",
+    "replace": "    if (track_sleep !== undefined && track_sleep != existing.track_sleep) fields.push('track_sleep');",
+    "expect": "killed",
+    "tests": ["children-role-fields.test.js"],
+    "namePattern": "stored 0",
+    "note": "Review finding A4. The UPDATE writes track_sleep ? 1 : 0, so a truthy value the gate reads as 0 is written as 1."
+  },
+  {
+    "label": "W5 role fields M11: the gate compares Number(track_sleep) (\"0\", [] and \" \" turn tracking ON against a stored 0)",
+    "file": "backend/src/routes/children.js",
+    "find": "    if (newTrack !== existing.track_sleep) fields.push('track_sleep');",
+    "replace": "    if (track_sleep !== undefined && Number(track_sleep) !== existing.track_sleep) fields.push('track_sleep');",
+    "expect": "killed",
+    "tests": ["children-role-fields.test.js"],
+    "namePattern": "stored 0",
+    "note": "Review finding A4, the other plausible spelling of a coercing gate."
+  },
+  {
+    "label": "W5 role fields M12: the name is written BEFORE the gate (a refused request still renames the child)",
+    "file": "backend/src/routes/children.js",
+    "find": "  if (!isAdminRequest(req)) {\r\n    const fields = [];",
+    "replace": "  db.prepare('UPDATE children SET name = ? WHERE id = ?').run(name?.trim() || existing.name, req.params.id);\r\n  if (!isAdminRequest(req)) {\r\n    const fields = [];",
+    "expect": "killed",
+    "tests": ["children-role-fields.test.js"],
+    "namePattern": "a caregiver cannot change sleep tracking",
+    "note": "Stands in for 'the gate placed below the UPDATE': every refused request carries a changed name, asserted unchanged."
+  },
+  {
+    "label": "W5 role gate M13: DELETE /api/recordings/:id runs requireAdmin BEFORE requireAuth",
+    "file": "backend/src/routes/recordings.js",
+    "find": "router.delete('/:id', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.delete('/:id', requireAdmin, requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "No router-wide requireAuth in recordings.js: requireAdmin first refuses everyone, admins included, and answers anonymous 403 not 401."
+  },
+  {
+    "label": "W5 role UI M14: a 403 on a clip or recording delete shows the generic 'try again' instead of the server's reason",
+    "file": "frontend/src/components/ClipPlayerModal.jsx",
+    "find": "  return err?.status === 403 && err.message ? err.message : fallback;",
+    "replace": "  return fallback;",
+    "expect": "killed",
+    "tests": ["mediaCards.test.jsx"],
+    "namePattern": "403"
+  },
+  {
+    "label": "W5 role UI M15: a caregiver's child save sends the whole form again",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "isAdmin ? form : Object.fromEntries(CAREGIVER_FIELDS.map((k) => [k, form[k]]))",
+    "replace": "form",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "sends ONLY name, birthday, colour and photo"
+  },
+  {
+    "label": "W5 role UI M16: the tracking switch stays enabled for a caregiver",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "<Switch checked={form.track_sleep} disabled={!isAdmin}",
+    "replace": "<Switch checked={form.track_sleep} disabled={false}",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "shown but disabled"
+  },
+  {
+    "label": "W5 role UI M17: Remove child is offered to a caregiver again",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "{!isNew && isAdmin && (",
+    "replace": "{!isNew && (",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "has no Remove child"
+  },
+  {
+    "label": "W5 role UI M18: a caregiver gets the Add child form",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "{isNew && !isAdmin ? (",
+    "replace": "{false ? (",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "on Add child is told"
+  },
+  {
+    "label": "W5 role UI M19: the Children tab shows Add child to a caregiver",
+    "file": "frontend/src/pages/Children.jsx",
+    "find": "        {isAdmin && (\r\n          <button className=\"btn btn-primary\" onClick={() => navigate('/children/new')}",
+    "replace": "        {true && (\r\n          <button className=\"btn btn-primary\" onClick={() => navigate('/children/new')}",
+    "expect": "killed",
+    "tests": ["children.test.jsx"],
+    "namePattern": "only an admin gets Add child"
+  },
+  {
+    "label": "W5 role UI M20: the Cameras tab gives a caregiver the assign <select>",
+    "file": "frontend/src/pages/Cameras.jsx",
+    "find": "              {isAdmin ? (\r\n                <select value={cam.child_id || ''}",
+    "replace": "              {true ? (\r\n                <select value={cam.child_id || ''}",
+    "expect": "killed",
+    "tests": ["cameras.test.jsx"],
+    "namePattern": "SEES each camera"
+  },
+  {
+    "label": "W5 role UI M21: AlertList hands a caregiver's clip player the delete action",
+    "file": "frontend/src/components/AlertList.jsx",
+    "find": "onDeleted={isAdmin ? onChanged : undefined}",
+    "replace": "onDeleted={onChanged}",
+    "expect": "killed",
+    "tests": ["smallComponents.test.jsx"],
+    "namePattern": "never offered the delete"
+  },
+  {
+    "label": "W5 role UI M22: RecordingsCard offers a caregiver the delete action",
+    "file": "frontend/src/components/RecordingsCard.jsx",
+    "find": "          headerAction={\r\n            isAdmin ? (",
+    "replace": "          headerAction={\r\n            true ? (",
+    "expect": "killed",
+    "tests": ["mediaCards.test.jsx"],
+    "namePattern": "gets no delete action"
+  },
+  {
+    "label": "W5 role UI M23: RecordingsCard offers a caregiver Remove on a failed entry",
+    "file": "frontend/src/components/RecordingsCard.jsx",
+    "find": "            {isAdmin && (\r\n              <button type=\"button\" className=\"btn btn-danger\" onClick={deleteNow}",
+    "replace": "            {true && (\r\n              <button type=\"button\" className=\"btn btn-danger\" onClick={deleteNow}",
+    "expect": "killed",
+    "tests": ["mediaCards.test.jsx"],
+    "namePattern": "told an admin can remove it"
+  },
+  {
+    "label": "W5 role gate M5: PUT /api/cameras/reorder loses requireAdmin (a caregiver's drag changes the scoring camera)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.put('/reorder', requireAdmin, (req, res) => {",
+    "replace": "router.put('/reorder', (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js", "role-gates-destroy.test.js"],
+    "note": "#552: sort_order picks the camera a child's sleep is scored from, the timelapse camera and the review's camera list."
+  },
+  {
+    "label": "W5 role UI M24: a caregiver's live tiles get the drag handle again",
+    "file": "frontend/src/components/LiveMonitor.jsx",
+    "find": "  const canReorder = user?.role === 'admin';",
+    "replace": "  const canReorder = true;",
+    "expect": "killed",
+    "tests": ["liveMonitor.test.jsx"],
+    "namePattern": "no drag handle"
   }
 ]

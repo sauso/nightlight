@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { FileText, ExternalLink } from 'lucide-react';
-import { api } from '../lib/api.js';
+import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { isNativeApp, hasFileExport, saveToDownloads, saveTextFile } from '../lib/nativeBridge.js';
 
 // Where to send an unsupported-camera report. Title/body prefilled so the attachment + the one thing
@@ -32,7 +32,7 @@ export default function CameraReportButton({ payload }) {
     setState('busy');
     setError('');
     try {
-      const report = await api.post('/cameras/probe-report', payload);
+      const report = await api.post('/cameras/probe-report', payload, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const filename = `nightlight-camera-report-${stamp}.json`;
       const text = JSON.stringify(report, null, 2);

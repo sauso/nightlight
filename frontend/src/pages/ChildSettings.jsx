@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, Link } from 'react-router-dom';
-import { api } from '../lib/api.js';
+import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
@@ -12,7 +12,16 @@ import { fileToAvatarDataUrl } from '../lib/imageResize.js';
 const COLORS = ['#f4c56a', '#7FBFA3', '#8A9FE0', '#E0A5C9', '#E0B27F', '#7c83db'];
 
 // Add / edit a child on its own routed screen, reached from the Children tab (or a child's detail
-// via its avatar). Open to any signed-in user, matching how children have always been managed.
+// via its avatar). Both roles can open it, but what a caregiver may do here is narrower (owner decision
+// 2026-10-10, #542: a caregiver can watch and act in the moment, but not destroy or reconfigure):
+//   - name, birthday, colour and photo: both roles;
+//   - Track sleep and the bedtime window: shown to a caregiver but disabled, and left OUT of a caregiver's
+//     save, because the server refuses the whole request if a caregiver's save would change them
+//     (routes/children.js); sending the unchanged values would pass, but leaving them out means a stale
+//     form can never be the reason a caregiver's rename is refused;
+//   - adding and removing a child: admin only (the server refuses both).
+const CAREGIVER_FIELDS = ['name', 'birthday', 'color', 'photo'];
+
 export default function ChildSettings() {
   const { id } = useParams();
   const isNew = !id || id === 'new';
@@ -53,7 +62,7 @@ export default function ChildSettings() {
     if (isNew) return;
     setPhotoStatus('saving');
     try {
-      await api.put(`/children/${id}`, { name: form.name, birthday: form.birthday, color: form.color, photo });
+      await api.put(`/children/${id}`, { name: form.name, birthday: form.birthday, color: form.color, photo }, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });
       await refresh();
       setPhotoStatus('saved');
       setTimeout(() => setPhotoStatus(''), 2000);
@@ -88,7 +97,7 @@ export default function ChildSettings() {
     setError('');
     try {
       if (isNew) await api.post('/children', form);
-      else await api.put(`/children/${id}`, form);
+      else await api.put(`/children/${id}`, isAdmin ? form : Object.fromEntries(CAREGIVER_FIELDS.map((k) => [k, form[k]])));
       await refresh();
       navigate(back.to);
     } catch (err) {
@@ -115,7 +124,11 @@ export default function ChildSettings() {
     <>
       <AppHeader title={isNew ? 'Add child' : (kid?.name || 'Child')} back={back} />
       <main className="app-main">
-        {!isNew && !kid ? (
+        {isNew && !isAdmin ? (
+          // No form at all: the server refuses a caregiver's add, so a form here would only let someone
+          // type a child in and then be told no.
+          <div className="empty-state">Only an admin can add a child. Ask an admin to add them.</div>
+        ) : !isNew && !kid ? (
           <div className="empty-state">Loading…</div>
         ) : (
           <form onSubmit={save}>
@@ -172,8 +185,14 @@ export default function ChildSettings() {
             <div className="field">
               <label className="child-sleep-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span>Track sleep</span>
-                <Switch checked={form.track_sleep} onChange={(e) => setForm({ ...form, track_sleep: e.target.checked })} />
+                <Switch checked={form.track_sleep} disabled={!isAdmin}
+                  onChange={(e) => setForm({ ...form, track_sleep: e.target.checked })} />
               </label>
+              {!isAdmin && (
+                <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                  Only an admin can change sleep tracking and the bedtime window.
+                </div>
+              )}
               <div className="camera-tile__sub" style={{ marginTop: 6 }}>
                 Estimate this child's nightly sleep from their cameras' movement &amp; sound. Wake-ups are
                 also recorded (without alerting you)
@@ -188,12 +207,12 @@ export default function ChildSettings() {
                   <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
                     <div style={{ flex: 1 }}>
                       <label htmlFor="child-bed">Bedtime</label>
-                      <input id="child-bed" type="time" value={form.sleep_window_start}
+                      <input id="child-bed" type="time" value={form.sleep_window_start} disabled={!isAdmin}
                         onChange={(e) => setForm({ ...form, sleep_window_start: e.target.value })} />
                     </div>
                     <div style={{ flex: 1 }}>
                       <label htmlFor="child-wake">Wake time</label>
-                      <input id="child-wake" type="time" value={form.sleep_window_end}
+                      <input id="child-wake" type="time" value={form.sleep_window_end} disabled={!isAdmin}
                         onChange={(e) => setForm({ ...form, sleep_window_end: e.target.value })} />
                     </div>
                   </div>
@@ -207,7 +226,9 @@ export default function ChildSettings() {
             <button className="btn btn-primary" type="submit" disabled={busy} style={{ marginTop: 8 }}>
               {busy ? 'Saving…' : isNew ? 'Add child' : 'Save changes'}
             </button>
-            {!isNew && (
+            {/* Admin-only: DELETE /api/children/:id has always been requireAdmin, so offering it to a
+                caregiver only ever led to a refusal. */}
+            {!isNew && isAdmin && (
               <button className="btn btn-danger" type="button" style={{ marginTop: 10 }} onClick={() => setRemoving(true)}>
                 Remove child
               </button>

@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { Plus, ChevronRight, Cctv } from 'lucide-react';
 import { useCameras } from '../lib/CamerasContext.jsx';
+import { useAuth } from '../lib/AuthContext.jsx';
 import { ageLabel } from '../lib/age.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Avatar from '../components/Avatar.jsx';
@@ -11,6 +12,10 @@ import Avatar from '../components/Avatar.jsx';
 export default function Children() {
   const navigate = useNavigate();
   const { kids, cameras } = useCameras();
+  // Adding a child is admin-only (#542; the server refuses a caregiver's add), so a caregiver gets no
+  // Add button, and an empty list tells them who can add one instead of inviting them to.
+  const { user } = useAuth() || {};
+  const isAdmin = user?.role === 'admin';
 
   const camCount = (kidId) => cameras.filter((c) => c.child_id === kidId).length;
 
@@ -37,11 +42,15 @@ export default function Children() {
           );
         })}
         {kids.length === 0 && (
-          <div className="empty-state" style={{ padding: 20 }}>No children yet. Add one to start grouping cameras.</div>
+          <div className="empty-state" style={{ padding: 20 }}>
+            {isAdmin ? 'No children yet. Add one to start grouping cameras.' : 'No children yet. An admin can add one.'}
+          </div>
         )}
-        <button className="btn btn-primary" onClick={() => navigate('/children/new')} style={{ marginTop: 4 }}>
-          <Plus size={16} aria-hidden="true" /> Add child
-        </button>
+        {isAdmin && (
+          <button className="btn btn-primary" onClick={() => navigate('/children/new')} style={{ marginTop: 4 }}>
+            <Plus size={16} aria-hidden="true" /> Add child
+          </button>
+        )}
       </main>
     </>
   );

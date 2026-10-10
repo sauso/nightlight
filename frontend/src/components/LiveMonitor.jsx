@@ -34,6 +34,7 @@ export function reorderCameras(full, activeId, overId) {
 }
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
+import { useAuth } from '../lib/AuthContext.jsx';
 import {
   isNativeApp,
   setAutoPictureInPicture,
@@ -57,6 +58,11 @@ export default function LiveMonitor() {
   const isActive = location.pathname === '/';
   const { kids, cameras, error } = useCameras();
   const { settings } = useSettings();
+  // Reordering is admin-only (#552): the camera order also picks the camera each child's sleep is measured
+  // from, so a caregiver's tiles get no drag handle and their sortables are disabled, and no PUT is ever
+  // sent for them (the server would refuse it anyway).
+  const { user } = useAuth() || {};
+  const canReorder = user?.role === 'admin';
 
   // Bumping this remounts every camera player (see CameraTile), which rebuilds each
   // stream connection from scratch - the in-app equivalent of restarting the app to
@@ -95,7 +101,7 @@ export default function LiveMonitor() {
 
   function handleDragEnd(event) {
     const { active, over } = event;
-    if (!over || active.id === over.id) return;
+    if (!canReorder || !over || active.id === over.id) return;
     setOrderedCameras((current) => {
       const next = reorderCameras(current, active.id, over.id);
       api.put('/cameras/reorder', { order: next.map((c) => c.id) }).catch(() => {});
@@ -232,6 +238,7 @@ export default function LiveMonitor() {
                     camera={cam}
                     childName={childNameFor(cam)}
                     refreshNonce={refreshNonce}
+                    sortable={canReorder}
                   />
                 ))}
               </div>

@@ -1,10 +1,10 @@
 // The Cameras tab (src/pages/Cameras.jsx) and Settings → Camera controls (src/pages/SettingsCamera.jsx).
 //
 // Both had ZERO tests. What is worth pinning here is not the markup:
-//   1. ROLE GATING. Every destructive affordance on this page — Disable, Edit, Remove, Add — is
-//      admin-only, and the assign-to-child <select> is NOT. A caregiver seeing a Remove button is the
-//      exact shape of bug this suite exists for (an admin-only route once shipped 403-ing everyone,
-//      invisible until someone clicked it).
+//   1. ROLE GATING. Every destructive or reconfiguring affordance on this page — Disable, Edit, Remove,
+//      Add, and (since #552) the assign-to-child <select> — is admin-only; a caregiver sees which child a
+//      camera belongs to as text. A caregiver seeing a Remove button is the exact shape of bug this suite
+//      exists for (an admin-only route once shipped 403-ing everyone, invisible until someone clicked it).
 //   2. THE ENABLE TOGGLE SENDS THE OPPOSITE OF WHAT IT READS. `enabled: !!cam.disabled` — the payload
 //      is the NEW state, derived from the OLD one. An inverted flag here silently disables a camera
 //      when someone tries to enable it, and the label would still look right.
@@ -124,9 +124,21 @@ describe('the Cameras tab', () => {
     expect(screen.queryByRole('button', { name: '+ Add camera' })).not.toBeInTheDocument();
   });
 
-  test('a caregiver CAN still reassign a camera to a child — that is not gated', async () => {
+  test('★ a caregiver SEES each camera\'s child as text, with no control to change it (#552)', () => {
+    // Assigning is admin-only now: which child a camera belongs to decides whether its nights are
+    // tracked, and the server refuses a caregiver's assign. A <select> here would only lead to a refusal.
     mockApi();
-    const { user, camerasValue } = renderAsCaregiver(<Cameras />, withCams());
+    renderAsCaregiver(<Cameras />, withCams());
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(within(card('Child B Room')).getByText('Child B')).toBeInTheDocument();
+    expect(within(card('Hallway')).getByText('Unassigned')).toBeInTheDocument();
+    expect(api.put).not.toHaveBeenCalled();
+  });
+
+  test('an admin reassigns a camera to a child through the <select>', async () => {
+    mockApi();
+    const { user, camerasValue } = renderAsAdmin(<Cameras />, withCams());
+    expect(screen.getAllByRole('combobox')).toHaveLength(2);
     const select = within(card('Hallway')).getByRole('combobox');
     await user.selectOptions(select, 'kid-2');
     await waitFor(() => expect(api.put).toHaveBeenCalledWith('/cameras/cam-b/assign', { child_id: 'kid-2' }));

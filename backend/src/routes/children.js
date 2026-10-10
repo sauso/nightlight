@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
-import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { requireAuth, requireAdmin, isAdminRequest } from '../middleware/auth.js';
 import { normalizePhoto } from '../lib/photo.js';
 import {
   getStoredNights, computeNight, computeAndStoreNight, currentNightDate, childTracksSleep, sleepInsights,
@@ -66,7 +66,10 @@ router.get('/', (req, res) => {
 const NAME_NOT_TEXT = 'Name must be text';
 const isNotText = (name) => name !== undefined && name !== null && typeof name !== 'string';
 
-router.post('/', (req, res) => {
+// Adding a child is admin-only (owner decision 2026-10-10, #542): a caregiver can watch and act in the
+// moment but not reconfigure, and a new child starts with sleep tracking ON, so creating one is the same
+// decision as turning tracking on for an existing one (which the PUT below also keeps for admins).
+router.post('/', requireAdmin, (req, res) => {
   const { name, birthday, color, track_sleep, sleep_window_start, sleep_window_end } = req.body || {};
   if (isNotText(name)) return res.status(400).json({ error: NAME_NOT_TEXT });
   if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
@@ -100,7 +103,36 @@ router.put('/:id', (req, res) => {
   try { photo = normalizePhoto(req.body?.photo, existing.photo); } catch (e) { return res.status(400).json({ error: e.message }); }
   if (sleep_window_start !== undefined && !HHMM.test(sleep_window_start)) return res.status(400).json({ error: 'Bedtime must be a time like 19:00' });
   if (sleep_window_end !== undefined && !HHMM.test(sleep_window_end)) return res.status(400).json({ error: 'Wake time must be a time like 07:00' });
+  // The three sleep values the UPDATE below will write, computed once so the role gate and the write
+  // cannot disagree about them.
   const newTrack = track_sleep === undefined ? existing.track_sleep : track_sleep ? 1 : 0;
+  const nextStart = sleep_window_start !== undefined ? sleep_window_start : existing.sleep_window_start;
+  const nextEnd = sleep_window_end !== undefined ? sleep_window_end : existing.sleep_window_end;
+  // Sleep tracking and the bedtime window are admin-only (owner decision 2026-10-10, #542): a caregiver can
+  // watch and act in the moment but not reconfigure, and turning tracking off stops a child's nights, wake
+  // clips and timelapses being recorded at all. Name, birthday, colour and photo stay open to both roles.
+  // The gate is in the handler, not a requireAdmin, because the same request carries both kinds of field.
+  //   1. COMPARE, never test for presence. The SPA's edit form (pages/ChildSettings.jsx) has always re-sent
+  //      the whole form, so a page opened before this gate existed sends `track_sleep: true` against a
+  //      stored 1 on a plain rename; refusing that would break every open caregiver page.
+  //   2. Compare the value that will be WRITTEN, not the raw input. `"0"`, `[]` and `" "` are truthy, so
+  //      they are written as 1; a gate using `!=` or `Number()` reads them as 0 and would let a caregiver
+  //      turn tracking ON for a child that has it off (review finding A4).
+  //   3. Refuse the WHOLE request, writing nothing. Saving the name and silently dropping the rest would
+  //      leave a page showing a window that was never stored.
+  if (!isAdminRequest(req)) {
+    const fields = [];
+    if (newTrack !== existing.track_sleep) fields.push('track_sleep');
+    if (nextStart !== existing.sleep_window_start) fields.push('sleep_window_start');
+    if (nextEnd !== existing.sleep_window_end) fields.push('sleep_window_end');
+    if (fields.length > 0) {
+      return res.status(403).json({
+        error: 'Only an admin can turn sleep tracking on or off or change the sleep window. Your other changes were not saved.',
+        reason: 'admin_only_fields',
+        fields,
+      });
+    }
+  }
   db.prepare(
     `UPDATE children SET name = ?, birthday = ?, color = ?, photo = ?, track_sleep = ?,
        sleep_window_start = ?, sleep_window_end = ? WHERE id = ?`
@@ -110,8 +142,8 @@ router.put('/:id', (req, res) => {
     color || existing.color,
     photo,
     newTrack,
-    sleep_window_start !== undefined ? sleep_window_start : existing.sleep_window_start,
-    sleep_window_end !== undefined ? sleep_window_end : existing.sleep_window_end,
+    nextStart,
+    nextEnd,
     req.params.id
   );
   // Turning tracking on/off — or moving the window so it no longer contains "now" — changes whether the
@@ -316,7 +348,7 @@ router.get('/:id/review/:date', (req, res) => {
 // Save the night's true times (or "no one was in the bed" instead of them), any per-transition
 // verdicts, and/or a dismissal. Every field is optional: dismissing is just a save with nothing else in
 // it, which is why one route covers both. Any signed-in user may save, caregivers included, the same
-// as every other part of a review.
+// as every other part of a review (owner decision 2026-10-10: stays open to caregivers).
 router.put('/:id/review/:date', (req, res) => {
   const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });

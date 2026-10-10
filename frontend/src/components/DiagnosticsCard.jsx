@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Download, ExternalLink } from 'lucide-react';
-import { api } from '../lib/api.js';
+import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { isNativeApp, hasFileExport, saveToDownloads, saveTextFile } from '../lib/nativeBridge.js';
 
 // Where self-hosters file bugs. Prefilled with the bundle reminder so the attachment isn't forgotten.
@@ -31,7 +31,8 @@ export default function DiagnosticsCard({ title }) {
     setState('busy');
     setError('');
     try {
-      const bundle = await api.get('/diagnostics');
+      // Slow-allowed (#556): the route queries MediaMTX once per camera and bundles recent logs.
+      const bundle = await api.get('/diagnostics', { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const filename = `nightlight-diagnostics-${stamp}.json`;
       const text = JSON.stringify(bundle, null, 2);

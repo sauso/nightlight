@@ -145,7 +145,10 @@ export default function TwoFactorSection() {
       )}
 
       {backupCodes && (
-        <Modal title="Save your backup codes" onClose={() => setBackupCodes(null)}>
+        // dismissible={false}: these codes exist only in this component's state and the server will never
+        // show them again, so a stray tap outside the card (easy on a phone) must not discard them (#557).
+        // The only way out is the explicit button below; onClose is still wired for it and for the type.
+        <Modal title="Save your backup codes" dismissible={false} onClose={() => setBackupCodes(null)}>
           <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
             Keep these somewhere safe. Each one works <strong>once</strong> if you lose your authenticator.
             They won't be shown again.

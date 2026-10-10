@@ -175,7 +175,8 @@ have one write's confirmation land after the other's and revert it on screen.
 
 Recordings appear in the **Recordings** card on the child's page. **They are never deleted
 automatically** — unlike the other two kinds, these are keepsakes someone chose to keep, so deleting
-one is the only way to reclaim its space.
+one is the only way to reclaim its space. **Only an admin can delete one**; anyone signed in, caregivers
+included, can record, watch and download (see [Who can delete](#who-can-delete)).
 
 **When the buffering starts.** As soon as a camera is added, and again whenever Nightlight restarts —
 you don't have to turn anything else on. Note what this costs, since it applies to *every* camera while
@@ -228,8 +229,8 @@ given up on, and marked **failed** the next time Nightlight starts — a bounded
 **When a recording can't be saved, it says so.** A recording that fails — the camera was offline and
 the buffer had no frames in it, the clip couldn't be assembled, or a restart interrupted it — appears
 in the **Recordings** card as a greyed entry reading *Couldn't be saved*, rather than never appearing.
-Tapping it explains what happened and offers to remove it. There's nothing to play, so it has no
-thumbnail and no play button.
+Tapping it explains what happened and, for an admin, offers to remove it (a caregiver is told that an
+admin can). There's nothing to play, so it has no thumbnail and no play button.
 
 ⚠️ **Deleting a child deletes its recordings, its wake clips and its timelapses** — files and all,
 including frames already collected for a timelapse that hasn't been assembled yet. Recordings have no
@@ -240,7 +241,7 @@ removing a child**, and note that only an **admin** can remove one.
 Alert clips are the exception — they belong to the *camera*, not the child, so they survive and are
 swept by the normal retention rules.
 
-**Removing a failed one doesn't ask twice.** Deleting a recording that *worked* takes two taps — a
+**Removing a failed one doesn't ask twice** (admin only, like any delete). Deleting a recording that *worked* takes two taps — a
 confirmation, because the video is gone for good and there's no retention sweep that would have removed
 it anyway. A failed entry has no video to lose, so **Remove** clears it immediately.
 
@@ -267,6 +268,13 @@ Video is larger and burstier than the database, so on Unraid you may prefer to k
 1. Map a second volume to the container path **`/recordings`**, pointing at a folder on your array
    (e.g. `/mnt/user/nightlight-clips`).
 2. Set the environment variable **`CLIPS_DIR=/recordings`**.
+
+`CLIPS_DIR` accepts an absolute container path with or without a trailing slash (`/recordings` and
+`/recordings/` are the same folder). A relative path is resolved against the server's working directory,
+which is rarely what you want, so use an absolute one. Leaving it blank (or whitespace only) means "unset": clips
+go under `<data dir>/clips`. Any other value is used exactly as typed, so a space at the start or end is part
+of the folder name (a legal Linux name), not ignored: do not add one by accident. Before this was fixed (#545), a trailing slash made clips unplayable and
+undeletable, so if you ever entered one, update and restart: nothing else is needed.
 
 Both are exposed as optional fields in the Unraid template (**Recordings Directory** and **CLIPS_DIR**,
 under *Advanced view*). With Docker Compose, uncomment the commented `recordings` volume line in
@@ -311,3 +319,14 @@ Each kind ages out differently — this is the part most worth reading twice:
 
 There is also a **minimum-free-space guard** across all three: if the volume is nearly full, new video
 is skipped, so recording can never be the thing that fills your disk.
+
+### Who can delete
+
+**Only an admin can delete video by hand**: an alert clip, a wake clip, an on-demand recording (a failed
+one included) or a timelapse. Anyone signed in, caregivers included, can watch and download all of them,
+and can press **Record**. (Owner decision, 2026-10-10: a caregiver can watch and act in the moment, but
+cannot destroy or reconfigure.) On a caregiver's screen the delete buttons are simply not there.
+
+This is **different from retention**. The sweeps above are automatic, run on a timer, and apply on every
+install whoever is signed in; signing in as a caregiver changes nothing about what they remove. Only
+*configuring* them (Settings → Recording) is admin-only.

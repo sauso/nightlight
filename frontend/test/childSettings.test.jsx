@@ -15,8 +15,9 @@
 // ⚠️ The photo PICKER is not exercised: it goes through `imageResize.js` (canvas), which jsdom stubs.
 // `persistPhoto` is reached through Remove, which takes the same path with a null photo.
 //
-// This screen is open to any signed-in user — children have always been managed by both roles — so
-// both roles are exercised where the screen differs.
+// Both roles reach this screen, but since #542 (owner decision 2026-10-10) a caregiver may change only a
+// child's name, birthday, colour and photo: tracking and the window are shown disabled and left out of
+// their save, and Add / Remove child are admin-only. Both roles are exercised wherever the screen differs.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import { Routes, Route, useLocation } from 'react-router-dom';
@@ -271,13 +272,80 @@ describe('what each role is told about clip settings', () => {
   });
 
   test('both roles can still edit the child', async () => {
-    // Children have always been managed by both roles; this screen does no gating of its own beyond
-    // the link above, and that is deliberate.
+    // Name, birthday, colour and photo stay open to a caregiver (#542 gates only tracking and the
+    // window, below), so both roles get the form and its Save.
     for (const who of [ADMIN, CAREGIVER]) {
       const { unmount } = mount({ who });
       expect(await screen.findByRole('button', { name: 'Save changes' })).toBeTruthy();
+      expect(screen.getByLabelText('Name')).toBeEnabled();
       unmount();
     }
+  });
+});
+
+describe('★★ what a caregiver can change (#542)', () => {
+  const NOTE = 'Only an admin can change sleep tracking and the bedtime window.';
+
+  test('tracking and the window are shown but disabled, with the reason; an admin gets them enabled', async () => {
+    const carer = mount({ who: CAREGIVER });
+    await screen.findByLabelText('Name');
+    expect(screen.getByRole('switch')).toBeDisabled();
+    expect(screen.getByRole('switch').checked, 'still SHOWS the stored state').toBe(true);
+    expect(screen.getByLabelText('Bedtime')).toBeDisabled();
+    expect(screen.getByLabelText('Wake time')).toBeDisabled();
+    expect(screen.getByText(NOTE)).toBeTruthy();
+    carer.unmount();
+
+    mount({ who: ADMIN });
+    await screen.findByLabelText('Name');
+    expect(screen.getByRole('switch')).toBeEnabled();
+    expect(screen.getByLabelText('Bedtime')).toBeEnabled();
+    expect(screen.getByLabelText('Wake time')).toBeEnabled();
+    expect(screen.queryByText(NOTE)).toBeNull();
+  });
+
+  test('★ a caregiver\'s save sends ONLY name, birthday, colour and photo', async () => {
+    // The server refuses the whole request if a caregiver's save would CHANGE tracking or the window.
+    // Leaving them out (rather than echoing the form) means no stale form state can be the reason a
+    // caregiver's rename is refused.
+    const { user } = mount({ who: CAREGIVER });
+    const name = await screen.findByLabelText('Name');
+    await user.clear(name);
+    await user.type(name, 'Alexandra');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    const [path, body] = putSpy.mock.calls[0];
+    expect(path).toBe('/children/kid-1');
+    expect(Object.keys(body).sort()).toEqual(['birthday', 'color', 'name', 'photo']);
+    expect(body.name).toBe('Alexandra');
+  });
+
+  test('a refused save shows the server\'s reason and stays on the form', async () => {
+    // A page opened by an admin who was then demoted still renders the admin form; the server's 403
+    // message is what tells them why nothing was saved.
+    const reason = 'Only an admin can turn sleep tracking on or off or change the sleep window. Your other changes were not saved.';
+    putSpy = vi.spyOn(api, 'put').mockRejectedValue(Object.assign(new Error(reason), { status: 403 }));
+    const { user } = mount({ who: CAREGIVER });
+    await user.click(await screen.findByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText(reason)).toBeTruthy();
+    expect(screen.getByText('at /children/kid-1')).toBeTruthy();
+  });
+
+  test('★ a caregiver has no Remove child; an admin does', async () => {
+    const carer = mount({ who: CAREGIVER });
+    await screen.findByLabelText('Name');
+    expect(screen.queryByRole('button', { name: 'Remove child' })).toBeNull();
+    carer.unmount();
+    mount({ who: ADMIN });
+    expect(await screen.findByRole('button', { name: 'Remove child' })).toBeTruthy();
+  });
+
+  test('★ a caregiver on Add child is told an admin adds children, with no form to fill in', async () => {
+    mount({ who: CAREGIVER, id: 'new' });
+    expect(await screen.findByText('Only an admin can add a child. Ask an admin to add them.')).toBeTruthy();
+    expect(screen.queryByLabelText('Name')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add child' })).toBeNull();
+    expect(postSpy).not.toHaveBeenCalled();
   });
 });
 

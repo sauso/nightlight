@@ -881,7 +881,9 @@ describe('the review screen', () => {
     await user.click(thatsRight);
     expect(api.put).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: /Not quite/ })).toBeDisabled();
-    expect(screen.getByText(/Waiting for the app.s timezone setting/)).toBeInTheDocument();
+    // beforeZone is `loading: false`, i.e. a FAILED /settings: the page says so (not "waiting") and how to recover.
+    expect(screen.getByText(/timezone setting could not be loaded/)).toBeInTheDocument();
+    expect(screen.queryByText(/Waiting for the app.s timezone setting/)).toBeNull();
     // Nothing here carries a time, so none of it waits (and it is all that works if /settings failed).
     expect(screen.getByRole('button', { name: /No one was in the bed/ })).toBeEnabled();
     await openEvents(user);
@@ -895,7 +897,7 @@ describe('the review screen', () => {
 
     zoneArrives(rerenderWith);
     await waitFor(() => expect(screen.getByRole('button', { name: /That.s right/ })).toBeEnabled());
-    expect(screen.queryByText(/Waiting for the app.s timezone setting/)).toBeNull();
+    expect(screen.queryByText(/Waiting for the app.s timezone setting|timezone setting could not be loaded/)).toBeNull();
     expect(within(storyRow(31)).getByRole('button', { name: /Put down here/ })).toBeEnabled();
     await user.click(screen.getByRole('button', { name: /That.s right/ }));
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));

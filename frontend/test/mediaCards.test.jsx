@@ -12,12 +12,14 @@
 //      not a filename.
 //   4. DELETING A CLIP DELETES THE VIDEO, NOT THE ALERT — and deleting a RECORDING is permanent,
 //      because recordings have no automatic retention. The two confirmations say different things
-//      for that reason, and swapping them would be a quietly serious mistake.
+//      for that reason, and swapping them would be a quietly serious mistake. Both deletes are
+//      admin-only since #538/#552: a caregiver gets no delete control, and a 403 shows the server's
+//      reason rather than "try again".
 //   5. ClipDatePicker only enables days that HAVE clips, and its month arrows stop at the data.
 import { describe, test, expect, vi, afterEach, beforeEach } from 'vitest';
 import { screen, waitFor, within, render } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { renderAsAdmin } from './helpers/render.jsx';
+import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
 import Modal from '../src/components/Modal.jsx';
 import MediaPlayerModal from '../src/components/MediaPlayerModal.jsx';
 import ClipPlayerModal from '../src/components/ClipPlayerModal.jsx';
@@ -326,6 +328,21 @@ describe('ClipPlayerModal', () => {
     expect(onDeleted).not.toHaveBeenCalled();
   });
 
+  test('★ a 403 shows the SERVER\'S reason, not "try again" (#538)', async () => {
+    // Deleting a clip is admin-only. A page that still offers the button (an admin since demoted, or the
+    // read-only demo) gets a 403 whose message says why; "try again" would be untrue, since retrying
+    // cannot succeed. lib/api.js puts the server's `error` on err.message and the code on err.status.
+    const user = userEvent.setup();
+    api.del.mockRejectedValue(Object.assign(new Error('Admin access required'), { status: 403 }));
+    const onDeleted = vi.fn();
+    render(<ClipPlayerModal ev={EV} onClose={() => {}} onDeleted={onDeleted} />);
+    await user.click(screen.getByRole('button', { name: 'Delete clip' }));
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(await screen.findByText('Admin access required')).toBeInTheDocument();
+    expect(screen.queryByText('Couldn’t delete — try again.')).not.toBeInTheDocument();
+    expect(onDeleted).not.toHaveBeenCalled();
+  });
+
   test('a clip with no duration and no snapshot still renders', () => {
     const { container } = render(
       <ClipPlayerModal ev={{ ...EV, snapshot: null, clip_duration_s: null }} onClose={() => {}} />
@@ -498,6 +515,93 @@ describe('RecordingsCard', () => {
     vi.spyOn(api, 'get').mockResolvedValue([{ id: 'r-9', camera_name: 'Cam', started_at: 'not a date' }]);
     renderAsAdmin(<RecordingsCard childId="kid-1" />);
     expect(await screen.findByText('not a date')).toBeInTheDocument();
+  });
+
+  // --- who can delete (#552; owner decision 2026-10-10) ---
+  // Deleting a recording is admin-only on the server. A caregiver still watches and downloads; the
+  // delete and Remove controls are simply not there for them, and a failed entry says who can clear it.
+
+  test('★ a caregiver can play and download a recording but gets no delete action', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(ROWS);
+    const { user, container } = renderAsCaregiver(<RecordingsCard childId="kid-1" />);
+    await screen.findByText('Recordings');
+    await user.click(container.querySelectorAll('.rec-strip__item')[0]);
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.querySelector('video')).not.toBeNull();
+    expect(within(dialog).getByRole('button', { name: 'Download' })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Delete recording' })).not.toBeInTheDocument();
+    expect(api.del).not.toHaveBeenCalled();
+  });
+
+  test('★ a caregiver opening a failed entry is told an admin can remove it, with no Remove button', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(FAILED_ROWS);
+    const { user, container } = renderAsCaregiver(<RecordingsCard childId="kid-1" />);
+    await screen.findByText('Recordings');
+    await user.click(await waitFor(() => {
+      const el = container.querySelector('.rec-strip__item--failed');
+      expect(el).not.toBeNull();
+      return el;
+    }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.textContent).toContain('An admin can remove it from this list.');
+    expect(within(dialog).queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
+    // Still closable: the footer's own Close is there beside the ✕ (two buttons share the name).
+    expect(within(dialog).getAllByRole('button', { name: 'Close' })).toHaveLength(2);
+  });
+
+  test('an admin opening a failed entry gets Remove and no "an admin can" line', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(FAILED_ROWS);
+    const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
+    await screen.findByText('Recordings');
+    await user.click(await waitFor(() => {
+      const el = container.querySelector('.rec-strip__item--failed');
+      expect(el).not.toBeNull();
+      return el;
+    }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.textContent).not.toContain('An admin can remove it');
+    expect(within(dialog).getByRole('button', { name: 'Remove' })).toBeInTheDocument();
+  });
+
+  test('★ a 403 on delete shows the server\'s reason instead of "try again"', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(ROWS);
+    api.del.mockRejectedValue(Object.assign(new Error('Admin access required'), { status: 403 }));
+    const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
+    await screen.findByText('Recordings');
+    await user.click(container.querySelectorAll('.rec-strip__item')[0]);
+    await user.click(await screen.findByRole('button', { name: 'Delete recording' }));
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(await screen.findByText('Admin access required')).toBeInTheDocument();
+    expect(screen.queryByText('Couldn’t delete — try again.')).not.toBeInTheDocument();
+  });
+
+  test('a 403 removing a failed entry shows the server\'s reason too', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(FAILED_ROWS);
+    api.del.mockRejectedValue(Object.assign(new Error('Admin access required'), { status: 403 }));
+    const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
+    await screen.findByText('Recordings');
+    await user.click(await waitFor(() => {
+      const el = container.querySelector('.rec-strip__item--failed');
+      expect(el).not.toBeNull();
+      return el;
+    }));
+    await user.click(await screen.findByRole('button', { name: 'Remove' }));
+    expect(await screen.findByText('Admin access required')).toBeInTheDocument();
+    expect(screen.queryByText('Couldn’t remove it — try again.')).not.toBeInTheDocument();
+  });
+
+  test('any other failure removing a failed entry keeps its own retry wording', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(FAILED_ROWS);
+    api.del.mockRejectedValue(Object.assign(new Error('Request failed (502)'), { status: 502 }));
+    const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
+    await screen.findByText('Recordings');
+    await user.click(await waitFor(() => {
+      const el = container.querySelector('.rec-strip__item--failed');
+      expect(el).not.toBeNull();
+      return el;
+    }));
+    await user.click(await screen.findByRole('button', { name: 'Remove' }));
+    expect(await screen.findByText('Couldn’t remove it — try again.')).toBeInTheDocument();
   });
 });
 

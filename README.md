@@ -260,8 +260,36 @@ same as adding.
 **Removing** — Remove asks for confirmation, then stops the stream and deletes the camera.
 You can always add it again.
 
-**Assigning to a child** — use the "Assigned to" dropdown on each camera. (This is just for
-grouping the dashboard; any signed-in user can change it.)
+**Assigning to a child** — use the "Assigned to" dropdown on each camera (admin only; a caregiver
+sees the assignment as text). It is more than grouping: a camera's nights are tracked only while it is
+assigned to a child who has sleep tracking on, so unassigning a camera stops its tracking just as
+turning tracking off does.
+
+### Where to put the camera
+
+Nightlight works from **any** camera position: put the camera wherever it fits and you will still get
+sleep tracking and motion alerts. A good position makes them **more reliable**, and nothing more than that.
+These are suggestions from testing in one household, not guarantees, and not a measured result (a proper
+comparison of positions has not been done yet).
+
+- **The suggested view:** looking down at the bed from above, at about **45 degrees**, the way most baby
+  monitors are mounted. Have the **whole bed in frame**, and the **doorway or room entry in view as well**
+  if you can: seeing who comes in and goes out makes an entry or exit easier to tell from other movement.
+- **What to avoid:**
+  - **A light that flashes, flickers or changes brightness in view of the bed** (a blinking charger or
+    night light, a screen, a light that cycles). Every change lights up pixels in the bed, which can break
+    the empty-bed check into short pieces, and a correct morning wake can then read wrong or be missed.
+    Cover or move the light, or point the camera so it is out of frame.
+  - **A bed zone that overlaps where a parent stands or leans** (for example a camera so low or side-on
+    that a person at the bedside covers the bed in the picture). Their movement then counts as movement in
+    the bed.
+  - **The bed being a tiny part of the frame.** With few pixels on the bed, a real movement is a smaller
+    share of the zone and is easier to miss. Fill the frame with the bed, within reason.
+- **If you move a camera, paint the bed zone again.** The bed zone (the area the camera watches for
+  movement in the bed) is drawn on one particular picture, so after a move it no longer sits on the bed.
+  Nothing checks that the zone is on the bed, so look at it over a live picture after any move. Sleep
+  nights before and after a move are **not directly comparable**: the zone and the camera's idea of a quiet
+  room both change, so a difference in the figures may come from the move, not from the sleep.
 
 ## Sleep tracking
 
@@ -270,8 +298,10 @@ hear — no wearables, no extra hardware. It's a **sleep-pattern guide, not a me
 measurement**, and (like everything here) never a safety device — see the warning at the top.
 
 - **Turn it on per child.** Each child has a **Track sleep** toggle in their settings, with
-  their own **bedtime** and **wake time**. Turning tracking off stops it entirely. A child can
-  have more than one camera — their movement and sound are combined.
+  their own **bedtime** and **wake time**. Turning tracking off stops it entirely. Only an
+  **admin** can turn tracking on or off or change those times (a caregiver sees them, greyed out).
+  A child can have more than one camera; the night is measured from one of them (see "One camera
+  does the measuring" below).
 - **Bedtime is a guide, not a boundary.** Real bedtimes move night to night, and you shouldn't
   have to edit the setting each evening. The bedtime that gets reported is the one the camera
   actually saw — the **put-down**, and the child settling after it — whether that happens before
@@ -284,7 +314,8 @@ measurement**, and (like everything here) never a safety device — see the warn
   then nothing is an empty one, and the bedtime it seemed to start is discarded. The same applies at the other end: a morning wake
   is still found if it comes after the configured wake time.
 - **One camera does the measuring.** If a child has several cameras, sleep is worked out from their
-  **main camera** — the first one in the order you've arranged them, skipping any that are turned off.
+  **main camera** — the first one in the order an admin has arranged them on the live grid (drag the
+  tiles; only an admin can, for this reason), skipping any that are turned off.
   The others carry on streaming, alerting and recording as normal; they just don't affect the numbers.
   This is deliberate: if every camera were combined, the *noisiest* one would decide the night — a
   camera facing the doorway would push bedtime later and add wake-ups that never happened, with nothing
@@ -393,8 +424,10 @@ measurement**, and (like everything here) never a safety device — see the warn
     wrong zone (and saved that way). So **That's right**, **Not quite…**, the time fields and the frame
     buttons stay greyed out, with a line saying why, until it has loaded (usually a moment). Event
     answers, **Save just the event answers** and **No one was in the bed** don't involve a time and work
-    straight away. If the setting can't be loaded at all, the times stay greyed out for that visit:
-    reload the page.
+    straight away. If the setting can't be loaded at all, the line becomes an error saying so and the
+    times stay greyed out for that visit: reload the page. Every time on this page, shown or typed, is
+    in your **home** time (the timezone set in Settings), never the time zone of the phone or browser
+    you are using.
   - **Point at the picture instead of typing.** Tap the frame that shows the real moment and the time is
     taken from it, exact to the second rather than rounded from memory. Typing a time by hand instead
     clears the picked frame, so only one of them is ever the answer.
@@ -671,16 +704,31 @@ measurement**, and (like everything here) never a safety device — see the warn
 Once signed in as admin, go to **Settings → Caregivers** to create additional logins (e.g. for a
 partner or babysitter).
 
+The rule (owner decision, 2026-10-10): **a caregiver can watch and act in the moment, but cannot
+destroy or reconfigure.**
+
 | Capability | Caregiver | Admin |
 |---|:---:|:---:|
-| View live cameras and media | Yes | Yes |
-| Reorder / assign cameras to a child | Yes | Yes |
+| View live cameras; watch and download alert clips, recordings, wake clips and timelapses | Yes | Yes |
+| Record, move a PTZ camera, talk through a camera | Yes | Yes |
 | Restart, reboot, or snooze camera alerts | Yes | Yes |
+| Reorder cameras on the live grid (the order also picks each child's measuring camera) | No | Yes |
+| Assign a camera to a child | No | Yes |
 | Add / edit / enable / delete a camera | No | Yes |
-| Add / edit a child and review sleep | Yes | Yes |
+| Change a child's name, birthday, colour and photo | Yes | Yes |
+| Add a child; turn a child's sleep tracking on or off; change their bedtime and wake time | No | Yes |
+| Answer the morning sleep review | Yes | Yes |
+| Delete an alert clip, a recording or a wake clip | No | Yes |
+| Delete a timelapse | No | Yes |
 | Delete a child and its media | No | Yes |
-| Change global settings (detection, notifications, providers) | No | Yes |
+| Change global settings (detection, notifications, providers, recording retention) | No | Yes |
 | Manage caregiver/admin accounts and sessions | No | Yes |
+
+Deleting by hand is not the same as **retention**: the automatic sweep of old alert clips and wake clips
+(Settings → Recording, admin only to configure) runs on a timer on every install, whoever is signed in.
+On a caregiver's screen the admin-only controls are not shown (sleep tracking and the window are shown,
+greyed out, with a note); the server refuses them too, so a page opened before an update that changed a
+permission gets a refusal rather than a change.
 
 The **Settings** hub itself is visible to caregivers too — its admin-only pages (general,
 camera controls, recording, MQTT, push providers, users, logs, clip storage) are simply hidden

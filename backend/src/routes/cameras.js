@@ -408,7 +408,8 @@ function ptzConnForCamera(id, res) {
 }
 
 // --- On-demand recording (the tile's Record button) ---
-// Any signed-in user can record; this is a household app and capturing a moment isn't an admin action.
+// Any signed-in user can record; this is a household app and capturing a moment isn't an admin action
+// (owner decision 2026-10-10: stays open to caregivers; deleting a recording is admin-only).
 // Both routes are idempotent by design (see lib/recordings.js): a second Start returns the in-progress
 // state, and a Stop with nothing running is a no-op — so a double-tap or a retried request is harmless.
 
@@ -471,7 +472,8 @@ router.post('/:id/ptz/nudge', async (req, res) => {
 // Force a fresh restart of a camera's server-side stream (main transcoder + sub-stream). Useful when a
 // feed has drifted behind live or wedged in a way the watchdog hasn't caught yet — it tears down the
 // FFmpeg leg(s) (SIGTERM→SIGKILL) and relaunches, so every viewer reconnects at the live edge. Any
-// signed-in user (a recovery action, like a heavier pull-to-refresh that fixes it for everyone).
+// signed-in user (a recovery action, like a heavier pull-to-refresh that fixes it for everyone; owner
+// decision 2026-10-10: stays open to caregivers).
 router.post('/:id/restart', requireAuth, async (req, res) => {
   const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!cam) return res.status(404).json({ error: 'Camera not found' });
@@ -489,7 +491,7 @@ router.post('/:id/restart', requireAuth, async (req, res) => {
 // Power-cycle the whole camera over ONVIF (Device SystemReboot). A heavier recovery than /restart —
 // it takes the feed offline for ~30-60s — but it clears states a stream restart can't (e.g. a wedged
 // on-camera video encoder). Only for ONVIF-added cameras (reboot_capable); the UI hides the button
-// otherwise. Any signed-in user, same as /restart.
+// otherwise. Any signed-in user, same as /restart (owner decision 2026-10-10: stays open to caregivers).
 router.post('/:id/reboot', requireAuth, async (req, res) => {
   const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!cam) return res.status(404).json({ error: 'Camera not found' });
@@ -515,7 +517,8 @@ router.post('/:id/reboot', requireAuth, async (req, res) => {
 
 // Quick-silence: temporarily mute ALL of this camera's alerts (motion/sound/ONVIF/MQTT) for `minutes`
 // from now — for when you're still up as the alert schedule kicks in. minutes=0 clears the mute early.
-// Any signed-in user (an operational action, like /restart). Enforced in lib/detectSchedule.js.
+// Any signed-in user (an operational action, like /restart; owner decision 2026-10-10: stays open to
+// caregivers, with the 720-minute cap below as the bound). Enforced in lib/detectSchedule.js.
 router.post('/:id/snooze', requireAuth, (req, res) => {
   const cam = db.prepare('SELECT id, name FROM cameras WHERE id = ?').get(req.params.id);
   if (!cam) return res.status(404).json({ error: 'Camera not found' });
@@ -553,9 +556,12 @@ router.delete('/alerts', requireAuth, requireAdmin, (req, res) => {
   res.json({ cleared: clearDetectionEvents() });
 });
 
-// Delete just the recorded clip for one alert (any signed-in user — it's a contextual action on an
-// alert they can already see). Removes the video file; the alert row + snapshot stay.
-router.delete('/alerts/:id/clip', requireAuth, (req, res) => {
+// Delete just the recorded clip for one alert. Removes the video file; the alert row + snapshot stay.
+// Admin-only (owner decision 2026-10-10, #538): a caregiver can watch and act in the moment but not
+// destroy, and a deleted clip cannot be got back. Watching and downloading stay open to every signed-in
+// user (GET /alerts/:id/clip above); the automatic retention sweep (lib/clipStorage.js) is not a person
+// and is not affected.
+router.delete('/alerts/:id/clip', requireAuth, requireAdmin, (req, res) => {
   const had = deleteClipForEvent(req.params.id);
   if (!had) return res.status(404).json({ error: 'No clip for this alert' });
   res.status(204).end();
@@ -611,7 +617,13 @@ router.post('/clips/delete', requireAdmin, (req, res) => {
 
 // Persists a custom drag-and-drop order for the Nursery page. Mounted before /:id so
 // Express matches this literal path first, rather than treating "reorder" as an :id.
-router.put('/reorder', (req, res) => {
+// Admin-only (owner decision 2026-10-10, #552). `sort_order` is not only layout: the first enabled camera
+// in it is the ONE a child's sleep is scored from (lib/sleepAnalysis.js, the main-camera query), the one
+// the nightly timelapse is built from (lib/timelapse.js) and the first in the morning review's camera
+// list (lib/sleepReviews.js). A caregiver's drag would therefore reconfigure sleep tracking. The cost: a
+// caregiver can no longer rearrange the tiles, and the order is shared by every viewer anyway (one
+// sort_order per camera, not per person).
+router.put('/reorder', requireAdmin, (req, res) => {
   const { order } = req.body || {};
   if (!Array.isArray(order) || order.some((id) => typeof id !== 'string')) {
     return res.status(400).json({ error: 'order must be an array of camera ids' });
@@ -1109,7 +1121,10 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
 });
 
 // Dedicated assignment endpoint: attach (or unattach with child_id: null) a camera to a child.
-router.put('/:id/assign', async (req, res) => {
+// Admin-only (owner decision 2026-10-10, #552): which child a camera belongs to decides whether that
+// camera's nights are tracked at all, so unassigning one stops tracking exactly as switching the child's
+// `track_sleep` off does, and left open it would let a caregiver do what PUT /api/children/:id refuses.
+router.put('/:id/assign', requireAdmin, async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
   const { child_id } = req.body || {};
@@ -1133,10 +1148,12 @@ router.put('/:id/assign', async (req, res) => {
     else await stopMotionDetector(updated.id).catch(() => {});
     reconcileClipRing(updated);
   }
-  // Through publicCamera like every other camera response. This route is deliberately open to
-  // caregivers (assignment is day-to-day caregiving, not administration), and it was the ONLY site in
-  // this file returning the raw row — which handed rtsp_url, with the stream password embedded in it,
-  // plus the ONVIF and talk credentials, to any signed-in caregiver. See GHSA-43c3-wrx8-fq39.
+  // Through publicCamera like every other camera response. This route used to be open to caregivers, and
+  // it was the ONLY site in this file returning the raw row — which handed rtsp_url, with the stream
+  // password embedded in it, plus the ONVIF and talk credentials, to any signed-in caregiver. See
+  // GHSA-43c3-wrx8-fq39. Only an admin reaches this line now, but isAdminRequest(req) stays rather than a
+  // hard-coded `true`: defence in depth, so removing the gate above can never hand a caregiver the admin
+  // edit-form shape again.
   res.json(publicCamera(updated, isAdminRequest(req)));
 });
 

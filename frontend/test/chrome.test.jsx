@@ -22,7 +22,7 @@ import PushBanner from '../src/components/PushBanner.jsx';
 import ErrorBoundary from '../src/components/ErrorBoundary.jsx';
 import About from '../src/pages/About.jsx';
 import CameraReportButton from '../src/components/CameraReportButton.jsx';
-import { api } from '../src/lib/api.js';
+import { api, SLOW_REQUEST_TIMEOUT_MS } from '../src/lib/api.js';
 import * as nativeBridge from '../src/lib/nativeBridge.js';
 
 afterEach(() => vi.restoreAllMocks());
@@ -336,7 +336,7 @@ describe('CameraReportButton', () => {
 
     const { user } = renderAsAdmin(<CameraReportButton payload={PAYLOAD} />);
     await user.click(screen.getByRole('button', { name: /Generate camera report/ }));
-    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/cameras/probe-report', PAYLOAD));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/cameras/probe-report', PAYLOAD, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS }));
     await waitFor(() => expect(clicks).toHaveLength(1));
     expect(clicks[0]).toMatch(/^nightlight-camera-report-.*\.json$/);
     expect(clicks[0]).not.toContain(':');

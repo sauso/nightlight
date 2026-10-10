@@ -22,7 +22,17 @@ export function CamerasProvider({ children }) {
   const wasDownRef = useRef(false);
   const notReadyCountsRef = useRef(new Map()); // camera_id -> consecutive not-ready polls
 
+  // How many load() calls are currently awaiting the server. The 15 s timer skips its tick while this
+  // is above zero (issue #556): a stalled connection used to add two more pending requests on every
+  // tick, with nothing ever cancelling them (90 s of a never-answering server = 14 requests started,
+  // reproduced in vitest). The request timeout in api.js bounds how long a tick can stay "in flight",
+  // so the poll resumes by itself once the stalled request gives up. Only the TIMER is guarded: a
+  // manual `refresh()` (the detection queue awaits it after a save) must always run and return fresh
+  // data, so it is never skipped.
+  const inFlightRef = useRef(0);
+
   async function load() {
+    inFlightRef.current += 1;
     try {
       const [k, cams] = await Promise.all([api.get('/children'), api.get('/cameras')]);
       setKids(k);
@@ -56,12 +66,17 @@ export function CamerasProvider({ children }) {
       if (failureCountRef.current >= OUTAGE_THRESHOLD) {
         wasDownRef.current = true;
       }
+    } finally {
+      inFlightRef.current -= 1;
     }
   }
 
   useEffect(() => {
     load();
-    const interval = setInterval(load, 15000); // refresh live/offline status periodically
+    // refresh live/offline status periodically; skip a tick while the previous poll is unanswered.
+    // A timed-out poll lands in load()'s catch like any other failure, so the outage counter (and the
+    // reload-after-recovery logic) see a stalled server the same as one that refuses connections.
+    const interval = setInterval(() => { if (inFlightRef.current === 0) load(); }, 15000);
     return () => clearInterval(interval);
   }, []);
 

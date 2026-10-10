@@ -1,4 +1,5 @@
 import mqtt from 'mqtt';
+import { domainToASCII } from 'node:url';
 import db from '../db.js';
 import { logger } from './logger.js';
 import { inActiveWindow } from './detectSchedule.js';
@@ -164,15 +165,49 @@ export function mqttStatus() {
 // the admin did not type. A host containing one is refused instead. (A path, query or fragment also changes the port
 // that URL parses, so the `u.port` comparison alone would catch them; the explicit checks are listed so the intent
 // is readable, and a mutant that drops only `u.pathname` is therefore equivalent.)
-export function mqttBrokerUrl(host, port) {
+//
+// ⚠️ THE URL CHECK ALONE IS NOT ENOUGH (#641). It runs the WHATWG `URL` parser, but mqtt.js 5.x does NOT use that
+// parser: `mqtt.connect` reads the string with Node's legacy `url.parse` (node_modules/mqtt/build/lib/connect/index.js).
+// The two disagree on a handful of characters, and the WHATWG one is the more forgiving: it silently DELETES tab, CR
+// and LF anywhere in the input, and it accepts `;`, `'` and `%` in a non-special-scheme host, while the legacy parser
+// ends the host at each of them and reads the rest as a path (so `broker%20x:8883` is checked as host `broker%20x`
+// port 8883 but CONNECTS to `broker` on the default port 1883). The check passed and the client went somewhere else.
+// So the host is first held to an alphabet: letters and digits, `.`, `-`, `_` (the underscore is not legal in a DNS
+// name but is common on a LAN, and both parsers keep it), or an IPv6 literal in brackets (hex digits, `:` and `.`).
+// Anything else, above all whitespace and control characters, is refused BEFORE the URL parser sees it.
+//
+// An internationalised name (`bücher.example`) is allowed in but handed on as its punycode form
+// (`xn--bcher-kva.example`, from `domainToASCII`). The WHATWG parser would percent-encode it and the legacy one
+// converts it itself, and a few letters (U+037A is one) are converted by one and refused by the other, so sending
+// mqtt.js pure ASCII removes that last place the two could disagree. A name that does not convert is refused.
+// test/mqtt-broker-validation.test.js feeds every character to the real mqtt.js parse and compares, so a future
+// mqtt.js that reads a character differently fails there instead of here in the field.
+const BROKER_HOST_ALPHABET = /^(?:[\p{L}\p{N}_.-]+|\[[0-9A-Fa-f:.]+\])$/u;
+const BROKER_ASCII_HOST = /^[a-z0-9_.-]+$/;
+
+export function mqttBrokerUrl(rawHost, port) {
   const p = port || 1883; // the default the settings screen documents for a blank port
   if (!Number.isInteger(Number(p)) || Number(p) < 1 || Number(p) > 65535) {
     throw new Error(`the port ${JSON.stringify(p)} is not a whole number between 1 and 65535`);
   }
+  // JSON.stringify escapes \n, \t and the other C0 controls but leaves an invisible character (no-break or
+  // zero-width space, line separator) as it is, which is exactly the one the admin cannot see to fix.
+  const shown = typeof rawHost === 'string'
+    ? JSON.stringify(rawHost).replace(/(?! )[\p{C}\p{Z}]/gu, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
+    : JSON.stringify(rawHost) ?? String(rawHost);
+  const notAHost = () => new Error(`the host ${shown} is not a valid hostname or address (use letters, digits, ".", "-" and "_", or an IPv6 address in [brackets]; no spaces or other symbols)`);
+  // Surrounding spaces are harmless typing noise (the settings route trims them before saving; a value already
+  // stored that way is trimmed here too, so boot and save read the same host). Inner whitespace is not.
+  const typed = typeof rawHost === 'string' ? rawHost.trim() : '';
+  if (!BROKER_HOST_ALPHABET.test(typed)) throw notAHost();
+  // Only a name with a non-ASCII letter is converted. An all-ASCII host goes through exactly as typed: domainToASCII
+  // would also rewrite numeric forms (`1.2.3` becomes `1.2.0.3`) and refuse a name ending in a number.
+  const host = [...typed].every((ch) => ch.charCodeAt(0) < 128) ? typed : domainToASCII(typed);
+  if (!host.startsWith('[') && !BROKER_ASCII_HOST.test(host.toLowerCase())) throw notAHost();
   let u;
-  try { u = new URL(`mqtt://${host}:${p}`); } catch { throw new Error(`the host ${JSON.stringify(host)} is not a valid hostname or address`); }
+  try { u = new URL(`mqtt://${host}:${p}`); } catch { throw new Error(`the host ${shown} is not a valid hostname or address`); }
   if (!u.hostname || u.username || u.password || u.pathname || u.search || u.hash || u.port !== String(Number(p))) {
-    throw new Error(`the host ${JSON.stringify(host)} must be just a hostname or address, with no user name, path or query`);
+    throw new Error(`the host ${shown} must be just a hostname or address, with no user name, path or query`);
   }
   return `mqtt://${host}:${Number(p)}`;
 }

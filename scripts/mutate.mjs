@@ -56,6 +56,8 @@
 //      original bytes go to an on-disk journal (`.mutate-restore.json`, gitignored), so even a SIGKILL, a
 //      power cut or a Windows hard-kill (Windows cannot deliver SIGTERM to a handler at all) is undone by the
 //      NEXT run, which restores from the journal before it does anything else; (c) the normal `finally`.
+//      The journal also holds a hash of the mutant, and the next run restores ONLY a file that still matches it
+//      (#642): a file the developer has edited since the kill stops the run instead of being overwritten.
 //
 //   6. **The mutant ran no test, or a test the catalogue names no longer exists.** A `namePattern` that
 //      matches nothing makes `node --test` skip every test and exit 0, which used to be recorded as SURVIVED
@@ -67,6 +69,7 @@
 // written reason why it does not matter.
 import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -81,6 +84,13 @@ const flag = (name) => args.some((a) => a === `--${name}`);
 const value = (name) => args.find((a) => a.startsWith(`--${name}=`))?.split('=').slice(1).join('=');
 
 const catalogue = JSON.parse(readFileSync(path.join(HERE, 'mutants.json'), 'utf8'));
+// The values of `expect` the run loop below understands (see the long comment there). #642: M-509-15 said
+// "control", which the loop silently treated as an unknown value: a "control" that was KILLED did not void the
+// run, so the harness check it exists for was switched off without any sign. An entry whose `expect` is not
+// one of these (or is missing) is now a catalogue error everywhere: --check names it, and a run refuses to start.
+const EXPECT_VALUES = ['killed', 'survives', 'equivalent'];
+const expectProblem = (m) => (EXPECT_VALUES.includes(m.expect) ? null
+  : `its \`expect\` is ${m.expect === undefined ? 'missing' : JSON.stringify(m.expect)}, but the run only understands ${EXPECT_VALUES.map((v) => `"${v}"`).join(', ')}`);
 const only = value('only');
 const mutants = only ? catalogue.filter((m) => m.label.includes(only)) : catalogue;
 
@@ -89,6 +99,7 @@ const mutants = only ? catalogue.filter((m) => m.label.includes(only)) : catalog
 // two runs against the same tree would corrupt each other's results anyway, and recoverFromJournal() refuses
 // to start while the run that wrote it is still alive.
 const JOURNAL = path.join(HERE, '.mutate-restore.json');
+const sha256 = (buf) => createHash('sha256').update(buf).digest('hex'); // defined here, not by writeJournal: recoverFromJournal() runs before that line is reached
 
 // Line endings (#597). The checked-in catalogue was written on Windows, where the working tree is CRLF, so 135
 // multi-line `find` strings carry `\r\n`; CI (Linux) and anyone with `core.autocrlf=false` have LF files, where
@@ -99,6 +110,15 @@ const adaptEol = (s, eol) => s.replace(/\r\n/g, '\n').replace(/\n/g, eol);
 function adaptToFile(text, m) {
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
   return { find: adaptEol(m.find, eol), replace: adaptEol(m.replace, eol) };
+}
+// The bytes a catalogue entry makes of `original`, or null if it does not apply exactly once. Used only to
+// recognise a mutant from a legacy journal (see recoverFromJournal); the run loop below does its own checks so
+// that it can say WHY an entry failed.
+function mutantBytes(original, m) {
+  const text = original.toString('utf8');
+  const { find, replace } = adaptToFile(text, m);
+  if (text.split(find).length - 1 !== 1) return null;
+  return Buffer.from(text.replace(find, () => replace), 'utf8');
 }
 
 // --- namePattern verification (#604) ---------------------------------------------------------------------
@@ -186,6 +206,8 @@ if (flag('check')) {
   const cache = new Map();
   for (const m of catalogue) {
     const problems = [];
+    const unknownExpect = expectProblem(m);
+    if (unknownExpect) problems.push(unknownExpect);
     try {
       const text = readFileSync(path.join(REPO, m.file)).toString('utf8');
       const { find, replace } = adaptToFile(text, m);
@@ -213,6 +235,13 @@ if (flag('check')) {
 // Before anything reads a source file: undo what a previous, killed run left behind (#599). Ahead of the
 // `--only` check on purpose: a typo in the filter must not leave a mutated file lying around.
 recoverFromJournal();
+// After the recovery for the same reason as the `--only` check (nothing may stop a run before the journal is
+// dealt with), and before any file is touched: an `expect` the loop does not know would be misread as "survives".
+const badExpect = catalogue.filter((m) => expectProblem(m));
+if (badExpect.length) {
+  for (const m of badExpect) console.error(`ABORT: "${m.label}" — ${expectProblem(m)}.`);
+  process.exit(3);
+}
 if (!mutants.length) {
   console.error(`no mutants match --only=${only}`);
   process.exit(2);
@@ -253,13 +282,19 @@ function killTree(child) {
 // The journal is written BEFORE the mutant, never after: a process killed between the two steps would
 // otherwise leave a mutated file with nothing recording the original. Temp file + rename, so a kill during the
 // write cannot leave a half-written journal that the next run then refuses to read.
-function writeJournal(abs, original) {
+//
+// The journal also records a hash of the MUTATED bytes (#642). Recovery used to write the saved original over
+// whatever the file held, so a developer edit made after a hard kill (or a different branch's version of the file)
+// was silently destroyed. The hash is what lets recovery tell "still exactly the mutant I wrote" (safe to undo)
+// from "someone has changed it since" (not mine to overwrite).
+function writeJournal(abs, original, mutated) {
   const tmp = `${JOURNAL}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify({
     pid: process.pid,
     file: path.relative(REPO, abs),
     startedAt: new Date().toISOString(),
     originalBase64: original.toString('base64'),
+    mutatedSha256: sha256(mutated),
   }));
   renameSync(tmp, JOURNAL);
 }
@@ -299,6 +334,39 @@ function recoverFromJournal() {
   }
   const original = Buffer.from(entry.originalBase64, 'base64');
   const was = existsSync(abs) ? readFileSync(abs) : null;
+  // #642: only undo what this harness did. Writing the saved original over a file that is no longer the mutant
+  // destroys whatever the developer (or another branch) put there since the kill; the lost edit is silent, and
+  // it was reported as a successful "restored it from the journal". Three states are safe to act on:
+  //   - the file already equals the original: nothing to undo, just drop the journal;
+  //   - the file equals the mutant the journal vouches for (its hash, or for a journal from before the hash
+  //     existed, a mutant the CURRENT catalogue produces from the saved original): restore it;
+  // and anything else is somebody's work, so the run stops and the file is left alone, journal included (it
+  // still holds the original bytes, and deleting it is the human's decision, once they have looked).
+  const alreadyIntact = was?.equals(original) ?? false;
+  if (!alreadyIntact) {
+    let isMutant;
+    let how;
+    if (typeof entry.mutatedSha256 === 'string') {
+      isMutant = was !== null && sha256(was) === entry.mutatedSha256;
+      how = 'its bytes match the mutant the journal recorded';
+    } else {
+      // A journal written before the hash was recorded. Without one there is no way to know what the mutant was,
+      // so be conservative: act only if the file is exactly what some current catalogue entry makes of the saved
+      // original, and say that this is what was checked.
+      isMutant = was !== null && catalogue.some((m) => m.file === entry.file.split(path.sep).join('/') && mutantBytes(original, m)?.equals(was));
+      how = 'this journal predates the mutant hash, so the file was matched against the current catalogue instead';
+    }
+    if (!isMutant) {
+      console.error(`ABORT: ${entry.file} was left mutated by a run that died (pid ${entry.pid}, ${entry.startedAt}), but ` +
+        `${was === null ? 'the file no longer exists' : typeof entry.mutatedSha256 === 'string'
+          ? 'it no longer matches the mutant the journal recorded'
+          : 'it matches no mutant the current catalogue makes of the saved original (this journal predates the mutant hash, so that is all there is to check)'}.`);
+      console.error('        Something else has changed it since: a later edit, or another branch\'s version. NOT overwriting it.');
+      console.error(`        Compare it with \`git diff\`; if it is right, delete ${path.relative(REPO, JOURNAL)}. If a mutant is still in it, remove it by hand first.`);
+      process.exit(4);
+    }
+    console.error(`        (${how})`);
+  }
   writeFileSync(abs, original);
   if (!readFileSync(abs).equals(original)) {
     console.error(`\n★★★ RESTORE FAILED for ${entry.file} from the journal — restore it by hand.`);
@@ -475,7 +543,7 @@ for (const m of mutants) {
   let verdict;
   let noTestsRan = false;
   try {
-    writeJournal(abs, original);
+    writeJournal(abs, original, mutated);
     applied = { abs, original }; // before the write, so a signal at any point after it can undo it
     writeFileSync(abs, mutated);
     // Re-read from disk rather than trusting the write: this is the "the mutant never applied" guard,
