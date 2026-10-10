@@ -116,6 +116,66 @@ describe('★ activePushTokens also excludes anything not tied to a live SESSION
   });
 });
 
+// #552 (PR3) claim C4: the long-silence notice goes to the admins, not to the person who set the silence. Only
+// the app's own push can address a person, so the narrowing lives here, on top of the user and session filters
+// above (never instead of them). The fixture holds one device of every kind that must NOT be reached, beside the
+// two that must: a caregiver, an admin demoted after registering, an unrecognised role, an orphan row naming an
+// admin id that no longer exists, an admin whose session was revoked, and one whose session is past its TTL.
+describe('★ activePushTokens({ adminsOnly, excludeUserId }): the admins\' live devices, minus one account (#552)', () => {
+  function household() {
+    makeUser(db, { id: 'u-admin-a', username: 'admin-a', role: 'admin' });
+    makeUser(db, { id: 'u-admin-b', username: 'admin-b', role: 'admin' });
+    makeUser(db, { id: 'u-carer', username: 'carer', role: 'caregiver' });
+    makeUser(db, { id: 'u-demoted', username: 'demoted', role: 'admin' });
+    makeUser(db, { id: 'u-viewer', username: 'viewer', role: 'viewer' });
+    makeUser(db, { id: 'u-admin-revoked', username: 'admin-revoked', role: 'admin' });
+    makeUser(db, { id: 'u-admin-old', username: 'admin-old', role: 'admin' });
+    addToken('tok-admin-a', 'u-admin-a', makeSession(db, 'u-admin-a'));
+    addToken('tok-admin-b', 'u-admin-b', makeSession(db, 'u-admin-b'));
+    addToken('tok-carer', 'u-carer', makeSession(db, 'u-carer'));
+    addToken('tok-demoted', 'u-demoted', makeSession(db, 'u-demoted'));
+    db.prepare("UPDATE users SET role = 'caregiver' WHERE id = 'u-demoted'").run(); // demoted after registering
+    addToken('tok-viewer', 'u-viewer', makeSession(db, 'u-viewer'));
+    addToken('tok-orphan', 'u-gone-admin', 'sess-does-not-exist');
+    addToken('tok-revoked', 'u-admin-revoked', 'sess-does-not-exist');
+    const old = makeSession(db, 'u-admin-old');
+    db.prepare("UPDATE sessions SET created_at = datetime('now', '-45 days') WHERE id = ?").run(old);
+    addToken('tok-admin-old', 'u-admin-old', old);
+  }
+  const tokens = (opts) => activePushTokens(opts).map((r) => r.token).sort();
+
+  test('★ adminsOnly: only devices of accounts that are admins NOW, with a live session', () => {
+    household();
+    assert.deepEqual(tokens({ adminsOnly: true }), ['tok-admin-a', 'tok-admin-b']);
+  });
+
+  test('★ adminsOnly + excludeUserId: the other admins only (the person who set the silence is left out)', () => {
+    household();
+    assert.deepEqual(tokens({ adminsOnly: true, excludeUserId: 'u-admin-b' }), ['tok-admin-a']);
+    assert.deepEqual(tokens({ adminsOnly: true, excludeUserId: 'u-carer' }), ['tok-admin-a', 'tok-admin-b'],
+      'a caregiver who set it: every admin still gets it');
+  });
+
+  test('★ the default (every existing caller) is unchanged: every live device, any role', () => {
+    household();
+    const all = ['tok-admin-a', 'tok-admin-b', 'tok-carer', 'tok-demoted', 'tok-viewer'];
+    assert.deepEqual(tokens(), all);
+    assert.deepEqual(tokens({}), all);
+    assert.deepEqual(tokens({ adminsOnly: false, excludeUserId: null }), all);
+  });
+
+  test('excludeUserId alone leaves out that one account and nobody else', () => {
+    household();
+    assert.deepEqual(tokens({ excludeUserId: 'u-carer' }), ['tok-admin-a', 'tok-admin-b', 'tok-demoted', 'tok-viewer']);
+  });
+
+  test('the only admin set the silence: no device of the app\'s own push is left to reach', () => {
+    makeUser(db, { id: 'u-solo', username: 'solo', role: 'admin' });
+    addToken('tok-solo', 'u-solo', makeSession(db, 'u-solo'));
+    assert.deepEqual(tokens({ adminsOnly: true, excludeUserId: 'u-solo' }), []);
+  });
+});
+
 describe('★ registerToken rebinds an existing token to whichever session registered it most recently', () => {
   test('★ THE FIX: re-registering the same token under a NEW session updates session_id, not just leaves the old one', () => {
     makeUser(db, { id: 'u-1', username: 'alice' });
@@ -219,5 +279,28 @@ describe('★ sendToAll actually delivers through activePushTokens, not some oth
     const [messages] = sendEach.mock.calls[0].arguments;
     assert.equal(messages[0].android.notification.tag, 'sleep_report_child_a_2026-07-01');
     assert.equal(messages[0].apns.headers['apns-collapse-id'], 'sleep_report_child_a_2026-07-01');
+  });
+
+  // #552 (PR3) C4, the wiring half: activePushTokens' narrowing is tested above, but only this shows sendToAll
+  // passes it through to the query it actually sends from (the same gap the GHSA-q98f wiring test closed).
+  test('★ sendToAll({ adminsOnly, excludeUserId }) messages only the other admins\' devices', async () => {
+    db.prepare("UPDATE settings SET push_enabled = 1 WHERE id = 'app'").run();
+    makeUser(db, { id: 'u-admin-a', username: 'admin-a', role: 'admin' });
+    makeUser(db, { id: 'u-admin-b', username: 'admin-b', role: 'admin' });
+    makeUser(db, { id: 'u-carer', username: 'carer', role: 'caregiver' });
+    addToken('tok-admin-a', 'u-admin-a', makeSession(db, 'u-admin-a'));
+    addToken('tok-admin-b', 'u-admin-b', makeSession(db, 'u-admin-b'));
+    addToken('tok-carer', 'u-carer', makeSession(db, 'u-carer'));
+    sendEach.mock.resetCalls();
+    await sendToAll('Alerts silenced on Cam', 'body', { type: 'silence' }, null,
+      { tag: 'silence_cam-1', adminsOnly: true, excludeUserId: 'u-admin-b' });
+    const [messages] = sendEach.mock.calls[0].arguments;
+    assert.deepEqual(messages.map((m) => m.token), ['tok-admin-a']);
+    assert.equal(messages[0].android.notification.tag, 'silence_cam-1');
+
+    sendEach.mock.resetCalls();
+    await sendToAll('Motion', 'Camera detected motion');
+    assert.deepEqual(sendEach.mock.calls[0].arguments[0].map((m) => m.token).sort(), ['tok-admin-a', 'tok-admin-b', 'tok-carer'],
+      'and a caller that passes neither still reaches every device');
   });
 });

@@ -84,6 +84,7 @@ describe('PUT /api/settings: every numeric setting keeps to its documented range
   const BOUNDS = [
     ['ptz_step', 1, 100, 'docs/camera-controls.md'],
     ['camera_offline_alert_minutes', 1, 1440, 'docs/camera-controls.md'],
+    ['snooze_alert_minutes', 1, 719, 'docs/camera-controls.md'], // #552: the long-silence notice
     ['clip_pre_roll_s', 0, 30, 'docs/recording.md'],
     ['clip_post_roll_s', 5, 120, 'docs/recording.md'],
     ['clip_retention_days', 0, 365, 'docs/recording.md'],

@@ -592,6 +592,18 @@ if (!settingsColumns.includes('camera_offline_alert_enabled')) {
   db.exec('ALTER TABLE settings ADD COLUMN camera_offline_alert_minutes INTEGER NOT NULL DEFAULT 5');
 }
 
+// Long-silence notice (#552): tell the admins when one camera's alerts are kept silenced, on and off (short gaps
+// between silences count, lib/silences.js), for longer than snooze_alert_minutes. ON by default, unlike the offline alert above: a silence is
+// a person switching every alert from a camera off, and the admins finding out is the point of the feature,
+// so an install should not have to discover a setting to get it. 60 minutes is the tile's longest single
+// silence (CameraTile.jsx offers 15, 30 and 60), so one press of the tile never notifies and a renewal does.
+// Range 1-719, enforced in routes/settings.js (why 719 is there). Both columns are added together by one
+// sentinel; the schema transaction around this file is what makes the pair atomic.
+if (!settingsColumns.includes('snooze_alert_enabled')) {
+  db.exec('ALTER TABLE settings ADD COLUMN snooze_alert_enabled INTEGER NOT NULL DEFAULT 1');
+  db.exec('ALTER TABLE settings ADD COLUMN snooze_alert_minutes INTEGER NOT NULL DEFAULT 60');
+}
+
 // Sleep tracking (Stage 2): the nightly "night window" in the app timezone, as 'HH:MM' local times.
 // The window bounds where sleep is inferred from the per-minute activity timeline; it wraps midnight
 // when end <= start (the default 19:00–07:00). Global for now; a per-child override can come later.
@@ -927,6 +939,31 @@ if (!camerasColumns.includes('alerts_snoozed_by')) {
 for (const col of ['answered_by_user_id', 'answered_by_username']) {
   if (!sleepReviewColumns.includes(col)) db.exec(`ALTER TABLE sleep_reviews ADD COLUMN ${col} TEXT`);
 }
+
+// camera_silences (#552, the long-silence notice): ONE row per camera, describing its current or most recent
+// silence "episode" — consecutive silences of that camera's alerts, renewed within lib/silences.js's rejoin gap,
+// counted as one. Written only inside the snooze route's transaction (routes/cameras.js), so it moves exactly
+// when the mute does. Epoch millis, like cameras.alerts_snoozed_until:
+//   started_at  when the episode's first silence was set;
+//   ended_at    when its latest silence ends (or ended: an un-mute brings it forward to the un-mute);
+//   notified    1 once the admins have been told about THIS episode, so it is told once, not per renewal.
+// No person is stored here (the who is in camera_events), so the diagnostics bundle has nothing to strip.
+//
+// Why a table of its own and not the SNOOZE rows in camera_events: that history is pruned at 2,000 rows / 30
+// days SHARED by every camera (lib/cameraEvents.js), so a flapping camera elsewhere can prune a silence's rows
+// mid-episode, and their detail is free text ("muted for 30 min") a count would have to parse. CASCADE: deleting
+// a camera deletes its episode (a demo reset deletes every camera, lib/demoSeed.js). CREATE IF NOT EXISTS is both
+// the fresh-install and the upgrade path; nothing to backfill (a silence set before the upgrade starts its episode
+// at its next renewal). Downgrade-safe: older code never reads it.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS camera_silences (
+    camera_id TEXT PRIMARY KEY,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER NOT NULL,
+    notified INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE
+  )
+`);
 
 // Push a notification when a child's nightly sleep report is computed (window closed + row stored).
 // On by default; fires only for a freshly-closed night (a mid-day restart re-computing an old night

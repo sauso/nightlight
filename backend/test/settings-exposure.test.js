@@ -241,6 +241,7 @@ describe('GET /settings as an admin', () => {
   // SettingsRecording actually bind — keep this list in step with them.
   const FORM_FIELDS = [
     'camera_offline_alert_enabled', 'camera_offline_alert_minutes',
+    'snooze_alert_enabled', 'snooze_alert_minutes', // SettingsCamera's Long silence alerts card (#552)
     'clip_pre_roll_s', 'clip_post_roll_s', 'clip_retention_days', 'clip_retention_max_gb',
     'ondemand_enabled', 'ondemand_pre_roll_s', 'ondemand_max_duration_s',
     'ptz_step',
