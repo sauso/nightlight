@@ -42,6 +42,53 @@ stuck, you still get this notification, even though nothing was restarted.
 This is a global on/off with one global threshold: it applies to every camera the same way,
 there's no per-camera override.
 
+## Silencing a camera's alerts, and who did what
+
+Not a setting: this is a control on every camera tile, described here because it sits beside the
+alerts above. In a tile's menu (the gear button), **Silence alerts** mutes every alert from that one
+camera (motion, sound, ONVIF and MQTT) for 15 minutes, 30 minutes or an hour, and the same button then
+un-mutes it early. Anyone signed in can use it, caregivers included. The server accepts at most 720
+minutes (12 hours) for one silence; the tile only offers up to an hour.
+
+**Who did it is recorded, by username.** That is the login name an admin sets for each account, never
+the first name, which anyone can change on their own account (so it cannot be used to put someone
+else's name on what you did). It is copied at the time, so renaming or deleting the account later does
+not change what was recorded.
+
+- **On the tile, to everyone:** while a camera is silenced, the button reads `Muted until <time> by
+  <username> · tap to un-mute`, and the muted-bell time in the tile's strip says the same on hover. The
+  name goes away when the silence ends, whether it ran out or someone un-muted it.
+- **In Camera history** (Settings → Logs, admin only): one row for each silence (`muted for 30 min`),
+  each un-mute of a camera that was muted (`un-muted`), each stream restart (`stream restarted manually`, or `stream restart
+  failed`) and each camera reboot (`camera reboot requested (ONVIF)`, or `…; the camera did not
+  confirm`), each followed by `by <username>`. Silences are listed as **Silence alerts**. A silence that
+  simply runs out adds no row: its length is in the row that started it. An un-mute of a camera that is
+  not muted (never was, or its silence already ran out) changes nothing and adds no row either, so
+  repeating it cannot push other cameras' rows out of the shared history (below). Rows the system writes
+  itself (a watchdog restart, a camera going offline or coming back) have no name.
+
+**The difference people get wrong: a silence needs its history row, a restart does not.**
+
+| Action | If the Camera history row can't be written |
+|---|---|
+| Silence or un-mute alerts | **Nothing happens.** The camera keeps (or stays in) its previous state and the tile does not change. Not muting is the safe direction: a silence is the one action here that can hide something from everyone else. |
+| Restart the stream, reboot the camera | **It still happens**, without a row. By the time the row is written the camera has already acted, and that cannot be undone. |
+
+A failed restart or reboot is recorded too, because a failure can still have acted: a restart may have
+stopped the old stream, and a camera may accept a reboot and drop the connection before it answers.
+
+Known limits: Camera history keeps at most 2,000 rows and 30 days, shared by every camera, so an old
+silence can be pruned away (by age, or by enough newer rows from any camera), and **Clear log** removes
+every row. Silences, restarts and reboots from before this was recorded show no name. The diagnostics
+bundle (Settings → Logs), which is meant to be attached to a public issue, keeps only whether each
+history row was a *person* or the *system*, never the username.
+
+**Going back to an older version is not safe for privacy.** An older version's diagnostics bundle
+includes Camera history as stored, so after a downgrade it carries the username and account id of
+everyone this version recorded, for as long as those rows are kept (up to 30 days). If you downgrade
+and then share a diagnostics bundle, first clear Camera history (**Clear log**) or remove those fields
+from the file.
+
 ## Related
 
 - **[MQTT](mqtt.md)** — the broker connection and per-camera topics this doesn't cover.

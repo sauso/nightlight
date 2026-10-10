@@ -114,13 +114,21 @@ db.exec(`
   -- than joined, so the history survives the camera being deleted or renamed - it's a
   -- record of what happened, not a live foreign-key relationship. No FK to cameras for
   -- the same reason. Pruned by lib/cameraEvents.js so it can't grow unbounded.
+  --
+  -- actor_user_id / actor_username (#552): WHO did it, for the events a person causes (a silence, a
+  -- restart or a reboot from the tile). NULL = the system (a watchdog, a crashed stream). Copied in at
+  -- insert time like camera_name, so renaming or deleting the account cannot rewrite what happened. The
+  -- username, never first_name: anyone can set their own first name (PUT /api/auth/me), only an admin can
+  -- set a username, and it is UNIQUE. Also added by a guarded ALTER below, for upgrades.
   CREATE TABLE IF NOT EXISTS camera_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     camera_id TEXT NOT NULL,
     camera_name TEXT NOT NULL,
     type TEXT NOT NULL,
     detail TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    actor_user_id TEXT,
+    actor_username TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_camera_events_created_at ON camera_events(created_at);
 
@@ -234,6 +242,11 @@ db.exec(`
   -- true_in_bed_at / true_in_bed_transition_id: when the parent says the child went INTO the bed (the
   -- put-down), separate from true_onset_at (when they fell ASLEEP). Added 2026-09-30: the only frame
   -- button used to fill the asleep time, so a bedtime story made a put-down overwrite a correct onset.
+  --
+  -- answered_by_user_id / answered_by_username (#552): who last ANSWERED this review (a time, the flag, a
+  -- note, or an event answer). A dismissal or an empty save keeps the stored pair (see previewNightReview).
+  -- NULL on every review saved before this existed. Username, not first name, for the reason given on
+  -- camera_events above. Also added by a guarded ALTER below, for upgrades.
   CREATE TABLE IF NOT EXISTS sleep_reviews (
     child_id TEXT NOT NULL,
     night_date TEXT NOT NULL,
@@ -249,6 +262,8 @@ db.exec(`
     dismissed INTEGER NOT NULL DEFAULT 0,
     nobody_in_bed INTEGER NOT NULL DEFAULT 0,
     reviewed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    answered_by_user_id TEXT,
+    answered_by_username TEXT,
     PRIMARY KEY (child_id, night_date)
   );
 
@@ -881,6 +896,36 @@ if (!sleepNightsColumns.includes('in_bed_at')) {
 // it fresh each check so a snooze set from the UI takes effect without restarting the detector leg.
 if (!camerasColumns.includes('alerts_snoozed_until')) {
   db.exec('ALTER TABLE cameras ADD COLUMN alerts_snoozed_until INTEGER');
+}
+
+// WHO did it (#552). Every column below is nullable with no default, and NULL is the right answer for
+// every row that already exists: nothing before this recorded a person, and none may be invented (an old
+// restart could have been a person or the watchdog, and the history cannot say which). Each column has its
+// own guard, so no group can be skipped half way; the transaction around this whole section is what makes
+// the set atomic (see the top of this file). Downgrade-safe for the SCHEMA: older code names the columns it
+// inserts, so an extra nullable column is invisible to it.
+//
+// ⚠️ NOT downgrade-safe for PRIVACY (PR #663 review; KNOWN LIMIT, docs/camera-controls.md). An older version's
+// diagnostics bundle sends Camera history as a SELECT * (getRecentEvents), with no person/system reduction,
+// so after a downgrade it carries actor_user_id and actor_username for every row this version wrote, until
+// those rows age out (up to 30 days) or Camera history is cleared. Nothing here can prevent that: the old
+// code is what runs.
+//
+// camera_events: the actor of a person-caused event (a silence, a restart, a reboot); NULL = the system.
+const cameraEventsColumns = db.prepare('PRAGMA table_info(camera_events)').all().map((c) => c.name);
+for (const col of ['actor_user_id', 'actor_username']) {
+  if (!cameraEventsColumns.includes(col)) db.exec(`ALTER TABLE camera_events ADD COLUMN ${col} TEXT`);
+}
+// cameras.alerts_snoozed_by: the username of whoever set the CURRENT silence, shown on the tile while it
+// lasts. NULL = not muted, or muted before this column existed (the tile then shows no name). Named
+// `_by`, not `_user`/`_username`, on purpose: cameras-assign-exposure.test.js fails on any cameras column
+// matching /user/ until someone decides whether it is a credential, and this one is not.
+if (!camerasColumns.includes('alerts_snoozed_by')) {
+  db.exec('ALTER TABLE cameras ADD COLUMN alerts_snoozed_by TEXT');
+}
+// sleep_reviews: who last answered the review (see the CREATE TABLE above).
+for (const col of ['answered_by_user_id', 'answered_by_username']) {
+  if (!sleepReviewColumns.includes(col)) db.exec(`ALTER TABLE sleep_reviews ADD COLUMN ${col} TEXT`);
 }
 
 // Push a notification when a child's nightly sleep report is computed (window closed + row stored).

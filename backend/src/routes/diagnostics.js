@@ -104,6 +104,15 @@ function safeCamera(cam) {
   };
 }
 
+// One Camera history row as the bundle carries it: WHO did it (#552) becomes only whether it was a person
+// or the system. This bundle is made to be attached to a public GitHub issue, and a username is often a
+// real first name; whether a person or a watchdog restarted a camera is what a diagnosis needs, not which
+// person. Every other field is passed through as before. Destructured out rather than allow-listed so the
+// row keeps every column an existing reader expects.
+function bundleCameraEvent({ actor_user_id, actor_username, ...ev }) {
+  return { ...ev, actor: actor_user_id != null || actor_username != null ? 'person' : 'system' };
+}
+
 const router = Router();
 
 router.get('/', requireAuth, requireAdmin, async (req, res) => {
@@ -188,7 +197,7 @@ router.get('/', requireAuth, requireAdmin, async (req, res) => {
       children,
 
       recent_detection_events: getRecentDetectionEvents(100),
-      camera_history: getRecentEvents(200),
+      camera_history: getRecentEvents(200).map(bundleCameraEvent),
       server_logs: logger.getRecent(),
     };
 

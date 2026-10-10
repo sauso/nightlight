@@ -399,8 +399,12 @@ measurement**, and (like everything here) never a safety device — see the warn
   right, wrong, or "can't tell" against the still frame it was decided from. It appears once per night
   and goes for good once answered **or dismissed**; nothing is asked about nights with no times to
   confirm. Either an admin or a caregiver can answer, deliberately — the person who was in the room at
-  5am is the one who knows. Type times on your own clock; they are recorded against the timezone in
-  Settings, the same one the sleep card displays.
+  5am is the one who knows. The review then shows who last answered it (**Answered by** and their
+  username): a save with a time, "no one was in the bed", a note or an event answer counts, and so does
+  saving someone else's answers again unchanged; dismissing the prompt does not, nor does a save that
+  only empties fields, and both leave the name as it was. Reviews saved before this was recorded show no
+  name. Type times on your own clock; they are
+  recorded against the timezone in Settings, the same one the sleep card displays.
   - **Confirming that a night was right is worth as much as correcting one** — it is what makes a
     future change to sleep detection provable rather than arguable. Confirming and correcting are
     separate buttons on purpose: the times we guessed are never one stray tap from being recorded as
@@ -711,13 +715,13 @@ destroy or reconfigure.**
 |---|:---:|:---:|
 | View live cameras; watch and download alert clips, recordings, wake clips and timelapses | Yes | Yes |
 | Record, move a PTZ camera, talk through a camera | Yes | Yes |
-| Restart, reboot, or snooze camera alerts | Yes | Yes |
+| Restart, reboot, or snooze camera alerts (recorded with your username; see below) | Yes | Yes |
 | Reorder cameras on the live grid (the order also picks each child's measuring camera) | No | Yes |
 | Assign a camera to a child | No | Yes |
 | Add / edit / enable / delete a camera | No | Yes |
 | Change a child's name, birthday, colour and photo | Yes | Yes |
 | Add a child; turn a child's sleep tracking on or off; change their bedtime and wake time | No | Yes |
-| Answer the morning sleep review | Yes | Yes |
+| Answer the morning sleep review (the review shows who last answered it) | Yes | Yes |
 | Delete an alert clip, a recording or a wake clip | No | Yes |
 | Delete a timelapse | No | Yes |
 | Delete a child and its media | No | Yes |
@@ -726,6 +730,14 @@ destroy or reconfigure.**
 
 Deleting by hand is not the same as **retention**: the automatic sweep of old alert clips and wake clips
 (Settings → Recording, admin only to configure) runs on a timer on every install, whoever is signed in.
+
+**Who did it is recorded.** Silencing a camera's alerts, un-silencing them, restarting its stream and
+rebooting it each add a row to **Camera history** naming the account by its **username** (the login name
+an admin sets, never the first name, which anyone can change on their own account); a restart or reboot
+that failed is recorded too. While a camera is silenced, its tile shows who silenced it, to everyone. The
+morning review shows who last answered it (above). Details, including what happens when the history
+cannot be written, are in [docs/camera-controls.md](docs/camera-controls.md#silencing-a-cameras-alerts-and-who-did-what).
+
 On a caregiver's screen the admin-only controls are not shown (sleep tracking and the window are shown,
 greyed out, with a note); the server refuses them too, so a page opened before an update that changed a
 permission gets a refusal rather than a change.

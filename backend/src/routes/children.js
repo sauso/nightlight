@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid';
 import db from '../db.js';
 import { requireAuth, requireAdmin, isAdminRequest } from '../middleware/auth.js';
 import { normalizePhoto } from '../lib/photo.js';
+import { actorOf } from '../lib/actor.js';
 import {
   getStoredNights, computeNight, computeAndStoreNight, currentNightDate, childTracksSleep, sleepInsights,
   nightIsLocked, storeNightBeforeCorrection, reportableSpanMs, MIN_COVERAGE_FRAC, EMPTY_MIN_COVERAGE_FRAC,
@@ -562,8 +563,24 @@ router.put('/:id/review/:date', (req, res) => {
   const check = applyVerdicts(req.params.id, req.params.date, verdicts, reasons);
   if (check.error) return res.status(400).json({ error: check.error });
 
-  // `storeFirst: false`: done above already, and a second store would compute the night again.
-  const review = saveNightReview(req.params.id, req.params.date, patch, { storeFirst: false });
+  // Is this save an ANSWER, for "Answered by" (#552, review finding A5)? Yes if it carries a time (typed or a
+  // frame), "no one was in the bed" either way, a note, or at least one event answer or reason. A dismissal
+  // or an empty save is not, and keeps whoever is stored (previewNightReview). Read off the REQUEST, with the
+  // same "null is not answering" rule as the rest of this route: the review page sends explicit nulls for
+  // what it is not answering, and re-sends the stored note and verdicts on every save, so re-saving someone
+  // else's answers unchanged does count as answering them (the person has just confirmed them).
+  // ⚠️ KNOWN LIMIT (README, test "A answers with times, B dismisses"): a save that only EMPTIES fields is not
+  // an answer either, so it keeps the stored name although it removed that person's times. Counting a clear
+  // as an answer would contradict the owner's list above; the clear itself is still saved.
+  const hasText = (v) => typeof v === 'string' && v.trim() !== '';
+  const anyGiven = (m) => m != null && typeof m === 'object' && Object.values(m).some((v) => v != null);
+  const answered = onset != null || wake != null || inBed != null || typeof nobodyInBed === 'boolean'
+    || hasText(note) || anyGiven(verdicts) || anyGiven(reasons);
+
+  // `storeFirst: false`: done above already, and a second store would compute the night again. `actor` is
+  // the username from the session, never the first name (see lib/actor.js).
+  const actor = actorOf(req);
+  const review = saveNightReview(req.params.id, req.params.date, patch, { storeFirst: false, actor, answered });
   res.json({ review, verdicts_applied: check.applied, reasons_applied: check.reasons_applied });
 });
 

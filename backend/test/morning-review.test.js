@@ -945,3 +945,119 @@ test('transitionInstant tells "no frame named" apart from "not this night\'s fra
   assert.equal(transitionInstant(CHILD, DATE, id + 1000), undefined);
   assert.equal(transitionInstant(CHILD, DATE, 'nonsense'), undefined);
 });
+
+// --- WHO answered (#552, PR2 claim C7, review finding A5) -----------------------------------------------------
+//
+// "Answered by" is stamped only by a save that carries an answer (a time, the flag, a note, an event answer or
+// reason). A dismissal and an empty save go through the SAME upsert, and must leave the stored name alone: two
+// parents, one answers, the other dismisses the prompt on a second phone, and the review must still name the
+// first. Three separate accounts, so each assertion can only pass for one of them. Named by username, never by
+// first name (claim C6): parent B's first name is set to parent A's username to prove it.
+makeUser(db, { id: 'u-parent-a', username: 'parent-a-login', role: 'caregiver' });
+makeUser(db, { id: 'u-parent-b', username: 'parent-b-login', role: 'admin' });
+makeUser(db, { id: 'u-parent-c', username: 'parent-c-login', role: 'caregiver' });
+db.prepare("UPDATE users SET first_name = 'parent-a-login' WHERE id = 'u-parent-b'").run();
+const whoToken = (id, username, role = 'caregiver') => signToken({ id, username, role, sid: makeSession(db, id) });
+const tokenA = whoToken('u-parent-a', 'parent-a-login');
+const tokenB = whoToken('u-parent-b', 'parent-b-login', 'admin');
+const tokenC = whoToken('u-parent-c', 'parent-c-login');
+const putAs = (tok, body) => call(reviewUrl(), { method: 'PUT', token: tok, body });
+const answeredBy = () => {
+  const r = db.prepare('SELECT answered_by_user_id AS id, answered_by_username AS name FROM sleep_reviews WHERE child_id = ? AND night_date = ?').get(CHILD, DATE);
+  return r ? [r.id, r.name] : null;
+};
+
+test('★ C7: A answers with times, B dismisses: the review still says A', async () => {
+  laySamples();
+  const a = await putAs(tokenA, { true_onset_local: '19:40', true_wake_local: '06:00' });
+  assert.equal(a.status, 200);
+  assert.deepEqual(answeredBy(), ['u-parent-a', 'parent-a-login']);
+  assert.equal(a.body.review.answered_by_username, 'parent-a-login', 'and the response carries it (the page reads it from GET)');
+  const b = await putAs(tokenB, { dismissed: true });
+  assert.equal(b.status, 200);
+  assert.deepEqual(answeredBy(), ['u-parent-a', 'parent-a-login'], 'a dismissal never replaces who answered');
+  assert.equal(db.prepare('SELECT dismissed FROM sleep_reviews WHERE child_id = ?').get(CHILD).dismissed, 1, 'though it was saved');
+  // An empty save, and one that sends only explicit nulls (what a page sends for what it is not answering).
+  await putAs(tokenB, {});
+  await putAs(tokenB, { note: null, verdicts: {}, reasons: {} });
+  assert.deepEqual(answeredBy(), ['u-parent-a', 'parent-a-login'], 'nor does an empty save');
+  // And the GET the review page reads names A.
+  const shown = await call(reviewUrl(), { token: tokenC });
+  assert.equal(shown.body.review.answered_by_username, 'parent-a-login');
+  // KNOWN LIMIT, documented in the README: a save that only EMPTIES fields is not an answer either (explicit
+  // nulls are "not answering" throughout this route), so it keeps A's name although it cleared A's times.
+  await putAs(tokenB, { true_onset_local: null, true_wake_local: null });
+  const row = { ...db.prepare('SELECT true_onset_at, true_wake_at FROM sleep_reviews WHERE child_id = ?').get(CHILD) };
+  assert.deepEqual(row, { true_onset_at: null, true_wake_at: null }, 'setup: the times were emptied');
+  assert.deepEqual(answeredBy(), ['u-parent-a', 'parent-a-login']);
+});
+
+test('C7: B saves ONLY an event answer: now B (by username, not by the first name that copies A)', async () => {
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(6, 0, 1)));
+  await putAs(tokenA, { true_wake_local: '06:00' });
+  const res = await putAs(tokenB, { verdicts: { [id]: 'correct' } });
+  assert.equal(res.status, 200);
+  assert.deepEqual(answeredBy(), ['u-parent-b', 'parent-b-login']);
+  assert.ok(!JSON.stringify(res.body).includes('"parent-a-login"'), 'B\'s first name (A\'s username) is not what was recorded');
+});
+
+test('C7: C saves ONLY a note: now C; a reason alone, and the flag either way, count too', async () => {
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(19, 50)));
+  setTransitionVerdict(id, 'wrong');
+  await putAs(tokenA, { true_wake_local: '06:00' });
+  await putAs(tokenC, { note: 'woke at the thunderstorm' });
+  assert.deepEqual(answeredBy(), ['u-parent-c', 'parent-c-login']);
+  await putAs(tokenA, { reasons: { [id]: 'adult' } });
+  assert.deepEqual(answeredBy(), ['u-parent-a', 'parent-a-login'], 'a reason is an event answer');
+  await putAs(tokenB, { nobody_in_bed: true });
+  assert.deepEqual(answeredBy(), ['u-parent-b', 'parent-b-login'], '"no one was in the bed"');
+  await putAs(tokenC, { nobody_in_bed: false });
+  assert.deepEqual(answeredBy(), ['u-parent-c', 'parent-c-login'], 'and its undo, "someone was in the bed"');
+  await putAs(tokenA, { note: '   ' });
+  assert.deepEqual(answeredBy(), ['u-parent-c', 'parent-c-login'], 'a note of only spaces is not an answer');
+});
+
+// Each kind of time on its OWN, so dropping any one of them from the route's rule fails a test (PR #663 review:
+// removing `inBed != null` or `onset != null` survived, because every other test also sent a wake or a note).
+test('C7: an in-bed time on its own is an answer', async () => {
+  await putAs(tokenA, { note: 'first' });
+  const res = await putAs(tokenB, { true_in_bed_local: '19:20' });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.deepEqual(answeredBy(), ['u-parent-b', 'parent-b-login']);
+});
+
+test('C7: an asleep time on its own is an answer', async () => {
+  await putAs(tokenA, { note: 'first' });
+  const res = await putAs(tokenB, { true_onset_local: '19:40' });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.deepEqual(answeredBy(), ['u-parent-b', 'parent-b-login']);
+});
+
+test('C7: an event-answer map that only CLEARS (every value null) is not an answer', async () => {
+  // Null means "not answering" in this route, in the verdict and reason maps as everywhere else, so a save
+  // that only takes a verdict back keeps the stored name (the same rule as an empty-only save; README).
+  // PR #663 review: widening the check to "the map has any key" survived without this.
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(19, 50)));
+  setTransitionVerdict(id, 'wrong');
+  await putAs(tokenA, { note: 'first' });
+  const res = await putAs(tokenB, { verdicts: { [id]: null }, reasons: { [id]: null } });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(txRow(id).verdict, null, 'setup: the clear itself was saved');
+  assert.deepEqual(answeredBy(), ['u-parent-a', 'parent-a-login']);
+});
+
+test('C7: a frame named instead of a typed time is an answer', async () => {
+  const id = layTransition(TRANSITION.OUT_OF_BED, '2026-07-01 19:52:37');
+  await putAs(tokenA, { note: 'first' });
+  await putAs(tokenB, { true_wake_transition_id: id });
+  assert.deepEqual(answeredBy(), ['u-parent-b', 'parent-b-login']);
+});
+
+test('C7, the lib on its own: no options keep the stored name; an answer with no actor clears it rather than keep someone else\'s', () => {
+  saveNightReview(CHILD, DATE, { note: 'one' }, { actor: { user_id: 'u-parent-a', username: 'parent-a-login' }, answered: true });
+  assert.deepEqual(answeredBy(), ['u-parent-a', 'parent-a-login']);
+  saveNightReview(CHILD, DATE, { note: 'two' });
+  assert.deepEqual(answeredBy(), ['u-parent-a', 'parent-a-login'], 'a caller that says nothing about who never changes the name');
+  saveNightReview(CHILD, DATE, { note: 'three' }, { answered: true });
+  assert.deepEqual(answeredBy(), [null, null], 'an answer from nobody we know is not left under the previous person\'s name');
+});
