@@ -230,4 +230,63 @@ describe('★ registerToken — per-account token cap', () => {
     assert.ok(!ownedBy('u-a').includes('a-00'));
     assert.equal(countOf('u-b'), 0, 'the token still has an owner row under the old account');
   });
+
+  test('★ THE FIX: a token MOVING in from another account is kept even though its retained rowid is the oldest', () => {
+    // The `token != ?` guards are what protect this. The moved token keeps its ORIGINAL rowid (1, the
+    // lowest in the table) through the upsert. Without the guards it is ranked with the account's other
+    // rows, and when those are as new as it is (or newer) it is the OLDEST and is the one dropped —
+    // the account would lose the very device that just registered. The other rows are dated in the
+    // future so they are strictly newer than the moved token's fresh updated_at: deterministic, no
+    // dependence on which second the test runs in. (The earlier "moving" test above cannot catch
+    // this: its other rows are older than the refreshed token, so it survives either way — found by a
+    // reviewer deleting both guards.)
+    seed('shared', 'u-b', '2026-01-01 00:00:00');
+    for (let i = 0; i < CAP; i++) seed(`a-${String(i).padStart(2, '0')}`, 'u-a', '2099-01-01 00:00:00');
+    assert.equal(db.prepare('SELECT rowid FROM push_tokens WHERE token = ?').get('shared').rowid, 1);
+    registerToken('shared', 'android', 'u-a', null, makeSession(db, 'u-a'));
+    const have = ownedBy('u-a');
+    assert.ok(have.includes('shared'), 'the device that just registered was evicted by its own registration');
+    assert.ok(!have.includes('a-00'), 'the account\'s oldest-by-rowid other token should be the one retired');
+    assert.equal(have.length, CAP);
+  });
+
+  test('★ THE FIX (all-tied variant): a moved token survives when every updated_at is the same second', () => {
+    // Same shape as above with a genuine tie. If the clock ticks over mid-test the moved token is merely
+    // newer, which the correct code also survives — so this variant can only ever pass spuriously
+    // against a mutant, never fail against the real code; the future-dated test above is the one that
+    // pins the guards.
+    const now = db.prepare("SELECT datetime('now') AS t").get().t;
+    seed('shared', 'u-b', now);
+    for (let i = 0; i < CAP; i++) seed(`a-${String(i).padStart(2, '0')}`, 'u-a', now);
+    registerToken('shared', 'android', 'u-a', null, makeSession(db, 'u-a'));
+    assert.ok(ownedBy('u-a').includes('shared'));
+    assert.equal(countOf('u-a'), CAP);
+  });
+
+  test('★ THE FIX: the upsert and the eviction are one transaction — if the eviction fails, the registration is rolled back', () => {
+    // Without the transaction these are two autocommit statements: an error (or crash) between them leaves
+    // the new token stored and the account one over its cap. A trigger makes the eviction's DELETE throw.
+    seedMany('u-a', 'a', CAP);
+    const before = rowsOf('u-a');
+    db.exec(`CREATE TRIGGER test_block_evict BEFORE DELETE ON push_tokens
+             BEGIN SELECT RAISE(ABORT, 'eviction blocked by test'); END`);
+    try {
+      assert.throws(() => registerToken('a-new', 'android', 'u-a', null, makeSession(db, 'u-a')), /eviction blocked by test/);
+    } finally {
+      db.exec('DROP TRIGGER test_block_evict');
+    }
+    assert.deepEqual(rowsOf('u-a'), before, 'the new token was left stored (account over its cap) after the eviction failed');
+    assert.ok(!ownedBy('u-a').includes('a-new'));
+  });
+
+  test('★ KNOWN LIMIT (pinned): an account already over the cap is trimmed to the cap by its NEXT registration, not before', () => {
+    // Rows from before the cap existed. Documented in docs/notifications.md; this pins that it is trimmed
+    // down to exactly the cap (never below it, never a refusal) when a device registers.
+    seedMany('u-a', 'a', CAP + 10);
+    assert.equal(countOf('u-a'), CAP + 10, 'nothing trims at seeding time (no migration)');
+    registerToken('a-new', 'android', 'u-a', null, makeSession(db, 'u-a'));
+    assert.equal(countOf('u-a'), CAP);
+    assert.ok(ownedBy('u-a').includes('a-new'));
+    assert.ok(ownedBy('u-a').includes(`a-${String(CAP + 9).padStart(2, '0')}`), 'the newest pre-existing token was dropped');
+  });
 });

@@ -472,7 +472,10 @@ stops being refined, which is the other half of why no later wake time is pushed
   devices registered (default and fixed, not a setting). When an account registers a 26th, the server
   does **not** refuse it: it quietly drops that account's **oldest** registration (least recently
   opened) and keeps the new one, so a phone that just registered always works; a phone whose
-  registration was dropped gets alerts again the next time its app is opened while signed in. Opening
+  registration was dropped gets alerts again the next time its app is opened while signed in. The limit
+  is enforced when a device registers, not at upgrade: an account that already had more than 25 devices
+  registered before this limit existed keeps them all until one of its devices next registers, which then
+  trims it down to the 25 most recently opened. Opening
   the app again on a device that is already registered never counts as a new device. The limit is per
   account, so one account's devices never push another's out. A device token longer than **4096**
   characters is refused (`token is too long (at most 4096 characters)`); real Firebase tokens are

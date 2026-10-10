@@ -185,32 +185,49 @@ export function registerToken(token, platform, userId, baseUrl, sessionId) {
   const origin = normalizeBaseUrl(baseUrl);
   // COALESCE on base_url so a re-register from an older app that doesn't send it keeps the last
   // known good value rather than nulling out the device's snapshot-fetch base.
-  db.prepare(
-    `INSERT INTO push_tokens (token, user_id, platform, base_url, session_id, updated_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now'))
-     ON CONFLICT(token) DO UPDATE SET
-       user_id = excluded.user_id, platform = excluded.platform,
-       base_url = COALESCE(excluded.base_url, push_tokens.base_url),
-       session_id = excluded.session_id, updated_at = datetime('now')`
-  ).run(token, userId || null, platform || null, origin, sessionId || null);
-  // Per-user cap, applied AFTER the upsert so that (a) re-registering a token the user already has is a
-  // plain refresh that can never be turned away, and (b) a NEW token still registers at the cap, by
-  // retiring that user's oldest ones. Rejecting the new token instead would be the wrong trade: the
-  // newest token is the live device, the oldest are the likeliest to be stale (a reinstall mints a new
-  // token and orphans the old), and a refusal would leave a working phone without alerts with no way
-  // for the user to fix it. Keeps the token just registered plus the (MAX - 1) most recently updated
-  // others; the tie-break on rowid matters because updated_at has one-second resolution. Scoped to this
-  // user_id only, so one account can never evict another's devices. A row with no user (not reachable
-  // through the route, which always has one) is not capped.
-  if (userId) {
+  //
+  // The upsert and the cap's eviction below are ONE transaction: as two autocommit statements, a crash
+  // or error between them would leave the account one over its cap (found in review of #662). The
+  // admin public-URL write further down stays outside it on purpose — it is already best-effort and
+  // must never roll back a registration.
+  db.transaction(() => {
     db.prepare(
-      `DELETE FROM push_tokens
-        WHERE user_id = ? AND token != ?
-          AND token NOT IN (
-            SELECT token FROM push_tokens WHERE user_id = ? AND token != ?
-             ORDER BY updated_at DESC, rowid DESC LIMIT ?)`
-    ).run(userId, token, userId, token, MAX_PUSH_TOKENS_PER_USER - 1);
-  }
+      `INSERT INTO push_tokens (token, user_id, platform, base_url, session_id, updated_at)
+         VALUES (?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(token) DO UPDATE SET
+         user_id = excluded.user_id, platform = excluded.platform,
+         base_url = COALESCE(excluded.base_url, push_tokens.base_url),
+         session_id = excluded.session_id, updated_at = datetime('now')`
+    ).run(token, userId || null, platform || null, origin, sessionId || null);
+    // Per-user cap, applied AFTER the upsert so that (a) re-registering a token the user already has is a
+    // plain refresh that can never be turned away, and (b) a NEW token still registers at the cap, by
+    // retiring that user's oldest ones. Rejecting the new token instead would be the wrong trade: the
+    // newest token is the live device, the oldest are the likeliest to be stale (a reinstall mints a new
+    // token and orphans the old), and a refusal would leave a working phone without alerts with no way
+    // for the user to fix it. Keeps the token just registered plus the (MAX - 1) most recently updated
+    // others; the tie-break on rowid matters because updated_at has one-second resolution. Scoped to this
+    // user_id only, so one account can never evict another's devices. A row with no user (not reachable
+    // through the route, which always has one) is not capped.
+    //
+    // ⚠️ KNOWN LIMIT: the cap is enforced only when an account registers, and it only ever removes down to
+    // the cap. An account that already holds more than MAX tokens (registered before this limit existed)
+    // is trimmed to MAX the next time ONE of its devices registers — not at upgrade, and not on its own.
+    // No startup migration, on purpose: it would be a silent bulk delete of stored data on upgrade, and the
+    // next app launch trims it anyway.
+    //
+    // ⚠️ The `token != ?` guards matter beyond the "never evict the new token" case: a token that MOVES
+    // here from another account keeps its old (low) rowid, so on an updated_at tie it would rank oldest
+    // and be the one evicted — the guards are what keep it.
+    if (userId) {
+      db.prepare(
+        `DELETE FROM push_tokens
+          WHERE user_id = ? AND token != ?
+            AND token NOT IN (
+              SELECT token FROM push_tokens WHERE user_id = ? AND token != ?
+               ORDER BY updated_at DESC, rowid DESC LIMIT ?)`
+      ).run(userId, token, userId, token, MAX_PUSH_TOKENS_PER_USER - 1);
+    }
+  })();
   // Zero-config learning of THIS server's own public URL: the origin an app reaches us through is an
   // address that opens us in that app. Stash it so deep links can carry it and a tap always lands on
   // the sending server (see getPublicBaseUrl / detectionAlert.js).
