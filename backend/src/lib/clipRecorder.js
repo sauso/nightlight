@@ -52,8 +52,12 @@ const DATA_DIR = process.env.DATA_DIR || '/app/data';
 // A trailing backslash is deliberately NOT stripped: on Linux (the only supported host) it is a legal
 // file-name character, so removing it would silently point at a different directory; on Windows
 // (dev machines only) path.resolve already handles both separators.
+// SURROUNDING SPACES ARE NOT STRIPPED, for the same reason: a trailing (or leading) space is a legal character
+// in a Linux directory name, so an install whose CLIPS_DIR is `/data/clips ` (a real folder with that space)
+// would, if we trimmed, silently resolve to a different, empty folder after an upgrade. trim() is used ONLY to
+// recognise a blank / whitespace-only value, which means "unset" (an empty compose default, `CLIPS_DIR=`).
 export function resolveClipsDir(raw, dataDir) {
-  const v = typeof raw === 'string' ? raw.trim() : '';
+  const v = typeof raw === 'string' && raw.trim() !== '' ? raw : '';
   return path.resolve(v || path.join(dataDir, 'clips'));
 }
 export const CLIPS_DIR = resolveClipsDir(process.env.CLIPS_DIR, DATA_DIR);
