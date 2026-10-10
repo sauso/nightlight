@@ -93,7 +93,7 @@ export async function mountRouterTrustingProxy(mountPath, router) {
   app.set("trust proxy", true);
   app.use(express.json());
   app.use(mountPath, router);
-  app.use((err, _req, res, _next) => res.status(err.status || 500).json({ error: err.message }));
+  app.use((await import("../../src/middleware/errorHandler.js")).errorHandler);
   const server = await new Promise((resolve) => { const sv = app.listen(0, "127.0.0.1", () => resolve(sv)); });
   const { port } = server.address();
   return { url: `http://127.0.0.1:${port}`, close: () => new Promise((r) => server.close(r)) };
@@ -105,8 +105,9 @@ export async function mountRouter(mountPath, router, { middleware = [] } = {}) {
   app.use(express.json());
   for (const mw of middleware) app.use(mw);
   app.use(mountPath, router);
-  // Mirror the app's own JSON error shape so tests assert against what clients really see.
-  app.use((err, _req, res, _next) => res.status(err.status || 500).json({ error: err.message }));
+  // The app's REAL error handler (index.js mounts the same one last), so tests see what clients really see:
+  // a rejected async handler is a JSON 4xx/5xx, not a hang (issue #544).
+  app.use((await import("../../src/middleware/errorHandler.js")).errorHandler);
   const server = await new Promise((resolve) => {
     const s = app.listen(0, '127.0.0.1', () => resolve(s));
   });

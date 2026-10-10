@@ -238,6 +238,7 @@ const APP_REGISTRATIONS = [
   'post /api/csp-report express.text() <handler>', //                 PUBLIC: browsers send CSP reports without credentials
   'use express.static()',
   'get * <handler>', //                                               the SPA shell; /api/* falls through to a 404
+  'use errorHandler', //                                              not a gate: turns a thrown/rejected handler into JSON (#544); must stay LAST
 ];
 const APP_HANDED_TO = ['applyTrustProxy'];
 

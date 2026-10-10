@@ -10544,8 +10544,8 @@
   {
     "label": "#454 M7: the detection PUT (the frontend's autosave) forgets the camera's stamp",
     "file": "backend/src/routes/cameras.js",
-    "find": "router.put('/:id/detection', requireAdmin, async (req, res) => {",
-    "replace": "router.put('/:id/detection', requireAdmin, async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
+    "find": "router.put('/:id/detection', requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/:id/detection', requireAdmin, asyncHandler(async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
     "expect": "killed",
     "tests": ["motion-alert-cooldown-routes.test.js"],
     "namePattern": "^#454 C5:"
@@ -10553,8 +10553,8 @@
   {
     "label": "#454 M7b: PUT /:id (a rename, an address edit) forgets the camera's stamp",
     "file": "backend/src/routes/cameras.js",
-    "find": "router.put('/:id', requireAdmin, async (req, res) => {",
-    "replace": "router.put('/:id', requireAdmin, async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
+    "find": "router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
     "expect": "killed",
     "tests": ["motion-alert-cooldown-routes.test.js"],
     "namePattern": "^#454 C5:"
@@ -10562,8 +10562,8 @@
   {
     "label": "#454 M7c: PUT /:id/assign forgets the camera's stamp",
     "file": "backend/src/routes/cameras.js",
-    "find": "router.put('/:id/assign', requireAdmin, async (req, res) => {",
-    "replace": "router.put('/:id/assign', requireAdmin, async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
+    "find": "router.put('/:id/assign', requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/:id/assign', requireAdmin, asyncHandler(async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
     "expect": "killed",
     "tests": ["motion-alert-cooldown-routes.test.js"],
     "namePattern": "^#454 C5:"
@@ -10571,8 +10571,8 @@
   {
     "label": "#454 M7d: PUT /:id/enabled forgets the camera's stamp",
     "file": "backend/src/routes/cameras.js",
-    "find": "router.put('/:id/enabled', requireAdmin, async (req, res) => {",
-    "replace": "router.put('/:id/enabled', requireAdmin, async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
+    "find": "router.put('/:id/enabled', requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/:id/enabled', requireAdmin, asyncHandler(async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
     "expect": "killed",
     "tests": ["motion-alert-cooldown-routes.test.js"],
     "namePattern": "^#454 C5:"
@@ -12939,8 +12939,8 @@
   {
     "label": "#563 gate: POST /api/cameras without requireAdmin (a caregiver can add a camera)",
     "file": "backend/src/routes/cameras.js",
-    "find": "router.post('/', requireAdmin, async (req, res) => {",
-    "replace": "router.post('/', async (req, res) => {",
+    "find": "router.post('/', requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.post('/', asyncHandler(async (req, res) => {",
     "expect": "killed",
     "tests": ["route-permissions.test.js"],
     "note": "One of the eleven requireAdmin deletions that left the whole suite green before route-permissions.test.js (#563)."
@@ -13038,8 +13038,8 @@
   {
     "label": "#563 gate: GET /api/diagnostics without requireAdmin",
     "file": "backend/src/routes/diagnostics.js",
-    "find": "router.get('/', requireAuth, requireAdmin, async (req, res) => {",
-    "replace": "router.get('/', requireAuth, async (req, res) => {",
+    "find": "router.get('/', requireAuth, requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.get('/', requireAuth, asyncHandler(async (req, res) => {",
     "expect": "killed",
     "tests": ["route-permissions.test.js"],
     "note": "Survived the whole suite before #563."
@@ -13056,8 +13056,8 @@
   {
     "label": "#563 gate: PUT /api/pushover/config without requireAdmin",
     "file": "backend/src/routes/pushover.js",
-    "find": "router.put('/config', requireAuth, requireAdmin, async (req, res) => {",
-    "replace": "router.put('/config', requireAuth, async (req, res) => {",
+    "find": "router.put('/config', requireAuth, requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/config', requireAuth, asyncHandler(async (req, res) => {",
     "expect": "killed",
     "tests": ["route-permissions.test.js"],
     "note": "Survived the whole suite before #563."
@@ -13065,8 +13065,8 @@
   {
     "label": "#563 gate: POST /api/gotify/test without requireAdmin",
     "file": "backend/src/routes/gotify.js",
-    "find": "router.post('/test', requireAuth, requireAdmin, async (req, res) => {",
-    "replace": "router.post('/test', requireAuth, async (req, res) => {",
+    "find": "router.post('/test', requireAuth, requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.post('/test', requireAuth, asyncHandler(async (req, res) => {",
     "expect": "killed",
     "tests": ["route-permissions.test.js"],
     "note": "Survived the whole suite before #563."
@@ -13074,8 +13074,8 @@
   {
     "label": "#563 gate: PUT /api/push/enable without requireAdmin",
     "file": "backend/src/routes/push.js",
-    "find": "router.put('/enable', requireAuth, requireAdmin, async (req, res) => {",
-    "replace": "router.put('/enable', requireAuth, async (req, res) => {",
+    "find": "router.put('/enable', requireAuth, requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/enable', requireAuth, asyncHandler(async (req, res) => {",
     "expect": "killed",
     "tests": ["route-permissions.test.js"],
     "note": "Survived the whole suite before #563."
@@ -13561,8 +13561,8 @@
   {
     "label": "W5 role gate M4: PUT /api/cameras/:id/assign loses requireAdmin (a caregiver unassigns a camera)",
     "file": "backend/src/routes/cameras.js",
-    "find": "router.put('/:id/assign', requireAdmin, async (req, res) => {",
-    "replace": "router.put('/:id/assign', async (req, res) => {",
+    "find": "router.put('/:id/assign', requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/:id/assign', asyncHandler(async (req, res) => {",
     "expect": "killed",
     "tests": ["route-permissions.test.js", "cameras-assign-exposure.test.js"],
     "note": "#552: unassigning stops tracking like track_sleep off. cameras-assign-exposure pins child_id unchanged after the 403."

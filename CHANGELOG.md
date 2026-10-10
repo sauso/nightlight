@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **A server error while saving no longer leaves the web app waiting forever (#544).** An error in one of the server's `async` handlers (22 of them: most camera routes, the Pushover, ntfy, Gotify and push settings, the diagnostics download and two-factor setup) was never answered: the page's spinner never stopped, and behind Cloudflare you eventually saw a blank 524. Reproduced by saving a camera in one tab after deleting its child in another, by saving a Pushover token that was not text, and by adding a camera whose name was not text. Now every such request gets a JSON answer: saving a camera for a child that no longer exists says "Child not found" (400, nothing is written; adding a camera does the same, before anything is registered), a non-text Pushover app token, user key or device says which field must be text (400), and a non-text camera name says "Name is required" (400). Anything the server did not anticipate is a generic 500 ("Something went wrong on the server. Check the Nightlight logs for details."), and the real error and its stack go to the log only, never to the page. A database foreign-key failure that slips past a check is a readable 409 instead of a 500, because Cloudflare replaces a 5xx body with its own page. One visible difference: a malformed or oversized request body (and any error thrown outside an `async` handler) used to get Express's HTML error page with the same status; it now gets JSON `{ "error": ... }` with that same status. The rule is written down in `docs/architecture.md`, and a test fails for any `async` route added without the wrapper.
+
 ## [0.36.0] - 2026-10-10
 
 ### Added

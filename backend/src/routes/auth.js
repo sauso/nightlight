@@ -14,6 +14,7 @@ import {
   generateBackupCodes, verifyAndConsumeBackupCode, backupCodesRemaining,
 } from '../lib/mfa.js';
 import { normalizePhoto } from '../lib/photo.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
 
 const router = Router();
 const DATA_DIR = process.env.DATA_DIR || '/app/data';
@@ -605,14 +606,14 @@ router.get('/me/mfa', requireAuth, (req, res) => {
 
 // Begin enrolment: generate + stash a secret (still disabled) and return the QR + manual key. The
 // secret only becomes active once a code is confirmed at /me/mfa/enable.
-router.post('/me/mfa/setup', requireAuth, async (req, res) => {
+router.post('/me/mfa/setup', requireAuth, asyncHandler(async (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (user.mfa_enabled) return res.status(400).json({ error: 'Two-factor is already on. Turn it off first to re-enrol.' });
   const secret = generateSecret();
   db.prepare('UPDATE users SET mfa_secret = ? WHERE id = ?').run(secret, user.id);
   const uri = keyUri(user.username, secret, appName());
   res.json({ secret, otpauth_uri: uri, qr: await qrDataUrl(uri) });
-});
+}));
 
 // Confirm a code against the pending secret; on success, enable MFA and return one-time backup
 // codes to show the user once (only their hashes are kept).

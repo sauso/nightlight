@@ -4,6 +4,7 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { logger } from '../lib/logger.js';
 import { getPushoverConfig, pushoverConfigured, validatePushover, sendPushover } from '../lib/pushover.js';
 import { maskSecret } from '../lib/secretMask.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
 
 const router = Router();
 
@@ -31,8 +32,20 @@ router.get('/config', requireAuth, requireAdmin, (req, res) => {
 // Save Pushover config. A blank token/key keeps the currently-saved one (the secret is never sent to
 // the client to echo back). Turning it ON validates the effective app token + user/group key with
 // Pushover first and rejects (400, so the message survives any reverse proxy) if they don't check out.
-router.put('/config', requireAuth, requireAdmin, async (req, res) => {
+router.put('/config', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
   const enabled = !!(req.body && req.body.enabled);
+  // The three text fields are trimmed below, which throws on a non-string (`app_token: 5`). That used to
+  // leave the request with no response at all (issue #544); it is the caller's mistake, so say so as a 400.
+  // The rule mirrors exactly what the lines below already survive, so no request that was answered before
+  // is answered differently now: app_token/user_key use `|| ''`, so ANY falsy value (null, false, 0, '')
+  // already meant "keep the saved one" and stays accepted; device uses `?? ''`, so only null/undefined
+  // are safe there.
+  const notText = (v, falsyIsBlank) => typeof v !== 'string' && (falsyIsBlank ? !!v : v !== undefined && v !== null);
+  for (const [field, falsyIsBlank] of [['app_token', true], ['user_key', true], ['device', false]]) {
+    if (notText(req.body?.[field], falsyIsBlank)) {
+      return res.status(400).json({ error: `${field} must be text.` });
+    }
+  }
   const existing = getPushoverConfig();
   const appToken = (req.body?.app_token || '').trim() || existing.appToken;
   const userKey = (req.body?.user_key || '').trim() || existing.userKey;
@@ -54,11 +67,11 @@ router.put('/config', requireAuth, requireAdmin, async (req, res) => {
   logger.info(`[pushover] config saved — notifications ${enabled ? 'ENABLED' : 'disabled'}`);
 
   res.json(publicConfig());
-});
+}));
 
 // Send a test notification with the CURRENTLY SAVED config, so the admin can confirm delivery end to
 // end (including on their phone). 400s with Pushover's reason if it doesn't go through.
-router.post('/test', requireAuth, requireAdmin, async (req, res) => {
+router.post('/test', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
   if (!pushoverConfigured()) return res.status(400).json({ error: 'Save an application token and user/group key first.' });
   const result = await sendPushover({
     title: 'Nightlight',
@@ -67,6 +80,6 @@ router.post('/test', requireAuth, requireAdmin, async (req, res) => {
   });
   if (result && result.ok === false) return res.status(400).json({ error: result.error || 'Pushover rejected the message.' });
   res.json({ ok: true });
-});
+}));
 
 export default router;

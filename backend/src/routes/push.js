@@ -6,6 +6,7 @@ import {
 } from '../lib/push.js';
 import { getSnapshot } from '../lib/pushSnapshots.js';
 import db from '../db.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
 
 const router = Router();
 
@@ -61,7 +62,7 @@ router.get('/status', requireAuth, (req, res) => {
 // still logs in-app alerts on its own, but nothing is pushed to phones unless this is on. Turning
 // it ON validates the Firebase files up front and rejects (400, so the message survives any reverse
 // proxy) if anything is missing, rather than silently accepting a setting that can't deliver.
-router.put('/enable', requireAuth, requireAdmin, async (req, res) => {
+router.put('/enable', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
   const enabled = !!(req.body && req.body.enabled);
   if (enabled) {
     const check = validatePushSetup();
@@ -75,6 +76,6 @@ router.put('/enable', requireAuth, requireAdmin, async (req, res) => {
   }
   db.prepare('UPDATE settings SET push_enabled = ? WHERE id = ?').run(enabled ? 1 : 0, 'app');
   res.json({ push_enabled: pushEnabled(), configured: pushConfigured() });
-});
+}));
 
 export default router;

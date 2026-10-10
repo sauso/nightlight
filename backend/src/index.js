@@ -23,6 +23,7 @@ import recordingsRoutes from './routes/recordings.js';
 import { requireAuth, requireAuthQueryOrHeader, verifyToken, SESSION_TOKEN_TTL_DAYS } from './middleware/auth.js';
 import { demoGuard, demoRequestLimiter, isDemoModeActive } from './middleware/demoMode.js';
 import { whepOnlyGuard } from './middleware/whepOnlyGuard.js';
+import { errorHandler } from './middleware/errorHandler.js';
 import {
   recordWebrtcSessionOwner, webrtcSessionOwners, listWebrtcSessions, kickWebrtcSession, sessionsToKick,
 } from './lib/webrtcSessions.js';
@@ -287,6 +288,12 @@ app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
   res.sendFile(path.join(publicDir, 'index.html'));
 });
+
+// The error handler MUST be registered after every route above (Express only passes an error to handlers
+// registered after the point it was raised), so it stays the last app.use before listen. It is what turns a
+// rejected async route handler (lib/asyncHandler.js) into a JSON answer instead of a request that never
+// completes, and what keeps SQLite/stack details out of responses. See middleware/errorHandler.js.
+app.use(errorHandler);
 
 const PORT = process.env.PORT || 4000;
 const server = app.listen(PORT, () => {
