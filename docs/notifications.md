@@ -467,5 +467,15 @@ stops being refined, which is the other half of why no later wake time is pushed
   `[push] send failed for batch N/M` and still sends the remaining batches; the `[push] alert sent
   to X/Y device(s)` line counts every batch. Devices in a failed batch miss that one alert and are
   **not** removed (only tokens Firebase reports as dead are). Before this was fixed (issue #546), 501 or more registered
-  devices made every Firebase alert fail. The number of tokens one account can register is not
-  limited yet (issue #546).
+  devices made every Firebase alert fail.
+- **Limits on registering a device (issue #546).** Each signed-in account can have at most **25**
+  devices registered (default and fixed, not a setting). When an account registers a 26th, the server
+  does **not** refuse it: it quietly drops that account's **oldest** registration (least recently
+  opened) and keeps the new one, so a phone that just registered always works; a phone whose
+  registration was dropped gets alerts again the next time its app is opened while signed in. Opening
+  the app again on a device that is already registered never counts as a new device. The limit is per
+  account, so one account's devices never push another's out. A device token longer than **4096**
+  characters is refused (`token is too long (at most 4096 characters)`); real Firebase tokens are
+  roughly 150-200 characters. Both numbers are generous guesses, not measured on any particular
+  household. Unlike the batching above, this is a per-account limit: the total across all accounts is
+  still unlimited (the server batches those).

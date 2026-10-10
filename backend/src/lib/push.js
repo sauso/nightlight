@@ -154,6 +154,20 @@ export function normalizeBaseUrl(value) {
   }
 }
 
+// Limits on POST /api/push/register (issue #546, second half). Both exist only to bound what a signed-in
+// account can make the server store and later send to; neither is meant to be reached in normal use.
+//
+// ⚠️ Both numbers are GENEROUS GUESSES, not measurements from this or any house.
+//   - MAX_PUSH_TOKEN_LENGTH 4096: a real FCM registration token is roughly 150-200 characters, so this is
+//     over twenty times longer than anything seen. It is deliberately NOT tight: rejecting a real token
+//     would silently cost a device its alerts, while accepting a long hostile one costs a few kilobytes.
+//   - MAX_PUSH_TOKENS_PER_USER 25: one person's phones, tablets and stale tokens left by reinstalls
+//     (every reinstall mints a new token and the old one lingers until FCM reports it dead). A household
+//     would have to sign one account in on 25 devices to see it, and at the cap the oldest simply make way.
+//     Without a cap one account could register without bound and make every alert fan out to all of it.
+export const MAX_PUSH_TOKEN_LENGTH = 4096;
+export const MAX_PUSH_TOKENS_PER_USER = 25;
+
 function isAdminUser(userId) {
   if (!userId) return false;
   return !!db.prepare("SELECT 1 FROM users WHERE id = ? AND role = 'admin'").get(userId);
@@ -179,6 +193,24 @@ export function registerToken(token, platform, userId, baseUrl, sessionId) {
        base_url = COALESCE(excluded.base_url, push_tokens.base_url),
        session_id = excluded.session_id, updated_at = datetime('now')`
   ).run(token, userId || null, platform || null, origin, sessionId || null);
+  // Per-user cap, applied AFTER the upsert so that (a) re-registering a token the user already has is a
+  // plain refresh that can never be turned away, and (b) a NEW token still registers at the cap, by
+  // retiring that user's oldest ones. Rejecting the new token instead would be the wrong trade: the
+  // newest token is the live device, the oldest are the likeliest to be stale (a reinstall mints a new
+  // token and orphans the old), and a refusal would leave a working phone without alerts with no way
+  // for the user to fix it. Keeps the token just registered plus the (MAX - 1) most recently updated
+  // others; the tie-break on rowid matters because updated_at has one-second resolution. Scoped to this
+  // user_id only, so one account can never evict another's devices. A row with no user (not reachable
+  // through the route, which always has one) is not capped.
+  if (userId) {
+    db.prepare(
+      `DELETE FROM push_tokens
+        WHERE user_id = ? AND token != ?
+          AND token NOT IN (
+            SELECT token FROM push_tokens WHERE user_id = ? AND token != ?
+             ORDER BY updated_at DESC, rowid DESC LIMIT ?)`
+    ).run(userId, token, userId, token, MAX_PUSH_TOKENS_PER_USER - 1);
+  }
   // Zero-config learning of THIS server's own public URL: the origin an app reaches us through is an
   // address that opens us in that app. Stash it so deep links can carry it and a tap always lands on
   // the sending server (see getPublicBaseUrl / detectionAlert.js).
