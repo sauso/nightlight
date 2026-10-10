@@ -31,14 +31,18 @@ const getReviewStmt = db.prepare('SELECT * FROM sleep_reviews WHERE child_id = ?
 // Both in-bed columns are in the INSERT AND in the ON CONFLICT SET (plan review R5). Missing from the SET,
 // a second save of the same night would silently keep the FIRST in-bed answer, which is exactly the
 // two-edits case (change your mind about the put-down) this column exists for.
+// The same trap for the answered-by pair (#552): missing from the SET, the FIRST person to answer a night
+// would be named on it forever, whoever answered after them. previewNightReview decides the values (the
+// stored pair is carried over unless this save is an answer), so the SET always writes what it is given.
 const upsertReviewStmt = db.prepare(
   `INSERT INTO sleep_reviews
      (child_id, night_date, true_onset_at, true_wake_at, true_onset_transition_id,
       true_wake_transition_id, true_in_bed_at, true_in_bed_transition_id, computed_onset_at,
-      computed_wake_at, note, dismissed, nobody_in_bed, reviewed_at)
+      computed_wake_at, note, dismissed, nobody_in_bed, answered_by_user_id, answered_by_username, reviewed_at)
    VALUES (@child_id, @night_date, @true_onset_at, @true_wake_at, @true_onset_transition_id,
            @true_wake_transition_id, @true_in_bed_at, @true_in_bed_transition_id, @computed_onset_at,
-           @computed_wake_at, @note, @dismissed, @nobody_in_bed, datetime('now'))
+           @computed_wake_at, @note, @dismissed, @nobody_in_bed, @answered_by_user_id, @answered_by_username,
+           datetime('now'))
    ON CONFLICT(child_id, night_date) DO UPDATE SET
      true_onset_at            = excluded.true_onset_at,
      true_wake_at             = excluded.true_wake_at,
@@ -51,6 +55,8 @@ const upsertReviewStmt = db.prepare(
      note                     = excluded.note,
      dismissed                = excluded.dismissed,
      nobody_in_bed            = excluded.nobody_in_bed,
+     answered_by_user_id      = excluded.answered_by_user_id,
+     answered_by_username     = excluded.answered_by_username,
      reviewed_at              = datetime('now')`
 );
 
@@ -332,8 +338,12 @@ export function getNightReview(childId, nightDate) {
 // applyVerdicts writes, so a compute that throws is a 500 with nothing written, and it then saves through
 // here without a second compute. So the default path is what tests and any future caller get, not what a
 // parent's save takes.
-export function saveNightReview(childId, nightDate, patch = {}, { storeFirst = true } = {}) {
-  const next = previewNightReview(childId, nightDate, patch);
+//
+// `actor` and `answered` (#552) decide who the review says ANSWERED it; see previewNightReview. The route
+// passes both. The defaults (no actor, not an answer) keep whatever name is stored, so a caller that says
+// nothing about who is saving can never put a name on, or take one off, an answer.
+export function saveNightReview(childId, nightDate, patch = {}, { storeFirst = true, actor = null, answered = false } = {}) {
+  const next = previewNightReview(childId, nightDate, patch, { actor, answered });
   if (inBedAfterOnset(next)) {
     // The route refuses this first with a 400 (above applyVerdicts). Reaching this throw means a caller
     // skipped that validation: a bug, not a user mistake — same posture as the flag-plus-times throw.
@@ -353,8 +363,18 @@ export function saveNightReview(childId, nightDate, patch = {}, { storeFirst = t
 // overlay (falsy) but "a value" to SQL (`IS NOT NULL`), and those two spellings decide the lock between
 // them (see reviewCorrectsNight); normalising here means no save can create a row they read differently.
 // The SQL side is also written to read '' as nothing, for rows written some other way.
-export function previewNightReview(childId, nightDate, patch = {}) {
+//
+// WHO ANSWERED (#552, review finding A5, owner decision 2026-10-10). `answered` true: this save carries an
+// answer (the route decides: a time, the flag, a note, or an event answer), and the review is now
+// "Answered by" `actor`. Otherwise the stored pair is carried over unchanged. A dismissal goes through this
+// same upsert, as does an empty save, and neither is an answer: without the carry-over, one person tapping
+// "dismiss" on a second phone would put their name on a night someone else answered. Username, never first
+// name (see lib/actor.js).
+export function previewNightReview(childId, nightDate, patch = {}, { actor = null, answered = false } = {}) {
   const existing = getReviewStmt.get(childId, nightDate) || {};
+  const by = answered
+    ? { user_id: actor?.user_id ?? null, username: actor?.username ?? null }
+    : { user_id: existing.answered_by_user_id ?? null, username: existing.answered_by_username ?? null };
   const blankToNull = (v) => (v === '' ? null : v);
   const pick = (key, val) => blankToNull(val === undefined ? (existing[key] ?? null) : (val ?? null));
   const flagGiven = patch.nobodyInBed != null;
@@ -385,6 +405,8 @@ export function previewNightReview(childId, nightDate, patch = {}) {
     note: pick('note', patch.note),
     dismissed: patch.dismissed !== undefined ? (patch.dismissed ? 1 : 0) : flagGiven ? 0 : (existing.dismissed ?? 0),
     nobody_in_bed: nobody,
+    answered_by_user_id: by.user_id,
+    answered_by_username: by.username,
   };
 }
 

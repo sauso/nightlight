@@ -5,7 +5,8 @@ import db from '../db.js';
 import { requireAuth, requireAdmin, requireAuthQueryOrHeader, isAdminRequest } from '../middleware/auth.js';
 import { upsertPath, removePath, getPathStatus, toPathName, hlsPathName } from '../lib/mediamtx.js';
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
-import { recordCameraEvent, EVENT } from '../lib/cameraEvents.js';
+import { recordCameraEvent, insertCameraEvent, pruneCameraEvents, EVENT } from '../lib/cameraEvents.js';
+import { actorOf } from '../lib/actor.js';
 import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.js';
 import { startMotionDetector, stopMotionDetector, motionLegWanted, forgetMotionAlert } from '../lib/motionDetector.js';
 import { startOnvifMotion, stopOnvifMotion, onvifMotionWanted } from '../lib/onvifMotion.js';
@@ -183,6 +184,11 @@ function publicCamera(cam, isAdmin) {
     recording: recState.recording,
     recording_id: recState.id ?? null,
     recording_elapsed_s: recState.elapsed_s ?? 0,
+    // Who set the CURRENT silence (#552), for the tile's "Muted until 21:30 by …". Forced to null once
+    // the silence has run out: the stored name is left behind when a silence simply expires (only an
+    // un-mute clears it), and a name with no silence beside it would say someone is muting a camera
+    // that nobody is.
+    alerts_snoozed_by: cam.alerts_snoozed_until > Date.now() ? (cam.alerts_snoozed_by ?? null) : null,
   };
   if (!isAdmin) return base;
   const parts = parseRtspComponents(rtsp_url) || {};
@@ -474,16 +480,26 @@ router.post('/:id/ptz/nudge', async (req, res) => {
 // FFmpeg leg(s) (SIGTERM→SIGKILL) and relaunches, so every viewer reconnects at the live edge. Any
 // signed-in user (a recovery action, like a heavier pull-to-refresh that fixes it for everyone; owner
 // decision 2026-10-10: stays open to caregivers).
+//
+// WHO restarted it goes into Camera history (#552). Both outcomes are recorded: a restart that failed may
+// still have torn the old stream down, so "someone restarted it and it did not come back" is exactly what
+// the history needs to say. The failure row has FIXED text, never e.message: an error from a stream or a
+// camera can carry its address (see diagnostics-credential-leak-gate.test.js), and this history goes into
+// the support bundle. Best-effort (recordCameraEvent): the restart has already happened and cannot be
+// rolled back, so a failed history write must not turn it into an error. A silence is the opposite case.
 router.post('/:id/restart', requireAuth, async (req, res) => {
+  // ⚠️ FIRST, before any await (see lib/actor.js): the account can be deleted while this awaits.
+  const actor = actorOf(req);
   const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!cam) return res.status(404).json({ error: 'Camera not found' });
   if (cam.disabled) return res.status(400).json({ error: 'Camera is disabled' });
   try {
     await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
     if (subConfigured(cam)) await startSubStream(cam).catch((e) => logger.error(`[restart] sub: ${e.message}`));
-    recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'stream restarted manually');
+    recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'stream restarted manually', actor);
     res.json({ ok: true });
   } catch (e) {
+    recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'stream restart failed', actor);
     res.status(502).json({ error: e.message || 'Restart failed' });
   }
 });
@@ -492,7 +508,13 @@ router.post('/:id/restart', requireAuth, async (req, res) => {
 // it takes the feed offline for ~30-60s — but it clears states a stream restart can't (e.g. a wedged
 // on-camera video encoder). Only for ONVIF-added cameras (reboot_capable); the UI hides the button
 // otherwise. Any signed-in user, same as /restart (owner decision 2026-10-10: stays open to caregivers).
+// Recorded with WHO, on success and on failure, best-effort, exactly as /restart above and for the same
+// reasons. A failed reboot is recorded as "requested; the camera did not confirm" because a camera can
+// accept SystemReboot and drop the connection before answering, so a failure here does not prove nothing
+// happened.
 router.post('/:id/reboot', requireAuth, async (req, res) => {
+  // ⚠️ FIRST, before any await (see lib/actor.js).
+  const actor = actorOf(req);
   const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!cam) return res.status(404).json({ error: 'Camera not found' });
   if (!cam.onvif_capable || !cam.onvif_device_url) {
@@ -507,10 +529,11 @@ router.post('/:id/reboot', requireAuth, async (req, res) => {
   }
   try {
     await rebootCamera(conn);
-    recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'camera reboot requested (ONVIF)');
+    recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'camera reboot requested (ONVIF)', actor);
     res.json({ ok: true });
   } catch (e) {
     logger.info(`[onvif] reboot failed for ${cam.name}: ${e.message}`);
+    recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'camera reboot requested (ONVIF); the camera did not confirm', actor);
     res.status(502).json({ error: e.message || 'Camera reboot failed' });
   }
 });
@@ -519,14 +542,38 @@ router.post('/:id/reboot', requireAuth, async (req, res) => {
 // from now — for when you're still up as the alert schedule kicks in. minutes=0 clears the mute early.
 // Any signed-in user (an operational action, like /restart; owner decision 2026-10-10: stays open to
 // caregivers, with the 720-minute cap below as the bound). Enforced in lib/detectSchedule.js.
+//
+// ⚠️ A SILENCE IS APPLIED ONLY TOGETHER WITH THE HISTORY ROW SAYING WHO APPLIED IT (#552, review finding
+// B10, owner decision 2026-10-10). Silencing every alert from a camera is the one action here that can
+// hide something from everyone else, so "who did it" is part of the action, not a log line beside it: the
+// mute, the name on the tile and the Camera history row are written in ONE transaction, and if the row
+// cannot be written nothing is (a 500, the camera stays as it was). Not muting is the safe direction.
+// Contrast /restart and /reboot, which have already acted on the camera by the time they record, so
+// theirs is best-effort. The username is NOT logged: server logs go into the support bundle.
+const snoozeStmt = db.prepare('UPDATE cameras SET alerts_snoozed_until = ?, alerts_snoozed_by = ? WHERE id = ?');
 router.post('/:id/snooze', requireAuth, (req, res) => {
+  const actor = actorOf(req);
   const cam = db.prepare('SELECT id, name FROM cameras WHERE id = ?').get(req.params.id);
   if (!cam) return res.status(404).json({ error: 'Camera not found' });
   const minutes = Math.max(0, Math.min(720, Math.round(Number(req.body?.minutes) || 0)));
   const until = minutes > 0 ? Date.now() + minutes * 60000 : null;
-  db.prepare('UPDATE cameras SET alerts_snoozed_until = ? WHERE id = ?').run(until, cam.id);
+  // An un-mute clears the name with the time: a stored name with no silence beside it is not shown
+  // anyway (publicCamera), and leaving it would be a claim about a silence that has ended.
+  const by = until ? (actor?.username ?? null) : null;
+  try {
+    db.transaction(() => {
+      snoozeStmt.run(until, by, cam.id);
+      insertCameraEvent(cam.id, cam.name, EVENT.SNOOZE, until ? `muted for ${minutes} min` : 'un-muted', actor);
+    })();
+  } catch (err) {
+    logger.error(`[snooze] "${cam.name}": not applied, its Camera history row could not be written (${err.message})`);
+    return res.status(500).json({ error: 'Could not change this camera\'s alerts right now. Nothing was changed; try again.' });
+  }
+  // After the commit and best-effort: pruning is housekeeping the silence must not depend on.
+  pruneCameraEvents();
   logger.info(`[snooze] "${cam.name}" alerts ${until ? `muted for ${minutes} min` : 'un-muted'}`);
-  res.json({ ok: true, alerts_snoozed_until: until });
+  // `alerts_snoozed_by` is ADDED to the response; every key an open page already reads is still there.
+  res.json({ ok: true, alerts_snoozed_until: until, alerts_snoozed_by: by });
 });
 
 router.get('/', async (req, res) => {

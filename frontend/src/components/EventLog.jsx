@@ -9,7 +9,18 @@ const TYPE_META = {
   offline: { label: 'Offline', className: 'event-log__dot--offline' },
   online: { label: 'Back online', className: 'event-log__dot--online' },
   restart: { label: 'Restarted', className: 'event-log__dot--restart' },
+  // A person silencing (or un-silencing) a camera's alerts from its tile (#552). ONE type covers both
+  // directions and the detail says which ("muted for 30 min" / "un-muted"), so the label is the name of
+  // the tile control both rows come from: "Alerts silenced" above an "un-muted" detail would contradict
+  // itself.
+  snooze: { label: 'Silence alerts', className: 'event-log__dot--snooze' },
 };
+
+// "muted for 30 min · by carer" — WHO did it (#552), when a person did. No "by" for the system's own
+// events (a watchdog restart, an outage), whose actor is null, nor for any row written before this existed.
+function detailLine(ev) {
+  return [ev.detail, ev.actor_username ? `by ${ev.actor_username}` : null].filter(Boolean).join(' · ');
+}
 
 // SQLite stores created_at as UTC ("YYYY-MM-DD HH:MM:SS", no zone) - parse it as UTC and
 // let the browser render it in the viewer's own local time.
@@ -88,8 +99,8 @@ export default function EventLog() {
       {confirming && (
         <Modal title="Clear camera history" placement="top" onClose={() => (clearBusy ? null : setConfirming(false))}>
           <p style={{ marginTop: 0 }}>
-            Clear all camera history? This permanently deletes the up/down/restart history and can't
-            be undone.
+            Clear all camera history? This permanently deletes the up/down/restart history, including
+            who silenced, restarted or rebooted a camera, and can't be undone.
           </p>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
             <button className="btn" type="button" onClick={() => setConfirming(false)} disabled={clearBusy}>
@@ -106,8 +117,8 @@ export default function EventLog() {
 
       {loaded && events.length === 0 && !error ? (
         <div className="event-log__empty">
-          No camera events recorded yet. Drop-outs, recoveries, and restarts will show up
-          here as they happen.
+          No camera events recorded yet. Drop-outs, recoveries, restarts and silenced alerts will
+          show up here as they happen.
         </div>
       ) : (
         <ul className="event-log__list">
@@ -122,7 +133,7 @@ export default function EventLog() {
                     <span className="event-log__camera">{ev.camera_name}</span>
                     <span className="event-log__type">{meta.label}</span>
                   </div>
-                  {ev.detail && <div className="event-log__detail">{ev.detail}</div>}
+                  {detailLine(ev) && <div className="event-log__detail">{detailLine(ev)}</div>}
                 </div>
                 <time
                   className="event-log__time"
@@ -138,7 +149,8 @@ export default function EventLog() {
       )}
 
       <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-        Camera up/down and restart history (kept for up to 30 days). A drop that shows here
+        Camera up/down and restart history, and who silenced, restarted or rebooted a camera
+        (kept for up to 30 days). A drop that shows here
         was real - every device saw it. A camera that looks stuck on only one phone, with
         nothing here, is usually that phone's connection - pull down on the dashboard to
         reconnect. See <code>KNOWN-ISSUES.md</code> for more.

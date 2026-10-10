@@ -200,6 +200,37 @@ describe('the review screen', () => {
     expect(screen.getByText('05:48')).toBeInTheDocument();
   });
 
+  describe('★ who answered it (#552)', () => {
+    // A review row as GET returns it: SELECT *, so the answered_by_* pair arrives beside the answers.
+    const REVIEWED = (by) => ({
+      ...NIGHT,
+      review: { true_onset_at: null, true_wake_at: '2026-08-29 19:40:00', note: 'checked twice', dismissed: 0,
+        nobody_in_bed: 0, answered_by_user_id: by ? 'u-9' : null, answered_by_username: by },
+    });
+
+    test('a review someone answered names them, by username, for a caregiver and an admin alike', async () => {
+      for (const renderer of [renderAsAdmin, renderAsCaregiver]) {
+        api.get.mockResolvedValue(REVIEWED('carer1'));
+        const { unmount } = at(renderer);
+        expect(await screen.findByText('Answered by carer1')).toBeInTheDocument();
+        unmount();
+      }
+    });
+
+    test('★ no name on the review (none answered yet, or saved before this existed): no "Answered by" line at all', async () => {
+      api.get.mockResolvedValue(REVIEWED(null));
+      at();
+      expect(await screen.findByText('What we recorded')).toBeInTheDocument();
+      expect(screen.queryByText(/Answered by/)).not.toBeInTheDocument();
+    });
+
+    test('a night with no review yet shows no "Answered by" either', async () => {
+      at();
+      expect(await screen.findByRole('button', { name: /That.s right/ })).toBeInTheDocument();
+      expect(screen.queryByText(/Answered by/)).not.toBeInTheDocument();
+    });
+  });
+
   test('an event with a frame shows it; one without says so', async () => {
     const { user } = at();
     await openEvents(user);

@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+
+- **The app now records who silenced, restarted or rebooted a camera, and who answered a morning review (#552, #542).** A silenced camera's tile shows who silenced it ("Muted until 9:30 PM by …"), to everyone, until the silence ends. Camera history (Settings → Logs, admin only) names the person for each silence, un-mute, stream restart and camera reboot, including a restart or reboot that failed. The morning review shows who last answered it ("Answered by …"); dismissing the prompt does not change the name. People are named by their username, which only an admin can set, never by their first name, which anyone can change on their own account. If a silence's history row cannot be written, the silence is not applied at all (an error, and the camera keeps alerting); a restart or reboot still happens without its row. The diagnostics bundle keeps only "person" or "system" for each history row, never the username. Rows and reviews from before this update show no name. See [docs/camera-controls.md](docs/camera-controls.md#silencing-a-cameras-alerts-and-who-did-what).
+
 ### Fixed
 
 - **Developer tooling (the mutation script, not part of the image): a flag it does not know no longer starts the full battery (#654).** `node scripts/mutate.mjs --help` used to be read as "run everything", and a run killed that way once left a mutant in a real source file. The command line is now checked before anything is read or written: `--help` / `-h` prints the usage and exits 0, and an unknown flag, a typo, a value-less `--only` or `--timeout`, or a stray word exits 2 naming the argument and printing the usage. Every documented flag (`--full`, `--only=`, `--timeout=`, `--list`, `--check`) works as before.

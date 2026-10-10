@@ -8537,8 +8537,8 @@
   {
     "label": "in-bed/lock fix2 R2: the route ALSO runs saveNightReview's store-first step (every first correction computes the night twice)",
     "file": "backend/src/routes/children.js",
-    "find": "saveNightReview(req.params.id, req.params.date, patch, { storeFirst: false });",
-    "replace": "saveNightReview(req.params.id, req.params.date, patch);",
+    "find": "saveNightReview(req.params.id, req.params.date, patch, { storeFirst: false, actor, answered });",
+    "replace": "saveNightReview(req.params.id, req.params.date, patch, { actor, answered });",
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
     "namePattern": "save-time compute throws"
@@ -13758,5 +13758,246 @@
     "expect": "killed",
     "tests": ["liveMonitor.test.jsx"],
     "namePattern": "no drag handle"
+  },
+  {
+    "label": "#552 PR2 M01: the snooze history row loses its actor",
+    "file": "backend/src/routes/cameras.js",
+    "find": "insertCameraEvent(cam.id, cam.name, EVENT.SNOOZE, until ? `muted for ${minutes} min` : 'un-muted', actor);",
+    "replace": "insertCameraEvent(cam.id, cam.name, EVENT.SNOOZE, until ? `muted for ${minutes} min` : 'un-muted');",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "a silence: muted"
+  },
+  {
+    "label": "#552 PR2 M02: restart reads the actor AFTER the await (an account deleted mid-restart is named by its stale token claim)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "  const actor = actorOf(req);\r\n  const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);\r\n  if (!cam) return res.status(404).json({ error: 'Camera not found' });\r\n  if (cam.disabled) return res.status(400).json({ error: 'Camera is disabled' });\r\n  try {\r\n    await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);",
+    "replace": "  let actor = null;\r\n  const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);\r\n  if (!cam) return res.status(404).json({ error: 'Camera not found' });\r\n  if (cam.disabled) return res.status(400).json({ error: 'Camera is disabled' });\r\n  try {\r\n    await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);\r\n    actor = actorOf(req);",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "deleted while its restart"
+  },
+  {
+    "label": "#552 PR2 M03: the snooze uses the swallowing recordCameraEvent (a failed history write no longer stops the silence)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "insertCameraEvent(cam.id, cam.name, EVENT.SNOOZE,",
+    "replace": "recordCameraEvent(cam.id, cam.name, EVENT.SNOOZE,",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "the row cannot be written"
+  },
+  {
+    "label": "#552 PR2 M04: the mute is written OUTSIDE the transaction with its history row",
+    "file": "backend/src/routes/cameras.js",
+    "find": "    db.transaction(() => {\r\n      snoozeStmt.run(until, by, cam.id);",
+    "replace": "    snoozeStmt.run(until, by, cam.id);\r\n    db.transaction(() => {",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "the row cannot be written"
+  },
+  {
+    "label": "#552 PR2 M05: publicCamera sends the silencer's name after the silence has run out",
+    "file": "backend/src/routes/cameras.js",
+    "find": "alerts_snoozed_by: cam.alerts_snoozed_until > Date.now() ? (cam.alerts_snoozed_by ?? null) : null,",
+    "replace": "alerts_snoozed_by: cam.alerts_snoozed_by ?? null,",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "only while the camera is muted"
+  },
+  {
+    "label": "#552 PR2 M06: an un-mute leaves the name behind",
+    "file": "backend/src/routes/cameras.js",
+    "find": "const by = until ? (actor?.username ?? null) : null;",
+    "replace": "const by = actor?.username ?? null;",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "an un-mute"
+  },
+  {
+    "label": "#552 PR2 M07: a failed restart is not recorded",
+    "file": "backend/src/routes/cameras.js",
+    "find": "    recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'stream restart failed', actor);\r\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "a restart that failed"
+  },
+  {
+    "label": "#552 PR2 M08: an unconfirmed reboot is not recorded",
+    "file": "backend/src/routes/cameras.js",
+    "find": "    recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'camera reboot requested (ONVIF); the camera did not confirm', actor);\r\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "did not confirm"
+  },
+  {
+    "label": "#552 PR2 M09: insertCameraEvent drops the username",
+    "file": "backend/src/lib/cameraEvents.js",
+    "find": "    actor_username: actor?.username ?? null,",
+    "replace": "    actor_username: null,",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "a silence: muted"
+  },
+  {
+    "label": "#552 PR2 M10: actorOf records the self-chosen first name instead of the username (impersonation)",
+    "file": "backend/src/lib/actor.js",
+    "find": "u.username AS username FROM sessions s",
+    "replace": "u.first_name AS username FROM sessions s",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js",
+      "morning-review.test.js"
+    ],
+    "namePattern": "first name"
+  },
+  {
+    "label": "#552 PR2 M11: answered_by_username missing from the review upsert's ON CONFLICT SET (the first answerer is named forever)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "     answered_by_username     = excluded.answered_by_username,\r\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ],
+    "namePattern": "ONLY an event answer"
+  },
+  {
+    "label": "#552 PR2 M12: previewNightReview stamps the actor on every save, a dismissal included",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  const by = answered\r\n    ? {",
+    "replace": "  const by = true\r\n    ? {",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ],
+    "namePattern": "B dismisses"
+  },
+  {
+    "label": "#552 PR2 M13: the route treats every save as an answer",
+    "file": "backend/src/routes/children.js",
+    "find": "const answered = onset != null ||",
+    "replace": "const answered = true || onset != null ||",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ],
+    "namePattern": "B dismisses"
+  },
+  {
+    "label": "#552 PR2 M14: a note of only spaces counts as an answer",
+    "file": "backend/src/routes/children.js",
+    "find": "const hasText = (v) => typeof v === 'string' && v.trim() !== '';",
+    "replace": "const hasText = (v) => typeof v === 'string';",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ],
+    "namePattern": "C saves ONLY a note"
+  },
+  {
+    "label": "#552 PR2 M15: the upgrade guard for cameras.alerts_snoozed_by tests the wrong column (never added on upgrade)",
+    "file": "backend/src/db.js",
+    "find": "if (!camerasColumns.includes('alerts_snoozed_by')) {",
+    "replace": "if (!camerasColumns.includes('alerts_snoozed_until')) {",
+    "expect": "killed",
+    "tests": [
+      "who-did-it-migration.test.js"
+    ]
+  },
+  {
+    "label": "#552 PR2 M16: the upgrade guard for the camera_events actor columns tests the wrong column",
+    "file": "backend/src/db.js",
+    "find": "if (!cameraEventsColumns.includes(col))",
+    "replace": "if (!cameraEventsColumns.includes('camera_id'))",
+    "expect": "killed",
+    "tests": [
+      "who-did-it-migration.test.js"
+    ]
+  },
+  {
+    "label": "#552 PR2 M17: the diagnostics bundle carries the Camera history rows unstripped (usernames to a public issue)",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "camera_history: getRecentEvents(200).map(bundleCameraEvent),",
+    "replace": "camera_history: getRecentEvents(200),",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "carries no username"
+  },
+  {
+    "label": "#552 PR2 M18: the bundle calls every history row a person",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "actor: actor_user_id != null || actor_username != null ? 'person' : 'system'",
+    "replace": "actor: 'person'",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "carries no username"
+  },
+  {
+    "label": "#552 PR2 M19: the tile says \"by null\" when the server sent no name",
+    "file": "frontend/src/components/CameraTile.jsx",
+    "find": "const snoozeText = snoozedBy ? `${snoozeLabel} by ${snoozedBy}` : snoozeLabel;",
+    "replace": "const snoozeText = `${snoozeLabel} by ${snoozedBy}`;",
+    "expect": "killed",
+    "tests": [
+      "liveMonitor.test.jsx"
+    ],
+    "namePattern": "muted with no name"
+  },
+  {
+    "label": "#552 PR2 M20: the un-mute button no longer names who silenced the camera",
+    "file": "frontend/src/components/CameraTile.jsx",
+    "find": "Muted until {snoozeText} · tap to un-mute",
+    "replace": "Muted until {snoozeLabel} · tap to un-mute",
+    "expect": "killed",
+    "tests": [
+      "liveMonitor.test.jsx"
+    ],
+    "namePattern": "muted by someone"
+  },
+  {
+    "label": "#552 PR2 M21: Camera history says \"by null\" on a system row",
+    "file": "frontend/src/components/EventLog.jsx",
+    "find": "ev.actor_username ? `by ${ev.actor_username}` : null",
+    "replace": "`by ${ev.actor_username}`",
+    "expect": "killed",
+    "tests": [
+      "twoFactorAndEvents.test.jsx"
+    ],
+    "namePattern": "a person caused names them"
+  },
+  {
+    "label": "#552 PR2 M22: the review shows an \"Answered by\" line with no name",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "{data.review?.answered_by_username && (",
+    "replace": "{data.review && (",
+    "expect": "killed",
+    "tests": [
+      "MorningReview.test.jsx"
+    ],
+    "namePattern": "no \"Answered by\" line at all"
   }
 ]
