@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **The two-factor backup codes can no longer be lost to a stray tap (#557).** They are shown once and never again, but the dialog closed on a tap outside the card (easy to do on a phone), discarding them and leaving two-factor on with no way back in if the authenticator was lost. That dialog now has no ✕ and ignores a tap outside it (and Escape, should dialogs ever learn to close on it); the only way out is **I've saved them**. The shared `Modal` gained an opt-in `dismissible={false}` for this; every other dialog is unchanged.
+
 ## [0.35.1] - 2026-10-10
 
 ### Changed

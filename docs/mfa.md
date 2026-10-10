@@ -16,7 +16,9 @@ a domain, are a separate planned feature.)
 2. Enter the current 6-digit code to confirm.
 3. **Save the backup codes shown.** There are 10, each usable **once**, for signing in if you lose
    your authenticator. They're shown only at this moment and only their hashes are stored — Nightlight
-   can't show them again.
+   can't show them again. Because of that, this dialog can only be closed with its **I've saved them**
+   button: tapping outside it or pressing Escape does nothing, and it has no ✕ (unlike Nightlight's other
+   dialogs, so a stray tap can't throw the codes away). Use **Copy codes** to put them on the clipboard before you close it.
 
 At the next login you'll enter your password, then the 6-digit code. A backup code can be entered in
 the same field instead of an app code.
