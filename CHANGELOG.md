@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+
+- **Docs: a "Where to put the camera" section in the README (#644, docs half).** It suggests a top-down view at about 45 degrees with the whole bed and the room entry in frame, says plainly that any position still works (just less reliably), and lists what to avoid (a flashing or flickering light in view of the bed, a bed zone that overlaps where a parent stands, a very small bed in the frame). It also says that moving a camera means repainting the bed zone and that nights before and after a move are not directly comparable. These are suggestions from one household's testing, not a measured result; the placement trial from the issue is still to do.
+
 ### Fixed
 
 - **MQTT broker host: a typo that Nightlight accepted but the MQTT library read as a different host is now refused when you press Save (#641).** A host with a line break or other invisible character inside it, or with `;`, `'` or `%20` (for example `broker%20x` with port 8883), passed the check, was stored as typed, and then connected to something else (`broker` on port 1883, say). The host now has to be letters, digits, `.`, `-` and `_` (an internationalised name still works, sent as its ASCII form) or a bracketed IPv6 address, after surrounding spaces are removed; the error message names the host with any invisible character spelled out. Every host that worked before (underscore, dash, bracketed IPv6, mixed case, punycode, trailing dot) is still accepted. Tests only (#643): the port-only save over a bad stored host, a stored port of 0 meaning 1883, the client being cleared after a failed connect, and the ntfy report body being sent byte for byte are now pinned.
