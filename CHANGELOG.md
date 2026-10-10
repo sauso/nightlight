@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **Developer tooling (the mutation script, not part of the image): a flag it does not know no longer starts the full battery (#654).** `node scripts/mutate.mjs --help` used to be read as "run everything", and a run killed that way once left a mutant in a real source file. The command line is now checked before anything is read or written: `--help` / `-h` prints the usage and exits 0, and an unknown flag, a typo, a value-less `--only` or `--timeout`, or a stray word exits 2 naming the argument and printing the usage. Every documented flag (`--full`, `--only=`, `--timeout=`, `--list`, `--check`) works as before.
+
 ## [0.36.0] - 2026-10-10
 
 ### Added
