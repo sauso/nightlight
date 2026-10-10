@@ -13,6 +13,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 - **The two-factor backup codes can no longer be lost to a stray tap (#557).** They are shown once and never again, but the dialog closed on a tap outside the card (easy to do on a phone), discarding them and leaving two-factor on with no way back in if the authenticator was lost. That dialog now has no ✕ and ignores a tap outside it (and Escape, should dialogs ever learn to close on it); the only way out is **I've saved them**. The shared `Modal` gained an opt-in `dismissible={false}` for this; every other dialog is unchanged.
 - **Push alerts no longer stop for everyone once 501 or more devices are registered (#546).** Firebase accepts at most 500 messages per request and the server used to send one request for every device, so past 500 the whole send failed and no device got an alert (and dead tokens were never pruned). The server now sends in batches of up to 500, one after another; a failing batch is logged (`[push] send failed for batch N/M`) and the rest are still sent, and the `[push] alert sent to X/Y device(s)` line counts every batch. Still open: nothing yet limits how many tokens one account can register (the other half of #546).
+- **A `CLIPS_DIR` with a trailing slash (e.g. `/recordings/`) or a relative path no longer breaks clips (#545).**
+  Clips, recordings and timelapses were still written, but never played back (404) and never deleted, while
+  retention reported success: the files stayed on disk and the disk filled up unnoticed. `CLIPS_DIR` is now
+  normalised once where it is read (trailing separators removed, a relative path resolved against the working
+  directory, a blank or whitespace-only value treated as unset), so playback, deletion and the path-containment
+  checks all agree. The path-traversal protection is unchanged. A clip folder already affected needs nothing
+  but a restart: files written earlier are served and cleaned up normally from then on.
 
 ## [0.35.1] - 2026-10-10
 

@@ -41,7 +41,22 @@ const DATA_DIR = process.env.DATA_DIR || '/app/data';
 // Clips live OUTSIDE the container layer: default under the mapped /app/data, overridable to a
 // separate array mount via CLIPS_DIR (see the plan's storage section). Phase 2 adds the startup
 // "is this actually a mount?" guard; the spike just needs a writable dir.
-export const CLIPS_DIR = process.env.CLIPS_DIR || path.join(DATA_DIR, 'clips');
+//
+// NORMALISED ONCE, HERE (#545). Every containment guard elsewhere (detectionEvents.unlinkClip /
+// getEventClipFile, recordings.jailedFile, timelapse.jailedFile) compares `path.resolve(CLIPS_DIR, rel)`
+// against `CLIPS_DIR + path.sep`. path.resolve normalises, the raw env value does not: with
+// `CLIPS_DIR=/recordings/` (an easy entry in the Unraid "Recordings Directory" field) the prefix became
+// `/recordings//` and nothing matched, so clips were written (path.join) but 404'd and were never
+// deleted, while retention still cleared the rows and reported success — the disk filled silently.
+// A relative value failed the same way. Resolving here makes every consumer agree with no per-guard patch.
+// A trailing backslash is deliberately NOT stripped: on Linux (the only supported host) it is a legal
+// file-name character, so removing it would silently point at a different directory; on Windows
+// (dev machines only) path.resolve already handles both separators.
+export function resolveClipsDir(raw, dataDir) {
+  const v = typeof raw === 'string' ? raw.trim() : '';
+  return path.resolve(v || path.join(dataDir, 'clips'));
+}
+export const CLIPS_DIR = resolveClipsDir(process.env.CLIPS_DIR, DATA_DIR);
 // Raw segments are scratch — a hidden sibling so they're obviously not the finished clips.
 const RING_ROOT = path.join(CLIPS_DIR, '.ring');
 

@@ -13444,5 +13444,37 @@
     "expect": "killed",
     "tests": ["input-validation.test.js"],
     "note": "Survived the whole suite before #563: every real req.user has an own `role` from the database, so only a direct call can reach the branch."
+  },
+  {
+    "label": "#545 CLIPS_DIR: path.resolve dropped from the one place it is normalised",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "return path.resolve(v || path.join(dataDir, 'clips'));",
+    "replace": "return v || path.join(dataDir, 'clips');",
+    "expect": "killed",
+    "tests": ["clips-dir-normalisation.test.js"]
+  },
+  {
+    "label": "#545 CLIPS_DIR: surrounding whitespace no longer trimmed (blank value no longer means unset)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "typeof raw === 'string' ? raw.trim() : ''",
+    "replace": "typeof raw === 'string' ? raw : ''",
+    "expect": "killed",
+    "tests": ["clips-dir-normalisation.test.js"]
+  },
+  {
+    "label": "#545 CLIPS_DIR: recordings containment guard deleted (traversal row would be served)",
+    "file": "backend/src/lib/recordings.js",
+    "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
+    "replace": "if (false) return null;",
+    "expect": "killed",
+    "tests": ["clips-dir-normalisation.test.js"]
+  },
+  {
+    "label": "#545 CLIPS_DIR: timelapse containment guard deleted (traversal row would be served)",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
+    "replace": "if (false) return null;",
+    "expect": "killed",
+    "tests": ["clips-dir-normalisation.test.js"]
   }
 ]
