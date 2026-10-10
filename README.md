@@ -954,6 +954,31 @@ same protection.
 Timestamps use your container's local time (see the `TZ` variable above) rather than
 UTC, so they line up with when you actually remember something happening.
 
+## Times and your timezone
+
+Every time the app shows is in your **home** time: the timezone set in **Settings → General** (an IANA
+name such as `Europe/London`; **default `UTC`** until you set it, so set it first). It is the same zone
+the sleep reports, the morning review and the alert schedule already use, so an alert at "7:00 pm" is
+the same moment on every phone, and it agrees with the sleep card. It is **not** the zone of the phone or
+browser you happen to be using.
+
+- **When your device is in a different zone** (travelling, or someone watching from abroad), a time
+  carries a short zone label after it, such as **7:00 pm GMT-7**, so it cannot be mistaken for the
+  device's own clock. **When the device is in your home zone nothing is added**, so a household that
+  stays put sees no change. Clock format (12 or 24 hour) and date order follow the device's own language
+  settings, not the timezone.
+- **Where it applies:** the alert and camera-history lists (the exact time is in the tooltip on each row
+  and in the clip player), **Clip Management** (clips are grouped under their home-time **day**, and the
+  date filter and its "today" use home days, so two people never see the same clip on different days),
+  the **Recordings** card, a camera tile's **silenced until** time, and the nightly timelapse dates (a
+  night is a calendar date worked out in home time, so it never shifts).
+- **Not affected:** ages such as "3h ago" (elapsed time is the same everywhere), the sleep screens (they
+  were already in home time), and the build date under **About**.
+- **Known limits.** The label appears whenever the device's zone *name* differs from home, even if the two
+  happen to share an offset today (Paris and Berlin, say); it never hides a real difference. A time from
+  before a daylight-saving change shows the offset that applied then. Right after the page opens, before the setting has
+  loaded, times show in `UTC` for a moment and then switch to your home zone.
+
 ## Troubleshooting
 
 - **Camera shows "No signal"**: double check the RTSP URL works with a tool like VLC

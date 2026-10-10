@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { api } from '../lib/api.js';
+import { useHomeTime } from '../lib/useHomeTime.js';
 import MediaPlayerModal from './MediaPlayerModal.jsx';
 
 // The in-app clip player: a detection event's recorded clip, with download and (optional) delete.
@@ -25,6 +26,8 @@ export function deleteFailureText(err, fallback) {
 export default function ClipPlayerModal({ ev, onClose, onDeleted }) {
   const [del, setDel] = useState(''); // '' | 'confirm' | 'deleting' | 'error'
   const [delError, setDelError] = useState('');
+  // When the clip was captured, in HOME time (zone label when this device is elsewhere) — #561.
+  const home = useHomeTime();
 
   function close() {
     setDel('');
@@ -52,7 +55,7 @@ export default function ClipPlayerModal({ ev, onClose, onDeleted }) {
       videoPath={`/cameras/alerts/${ev.id}/clip`}
       posterPath={ev.snapshot ? `/cameras/alerts/${ev.id}/snapshot` : null}
       filename={`${ev.camera_name}-${ev.id}.mp4`}
-      meta={`${parseUtc(ev.created_at).toLocaleString()}${ev.clip_duration_s ? ` · ${ev.clip_duration_s}s` : ''}`}
+      meta={`${home.dateTime(parseUtc(ev.created_at))}${ev.clip_duration_s ? ` · ${ev.clip_duration_s}s` : ''}`}
       onClose={close}
       headerAction={
         onDeleted ? (

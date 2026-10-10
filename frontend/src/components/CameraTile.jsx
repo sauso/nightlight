@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { startTalk } from '../lib/twoWayTalk.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
+import { useHomeTime } from '../lib/useHomeTime.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { isNativeApp, isIOS, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip, hasNativePip, subscribeBackgroundPaused, isBackgroundPaused, setBackgroundPaused, setPipAutoEnteredFullscreen } from '../lib/nativeBridge.js';
@@ -304,8 +305,10 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   const [showSilenceMenu, setShowSilenceMenu] = useState(false); // "Silence alerts" → pick a duration
   const snoozedUntil = camera.alerts_snoozed_until && camera.alerts_snoozed_until > Date.now()
     ? camera.alerts_snoozed_until : null;
-  const snoozeLabel = snoozedUntil
-    ? new Date(snoozedUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
+  // The mute's end time sits next to quiet hours, which are edited and applied in HOME time, so it is
+  // shown in home time too (with a zone label when this device is elsewhere) — #561.
+  const home = useHomeTime();
+  const snoozeLabel = snoozedUntil ? home.time(new Date(snoozedUntil)) : null;
   // WHO silenced it (#552): their username, so everyone looking at this tile can see who to ask. Only while
   // the silence lasts (the server also nulls it after expiry), and nothing at all when the server sent
   // none: a silence set before this existed, or by an older server.

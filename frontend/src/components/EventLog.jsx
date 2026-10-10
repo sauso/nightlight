@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
+import { useHomeTime } from '../lib/useHomeTime.js';
 import Modal from './Modal.jsx';
 
 // Human-facing labels/colors for each event type the backend records (see
@@ -22,8 +23,9 @@ function detailLine(ev) {
   return [ev.detail, ev.actor_username ? `by ${ev.actor_username}` : null].filter(Boolean).join(' · ');
 }
 
-// SQLite stores created_at as UTC ("YYYY-MM-DD HH:MM:SS", no zone) - parse it as UTC and
-// let the browser render it in the viewer's own local time.
+// SQLite stores created_at as UTC ("YYYY-MM-DD HH:MM:SS", no zone) - parse it as UTC. The row shows an
+// age; its tooltip shows the clock time in HOME time (settings.timezone), with a zone label when this
+// device is elsewhere (#561).
 function parseUtc(s) {
   return new Date(s.replace(' ', 'T') + 'Z');
 }
@@ -40,6 +42,7 @@ function relativeTime(date) {
 }
 
 export default function EventLog() {
+  const home = useHomeTime();
   const [events, setEvents] = useState([]);
   const [error, setError] = useState('');
   const [loaded, setLoaded] = useState(false);
@@ -138,7 +141,7 @@ export default function EventLog() {
                 <time
                   className="event-log__time"
                   dateTime={when.toISOString()}
-                  title={when.toLocaleString()}
+                  title={home.dateTime(when)}
                 >
                   {relativeTime(when)}
                 </time>

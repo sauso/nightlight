@@ -2,16 +2,19 @@ import { useEffect, useState } from 'react';
 import { Play, Film, Trash2 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
+import { formatDayKey } from '../lib/homeTime.js';
 import MediaPlayerModal from './MediaPlayerModal.jsx';
 
 // "Memories" card on a child's detail page: the nightly sleep timelapse (see lib/timelapse.js). Shows
 // the most recent night as a hero thumbnail that plays in a modal; older nights sit in a strip below to
 // pick from. Renders nothing until the first timelapse exists, so it never shows an empty placeholder.
 
+// `night_date` is a calendar date the server worked out in HOME time (the night that began that evening),
+// so it is already the same for every viewer and has no clock to convert. It is printed through
+// formatDayKey (#561), which builds it in UTC, so no device zone can shift it to a neighbouring day or
+// land it in a daylight-saving gap the way `new Date(date + 'T00:00:00')` (local midnight) could.
 function nightLabel(nightDate) {
-  const d = new Date(nightDate + 'T00:00:00');
-  if (Number.isNaN(d.getTime())) return nightDate;
-  return d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+  return formatDayKey(nightDate, { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
 export default function TimelapseCard({ childId }) {
