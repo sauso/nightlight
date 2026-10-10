@@ -14551,5 +14551,192 @@
       "silences.test.js"
     ],
     "namePattern": "COMMIT fails"
+  },
+  {
+    "label": "#552 PR4 single-flight M1 (review B9): the flight is released when the answer settles, not when the ffmpeg has exited",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "if (flight.settled && flight.exited && liveFrameFlights.get(key) === flight) liveFrameFlights.delete(key);",
+    "replace": "if (flight.settled && liveFrameFlights.get(key) === flight) liveFrameFlights.delete(key);",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "holds the camera until its process exits|killed ffmpeg that has not exited yet"
+  },
+  {
+    "label": "#552 PR4 single-flight M2: a finished flight is never deleted, so the camera's first answer is served forever",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "liveFrameFlights.delete(key);",
+    "replace": "void key;",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "after the process exited starts a new grab"
+  },
+  {
+    "label": "#552 PR4 single-flight M3: one key for every camera, so two cameras share a grab",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "const key = cam.id;",
+    "replace": "const key = 'one-key-for-every-camera';",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "two cameras get two grabs"
+  },
+  {
+    "label": "#552 PR4 single-flight M4: the running flight is never looked up, so every request starts its own grab",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "const current = liveFrameFlights.get(key);",
+    "replace": "const current = undefined;",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "five requests at once share one capture"
+  },
+  {
+    "label": "#552 PR4 single-flight M5: release() loses its identity check, so a stale onExit ends the newer flight",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "flight.exited && liveFrameFlights.get(key) === flight)",
+    "replace": "flight.exited)",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "late or repeated onExit"
+  },
+  {
+    "label": "#552 PR4 single-flight M6: the stream grab is not given onExit",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "img = await capture(cam.mediamtx_path, { onExit });",
+    "replace": "img = await capture(cam.mediamtx_path);",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "killed ffmpeg that has not exited yet"
+  },
+  {
+    "label": "#552 PR4 single-flight M7: starting a stream grab does not mark the flight as having a process",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "flight.exited = false;",
+    "replace": "/* the flight is not marked as running a process */",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "holds the camera until its process exits"
+  },
+  {
+    "label": "#552 PR4 single-flight M8: a rejected capture is not treated as exited, so it wedges the camera",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "img = null;\r\n        onExit();",
+    "replace": "img = null;",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "a rejected capture"
+  },
+  {
+    "label": "#552 PR4 single-flight M9: the still-exiting warning is logged on every turned-away request",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "if (current.settled && !current.exited && !current.warned) {",
+    "replace": "if (current.settled && !current.exited) {",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "says so once"
+  },
+  {
+    "label": "#552 PR4 single-flight M10: the still-exiting warning is never logged",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "if (current.settled && !current.exited && !current.warned) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "says so once"
+  },
+  {
+    "label": "#552 PR4 single-flight M11: the child's 'exit' does not report onExit",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "    proc.on('exit', (code) => {\r\n      exitOnce();",
+    "replace": "    proc.on('exit', (code) => {",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "exits normally|onExit waits for the killed process|killed ffmpeg that has not exited yet"
+  },
+  {
+    "label": "#552 PR4 single-flight M12: every 'error' counts as an exit, even a failed kill on a running process",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "if (proc.pid === undefined) exitOnce();",
+    "replace": "exitOnce();",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "still running"
+  },
+  {
+    "label": "#552 PR4 single-flight M13: a spawn that fails later (no pid) never reports onExit",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "if (proc.pid === undefined) exitOnce();",
+    "replace": "/* an error never counts as an exit */",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "a spawn that fails later"
+  },
+  {
+    "label": "#552 PR4 single-flight M14: a spawn that throws never reports onExit",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "exitOnce(); // nothing was started, so nothing is left running",
+    "replace": "// nothing was started",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "a spawn that throws"
+  },
+  {
+    "label": "#552 PR4 single-flight M15: onExit is not guarded to fire once",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "if (exited) return;",
+    "replace": "/* not once */",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "a spawn that fails later"
+  },
+  {
+    "label": "#552 PR4 single-flight M16: onExit is called unconditionally, so the detection callers (who pass none) crash",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "onExit?.();",
+    "replace": "onExit();",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "without onExit"
+  },
+  {
+    "label": "#552 PR4 single-flight M17: the route calls the grabbers directly again (one grab per request)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "import { grabLiveFrame } from '../lib/snapshot.js';",
+    "replace": "import { captureSnapshot, fetchHttpSnapshot } from '../lib/snapshot.js';\r\nconst grabLiveFrame = async (cam) => ((cam.snapshot_url && String(cam.snapshot_url).trim() && (await fetchHttpSnapshot(cam.snapshot_url).catch(() => null))) || (await captureSnapshot(cam.mediamtx_path).catch(() => null)));",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "five concurrent GETs"
   }
 ]

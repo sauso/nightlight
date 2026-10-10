@@ -263,6 +263,26 @@ points at a different scheme, host, port, username or path, the stored password 
 and you will need to enter it again. That is deliberate: it stops one camera's credential being sent
 to a machine you just typed the name of.
 
+### The picture behind the Bed area editor
+
+The **Bed area** editor on the same screen paints the zone over a still frame from the camera. It
+comes from the **Alert image URL** above when one is set (and answers), otherwise from one frame of
+the camera's stream, which can take up to about 8 seconds on a camera with a long keyframe interval.
+**Refresh frame** asks for a new one.
+
+**One grab per camera at a time.** When several requests for the same camera's frame arrive while a
+grab is under way (two people opening the editor, **Refresh frame** pressed repeatedly, a page
+reloaded), they share that one grab: each later request waits for it and gets the same picture, or
+the same *Couldn't grab a frame*. On a slow camera, the second person therefore waits for the first
+person's grab instead of starting another one, and a **Refresh frame** pressed mid-grab shows that
+grab's picture (press it again once it has loaded for a newer one). The next request after a grab has
+finished starts a fresh one, including after a failed grab. Each camera has its own grab, so one
+camera never shows another's picture. This is only this editor's frame: alert images, the bed exit
+and entry frames, and timelapse frames are grabbed separately and are not affected. There is no
+overall limit beyond one per camera: with several cameras, each can be grabbing at the same time.
+Known limit: if a stream grab that was stopped for taking too long never exits, that camera's frame
+stays unavailable until the app restarts; see [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
+
 ### Alert schedule (quiet hours)
 
 **Cameras → edit a camera → Alert schedule.** Off by default, which means the camera alerts 24/7.

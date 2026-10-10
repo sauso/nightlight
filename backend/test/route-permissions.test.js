@@ -137,7 +137,7 @@ const ROUTE_GATES = {
   'GET /api/cameras/alerts/:id/snapshot': MEDIA,
   'GET /api/cameras/bed-transitions/:id/snapshot': MEDIA,
   'GET /api/cameras/alerts/:id/clip': MEDIA,
-  'GET /api/cameras/:id/snapshot': MEDIA, //                   the bed-zone picker's still; watching (owner). Spawn cap: #552
+  'GET /api/cameras/:id/snapshot': MEDIA, //                   the bed-zone picker's still; watching (owner). Single-flight per camera (#552): snapshot-single-flight.test.js
   'POST /api/cameras/onvif-probe': ADMIN,
   'POST /api/cameras/probe-report': ADMIN,
   'POST /api/cameras/:id/record/start': SIGNED_IN, //           capturing a moment is acting in it (owner)
