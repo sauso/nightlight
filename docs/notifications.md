@@ -461,3 +461,11 @@ stops being refined, which is the other half of why no later wake time is pushed
   Android app (package `com.sauso.nightlight`).
 - **Dead devices.** If you uninstall the app or clear its data, its token goes stale; the server
   prunes tokens that Firebase reports as unregistered automatically.
+- **Many devices.** Firebase accepts at most **500** messages per request, so the server sends an
+  alert in batches of up to 500 devices, one batch after another, and any number of registered
+  devices works. If one batch fails (for example a network error to Firebase) the server logs
+  `[push] send failed for batch N/M` and still sends the remaining batches; the `[push] alert sent
+  to X/Y device(s)` line counts every batch. Devices in a failed batch miss that one alert and are
+  **not** removed (only tokens Firebase reports as dead are). Before this was fixed (issue #546), 501 or more registered
+  devices made every Firebase alert fail. The number of tokens one account can register is not
+  limited yet (issue #546).
