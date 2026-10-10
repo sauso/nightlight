@@ -365,6 +365,10 @@ side only, title 18px, `✕` close button with `aria-label="Close"`.
 440px sheet wastes a desktop screen on a video, but a confirmation must stay narrow at any width. Don't
 add `wide` to a modal that is mostly text or a short form.
 
+**`dismissible={false}`** (default `true`) is for a dialog holding something that cannot be got back — today
+only the one-time two-factor backup codes (#557). It drops the overlay-click close and the `✕`, so the caller's
+own explicit button is the only way out. Any "close on Escape" behaviour added to `Modal` must honour it.
+
 Layout lives in **CSS** (`.modal-overlay` / `.modal-card`), not inline styles. That is load-bearing: a
 media query cannot reach an inline style, and inline styles beat stylesheet rules, so the desktop rules
 would silently lose. Only the two values the visual-viewport effect computes stay inline.

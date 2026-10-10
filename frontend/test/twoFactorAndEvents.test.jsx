@@ -105,6 +105,61 @@ describe('TwoFactorSection', () => {
     expect(screen.getByText(/won't be shown again/)).toBeInTheDocument();
   });
 
+  // #557: the codes live only in React state and the server will never show them again, so the dialog
+  // must survive every incidental dismissal and close ONLY through the explicit button.
+  async function openBackupCodesDialog() {
+    withStatus({ enabled: false });
+    vi.spyOn(api, 'post').mockResolvedValueOnce(SETUP).mockResolvedValueOnce({ backup_codes: CODES });
+    const { user } = renderAsAdmin(<TwoFactorSection />);
+    await user.click(await enabledButton('Set up two-factor'));
+    await user.type(screen.getByLabelText('Enter the 6-digit code to confirm'), '123456');
+    await user.click(screen.getByRole('button', { name: 'Turn on' }));
+    await screen.findByText(CODES[0]);
+    return { user };
+  }
+
+  test('★ a tap on the backdrop does NOT discard the backup codes (#557)', async () => {
+    const { user } = await openBackupCodesDialog();
+    // The overlay is the dialog's parent: a tap "just outside the card" lands here.
+    const overlay = screen.getByRole('dialog').parentElement;
+    expect(overlay).toHaveClass('modal-overlay');
+    await user.click(overlay);
+    for (const c of CODES) expect(screen.getByText(c)).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Save your backup codes' })).toBeInTheDocument();
+  });
+
+  test('★ Escape does NOT discard the backup codes (#557, guards a future #376)', async () => {
+    const { user } = await openBackupCodesDialog();
+    await user.keyboard('{Escape}');
+    for (const c of CODES) expect(screen.getByText(c)).toBeInTheDocument();
+  });
+
+  test('★ the backup-codes dialog has no ✕ close button, only the explicit one (#557)', async () => {
+    await openBackupCodesDialog();
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: "I've saved them" })).toBeInTheDocument();
+    // The copy affordance is unchanged.
+    expect(within(dialog).getByRole('button', { name: 'Copy codes' })).toBeInTheDocument();
+  });
+
+  test('★ "I\'ve saved them" is what closes the backup-codes dialog (#557)', async () => {
+    const { user } = await openBackupCodesDialog();
+    await user.click(screen.getByRole('button', { name: "I've saved them" }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    for (const c of CODES) expect(screen.queryByText(c)).not.toBeInTheDocument();
+  });
+
+  test('the other two-factor dialogs still close on a backdrop tap (only the codes are protected)', async () => {
+    withStatus({ enabled: false });
+    vi.spyOn(api, 'post').mockResolvedValueOnce(SETUP);
+    const { user } = renderAsAdmin(<TwoFactorSection />);
+    await user.click(await enabledButton('Set up two-factor'));
+    await screen.findByText(SETUP.secret);
+    await user.click(screen.getByRole('dialog').parentElement);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   test('a wrong code keeps the set-up dialog open so it can be retried', async () => {
     withStatus({ enabled: false });
     vi.spyOn(api, 'post')

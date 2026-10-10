@@ -10,7 +10,13 @@ import { useEffect, useId, useRef } from 'react';
 // Layout lives in CSS (.modal-overlay / .modal-card in index.css) rather than inline styles, because a
 // media query can't reach an inline style — and inline styles win over stylesheet rules, so the desktop
 // rules would silently lose. Only the two values the visual-viewport effect computes below stay inline.
-export default function Modal({ title, onClose, children, placement = 'bottom', headerAction = null, wide = false }) {
+//
+// `dismissible={false}` is for a dialog that holds something that cannot be got back (the one-time
+// two-factor backup codes, #557). It removes every incidental way out — the overlay click, the ✕ button —
+// so the only exit is whatever explicit button the caller renders inside. On a phone a tap just outside the
+// card, or a scroll that ends as a click, is an easy accident, and the default closes on both. Any future
+// "close on Escape" handling (#376) must honour this flag too.
+export default function Modal({ title, onClose, children, placement = 'bottom', headerAction = null, wide = false, dismissible = true }) {
   const top = placement === 'top';
   const titleId = useId();
   const overlayRef = useRef(null);
@@ -45,7 +51,7 @@ export default function Modal({ title, onClose, children, placement = 'bottom', 
   ].filter(Boolean).join(' ');
 
   return (
-    <div ref={overlayRef} className={overlayClass} onClick={onClose}>
+    <div ref={overlayRef} className={overlayClass} onClick={dismissible ? onClose : undefined}>
       {/* role/aria-modal so assistive tech announces this as a dialog and treats the page behind it
           as inert — without them a screen reader reads the modal as one more region of the page, and
           several of these ask for a password or confirm a destructive action. `aria-labelledby`
@@ -56,7 +62,7 @@ export default function Modal({ title, onClose, children, placement = 'bottom', 
           <h2 id={titleId}>{title}</h2>
           <div className="modal-card__actions">
             {headerAction}
-            <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
+            {dismissible && <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>}
           </div>
         </div>
         {children}
