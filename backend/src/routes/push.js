@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import {
   registerToken, removeToken, pushEnabled, pushConfigured, getClientConfig,
-  validatePushSetup, initPush,
+  validatePushSetup, initPush, MAX_PUSH_TOKEN_LENGTH,
 } from '../lib/push.js';
 import { getSnapshot } from '../lib/pushSnapshots.js';
 import db from '../db.js';
@@ -26,10 +26,17 @@ router.get('/snapshot/:id', (req, res) => {
 // baseUrl is the origin the app reaches this server through, used to build a device-fetchable
 // snapshot URL for image alerts (see lib/push.js sendToAll). Registration always succeeds for any
 // signed-in user; whether baseUrl is kept, and whether it may also become the server's global public
-// URL (admin devices only), is decided inside registerToken.
+// URL (admin devices only), is decided inside registerToken. Limits (issue #546): a token longer than
+// MAX_PUSH_TOKEN_LENGTH is refused with 400; one account holds at most MAX_PUSH_TOKENS_PER_USER tokens
+// and a new one beyond that retires the account's oldest (never refused) — see registerToken.
 router.post('/register', requireAuth, (req, res) => {
   const { token, platform, baseUrl } = req.body || {};
   if (!token || typeof token !== 'string') return res.status(400).json({ error: 'token is required' });
+  // 400 (not 413/422) with a plain message: Cloudflare strips 5xx bodies and some proxies mangle odd
+  // 4xx ones, and the app shows `error` verbatim. The limit is far above any real FCM token (see lib/push.js).
+  if (token.length > MAX_PUSH_TOKEN_LENGTH) {
+    return res.status(400).json({ error: `token is too long (at most ${MAX_PUSH_TOKEN_LENGTH} characters)` });
+  }
   registerToken(token, platform, req.user.id, typeof baseUrl === 'string' ? baseUrl : null, req.user.sid);
   res.json({ ok: true, push_enabled: pushEnabled() });
 });
