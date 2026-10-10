@@ -419,8 +419,10 @@ measurement**, and (like everything here) never a safety device — see the warn
     wrong zone (and saved that way). So **That's right**, **Not quite…**, the time fields and the frame
     buttons stay greyed out, with a line saying why, until it has loaded (usually a moment). Event
     answers, **Save just the event answers** and **No one was in the bed** don't involve a time and work
-    straight away. If the setting can't be loaded at all, the times stay greyed out for that visit:
-    reload the page.
+    straight away. If the setting can't be loaded at all, the line becomes an error saying so and the
+    times stay greyed out for that visit: reload the page. Every time on this page, shown or typed, is
+    in your **home** time (the timezone set in Settings), never the time zone of the phone or browser
+    you are using.
   - **Point at the picture instead of typing.** Tap the frame that shows the real moment and the time is
     taken from it, exact to the second rather than rounded from memory. Typing a time by hand instead
     clears the picked frame, so only one of them is ever the answer.

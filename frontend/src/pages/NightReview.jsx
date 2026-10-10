@@ -103,7 +103,7 @@ export default function NightReview() {
   // `loaded`: the server's settings have arrived, so `tz` is the app's REAL zone, not SettingsContext's
   // placeholder 'UTC'. Two things wait for it: "Before bedtime" (see `groupEarly`) and every control that
   // can send a time (see `timesReady`).
-  const { settings, loaded: settingsLoaded } = useSettings();
+  const { settings, loaded: settingsLoaded, loading: settingsLoading } = useSettings();
   const tz = settings?.timezone;
   // ⚠️ NOTHING THAT CAN SEND A TIME WORKS UNTIL THE REAL TIMEZONE HAS ARRIVED (fix round 2, 2026-09-30,
   // Codex P1, verified). "Fell asleep" and "Got up for the day" are UTC instants shown in `tz`, and until
@@ -121,7 +121,24 @@ export default function NightReview() {
   // time and stay usable, which is what matters if /settings FAILED and `loaded` never arrives this visit
   // (the page then says why the times can't be changed). ⚠️ A new control that sets `touched` or sends a time
   // must be gated on this too.
+  //
+  // ★ Issue #512 (filed 2026-09-28, before this gate existed) described the same hole from the other side:
+  // "Put down here" / "Up for the day here" pre-filled a field with the time in the placeholder zone, and
+  // the shared `touched` flag then stopped the OTHER, untouched field from ever re-seeding into the real
+  // zone, so Save wrote e.g. 09:48 for a real 19:48. The owner's convention (2026-10-10) is that times are
+  // shown and entered in HOME time (`settings.timezone`) everywhere, never the browser's and never the
+  // placeholder: so the answer is the gate, not a smarter `touched`. With nothing able to set `touched` (or
+  // send a time) before the real zone arrives, the shared flag cannot strand a field in the wrong zone, which
+  // is why it was NOT split per field. ⚠️ That makes the gate load-bearing for `touched`: if a control is ever
+  // allowed to set `touched` before `timesReady`, split the flag per field first. This is at least the fourth
+  // late-timezone bug in this file (see `groupEarly`, `inBedTouched`, `verdictsTouched`); the shared display
+  // helper that follows this convention across the app is #561.
   const timesReady = settingsLoaded;
+  // `loading` false with `loaded` still false is a FAILED first /settings request (SettingsContext clears
+  // `loading` when the request settles, success or not, and only a success sets `loaded`). The visit is then
+  // stuck on the placeholder zone for good, so "waiting" would be a lie: the page says what happened and
+  // how to recover instead. Reads of the screen still work; every control that sends a time stays off.
+  const settingsFailed = !settingsLoaded && !settingsLoading;
   const kid = kids.find((k) => k.id === id);
 
   const [data, setData] = useState(null);
@@ -619,12 +636,18 @@ export default function NightReview() {
             </>
           ) : (
           <>
-          {/* Says why the time controls are greyed out (see `timesReady`). Usually gone a moment after the
-              page opens; it stays for the visit only if the settings request failed. */}
-          {!timesReady && (
+          {/* Says why the time controls are greyed out (see `timesReady`). "Waiting" is gone a moment after
+              the page opens; the error stays for the whole visit, because a failed /settings request is
+              not retried (see `settingsFailed`). */}
+          {!timesReady && !settingsFailed && (
             <div className="camera-tile__sub">
-              Waiting for the app’s timezone setting before any time can be confirmed or changed. If this
-              doesn’t go away, reload the page.
+              Waiting for the app’s timezone setting before any time can be confirmed or changed.
+            </div>
+          )}
+          {settingsFailed && (
+            <div className="error-banner">
+              The app’s timezone setting could not be loaded, so times can’t be confirmed or changed on this
+              visit. Reload the page to try again. Event answers and “No one was in the bed” still work.
             </div>
           )}
           {/* Confirm-or-correct, deliberately NOT a pre-filled form you can save by reflex. A pre-filled

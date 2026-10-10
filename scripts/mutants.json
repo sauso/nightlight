@@ -6112,8 +6112,8 @@
   {
     "label": "0.34.0 review F1: NightReview gates on !loading, which a FAILED settings load also satisfies",
     "file": "frontend/src/pages/NightReview.jsx",
-    "find": "  const { settings, loaded: settingsLoaded } = useSettings();",
-    "replace": "  const { settings, loading } = useSettings();\r\n  const settingsLoaded = !loading;",
+    "find": "  const { settings, loaded: settingsLoaded, loading: settingsLoading } = useSettings();",
+    "replace": "  const { settings, loading } = useSettings();\r\n  const settingsLoaded = !loading;\r\n  const settingsLoading = loading;",
     "expect": "killed",
     "tests": ["MorningReview.test.jsx"]
   },
@@ -8367,6 +8367,42 @@
     "expect": "killed",
     "tests": ["MorningReview.test.jsx"],
     "namePattern": "placeholder zone"
+  },
+  {
+    "label": "#512: the same missing gate, caught by the replays through the REAL SettingsProvider (a chip tapped before /settings resolves sends 09:20 / 09:33 / 19:48 instead of 19:20 / 19:33 / 05:48)",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "  const timesReady = settingsLoaded;",
+    "replace": "  const timesReady = true;",
+    "expect": "killed",
+    "tests": ["nightReviewTimezoneGate.test.jsx"],
+    "namePattern": "replayed against the real SettingsProvider"
+  },
+  {
+    "label": "#512: the gate keys on the zone value, so a UTC install (UTC is a real configured zone, and also the placeholder) stays greyed out",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "  const timesReady = settingsLoaded;",
+    "replace": "  const timesReady = tz !== 'UTC';",
+    "expect": "killed",
+    "tests": ["nightReviewTimezoneGate.test.jsx"],
+    "namePattern": "a UTC install is a real configured zone"
+  },
+  {
+    "label": "#512: a failed /settings is never reported (the page says 'Waiting' for the whole visit)",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "  const settingsFailed = !settingsLoaded && !settingsLoading;",
+    "replace": "  const settingsFailed = false;",
+    "expect": "killed",
+    "tests": ["nightReviewTimezoneGate.test.jsx"],
+    "namePattern": "FAILS for the whole visit"
+  },
+  {
+    "label": "#512: the failure is reported while /settings is still in flight",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "  const settingsFailed = !settingsLoaded && !settingsLoading;",
+    "replace": "  const settingsFailed = !settingsLoaded;",
+    "expect": "killed",
+    "tests": ["nightReviewTimezoneGate.test.jsx"],
+    "namePattern": "the error appears only once the request has settled"
   },
   {
     "label": "in-bed/lock fix2 T2: \"That's right\" is usable before the real timezone arrives",
