@@ -112,17 +112,23 @@ const argProblems = args.flatMap((a) => {
   const [name, ...rest] = a.slice(2).split('=');
   const hasValue = rest.length > 0;
   if (BOOLEAN_FLAGS.includes(name)) return hasValue ? [`${a}: --${name} takes no value`] : [];
-  if (VALUE_FLAGS.includes(name)) return hasValue ? [] : [`${a}: --${name} needs a value, as --${name}=<value>`];
+  // An EMPTY value counts as missing: `--only=` is falsy, so the run took it as "no filter" and selected the whole
+  // catalogue (a typo, or an unset shell variable in `--only=$X`, started the full battery), and `--timeout=` only
+  // failed later, after the catalogue was read and without the usage. Both are refused here.
+  if (VALUE_FLAGS.includes(name)) return rest.join('=') !== '' ? [] : [`${a}: --${name} needs a non-empty value, as --${name}=<value>`];
   return [`unknown flag ${a}`];
 });
-if (args.includes('--help') || args.includes('-h')) {
-  console.log(USAGE);
-  process.exit(0);
-}
+// Problems are reported BEFORE --help is honoured, so `--help --bogus` exits 2 and names `--bogus`. Deliberate:
+// exit 0 means "the command line you typed was understood", and a script that wraps this one would otherwise
+// take `--help --typo` as a success. A lone `--help` is unaffected.
 if (argProblems.length) {
   for (const p of argProblems) console.error(`mutate.mjs: ${p}`);
   console.error(`\n${USAGE}`);
   process.exit(2);
+}
+if (args.includes('--help') || args.includes('-h')) {
+  console.log(USAGE);
+  process.exit(0);
 }
 
 const flag = (name) => args.some((a) => a === `--${name}`);

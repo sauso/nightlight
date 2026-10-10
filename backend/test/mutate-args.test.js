@@ -62,13 +62,24 @@ describe('mutate.mjs command line (#654)', () => {
     });
   }
 
-  for (const arg of ['--bogus', '--ful', '--only', '--timeout', '--full=1', '--help=1', 'full', '-x']) {
+  for (const arg of ['--bogus', '--ful', '--only', '--timeout', '--only=', '--timeout=', '--full=1', '--help=1', 'full', '-x']) {
     test(`${JSON.stringify(arg)} exits 2 naming the argument, with the usage, before touching anything`, async () => {
       const { dir, src } = fixture();
       const res = await runHarness(dir, [arg]);
       assert.equal(res.code, 2, `${res.stdout}\n${res.stderr}`);
       assert.ok(res.stderr.includes(arg), `the message does not name ${arg}:\n${res.stderr}`);
       assert.match(res.stderr, /usage: node scripts\/mutate\.mjs/);
+      assertNothingRan(dir, src, res);
+    });
+  }
+
+  for (const argv of [['--help', '--bogus'], ['--bogus', '--help'], ['-h', '--only=']]) {
+    test(`${argv.join(' ')}: a bad argument beside --help still exits 2 and is named (help does not hide it)`, async () => {
+      // Deliberate (see the comment in mutate.mjs): exit 0 means the whole command line was understood.
+      const { dir, src } = fixture();
+      const res = await runHarness(dir, argv);
+      assert.equal(res.code, 2, `${res.stdout}\n${res.stderr}`);
+      assert.ok(res.stderr.includes(argv.find((a) => a !== '--help' && a !== '-h')), `the bad argument is not named:\n${res.stderr}`);
       assertNothingRan(dir, src, res);
     });
   }
