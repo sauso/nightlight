@@ -12,6 +12,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ### Fixed
 
 - **The two-factor backup codes can no longer be lost to a stray tap (#557).** They are shown once and never again, but the dialog closed on a tap outside the card (easy to do on a phone), discarding them and leaving two-factor on with no way back in if the authenticator was lost. That dialog now has no ✕ and ignores a tap outside it (and Escape, should dialogs ever learn to close on it); the only way out is **I've saved them**. The shared `Modal` gained an opt-in `dismissible={false}` for this; every other dialog is unchanged.
+- **Developer tooling (the mutation script, not part of the image): the recovery after a killed run no longer
+  overwrites a later edit, and a control mutant can no longer be silently ignored (#642).** The restore journal
+  now records a hash of the mutant it wrote; the next run restores a file only if it still holds exactly that
+  mutant (or is already the original), and otherwise stops with a message naming the file and leaves it and the
+  journal alone, where it used to write the saved original over whatever the file held and report success. A
+  journal written by an older version has no hash, so it restores only a file that is exactly a mutant the
+  current catalogue makes of the saved original, and says so. The "no longer leaves a mutant in the source" claim
+  of the previous entry holds only once the script runs again after a hard kill, because nothing else reads the
+  journal. Separately, one control mutant was spelled `"control"`, a value the script did not recognise, so
+  killing it did not void the run; it now reads `"survives"`, and a catalogue entry whose `expect` is not
+  `killed`, `survives` or `equivalent` fails `--check` (and therefore CI) and stops a run before it starts.
 - **Push alerts no longer stop for everyone once 501 or more devices are registered (#546).** Firebase accepts at most 500 messages per request and the server used to send one request for every device, so past 500 the whole send failed and no device got an alert (and dead tokens were never pruned). The server now sends in batches of up to 500, one after another; a failing batch is logged (`[push] send failed for batch N/M`) and the rest are still sent, and the `[push] alert sent to X/Y device(s)` line counts every batch. Still open: nothing yet limits how many tokens one account can register (the other half of #546).
 
 ## [0.35.1] - 2026-10-10
