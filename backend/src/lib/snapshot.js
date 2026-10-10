@@ -110,7 +110,7 @@ export function captureSnapshot(pathName, { timeoutMs = 8000, onExit } = {}) {
       // emits 'error' with no pid and then never 'exit' (measured on Node 24: 'error' then 'close'), so
       // that is where it ends. But Node also emits 'error' when kill() fails on a child that is still
       // RUNNING; reporting an exit then would let a second ffmpeg start beside a live one. So: no pid
-      // means it never started; otherwise wait for 'exit'.
+      // means it never started; otherwise wait for 'exit' (or 'close', below).
       if (proc.pid === undefined) exitOnce();
       finish(null);
     });
@@ -119,6 +119,12 @@ export function captureSnapshot(pathName, { timeoutMs = 8000, onExit } = {}) {
       const buf = chunks.length ? Buffer.concat(chunks) : null;
       finish(code === 0 && buf && buf.length ? buf : null);
     });
+    // Fallback (#552, PR #665 review): Node emits 'close' only once the child has ended and its pipes have
+    // closed, after 'exit' when there was one. So 'close' is a safe last word that nothing is left running,
+    // and it covers an end we did not hear as 'exit' (an 'error' from a failed kill, then the child ends).
+    // Without it such a camera would stay held until restart. exitOnce makes the usual 'exit' then 'close'
+    // count once.
+    proc.on('close', exitOnce);
 
     timer = setTimeout(() => {
       try { proc.kill('SIGKILL'); } catch { /* already gone */ }

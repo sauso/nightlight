@@ -1439,9 +1439,10 @@ progress, when the exit is earlier than the start of the activity, or on a night
 
 **Why:** Requests for a camera's still frame share one grab at a time (#552; see
 [The picture behind the Bed area editor](docs/notifications.md#the-picture-behind-the-bed-area-editor)), and
-a grab counts as finished only once its ffmpeg has **exited**, not when it was told to stop. A grab that
-takes longer than 8 seconds is killed, and normally exits within moments; until it does, requests get the
-killed grab's answer (no frame) rather than starting a second ffmpeg beside it. If it never exits (a process
+a grab counts as finished only once its ffmpeg has **exited**, not when it was told to stop. The ffmpeg part
+of a grab is killed after 8 seconds (with an **Alert image URL** set, it comes after up to 5 seconds of trying
+that address, so one grab can last about 13 seconds), and a killed ffmpeg normally exits within moments; until
+it does, requests get the killed grab's answer (no frame) rather than starting a second ffmpeg beside it. If it never exits (a process
 stuck inside the operating system, which a kill cannot end; not seen so far), that camera's frame stays
 unavailable. The log line is written once per stuck grab, the first time a request is turned away by it. A
 line followed by a working frame a moment later was only the normal short wait for the exit.

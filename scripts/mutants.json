@@ -14671,7 +14671,8 @@
     "tests": [
       "snapshot-single-flight.test.js"
     ],
-    "namePattern": "exits normally|onExit waits for the killed process|killed ffmpeg that has not exited yet"
+    "namePattern": "exit then close",
+    "note": "Since the 'close' fallback (PR #665 review) a child that exits also closes, so most tests still see onExit, one event later; the exit-then-close test asserts the release happens AT 'exit'."
   },
   {
     "label": "#552 PR4 single-flight M12: every 'error' counts as an exit, even a failed kill on a running process",
@@ -14738,5 +14739,82 @@
       "snapshot-single-flight.test.js"
     ],
     "namePattern": "five concurrent GETs"
+  },
+  {
+    "label": "#552 PR4 single-flight M18 (PR #665 review): the 'close' fallback removed, so a child heard only as 'close' is never released",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "proc.on('close', exitOnce);",
+    "replace": "/* no close fallback */",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "close and no exit|until the child closes"
+  },
+  {
+    "label": "#552 PR4 single-flight M19 (PR #665 review R12): the route's default capture never grabs a frame",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "capture = captureSnapshot } = {}) {",
+    "replace": "capture = async () => null } = {}) {",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "start ONE ffmpeg"
+  },
+  {
+    "label": "#552 PR4 single-flight M20 (PR #665 review R15): the restart warning loses `current.settled &&`, so joining a RUNNING grab logs it",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "if (current.settled && !current.exited && !current.warned) {",
+    "replace": "if (!current.exited && !current.warned) {",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "five requests at once share one capture|start ONE ffmpeg"
+  },
+  {
+    "label": "#552 PR4 single-flight M21 (PR #665 review R16): the restart warning is reduced to `if (!current.warned)`, so any join logs it once",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "if (current.settled && !current.exited && !current.warned) {",
+    "replace": "if (!current.warned) {",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "five requests at once share one capture|five concurrent GETs|start ONE ffmpeg"
+  },
+  {
+    "label": "#552 PR4 single-flight M22 (PR #665 review R13b): a live frame is served without Cache-Control: no-store",
+    "file": "backend/src/routes/cameras.js",
+    "find": "res.set('Cache-Control', 'no-store');",
+    "replace": "/* cacheable */",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "five concurrent GETs|start ONE ffmpeg"
+  },
+  {
+    "label": "#552 PR4 single-flight M23 (PR #665 review R13): the no-frame answer is a 500 instead of a 503",
+    "file": "backend/src/routes/cameras.js",
+    "find": "if (!img) return res.status(503).json({ error: 'Could not grab a frame right now' });",
+    "replace": "if (!img) return res.status(500).json({ error: 'Could not grab a frame right now' });",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "both fail"
+  },
+  {
+    "label": "#552 PR4 single-flight M24 (PR #665 review R13): the no-frame answer's JSON body changes",
+    "file": "backend/src/routes/cameras.js",
+    "find": "res.status(503).json({ error: 'Could not grab a frame right now' })",
+    "replace": "res.status(503).json({ error: 'No frame' })",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "both fail"
   }
 ]

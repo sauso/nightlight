@@ -268,7 +268,8 @@ to a machine you just typed the name of.
 The **Bed area** editor on the same screen paints the zone over a still frame from the camera. It
 comes from the **Alert image URL** above when one is set (and answers), otherwise from one frame of
 the camera's stream, which can take up to about 8 seconds on a camera with a long keyframe interval.
-**Refresh frame** asks for a new one.
+With an Alert image URL set, one grab can therefore last about 13 seconds: up to 5 seconds trying
+the address, then up to 8 seconds from the stream. **Refresh frame** asks for a new one.
 
 **One grab per camera at a time.** When several requests for the same camera's frame arrive while a
 grab is under way (two people opening the editor, **Refresh frame** pressed repeatedly, a page
