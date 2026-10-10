@@ -32,6 +32,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   directory, a blank or whitespace-only value treated as unset), so playback, deletion and the path-containment
   checks all agree. The path-traversal protection is unchanged. A clip folder already affected needs nothing
   but a restart: files written earlier are served and cleaned up normally from then on.
+- **The morning review (the "Was this right?" screen) now says so when the app's timezone setting could not be loaded, instead of waiting for ever (#512).** Its times are always home time, the timezone set in Settings, never the phone's or the browser's. The buttons that send a time (**That's right**, **Not quite…**, the time fields and the frame buttons) already stayed greyed out until that setting arrived, so a time could no longer be saved in the wrong zone; if the setting failed to load, though, the page said "Waiting…" for the whole visit. It now shows an error saying the setting could not be loaded and to reload the page, and the event answers and **No one was in the bed** still work. Tests only for the rest of #512: the issue's two repro rows (a frame button tapped before the setting arrives) are now replayed through the real settings provider with a request that resolves late or fails, asserting on the exact body sent to the server.
 
 ## [0.35.1] - 2026-10-10
 
