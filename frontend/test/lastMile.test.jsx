@@ -15,7 +15,7 @@ import { Routes, Route } from 'react-router-dom';
 import { renderAsAdmin } from './helpers/render.jsx';
 import SettingsGeneral from '../src/pages/SettingsGeneral.jsx';
 import UserSettings from '../src/pages/UserSettings.jsx';
-import { api } from '../src/lib/api.js';
+import { api, SLOW_REQUEST_TIMEOUT_MS } from '../src/lib/api.js';
 import * as imageResize from '../src/lib/imageResize.js';
 
 afterEach(() => vi.restoreAllMocks());
@@ -162,7 +162,7 @@ describe('UserSettings', () => {
     // ⚠️ Deliberately unlike every other field on this form. A photo is picked from a system dialog
     // that has already felt like a commit, so leaving it pending behind a Save button is where people
     // lose it.
-    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/auth/users/u-care', { photo: 'data:image/png;base64,AAA' }));
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/auth/users/u-care', { photo: 'data:image/png;base64,AAA' }, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS }));
     expect(await screen.findByText('Photo saved ✓')).toBeInTheDocument();
   });
 

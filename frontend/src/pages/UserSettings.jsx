@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { api } from '../lib/api.js';
+import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Avatar from '../components/Avatar.jsx';
@@ -39,7 +39,7 @@ export default function UserSettings() {
     if (isNew) return;
     setPhotoStatus('saving');
     try {
-      await api.put(`/auth/users/${id}`, { photo });
+      await api.put(`/auth/users/${id}`, { photo }, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });
       if (id === me?.id) await refreshMe();
       setPhotoStatus('saved');
       setTimeout(() => setPhotoStatus(''), 2000);

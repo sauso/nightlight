@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { RefreshCw } from 'lucide-react';
-import { api } from '../lib/api.js';
+import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import Modal from './Modal.jsx';
 
@@ -68,7 +68,7 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
       // correction was showing a moment before — true for a time correction already, and it would have
       // been just as true for the new flag if this had not been fixed (plan review R3). Re-fetching the
       // normal route after the write is what keeps the overlay in force.
-      await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1`);
+      await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1`, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });
       const overlaid = await api.get(`/children/${childId}/sleep/${date}?detail=1`);
       onRecomputed?.(overlaid);
       setOpen(false);
