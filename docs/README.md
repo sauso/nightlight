@@ -41,7 +41,7 @@ A quick tour of the app's main screens.
 
 The home screen is a live grid of camera tiles. Each tile plays low-latency video and shows
 the camera's name, which child it's assigned to, a connection indicator, and controls for
-audio, fullscreen, picture-in-picture, and stream quality. Tiles can be dragged to reorder.
+audio, fullscreen, picture-in-picture, and stream quality. Tiles can be dragged to reorder (admin only, because the order picks the main camera for a child with more than one).
 
 On a phone, with the bottom tab bar:
 
