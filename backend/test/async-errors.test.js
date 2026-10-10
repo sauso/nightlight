@@ -261,15 +261,18 @@ describe('errorHandler over real HTTP', () => {
 
   test('an error mid-stream (headers sent, body unfinished) is delegated so the client sees a FAILED response, not a truncated "complete" one', async () => {
     const outcome = await new Promise((resolve) => {
-      http.get(`${base}/mid-stream`, (res) => {
+      const req = http.get(`${base}/mid-stream`, (res) => {
         res.on('data', () => {});
         res.on('end', () => resolve(res.complete ? 'complete' : 'incomplete'));
         res.on('error', () => resolve('errored'));
         res.on('aborted', () => resolve('aborted'));
         res.on('close', () => resolve(res.complete ? 'complete' : 'incomplete'));
-      }).on('error', () => resolve('errored'));
+      });
+      req.on('error', () => resolve('errored'));
+      // Bounded: a handler that neither finishes nor closes the response would otherwise hang the whole file.
+      setTimeout(() => { resolve('hung'); req.destroy(); }, 3000).unref();
     });
-    assert.notEqual(outcome, 'complete');
+    assert.ok(['aborted', 'errored', 'incomplete'].includes(outcome), `the client must see a failure, got: ${outcome}`);
   });
 
   test('delegation, unit level: headers sent + still open -> next(err); headers sent + ended -> not delegated; nothing sent -> answered', () => {
