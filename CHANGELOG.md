@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-10-10
+
 ### Added
 
 - **Docs: a "Where to put the camera" section in the README (#644, docs half).** It suggests a top-down view at about 45 degrees with the whole bed and the room entry in frame, says plainly that any position still works (just less reliably), and lists what to avoid (a flashing or flickering light in view of the bed, a bed zone that overlaps where a parent stands, a very small bed in the frame). It also says that moving a camera means repainting the bed zone and that nights before and after a move are not directly comparable. These are suggestions from one household's testing, not a measured result; the placement trial from the issue is still to do.
