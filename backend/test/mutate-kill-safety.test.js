@@ -20,6 +20,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import {
   buildTree, cleanupTrees, startHarness, runHarness, alive, waitDead, waitFor,
 } from './helpers/mutateFixture.js';
@@ -82,6 +84,9 @@ describe('#599 a run killed while a mutant is on disk', () => {
     const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8'));
     assert.equal(journal.file.split(/[\\/]/).join('/'), 'backend/src/slow.js');
     assert.ok(Buffer.from(journal.originalBase64, 'base64').equals(original), 'the journal does not hold the original bytes');
+    // #642: and a hash of the MUTATED bytes, which is what lets the next run tell the mutant from a later edit.
+    assert.equal(journal.mutatedSha256, createHash('sha256').update(fs.readFileSync(src)).digest('hex'),
+      'the journal does not carry the hash of the mutant that is on disk');
 
     // The harness dies with no chance to clean up (Windows: this is also what any kill of it looks like).
     run.child.kill('SIGKILL');
@@ -170,6 +175,95 @@ describe('#599 a run killed while a mutant is on disk', () => {
       }
     });
   }
+});
+
+// ---- #642 recovery must not overwrite a later edit ------------------------------------------------------
+// Windows cannot deliver SIGTERM to a handler, so these cases do not kill anything: they write the journal a
+// killed run would have left (a pid that is certainly dead, the saved original, the mutant's hash) next to a
+// file in the state under test, then start the next run. The files are fixture copies in a scratch tree, never
+// the repo's own source.
+const sha = (buf) => createHash('sha256').update(buf).digest('hex');
+const DEAD_PID = spawnSync(process.execPath, ['-e', '']).pid; // exited by the time spawnSync returns
+const ORIGINAL = Buffer.from(SLOW_SRC);
+const MUTANT = Buffer.from(SLOW_SRC.replace('return 1', 'return 2'));
+const EDIT = Buffer.from(`${MUTANT.toString()}// a developer edit made after the kill\n`);
+function leftBehind({ onDisk, journal = {} }) {
+  const dir = buildTree([SLOW_MUTANT], slowFiles);
+  const src = path.join(dir, 'backend/src/slow.js');
+  if (onDisk === null) fs.rmSync(src); else fs.writeFileSync(src, onDisk);
+  fs.writeFileSync(path.join(dir, JOURNAL), JSON.stringify({
+    pid: DEAD_PID, file: 'backend/src/slow.js', startedAt: '2026-10-10T00:00:00.000Z',
+    originalBase64: ORIGINAL.toString('base64'), mutatedSha256: sha(MUTANT), ...journal,
+  }));
+  return { dir, src, journalPath: path.join(dir, JOURNAL) };
+}
+const nextRun = (dir) => runHarness(dir, ['--only=no mutant has this label']);
+
+describe('#642 the journal restores only a file that still holds the mutant', () => {
+  test('a developer edit made after the kill is NOT overwritten: the run stops, names the file and leaves it (and the journal) alone', async () => {
+    const { dir, src, journalPath } = leftBehind({ onDisk: EDIT });
+    const res = await nextRun(dir);
+    assert.equal(res.code, 4, `${res.stdout}\n${res.stderr}`);
+    assert.ok(fs.readFileSync(src).equals(EDIT), 'the developer\'s edit was overwritten by the journal\'s original');
+    assert.match(res.stderr, /ABORT: backend[\\/]src[\\/]slow\.js was left mutated by a run that died/);
+    assert.match(res.stderr, /no longer matches the mutant the journal recorded/);
+    assert.match(res.stderr, /NOT overwriting/);
+    assert.doesNotMatch(res.stderr, /RECOVERED/);
+    assert.ok(fs.existsSync(journalPath), 'the journal (the only copy of the original bytes) was deleted');
+  });
+
+  test('another version of the file entirely (a different branch) is likewise left alone', async () => {
+    const other = Buffer.from('export function answer() {\n  return 3;\n}\n');
+    const { dir, src } = leftBehind({ onDisk: other });
+    const res = await nextRun(dir);
+    assert.equal(res.code, 4, `${res.stdout}\n${res.stderr}`);
+    assert.ok(fs.readFileSync(src).equals(other));
+  });
+
+  test('a file that is exactly the recorded mutant IS restored (the guard must not disable the recovery)', async () => {
+    const { dir, src, journalPath } = leftBehind({ onDisk: MUTANT });
+    const res = await nextRun(dir);
+    assert.ok(fs.readFileSync(src).equals(ORIGINAL), `${res.stdout}\n${res.stderr}`);
+    assert.match(res.stderr, /RECOVERED: backend[\\/]src[\\/]slow\.js .*restored it from the journal/);
+    assert.equal(fs.existsSync(journalPath), false);
+  });
+
+  test('a file already back to the original just drops the journal, whatever the hash says', async () => {
+    const { dir, src, journalPath } = leftBehind({ onDisk: ORIGINAL });
+    const res = await nextRun(dir);
+    assert.ok(fs.readFileSync(src).equals(ORIGINAL));
+    assert.match(res.stderr, /it was already intact/);
+    assert.equal(fs.existsSync(journalPath), false);
+  });
+
+  test('a file that has been deleted is not recreated from the journal', async () => {
+    const { dir, src, journalPath } = leftBehind({ onDisk: null });
+    const res = await nextRun(dir);
+    assert.equal(res.code, 4, `${res.stdout}\n${res.stderr}`);
+    assert.match(res.stderr, /the file no longer exists/);
+    assert.equal(fs.existsSync(src), false);
+    assert.ok(fs.existsSync(journalPath));
+  });
+
+  // A journal from before the hash existed. The conservative reading: act only when the file is exactly what a
+  // CURRENT catalogue entry makes of the saved original, and say that this is what was checked.
+  const legacy = { mutatedSha256: undefined };
+  test('a journal WITHOUT a hash still restores a file that is exactly a catalogue mutant of the original, and says how it knew', async () => {
+    const { dir, src } = leftBehind({ onDisk: MUTANT, journal: legacy });
+    const res = await nextRun(dir);
+    assert.ok(fs.readFileSync(src).equals(ORIGINAL), `${res.stdout}\n${res.stderr}`);
+    assert.match(res.stderr, /predates the mutant hash/);
+    assert.match(res.stderr, /RECOVERED/);
+  });
+
+  test('a journal WITHOUT a hash does not restore over a developer edit: it stops and says why', async () => {
+    const { dir, src, journalPath } = leftBehind({ onDisk: EDIT, journal: legacy });
+    const res = await nextRun(dir);
+    assert.equal(res.code, 4, `${res.stdout}\n${res.stderr}`);
+    assert.ok(fs.readFileSync(src).equals(EDIT), 'a hash-less journal overwrote the developer\'s edit');
+    assert.match(res.stderr, /predates the mutant hash/);
+    assert.ok(fs.existsSync(journalPath));
+  });
 });
 
 // ---- #597 line endings ---------------------------------------------------------------------------------

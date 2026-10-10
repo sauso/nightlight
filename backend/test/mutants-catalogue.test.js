@@ -65,6 +65,37 @@ const files = {
 };
 const check = (catalogue) => runHarness(buildTree(catalogue, files), ['--check']);
 
+describe('`expect` must be a value the script understands (#642)', () => {
+  // M-509-15 said "control", which the run loop did not know: a control that was KILLED did not void the run.
+  // Fixtures use values straight from the file, so the case that failed in the real catalogue is reproduced
+  // exactly, and `--check` (which the real-catalogue test above runs) is what rejects it.
+  test('every value the run knows is accepted', async () => {
+    const res = await check(['killed', 'survives', 'equivalent'].map((expect) => entry({ label: expect, expect })));
+    assert.equal(res.code, 0, `${res.stdout}\n${res.stderr}`);
+  });
+
+  test('"control" (the M-509-15 spelling), any other value and a missing one are each named and fail the check', async () => {
+    const noExpect = entry({ label: 'no expect' });
+    delete noExpect.expect;
+    const res = await check([entry({ label: 'spelled control', expect: 'control' }), entry({ label: 'typo', expect: 'kiled' }), noExpect, entry({ label: 'fine' })]);
+    assert.equal(res.code, 3, `${res.stdout}\n${res.stderr}`);
+    assert.match(res.stderr, /STALE: "spelled control" — its `expect` is "control"/);
+    assert.match(res.stderr, /STALE: "typo" — its `expect` is "kiled"/);
+    assert.match(res.stderr, /STALE: "no expect" — its `expect` is missing/);
+    assert.doesNotMatch(res.stderr, /"fine"/);
+    assert.match(res.stdout, /4 catalogue entries, 3 that would not apply/);
+  });
+
+  test('a real run refuses to start on such an entry, before it touches any file or runs any test', async () => {
+    const dir = buildTree([entry({ label: 'spelled control', expect: 'control' })], files);
+    const res = await runHarness(dir, []);
+    assert.equal(res.code, 3, `${res.stdout}\n${res.stderr}`);
+    assert.match(res.stderr, /ABORT: "spelled control" — its `expect` is "control"/);
+    assert.equal(fs.readFileSync(path.join(dir, 'backend/src/one.js'), 'utf8'), SRC);
+    assert.doesNotMatch(res.stdout, /KILLED|SURVIVED/);
+  });
+});
+
 describe('--check and namePattern (#604)', () => {
   test('patterns that select a test pass: a test name, a describe title, quote styles, a /regex/ form', async () => {
     const res = await check([

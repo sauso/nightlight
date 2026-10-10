@@ -12741,7 +12741,7 @@
     "file": "backend/src/lib/sleepAnalysis.js",
     "find": "THE MORNING WAKE MUST NOT DEPEND ON THE CLOCK.",
     "replace": "THE MORNING WAKE MUST NOT DEPEND ON THE CLOCK. (control)",
-    "expect": "control",
+    "expect": "survives",
     "tests": [
       "sleepAnalysis.test.js"
     ],
