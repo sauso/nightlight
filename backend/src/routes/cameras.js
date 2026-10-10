@@ -553,10 +553,21 @@ router.post('/:id/reboot', requireAuth, async (req, res) => {
 const snoozeStmt = db.prepare('UPDATE cameras SET alerts_snoozed_until = ?, alerts_snoozed_by = ? WHERE id = ?');
 router.post('/:id/snooze', requireAuth, (req, res) => {
   const actor = actorOf(req);
-  const cam = db.prepare('SELECT id, name FROM cameras WHERE id = ?').get(req.params.id);
+  const cam = db.prepare('SELECT id, name, alerts_snoozed_until FROM cameras WHERE id = ?').get(req.params.id);
   if (!cam) return res.status(404).json({ error: 'Camera not found' });
   const minutes = Math.max(0, Math.min(720, Math.round(Number(req.body?.minutes) || 0)));
   const until = minutes > 0 ? Date.now() + minutes * 60000 : null;
+  // ⚠️ AN UN-MUTE OF A CAMERA THAT IS NOT MUTED WRITES NOTHING (#552, PR #663 review, reproduced: 2,000 such
+  // un-mutes pushed another camera's silence row out of Camera history). That history is ONE 2,000-row cap
+  // shared by every camera (lib/cameraEvents.js), and this route is open to every signed-in user, so an
+  // un-mute that changes nothing must not write a row: otherwise one account could flood the cap and erase
+  // the record of who silenced the other cameras. Nothing changes and nothing is recorded; the answer is the
+  // same one a real un-mute gives (not muted: no time, no name). "Not muted" includes a silence that has run
+  // out: its stored time and name are left as they are, and both readers already treat them as ended
+  // (lib/detectSchedule.js compares the time with now; publicCamera nulls the name).
+  if (!until && !(cam.alerts_snoozed_until > Date.now())) {
+    return res.json({ ok: true, alerts_snoozed_until: null, alerts_snoozed_by: null });
+  }
   // An un-mute clears the name with the time: a stored name with no silence beside it is not shown
   // anyway (publicCamera), and leaving it would be a claim about a silence that has ended.
   const by = until ? (actor?.username ?? null) : null;
@@ -569,7 +580,11 @@ router.post('/:id/snooze', requireAuth, (req, res) => {
     logger.error(`[snooze] "${cam.name}": not applied, its Camera history row could not be written (${err.message})`);
     return res.status(500).json({ error: 'Could not change this camera\'s alerts right now. Nothing was changed; try again.' });
   }
-  // After the commit and best-effort: pruning is housekeeping the silence must not depend on.
+  // After the commit and best-effort: pruning is housekeeping the silence must not depend on. Pinned by
+  // who-did-it.test.js ("a silence prunes Camera history back to its cap"). Moving this call INTO the
+  // transaction, after the insert, is an equivalent mutant (PR #663 review), deliberately not chased:
+  // pruneCameraEvents swallows its own errors, so it cannot roll a silence back, and on success its deletes
+  // commit either way. It stays outside so that holds by construction, not by that try/catch.
   pruneCameraEvents();
   logger.info(`[snooze] "${cam.name}" alerts ${until ? `muted for ${minutes} min` : 'un-muted'}`);
   // `alerts_snoozed_by` is ADDED to the response; every key an open page already reads is still there.

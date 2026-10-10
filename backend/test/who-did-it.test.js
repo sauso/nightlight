@@ -11,7 +11,11 @@
 //       acted (actorOf runs before the await);
 //   C6  a self-chosen first name cannot impersonate: the row carries the admin-set username;
 //   C9  every key an open page already reads is still in each response;
-//   C10 the diagnostics bundle carries no username and no user id.
+//   C10 the diagnostics bundle carries no username and no user id;
+//   C11 an un-mute of a camera that is not muted writes nothing, so un-mutes cannot flood the shared cap and
+//       push another camera's silence row out (PR #663 review);
+//   C12 a silence prunes Camera history back to its cap after it commits (PR #663 review).
+// C5 is checked on /restart AND on /reboot.
 //
 // Faked: lib/transcoder.js and lib/onvif.js (neither is in test:core's coverage include list, so mock.module is
 // safe here; see backend-test-suite notes), so no ffmpeg and no camera is touched. A stand-in MediaMTX answers
@@ -290,6 +294,86 @@ test('★ C5: an account deleted while its restart is awaiting is still named, a
   const [r] = rows();
   assert.equal(r.actor_user_id, 'u-leaving');
   assert.equal(r.actor_username, 'renamed-now');
+});
+
+test('★ C5, the reboot: an account renamed, then deleted while its reboot is awaiting, is named as it was when it acted', async () => {
+  // The same shape as the restart case above, on /reboot (PR #663 review: the reboot's own "actorOf after the
+  // await" mutant survived without this). Rename after the token was minted, delete mid-await: read first,
+  // the row says 'reboot-renamed-now'; read late, only the token's stale claim is left.
+  makeUser(db, { id: 'u-reboot-leaving', username: 'reboot-claim-at-login', role: 'caregiver' });
+  const token = tokenFor({ id: 'u-reboot-leaving', username: 'reboot-claim-at-login', role: 'caregiver' });
+  db.prepare("UPDATE users SET username = 'reboot-renamed-now' WHERE id = 'u-reboot-leaving'").run();
+  let release;
+  let started;
+  const startedP = new Promise((r) => { started = r; });
+  fake.rebootCamera = () => { started(); return new Promise((r) => { release = r; }); };
+  const pending = post(`${REBOOTABLE}/reboot`, token);
+  await startedP;
+  db.prepare("DELETE FROM users WHERE id = 'u-reboot-leaving'").run();
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM sessions WHERE user_id = 'u-reboot-leaving'").get().c, 0, 'setup: gone');
+  release();
+  const res = await pending;
+  assert.equal(res.status, 200);
+  const [r] = rows();
+  assert.equal(r.detail, 'camera reboot requested (ONVIF)');
+  assert.equal(r.actor_user_id, 'u-reboot-leaving');
+  assert.equal(r.actor_username, 'reboot-renamed-now');
+});
+
+// --- an un-mute that changes nothing writes nothing (PR #663 review) -----------------------------------------
+
+describe('an un-mute of a camera that is not muted writes nothing', () => {
+  test('★ never muted, or muted and run out: 200, "not muted", no row, the camera row untouched', async () => {
+    const ranOut = Date.now() - 60_000;
+    db.prepare('UPDATE cameras SET alerts_snoozed_until = ?, alerts_snoozed_by = ? WHERE id = ?').run(ranOut, 'stale-login', REBOOTABLE);
+    for (const id of [CAM, REBOOTABLE]) {
+      const before_ = camRow(id);
+      const res = await post(`${id}/snooze`, carerToken, { minutes: 0 });
+      assert.equal(res.status, 200);
+      assert.deepEqual(res.body, { ok: true, alerts_snoozed_until: null, alerts_snoozed_by: null });
+      assert.deepEqual(camRow(id), before_, `${id}: the stored state did not change`);
+    }
+    assert.equal(rows().length, 0, 'no history row for an un-mute that changed nothing');
+  });
+
+  test('★ the flood: un-mutes of an un-muted camera cannot push another camera\'s silence out of the shared cap', async () => {
+    // Camera history keeps the newest 2,000 rows across EVERY camera (lib/cameraEvents.js, docs). Smaller form of
+    // the reviewer's reproduction (2,000 un-mutes): the silence row first, 1,990 other rows after it, then 15
+    // un-mutes of a camera that was never muted. Writing a row each would make 2,006 and prune the silence row.
+    assert.equal((await post(`${CAM}/snooze`, carerToken, { minutes: 720 })).status, 200);
+    const plant = db.prepare("INSERT INTO camera_events (camera_id, camera_name, type, detail) VALUES ('cam-elsewhere', 'Elsewhere', 'offline', 'filler')");
+    db.transaction(() => { for (let i = 0; i < 1990; i++) plant.run(); })();
+    for (let i = 0; i < 15; i++) {
+      assert.equal((await post(`${REBOOTABLE}/snooze`, carerToken, { minutes: 0 })).status, 200);
+    }
+    const r = rows();
+    assert.equal(r.length, 1991, 'nothing was added');
+    const mute = r.find((x) => x.camera_id === CAM);
+    assert.ok(mute, 'the silence row survived');
+    assert.deepEqual([mute.detail, mute.actor_username], ['muted for 720 min', 'carer-login']);
+    assert.ok(camRow(CAM).alerts_snoozed_until > Date.now(), 'and the camera is still muted');
+  });
+
+  test('the contrast: un-muting a camera that IS muted still records who did it', async () => {
+    db.prepare('UPDATE cameras SET alerts_snoozed_until = ?, alerts_snoozed_by = ? WHERE id = ?').run(Date.now() + 600_000, 'admin-login', CAM);
+    const res = await post(`${CAM}/snooze`, carerToken, { minutes: 0 });
+    assert.equal(res.status, 200);
+    assert.deepEqual(camRow(), { alerts_snoozed_until: null, alerts_snoozed_by: null });
+    const r = rows();
+    assert.equal(r.length, 1);
+    assert.deepEqual([r[0].detail, r[0].actor_username], ['un-muted', 'carer-login']);
+  });
+});
+
+test('★ a silence prunes Camera history back to its cap, after the commit, keeping its own row', async () => {
+  // PR #663 review: deleting the route's pruneCameraEvents() call survived. 2,005 rows already there (more than
+  // the documented 2,000), then one silence: the table is back at 2,000 and the newest row is the silence's.
+  const plant = db.prepare("INSERT INTO camera_events (camera_id, camera_name, type, detail) VALUES ('cam-elsewhere', 'Elsewhere', 'offline', 'filler')");
+  db.transaction(() => { for (let i = 0; i < 2005; i++) plant.run(); })();
+  assert.equal((await post(`${CAM}/snooze`, carerToken, { minutes: 30 })).status, 200);
+  const r = rows();
+  assert.equal(r.length, 2000);
+  assert.deepEqual([r.at(-1).camera_id, r.at(-1).detail, r.at(-1).actor_username], [CAM, 'muted for 30 min', 'carer-login']);
 });
 
 // --- C6 ---------------------------------------------------------------------------------------------------------

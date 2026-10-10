@@ -59,11 +59,13 @@ not change what was recorded.
   <username> · tap to un-mute`, and the muted-bell time in the tile's strip says the same on hover. The
   name goes away when the silence ends, whether it ran out or someone un-muted it.
 - **In Camera history** (Settings → Logs, admin only): one row for each silence (`muted for 30 min`),
-  each un-mute (`un-muted`), each stream restart (`stream restarted manually`, or `stream restart
+  each un-mute of a camera that was muted (`un-muted`), each stream restart (`stream restarted manually`, or `stream restart
   failed`) and each camera reboot (`camera reboot requested (ONVIF)`, or `…; the camera did not
   confirm`), each followed by `by <username>`. Silences are listed as **Silence alerts**. A silence that
-  simply runs out adds no row: its length is in the row that started it. Rows the system writes itself
-  (a watchdog restart, a camera going offline or coming back) have no name.
+  simply runs out adds no row: its length is in the row that started it. An un-mute of a camera that is
+  not muted (never was, or its silence already ran out) changes nothing and adds no row either, so
+  repeating it cannot push other cameras' rows out of the shared history (below). Rows the system writes
+  itself (a watchdog restart, a camera going offline or coming back) have no name.
 
 **The difference people get wrong: a silence needs its history row, a restart does not.**
 
@@ -76,10 +78,16 @@ A failed restart or reboot is recorded too, because a failure can still have act
 stopped the old stream, and a camera may accept a reboot and drop the connection before it answers.
 
 Known limits: Camera history keeps at most 2,000 rows and 30 days, shared by every camera, so an old
-silence can be pruned away, and **Clear log** removes every row. Silences, restarts and reboots from
-before this was recorded show no name. The diagnostics bundle (Settings → Logs), which is meant to be
-attached to a public issue, keeps only whether each history row was a *person* or the *system*, never
-the username.
+silence can be pruned away (by age, or by enough newer rows from any camera), and **Clear log** removes
+every row. Silences, restarts and reboots from before this was recorded show no name. The diagnostics
+bundle (Settings → Logs), which is meant to be attached to a public issue, keeps only whether each
+history row was a *person* or the *system*, never the username.
+
+**Going back to an older version is not safe for privacy.** An older version's diagnostics bundle
+includes Camera history as stored, so after a downgrade it carries the username and account id of
+everyone this version recorded, for as long as those rows are kept (up to 30 days). If you downgrade
+and then share a diagnostics bundle, first clear Camera history (**Clear log**) or remove those fields
+from the file.
 
 ## Related
 

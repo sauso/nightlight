@@ -902,8 +902,14 @@ if (!camerasColumns.includes('alerts_snoozed_until')) {
 // every row that already exists: nothing before this recorded a person, and none may be invented (an old
 // restart could have been a person or the watchdog, and the history cannot say which). Each column has its
 // own guard, so no group can be skipped half way; the transaction around this whole section is what makes
-// the set atomic (see the top of this file). Downgrade-safe: older code names the columns it inserts, so an
-// extra nullable column is invisible to it.
+// the set atomic (see the top of this file). Downgrade-safe for the SCHEMA: older code names the columns it
+// inserts, so an extra nullable column is invisible to it.
+//
+// ⚠️ NOT downgrade-safe for PRIVACY (PR #663 review; KNOWN LIMIT, docs/camera-controls.md). An older version's
+// diagnostics bundle sends Camera history as a SELECT * (getRecentEvents), with no person/system reduction,
+// so after a downgrade it carries actor_user_id and actor_username for every row this version wrote, until
+// those rows age out (up to 30 days) or Camera history is cleared. Nothing here can prevent that: the old
+// code is what runs.
 //
 // camera_events: the actor of a person-caused event (a silence, a restart, a reboot); NULL = the system.
 const cameraEventsColumns = db.prepare('PRAGMA table_info(camera_events)').all().map((c) => c.name);

@@ -1017,6 +1017,35 @@ test('C7: C saves ONLY a note: now C; a reason alone, and the flag either way, c
   assert.deepEqual(answeredBy(), ['u-parent-c', 'parent-c-login'], 'a note of only spaces is not an answer');
 });
 
+// Each kind of time on its OWN, so dropping any one of them from the route's rule fails a test (PR #663 review:
+// removing `inBed != null` or `onset != null` survived, because every other test also sent a wake or a note).
+test('C7: an in-bed time on its own is an answer', async () => {
+  await putAs(tokenA, { note: 'first' });
+  const res = await putAs(tokenB, { true_in_bed_local: '19:20' });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.deepEqual(answeredBy(), ['u-parent-b', 'parent-b-login']);
+});
+
+test('C7: an asleep time on its own is an answer', async () => {
+  await putAs(tokenA, { note: 'first' });
+  const res = await putAs(tokenB, { true_onset_local: '19:40' });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.deepEqual(answeredBy(), ['u-parent-b', 'parent-b-login']);
+});
+
+test('C7: an event-answer map that only CLEARS (every value null) is not an answer', async () => {
+  // Null means "not answering" in this route, in the verdict and reason maps as everywhere else, so a save
+  // that only takes a verdict back keeps the stored name (the same rule as an empty-only save; README).
+  // PR #663 review: widening the check to "the map has any key" survived without this.
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(19, 50)));
+  setTransitionVerdict(id, 'wrong');
+  await putAs(tokenA, { note: 'first' });
+  const res = await putAs(tokenB, { verdicts: { [id]: null }, reasons: { [id]: null } });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(txRow(id).verdict, null, 'setup: the clear itself was saved');
+  assert.deepEqual(answeredBy(), ['u-parent-a', 'parent-a-login']);
+});
+
 test('C7: a frame named instead of a typed time is an answer', async () => {
   const id = layTransition(TRANSITION.OUT_OF_BED, '2026-07-01 19:52:37');
   await putAs(tokenA, { note: 'first' });

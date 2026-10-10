@@ -236,7 +236,10 @@ describe('POST /api/cameras/:id/snooze: at most 12 hours, whole minutes, zero or
   ];
   for (const [sent, minutes] of CASES) {
     test(`minutes = ${JSON.stringify(sent)} mutes for ${minutes === null ? 'nothing' : `${minutes} min`}`, async () => {
-      db.prepare("UPDATE cameras SET alerts_snoozed_until = 1 WHERE id = 'cam-1'").run();
+      // A camera that IS muted (an hour left), so every "nothing" case is a real un-mute. Since #552 an un-mute
+      // of a camera that is not muted writes nothing at all (who-did-it.test.js), so an expired value planted
+      // here, as this used to, would stay in the database while the answer says null (not muted).
+      db.prepare("UPDATE cameras SET alerts_snoozed_until = ? WHERE id = 'cam-1'").run(Date.now() + 3_600_000);
       const t0 = Date.now();
       const res = await api('/api/cameras/cam-1/snooze', { method: 'POST', token: caregiverToken, body: sent === undefined ? {} : { minutes: sent } });
       const t1 = Date.now();

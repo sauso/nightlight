@@ -13999,5 +13999,82 @@
       "MorningReview.test.jsx"
     ],
     "namePattern": "no \"Answered by\" line at all"
+  },
+  {
+    "label": "#552 PR2 M23: reboot reads the actor AFTER the await (an account renamed then deleted mid-reboot is named by its stale claim)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'camera reboot requested (ONVIF)', actor);",
+    "replace": "recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'camera reboot requested (ONVIF)', actorOf(req));",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "C5, the reboot"
+  },
+  {
+    "label": "#552 PR2 M24: an in-bed time no longer counts as an answer",
+    "file": "backend/src/routes/children.js",
+    "find": "const answered = onset != null || wake != null || inBed != null || typeof nobodyInBed === 'boolean'",
+    "replace": "const answered = onset != null || wake != null || typeof nobodyInBed === 'boolean'",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ],
+    "namePattern": "an in-bed time on its own"
+  },
+  {
+    "label": "#552 PR2 M25: an asleep time no longer counts as an answer",
+    "file": "backend/src/routes/children.js",
+    "find": "const answered = onset != null || wake != null || inBed != null || typeof nobodyInBed === 'boolean'",
+    "replace": "const answered = wake != null || inBed != null || typeof nobodyInBed === 'boolean'",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ],
+    "namePattern": "an asleep time on its own"
+  },
+  {
+    "label": "#552 PR2 M26: an event-answer map that only clears (all null) counts as an answer",
+    "file": "backend/src/routes/children.js",
+    "find": "Object.values(m).some((v) => v != null)",
+    "replace": "Object.keys(m).length > 0",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ],
+    "namePattern": "only CLEARS"
+  },
+  {
+    "label": "#552 PR2 M27: an un-mute of an un-muted camera writes a row again (one account can flood the shared 2,000-row cap)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "if (!until && !(cam.alerts_snoozed_until > Date.now())) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "the flood"
+  },
+  {
+    "label": "#552 PR2 M28: every un-mute is treated as a no-op, a real one included",
+    "file": "backend/src/routes/cameras.js",
+    "find": "if (!until && !(cam.alerts_snoozed_until > Date.now())) {",
+    "replace": "if (!until) {",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "IS muted still records"
+  },
+  {
+    "label": "#552 PR2 M29: the snooze no longer prunes Camera history after its commit",
+    "file": "backend/src/routes/cameras.js",
+    "find": "  pruneCameraEvents();\r\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "prunes Camera history back to its cap"
   }
 ]
