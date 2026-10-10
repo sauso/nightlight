@@ -263,6 +263,32 @@ You can always add it again.
 **Assigning to a child** — use the "Assigned to" dropdown on each camera. (This is just for
 grouping the dashboard; any signed-in user can change it.)
 
+### Where to put the camera
+
+Nightlight works from **any** camera position: put the camera wherever it fits and you will still get
+sleep tracking and motion alerts. A good position makes them **more reliable**, and nothing more than that.
+These are suggestions from testing in one household, not guarantees, and not a measured result (a proper
+comparison of positions has not been done yet).
+
+- **The suggested view:** looking down at the bed from above, at about **45 degrees**, the way most baby
+  monitors are mounted. Have the **whole bed in frame**, and the **doorway or room entry in view as well**
+  if you can: seeing who comes in and goes out makes an entry or exit easier to tell from other movement.
+- **What to avoid:**
+  - **A light that flashes, flickers or changes brightness in view of the bed** (a blinking charger or
+    night light, a screen, a light that cycles). Every change lights up pixels in the bed, which can break
+    the empty-bed check into short pieces, and a correct morning wake can then read wrong or be missed.
+    Cover or move the light, or point the camera so it is out of frame.
+  - **A bed zone that overlaps where a parent stands or leans** (for example a camera so low or side-on
+    that a person at the bedside covers the bed in the picture). Their movement then counts as movement in
+    the bed.
+  - **The bed being a tiny part of the frame.** With few pixels on the bed, a real movement is a smaller
+    share of the zone and is easier to miss. Fill the frame with the bed, within reason.
+- **If you move a camera, paint the bed zone again.** The bed zone (the area the camera watches for
+  movement in the bed) is drawn on one particular picture, so after a move it no longer sits on the bed.
+  Nothing checks that the zone is on the bed, so look at it over a live picture after any move. Sleep
+  nights before and after a move are **not directly comparable**: the zone and the camera's idea of a quiet
+  room both change, so a difference in the figures may come from the move, not from the sleep.
+
 ## Sleep tracking
 
 Nightlight can estimate each child's overnight sleep from what their cameras already see and
