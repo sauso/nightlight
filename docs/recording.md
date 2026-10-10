@@ -268,6 +268,12 @@ Video is larger and burstier than the database, so on Unraid you may prefer to k
    (e.g. `/mnt/user/nightlight-clips`).
 2. Set the environment variable **`CLIPS_DIR=/recordings`**.
 
+`CLIPS_DIR` accepts an absolute container path with or without a trailing slash (`/recordings` and
+`/recordings/` are the same folder). A relative path is resolved against the server's working directory,
+which is rarely what you want, so use an absolute one. Leaving it blank (or whitespace) means "unset": clips
+go under `<data dir>/clips`. Before this was fixed (#545), a trailing slash made clips unplayable and
+undeletable, so if you ever entered one, update and restart: nothing else is needed.
+
 Both are exposed as optional fields in the Unraid template (**Recordings Directory** and **CLIPS_DIR**,
 under *Advanced view*). With Docker Compose, uncomment the commented `recordings` volume line in
 `docker-compose.yml` and set `CLIPS_DIR` in your `.env` — see the comments in `.env.example`. With a
