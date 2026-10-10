@@ -569,6 +569,9 @@ router.put('/:id/review/:date', (req, res) => {
   // same "null is not answering" rule as the rest of this route: the review page sends explicit nulls for
   // what it is not answering, and re-sends the stored note and verdicts on every save, so re-saving someone
   // else's answers unchanged does count as answering them (the person has just confirmed them).
+  // ⚠️ KNOWN LIMIT (README, test "A answers with times, B dismisses"): a save that only EMPTIES fields is not
+  // an answer either, so it keeps the stored name although it removed that person's times. Counting a clear
+  // as an answer would contradict the owner's list above; the clear itself is still saved.
   const hasText = (v) => typeof v === 'string' && v.trim() !== '';
   const anyGiven = (m) => m != null && typeof m === 'object' && Object.values(m).some((v) => v != null);
   const answered = onset != null || wake != null || inBed != null || typeof nobodyInBed === 'boolean'
