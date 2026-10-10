@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Zap, AudioLines, Play } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
+import { useHomeTime } from '../lib/useHomeTime.js';
 import ClipPlayerModal from './ClipPlayerModal.jsx';
 
 // A single-card alert list (matching the design mockup): one row per alert — snapshot thumbnail,
@@ -31,6 +32,9 @@ export default function AlertList({ alerts, onChanged, title }) {
   // (some tests), nobody is signed in, so nobody is an admin.
   const { user } = useAuth() || {};
   const isAdmin = user?.role === 'admin';
+  // The row shows an age ("3h ago", the same wherever you are); the tooltip carries the clock time, in
+  // HOME time with a zone label when this device is elsewhere (#561).
+  const home = useHomeTime();
 
   if (!alerts || alerts.length === 0) return null;
   return (
@@ -73,7 +77,7 @@ export default function AlertList({ alerts, onChanged, title }) {
                   {t.label}{ev.detail ? ` · ${ev.detail}` : ''}
                 </div>
               </div>
-              <time className="alert-item__time" dateTime={when.toISOString()} title={when.toLocaleString()}>
+              <time className="alert-item__time" dateTime={when.toISOString()} title={home.dateTime(when)}>
                 {relTime(when)}
               </time>
             </div>

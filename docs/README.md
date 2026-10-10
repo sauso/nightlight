@@ -68,7 +68,9 @@ two-way-audio credentials here.
 ## Settings
 
 Admins can theme the app (name, colors, font), set the timezone and temperature unit, and
-connect an MQTT broker to show room temperature/humidity on each tile.
+connect an MQTT broker to show room temperature/humidity on each tile. The timezone (default
+`UTC`) is the **home** time every time in the app is shown in; a zone label appears next to a time only
+when the device is in a different zone (see [Times and your timezone](../README.md#times-and-your-timezone)).
 
 ![The settings screen on a phone](screenshots/settings-mobile.png)
 

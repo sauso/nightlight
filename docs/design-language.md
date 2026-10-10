@@ -438,6 +438,11 @@ Identifiers deliberately **not** renamed: `detect_zone`, `.crib__*`, `cribActive
 `CribZonePicker.jsx` — don't "fix" it without accepting the schema/API churn.
 
 Other rules:
+- **Times are home time.** Format every time through `lib/homeTime.js` / `useHomeTime()` (the zone is
+  `settings.timezone`), never `toLocaleString()` or `getHours()` on the device. When the device is in a
+  different zone the formatter appends the short zone name ("7:00 pm GMT-7") as plain text in the same run
+  as the time — no badge, no separate colour; when it is the same zone there is nothing to add. Locale and
+  12/24-hour stay the device's own (#561).
 - Sentence case for labels and buttons; uppercase only via `.section-title`.
 - A button says what happens ("Save changes", "Add camera"), and the result confirms it.
 - Errors say what went wrong and what to do. **User-facing API errors must be 4xx, not 5xx** — the

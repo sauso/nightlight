@@ -297,7 +297,10 @@ Turn on **Only alert during set hours** and set a **From** and **To** time.
 - **Overnight windows work.** From 20:00 to 07:00 is one window that crosses midnight, not an empty one.
 - **The window is shared by motion and sound** — there is not one schedule each.
 - **Times are in the app timezone** (**Settings → General**), not the browser's or the camera's. On a
-  fresh install that timezone is **UTC** until you set it, so set it before relying on a schedule.
+  fresh install that timezone is **UTC** until you set it, so set it before relying on a schedule. The
+  times the app *shows* (alert and history lists, clips, recordings, the time a camera's alerts are
+  silenced until) are in that same zone, with a zone label added only when the device you are looking
+  at is in a different one; see [Times and your timezone](../README.md#times-and-your-timezone).
 - ⚠️ **It suppresses alerts, not detection.** Outside the window there is no push *and* no in-app
   alert, but the camera is still watched: **sleep tracking keeps recording normally**, so a night is
   unaffected by the schedule. This is the opposite of turning motion or sound detection off, which
