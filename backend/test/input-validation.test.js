@@ -203,7 +203,9 @@ describe('photos: an image data URL, within the cap', () => {
     const html = 'data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==';
     const childCount = () => db.prepare('SELECT COUNT(*) AS c FROM children').get().c;
     const before = childCount();
-    const child = await api('/api/children', { method: 'POST', token: caregiverToken, body: { name: 'A child', photo: html } });
+    // An ADMIN token: adding a child is admin-only since #542, and a caregiver's 403 would pass this
+    // assertion without the photo check ever running.
+    const child = await api('/api/children', { method: 'POST', token: adminToken, body: { name: 'A child', photo: html } });
     assert.equal(child.status, 400);
     assert.equal(childCount(), before, 'the child was created anyway');
 
@@ -223,7 +225,7 @@ describe('photos: an image data URL, within the cap', () => {
 
 describe('POST /api/cameras/:id/snooze: at most 12 hours, whole minutes, zero or less un-mutes', () => {
   // MUTANT THIS KILLS (#563): removing the 720-minute cap survived the whole suite. Any signed-in caregiver
-  // can mute ALL of a camera's alerts with this route (route-permissions.test.js, pending #552), so the cap
+  // can mute ALL of a camera's alerts with this route (route-permissions.test.js; owner decision 2026-10-10), so the cap
   // is what bounds a forgotten or mistaken mute to one night instead of forever.
   before(() => { makeCamera(db, { id: 'cam-1', name: 'Snooze Cam' }); });
   const stored = () => db.prepare("SELECT alerts_snoozed_until AS v FROM cameras WHERE id = 'cam-1'").get().v;

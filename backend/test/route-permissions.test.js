@@ -37,10 +37,13 @@
 //     which never passes through Express and so is not in this table at all.
 //   - Decisions made INSIDE a handler are not gates and are not pinned: DELETE /api/auth/sessions/:id
 //     (your own session, or any if admin), GET /api/children/:id/sleep/:date?store=1 (admin-only store),
-//     and the admin-shaped responses of GET /api/cameras, PUT /api/cameras/:id/assign and GET /api/settings.
-//     Most have their own tests (auth-routes.test.js, recompute-night.test.js, cameras-assign-exposure.test.js,
-//     settings-exposure.test.js); the admin-vs-caregiver shape of the GET /api/cameras LIST has none that
-//     was found when this file was written (2026-10-09).
+//     PUT /api/children/:id (a caregiver may change a child's name, birthday, colour and photo, but not
+//     track_sleep or the sleep window: #542, children-role-fields.test.js), and the admin-shaped responses
+//     of GET /api/cameras and GET /api/settings. Most have their own tests (auth-routes.test.js,
+//     recompute-night.test.js, settings-exposure.test.js); the admin-vs-caregiver shape of the GET
+//     /api/cameras LIST has none that was found when this file was written (2026-10-09). PUT
+//     /api/cameras/:id/assign used to be listed here for its response shape; it is an admin gate now
+//     (#552) and pinned below like any other.
 //   - Rate limiters in front of routes are not pinned (login-rate-limit.test.js covers them).
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -85,13 +88,10 @@ const MEDIA = 'media'; //              requireAuthQueryOrHeader: a session heade
 const SIGNED_IN = 'signed-in'; //      requireAuth: a session token in the header, ANY role (caregiver included)
 const ADMIN = 'signed-in+admin'; //    requireAuth, then requireAdmin
 
-// PENDING OWNER DECISION (#538, #542, #552). These routes are reachable by every signed-in caregiver today,
-// and the owner has not yet decided whether they should be. They are pinned AS THEY ARE TODAY, on purpose:
-// this file must not change a permission, and pinning current behaviour is what makes the eventual W5
-// decision land as a deliberate edit of these entries instead of an accident in some other PR. The issue
-// number says where the question is being decided; remove the marker when it is.
-const pending = (issue, gate) => ({ gate, pending: issue });
-const gateOf = (entry) => (typeof entry === 'string' ? entry : entry.gate);
+// HISTORY. When this file landed (#563), sixteen routes were pinned at their behaviour of the day and marked
+// "pending owner decision" (#538, #542, #552). The owner decided on 2026-10-10: a caregiver can watch and act
+// in the moment, but cannot destroy or reconfigure. The entries below are that decision; each one that a
+// caregiver can still reach says why on its own line.
 
 const ROUTE_GATES = {
   // /api/auth — the login screen has to work before anyone can sign in, so its first five are public. Each
@@ -119,48 +119,48 @@ const ROUTE_GATES = {
   'DELETE /api/auth/users/:id/mfa': ADMIN,
   'DELETE /api/auth/users/:id': ADMIN,
 
-  // /api/children — `router.use(requireAuth)` gates the whole router; only delete adds requireAdmin.
+  // /api/children — `router.use(requireAuth)` gates the whole router; add and delete add requireAdmin.
   'GET /api/children': SIGNED_IN,
-  'POST /api/children': pending('#542', SIGNED_IN), //               a caregiver can create a child
-  'PUT /api/children/:id': pending('#542', SIGNED_IN), //            ...and switch its sleep tracking off
+  'POST /api/children': ADMIN, //                        #542: a new child starts with sleep tracking on
+  'PUT /api/children/:id': SIGNED_IN, //                 name/colour/photo; tracking + window refused in the handler (#542)
   'GET /api/children/:id/sleep/live': SIGNED_IN,
   'GET /api/children/:id/sleep/insights': SIGNED_IN,
   'GET /api/children/:id/sleep': SIGNED_IN,
   'GET /api/children/:id/sleep/:date': SIGNED_IN,
   'GET /api/children/:id/review/pending': SIGNED_IN,
   'GET /api/children/:id/review/:date': SIGNED_IN,
-  'PUT /api/children/:id/review/:date': pending('#542', SIGNED_IN), // saves the morning review
-  'DELETE /api/children/:id': pending('#552', ADMIN), //             the admin-only side of #552's "align delete rights"
+  'PUT /api/children/:id/review/:date': SIGNED_IN, //    saving the morning review is acting in the moment (owner)
+  'DELETE /api/children/:id': ADMIN, //                  deletes the child's media too
 
   // /api/cameras — four media routes come BEFORE `router.use(requireAuth)` so an <img>/<video> can load
   // them with ?token=; everything after that line needs a session.
   'GET /api/cameras/alerts/:id/snapshot': MEDIA,
   'GET /api/cameras/bed-transitions/:id/snapshot': MEDIA,
   'GET /api/cameras/alerts/:id/clip': MEDIA,
-  'GET /api/cameras/:id/snapshot': pending('#552', MEDIA), //         spawns an ffmpeg per request, uncapped
+  'GET /api/cameras/:id/snapshot': MEDIA, //                   the bed-zone picker's still; watching (owner). Spawn cap: #552
   'POST /api/cameras/onvif-probe': ADMIN,
   'POST /api/cameras/probe-report': ADMIN,
-  'POST /api/cameras/:id/record/start': pending('#552', SIGNED_IN),
-  'POST /api/cameras/:id/record/stop': pending('#552', SIGNED_IN),
-  'POST /api/cameras/:id/ptz/nudge': pending('#552', SIGNED_IN),
-  'POST /api/cameras/:id/restart': pending('#552', SIGNED_IN), //     restarts the stream for every viewer
-  'POST /api/cameras/:id/reboot': pending('#552', SIGNED_IN), //      power-cycles the camera
-  'POST /api/cameras/:id/snooze': pending('#552', SIGNED_IN), //      mutes all of a camera's alerts, up to 12 h
-  'GET /api/cameras': SIGNED_IN, //                                   admin sees more fields (see header)
+  'POST /api/cameras/:id/record/start': SIGNED_IN, //           capturing a moment is acting in it (owner)
+  'POST /api/cameras/:id/record/stop': SIGNED_IN,
+  'POST /api/cameras/:id/ptz/nudge': SIGNED_IN, //              moving the camera to see the child (owner)
+  'POST /api/cameras/:id/restart': SIGNED_IN, //                a recovery action for every viewer (owner)
+  'POST /api/cameras/:id/reboot': SIGNED_IN, //                 ditto, heavier; ONVIF cameras only (owner)
+  'POST /api/cameras/:id/snooze': SIGNED_IN, //                 mutes a camera's alerts, capped at 12 h (owner)
+  'GET /api/cameras': SIGNED_IN, //                             admin sees more fields (see header)
   'GET /api/cameras/alerts': SIGNED_IN,
-  'DELETE /api/cameras/alerts': ADMIN, //                             the whole alert history
-  'DELETE /api/cameras/alerts/:id/clip': pending('#538', SIGNED_IN), // one alert's clip, irreversibly
+  'DELETE /api/cameras/alerts': ADMIN, //                       the whole alert history
+  'DELETE /api/cameras/alerts/:id/clip': ADMIN, //              #538: one alert's clip, irreversibly
   'GET /api/cameras/clips': SIGNED_IN,
   'GET /api/cameras/:id/sensor-history': SIGNED_IN,
   'GET /api/cameras/:id/activity-history': SIGNED_IN,
   'POST /api/cameras/clips/delete': ADMIN,
-  'PUT /api/cameras/reorder': pending('#552', SIGNED_IN),
+  'PUT /api/cameras/reorder': ADMIN, //                         #552: sort_order picks the scoring, timelapse and review camera
   'POST /api/cameras/verify-talk': ADMIN,
   'POST /api/cameras': ADMIN,
   'PUT /api/cameras/:id': ADMIN,
   'PUT /api/cameras/:id/enabled': ADMIN,
   'PUT /api/cameras/:id/detection': ADMIN,
-  'PUT /api/cameras/:id/assign': pending('#552', SIGNED_IN),
+  'PUT /api/cameras/:id/assign': ADMIN, //                      #552: unassigning stops tracking, like track_sleep off
   'DELETE /api/cameras/:id': ADMIN,
 
   'GET /api/settings': OPTIONAL, //          the public half feeds the login screen; admins get the rest
@@ -198,11 +198,11 @@ const ROUTE_GATES = {
   'GET /api/timelapses/child/:childId': SIGNED_IN,
   'GET /api/timelapses/:id/video': MEDIA,
   'GET /api/timelapses/:id/thumb': MEDIA,
-  'DELETE /api/timelapses/:id': pending('#552', ADMIN), //            admin-only, unlike a recording
+  'DELETE /api/timelapses/:id': ADMIN, //               a keepsake that cannot be rebuilt
   'GET /api/recordings/child/:childId': SIGNED_IN,
   'GET /api/recordings/:id/video': MEDIA,
   'GET /api/recordings/:id/thumb': MEDIA,
-  'DELETE /api/recordings/:id': pending('#552', SIGNED_IN), //        any signed-in user, unlike a timelapse
+  'DELETE /api/recordings/:id': ADMIN, //               #552: a manual recording or a wake clip; no retention for the former
 
   'GET /manifest.webmanifest': PUBLIC, //    the PWA manifest; a browser fetches it without credentials
 };
@@ -397,15 +397,13 @@ describe('the pin', () => {
       if (seen.has(r.key)) problems.push(`REGISTERED TWICE: ${r.key}; the pin cannot say which gate answers it ${detail}`);
       seen.add(r.key);
       if (!Object.hasOwn(ROUTE_GATES, r.key)) problems.push(`NEW ROUTE, not pinned: '${r.key}': '${actual}' ${detail}`);
-      else if (gateOf(ROUTE_GATES[r.key]) !== actual) {
-        problems.push(`GATE CHANGED: ${r.key} is pinned '${gateOf(ROUTE_GATES[r.key])}' but is now '${actual}' ${detail}`);
+      else if (ROUTE_GATES[r.key] !== actual) {
+        problems.push(`GATE CHANGED: ${r.key} is pinned '${ROUTE_GATES[r.key]}' but is now '${actual}' ${detail}`);
       }
     }
     for (const key of Object.keys(ROUTE_GATES)) if (!seen.has(key)) problems.push(`GONE: ${key} is pinned but no router answers it`);
     assert.deepEqual(problems, [], `\n${problems.join('\n')}\n\n${HOW_TO_UPDATE}`);
-    const pend = Object.entries(ROUTE_GATES).filter(([, e]) => typeof e !== 'string');
-    t.diagnostic(`${ROUTES.length} routes pinned; ${Object.values(ROUTE_GATES).filter((e) => gateOf(e) === ADMIN).length} admin-only; ` +
-      `${pend.length} awaiting an owner decision (${[...new Set(pend.map(([, e]) => e.pending))].join(', ')})`);
+    t.diagnostic(`${ROUTES.length} routes pinned; ${Object.values(ROUTE_GATES).filter((e) => e === ADMIN).length} admin-only`);
   });
 });
 
@@ -426,8 +424,7 @@ describe('the real routers refuse who the pin says', () => {
   function targets(wanted) {
     const out = [];
     const problems = [];
-    for (const [key, entry] of Object.entries(ROUTE_GATES)) {
-      const gate = gateOf(entry);
+    for (const [key, gate] of Object.entries(ROUTE_GATES)) {
       if (!wanted(gate)) continue;
       const { method, fullPath } = splitKey(key);
       const where = locate(fullPath);
@@ -483,7 +480,7 @@ describe('the real routers refuse who the pin says', () => {
 
   test("a caregiver: requireAdmin's 403 on every route the pin says is admin-only", async () => {
     const { out, problems } = targets((g) => g === ADMIN);
-    assert.equal(out.length + problems.length, Object.values(ROUTE_GATES).filter((e) => gateOf(e) === ADMIN).length);
+    assert.equal(out.length + problems.length, Object.values(ROUTE_GATES).filter((e) => e === ADMIN).length);
     await expectAll(out, problems, { token: caregiverToken }, (res) => (
       res.status === 403 && res.body?.error === 'Admin access required' ? null : "expected requireAdmin's 403 for a caregiver"
     ));
@@ -519,8 +516,8 @@ describe('the gates admit who the pin says', () => {
       [ADMIN]: { token: adminToken },
     };
     for (const { key, method, path: p } of probes) {
-      const who = CALLER[gateOf(ROUTE_GATES[key])];
-      if (!who) { problems.push(`${key}: pinned gate '${gateOf(ROUTE_GATES[key])}' has no caller defined here`); continue; }
+      const who = CALLER[ROUTE_GATES[key]];
+      if (!who) { problems.push(`${key}: pinned gate '${ROUTE_GATES[key]}' has no caller defined here`); continue; }
       const url = `${probeBase}${p}${who.query ? `?token=${who.query}` : ''}`;
       const res = await call(url, { method: method.toUpperCase(), token: who.token });
       if (res.status !== 200 || res.body?.reached !== key) problems.push(`${key}: the gate did not admit ${JSON.stringify(Object.keys(who))} (got ${res.status} ${JSON.stringify(res.body)})`);

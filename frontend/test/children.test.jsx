@@ -81,7 +81,28 @@ describe('the Children tab', () => {
 
   test('with no children it says so instead of rendering an empty page', () => {
     renderAsAdmin(<Children />, { kids: [], cameras: [] });
-    expect(screen.getByText(/No children yet/)).toBeTruthy();
+    expect(screen.getByText('No children yet. Add one to start grouping cameras.')).toBeTruthy();
+  });
+
+  test('★ only an admin gets Add child; a caregiver is told an admin can add one (#542)', async () => {
+    // Adding a child is admin-only on the server; a button that always ends in a refusal reads as a
+    // broken app. Both roles, both with and without children.
+    const { user, unmount } = renderAsAdmin(
+      <Routes><Route path="/" element={<Children />} /><Route path="/children/new" element={<div>add form</div>} /></Routes>,
+      { kids: KIDS, cameras: CAMS }
+    );
+    await user.click(screen.getByRole('button', { name: 'Add child' }));
+    expect(await screen.findByText('add form')).toBeTruthy();
+    unmount();
+
+    const carer = renderAsCaregiver(<Children />, { kids: KIDS, cameras: CAMS });
+    expect(screen.queryByRole('button', { name: 'Add child' })).toBeNull();
+    expect(screen.getByText('Child B')).toBeTruthy();
+    carer.unmount();
+
+    renderAsCaregiver(<Children />, { kids: [], cameras: [] });
+    expect(screen.getByText('No children yet. An admin can add one.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Add child' })).toBeNull();
   });
 });
 
@@ -99,9 +120,14 @@ describe('a child detail screen', () => {
     expect(screen.getByText('Cameras · 2')).toBeTruthy();
   });
 
-  test('a child with no cameras is told how to assign one', async () => {
-    renderAsAdmin(detailRoutes, { ...atChild('kid-1'), cameras: [] });
-    expect(await screen.findByText(/No cameras assigned yet/)).toBeTruthy();
+  test('a child with no cameras is told how to assign one, and a caregiver that an admin assigns them', async () => {
+    // Assigning is admin-only since #552: telling a caregiver to "assign one" would send them to a
+    // Cameras tab that has no control for it.
+    const { unmount } = renderAsAdmin(detailRoutes, { ...atChild('kid-1'), cameras: [] });
+    expect(await screen.findByText('No cameras assigned yet — assign one from the Cameras tab.')).toBeTruthy();
+    unmount();
+    renderAsCaregiver(detailRoutes, { ...atChild('kid-1'), cameras: [] });
+    expect(await screen.findByText('No cameras assigned yet — an admin can assign one from the Cameras tab.')).toBeTruthy();
   });
 
   // ★ The role gate. CameraRow renders a <button> when it is given an onClick and a <div> when it is

@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Play, Video, Trash2, AlertTriangle } from 'lucide-react';
 import { api } from '../lib/api.js';
+import { useAuth } from '../lib/AuthContext.jsx';
 import MediaPlayerModal from './MediaPlayerModal.jsx';
 import Modal from './Modal.jsx';
+import { deleteFailureText } from './ClipPlayerModal.jsx';
 
 // "Recordings" card on a child's detail page: the clips someone captured with the tile's Record button
 // (see lib/recordings.js). Deliberately its own card rather than entries in the alert feed — these are
 // moments a person chose to keep, not detections. Renders nothing until the first recording exists.
 //
 // Unlike alert clips, recordings have NO automatic retention, so deleting is the only way to reclaim
-// the space — hence the delete action here.
+// the space — hence the delete action here. It is an ADMIN's action (#552; the server refuses a
+// caregiver, owner decision 2026-10-10), the same as TimelapseCard: a caregiver can watch and download
+// every recording, and a failed entry tells them an admin can clear it.
 
 const parseUtc = (s) => new Date(String(s).replace(' ', 'T') + 'Z');
 
@@ -23,6 +27,9 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
   const [list, setList] = useState([]);
   const [openId, setOpenId] = useState(null);
   const [del, setDel] = useState(''); // '' | 'confirm' | 'deleting' | 'error'
+  const [delError, setDelError] = useState('');
+  const { user } = useAuth() || {};
+  const isAdmin = user?.role === 'admin';
 
   const load = useCallback(() => {
     let alive = true;
@@ -49,7 +56,9 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
       await api.del(`/recordings/${open.id}`);
       close();
       load();
-    } catch {
+    } catch (err) {
+      // The failed entry's modal and the player word a retry differently, so each passes its own fallback.
+      setDelError(deleteFailureText(err, open.status === 'failed' ? 'Couldn’t remove it — try again.' : 'Couldn’t delete — try again.'));
       setDel('error');
     }
   }
@@ -107,14 +116,17 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
             Nightlight started this recording but couldn’t finish saving it. That usually means the
             container restarted while the clip was still being assembled, or the camera stopped sending
             video partway through. There’s nothing to play.
+            {!isAdmin && ' An admin can remove it from this list.'}
           </p>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
             <button type="button" className="btn" onClick={close} disabled={del === 'deleting'}>Close</button>
-            <button type="button" className="btn btn-danger" onClick={deleteNow} disabled={del === 'deleting'}>
-              {del === 'deleting' ? 'Removing…' : 'Remove'}
-            </button>
+            {isAdmin && (
+              <button type="button" className="btn btn-danger" onClick={deleteNow} disabled={del === 'deleting'}>
+                {del === 'deleting' ? 'Removing…' : 'Remove'}
+              </button>
+            )}
           </div>
-          {del === 'error' && <p className="muted">Couldn’t remove it — try again.</p>}
+          {del === 'error' && <p className="muted">{delError}</p>}
         </Modal>
       )}
 
@@ -127,15 +139,17 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
           meta={`${when(open.started_at)}${open.duration_s ? ` · ${open.duration_s}s` : ''}`}
           onClose={close}
           headerAction={
-            <button type="button" className="icon-btn icon-btn--danger" aria-label="Delete recording"
-              onClick={() => setDel('confirm')} disabled={del === 'deleting'}>
-              <Trash2 size={17} />
-            </button>
+            isAdmin ? (
+              <button type="button" className="icon-btn icon-btn--danger" aria-label="Delete recording"
+                onClick={() => setDel('confirm')} disabled={del === 'deleting'}>
+                <Trash2 size={17} />
+              </button>
+            ) : null
           }
           footer={
             confirming ? (
               <div className="clip-confirm">
-                <span>{del === 'error' ? 'Couldn’t delete — try again.' : 'Delete this recording? This can’t be undone.'}</span>
+                <span>{del === 'error' ? delError : 'Delete this recording? This can’t be undone.'}</span>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button type="button" className="btn" onClick={() => setDel('')} disabled={del === 'deleting'}>Cancel</button>
                   <button type="button" className="btn btn-danger" onClick={deleteNow} disabled={del === 'deleting'}>

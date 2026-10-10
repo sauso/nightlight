@@ -104,8 +104,14 @@ export default function ChildDetail() {
               onClick={isAdmin ? () => navigate(`/cameras/${c.id}`, { state: { from: { to: `/children/${id}`, label: kid.name } } }) : undefined}
             />
           ))}
+          {/* Assigning a camera is admin-only (#552), so a caregiver is told who can, not sent to a
+              screen where the control is not there for them. */}
           {childCams.length === 0 && (
-            <div className="camera-tile__sub">No cameras assigned yet — assign one from the Cameras tab.</div>
+            <div className="camera-tile__sub">
+              {isAdmin
+                ? 'No cameras assigned yet — assign one from the Cameras tab.'
+                : 'No cameras assigned yet — an admin can assign one from the Cameras tab.'}
+            </div>
           )}
         </div>
 
