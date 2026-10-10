@@ -314,7 +314,10 @@ describe('#641 mqttBrokerUrl and mqtt.js read the same host', () => {
 
   test('every accepted host is dialled by mqtt.js on that host and that port, with no user name and no path', () => {
     const hosts = ['broker.local', 'MQTT.Example.COM', 'x_y.local', 'my-broker', '192.168.1.5', 'broker.local.', 'bücher.example',
-      'xn--bcher-kva.example', '[::1]', '[fe80::1]', '[2001:DB8::1]', '[::ffff:1.2.3.4]', 'a'.repeat(64) + '.example'];
+      'xn--bcher-kva.example', '[::1]', '[fe80::1]', '[2001:DB8::1]', '[::ffff:1.2.3.4]', 'a'.repeat(64) + '.example',
+      // All-ASCII names go through exactly as typed: no IPv4 rewriting (domainToASCII turns 1.2.3 into 1.2.0.3) and no
+      // refusal of a name that ends in a number (domainToASCII returns '' for it).
+      '1.2.3', 'broker.1'];
     for (const host of hosts) {
       for (const port of [null, 1883, 8883, 65535]) {
         const url = mqttBrokerUrl(host, port);
