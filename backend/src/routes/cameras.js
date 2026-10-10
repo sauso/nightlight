@@ -27,7 +27,7 @@ import { verifyTalkCreds, talkConfigured, verifyBackchannel } from '../lib/twoWa
 import { getReading, subscribeAllCameraTopics, refreshMqttConnection } from '../lib/mqttClient.js';
 import { probeOnvifCamera, ptzNudge, ptzRelativeStep, probePtzRelativeSupport, rebootCamera } from '../lib/onvif.js';
 import { validateRtspStream, probeRtspDetailed, ffprobeVersion } from '../lib/rtspProbe.js';
-import { captureSnapshot, fetchHttpSnapshot } from '../lib/snapshot.js';
+import { grabLiveFrame } from '../lib/snapshot.js';
 import { logger } from '../lib/logger.js';
 import { startRecording, stopRecording, recordingState, getOndemandSettings } from '../lib/recordings.js';
 import { stripUrlPassword, urlHasPassword, resolveUrlPassword, scrubSecrets, findCredentialLeak } from '../lib/urlCredentials.js';
@@ -78,12 +78,14 @@ router.get('/alerts/:id/clip', requireAuthQueryOrHeader, (req, res) => {
 // (same reason as the alert snapshot). Prefers the camera's HTTP snapshot URL, else grabs one frame
 // off the local MediaMTX stream. Registered before requireAuth; the literal "snapshot" segment keeps
 // it clear of the other /:id routes.
+//
+// Single-flight per camera (#552): every viewer can call this, so requests for a camera whose grab is
+// already under way share that grab instead of each starting an ffmpeg. See grabLiveFrame in
+// lib/snapshot.js for why the flight is held until the ffmpeg has EXITED, and why there is no global cap.
 router.get('/:id/snapshot', requireAuthQueryOrHeader, async (req, res) => {
   const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!cam) return res.status(404).json({ error: 'Camera not found' });
-  let img = null;
-  if (cam.snapshot_url && String(cam.snapshot_url).trim()) img = await fetchHttpSnapshot(cam.snapshot_url).catch(() => null);
-  if (!img) img = await captureSnapshot(cam.mediamtx_path).catch(() => null);
+  const img = await grabLiveFrame(cam);
   if (!img) return res.status(503).json({ error: 'Could not grab a frame right now' });
   res.set('Content-Type', 'image/jpeg');
   res.set('Cache-Control', 'no-store');
