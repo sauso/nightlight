@@ -7,6 +7,7 @@ import { upsertPath, removePath, getPathStatus, toPathName, hlsPathName } from '
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
 import { recordCameraEvent, insertCameraEvent, pruneCameraEvents, EVENT } from '../lib/cameraEvents.js';
 import { actorOf } from '../lib/actor.js';
+import { noteSilence, sendLongSilenceNotice } from '../lib/silences.js';
 import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.js';
 import { startMotionDetector, stopMotionDetector, motionLegWanted, forgetMotionAlert } from '../lib/motionDetector.js';
 import { startOnvifMotion, stopOnvifMotion, onvifMotionWanted } from '../lib/onvifMotion.js';
@@ -550,13 +551,20 @@ router.post('/:id/reboot', requireAuth, async (req, res) => {
 // cannot be written nothing is (a 500, the camera stays as it was). Not muting is the safe direction.
 // Contrast /restart and /reboot, which have already acted on the camera by the time they record, so
 // theirs is best-effort. The username is NOT logged: server logs go into the support bundle.
+//
+// The same transaction also updates the camera's silence episode (lib/silences.js, #552), which is what the
+// long-silence notice counts, so the count moves exactly when the mute does. The notice itself is sent after the
+// commit and can neither fail nor undo the silence (sendLongSilenceNotice never throws).
 const snoozeStmt = db.prepare('UPDATE cameras SET alerts_snoozed_until = ?, alerts_snoozed_by = ? WHERE id = ?');
 router.post('/:id/snooze', requireAuth, (req, res) => {
   const actor = actorOf(req);
   const cam = db.prepare('SELECT id, name, alerts_snoozed_until FROM cameras WHERE id = ?').get(req.params.id);
   if (!cam) return res.status(404).json({ error: 'Camera not found' });
   const minutes = Math.max(0, Math.min(720, Math.round(Number(req.body?.minutes) || 0)));
-  const until = minutes > 0 ? Date.now() + minutes * 60000 : null;
+  // ONE clock reading for the whole request: the episode compares this `now` with the end it stored for the last
+  // silence, so the mute's `until`, the not-muted check and the episode must all see the same instant.
+  const now = Date.now();
+  const until = minutes > 0 ? now + minutes * 60000 : null;
   // ⚠️ AN UN-MUTE OF A CAMERA THAT IS NOT MUTED WRITES NOTHING (#552, PR #663 review, reproduced: 2,000 such
   // un-mutes pushed another camera's silence row out of Camera history). That history is ONE 2,000-row cap
   // shared by every camera (lib/cameraEvents.js), and this route is open to every signed-in user, so an
@@ -565,7 +573,7 @@ router.post('/:id/snooze', requireAuth, (req, res) => {
   // same one a real un-mute gives (not muted: no time, no name). "Not muted" includes a silence that has run
   // out: its stored time and name are left as they are, and both readers already treat them as ended
   // (lib/detectSchedule.js compares the time with now; publicCamera nulls the name).
-  if (!until && !(cam.alerts_snoozed_until > Date.now())) {
+  if (!until && !(cam.alerts_snoozed_until > now)) {
     return res.json({ ok: true, alerts_snoozed_until: null, alerts_snoozed_by: null });
   }
   // An un-mute clears the name with the time: a stored name with no silence beside it is not shown
@@ -575,9 +583,12 @@ router.post('/:id/snooze', requireAuth, (req, res) => {
     db.transaction(() => {
       snoozeStmt.run(until, by, cam.id);
       insertCameraEvent(cam.id, cam.name, EVENT.SNOOZE, until ? `muted for ${minutes} min` : 'un-muted', actor);
+      // Required like the history row: a silence the long-silence notice cannot count is not applied either,
+      // otherwise a failing episode write would let silences be chained without the admins ever being told.
+      noteSilence(cam.id, now, until);
     })();
   } catch (err) {
-    logger.error(`[snooze] "${cam.name}": not applied, its Camera history row could not be written (${err.message})`);
+    logger.error(`[snooze] "${cam.name}": not applied, its Camera history row or silence record could not be written (${err.message})`);
     return res.status(500).json({ error: 'Could not change this camera\'s alerts right now. Nothing was changed; try again.' });
   }
   // After the commit and best-effort: pruning is housekeeping the silence must not depend on. Pinned by
@@ -586,6 +597,9 @@ router.post('/:id/snooze', requireAuth, (req, res) => {
   // pruneCameraEvents swallows its own errors, so it cannot roll a silence back, and on success its deletes
   // commit either way. It stays outside so that holds by construction, not by that try/catch.
   pruneCameraEvents();
+  // The long-silence notice (#552): after the commit, never throws (see lib/silences.js). Only a mute can make an
+  // episode long enough; an un-mute only ever shortens one, so it never sends.
+  if (until) sendLongSilenceNotice(cam, actor);
   logger.info(`[snooze] "${cam.name}" alerts ${until ? `muted for ${minutes} min` : 'un-muted'}`);
   // `alerts_snoozed_by` is ADDED to the response; every key an open page already reads is still there.
   res.json({ ok: true, alerts_snoozed_until: until, alerts_snoozed_by: by });

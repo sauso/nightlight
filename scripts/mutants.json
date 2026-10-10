@@ -14047,7 +14047,7 @@
   {
     "label": "#552 PR2 M27: an un-mute of an un-muted camera writes a row again (one account can flood the shared 2,000-row cap)",
     "file": "backend/src/routes/cameras.js",
-    "find": "if (!until && !(cam.alerts_snoozed_until > Date.now())) {",
+    "find": "if (!until && !(cam.alerts_snoozed_until > now)) {",
     "replace": "if (false) {",
     "expect": "killed",
     "tests": [
@@ -14058,7 +14058,7 @@
   {
     "label": "#552 PR2 M28: every un-mute is treated as a no-op, a real one included",
     "file": "backend/src/routes/cameras.js",
-    "find": "if (!until && !(cam.alerts_snoozed_until > Date.now())) {",
+    "find": "if (!until && !(cam.alerts_snoozed_until > now)) {",
     "replace": "if (!until) {",
     "expect": "killed",
     "tests": [
@@ -14076,5 +14076,392 @@
       "who-did-it.test.js"
     ],
     "namePattern": "prunes Camera history back to its cap"
+  },
+  {
+    "label": "#552 PR3: control - a comment edit in lib/silences.js must change nothing",
+    "file": "backend/src/lib/silences.js",
+    "find": "// The long-silence notice (#552).",
+    "replace": "// The long-silence notice (#552). [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": [
+      "silences.test.js"
+    ],
+    "note": "Validates the harness for the lib/silences.js mutants below. If this is ever KILLED, none of their results means anything."
+  },
+  {
+    "label": "#552 PR3: control - a comment edit in lib/cameraStatusAlert.js must change nothing",
+    "file": "backend/src/lib/cameraStatusAlert.js",
+    "find": "// Also the long-silence notice (#552)",
+    "replace": "// Also the long-silence notice (#552) [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": [
+      "long-silence-notice.test.js"
+    ],
+    "note": "Validates the harness for the lib/cameraStatusAlert.js mutants below."
+  },
+  {
+    "label": "#552 PR3 M01: the rejoin gap becomes exclusive (a renewal at exactly 30 minutes starts a new count)",
+    "file": "backend/src/lib/silences.js",
+    "find": "now <= row.ended_at + REJOIN_GAP_MS",
+    "replace": "now < row.ended_at + REJOIN_GAP_MS",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "EXACTLY the gap"
+  },
+  {
+    "label": "#552 PR3 M02: no rejoin gap at all (only a renewal while still muted continues; the tile can never renew that way)",
+    "file": "backend/src/lib/silences.js",
+    "find": "now <= row.ended_at + REJOIN_GAP_MS",
+    "replace": "now <= row.ended_at",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "the second set 5 minutes after"
+  },
+  {
+    "label": "#552 PR3 M03: the notified flag is ignored (every renewal of a long silence notifies again)",
+    "file": "backend/src/lib/silences.js",
+    "find": "SET notified = 1 WHERE camera_id = ? AND notified = 0",
+    "replace": "SET notified = 1 WHERE camera_id = ?",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "third renewal"
+  },
+  {
+    "label": "#552 PR3 M04: the threshold becomes inclusive (exactly 60 minutes notifies)",
+    "file": "backend/src/lib/silences.js",
+    "find": "if (!(length > s.snooze_alert_minutes * 60_000)) return null;",
+    "replace": "if (!(length >= s.snooze_alert_minutes * 60_000)) return null;",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "exactly the threshold sends nothing"
+  },
+  {
+    "label": "#552 PR3 M05: the on/off setting is not checked (notifies while switched off)",
+    "file": "backend/src/lib/silences.js",
+    "find": "if (!s?.snooze_alert_enabled) return null;",
+    "replace": "if (!s) return null;",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "off: no notice"
+  },
+  {
+    "label": "#552 PR3 M06: an un-mute does not bring the silence's end forward",
+    "file": "backend/src/lib/silences.js",
+    "find": "  endEarlyStmt.run(now, cameraId, now);",
+    "replace": "  void endEarlyStmt;",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "re-mute after the gap"
+  },
+  {
+    "label": "#552 PR3 M07: an un-mute can move a silence's end LATER (an un-mute after it ran out extends it)",
+    "file": "backend/src/lib/silences.js",
+    "find": "WHERE camera_id = ? AND ended_at > ?",
+    "replace": "WHERE camera_id = ? AND ? IS NOT NULL",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "never moves the end LATER"
+  },
+  {
+    "label": "#552 PR3 M08: the notice's try no longer swallows (a failed notice turns an applied silence into a 500)",
+    "file": "backend/src/lib/silences.js",
+    "find": "logger.error(`[silence-alert] ",
+    "replace": "throw err; logger.error(`[silence-alert] ",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "the notice throws"
+  },
+  {
+    "label": "#552 PR3 M09: the minutes in the notice are rounded to nearest (a just-over-60 silence reads as 60)",
+    "file": "backend/src/lib/silences.js",
+    "find": "Math.ceil(length / 60_000)",
+    "replace": "Math.round(length / 60_000)",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "rounded UP"
+  },
+  {
+    "label": "#552 PR3 M10: the snooze route never records the silence (nothing is ever counted)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "noteSilence(cam.id, now, until);",
+    "replace": "void noteSilence;",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "a 12-hour silence notifies once"
+  },
+  {
+    "label": "#552 PR3 M11: the silence record is best-effort (a silence the notice cannot count is applied anyway)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "noteSilence(cam.id, now, until);",
+    "replace": "try { noteSilence(cam.id, now, until); } catch { /* best-effort */ }",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "the silence record is written with the mute"
+  },
+  {
+    "label": "#552 PR3 M12: an un-mute also asks for the notice",
+    "file": "backend/src/routes/cameras.js",
+    "find": "if (until) sendLongSilenceNotice(cam, actor);",
+    "replace": "sendLongSilenceNotice(cam, actor);",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "an un-mute never sends a notice"
+  },
+  {
+    "label": "#552 PR3 M13: the admins-only filter is dropped (a caregiver's device gets the admins' notice)",
+    "file": "backend/src/lib/push.js",
+    "find": "AND pt.user_id IN (SELECT u.id FROM users u WHERE u.role = 'admin')",
+    "replace": "AND pt.user_id IN (SELECT u.id FROM users u)",
+    "expect": "killed",
+    "tests": [
+      "push.test.js"
+    ],
+    "namePattern": "adminsOnly: only devices"
+  },
+  {
+    "label": "#552 PR3 M14: activePushTokens defaults to admins only (every existing alert stops reaching caregivers)",
+    "file": "backend/src/lib/push.js",
+    "find": "export function activePushTokens({ adminsOnly = false",
+    "replace": "export function activePushTokens({ adminsOnly = true",
+    "expect": "killed",
+    "tests": [
+      "push.test.js"
+    ],
+    "namePattern": "is unchanged: every live device"
+  },
+  {
+    "label": "#552 PR3 M15: excludeUserId is ignored (the person who set the silence is notified about themselves)",
+    "file": "backend/src/lib/push.js",
+    "find": "  if (excludeUserId) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": [
+      "push.test.js"
+    ],
+    "namePattern": "the other admins only"
+  },
+  {
+    "label": "#552 PR3 M16: sendToAll does not pass the narrowing to the query it sends from",
+    "file": "backend/src/lib/push.js",
+    "find": "const rows = activePushTokens({ adminsOnly, excludeUserId });",
+    "replace": "const rows = activePushTokens();",
+    "expect": "killed",
+    "tests": [
+      "push.test.js"
+    ],
+    "namePattern": "messages only the other admins"
+  },
+  {
+    "label": "#552 PR3 M17: fanOut does not hand the tag and the narrowing to sendToAll",
+    "file": "backend/src/lib/cameraStatusAlert.js",
+    "find": "sendToAll(title, body, { cameraId, type }, null, { tag, adminsOnly, excludeUserId })",
+    "replace": "sendToAll(title, body, { cameraId, type })",
+    "expect": "killed",
+    "tests": [
+      "long-silence-notice.test.js"
+    ],
+    "namePattern": "narrowed to admins"
+  },
+  {
+    "label": "#552 PR3 M18: fanOut defaults to admins only (offline and back-online notices stop reaching caregivers)",
+    "file": "backend/src/lib/cameraStatusAlert.js",
+    "find": "{ tag, adminsOnly = false, excludeUserId = null } = {}) {",
+    "replace": "{ tag, adminsOnly = true, excludeUserId = null } = {}) {",
+    "expect": "killed",
+    "tests": [
+      "long-silence-notice.test.js"
+    ],
+    "namePattern": "offline and back-online notices are unchanged"
+  },
+  {
+    "label": "#552 PR3 M19: the long-silence notice is not narrowed to admins",
+    "file": "backend/src/lib/cameraStatusAlert.js",
+    "find": "    adminsOnly: true,",
+    "replace": "    adminsOnly: false,",
+    "expect": "killed",
+    "tests": [
+      "long-silence-notice.test.js"
+    ],
+    "namePattern": "narrowed to admins"
+  },
+  {
+    "label": "#552 PR3 M20: the person who set the silence is not left out of the app's push",
+    "file": "backend/src/lib/cameraStatusAlert.js",
+    "find": "    excludeUserId: actorUserId,",
+    "replace": "    excludeUserId: null,",
+    "expect": "killed",
+    "tests": [
+      "long-silence-notice.test.js"
+    ],
+    "namePattern": "narrowed to admins"
+  },
+  {
+    "label": "#552 PR3 M21: the username goes into the log line (logs reach the diagnostics bundle)",
+    "file": "backend/src/lib/cameraStatusAlert.js",
+    "find": "notifying the admins`);",
+    "replace": "notifying the admins (latest by ${username})`);",
+    "expect": "killed",
+    "tests": [
+      "long-silence-notice.test.js"
+    ],
+    "namePattern": "NOT in the log"
+  },
+  {
+    "label": "#552 PR3 M22: the threshold ceiling raised from 719 to 720",
+    "file": "backend/src/routes/settings.js",
+    "find": "n < 1 || n > 719) {",
+    "replace": "n < 1 || n > 720) {",
+    "expect": "killed",
+    "tests": [
+      "input-validation.test.js",
+      "silences.test.js"
+    ],
+    "namePattern": "snooze_alert_minutes|the range is 1-719"
+  },
+  {
+    "label": "#552 PR3 M23: the threshold floor loosened from 1 to 0",
+    "file": "backend/src/routes/settings.js",
+    "find": "n < 1 || n > 719) {",
+    "replace": "n < 0 || n > 719) {",
+    "expect": "killed",
+    "tests": [
+      "input-validation.test.js",
+      "silences.test.js"
+    ],
+    "namePattern": "snooze_alert_minutes|the range is 1-719"
+  },
+  {
+    "label": "#552 PR3 M24: the threshold is validated but never written",
+    "file": "backend/src/routes/settings.js",
+    "find": "snooze_alert_enabled = ?, snooze_alert_minutes = ?,",
+    "replace": "snooze_alert_enabled = ?, snooze_alert_minutes = snooze_alert_minutes + 0 * ?,",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "round trip"
+  },
+  {
+    "label": "#552 PR3 M25: the on/off switch is never written",
+    "file": "backend/src/routes/settings.js",
+    "find": "snooze_alert_enabled = ?, snooze_alert_minutes = ?,",
+    "replace": "snooze_alert_enabled = snooze_alert_enabled + 0 * ?, snooze_alert_minutes = ?,",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "round trip"
+  },
+  {
+    "label": "#552 PR3 M26: GET /settings stops sending the threshold to the admin (the form shows its fallback)",
+    "file": "backend/src/routes/settings.js",
+    "find": "  'snooze_alert_minutes',",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "settings-exposure.test.js"
+    ],
+    "namePattern": "gets every field the settings forms bind"
+  },
+  {
+    "label": "#552 PR3 M27: the upgrade guard for the two settings tests the wrong column (never added on upgrade)",
+    "file": "backend/src/db.js",
+    "find": "if (!settingsColumns.includes('snooze_alert_enabled')) {",
+    "replace": "if (!settingsColumns.includes('camera_offline_alert_enabled')) {",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "an install from before this change"
+  },
+  {
+    "label": "#552 PR3 M28: long-silence alerts default to off",
+    "file": "backend/src/db.js",
+    "find": "ADD COLUMN snooze_alert_enabled INTEGER NOT NULL DEFAULT 1",
+    "replace": "ADD COLUMN snooze_alert_enabled INTEGER NOT NULL DEFAULT 0",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "defaults to on, 60 minutes"
+  },
+  {
+    "label": "#552 PR3 M29: the default threshold moves from 60 to 59 minutes",
+    "file": "backend/src/db.js",
+    "find": "ADD COLUMN snooze_alert_minutes INTEGER NOT NULL DEFAULT 60",
+    "replace": "ADD COLUMN snooze_alert_minutes INTEGER NOT NULL DEFAULT 59",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "defaults to on, 60 minutes"
+  },
+  {
+    "label": "#552 PR3 M30: deleting a camera leaves its silence record behind",
+    "file": "backend/src/db.js",
+    "find": "FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE",
+    "replace": "CHECK (1)",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "deleting a camera deletes its silence record"
+  },
+  {
+    "label": "#552 PR3 M31: Camera controls stops saving the long-silence threshold",
+    "file": "frontend/src/pages/SettingsCamera.jsx",
+    "find": "        snooze_alert_minutes: form.snooze_alert_minutes,",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "cameras.test.jsx"
+    ],
+    "namePattern": "saves ONLY its own five fields"
+  },
+  {
+    "label": "#552 PR3 M32: Camera controls saves its fallback (on) over a stored value it never received",
+    "file": "frontend/src/pages/SettingsCamera.jsx",
+    "find": "snooze_alert_enabled: form.snooze_alert_enabled === undefined ? undefined : !!form.snooze_alert_enabled,",
+    "replace": "snooze_alert_enabled: !!(form.snooze_alert_enabled ?? 1),",
+    "expect": "killed",
+    "tests": [
+      "cameras.test.jsx"
+    ],
+    "namePattern": "values that never arrived are NOT saved"
+  },
+  {
+    "label": "#552 PR3 M33: an unknown long-silence setting shows as off, not the server's default (on)",
+    "file": "frontend/src/pages/SettingsCamera.jsx",
+    "find": "const silenceOn = form.snooze_alert_enabled === undefined ? true : !!form.snooze_alert_enabled;",
+    "replace": "const silenceOn = !!form.snooze_alert_enabled;",
+    "expect": "killed",
+    "tests": [
+      "cameras.test.jsx"
+    ],
+    "namePattern": "falls back to the documented defaults"
   }
 ]

@@ -9,9 +9,9 @@
 //      is the NEW state, derived from the OLD one. An inverted flag here silently disables a camera
 //      when someone tries to enable it, and the label would still look right.
 //   3. THE REMOVE MODAL MUST NOT BE CLOSEABLE MID-DELETE. `onClose` returns null while busy.
-//   4. SettingsCamera SENDS A PARTIAL PAYLOAD — three fields, on purpose, because the settings PUT
+//   4. SettingsCamera SENDS A PARTIAL PAYLOAD — its own five fields, on purpose, because the settings PUT
 //      keeps everything it is not sent. Sending the whole form would stamp this page's stale copy of
-//      every other setting over the real ones.
+//      every other setting over the real ones. (Five since #552 added the long-silence pair.)
 //   5. SettingsCamera's form is SEEDED FROM CONTEXT AND RE-SEEDED WHEN IT ARRIVES. SettingsContext
 //      resolves after first paint, so the page always renders once with an empty settings object.
 import { describe, test, expect, vi, afterEach } from 'vitest';
@@ -289,10 +289,16 @@ const SETTINGS = {
   ptz_step: 12,
   camera_offline_alert_enabled: 1,
   camera_offline_alert_minutes: 5,
+  // Stored AWAY from the defaults (on, 60), so "seeded" and "fell back" cannot look alike.
+  snooze_alert_enabled: 0,
+  snooze_alert_minutes: 95,
   // Deliberately present and deliberately NOT in the payload below.
   app_name: 'Nightlight',
   timezone: 'Australia/Melbourne',
 };
+
+const OFFLINE_SWITCH = { name: 'Notify when a camera goes offline' };
+const SILENCE_SWITCH = { name: "Notify admins when a camera's alerts stay silenced for a long time" };
 
 describe('Settings → Camera controls', () => {
   test('seeds every field from the settings context', () => {
@@ -300,15 +306,21 @@ describe('Settings → Camera controls', () => {
     renderAsAdmin(<SettingsCamera />, { settings: SETTINGS });
     expect(screen.getByLabelText('PTZ step size')).toHaveValue(12);
     expect(screen.getByLabelText('Offline for longer than (minutes)')).toHaveValue(5);
-    expect(screen.getByRole('switch')).toBeChecked();
+    expect(screen.getByRole('switch', OFFLINE_SWITCH)).toBeChecked();
+    expect(screen.getByRole('switch', SILENCE_SWITCH)).not.toBeChecked();
+    expect(screen.getByLabelText('Silenced for longer than (minutes)')).toHaveValue(95);
   });
 
   test('falls back to the documented defaults when settings are empty', () => {
     mockApi();
     renderAsAdmin(<SettingsCamera />, { settings: { ptz_step: undefined, camera_offline_alert_minutes: undefined } });
-    // These two numbers are the defaults docs/README quote; if they change, the docs are wrong too.
+    // These numbers are the defaults docs/camera-controls.md quotes; if they change, the docs are wrong too.
     expect(screen.getByLabelText('PTZ step size')).toHaveValue(12);
     expect(screen.getByLabelText('Offline for longer than (minutes)')).toHaveValue(5);
+    // #552: long-silence alerts are ON by default, threshold 60.
+    expect(screen.getByRole('switch', SILENCE_SWITCH)).toBeChecked();
+    expect(screen.getByLabelText('Silenced for longer than (minutes)')).toHaveValue(60);
+    expect(screen.getByLabelText('Silenced for longer than (minutes)')).toBeEnabled();
   });
 
   test('picks the settings up when the context resolves AFTER first paint', () => {
@@ -322,7 +334,7 @@ describe('Settings → Camera controls', () => {
     expect(screen.getByLabelText('PTZ step size')).toHaveValue(40);
   });
 
-  test('saves ONLY its own three fields', async () => {
+  test('saves ONLY its own five fields', async () => {
     mockApi();
     const { user } = renderAsAdmin(<SettingsCamera />, { settings: SETTINGS });
     await user.clear(screen.getByLabelText('PTZ step size'));
@@ -338,14 +350,18 @@ describe('Settings → Camera controls', () => {
       'camera_offline_alert_enabled',
       'camera_offline_alert_minutes',
       'ptz_step',
+      'snooze_alert_enabled',
+      'snooze_alert_minutes',
     ]);
     expect(body.ptz_step).toBe('25');
+    expect(body.snooze_alert_enabled).toBe(false);
+    expect(body.snooze_alert_minutes).toBe(95);
   });
 
   test('the offline toggle is saved as a real boolean, not the 0/1 the API returns', async () => {
     mockApi();
     const { user } = renderAsAdmin(<SettingsCamera />, { settings: SETTINGS });
-    await user.click(screen.getByRole('switch'));
+    await user.click(screen.getByRole('switch', OFFLINE_SWITCH));
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(api.put).toHaveBeenCalled());
     expect(api.put.mock.calls[0][1].camera_offline_alert_enabled).toBe(false);
@@ -358,8 +374,49 @@ describe('Settings → Camera controls', () => {
     });
     const mins = screen.getByLabelText('Offline for longer than (minutes)');
     expect(mins).toBeDisabled();
-    await user.click(screen.getByRole('switch'));
+    await user.click(screen.getByRole('switch', OFFLINE_SWITCH));
     expect(mins).toBeEnabled();
+  });
+
+  // --- #552: Long silence alerts ---
+
+  test('long-silence alerts: the toggle and the minutes are saved, the toggle as a real boolean', async () => {
+    mockApi();
+    const { user } = renderAsAdmin(<SettingsCamera />, { settings: SETTINGS });
+    const mins = screen.getByLabelText('Silenced for longer than (minutes)');
+    expect(mins).toBeDisabled(); // stored off
+    await user.click(screen.getByRole('switch', SILENCE_SWITCH));
+    expect(mins).toBeEnabled();
+    expect(mins).toHaveAttribute('min', '1');
+    expect(mins).toHaveAttribute('max', '719');
+    await user.clear(mins);
+    await user.type(mins, '120');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(api.put).toHaveBeenCalled());
+    const body = api.put.mock.calls[0][1];
+    expect(body.snooze_alert_enabled).toBe(true);
+    expect(body.snooze_alert_minutes).toBe('120');
+  });
+
+  test('long-silence alerts: values that never arrived are NOT saved over the stored ones', async () => {
+    // The page shows the defaults (on, 60) before the settings arrive. Saving then must not send them: they
+    // would overwrite whatever an admin had stored. Left undefined, they drop out of the request body and
+    // the server keeps what it has.
+    mockApi();
+    const { user } = renderAsAdmin(<SettingsCamera />, { settings: { ptz_step: 12 } });
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(api.put).toHaveBeenCalled());
+    const sentBody = JSON.parse(JSON.stringify(api.put.mock.calls[0][1]));
+    expect('snooze_alert_enabled' in sentBody).toBe(false);
+    expect('snooze_alert_minutes' in sentBody).toBe(false);
+  });
+
+  test('long-silence alerts: the card says who receives it on each kind of channel', () => {
+    mockApi();
+    renderAsAdmin(<SettingsCamera />, { settings: SETTINGS });
+    expect(screen.getByText(/goes to admins only, not to the person who set the silence/)).toBeInTheDocument();
+    expect(screen.getByText(/Pushover, ntfy\s+and Gotify can't send to one person, so everyone on those receives it too, including whoever\s+set the silence/)).toBeInTheDocument();
+    expect(screen.getByText(/within 30 minutes of the last one ending count as one/)).toBeInTheDocument();
   });
 
   test('shows Saved ✓ and refreshes the context on success', async () => {

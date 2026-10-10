@@ -321,16 +321,30 @@ export function removeToken(token) {
 // the table — kept "alive" by unrelated activity from the same device — well past when its holder's
 // API access has already, correctly, stopped working. Checking created_at here closes that gap
 // directly rather than silently trusting row presence alone.
-export function activePushTokens() {
-  return db
-    .prepare(
-      `SELECT pt.token, pt.base_url FROM push_tokens pt
+//
+// Two optional narrowings (#552, the long-silence notice, which is for the admins and not for whoever set the
+// silence), both OFF by default so every existing caller still reaches every live device:
+//   adminsOnly     only devices of accounts that are admins NOW, read from `users` at send time, so a demoted
+//                  admin stops receiving at once. The positive `IN (admins)` form, not `NOT IN (caregivers)`,
+//                  for the reason newestAdminDeviceBaseUrl gives: a row naming a user that no longer exists, or
+//                  a role this build does not know, must not match. Aliased `u` on purpose: the same filter
+//                  unaliased is newestAdminDeviceBaseUrl's, and scripts/mutants.json anchors each by its exact
+//                  text, which must appear exactly once in this file.
+//   excludeUserId  not this account's devices (the person who set the silence).
+// Both sit on top of the user and session filters above, never instead of them.
+export function activePushTokens({ adminsOnly = false, excludeUserId = null } = {}) {
+  let sql = `SELECT pt.token, pt.base_url FROM push_tokens pt
         WHERE pt.user_id IN (SELECT id FROM users)
           AND pt.session_id IN (
             SELECT id FROM sessions WHERE created_at > datetime('now', ?)
-          )`
-    )
-    .all(`-${SESSION_TOKEN_TTL_DAYS} days`);
+          )`;
+  const params = [`-${SESSION_TOKEN_TTL_DAYS} days`];
+  if (adminsOnly) sql += `\n          AND pt.user_id IN (SELECT u.id FROM users u WHERE u.role = 'admin')`;
+  if (excludeUserId) {
+    sql += '\n          AND pt.user_id != ?';
+    params.push(excludeUserId);
+  }
+  return db.prepare(sql).all(...params);
 }
 
 // `tag` (ROADMAP §1.6) is a notification-tray dedup key: posting a later message with the SAME tag
@@ -339,9 +353,12 @@ export function activePushTokens() {
 // format, `sleep_report_<childId>_<nightDate>`, comfortably fits a UUID childId). Optional and backward
 // compatible — every existing caller omits it and gets today's exact behavior (no `tag`/`apns` key at
 // all).
-export async function sendToAll(title, body, data = {}, imageBuffer = null, { tag } = {}) {
+//
+// `adminsOnly` / `excludeUserId` (#552) narrow the recipients, as activePushTokens documents; omitted, every
+// live device is messaged, exactly as before.
+export async function sendToAll(title, body, data = {}, imageBuffer = null, { tag, adminsOnly = false, excludeUserId = null } = {}) {
   if (!pushEnabled()) return;
-  const rows = activePushTokens();
+  const rows = activePushTokens({ adminsOnly, excludeUserId });
   if (rows.length === 0) return;
   // FCM data payload values must all be strings.
   const stringData = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)]));
