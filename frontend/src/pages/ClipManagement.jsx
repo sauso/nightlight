@@ -47,6 +47,18 @@ export default function ClipManagement() {
   }
   useEffect(() => { load(); }, []);
 
+  // A change of HOME ZONE after mount (the real setting arriving and replacing the placeholder 'UTC', or an
+  // admin changing it) re-buckets every clip into different days. `selectedDays` holds day KEYS of the old
+  // zone and `selected` holds ids picked from a list grouped under them, so both would now describe a
+  // screen that no longer exists: a day filter naming the wrong days, and — worse — a clip hidden by the
+  // new grouping that is still in `selected` and would be sent by Delete without being visible (Codex
+  // review of #561). Clear both rather than translate them. An empty set is returned as the SAME object so
+  // the mount-time run (and any run with nothing chosen) causes no extra render.
+  useEffect(() => {
+    setSelectedDays((prev) => (prev.size ? new Set() : prev));
+    setSelected((prev) => (prev.size ? new Set() : prev));
+  }, [home.zone]);
+
   // Group by HOME-zone calendar day (clips come newest-first, so groups stay in order). Keyed by the
   // stable 'YYYY-MM-DD' day key, carrying a display label for the section heading. The heading is a
   // plain date (no zone label): the label rides on each row's clock time below. `home` changes identity

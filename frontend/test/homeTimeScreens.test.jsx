@@ -169,6 +169,29 @@ describe('ClipManagement', () => {
     expect(await screen.findByText('1 selected')).toBeInTheDocument();
   });
 
+  test('★★ changing the home zone after mount clears the selection and the day filter (nothing hidden can be deleted)', async () => {
+    // The real setting arrives AFTER first paint, replacing the placeholder 'UTC'. These two clips share
+    // a UTC day but are on different Los Angeles days, so the switch re-buckets them. A selection made
+    // under UTC must not survive it: it would still hold ids the new grouping/filter may not show, and
+    // Delete would send them.
+    vi.spyOn(api, 'get').mockResolvedValue(CLIPS);
+    const postSpy = vi.spyOn(api, 'post').mockResolvedValue({});
+    const { user, rerenderWith } = renderAsAdmin(<ClipManagement />, { route: '/settings/clips', settings: { timezone: 'UTC' } });
+    await screen.findByText(/2 clips/);
+    expect(headings()).toHaveLength(1); // one UTC day
+    await user.click(screen.getByRole('button', { name: 'Select all' }));
+    expect(await screen.findByText('2 selected')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /All dates/ }));
+    await user.click(screen.getByRole('button', { name: /clips available/ })); // filter to the one UTC day
+
+    rerenderWith({ settings: { timezone: LA } });
+
+    await waitFor(() => expect(headings()).toHaveLength(2)); // the filter is gone: both LA days show
+    expect(screen.queryByText(/\d+ selected/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
   test('★ the player\'s timestamp is HOME time with the label', async () => {
     const { user } = mount(LA);
     await screen.findByText(/2 clips/);
@@ -236,11 +259,33 @@ describe('TimelapseCard — a night is a calendar date, not an instant', () => {
     vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}`);
     vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(false);
     vi.spyOn(api, 'get').mockResolvedValue([{ id: 't-1', night_date: '2026-03-08', duration_s: 42 }]);
-    // Under the old code (local midnight, formatted locally) this also passed; what it must NOT do is
-    // what a naive "convert to home time" would: read '2026-03-08' as 00:00 UTC and print the evening
-    // before in Los Angeles. This pins that a date key never goes through a time-zone conversion.
+    // ⚠️ This case does NOT distinguish the old device-local code from the new (both print Sun 8 Mar under
+    // the pinned device zone). What it guards is the OTHER wrong fix: a naive "convert to home time" that
+    // reads '2026-03-08' as 00:00 UTC and prints the evening before in Los Angeles. The next case is the
+    // one that fails on the old formatter.
     renderAsAdmin(<TimelapseCard childId="kid-1" />, { settings: { timezone: LA } });
     expect(await screen.findByRole('button', { name: 'Play Sun, 8 Mar timelapse' })).toBeInTheDocument();
+  });
+
+  test('★★ a night whose local midnight does not exist on this device still prints its own date', async () => {
+    // Samoa skipped 30 Dec 2011 entirely (it crossed the date line). On a device in Pacific/Apia the old
+    // `new Date('2011-12-30T00:00:00')` is a time that never happened, so it rolled forward and the card
+    // read "Sat, 31 Dec". The night_date is a calendar date and must print as itself ("Fri, 30 Dec").
+    // The suite's pinned device zone (Pacific/Auckland) has no such gap, so for this one test the process
+    // zone is switched to Apia and put back afterwards; the pin in vite.config.js is not touched.
+    const pinned = process.env.TZ;
+    process.env.TZ = 'Pacific/Apia';
+    try {
+      // Guard the fixture: if this runtime ignores a runtime TZ change the test would prove nothing.
+      expect(new Date('2011-12-30T00:00:00').getDate()).toBe(31);
+      vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}`);
+      vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(false);
+      vi.spyOn(api, 'get').mockResolvedValue([{ id: 't-1', night_date: '2011-12-30', duration_s: 42 }]);
+      renderAsAdmin(<TimelapseCard childId="kid-1" />, { settings: { timezone: LA } });
+      expect(await screen.findByRole('button', { name: 'Play Fri, 30 Dec timelapse' })).toBeInTheDocument();
+    } finally {
+      process.env.TZ = pinned;
+    }
   });
 });
 
