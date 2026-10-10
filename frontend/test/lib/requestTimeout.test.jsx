@@ -113,6 +113,51 @@ describe('api request timeout', () => {
     expect(err.timedOut).toBeUndefined();
   });
 
+  // Review of 0.36.0: a fetch that ignores its abort signal can still answer AFTER the timeout released the
+  // caller. A late 401 used to clear the session token and bounce to the login page, so a timed-out request
+  // could log out a user who had logged in again in the meantime.
+  test('a LATE 401 after the timeout does not clear a newer session token or redirect', async () => {
+    let answer;
+    globalThis.fetch = vi.fn(() => new Promise((resolve) => { answer = resolve; })); // ignores the signal
+    window.location.hash = '#/somewhere';
+    localStorage.setItem('nightlight_token', 'old-token');
+
+    const result = track(api.get('/cameras'));
+    await advance(DEFAULT_REQUEST_TIMEOUT_MS);
+    expect(result.error.timedOut).toBe(true);
+
+    // The user logs in again after the request gave up; then the stale answer finally arrives.
+    localStorage.setItem('nightlight_token', 'new-token');
+    answer({ ok: false, status: 401, text: async () => '{"error":"Unauthorized"}' });
+    await advance(0);
+
+    expect(localStorage.getItem('nightlight_token')).toBe('new-token');
+    expect(window.location.hash).toBe('#/somewhere');
+    // The caller keeps the timeout error it was already given; the late answer cannot rewrite it.
+    expect(result.error.timedOut).toBe(true);
+  });
+
+  test('a late non-401 answer after the timeout is ignored too, and the caller is not re-settled', async () => {
+    let answer;
+    globalThis.fetch = vi.fn(() => new Promise((resolve) => { answer = resolve; }));
+    const result = track(api.get('/cameras'));
+    await advance(DEFAULT_REQUEST_TIMEOUT_MS);
+    answer({ ok: true, status: 200, text: async () => '{"a":1}' });
+    await advance(0);
+    expect(result.value).toBeUndefined();
+    expect(result.error.timedOut).toBe(true);
+  });
+
+  test('a 401 that arrives IN TIME still clears the token and redirects to login', async () => {
+    window.location.hash = '#/somewhere';
+    localStorage.setItem('nightlight_token', 'tok');
+    globalThis.fetch = vi.fn(async () => ({ ok: false, status: 401, text: async () => '{"error":"Unauthorized"}' }));
+    const err = await api.get('/cameras').catch((e) => e);
+    expect(err.status).toBe(401);
+    expect(localStorage.getItem('nightlight_token')).toBeNull();
+    expect(window.location.hash).toBe('#/login');
+  });
+
   test('a response whose BODY never finishes also times out', async () => {
     globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200, text: () => new Promise(() => {}) }));
     const result = track(api.get('/x'));

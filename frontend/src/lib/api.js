@@ -104,6 +104,18 @@ async function exchange(method, url, body, headers, signal) {
     signal,
   });
 
+  // A request the timeout already gave up on must never act on its answer. `request` released the caller
+  // with the timeout error, but a fetch implementation that ignores the abort signal (or a response already
+  // in flight when it fired) can still resolve here LATER. If that late answer is a 401 it would clear the
+  // token and bounce to the login page, even though the user may have logged in again since, so a timed-out
+  // request would log someone out. There is no await between this check and the token write below, so one
+  // check is enough. The rejection is swallowed: the race has already settled with the timeout error.
+  if (signal.aborted) {
+    const err = new Error('The request was aborted.');
+    err.name = 'AbortError';
+    throw err;
+  }
+
   if (res.status === 401) {
     setToken(null);
     window.location.hash = '#/login';

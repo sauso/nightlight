@@ -98,10 +98,20 @@ test('resolveClipsDir: strips trailing separators, resolves relatives, defaults 
   assert.equal(resolveClipsDir(abs + '/', '/d'), abs, '"/" is a separator on every platform');
   assert.equal(resolveClipsDir(abs + path.sep + path.sep, '/d'), abs);
   assert.equal(resolveClipsDir(path.join('some', 'recordings'), '/d'), abs);
-  assert.equal(resolveClipsDir(`  ${abs}  `, '/d'), abs, 'surrounding whitespace is ignored');
   assert.equal(resolveClipsDir(undefined, '/d'), path.resolve('/d', 'clips'));
   assert.equal(resolveClipsDir('', '/d'), path.resolve('/d', 'clips'), 'an empty compose default means "unset"');
   assert.equal(resolveClipsDir('   ', '/d'), path.resolve('/d', 'clips'));
+  assert.equal(resolveClipsDir(' \t\n', '/d'), path.resolve('/d', 'clips'), 'any whitespace-only value is "unset"');
+});
+
+// Regression (review of 0.36.0): the value used to be trim()med and the TRIMMED text used, so an existing
+// install whose CLIPS_DIR is a real Linux folder with a trailing space moved to a different (empty) folder on
+// upgrade. trim() may only decide "blank = unset"; a non-blank value goes to path.resolve untouched.
+test('resolveClipsDir keeps surrounding spaces of a non-blank value (a legal Linux folder name)', () => {
+  assert.equal(resolveClipsDir('/data/clips ', '/d'), path.resolve('/data/clips '));
+  assert.notEqual(resolveClipsDir('/data/clips ', '/d'), path.resolve('/data/clips'));
+  assert.equal(resolveClipsDir(' /data/clips', '/d'), path.resolve(' /data/clips'), 'a leading space too');
+  assert.equal(resolveClipsDir('/data/clips /', '/d'), path.resolve('/data/clips '),'a space before a trailing slash stays');
 });
 
 test('resolveClipsDir never returns a trailing separator (the property every guard relies on)', () => {

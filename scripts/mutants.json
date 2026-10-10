@@ -2301,6 +2301,15 @@
     "namePattern": "friendly, actionable copy"
   },
   {
+    "label": "request timeout: a LATE 401 after the timeout is acted on (aborted-signal check removed)",
+    "file": "frontend/src/lib/api.js",
+    "find": "if (signal.aborted) {",
+    "replace": "if (false && signal.aborted) {",
+    "expect": "killed",
+    "tests": ["lib/requestTimeout.test.jsx"],
+    "namePattern": "LATE 401"
+  },
+  {
     "label": "demo frontend: banner is removed from the signed-in app shell",
     "file": "frontend/src/components/AppHeader.jsx",
     "find": "      {showDemoBanner && <DemoBanner />}",
@@ -13490,12 +13499,21 @@
     "tests": ["clips-dir-normalisation.test.js"]
   },
   {
-    "label": "#545 CLIPS_DIR: surrounding whitespace no longer trimmed (blank value no longer means unset)",
+    "label": "#545 CLIPS_DIR: a whitespace-only value no longer means unset (blank test dropped)",
     "file": "backend/src/lib/clipRecorder.js",
-    "find": "typeof raw === 'string' ? raw.trim() : ''",
+    "find": "typeof raw === 'string' && raw.trim() !== '' ? raw : ''",
     "replace": "typeof raw === 'string' ? raw : ''",
     "expect": "killed",
     "tests": ["clips-dir-normalisation.test.js"]
+  },
+  {
+    "label": "#545 CLIPS_DIR: a non-blank value is trimmed again (a folder name ending in a space moves on upgrade)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "typeof raw === 'string' && raw.trim() !== '' ? raw : ''",
+    "replace": "typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : ''",
+    "expect": "killed",
+    "tests": ["clips-dir-normalisation.test.js"],
+    "namePattern": "keeps surrounding spaces"
   },
   {
     "label": "#545 CLIPS_DIR: recordings containment guard deleted (traversal row would be served)",
