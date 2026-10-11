@@ -136,6 +136,19 @@ npm run test:future          # the same suite with the wall clock a YEAR AHEAD (
 # Repo-level checks (no install needed, run from the repo root)
 node scripts/check-changelog.mjs   # CHANGELOG.md structure: one heading per type per version, in
                                    # Keep a Changelog order, released sections dated. Runs in CI.
+node scripts/scoreboard.mjs <snapshot.db> [--clock=<ISO>] [--unseen-after=<ISO>] [--json] [--out=<file>]
+                                   # SLEEP ACCURACY SCOREBOARD (read-only, not in CI). Recomputes every
+                                   # reviewed night of a database snapshot with the backend's own computeNight
+                                   # and scores it against the review: % within 10 min (in-bed), 15 (onset),
+                                   # 10 (wake), median/mean error, blank wakes, wakes off by > 60, per child
+                                   # and overall, split into "fitted-to" (reviewed <= --unseen-after) and
+                                   # "unseen". Run it on a snapshot before and after a sleep change and append
+                                   # the printed ledger row to a file OUTSIDE the repo (--out inside the repo is
+                                   # refused). It works on a temp copy, never the snapshot. --backend=<dir>
+                                   # scores another checkout's backend (npm ci done) on the same snapshot: the
+                                   # old-vs-new comparison. Nights older than the 30-day activity retention
+                                   # cannot be recomputed and are counted, not scored. Only "unseen" measures
+                                   # progress; read its n. See planning/sleep-marker-review-runbook.md §6.
 node scripts/mutate.mjs            # MUTATION TESTING. Breaks the source one way at a time (the
                                    # catalogue is scripts/mutants.json) and reports any mutant the
                                    # tests fail to kill. NOT in CI — it is slow and it is a tool for
