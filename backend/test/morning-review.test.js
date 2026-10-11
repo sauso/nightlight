@@ -1061,3 +1061,65 @@ test('C7, the lib on its own: no options keep the stored name; an answer with no
   saveNightReview(CHILD, DATE, { note: 'three' }, { answered: true });
   assert.deepEqual(answeredBy(), [null, null], 'an answer from nobody we know is not left under the previous person\'s name');
 });
+
+// --- #552 release review: no other person's ACCOUNT ID leaves the server ---------------------------------------
+//
+// The username is shown to every signed-in user by design (owner, 2026-10-10). The account id is not: no screen
+// reads it, and the review routes are open to caregivers. HOSTILE FIXTURE: both accounts' ids ARE the marker,
+// so every save stores the marker for real, and before each GET the marker is also written straight into every
+// `*user_id` column of sleep_reviews, found by reading the schema (PRAGMA), so a future column naming an account
+// is planted too and fails here until reviewForBrowser deals with it.
+const ID_MARK = 'ZZ-ACCOUNT-ID-MARKER';
+makeUser(db, { id: `${ID_MARK}-carer`, username: 'carer-552-login', role: 'caregiver' });
+makeUser(db, { id: `${ID_MARK}-admin`, username: 'admin-552-login', role: 'admin' });
+const ROLES = {
+  caregiver: { username: 'carer-552-login', token: whoToken(`${ID_MARK}-carer`, 'carer-552-login') },
+  admin: { username: 'admin-552-login', token: whoToken(`${ID_MARK}-admin`, 'admin-552-login', 'admin') },
+};
+const reviewIdColumns = () => db.prepare('PRAGMA table_info(sleep_reviews)').all().map((c) => c.name)
+  .filter((n) => /user_?id$/i.test(n));
+const plantIdMarker = () => {
+  for (const col of reviewIdColumns()) db.prepare(`UPDATE sleep_reviews SET ${col} = ?`).run(`${ID_MARK}-${col}`);
+};
+// Every review response: 200, no marker anywhere in the body, no id key on the review, and the username still there.
+const assertNoAccountId = (res, username, what) => {
+  assert.equal(res.status, 200, `${what}: ${JSON.stringify(res.body).slice(0, 300)}`);
+  assert.ok(!JSON.stringify(res.body).includes(ID_MARK), `${what}: an account id reached the browser`);
+  for (const col of reviewIdColumns()) assert.ok(!Object.hasOwn(res.body.review, col), `${what}: the review still has the key ${col}`);
+  assert.equal(res.body.review.answered_by_username, username, `${what}: the username is still sent`);
+};
+
+test('★ #552 no account id: the schema has exactly one account-id column on a review (a new one must be classified)', () => {
+  assert.deepEqual(reviewIdColumns(), ['answered_by_user_id']);
+});
+
+for (const [role, me] of Object.entries(ROLES)) {
+  const other = role === 'caregiver' ? ROLES.admin : ROLES.caregiver;
+  test(`★ #552 no account id: as a ${role}, GET, a normal save, a dismissal and an empty save carry the username, never an account id`, async () => {
+    laySamples();
+    const before = await call(reviewUrl(), { token: me.token });
+    assert.equal(before.status, 200);
+    assert.equal(before.body.review, null, 'an unreviewed night still reads as no review (null, not an empty object)');
+
+    // The OTHER person answers first, so every response below is about someone else's answer.
+    const theirs = await putAs(other.token, { note: 'answered by the other person' });
+    assertNoAccountId(theirs, other.username, 'their own save');
+    assert.equal(answeredBy()[0], `${ID_MARK}-${role === 'caregiver' ? 'admin' : 'carer'}`, 'setup: the id IS stored');
+
+    plantIdMarker();
+    assertNoAccountId(await call(reviewUrl(), { token: me.token }), other.username, 'GET');
+    plantIdMarker();
+    assertNoAccountId(await putAs(me.token, { dismissed: true }), other.username, 'a dismissal (keeps their name)');
+    plantIdMarker();
+    assertNoAccountId(await putAs(me.token, {}), other.username, 'an empty save (keeps their name)');
+    assertNoAccountId(await putAs(me.token, { true_onset_local: '19:40', true_wake_local: '06:00' }), me.username, 'a normal save');
+    assert.ok(answeredBy()[0].startsWith(ID_MARK), 'setup: the saver\'s id is stored, only not sent');
+  });
+}
+
+test('#552 no account id: the lib keeps the stored row whole; only what is SENT loses the id', () => {
+  saveNightReview(CHILD, DATE, { note: 'kept' }, { actor: { user_id: `${ID_MARK}-x`, username: 'x-login' }, answered: true });
+  assert.equal(db.prepare('SELECT answered_by_user_id AS id FROM sleep_reviews').get().id, `${ID_MARK}-x`);
+  assert.equal(getNightReview(CHILD, DATE).review.answered_by_username, 'x-login');
+  assert.ok(!Object.hasOwn(getNightReview(CHILD, DATE).review, 'answered_by_user_id'));
+});

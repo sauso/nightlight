@@ -15,7 +15,8 @@ import { deleteRecording } from '../lib/recordings.js';
 import { deleteTimelapse, discardAllTimelapseFrames } from '../lib/timelapse.js';
 import { TRANSITION } from '../lib/bedTransitions.js';
 import { getNightReview, saveNightReview, previewNightReview, inBedAfterOnset, asleepAfterWake, reviewCorrectsNight,
-  reviewCardState, localHmToUtcSql, applyVerdicts, applyCorrection, applyCorrections, transitionInstant } from '../lib/sleepReviews.js';
+  reviewCardState, localHmToUtcSql, applyVerdicts, applyCorrection, applyCorrections, transitionInstant,
+  reviewForBrowser } from '../lib/sleepReviews.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -631,7 +632,10 @@ router.put('/:id/review/:date', (req, res) => {
   // the username from the session, never the first name (see lib/actor.js).
   const actor = actorOf(req);
   const review = saveNightReview(req.params.id, req.params.date, patch, { storeFirst: false, actor, answered });
-  res.json({ review, verdicts_applied: check.applied, reasons_applied: check.reasons_applied });
+  // reviewForBrowser: the stored row names the answerer by account id as well as username, and this response
+  // goes to caregivers too. A dismissal or an empty save keeps SOMEONE ELSE's answer (and id) on the row, so
+  // without it the saver would receive another person's account id (#552 release review).
+  res.json({ review: reviewForBrowser(review), verdicts_applied: check.applied, reasons_applied: check.reasons_applied });
 });
 
 // ⚠️ DELETING A CHILD MUST TAKE ITS VIDEO WITH IT (issue #259). `timelapses` and `recordings` both

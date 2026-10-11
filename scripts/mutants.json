@@ -15230,5 +15230,77 @@
     "expect": "killed",
     "tests": ["childSettings.test.jsx"],
     "namePattern": "says truthfully which saved nights"
+  },
+  {
+    "label": "#552 no-id N1: the GET review sends the stored row whole (the answerer's account id included)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "review: reviewForBrowser(getReviewStmt.get(childId, nightDate)),",
+    "replace": "review: getReviewStmt.get(childId, nightDate) || null,",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"],
+    "namePattern": "#552 no account id"
+  },
+  {
+    "label": "#552 no-id N2: the PUT review response sends the stored row whole (a dismissal hands back someone else's account id)",
+    "file": "backend/src/routes/children.js",
+    "find": "res.json({ review: reviewForBrowser(review), verdicts_applied",
+    "replace": "res.json({ review, verdicts_applied",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"],
+    "namePattern": "#552 no account id"
+  },
+  {
+    "label": "#552 no-id N3: reviewForBrowser strips nothing",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "delete out.answered_by_user_id;",
+    "replace": "/* stripped nothing */",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"],
+    "namePattern": "#552 no account id"
+  },
+  {
+    "label": "#552 no-id N4: reviewForBrowser nulls the id instead of removing the key",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "delete out.answered_by_user_id;",
+    "replace": "out.answered_by_user_id = null;",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"],
+    "namePattern": "#552 no account id"
+  },
+  {
+    "label": "#552 no-id N5: reviewForBrowser strips the username too (the name every user is meant to see)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "delete out.answered_by_user_id;",
+    "replace": "delete out.answered_by_user_id; delete out.answered_by_username;",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"],
+    "namePattern": "#552 no account id"
+  },
+  {
+    "label": "#552 no-id N6: an unreviewed night's review reads as an empty object instead of null",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "if (!row) return null;",
+    "replace": "if (!row) return {};",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"],
+    "namePattern": "#552 no account id"
+  },
+  {
+    "label": "#552 no-id N7: Camera history (which carries account ids) opens to caregivers",
+    "file": "backend/src/routes/events.js",
+    "find": "router.get('/', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.get('/', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["who-did-it.test.js"],
+    "namePattern": "#552 no account id"
+  },
+  {
+    "label": "#552 no-id N8: the tile's 'muted by' carries the account id instead of the username",
+    "file": "backend/src/routes/cameras.js",
+    "find": "const by = until ? (actor?.username ?? null) : null;",
+    "replace": "const by = until ? (actor?.user_id ?? null) : null;",
+    "expect": "killed",
+    "tests": ["who-did-it.test.js"],
+    "namePattern": "#552 no account id"
   }
 ]

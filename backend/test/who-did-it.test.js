@@ -458,3 +458,36 @@ test('★ C10: the diagnostics bundle carries no username and no user id, only "
   const history = (await call(`${events.url}/api/events`, { token: adminToken })).body.events;
   assert.ok(history.some((r) => r.actor_username === `${MARK}-login`));
 });
+
+// --- #552 release review: no other person's account id reaches a caregiver ---------------------------------------
+
+test('★ #552 no account id: a caregiver gets the muter\'s username from the cameras, never their account id, and no Camera history', async () => {
+  // Read off the schema: no cameras column holds an account id today (the tile's name is alerts_snoozed_by, a
+  // username). A new one fails here until someone decides whether a caregiver may see it.
+  const idCols = db.prepare('PRAGMA table_info(cameras)').all().map((c) => c.name).filter((n) => /user_?id$/i.test(n));
+  assert.deepEqual(idCols, [], 'a cameras column holding an account id must be classified here');
+  // HOSTILE: the acting account's id IS the marker, so every row it writes carries it for real.
+  const MARK = 'ZZ-ACCOUNT-ID-MARKER';
+  makeUser(db, { id: `${MARK}-muter`, username: 'muter-552-login', role: 'admin' });
+  const muter = tokenFor({ id: `${MARK}-muter`, username: 'muter-552-login', role: 'admin' });
+  const snooze = await post(`${CAM}/snooze`, muter, { minutes: 15 });
+  assert.equal(snooze.status, 200);
+  assert.ok(!JSON.stringify(snooze.body).includes(MARK), 'the snooze response names the muter by username only');
+  assert.equal((await post(`${CAM}/restart`, muter)).status, 200);
+  assert.ok(rows().every((r) => r.actor_user_id === `${MARK}-muter`), 'setup: the id IS stored, on both rows');
+
+  db.prepare('UPDATE cameras SET disabled = 1').run(); // the list never asks MediaMTX (as C3)
+  for (const token of [carerToken, adminToken]) {
+    const list = await call(`${cams.url}/api/cameras`, { token });
+    assert.equal(list.status, 200);
+    assert.ok(!JSON.stringify(list.body).includes(MARK), 'an account id reached the camera list');
+    assert.equal(list.body.find((c) => c.id === CAM).alerts_snoozed_by, 'muter-552-login', 'the username still is');
+  }
+  // Camera history is where the account id lives, and a caregiver cannot read it at all.
+  const refused = await call(`${events.url}/api/events`, { token: carerToken });
+  assert.equal(refused.status, 403);
+  assert.ok(!JSON.stringify(refused.body).includes(MARK));
+  // An admin's does carry it (admin-only by design): the marker is reachable, so the 403 above is what holds.
+  const history = await call(`${events.url}/api/events`, { token: adminToken });
+  assert.ok(history.body.events.some((r) => r.actor_user_id === `${MARK}-muter`));
+});

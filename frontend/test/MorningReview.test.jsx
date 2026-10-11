@@ -201,11 +201,12 @@ describe('the review screen', () => {
   });
 
   describe('★ who answered it (#552)', () => {
-    // A review row as GET returns it: SELECT *, so the answered_by_* pair arrives beside the answers.
+    // A review row as GET returns it: SELECT *, so answered_by_username arrives beside the answers. The account
+    // id (answered_by_user_id) is stored but never sent (reviewForBrowser, backend/src/lib/sleepReviews.js).
     const REVIEWED = (by) => ({
       ...NIGHT,
       review: { true_onset_at: null, true_wake_at: '2026-08-29 19:40:00', note: 'checked twice', dismissed: 0,
-        nobody_in_bed: 0, answered_by_user_id: by ? 'u-9' : null, answered_by_username: by },
+        nobody_in_bed: 0, answered_by_username: by },
     });
 
     test('a review someone answered names them, by username, for a caregiver and an admin alike', async () => {

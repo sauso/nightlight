@@ -259,6 +259,23 @@ function transitionsFor(childId, nightDate) {
   }));
 }
 
+// A review row as it may leave the server: everything except `answered_by_user_id` (#552 release review,
+// 2026-10-11). That column is ANOTHER person's internal account id. It stays stored (the row is traced to an
+// account, and a dismissal carries it over: previewNightReview), but no screen reads it, since the page names
+// people by `answered_by_username`, and every signed-in user, caregivers included, can open and save any
+// night's review. So it is removed from every review response, for every caller: an admin's screen has no
+// use for it either, and one shape for every role is one less role check to get wrong. The username IS sent to
+// everyone, by design (owner decision 2026-10-10; docs/camera-controls.md). Removed, not nulled: a null would
+// read as "answered by nobody we know". Both review routes (GET, and PUT's response) go through here.
+// ⚠️ A new column naming a person must be added here too: the test "#552 no account id" reads the schema
+// (PRAGMA) and fails on any `*user_id` column it has not been told about.
+export function reviewForBrowser(row) {
+  if (!row) return null;
+  const out = { ...row };
+  delete out.answered_by_user_id;
+  return out;
+}
+
 // Everything the review screen needs for one night: what the app currently says, what a person has
 // already said, and every recorded transition with whether it has a frame and a verdict.
 export function getNightReview(childId, nightDate) {
@@ -280,7 +297,8 @@ export function getNightReview(childId, nightDate) {
     },
     // SELECT *, so a column added to sleep_reviews (true_in_bed_at / true_in_bed_transition_id, 2026-09-30)
     // reaches the screen without a change here, and none is ever dropped from what an open page reads.
-    review: getReviewStmt.get(childId, nightDate) || null,
+    // The one exception is the answerer's account id, which never leaves the server (reviewForBrowser).
+    review: reviewForBrowser(getReviewStmt.get(childId, nightDate)),
     transitions: transitionsFor(childId, nightDate),
   };
 }

@@ -130,7 +130,10 @@ admins: see [Long-silence alerts](#long-silence-alerts) above.
 **Who did it is recorded, by username.** That is the login name an admin sets for each account, never
 the first name, which anyone can change on their own account (so it cannot be used to put someone
 else's name on what you did). It is copied at the time, so renaming or deleting the account later does
-not change what was recorded.
+not change what was recorded. People are named by username only: the other person's account id is
+stored with the name but never sent to the browser, on the tile, in the morning review's **Answered by**,
+or in the response to a review save, for caregivers and admins alike. Camera history, which does carry
+it, is admin only.
 
 - **On the tile, to everyone:** while a camera is silenced, the button reads `Muted until <time> by
   <username> · tap to un-mute`, and the muted-bell time in the tile's strip says the same on hover. The
