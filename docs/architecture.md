@@ -106,7 +106,7 @@ reviewer reads. The split between the roles follows one rule (owner decision 202
 caregiver can still reach says why on its line of the table. Role checks made *inside* a handler
 (deleting another user's session, the admin-only fields of `GET /api/settings`, and `PUT
 /api/children/:id`, where a caregiver may change a child's name, birthday, colour and photo but not
-`track_sleep` or the sleep window) are not gates: their own test files cover them
+`track_sleep`, the sleep window or, since #655, the primary camera `primary_camera_id`) are not gates: their own test files cover them
 (`children-role-fields.test.js` for the last).
 
 **Stored secrets are never returned, and that is pinned too** (#563's second half),

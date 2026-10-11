@@ -48,7 +48,7 @@ function mockApi() {
   delSpy = vi.spyOn(api, 'del').mockResolvedValue({});
 }
 
-function mount({ kid = KID, id = KID.id, who = ADMIN } = {}) {
+function mount({ kid = KID, id = KID.id, who = ADMIN, cameras = [] } = {}) {
   return renderAs(
     who,
     <>
@@ -59,7 +59,7 @@ function mount({ kid = KID, id = KID.id, who = ADMIN } = {}) {
         <Route path="*" element={<div>elsewhere</div>} />
       </Routes>
     </>,
-    { kids: kid ? [kid] : [], route: `/children/${id}` }
+    { kids: kid ? [kid] : [], cameras, route: `/children/${id}` }
   );
 }
 
@@ -283,8 +283,112 @@ describe('what each role is told about clip settings', () => {
   });
 });
 
+describe('★★ the sleep camera picker (#655)', () => {
+  // GET /cameras order (tile order), as CamerasContext publishes it. cam-other belongs to another child and
+  // must never be offered.
+  const CAMS = [
+    { id: 'cam-1', name: 'Cam one', child_id: 'kid-1', disabled: 0 },
+    { id: 'cam-other', name: 'Their cam', child_id: 'kid-9', disabled: 0 },
+    { id: 'cam-2', name: 'Cam two', child_id: 'kid-1', disabled: 1 },
+  ];
+  const LABEL = "Camera used for this child's sleep";
+  const optionTexts = () => [...screen.getByLabelText(LABEL).options].map((o) => o.textContent);
+
+  test('★ an admin gets every camera of this child, turned-off ones marked, and Automatic first', async () => {
+    mount({ kid: { ...KID, primary_camera_id: null, primary_camera: { id: 'cam-1', name: 'Cam one' } }, cameras: CAMS });
+    const select = await screen.findByLabelText(LABEL);
+    expect(select).toBeEnabled();
+    expect(select.value).toBe('');
+    expect(optionTexts()).toEqual([
+      'Automatic (first enabled camera in tile order)', 'Cam one', 'Cam two (turned off)',
+    ]);
+  });
+
+  test('★ a caregiver sees it disabled, with the reason', async () => {
+    mount({ who: CAREGIVER, kid: { ...KID, primary_camera_id: 'cam-1', primary_camera: { id: 'cam-1', name: 'Cam one' } }, cameras: CAMS });
+    const select = await screen.findByLabelText(LABEL);
+    expect(select).toBeDisabled();
+    expect(select.value, 'still SHOWS the stored choice').toBe('cam-1');
+    expect(screen.getByText(/Only an admin can change sleep tracking, the bedtime window and the sleep camera/)).toBeTruthy();
+  });
+
+  test('hidden for a child with one camera and no choice made (nothing to choose)', async () => {
+    mount({ cameras: [CAMS[0], CAMS[1]] });
+    await screen.findByLabelText('Name');
+    expect(screen.queryByLabelText(LABEL)).toBeNull();
+  });
+
+  test('hidden for a child with no camera at all', async () => {
+    mount({ cameras: [] });
+    await screen.findByLabelText('Name');
+    expect(screen.queryByLabelText(LABEL)).toBeNull();
+  });
+
+  test('★ "Currently measured from" names the camera the SERVER resolved, not one re-derived here', async () => {
+    // The stored choice is cam-2, which is turned off, so the server falls back to cam-1 and says so in
+    // `primary_camera`. A screen that re-derived the answer from the stored id would name Cam two.
+    mount({ kid: { ...KID, primary_camera_id: 'cam-2', primary_camera: { id: 'cam-1', name: 'Cam one' } }, cameras: CAMS });
+    await screen.findByLabelText(LABEL);
+    const line = screen.getByText(/Currently measured from/);
+    expect(line.textContent).toMatch(/Currently measured from Cam one\./);
+    expect(line.textContent).toMatch(/The chosen camera is turned off or no longer assigned/);
+  });
+
+  test('★ says truthfully which saved nights a change can still reach', async () => {
+    // The first wording said "saved summaries keep their numbers", which is false: last night's summary
+    // is re-scored for ~3h after the wake time, and a review correction or Recompute re-scores a night
+    // (#655 review). Pinned on the parts a reader acts on, not the whole sentence.
+    mount({ kid: { ...KID, primary_camera_id: null, primary_camera: { id: 'cam-1', name: 'Cam one' } }, cameras: CAMS });
+    await screen.findByLabelText(LABEL);
+    const text = screen.getByText(/Currently measured from/).textContent;
+    expect(text).toMatch(/A night's detail page always\s+uses the new camera\./);
+    expect(text).toMatch(/last night's can still\s+be updated for a few hours after the wake time/);
+    expect(text).toMatch(/a review correction or a Recompute\s+works a night out again/);
+    expect(text).not.toMatch(/saved summaries keep their\s+numbers/);
+  });
+
+  test('says so when no camera of the child is on', async () => {
+    mount({ kid: { ...KID, primary_camera_id: 'cam-2', primary_camera: null }, cameras: CAMS });
+    await screen.findByLabelText(LABEL);
+    expect(screen.getByText(/No camera of this child is turned on/)).toBeTruthy();
+  });
+
+  test('★★ a stale stored camera (deleted) is still shown, as "(unavailable)", and a save keeps it', async () => {
+    // One camera left, so only the stored choice makes the picker appear. Without the extra option the
+    // select would show Automatic and a plain rename would clear the stored choice without anyone asking.
+    const { user } = mount({ kid: { ...KID, primary_camera_id: 'cam-gone', primary_camera: { id: 'cam-1', name: 'Cam one' } }, cameras: [CAMS[0]] });
+    const select = await screen.findByLabelText(LABEL);
+    expect(select.value).toBe('cam-gone');
+    expect(optionTexts()).toContain('A removed camera (unavailable)');
+
+    const name = screen.getByLabelText('Name');
+    await user.clear(name);
+    await user.type(name, 'Renamed');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    expect(putSpy.mock.calls[0][1].primary_camera_id).toBe('cam-gone');
+  });
+
+  test('an admin\'s choice reaches the payload; Automatic is sent as ""', async () => {
+    const { user } = mount({ kid: { ...KID, primary_camera_id: null, primary_camera: { id: 'cam-1', name: 'Cam one' } }, cameras: CAMS });
+    await user.selectOptions(await screen.findByLabelText(LABEL), 'cam-2');
+    expect(putSpy, 'a form field: nothing is written until Save').not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    expect(putSpy.mock.calls[0][1].primary_camera_id).toBe('cam-2');
+  });
+
+  test('★ a caregiver\'s save leaves it OUT, so a stale form can never be why a rename is refused', async () => {
+    const { user } = mount({ who: CAREGIVER, kid: { ...KID, primary_camera_id: 'cam-1', primary_camera: { id: 'cam-1', name: 'Cam one' } }, cameras: CAMS });
+    await screen.findByLabelText(LABEL);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    expect(putSpy.mock.calls[0][1]).not.toHaveProperty('primary_camera_id');
+  });
+});
+
 describe('★★ what a caregiver can change (#542)', () => {
-  const NOTE = 'Only an admin can change sleep tracking and the bedtime window.';
+  const NOTE = 'Only an admin can change sleep tracking, the bedtime window and the sleep camera.';
 
   test('tracking and the window are shown but disabled, with the reason; an admin gets them enabled', async () => {
     const carer = mount({ who: CAREGIVER });
@@ -323,7 +427,8 @@ describe('★★ what a caregiver can change (#542)', () => {
   test('a refused save shows the server\'s reason and stays on the form', async () => {
     // A page opened by an admin who was then demoted still renders the admin form; the server's 403
     // message is what tells them why nothing was saved.
-    const reason = 'Only an admin can turn sleep tracking on or off or change the sleep window. Your other changes were not saved.';
+    const reason = 'Only an admin can turn sleep tracking on or off, change the sleep window or choose the camera '
+      + "a child's sleep is measured from. Your other changes were not saved.";
     putSpy = vi.spyOn(api, 'put').mockRejectedValue(Object.assign(new Error(reason), { status: 403 }));
     const { user } = mount({ who: CAREGIVER });
     await user.click(await screen.findByRole('button', { name: 'Save changes' }));

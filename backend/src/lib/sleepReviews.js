@@ -60,8 +60,11 @@ const upsertReviewStmt = db.prepare(
      reviewed_at              = datetime('now')`
 );
 
-// The child's cameras in the same order the analysis picks its scoring camera, so the frames shown are
-// the ones the decisions were actually made from.
+// Every ENABLED camera of the child: the SET of cameras whose bed-transition frames the review shows.
+// Its ORDER no longer matches how the scoring camera is picked (since #655 a child can name a primary
+// camera, lib/primaryCamera.js) and does not need to: the events come back ordered by time
+// (getBedTransitions, ORDER BY created_at), so this order is invisible, and it is deliberately left as it was. The review shows the frames of all the
+// child's enabled cameras, not only the primary's.
 const camsForChild = db.prepare(
   'SELECT id, name FROM cameras WHERE child_id = ? AND disabled = 0 ORDER BY sort_order, id'
 );

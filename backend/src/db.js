@@ -362,6 +362,17 @@ if (!childrenColumns.includes('track_sleep')) {
   db.exec("ALTER TABLE children ADD COLUMN sleep_window_end TEXT NOT NULL DEFAULT '07:00'");
 }
 
+// The camera a child's sleep is measured from (#655). NULL = the old rule, "the first enabled camera in
+// tile order" (sort_order), so every child that existed before this column scores exactly as it did.
+// Its OWN guard, not inside the track_sleep block above: that block only runs on a database old enough
+// to lack track_sleep, so nesting this there would never add the column to any current install.
+// No FOREIGN KEY: lib/primaryCamera.js re-validates the pointer on every read (still this child's camera,
+// still enabled), and a dangling id there falls back instead of failing. An FK could not express "and
+// still assigned to this child" anyway.
+if (!childrenColumns.includes('primary_camera_id')) {
+  db.exec('ALTER TABLE children ADD COLUMN primary_camera_id TEXT');
+}
+
 const camerasColumns = db.prepare('PRAGMA table_info(cameras)').all().map((c) => c.name);
 if (!camerasColumns.includes('sort_order')) {
   db.exec('ALTER TABLE cameras ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0');

@@ -15,10 +15,10 @@ const COLORS = ['#f4c56a', '#7FBFA3', '#8A9FE0', '#E0A5C9', '#E0B27F', '#7c83db'
 // via its avatar). Both roles can open it, but what a caregiver may do here is narrower (owner decision
 // 2026-10-10, #542: a caregiver can watch and act in the moment, but not destroy or reconfigure):
 //   - name, birthday, colour and photo: both roles;
-//   - Track sleep and the bedtime window: shown to a caregiver but disabled, and left OUT of a caregiver's
-//     save, because the server refuses the whole request if a caregiver's save would change them
-//     (routes/children.js); sending the unchanged values would pass, but leaving them out means a stale
-//     form can never be the reason a caregiver's rename is refused;
+//   - Track sleep, the bedtime window and the sleep camera (#655): shown to a caregiver but disabled, and
+//     left OUT of a caregiver's save, because the server refuses the whole request if a caregiver's save
+//     would change them (routes/children.js); sending the unchanged values would pass, but leaving them out
+//     means a stale form can never be the reason a caregiver's rename is refused;
 //   - adding and removing a child: admin only (the server refuses both).
 const CAREGIVER_FIELDS = ['name', 'birthday', 'color', 'photo'];
 
@@ -27,14 +27,15 @@ export default function ChildSettings() {
   const isNew = !id || id === 'new';
   const navigate = useNavigate();
   const location = useLocation();
-  const { kids, refresh } = useCameras();
+  const { kids, cameras, refresh } = useCameras();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const kid = isNew ? null : kids.find((k) => k.id === id);
 
+  // `primary_camera_id` '' = automatic, and '' is what the server stores as NULL (#655).
   const [form, setForm] = useState({
     name: '', birthday: '', color: COLORS[0], photo: null,
-    track_sleep: true, sleep_window_start: '19:00', sleep_window_end: '07:00',
+    track_sleep: true, sleep_window_start: '19:00', sleep_window_end: '07:00', primary_camera_id: '',
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -53,8 +54,23 @@ export default function ChildSettings() {
       track_sleep: kid.track_sleep == null ? true : !!kid.track_sleep,
       sleep_window_start: kid.sleep_window_start || '19:00',
       sleep_window_end: kid.sleep_window_end || '07:00',
+      primary_camera_id: kid.primary_camera_id || '',
     });
   }, [kid, isNew]);
+
+  // The sleep camera picker (#655). Its options are EVERY camera assigned to this child, in tile order
+  // (GET /cameras order), turned-off ones included and marked, because an admin may choose a camera that is
+  // off for now: the choice takes effect once it is back on. Shown only when there is a choice to make (two
+  // or more cameras) or a choice was made, so a one-camera child gets no control that does nothing.
+  const assignedCams = isNew ? [] : (cameras || []).filter((c) => c.child_id === id);
+  const storedPrimary = kid?.primary_camera_id || '';
+  // A stored primary that is no longer among the options (deleted, or moved to another child by something
+  // other than this app's own routes, which clear it) is still offered, as "(unavailable)", so the select
+  // shows what is stored and an admin's save sends it back unchanged. Without it the select would show
+  // "Automatic" and a plain rename would silently clear the stored choice.
+  const missingPrimary = form.primary_camera_id && !assignedCams.some((c) => c.id === form.primary_camera_id)
+    ? form.primary_camera_id : '';
+  const showCameraPicker = !isNew && (assignedCams.length >= 2 || !!storedPrimary);
 
   // Persist just the photo immediately for an existing child (no Save press needed). On a new child
   // there's no record yet, so it rides along when the form is first saved.
@@ -190,7 +206,7 @@ export default function ChildSettings() {
               </label>
               {!isAdmin && (
                 <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-                  Only an admin can change sleep tracking and the bedtime window.
+                  Only an admin can change sleep tracking, the bedtime window and the sleep camera.
                 </div>
               )}
               <div className="camera-tile__sub" style={{ marginTop: 6 }}>
@@ -219,6 +235,43 @@ export default function ChildSettings() {
                   <div className="camera-tile__sub" style={{ marginTop: 6 }}>
                     The overnight window looked at for this child (it can run past midnight).
                   </div>
+                  {showCameraPicker && (
+                    <div style={{ marginTop: 12 }}>
+                      <label htmlFor="child-sleep-camera">Camera used for this child's sleep</label>
+                      <select id="child-sleep-camera" value={form.primary_camera_id} disabled={!isAdmin}
+                        onChange={(e) => setForm({ ...form, primary_camera_id: e.target.value })}>
+                        <option value="">Automatic (first enabled camera in tile order)</option>
+                        {assignedCams.map((c) => (
+                          <option key={c.id} value={c.id}>{c.disabled ? `${c.name} (turned off)` : c.name}</option>
+                        ))}
+                        {missingPrimary && (
+                          <option value={missingPrimary}>
+                            {(cameras || []).find((c) => c.id === missingPrimary)?.name || 'A removed camera'} (unavailable)
+                          </option>
+                        )}
+                      </select>
+                      {/* What the SERVER says the night is measured from now (child.primary_camera, resolved by
+                          the same function scoring uses), never re-derived here: the stored choice can be turned
+                          off or gone, and then the automatic rule applies. */}
+                      <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                        {kid?.primary_camera ? (
+                          <>Currently measured from <strong>{kid.primary_camera.name}</strong>.</>
+                        ) : (
+                          <>No camera of this child is turned on, so nothing is measured right now.</>
+                        )}
+                        {storedPrimary && kid?.primary_camera?.id !== storedPrimary && (
+                          <> The chosen camera is turned off or no longer assigned, so the automatic choice is used until it is back.</>
+                        )}
+                        {/* Same facts as README "What a change affects". NOT "saved summaries keep their numbers":
+                            last night's summary is re-scored for ~3h after the wake time, and a review correction
+                            or an admin's Recompute re-scores a night (#655 review). */}
+                        {' '}A change applies whenever a night is next worked out. A night's detail page always
+                        uses the new camera. A saved summary stays as saved, except that last night's can still
+                        be updated for a few hours after the wake time, and a review correction or a Recompute
+                        works a night out again.
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
             </div>

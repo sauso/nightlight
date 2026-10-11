@@ -2,7 +2,8 @@
 // and act in the moment, but cannot destroy or reconfigure).
 //
 // ★ WHY THIS FILE EXISTS. PUT /api/children/:id serves both roles from ONE request: name, birthday,
-// colour and photo stay open to a caregiver, while `track_sleep` and the bedtime window are admin-only.
+// colour and photo stay open to a caregiver, while `track_sleep`, the bedtime window and (since #655) the
+// primary camera are admin-only.
 // So the gate cannot be a requireAdmin in front of the route (route-permissions.test.js pins the route as
 // SIGNED_IN and lists this file in its header); it is a comparison inside the handler, and only these
 // tests see it.
@@ -29,7 +30,8 @@ const { default: childrenRouter } = await import('../src/routes/children.js');
 
 const KID = 'kid-role';
 const STORED = { name: 'Original Name', start: '19:30', end: '06:45' };
-const REFUSED = 'Only an admin can turn sleep tracking on or off or change the sleep window. Your other changes were not saved.';
+const REFUSED = 'Only an admin can turn sleep tracking on or off, change the sleep window or choose the camera '
+  + "a child's sleep is measured from. Your other changes were not saved.";
 
 let server;
 let adminToken;
@@ -161,6 +163,70 @@ describe('★ no type coercion turns tracking on or off for a caregiver', () => 
     assert.equal(res.status, 200, JSON.stringify(res.body));
     assert.equal(row().name, 'Renamed');
     assert.equal(row().track_sleep, 0);
+  });
+});
+
+// #655: the primary camera (which camera a child's sleep is measured from) joins the admin-only fields.
+// Same gate, same rules: compare the value that will be WRITTEN ('' and null are both written as NULL),
+// refuse the whole request. The cameras are DISABLED so no write can start a detector from a unit test.
+describe('★ a caregiver cannot change the primary camera (#655)', () => {
+  beforeEach(() => {
+    seed(1);
+    for (const id of ['cam-a', 'cam-b']) {
+      db.prepare(`INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path, disabled)
+                  VALUES (?, ?, 'rtsp://example/x', ?, ?, 1)`).run(id, id, KID, `path_${id}`);
+    }
+  });
+  const primary = () => row().primary_camera_id;
+  const setPrimary = (v) => db.prepare('UPDATE children SET primary_camera_id = ? WHERE id = ?').run(v, KID);
+
+  test('choosing one (NULL -> a camera) is refused and nothing is saved', async () => {
+    const res = await put({ name: 'Renamed', primary_camera_id: 'cam-b' });
+    assertRefused(res, ['primary_camera_id'], 'choose');
+    assertUntouched(1, 'choose');
+    assert.equal(primary(), null);
+  });
+
+  test('switching it (a camera -> another) is refused', async () => {
+    setPrimary('cam-a');
+    const res = await put({ name: 'Renamed', primary_camera_id: 'cam-b' });
+    assertRefused(res, ['primary_camera_id'], 'switch');
+    assert.equal(primary(), 'cam-a');
+  });
+
+  for (const value of ['', null]) {
+    test(`clearing it with ${JSON.stringify(value)} (a camera -> automatic) is refused`, async () => {
+      setPrimary('cam-a');
+      const res = await put({ name: 'Renamed', primary_camera_id: value });
+      assertRefused(res, ['primary_camera_id'], 'clear');
+      assert.equal(primary(), 'cam-a');
+    });
+  }
+
+  test('★ echoing the stored camera, as a whole-form save does, saves the rest', async () => {
+    setPrimary('cam-a');
+    const res = await put({ name: 'Renamed', primary_camera_id: 'cam-a' });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(row().name, 'Renamed');
+    assert.equal(primary(), 'cam-a');
+  });
+
+  test('★ sending "" for a child with no primary is not a change ("" and NULL are both automatic)', async () => {
+    const res = await put({ name: 'Renamed', primary_camera_id: '' });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(row().name, 'Renamed');
+    assert.equal(primary(), null);
+  });
+
+  test('a caregiver changing the primary AND the window is told both, in a fixed order', async () => {
+    const res = await put({ name: 'Renamed', sleep_window_start: '20:00', primary_camera_id: 'cam-b' });
+    assertRefused(res, ['sleep_window_start', 'primary_camera_id'], 'window + camera');
+  });
+
+  test('an admin can change it', async () => {
+    const res = await put({ primary_camera_id: 'cam-b' }, adminToken);
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(primary(), 'cam-b');
   });
 });
 

@@ -8,9 +8,11 @@ import { CLIPS_DIR } from './clipRecorder.js';
 import { clipStorageReady, hasMinFreeSpace } from './clipStorage.js';
 import { captureSnapshot, fetchHttpSnapshot } from './snapshot.js';
 import { childTracksSleep, childWindowActiveNow, currentNightDate } from './sleepAnalysis.js';
+import { primaryCameraRowFor } from './primaryCamera.js';
 
 // Nightly "memories" timelapse (shipped in 0.24.0). While a child's sleep
-// window is open we sample one still every SAMPLE_INTERVAL from their primary camera into a per-night
+// window is open we sample one still every SAMPLE_INTERVAL from their primary camera (lib/primaryCamera.js:
+// the one named in the child's settings, else the first enabled one in tile order) into a per-night
 // frame dir; when the window closes the nightly sleep job assembles those frames into a short MP4 that
 // condenses the whole night into ~TARGET_DURATION_SEC. Cheap and self-contained: frames come from the
 // same local snapshot path the alert image uses (no extra camera session), one FFmpeg pass assembles
@@ -102,19 +104,20 @@ export function getTimelapseThumbFile(id) {
 
 // --- frame sampling ---
 
-// disabled = 0: a disabled camera's streaming/detection legs are off, and its RTSP source may be
-// stale or gone entirely — it must not be selected just because it happens to sort first, and must
-// not be picked ahead of a working enabled sibling. Same eligibility filter sleepAnalysis.js and
-// sleepReviews.js already use for "the primary camera for a child".
-const selectEligibleCameraStmt = db.prepare(
-  'SELECT id, mediamtx_path, snapshot_url FROM cameras WHERE child_id = ? AND disabled = 0 ORDER BY sort_order ASC, rowid ASC LIMIT 1'
-);
+// The camera is the child's primary camera, from the same resolver sleep scoring uses
+// (lib/primaryCamera.js, #655), so the timelapse shows the room the night was measured from: the camera an
+// admin named in the child's settings while it is still theirs and enabled, else the first enabled one in
+// sort_order. disabled = 0 either way: a disabled camera's streaming/detection legs are off, and its RTSP
+// source may be stale or gone entirely, so it must never be sampled, not even when it is the named one.
+// tieBreak 'rowid': this sampler's own tie-break for two cameras with the same sort_order before #655
+// (`ORDER BY sort_order ASC, rowid ASC`), kept so a child with no primary samples exactly the camera it
+// did. Scoring breaks the same tie by id; see primaryCamera.js for why the two are not unified.
 // Re-checked right before a frame is written (see captureChildFrame) — a camera can be disabled,
 // reassigned to a different child, or deleted entirely while its snapshot fetch was in flight.
 const isStillEligibleStmt = db.prepare('SELECT 1 FROM cameras WHERE id = ? AND child_id = ? AND disabled = 0');
 
 export async function captureChildFrame(childId, nightDate) {
-  const cam = selectEligibleCameraStmt.get(childId);
+  const cam = primaryCameraRowFor(childId, { tieBreak: 'rowid' });
   if (!cam) return;
   let buf = null;
   if (cam.snapshot_url) buf = await fetchHttpSnapshot(cam.snapshot_url).catch(() => null);

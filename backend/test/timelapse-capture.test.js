@@ -119,6 +119,52 @@ describe('captureChildFrame — camera selection respects `disabled`', () => {
   });
 });
 
+// #655: the timelapse is taken from the child's PRIMARY camera (lib/primaryCamera.js), the same one the
+// night is scored from, so it shows the room the numbers came from.
+describe('captureChildFrame — the child\'s primary camera (#655)', () => {
+  const snap = (id) => `http://${id}.invalid/snap.jpg`;
+  const cam = (id, childId, extra = {}) => makeCamera(db, { id, childId, extra: { snapshot_url: snap(id), ...extra } });
+  const setPrimary = (childId, camId) => db.prepare('UPDATE children SET primary_camera_id = ? WHERE id = ?').run(camId, childId);
+  const fetchedFrom = () => fetchHttpSnapshot.mock.calls.map((c) => c.arguments[0]);
+
+  test('★ a named primary is sampled even though another camera sorts first', async () => {
+    const child = makeChild(db, { id: 'kid-1' });
+    cam('cam-first', child.id, { sort_order: 0 });
+    cam('cam-chosen', child.id, { sort_order: 5 });
+    setPrimary(child.id, 'cam-chosen');
+    fetchHttpSnapshot.mock.mockImplementation(async () => JPEG);
+
+    await captureChildFrame(child.id, NIGHT);
+
+    assert.deepEqual(fetchedFrom(), [snap('cam-chosen')]);
+    assert.equal(framesIn(child.id).length, 1);
+  });
+
+  test('★ a turned-off primary is never sampled; the first enabled camera is used instead', async () => {
+    const child = makeChild(db, { id: 'kid-1' });
+    cam('cam-first', child.id, { sort_order: 0 });
+    cam('cam-chosen', child.id, { sort_order: 5, disabled: 1 });
+    setPrimary(child.id, 'cam-chosen');
+    fetchHttpSnapshot.mock.mockImplementation(async () => JPEG);
+
+    await captureChildFrame(child.id, NIGHT);
+
+    assert.deepEqual(fetchedFrom(), [snap('cam-first')]);
+  });
+
+  test('★ NULL primary, a sort_order tie: still broken by rowid, as before #655 (not scoring\'s id)', async () => {
+    // Inserted z first: rowid order (z, a) disagrees with id order (a, z).
+    const child = makeChild(db, { id: 'kid-1' });
+    cam('cam-z', child.id, { sort_order: 0 });
+    cam('cam-a', child.id, { sort_order: 0 });
+    fetchHttpSnapshot.mock.mockImplementation(async () => JPEG);
+
+    await captureChildFrame(child.id, NIGHT);
+
+    assert.deepEqual(fetchedFrom(), [snap('cam-z')]);
+  });
+});
+
 describe('captureChildFrame — eligibility is re-checked after the (async) capture, not just before it', () => {
   test('★ THE FIX: the camera is disabled WHILE its snapshot fetch is in flight — no frame is written', async () => {
     const child = makeChild(db, { id: 'kid-1' });
