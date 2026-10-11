@@ -619,6 +619,13 @@ export default function NightReview() {
       <main className="app-main">
         <div className="card">
           <div className="card-title">What we recorded</div>
+          {/* WHO last answered this night (#552), by username: the person to ask about it, on a
+              two-parent night. Set only by a save that answers something (a time, "no one was in the
+              bed", a note or an event answer); a dismissal never changes it. Absent for a night nobody has
+              answered yet, and for any review saved before this was recorded. */}
+          {data.review?.answered_by_username && (
+            <div className="camera-tile__sub">Answered by {data.review.answered_by_username}</div>
+          )}
 
           {/* "No one was in the bed" takes priority over confirm-or-edit, whatever `editing` says —
               that is the whole fix for R5: a flag always clears the review's stored times, so `editing`

@@ -1,18 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useHomeTime } from '../lib/useHomeTime.js';
 
 // Popup calendar for filtering clips by day — multi-select. Only days that actually have clips are
 // enabled (shown with a dot); tapping days toggles them in/out of the filter (the list shows clips
-// from every selected day), and "Clear" resets to all. Works in stable local day keys 'YYYY-MM-DD';
-// the parent maps a key back to a display label.
+// from every selected day), and "Clear" resets to all. Works in stable HOME-zone day keys 'YYYY-MM-DD'
+// (#561; the parent builds them with useHomeTime); the parent maps a key back to a display label.
+//
+// The calendar GRID is pure calendar arithmetic with no zone in it, so it is done in UTC (Date.UTC /
+// getUTC*) rather than with local `new Date(y, m, d)`: the device zone can then neither shift a day nor
+// hit a daylight-saving gap. The only zone-dependent thing here is "today" (which month to open on when
+// nothing is selected and no clips exist), and that is the HOME zone's today.
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const pad = (n) => String(n).padStart(2, '0');
 const keyOf = (y, m, d) => `${y}-${pad(m + 1)}-${pad(d)}`;
-const monthNum = (k) => { const d = new Date(k + 'T00:00'); return d.getFullYear() * 12 + d.getMonth(); };
+// 'YYYY-MM-DD' -> { y, m } (m is 0-based, like Date).
+const ymOf = (k) => { const [y, m] = String(k).split('-'); return { y: Number(y), m: Number(m) - 1 }; };
+const monthNum = (k) => { const { y, m } = ymOf(k); return y * 12 + m; };
 
 export default function ClipDatePicker({ selected, onToggle, onClear, availableDays, labelFor }) {
+  const home = useHomeTime();
   const [open, setOpen] = useState(false);
-  const [ym, setYm] = useState(() => ({ y: new Date().getFullYear(), m: new Date().getMonth() }));
+  const [ym, setYm] = useState(() => ymOf(home.todayKey()));
   const ref = useRef(null);
 
   const bounds = useMemo(() => {
@@ -23,9 +32,8 @@ export default function ClipDatePicker({ selected, onToggle, onClear, availableD
   // Jump the shown month to the latest selected day (or the most recent month with clips) when opening.
   function openPicker() {
     const sel = [...selected].sort();
-    const base = sel[sel.length - 1] || bounds.max;
-    const d = base ? new Date(base + 'T00:00') : new Date();
-    setYm({ y: d.getFullYear(), m: d.getMonth() });
+    const base = sel[sel.length - 1] || bounds.max || home.todayKey();
+    setYm(ymOf(base));
     setOpen(true);
   }
 
@@ -40,8 +48,8 @@ export default function ClipDatePicker({ selected, onToggle, onClear, availableD
   }, [open]);
 
   const cells = useMemo(() => {
-    const startDow = new Date(ym.y, ym.m, 1).getDay();
-    const daysInMonth = new Date(ym.y, ym.m + 1, 0).getDate();
+    const startDow = new Date(Date.UTC(ym.y, ym.m, 1)).getUTCDay();
+    const daysInMonth = new Date(Date.UTC(ym.y, ym.m + 1, 0)).getUTCDate();
     const arr = Array.from({ length: startDow }, () => null);
     for (let d = 1; d <= daysInMonth; d++) arr.push(d);
     while (arr.length % 7 !== 0) arr.push(null);
@@ -51,7 +59,7 @@ export default function ClipDatePicker({ selected, onToggle, onClear, availableD
   const cur = ym.y * 12 + ym.m;
   const canPrev = bounds.min ? cur > monthNum(bounds.min) : false;
   const canNext = bounds.max ? cur < monthNum(bounds.max) : false;
-  const monthLabel = new Date(ym.y, ym.m, 1).toLocaleDateString([], { month: 'long', year: 'numeric' });
+  const monthLabel = home.dayLabel(keyOf(ym.y, ym.m, 1), { month: 'long', year: 'numeric' });
 
   const triggerLabel =
     selected.size === 0 ? 'All dates'
@@ -95,7 +103,7 @@ export default function ClipDatePicker({ selected, onToggle, onClear, availableD
                   disabled={!has}
                   aria-pressed={has ? isSel : undefined}
                   onClick={() => onToggle(k)}
-                  aria-label={has ? `${new Date(ym.y, ym.m, d).toLocaleDateString()} — clips available` : undefined}
+                  aria-label={has ? `${home.dayLabel(k)} — clips available` : undefined}
                 >
                   {d}
                 </button>

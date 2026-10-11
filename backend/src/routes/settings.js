@@ -50,6 +50,8 @@ const ADMIN_FIELDS = [
   ...PUBLIC_FIELDS,
   'camera_offline_alert_enabled',
   'camera_offline_alert_minutes',
+  'snooze_alert_enabled',
+  'snooze_alert_minutes',
   'clip_pre_roll_s',
   'clip_post_roll_s',
   'clip_retention_days',
@@ -131,6 +133,7 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     ondemand_enabled, ondemand_pre_roll_s, ondemand_max_duration_s,
     wake_clips_enabled, wake_clip_seconds, wake_clip_retention_days,
     camera_offline_alert_enabled, camera_offline_alert_minutes,
+    snooze_alert_enabled, snooze_alert_minutes,
   } = req.body || {};
 
   if (app_name !== undefined && !app_name.trim()) {
@@ -266,6 +269,34 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     offlineAlertMinutes = n;
   }
 
+  // Long-silence notice (#552, lib/silences.js): enable flag + threshold in whole minutes (1-719).
+  // ⚠️ Why the ceiling is 719 and not 720: one silence is capped at 720 minutes (the snooze route in
+  // routes/cameras.js) and the notice fires only on MORE than the threshold, so 719 is the largest value at which
+  // the longest single silence still notifies. At 720 or above only silences chained by renewals could, and the
+  // setting would read like "off" to anyone who tried one long silence. 0 is refused rather than meaning "off":
+  // the switch is the off.
+  //
+  // Both are validated STRICTLY, unlike the parseInt / truthiness of the fields above (PR #664 review, reproduced):
+  // parseInt reads 59.5 as 59 and 1e100 as 1, and truthiness stores the string "false" as ON, so a mistyped or
+  // hostile value would silently become a different setting. Only a whole number (a number, or a string of digits)
+  // and only true/false/1/0 are accepted. The older fields keep their behaviour; tightening them is out of scope.
+  let snoozeAlertEnabled = existing.snooze_alert_enabled;
+  if (snooze_alert_enabled !== undefined) {
+    if (![true, false, 1, 0].includes(snooze_alert_enabled)) {
+      return res.status(400).json({ error: 'Long-silence alerts must be switched on or off (true or false)' });
+    }
+    snoozeAlertEnabled = snooze_alert_enabled ? 1 : 0;
+  }
+  let snoozeAlertMinutes = existing.snooze_alert_minutes;
+  if (snooze_alert_minutes !== undefined) {
+    const v = snooze_alert_minutes;
+    const n = Number.isInteger(v) ? v : typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : NaN;
+    if (!(n >= 1 && n <= 719)) {
+      return res.status(400).json({ error: 'Long-silence alert threshold must be between 1 and 719 minutes' });
+    }
+    snoozeAlertMinutes = n;
+  }
+
   // MQTT broker host and port (#543). Validated HERE, before anything is written: a bad value used to be stored,
   // then make `mqtt.connect` throw, so the request answered 500 with the value already saved and the rest of this
   // handler skipped, and on every later boot the same call took the process down. A blank port means "the default
@@ -297,6 +328,7 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
          temp_unit = ?, mqtt_enabled = ?, mqtt_host = ?, mqtt_port = ?, mqtt_username = ?, mqtt_password = ?,
          ptz_step = ?, clip_pre_roll_s = ?, clip_post_roll_s = ?, clip_retention_days = ?, clip_retention_max_gb = ?,
          camera_offline_alert_enabled = ?, camera_offline_alert_minutes = ?,
+         snooze_alert_enabled = ?, snooze_alert_minutes = ?,
          ondemand_enabled = ?, ondemand_pre_roll_s = ?, ondemand_max_duration_s = ?,
          wake_clips_enabled = ?, wake_clip_seconds = ?, wake_clip_retention_days = ?
      WHERE id = ?`
@@ -320,6 +352,8 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     retentionGb,
     offlineAlertEnabled,
     offlineAlertMinutes,
+    snoozeAlertEnabled,
+    snoozeAlertMinutes,
     ondEnabled,
     ondPreRoll,
     ondMaxDur,

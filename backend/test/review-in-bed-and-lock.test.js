@@ -518,8 +518,10 @@ test('never break open clients: the review GET and the done card only ADD keys',
 // row, and all three must agree about every one of them. The column list comes from PRAGMA, so a column
 // added later fails the classification check below until someone decides whether it corrects a night.
 const LOCKING = ['nobody_in_bed', 'true_onset_at', 'true_wake_at', 'true_in_bed_at'];
+// answered_by_* (#552) say WHO answered, not what the night was: a name on a review must never lock a night
+// or change what it shows.
 const NOT_LOCKING = ['true_onset_transition_id', 'true_wake_transition_id', 'true_in_bed_transition_id',
-  'computed_onset_at', 'computed_wake_at', 'note', 'dismissed'];
+  'computed_onset_at', 'computed_wake_at', 'note', 'dismissed', 'answered_by_user_id', 'answered_by_username'];
 const REVIEW_KEYS = ['child_id', 'night_date', 'reviewed_at'];
 
 test('★ the lock, the overlay and the card agree about every sleep_reviews column, one column at a time', () => {
@@ -854,7 +856,9 @@ test('★ a FIRST correction whose save-time compute throws is a 500 before anyt
   prepare.mock.restore();
 
   assert.equal(res.status, 500, JSON.stringify(res.body));
-  assert.equal(res.body.error, 'compute failed', 'precondition: the 500 is the save-time compute, not something else');
+  // The response body is the app's generic 500 text now (the error middleware, #544, keeps internals out of
+  // a response), so the precondition is read from the LOG, where the real cause goes.
+  assert.ok(logger.getRecent().some((l) => l.includes('compute failed')), 'precondition: the 500 is the save-time compute, not something else');
   assert.equal(verdictOf(frame), null, 'the verdict was NOT written');
   assert.equal(reviewRow(), undefined, 'nor the review');
   assert.deepEqual(storedRow(), first, 'nor the night');

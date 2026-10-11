@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Play, Video, Trash2, AlertTriangle } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
+import { useHomeTime } from '../lib/useHomeTime.js';
 import MediaPlayerModal from './MediaPlayerModal.jsx';
 import Modal from './Modal.jsx';
 import { deleteFailureText } from './ClipPlayerModal.jsx';
@@ -17,10 +18,13 @@ import { deleteFailureText } from './ClipPlayerModal.jsx';
 
 const parseUtc = (s) => new Date(String(s).replace(' ', 'T') + 'Z');
 
-function when(startedAt) {
+// Rendered in HOME time (settings.timezone), with a zone label when the viewer's device is elsewhere
+// (#561): a recording's "3:12 AM" must be the same moment for everyone looking at this child.
+const WHEN = { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' };
+function when(startedAt, home) {
   const d = parseUtc(startedAt);
   if (Number.isNaN(d.getTime())) return startedAt;
-  return d.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+  return home.time(d, WHEN);
 }
 
 export default function RecordingsCard({ childId, refreshNonce = 0 }) {
@@ -30,6 +34,7 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
   const [delError, setDelError] = useState('');
   const { user } = useAuth() || {};
   const isAdmin = user?.role === 'admin';
+  const home = useHomeTime();
 
   const load = useCallback(() => {
     let alive = true;
@@ -86,8 +91,8 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
               onClick={() => setOpenId(r.id)}
               title={
                 failed
-                  ? `${r.camera_name || 'Camera'} · ${when(r.started_at)} · couldn’t be saved`
-                  : `${r.camera_name || 'Camera'} · ${when(r.started_at)}`
+                  ? `${r.camera_name || 'Camera'} · ${when(r.started_at, home)} · couldn’t be saved`
+                  : `${r.camera_name || 'Camera'} · ${when(r.started_at, home)}`
               }
             >
               {failed ? (
@@ -98,7 +103,7 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
                   <span className="rec-strip__play"><Play size={16} aria-hidden="true" /></span>
                 </>
               )}
-              <span>{failed ? 'Couldn’t be saved' : when(r.started_at)}</span>
+              <span>{failed ? 'Couldn’t be saved' : when(r.started_at, home)}</span>
             </button>
           );
         })}
@@ -110,7 +115,7 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
       {open && open.status === 'failed' && (
         <Modal title="Recording couldn’t be saved" onClose={close}>
           <p className="muted" style={{ marginTop: 0 }}>
-            {open.camera_name || 'This camera'} · {when(open.started_at)}
+            {open.camera_name || 'This camera'} · {when(open.started_at, home)}
           </p>
           <p>
             Nightlight started this recording but couldn’t finish saving it. That usually means the
@@ -132,11 +137,11 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
 
       {open && open.status !== 'failed' && (
         <MediaPlayerModal
-          title={`${open.camera_name || 'Recording'} · ${when(open.started_at)}`}
+          title={`${open.camera_name || 'Recording'} · ${when(open.started_at, home)}`}
           videoPath={`/recordings/${open.id}/video`}
           posterPath={`/recordings/${open.id}/thumb`}
           filename={`${open.camera_name || 'recording'}-${open.id}.mp4`}
-          meta={`${when(open.started_at)}${open.duration_s ? ` · ${open.duration_s}s` : ''}`}
+          meta={`${when(open.started_at, home)}${open.duration_s ? ` · ${open.duration_s}s` : ''}`}
           onClose={close}
           headerAction={
             isAdmin ? (

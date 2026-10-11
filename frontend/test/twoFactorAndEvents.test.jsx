@@ -286,6 +286,23 @@ describe('EventLog', () => {
     expect(screen.getAllByText('Child B Room')).toHaveLength(2);
   });
 
+  test('★ a row a person caused names them; a system row says nothing about who (#552)', async () => {
+    withEvents([
+      { id: 11, camera_name: 'Hallway', type: 'snooze', detail: 'muted for 30 min', actor_user_id: 'u-1', actor_username: 'carer1', created_at: at(60) },
+      { id: 12, camera_name: 'Hallway', type: 'restart', detail: 'stream restart failed', actor_user_id: 'u-2', actor_username: 'admin1', created_at: at(120) },
+      { id: 13, camera_name: 'Hallway', type: 'restart', detail: 'force-restarted by watchdog (unready 30s+)', actor_user_id: null, actor_username: null, created_at: at(180) },
+      // A row from before #552, which has no actor keys at all.
+      { id: 14, camera_name: 'Hallway', type: 'offline', detail: 'stream stopped delivering frames', created_at: at(240) },
+    ]);
+    renderAsAdmin(<EventLog />);
+    expect(await screen.findByText('muted for 30 min · by carer1')).toBeInTheDocument();
+    expect(screen.getByText('Silence alerts')).toBeInTheDocument();
+    expect(screen.getByText('stream restart failed · by admin1')).toBeInTheDocument();
+    expect(screen.getByText('force-restarted by watchdog (unready 30s+)')).toBeInTheDocument();
+    expect(screen.getByText('stream stopped delivering frames')).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/by (null|undefined)/);
+  });
+
   test('says so when a camera has never reported anything', async () => {
     withEvents([]);
     renderAsAdmin(<EventLog />);

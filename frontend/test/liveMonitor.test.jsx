@@ -148,6 +148,42 @@ describe('★★ who can reorder the grid (#552)', () => {
   });
 });
 
+describe('★ who silenced a camera, on its tile (#552)', () => {
+  // The server sends `alerts_snoozed_by` (a username) only while the camera is muted; the tile must show it
+  // there, and show NO "by" when it is null (a silence set before this existed, or by an older server).
+  const muted = (by, untilMs = Date.now() + 3_600_000) => [
+    { id: 'c9', name: 'Quiet room', mediamtx_path: 'p9', alerts_snoozed_until: untilMs, alerts_snoozed_by: by },
+  ];
+  const openMenu = (user) => user.click(screen.getByRole('button', { name: 'Camera settings' }));
+
+  test('muted by someone: the strip and the un-mute button both name them, for a caregiver too', async () => {
+    for (const render of [renderAsAdmin, renderAsCaregiver]) {
+      const { user, unmount } = render(<LiveMonitor />, { cameras: muted('carer1') });
+      expect(screen.getByTitle(/^Alerts muted until .+ by carer1$/)).toBeTruthy();
+      await openMenu(user);
+      expect(screen.getByRole('button', { name: /^Muted until .+ by carer1 · tap to un-mute$/ })).toBeTruthy();
+      unmount();
+    }
+  });
+
+  test('★ muted with no name: no "by" anywhere, not "by null" or "by undefined"', async () => {
+    const { user } = renderAsAdmin(<LiveMonitor />, { cameras: muted(null) });
+    const badge = screen.getByTitle(/^Alerts muted until /);
+    expect(badge.getAttribute('title')).not.toMatch(/ by /);
+    await openMenu(user);
+    const button = screen.getByRole('button', { name: /^Muted until .+ · tap to un-mute$/ });
+    expect(button.textContent).not.toMatch(/ by /);
+  });
+
+  test('a silence that has run out shows no mute and no name, even if a name came with it', async () => {
+    const { user } = renderAsAdmin(<LiveMonitor />, { cameras: muted('carer1', Date.now() - 60_000) });
+    expect(screen.queryByTitle(/^Alerts muted until /)).toBeNull();
+    await openMenu(user);
+    expect(screen.getByRole('button', { name: 'Silence alerts' })).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/carer1/);
+  });
+});
+
 // ⚠️ NOT TESTED HERE, and deliberately not faked into looking tested: the drag itself. `handleDragEnd`
 // only runs on a dnd-kit drop, which needs real pointer events against real layout — jsdom has
 // neither. A test that called `reorderCameras` directly and claimed to be exercising the screen would

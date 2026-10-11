@@ -945,3 +945,181 @@ test('transitionInstant tells "no frame named" apart from "not this night\'s fra
   assert.equal(transitionInstant(CHILD, DATE, id + 1000), undefined);
   assert.equal(transitionInstant(CHILD, DATE, 'nonsense'), undefined);
 });
+
+// --- WHO answered (#552, PR2 claim C7, review finding A5) -----------------------------------------------------
+//
+// "Answered by" is stamped only by a save that carries an answer (a time, the flag, a note, an event answer or
+// reason). A dismissal and an empty save go through the SAME upsert, and must leave the stored name alone: two
+// parents, one answers, the other dismisses the prompt on a second phone, and the review must still name the
+// first. Three separate accounts, so each assertion can only pass for one of them. Named by username, never by
+// first name (claim C6): parent B's first name is set to parent A's username to prove it.
+makeUser(db, { id: 'u-parent-a', username: 'parent-a-login', role: 'caregiver' });
+makeUser(db, { id: 'u-parent-b', username: 'parent-b-login', role: 'admin' });
+makeUser(db, { id: 'u-parent-c', username: 'parent-c-login', role: 'caregiver' });
+db.prepare("UPDATE users SET first_name = 'parent-a-login' WHERE id = 'u-parent-b'").run();
+const whoToken = (id, username, role = 'caregiver') => signToken({ id, username, role, sid: makeSession(db, id) });
+const tokenA = whoToken('u-parent-a', 'parent-a-login');
+const tokenB = whoToken('u-parent-b', 'parent-b-login', 'admin');
+const tokenC = whoToken('u-parent-c', 'parent-c-login');
+const putAs = (tok, body) => call(reviewUrl(), { method: 'PUT', token: tok, body });
+const answeredBy = () => {
+  const r = db.prepare('SELECT answered_by_user_id AS id, answered_by_username AS name FROM sleep_reviews WHERE child_id = ? AND night_date = ?').get(CHILD, DATE);
+  return r ? [r.id, r.name] : null;
+};
+
+test('★ C7: A answers with times, B dismisses: the review still says A', async () => {
+  laySamples();
+  const a = await putAs(tokenA, { true_onset_local: '19:40', true_wake_local: '06:00' });
+  assert.equal(a.status, 200);
+  assert.deepEqual(answeredBy(), ['u-parent-a', 'parent-a-login']);
+  assert.equal(a.body.review.answered_by_username, 'parent-a-login', 'and the response carries it (the page reads it from GET)');
+  const b = await putAs(tokenB, { dismissed: true });
+  assert.equal(b.status, 200);
+  assert.deepEqual(answeredBy(), ['u-parent-a', 'parent-a-login'], 'a dismissal never replaces who answered');
+  assert.equal(db.prepare('SELECT dismissed FROM sleep_reviews WHERE child_id = ?').get(CHILD).dismissed, 1, 'though it was saved');
+  // An empty save, and one that sends only explicit nulls (what a page sends for what it is not answering).
+  await putAs(tokenB, {});
+  await putAs(tokenB, { note: null, verdicts: {}, reasons: {} });
+  assert.deepEqual(answeredBy(), ['u-parent-a', 'parent-a-login'], 'nor does an empty save');
+  // And the GET the review page reads names A.
+  const shown = await call(reviewUrl(), { token: tokenC });
+  assert.equal(shown.body.review.answered_by_username, 'parent-a-login');
+  // KNOWN LIMIT, documented in the README: a save that only EMPTIES fields is not an answer either (explicit
+  // nulls are "not answering" throughout this route), so it keeps A's name although it cleared A's times.
+  await putAs(tokenB, { true_onset_local: null, true_wake_local: null });
+  const row = { ...db.prepare('SELECT true_onset_at, true_wake_at FROM sleep_reviews WHERE child_id = ?').get(CHILD) };
+  assert.deepEqual(row, { true_onset_at: null, true_wake_at: null }, 'setup: the times were emptied');
+  assert.deepEqual(answeredBy(), ['u-parent-a', 'parent-a-login']);
+});
+
+test('C7: B saves ONLY an event answer: now B (by username, not by the first name that copies A)', async () => {
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(6, 0, 1)));
+  await putAs(tokenA, { true_wake_local: '06:00' });
+  const res = await putAs(tokenB, { verdicts: { [id]: 'correct' } });
+  assert.equal(res.status, 200);
+  assert.deepEqual(answeredBy(), ['u-parent-b', 'parent-b-login']);
+  assert.ok(!JSON.stringify(res.body).includes('"parent-a-login"'), 'B\'s first name (A\'s username) is not what was recorded');
+});
+
+test('C7: C saves ONLY a note: now C; a reason alone, and the flag either way, count too', async () => {
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(19, 50)));
+  setTransitionVerdict(id, 'wrong');
+  await putAs(tokenA, { true_wake_local: '06:00' });
+  await putAs(tokenC, { note: 'woke at the thunderstorm' });
+  assert.deepEqual(answeredBy(), ['u-parent-c', 'parent-c-login']);
+  await putAs(tokenA, { reasons: { [id]: 'adult' } });
+  assert.deepEqual(answeredBy(), ['u-parent-a', 'parent-a-login'], 'a reason is an event answer');
+  await putAs(tokenB, { nobody_in_bed: true });
+  assert.deepEqual(answeredBy(), ['u-parent-b', 'parent-b-login'], '"no one was in the bed"');
+  await putAs(tokenC, { nobody_in_bed: false });
+  assert.deepEqual(answeredBy(), ['u-parent-c', 'parent-c-login'], 'and its undo, "someone was in the bed"');
+  await putAs(tokenA, { note: '   ' });
+  assert.deepEqual(answeredBy(), ['u-parent-c', 'parent-c-login'], 'a note of only spaces is not an answer');
+});
+
+// Each kind of time on its OWN, so dropping any one of them from the route's rule fails a test (PR #663 review:
+// removing `inBed != null` or `onset != null` survived, because every other test also sent a wake or a note).
+test('C7: an in-bed time on its own is an answer', async () => {
+  await putAs(tokenA, { note: 'first' });
+  const res = await putAs(tokenB, { true_in_bed_local: '19:20' });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.deepEqual(answeredBy(), ['u-parent-b', 'parent-b-login']);
+});
+
+test('C7: an asleep time on its own is an answer', async () => {
+  await putAs(tokenA, { note: 'first' });
+  const res = await putAs(tokenB, { true_onset_local: '19:40' });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.deepEqual(answeredBy(), ['u-parent-b', 'parent-b-login']);
+});
+
+test('C7: an event-answer map that only CLEARS (every value null) is not an answer', async () => {
+  // Null means "not answering" in this route, in the verdict and reason maps as everywhere else, so a save
+  // that only takes a verdict back keeps the stored name (the same rule as an empty-only save; README).
+  // PR #663 review: widening the check to "the map has any key" survived without this.
+  const id = layTransition(TRANSITION.OUT_OF_BED, exactSql(at(19, 50)));
+  setTransitionVerdict(id, 'wrong');
+  await putAs(tokenA, { note: 'first' });
+  const res = await putAs(tokenB, { verdicts: { [id]: null }, reasons: { [id]: null } });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(txRow(id).verdict, null, 'setup: the clear itself was saved');
+  assert.deepEqual(answeredBy(), ['u-parent-a', 'parent-a-login']);
+});
+
+test('C7: a frame named instead of a typed time is an answer', async () => {
+  const id = layTransition(TRANSITION.OUT_OF_BED, '2026-07-01 19:52:37');
+  await putAs(tokenA, { note: 'first' });
+  await putAs(tokenB, { true_wake_transition_id: id });
+  assert.deepEqual(answeredBy(), ['u-parent-b', 'parent-b-login']);
+});
+
+test('C7, the lib on its own: no options keep the stored name; an answer with no actor clears it rather than keep someone else\'s', () => {
+  saveNightReview(CHILD, DATE, { note: 'one' }, { actor: { user_id: 'u-parent-a', username: 'parent-a-login' }, answered: true });
+  assert.deepEqual(answeredBy(), ['u-parent-a', 'parent-a-login']);
+  saveNightReview(CHILD, DATE, { note: 'two' });
+  assert.deepEqual(answeredBy(), ['u-parent-a', 'parent-a-login'], 'a caller that says nothing about who never changes the name');
+  saveNightReview(CHILD, DATE, { note: 'three' }, { answered: true });
+  assert.deepEqual(answeredBy(), [null, null], 'an answer from nobody we know is not left under the previous person\'s name');
+});
+
+// --- #552 release review: no other person's ACCOUNT ID leaves the server ---------------------------------------
+//
+// The username is shown to every signed-in user by design (owner, 2026-10-10). The account id is not: no screen
+// reads it, and the review routes are open to caregivers. HOSTILE FIXTURE: both accounts' ids ARE the marker,
+// so every save stores the marker for real, and before each GET the marker is also written straight into every
+// `*user_id` column of sleep_reviews, found by reading the schema (PRAGMA), so a future column naming an account
+// is planted too and fails here until reviewForBrowser deals with it.
+const ID_MARK = 'ZZ-ACCOUNT-ID-MARKER';
+makeUser(db, { id: `${ID_MARK}-carer`, username: 'carer-552-login', role: 'caregiver' });
+makeUser(db, { id: `${ID_MARK}-admin`, username: 'admin-552-login', role: 'admin' });
+const ROLES = {
+  caregiver: { username: 'carer-552-login', token: whoToken(`${ID_MARK}-carer`, 'carer-552-login') },
+  admin: { username: 'admin-552-login', token: whoToken(`${ID_MARK}-admin`, 'admin-552-login', 'admin') },
+};
+const reviewIdColumns = () => db.prepare('PRAGMA table_info(sleep_reviews)').all().map((c) => c.name)
+  .filter((n) => /user_?id$/i.test(n));
+const plantIdMarker = () => {
+  for (const col of reviewIdColumns()) db.prepare(`UPDATE sleep_reviews SET ${col} = ?`).run(`${ID_MARK}-${col}`);
+};
+// Every review response: 200, no marker anywhere in the body, no id key on the review, and the username still there.
+const assertNoAccountId = (res, username, what) => {
+  assert.equal(res.status, 200, `${what}: ${JSON.stringify(res.body).slice(0, 300)}`);
+  assert.ok(!JSON.stringify(res.body).includes(ID_MARK), `${what}: an account id reached the browser`);
+  for (const col of reviewIdColumns()) assert.ok(!Object.hasOwn(res.body.review, col), `${what}: the review still has the key ${col}`);
+  assert.equal(res.body.review.answered_by_username, username, `${what}: the username is still sent`);
+};
+
+test('★ #552 no account id: the schema has exactly one account-id column on a review (a new one must be classified)', () => {
+  assert.deepEqual(reviewIdColumns(), ['answered_by_user_id']);
+});
+
+for (const [role, me] of Object.entries(ROLES)) {
+  const other = role === 'caregiver' ? ROLES.admin : ROLES.caregiver;
+  test(`★ #552 no account id: as a ${role}, GET, a normal save, a dismissal and an empty save carry the username, never an account id`, async () => {
+    laySamples();
+    const before = await call(reviewUrl(), { token: me.token });
+    assert.equal(before.status, 200);
+    assert.equal(before.body.review, null, 'an unreviewed night still reads as no review (null, not an empty object)');
+
+    // The OTHER person answers first, so every response below is about someone else's answer.
+    const theirs = await putAs(other.token, { note: 'answered by the other person' });
+    assertNoAccountId(theirs, other.username, 'their own save');
+    assert.equal(answeredBy()[0], `${ID_MARK}-${role === 'caregiver' ? 'admin' : 'carer'}`, 'setup: the id IS stored');
+
+    plantIdMarker();
+    assertNoAccountId(await call(reviewUrl(), { token: me.token }), other.username, 'GET');
+    plantIdMarker();
+    assertNoAccountId(await putAs(me.token, { dismissed: true }), other.username, 'a dismissal (keeps their name)');
+    plantIdMarker();
+    assertNoAccountId(await putAs(me.token, {}), other.username, 'an empty save (keeps their name)');
+    assertNoAccountId(await putAs(me.token, { true_onset_local: '19:40', true_wake_local: '06:00' }), me.username, 'a normal save');
+    assert.ok(answeredBy()[0].startsWith(ID_MARK), 'setup: the saver\'s id is stored, only not sent');
+  });
+}
+
+test('#552 no account id: the lib keeps the stored row whole; only what is SENT loses the id', () => {
+  saveNightReview(CHILD, DATE, { note: 'kept' }, { actor: { user_id: `${ID_MARK}-x`, username: 'x-login' }, answered: true });
+  assert.equal(db.prepare('SELECT answered_by_user_id AS id FROM sleep_reviews').get().id, `${ID_MARK}-x`);
+  assert.equal(getNightReview(CHILD, DATE).review.answered_by_username, 'x-login');
+  assert.ok(!Object.hasOwn(getNightReview(CHILD, DATE).review, 'answered_by_user_id'));
+});

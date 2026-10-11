@@ -5,7 +5,9 @@ import db from '../db.js';
 import { requireAuth, requireAdmin, requireAuthQueryOrHeader, isAdminRequest } from '../middleware/auth.js';
 import { upsertPath, removePath, getPathStatus, toPathName, hlsPathName } from '../lib/mediamtx.js';
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
-import { recordCameraEvent, EVENT } from '../lib/cameraEvents.js';
+import { recordCameraEvent, insertCameraEvent, pruneCameraEvents, EVENT } from '../lib/cameraEvents.js';
+import { actorOf } from '../lib/actor.js';
+import { noteSilence, sendLongSilenceNotice } from '../lib/silences.js';
 import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.js';
 import { startMotionDetector, stopMotionDetector, motionLegWanted, forgetMotionAlert } from '../lib/motionDetector.js';
 import { startOnvifMotion, stopOnvifMotion, onvifMotionWanted } from '../lib/onvifMotion.js';
@@ -25,12 +27,23 @@ import { verifyTalkCreds, talkConfigured, verifyBackchannel } from '../lib/twoWa
 import { getReading, subscribeAllCameraTopics, refreshMqttConnection } from '../lib/mqttClient.js';
 import { probeOnvifCamera, ptzNudge, ptzRelativeStep, probePtzRelativeSupport, rebootCamera } from '../lib/onvif.js';
 import { validateRtspStream, probeRtspDetailed, ffprobeVersion } from '../lib/rtspProbe.js';
-import { captureSnapshot, fetchHttpSnapshot } from '../lib/snapshot.js';
+import { grabLiveFrame } from '../lib/snapshot.js';
 import { logger } from '../lib/logger.js';
 import { startRecording, stopRecording, recordingState, getOndemandSettings } from '../lib/recordings.js';
 import { stripUrlPassword, urlHasPassword, resolveUrlPassword, scrubSecrets, findCredentialLeak } from '../lib/urlCredentials.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
+import { clearStalePrimaryPointers } from '../lib/primaryCamera.js';
 
 const router = Router();
+
+// Is this child_id acceptable to store on a camera? Falsy means "no child" and is always fine (null / ''
+// unassigns). Anything else must be the id of a child that exists NOW. A non-string (a number, an object)
+// is never a child id, and is rejected here rather than handed to SQLite, whose binding of an object throws.
+function childExists(child_id) {
+  if (!child_id) return true;
+  if (typeof child_id !== 'string') return false;
+  return !!db.prepare('SELECT id FROM children WHERE id = ?').get(child_id);
+}
 
 // App version for the camera report (read once). Best-effort — matches routes/diagnostics.js.
 let appVersion = 'unknown';
@@ -76,17 +89,19 @@ router.get('/alerts/:id/clip', requireAuthQueryOrHeader, (req, res) => {
 // (same reason as the alert snapshot). Prefers the camera's HTTP snapshot URL, else grabs one frame
 // off the local MediaMTX stream. Registered before requireAuth; the literal "snapshot" segment keeps
 // it clear of the other /:id routes.
-router.get('/:id/snapshot', requireAuthQueryOrHeader, async (req, res) => {
+//
+// Single-flight per camera (#552): every viewer can call this, so requests for a camera whose grab is
+// already under way share that grab instead of each starting an ffmpeg. See grabLiveFrame in
+// lib/snapshot.js for why the flight is held until the ffmpeg has EXITED, and why there is no global cap.
+router.get('/:id/snapshot', requireAuthQueryOrHeader, asyncHandler(async (req, res) => {
   const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!cam) return res.status(404).json({ error: 'Camera not found' });
-  let img = null;
-  if (cam.snapshot_url && String(cam.snapshot_url).trim()) img = await fetchHttpSnapshot(cam.snapshot_url).catch(() => null);
-  if (!img) img = await captureSnapshot(cam.mediamtx_path).catch(() => null);
+  const img = await grabLiveFrame(cam);
   if (!img) return res.status(503).json({ error: 'Could not grab a frame right now' });
   res.set('Content-Type', 'image/jpeg');
   res.set('Cache-Control', 'no-store');
   res.send(img);
-});
+}));
 
 router.use(requireAuth);
 
@@ -183,6 +198,11 @@ function publicCamera(cam, isAdmin) {
     recording: recState.recording,
     recording_id: recState.id ?? null,
     recording_elapsed_s: recState.elapsed_s ?? 0,
+    // Who set the CURRENT silence (#552), for the tile's "Muted until 21:30 by …". Forced to null once
+    // the silence has run out: the stored name is left behind when a silence simply expires (only an
+    // un-mute clears it), and a name with no silence beside it would say someone is muting a camera
+    // that nobody is.
+    alerts_snoozed_by: cam.alerts_snoozed_until > Date.now() ? (cam.alerts_snoozed_by ?? null) : null,
   };
   if (!isAdmin) return base;
   const parts = parseRtspComponents(rtsp_url) || {};
@@ -215,7 +235,7 @@ function publicCamera(cam, isAdmin) {
 // ONVIF auto-fill: given a camera's IP + ONVIF credentials, connect and return a
 // ready-to-use RTSP URL plus detected codec/resolution, so the admin doesn't hand-type the
 // RTSP path. Read-only probe - creates nothing; the normal POST / still does the adding.
-router.post('/onvif-probe', requireAdmin, async (req, res) => {
+router.post('/onvif-probe', requireAdmin, asyncHandler(async (req, res) => {
   const { host, port, username, id } = req.body || {};
   let { password } = req.body || {};
   if (!host || !host.trim()) return res.status(400).json({ error: 'Camera IP address is required' });
@@ -259,7 +279,7 @@ router.post('/onvif-probe', requireAdmin, async (req, res) => {
     logger.info(`[onvif] probe of ${host} failed: ${err.message}`);
     res.status(422).json({ error: err.message || 'ONVIF probe failed' });
   }
-});
+}));
 
 // "Unsupported camera" diagnostic report. When adding a camera fails (ONVIF probe or stream
 // validation), the add screen offers to build this — a redacted JSON bundle of exactly what's needed
@@ -276,7 +296,7 @@ router.post('/onvif-probe', requireAdmin, async (req, res) => {
 // shipped the RTSP password in ffprobe's stderr for two releases. The allow-list was real; it just
 // did not cover the two fields that were pasted in wholesale. Redaction is now asserted on the
 // assembled report rather than reasoned about per-field.
-router.post('/probe-report', requireAdmin, async (req, res) => {
+router.post('/probe-report', requireAdmin, asyncHandler(async (req, res) => {
   const b = req.body || {};
   const host = String(b.host || b.rtsp_host || '').trim();
   const port = String(b.port || b.rtsp_port || '554').trim() || '554';
@@ -373,7 +393,7 @@ router.post('/probe-report', requireAdmin, async (req, res) => {
     return res.status(500).json({ error: 'Could not build a report that is safe to share. Nothing was saved — please report this.' });
   }
   res.json(safe);
-});
+}));
 
 // PTZ control. Any signed-in user can reposition a camera (day-to-day, like reordering) -
 // not admin-only. The camera auto-stops a few seconds after a move server-side (runaway
@@ -425,20 +445,20 @@ router.post('/:id/record/start', (req, res) => {
   }
 });
 
-router.post('/:id/record/stop', async (req, res) => {
+router.post('/:id/record/stop', asyncHandler(async (req, res) => {
   const cam = db.prepare('SELECT id FROM cameras WHERE id = ?').get(req.params.id);
   if (!cam) return res.status(404).json({ error: 'Camera not found' });
   // Resolves once the clip has been cut, so the client can refresh and see the new recording.
   const id = await stopRecording(req.params.id);
   res.json({ ok: true, recording_id: id });
-});
+}));
 
 // One fixed-distance step per call, so each press of a D-pad arrow travels a consistent amount. The
 // client sends one per tap and repeats while a button is held. Prefer ONVIF RelativeMove (the camera
 // moves a set distance and stops itself — deterministic) when the camera supports it; fall back to
 // the continuous start->hold->stop nudge otherwise. Relative support is probed once on first PTZ and
 // cached in cameras.ptz_relative (null = unprobed).
-router.post('/:id/ptz/nudge', async (req, res) => {
+router.post('/:id/ptz/nudge', asyncHandler(async (req, res) => {
   const ctx = ptzConnForCamera(req.params.id, res);
   if (!ctx) return;
   const { cam, conn } = ctx;
@@ -467,32 +487,48 @@ router.post('/:id/ptz/nudge', async (req, res) => {
     logger.info(`[ptz] nudge failed for ${req.params.id}: ${e.message}`);
     res.status(502).json({ error: e.message || 'PTZ move failed' });
   }
-});
+}));
 
 // Force a fresh restart of a camera's server-side stream (main transcoder + sub-stream). Useful when a
 // feed has drifted behind live or wedged in a way the watchdog hasn't caught yet — it tears down the
 // FFmpeg leg(s) (SIGTERM→SIGKILL) and relaunches, so every viewer reconnects at the live edge. Any
 // signed-in user (a recovery action, like a heavier pull-to-refresh that fixes it for everyone; owner
 // decision 2026-10-10: stays open to caregivers).
-router.post('/:id/restart', requireAuth, async (req, res) => {
+//
+// WHO restarted it goes into Camera history (#552). Both outcomes are recorded: a restart that failed may
+// still have torn the old stream down, so "someone restarted it and it did not come back" is exactly what
+// the history needs to say. The failure row has FIXED text, never e.message: an error from a stream or a
+// camera can carry its address (see diagnostics-credential-leak-gate.test.js), and this history goes into
+// the support bundle. Best-effort (recordCameraEvent): the restart has already happened and cannot be
+// rolled back, so a failed history write must not turn it into an error. A silence is the opposite case.
+router.post('/:id/restart', requireAuth, asyncHandler(async (req, res) => {
+  // ⚠️ FIRST, before any await (see lib/actor.js): the account can be deleted while this awaits.
+  const actor = actorOf(req);
   const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!cam) return res.status(404).json({ error: 'Camera not found' });
   if (cam.disabled) return res.status(400).json({ error: 'Camera is disabled' });
   try {
     await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
     if (subConfigured(cam)) await startSubStream(cam).catch((e) => logger.error(`[restart] sub: ${e.message}`));
-    recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'stream restarted manually');
+    recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'stream restarted manually', actor);
     res.json({ ok: true });
   } catch (e) {
+    recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'stream restart failed', actor);
     res.status(502).json({ error: e.message || 'Restart failed' });
   }
-});
+}));
 
 // Power-cycle the whole camera over ONVIF (Device SystemReboot). A heavier recovery than /restart —
 // it takes the feed offline for ~30-60s — but it clears states a stream restart can't (e.g. a wedged
 // on-camera video encoder). Only for ONVIF-added cameras (reboot_capable); the UI hides the button
 // otherwise. Any signed-in user, same as /restart (owner decision 2026-10-10: stays open to caregivers).
-router.post('/:id/reboot', requireAuth, async (req, res) => {
+// Recorded with WHO, on success and on failure, best-effort, exactly as /restart above and for the same
+// reasons. A failed reboot is recorded as "requested; the camera did not confirm" because a camera can
+// accept SystemReboot and drop the connection before answering, so a failure here does not prove nothing
+// happened.
+router.post('/:id/reboot', requireAuth, asyncHandler(async (req, res) => {
+  // ⚠️ FIRST, before any await (see lib/actor.js).
+  const actor = actorOf(req);
   const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!cam) return res.status(404).json({ error: 'Camera not found' });
   if (!cam.onvif_capable || !cam.onvif_device_url) {
@@ -507,29 +543,82 @@ router.post('/:id/reboot', requireAuth, async (req, res) => {
   }
   try {
     await rebootCamera(conn);
-    recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'camera reboot requested (ONVIF)');
+    recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'camera reboot requested (ONVIF)', actor);
     res.json({ ok: true });
   } catch (e) {
     logger.info(`[onvif] reboot failed for ${cam.name}: ${e.message}`);
+    recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'camera reboot requested (ONVIF); the camera did not confirm', actor);
     res.status(502).json({ error: e.message || 'Camera reboot failed' });
   }
-});
+}));
 
 // Quick-silence: temporarily mute ALL of this camera's alerts (motion/sound/ONVIF/MQTT) for `minutes`
 // from now — for when you're still up as the alert schedule kicks in. minutes=0 clears the mute early.
 // Any signed-in user (an operational action, like /restart; owner decision 2026-10-10: stays open to
 // caregivers, with the 720-minute cap below as the bound). Enforced in lib/detectSchedule.js.
+//
+// ⚠️ A SILENCE IS APPLIED ONLY TOGETHER WITH THE HISTORY ROW SAYING WHO APPLIED IT (#552, review finding
+// B10, owner decision 2026-10-10). Silencing every alert from a camera is the one action here that can
+// hide something from everyone else, so "who did it" is part of the action, not a log line beside it: the
+// mute, the name on the tile and the Camera history row are written in ONE transaction, and if the row
+// cannot be written nothing is (a 500, the camera stays as it was). Not muting is the safe direction.
+// Contrast /restart and /reboot, which have already acted on the camera by the time they record, so
+// theirs is best-effort. The username is NOT logged: server logs go into the support bundle.
+//
+// The same transaction also updates the camera's silence episode (lib/silences.js, #552), which is what the
+// long-silence notice counts, so the count moves exactly when the mute does. The notice itself is sent after the
+// commit and can neither fail nor undo the silence (sendLongSilenceNotice never throws).
+const snoozeStmt = db.prepare('UPDATE cameras SET alerts_snoozed_until = ?, alerts_snoozed_by = ? WHERE id = ?');
 router.post('/:id/snooze', requireAuth, (req, res) => {
-  const cam = db.prepare('SELECT id, name FROM cameras WHERE id = ?').get(req.params.id);
+  const actor = actorOf(req);
+  const cam = db.prepare('SELECT id, name, alerts_snoozed_until FROM cameras WHERE id = ?').get(req.params.id);
   if (!cam) return res.status(404).json({ error: 'Camera not found' });
   const minutes = Math.max(0, Math.min(720, Math.round(Number(req.body?.minutes) || 0)));
-  const until = minutes > 0 ? Date.now() + minutes * 60000 : null;
-  db.prepare('UPDATE cameras SET alerts_snoozed_until = ? WHERE id = ?').run(until, cam.id);
+  // ONE clock reading for the whole request: the episode compares this `now` with the end it stored for the last
+  // silence, so the mute's `until`, the not-muted check and the episode must all see the same instant.
+  const now = Date.now();
+  const until = minutes > 0 ? now + minutes * 60000 : null;
+  // ⚠️ AN UN-MUTE OF A CAMERA THAT IS NOT MUTED WRITES NOTHING (#552, PR #663 review, reproduced: 2,000 such
+  // un-mutes pushed another camera's silence row out of Camera history). That history is ONE 2,000-row cap
+  // shared by every camera (lib/cameraEvents.js), and this route is open to every signed-in user, so an
+  // un-mute that changes nothing must not write a row: otherwise one account could flood the cap and erase
+  // the record of who silenced the other cameras. Nothing changes and nothing is recorded; the answer is the
+  // same one a real un-mute gives (not muted: no time, no name). "Not muted" includes a silence that has run
+  // out: its stored time and name are left as they are, and both readers already treat them as ended
+  // (lib/detectSchedule.js compares the time with now; publicCamera nulls the name).
+  if (!until && !(cam.alerts_snoozed_until > now)) {
+    return res.json({ ok: true, alerts_snoozed_until: null, alerts_snoozed_by: null });
+  }
+  // An un-mute clears the name with the time: a stored name with no silence beside it is not shown
+  // anyway (publicCamera), and leaving it would be a claim about a silence that has ended.
+  const by = until ? (actor?.username ?? null) : null;
+  try {
+    db.transaction(() => {
+      snoozeStmt.run(until, by, cam.id);
+      insertCameraEvent(cam.id, cam.name, EVENT.SNOOZE, until ? `muted for ${minutes} min` : 'un-muted', actor);
+      // Required like the history row: a silence the long-silence notice cannot count is not applied either,
+      // otherwise a failing episode write would let silences be chained without the admins ever being told.
+      noteSilence(cam.id, now, until);
+    })();
+  } catch (err) {
+    logger.error(`[snooze] "${cam.name}": not applied, its Camera history row or silence record could not be written (${err.message})`);
+    return res.status(500).json({ error: 'Could not change this camera\'s alerts right now. Nothing was changed; try again.' });
+  }
+  // After the commit and best-effort: pruning is housekeeping the silence must not depend on. Pinned by
+  // who-did-it.test.js ("a silence prunes Camera history back to its cap"). Moving this call INTO the
+  // transaction, after the insert, is an equivalent mutant (PR #663 review), deliberately not chased:
+  // pruneCameraEvents swallows its own errors, so it cannot roll a silence back, and on success its deletes
+  // commit either way. It stays outside so that holds by construction, not by that try/catch.
+  pruneCameraEvents();
+  // The long-silence notice (#552): after the commit, never throws (see lib/silences.js). Only a mute can make an
+  // episode long enough; an un-mute only ever shortens one, so it never sends.
+  if (until) sendLongSilenceNotice(cam, actor);
   logger.info(`[snooze] "${cam.name}" alerts ${until ? `muted for ${minutes} min` : 'un-muted'}`);
-  res.json({ ok: true, alerts_snoozed_until: until });
+  // `alerts_snoozed_by` is ADDED to the response; every key an open page already reads is still there.
+  res.json({ ok: true, alerts_snoozed_until: until, alerts_snoozed_by: by });
 });
 
-router.get('/', async (req, res) => {
+router.get('/', asyncHandler(async (req, res) => {
   const cameras = db.prepare('SELECT * FROM cameras ORDER BY sort_order, created_at').all();
   const isAdmin = isAdminRequest(req);
   const withStatus = await Promise.all(
@@ -543,7 +632,7 @@ router.get('/', async (req, res) => {
     }))
   );
   res.json(withStatus);
-});
+}));
 
 // Recent detection alerts (motion now, sound later) — the "Recent alerts" list. Any signed-in
 // caregiver can see them. Literal path, mounted before /:id so it isn't treated as an :id.
@@ -617,12 +706,13 @@ router.post('/clips/delete', requireAdmin, (req, res) => {
 
 // Persists a custom drag-and-drop order for the Nursery page. Mounted before /:id so
 // Express matches this literal path first, rather than treating "reorder" as an :id.
-// Admin-only (owner decision 2026-10-10, #552). `sort_order` is not only layout: the first enabled camera
-// in it is the ONE a child's sleep is scored from (lib/sleepAnalysis.js, the main-camera query), the one
-// the nightly timelapse is built from (lib/timelapse.js) and the first in the morning review's camera
-// list (lib/sleepReviews.js). A caregiver's drag would therefore reconfigure sleep tracking. The cost: a
-// caregiver can no longer rearrange the tiles, and the order is shared by every viewer anyway (one
-// sort_order per camera, not per person).
+// Admin-only (owner decision 2026-10-10, #552). `sort_order` is not only layout: for a child with no
+// primary camera chosen (children.primary_camera_id NULL, the default; #655), or whose chosen one is
+// turned off or gone, the first enabled camera in it is the ONE that child's sleep is scored from and the
+// nightly timelapse is built from (lib/primaryCamera.js, used by lib/sleepAnalysis.js and lib/timelapse.js).
+// A caregiver's drag would therefore still reconfigure sleep tracking for such a child, which is why this
+// stays admin-only after #655 (reopening it is a follow-up). The cost: a caregiver can no longer rearrange
+// the tiles, and the order is shared by every viewer anyway (one sort_order per camera, not per person).
 router.put('/reorder', requireAdmin, (req, res) => {
   const { order } = req.body || {};
   if (!Array.isArray(order) || order.some((id) => typeof id !== 'string')) {
@@ -639,7 +729,7 @@ router.put('/reorder', requireAdmin, (req, res) => {
 // Verify two-way-audio (talk) credentials without saving - the "Verify login" button in the
 // add/edit form. On edit, a blank password + camera id falls back to the stored password (same
 // "blank = keep" rule as elsewhere). Mounted before /:id so "verify-talk" isn't matched as an :id.
-router.post('/verify-talk', requireAdmin, async (req, res) => {
+router.post('/verify-talk', requireAdmin, asyncHandler(async (req, res) => {
   const { host, username, password, id } = req.body || {};
   if (!host || !host.trim()) return res.status(400).json({ error: 'Camera IP address is required' });
   let pass = password;
@@ -649,9 +739,9 @@ router.post('/verify-talk', requireAdmin, async (req, res) => {
   // 422 (not 5xx) so a reverse proxy passes the message through - see the onvif-probe note above.
   if (!result.ok) return res.status(422).json({ error: result.error || 'Verification failed' });
   res.json({ ok: true, codec: result.codec });
-});
+}));
 
-router.post('/', requireAdmin, async (req, res) => {
+router.post('/', requireAdmin, asyncHandler(async (req, res) => {
   const {
     name, rtsp_host, rtsp_port, rtsp_path, rtsp_username, rtsp_password,
     child_id, mqtt_topic, force,
@@ -659,7 +749,9 @@ router.post('/', requireAdmin, async (req, res) => {
     ptz_supported, onvif_profile_token,
     talk_username, talk_password, sub_rtsp_path,
   } = req.body || {};
-  if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
+  // typeof first: `name: 5` used to throw on `.trim()` and, with no error middleware, left the request
+  // hanging with no response at all (issue #544). A non-string name is the same mistake as a missing one.
+  if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'Name is required' });
   const rtsp_url = assembleRtspUrl({
     host: rtsp_host,
     port: rtsp_port,
@@ -670,6 +762,9 @@ router.post('/', requireAdmin, async (req, res) => {
   if (!isValidRtsp(rtsp_url)) {
     return res.status(400).json({ error: 'A camera IP address is required' });
   }
+  // Same check as PUT /:id/assign, and BEFORE the stream probe and the MediaMTX registration below so a
+  // stale child id cannot leave a half-created camera behind (issue #544).
+  if (!childExists(child_id)) return res.status(400).json({ error: 'Child not found' });
   // Verify the stream actually works before saving (unless the user chose "save anyway"
   // after a failed check). Catches wrong credentials / path / IP instead of storing a dead
   // camera. 422 + needsConfirm lets the UI offer an override for a camera that's just
@@ -754,18 +849,24 @@ router.post('/', requireAdmin, async (req, res) => {
   startClipCapture(added);
   subscribeAllCameraTopics();
   res.status(201).json(publicCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(id), true));
-});
+}));
 
 // Admin-only, same as adding one: editing includes changing the RTSP URL, which
 // points this server's FFmpeg at an arbitrary address - that's camera management,
 // not day-to-day caregiving. (Reordering and child assignment below stay open to
 // every signed-in user - those are cosmetic.)
-router.put('/:id', requireAdmin, async (req, res) => {
+router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
   const { name, rtsp_host, rtsp_port, rtsp_path, rtsp_username, rtsp_password, child_id, mqtt_topic, force,
     talk_username, talk_password, sub_rtsp_path,
     discovery_source, onvif_device_url, backchannel_supported, motion_events_supported, ptz_supported, onvif_profile_token } = req.body || {};
+
+  // A child_id naming a child that no longer exists (deleted in another tab) used to reach the UPDATE below,
+  // fail the foreign key and, with no error middleware, leave the request without any response (issue #544).
+  // Answered as a 400 BEFORE any side effect, exactly as PUT /:id/assign already does. Falsy (null, '') still
+  // means "unassign" and an absent field still means "leave it alone".
+  if (!childExists(child_id)) return res.status(400).json({ error: 'Child not found' });
 
   // Reassemble the RTSP URL from the edited fields. A field not sent keeps its current
   // value; a blank password specifically means "keep the existing one" (the browser never
@@ -903,6 +1004,9 @@ router.put('/:id', requireAdmin, async (req, res) => {
     onvifPass,
     req.params.id
   );
+  // The child may have changed (#655): see clearStalePrimaryPointers (lib/primaryCamera.js). Synchronous, straight after the
+  // UPDATE, so no other request can run between the two.
+  clearStalePrimaryPointers(req.params.id);
   // Apply the sub-stream change to the running pipeline (unless the camera is disabled): start/
   // restart its transcoder if a sub-stream is configured, or tear it down if it was cleared.
   if (!existing.disabled) {
@@ -929,13 +1033,13 @@ router.put('/:id', requireAdmin, async (req, res) => {
   }
   subscribeAllCameraTopics();
   res.json(publicCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id), true));
-});
+}));
 
 // Turn a camera fully on/off server-side (admin-only, like editing). Disabling stops the
 // transcoder and drops the MediaMTX path, so it stops pulling from the camera and streaming
 // entirely; enabling re-registers the path and restarts the transcoder. The row (and its
 // settings/history) is kept - this is a reversible on/off switch, not a delete.
-router.put('/:id/enabled', requireAdmin, async (req, res) => {
+router.put('/:id/enabled', requireAdmin, asyncHandler(async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
   const enabled = !!(req.body || {}).enabled;
@@ -983,11 +1087,11 @@ router.put('/:id/enabled', requireAdmin, async (req, res) => {
   }
   db.prepare('UPDATE cameras SET disabled = ? WHERE id = ?').run(enabled ? 0 : 1, req.params.id);
   res.json(publicCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id), true));
-});
+}));
 
 // Motion-detection settings for a camera (admin). Applies immediately — starts/stops/restarts
 // the detector to match. `zone` is {x,y,w,h} in 0..1 frame fractions, or null for the whole frame.
-router.put('/:id/detection', requireAdmin, async (req, res) => {
+router.put('/:id/detection', requireAdmin, asyncHandler(async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
   const {
@@ -1118,21 +1222,21 @@ router.put('/:id/detection', requireAdmin, async (req, res) => {
   // Re-subscribe MQTT so a new/changed/removed motion topic takes effect immediately.
   refreshMqttConnection();
   res.json(publicCamera(updated, true));
-});
+}));
 
 // Dedicated assignment endpoint: attach (or unattach with child_id: null) a camera to a child.
 // Admin-only (owner decision 2026-10-10, #552): which child a camera belongs to decides whether that
 // camera's nights are tracked at all, so unassigning one stops tracking exactly as switching the child's
 // `track_sleep` off does, and left open it would let a caregiver do what PUT /api/children/:id refuses.
-router.put('/:id/assign', requireAdmin, async (req, res) => {
+router.put('/:id/assign', requireAdmin, asyncHandler(async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
   const { child_id } = req.body || {};
-  if (child_id) {
-    const child = db.prepare('SELECT id FROM children WHERE id = ?').get(child_id);
-    if (!child) return res.status(400).json({ error: 'Child not found' });
-  }
+  if (!childExists(child_id)) return res.status(400).json({ error: 'Child not found' });
   db.prepare('UPDATE cameras SET child_id = ? WHERE id = ?').run(child_id || null, req.params.id);
+  // See clearStalePrimaryPointers in lib/primaryCamera.js (#655). Synchronous, straight after the UPDATE, so no other request can
+  // run between the two.
+  clearStalePrimaryPointers(existing.id);
   const updated = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   // Child assignment drives the activity-only sleep-motion leg (motionLegWanted keys off child_id), so
   // (un)assigning may start or stop it. No-op for a camera already covered by the frame-diff alert leg.
@@ -1155,9 +1259,9 @@ router.put('/:id/assign', requireAdmin, async (req, res) => {
   // hard-coded `true`: defence in depth, so removing the gate above can never hand a caregiver the admin
   // edit-form shape again.
   res.json(publicCamera(updated, isAdminRequest(req)));
-});
+}));
 
-router.delete('/:id', requireAdmin, async (req, res) => {
+router.delete('/:id', requireAdmin, asyncHandler(async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
   await stopTranscoder(req.params.id);
@@ -1185,6 +1289,6 @@ router.delete('/:id', requireAdmin, async (req, res) => {
   }
   db.prepare('DELETE FROM cameras WHERE id = ?').run(req.params.id);
   res.status(204).end();
-});
+}));
 
 export default router;

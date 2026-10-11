@@ -106,7 +106,7 @@ reviewer reads. The split between the roles follows one rule (owner decision 202
 caregiver can still reach says why on its line of the table. Role checks made *inside* a handler
 (deleting another user's session, the admin-only fields of `GET /api/settings`, and `PUT
 /api/children/:id`, where a caregiver may change a child's name, birthday, colour and photo but not
-`track_sleep` or the sleep window) are not gates: their own test files cover them
+`track_sleep`, the sleep window or, since #655, the primary camera `primary_camera_id`) are not gates: their own test files cover them
 (`children-role-fields.test.js` for the last).
 
 **Stored secrets are never returned, and that is pinned too** (#563's second half),
@@ -135,6 +135,43 @@ better-sqlite3, single file in `DATA_DIR` (default `/app/data`). Schema is creat
 the bottom of `db.js` (`PRAGMA table_info` + conditional `ALTER TABLE`) — there is no migration
 framework. Follow this same pattern for new columns: check `table_info`, `ALTER TABLE` if
 missing, keep it idempotent.
+
+## API errors (`backend/src/lib/asyncHandler.js`, `backend/src/middleware/errorHandler.js`)
+
+Every API error is JSON in the same shape the routes already use, `{ "error": "<message>" }`, and a
+request never goes unanswered. Express 4 ignores the promise an `async` handler returns, so **every
+`async` route handler is wrapped in `asyncHandler(...)`**: a rejection (or a throw before the handler's
+own `try/catch`) is passed to `next(err)` and ends at `errorHandler`, which is mounted **last** in
+`index.js` (after every router and the SPA fallback; Express only delivers an error to handlers
+registered after it). `backend/test/async-errors.test.js` walks every router's real stack and fails for an
+`async` function registered without the wrapper, so a new route cannot bring the hang back. A handler
+that returns a promise without being `async` is not seen by that guard; write route handlers as `async`
+and wrap them.
+
+The status follows one rule, because Cloudflare (and some other proxies) replace a 5xx body with their own
+page and only a 4xx message reaches the person:
+
+- **4xx: the request was wrong and the person can fix it; the message is readable.** Validate and answer
+  a 4xx *before* any write (`PUT /api/cameras/:id` answers 400 `Child not found` for a deleted child,
+  like `/assign`). The safety nets behind that: a SQLite foreign-key failure (typically a stale tab
+  saving a reference to something another tab deleted) is a 409; an error that carries its own 4xx
+  `status`/`statusCode` keeps it (malformed JSON is 400, an oversized body 413, a missing file from
+  `res.sendFile` 404) and its message is shown only when the error is marked `expose: true` (the
+  `http-errors` / body-parser / `send` convention), capped at 200 characters; otherwise a generic message
+  for that status is used. Two exceptions: a **401** on a thrown error is never honoured (the web UI signs
+  the user out on any 401, and a library error can carry its upstream's status), so 401 comes only from
+  `middleware/auth.js`; and a **403** is honoured only when the error is `expose: true`, which is what
+  `res.sendFile` throws for a denied dotfile or a `..` path (a bare `{ status: 403 }` from some other
+  library stays a 500).
+- **5xx: a server bug.** The response is `500` with a generic message. The real error (message and stack)
+  is written to the log with the method and path (never the query string, which can hold a media token) and
+  is never sent to the client, because a SQLite message names tables and columns and a stack names source
+  files. Errors that already carry a 4xx status are the opposite: **not logged** at all, since anyone,
+  signed in or not, can cause them (a malformed `%` escape in a URL, a missing file) and they would fill the
+  1000-line in-app log with caller-chosen text.
+- If the response has already started streaming when the error happens, Express's default handler closes
+  the connection so the client sees a failure rather than a truncated body that looks complete. If the
+  reply already finished, the error is only logged.
 
 ## Runtime identity (`backend/entrypoint.sh`, `Dockerfile`)
 

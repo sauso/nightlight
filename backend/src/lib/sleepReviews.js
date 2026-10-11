@@ -31,14 +31,18 @@ const getReviewStmt = db.prepare('SELECT * FROM sleep_reviews WHERE child_id = ?
 // Both in-bed columns are in the INSERT AND in the ON CONFLICT SET (plan review R5). Missing from the SET,
 // a second save of the same night would silently keep the FIRST in-bed answer, which is exactly the
 // two-edits case (change your mind about the put-down) this column exists for.
+// The same trap for the answered-by pair (#552): missing from the SET, the FIRST person to answer a night
+// would be named on it forever, whoever answered after them. previewNightReview decides the values (the
+// stored pair is carried over unless this save is an answer), so the SET always writes what it is given.
 const upsertReviewStmt = db.prepare(
   `INSERT INTO sleep_reviews
      (child_id, night_date, true_onset_at, true_wake_at, true_onset_transition_id,
       true_wake_transition_id, true_in_bed_at, true_in_bed_transition_id, computed_onset_at,
-      computed_wake_at, note, dismissed, nobody_in_bed, reviewed_at)
+      computed_wake_at, note, dismissed, nobody_in_bed, answered_by_user_id, answered_by_username, reviewed_at)
    VALUES (@child_id, @night_date, @true_onset_at, @true_wake_at, @true_onset_transition_id,
            @true_wake_transition_id, @true_in_bed_at, @true_in_bed_transition_id, @computed_onset_at,
-           @computed_wake_at, @note, @dismissed, @nobody_in_bed, datetime('now'))
+           @computed_wake_at, @note, @dismissed, @nobody_in_bed, @answered_by_user_id, @answered_by_username,
+           datetime('now'))
    ON CONFLICT(child_id, night_date) DO UPDATE SET
      true_onset_at            = excluded.true_onset_at,
      true_wake_at             = excluded.true_wake_at,
@@ -51,11 +55,16 @@ const upsertReviewStmt = db.prepare(
      note                     = excluded.note,
      dismissed                = excluded.dismissed,
      nobody_in_bed            = excluded.nobody_in_bed,
+     answered_by_user_id      = excluded.answered_by_user_id,
+     answered_by_username     = excluded.answered_by_username,
      reviewed_at              = datetime('now')`
 );
 
-// The child's cameras in the same order the analysis picks its scoring camera, so the frames shown are
-// the ones the decisions were actually made from.
+// Every ENABLED camera of the child: the SET of cameras whose bed-transition frames the review shows.
+// Its ORDER no longer matches how the scoring camera is picked (since #655 a child can name a primary
+// camera, lib/primaryCamera.js) and does not need to: the events come back ordered by time
+// (getBedTransitions, ORDER BY created_at), so this order is invisible, and it is deliberately left as it was. The review shows the frames of all the
+// child's enabled cameras, not only the primary's.
 const camsForChild = db.prepare(
   'SELECT id, name FROM cameras WHERE child_id = ? AND disabled = 0 ORDER BY sort_order, id'
 );
@@ -250,6 +259,23 @@ function transitionsFor(childId, nightDate) {
   }));
 }
 
+// A review row as it may leave the server: everything except `answered_by_user_id` (#552 release review,
+// 2026-10-11). That column is ANOTHER person's internal account id. It stays stored (the row is traced to an
+// account, and a dismissal carries it over: previewNightReview), but no screen reads it, since the page names
+// people by `answered_by_username`, and every signed-in user, caregivers included, can open and save any
+// night's review. So it is removed from every review response, for every caller: an admin's screen has no
+// use for it either, and one shape for every role is one less role check to get wrong. The username IS sent to
+// everyone, by design (owner decision 2026-10-10; docs/camera-controls.md). Removed, not nulled: a null would
+// read as "answered by nobody we know". Both review routes (GET, and PUT's response) go through here.
+// ⚠️ A new column naming a person must be added here too: the test "#552 no account id" reads the schema
+// (PRAGMA) and fails on any `*user_id` column it has not been told about.
+export function reviewForBrowser(row) {
+  if (!row) return null;
+  const out = { ...row };
+  delete out.answered_by_user_id;
+  return out;
+}
+
 // Everything the review screen needs for one night: what the app currently says, what a person has
 // already said, and every recorded transition with whether it has a frame and a verdict.
 export function getNightReview(childId, nightDate) {
@@ -271,7 +297,8 @@ export function getNightReview(childId, nightDate) {
     },
     // SELECT *, so a column added to sleep_reviews (true_in_bed_at / true_in_bed_transition_id, 2026-09-30)
     // reaches the screen without a change here, and none is ever dropped from what an open page reads.
-    review: getReviewStmt.get(childId, nightDate) || null,
+    // The one exception is the answerer's account id, which never leaves the server (reviewForBrowser).
+    review: reviewForBrowser(getReviewStmt.get(childId, nightDate)),
     transitions: transitionsFor(childId, nightDate),
   };
 }
@@ -332,8 +359,12 @@ export function getNightReview(childId, nightDate) {
 // applyVerdicts writes, so a compute that throws is a 500 with nothing written, and it then saves through
 // here without a second compute. So the default path is what tests and any future caller get, not what a
 // parent's save takes.
-export function saveNightReview(childId, nightDate, patch = {}, { storeFirst = true } = {}) {
-  const next = previewNightReview(childId, nightDate, patch);
+//
+// `actor` and `answered` (#552) decide who the review says ANSWERED it; see previewNightReview. The route
+// passes both. The defaults (no actor, not an answer) keep whatever name is stored, so a caller that says
+// nothing about who is saving can never put a name on, or take one off, an answer.
+export function saveNightReview(childId, nightDate, patch = {}, { storeFirst = true, actor = null, answered = false } = {}) {
+  const next = previewNightReview(childId, nightDate, patch, { actor, answered });
   if (inBedAfterOnset(next)) {
     // The route refuses this first with a 400 (above applyVerdicts). Reaching this throw means a caller
     // skipped that validation: a bug, not a user mistake — same posture as the flag-plus-times throw.
@@ -353,8 +384,18 @@ export function saveNightReview(childId, nightDate, patch = {}, { storeFirst = t
 // overlay (falsy) but "a value" to SQL (`IS NOT NULL`), and those two spellings decide the lock between
 // them (see reviewCorrectsNight); normalising here means no save can create a row they read differently.
 // The SQL side is also written to read '' as nothing, for rows written some other way.
-export function previewNightReview(childId, nightDate, patch = {}) {
+//
+// WHO ANSWERED (#552, review finding A5, owner decision 2026-10-10). `answered` true: this save carries an
+// answer (the route decides: a time, the flag, a note, or an event answer), and the review is now
+// "Answered by" `actor`. Otherwise the stored pair is carried over unchanged. A dismissal goes through this
+// same upsert, as does an empty save, and neither is an answer: without the carry-over, one person tapping
+// "dismiss" on a second phone would put their name on a night someone else answered. Username, never first
+// name (see lib/actor.js).
+export function previewNightReview(childId, nightDate, patch = {}, { actor = null, answered = false } = {}) {
   const existing = getReviewStmt.get(childId, nightDate) || {};
+  const by = answered
+    ? { user_id: actor?.user_id ?? null, username: actor?.username ?? null }
+    : { user_id: existing.answered_by_user_id ?? null, username: existing.answered_by_username ?? null };
   const blankToNull = (v) => (v === '' ? null : v);
   const pick = (key, val) => blankToNull(val === undefined ? (existing[key] ?? null) : (val ?? null));
   const flagGiven = patch.nobodyInBed != null;
@@ -385,6 +426,8 @@ export function previewNightReview(childId, nightDate, patch = {}) {
     note: pick('note', patch.note),
     dismissed: patch.dismissed !== undefined ? (patch.dismissed ? 1 : 0) : flagGiven ? 0 : (existing.dismissed ?? 0),
     nobody_in_bed: nobody,
+    answered_by_user_id: by.user_id,
+    answered_by_username: by.username,
   };
 }
 

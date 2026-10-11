@@ -4,6 +4,7 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { logger } from '../lib/logger.js';
 import { getNtfyConfig, ntfyConfigured, sendNtfy } from '../lib/ntfy.js';
 import { maskSecret } from '../lib/secretMask.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
 
 const router = Router();
 
@@ -46,11 +47,11 @@ router.put('/config', requireAuth, requireAdmin, (req, res) => {
   res.json(publicConfig());
 });
 
-router.post('/test', requireAuth, requireAdmin, async (req, res) => {
+router.post('/test', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
   if (!ntfyConfigured()) return res.status(400).json({ error: 'Set a server URL and topic first.' });
   const result = await sendNtfy({ title: 'Nightlight', message: 'Test notification - ntfy is working.', priority: 3 });
   if (result && result.ok === false) return res.status(400).json({ error: result.error || 'ntfy rejected the message.' });
   res.json({ ok: true });
-});
+}));
 
 export default router;

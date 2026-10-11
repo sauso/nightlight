@@ -13,6 +13,7 @@ import { getRecentDetectionEvents } from '../lib/detectionEvents.js';
 import { pushConfigured, pushEnabled } from '../lib/push.js';
 import { pushoverConfigured, pushoverEnabled } from '../lib/pushover.js';
 import { findCredentialLeak } from '../lib/urlCredentials.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -104,13 +105,24 @@ function safeCamera(cam) {
   };
 }
 
+// One Camera history row as the bundle carries it: WHO did it (#552) becomes only whether it was a person
+// or the system. This bundle is made to be attached to a public GitHub issue, and a username is often a
+// real first name; whether a person or a watchdog restarted a camera is what a diagnosis needs, not which
+// person. Every other field is passed through as before. Destructured out rather than allow-listed so the
+// row keeps every column an existing reader expects.
+function bundleCameraEvent({ actor_user_id, actor_username, ...ev }) {
+  return { ...ev, actor: actor_user_id != null || actor_username != null ? 'person' : 'system' };
+}
+
 const router = Router();
 
-router.get('/', requireAuth, requireAdmin, async (req, res) => {
+router.get('/', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
   try {
     const settings = db.prepare('SELECT * FROM settings WHERE id = ?').get('app') || {};
     const cameras = db.prepare('SELECT * FROM cameras ORDER BY sort_order, created_at').all();
-    const children = db.prepare('SELECT id, name, birthday, color, created_at FROM children').all();
+    // primary_camera_id (#655): which camera a child's sleep is scored from is the first thing to check when
+    // a night looks wrong, and NULL (automatic: first enabled camera in sort_order) is a meaningful answer.
+    const children = db.prepare('SELECT id, name, birthday, color, created_at, primary_camera_id FROM children').all();
     const userRows = db.prepare('SELECT role FROM users').all();
 
     const camerasWithStatus = await Promise.all(
@@ -188,7 +200,7 @@ router.get('/', requireAuth, requireAdmin, async (req, res) => {
       children,
 
       recent_detection_events: getRecentDetectionEvents(100),
-      camera_history: getRecentEvents(200),
+      camera_history: getRecentEvents(200).map(bundleCameraEvent),
       server_logs: logger.getRecent(),
     };
 
@@ -209,6 +221,6 @@ router.get('/', requireAuth, requireAdmin, async (req, res) => {
     // 4xx (not 5xx): a reverse proxy replaces origin 5xx bodies, hiding the message.
     res.status(400).json({ error: `Failed to build diagnostics: ${err.message}` });
   }
-});
+}));
 
 export default router;

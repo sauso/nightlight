@@ -299,7 +299,8 @@ measurement**, and (like everything here) never a safety device — see the warn
 
 - **Turn it on per child.** Each child has a **Track sleep** toggle in their settings, with
   their own **bedtime** and **wake time**. Turning tracking off stops it entirely. Only an
-  **admin** can turn tracking on or off or change those times (a caregiver sees them, greyed out).
+  **admin** can turn tracking on or off, change those times or choose the camera the night is measured
+  from (a caregiver sees them, greyed out).
   A child can have more than one camera; the night is measured from one of them (see "One camera
   does the measuring" below).
 - **Bedtime is a guide, not a boundary.** Real bedtimes move night to night, and you shouldn't
@@ -314,9 +315,28 @@ measurement**, and (like everything here) never a safety device — see the warn
   then nothing is an empty one, and the bedtime it seemed to start is discarded. The same applies at the other end: a morning wake
   is still found if it comes after the configured wake time.
 - **One camera does the measuring.** If a child has several cameras, sleep is worked out from their
-  **main camera** — the first one in the order an admin has arranged them on the live grid (drag the
-  tiles; only an admin can, for this reason), skipping any that are turned off.
+  **main camera**, and an admin can choose which one it is: **Camera used for this child's sleep** in
+  the child's settings (shown once a child has two or more cameras).
+  - **Default: Automatic** — the first camera in the order an admin has arranged them on the live grid,
+    skipping any that are turned off. This is how every child behaved before the setting existed, so
+    nothing changes until an admin picks a camera. With Automatic, dragging the tiles still changes the
+    main camera, which is why only an admin can rearrange them.
+  - **Range: any camera assigned to that child**, including one that is turned off. A chosen camera
+    that is turned off (or has been deleted) is skipped and Automatic is used until it is back on;
+    turning it back on makes it the main camera again. Moving the chosen camera to another child, or
+    unassigning it, resets the choice to Automatic.
+  - Only an **admin** can change it (a caregiver sees it, greyed out). The settings screen says which
+    camera the night is being measured from right now.
+  - **What a change affects.** The camera is looked up each time a night is worked out, so a change
+    applies to every night computed afterwards, not only future ones: tonight's figures, a night's
+    **detail page** and the **morning review** (always worked out fresh), last night's saved summary
+    while it can still be updated (up to about three hours after the wake time), a review correction
+    that saves the night first, and an admin's **Recompute**. Older saved summaries (the child's card)
+    are not recomputed and keep the numbers of the camera they were measured from, so after a change a
+    past night's detail page can show different figures from its card.
+
   The others carry on streaming, alerting and recording as normal; they just don't affect the numbers.
+  The nightly timelapse is taken from the same main camera.
   This is deliberate: if every camera were combined, the *noisiest* one would decide the night — a
   camera facing the doorway would push bedtime later and add wake-ups that never happened, with nothing
   saying which camera was responsible. The night's detail view names the camera it measured from. Room
@@ -399,8 +419,12 @@ measurement**, and (like everything here) never a safety device — see the warn
   right, wrong, or "can't tell" against the still frame it was decided from. It appears once per night
   and goes for good once answered **or dismissed**; nothing is asked about nights with no times to
   confirm. Either an admin or a caregiver can answer, deliberately — the person who was in the room at
-  5am is the one who knows. Type times on your own clock; they are recorded against the timezone in
-  Settings, the same one the sleep card displays.
+  5am is the one who knows. The review then shows who last answered it (**Answered by** and their
+  username): a save with a time, "no one was in the bed", a note or an event answer counts, and so does
+  saving someone else's answers again unchanged; dismissing the prompt does not, nor does a save that
+  only empties fields, and both leave the name as it was. Reviews saved before this was recorded show no
+  name. Type times on your own clock; they are
+  recorded against the timezone in Settings, the same one the sleep card displays.
   - **Confirming that a night was right is worth as much as correcting one** — it is what makes a
     future change to sleep detection provable rather than arguable. Confirming and correcting are
     separate buttons on purpose: the times we guessed are never one stray tap from being recorded as
@@ -711,13 +735,13 @@ destroy or reconfigure.**
 |---|:---:|:---:|
 | View live cameras; watch and download alert clips, recordings, wake clips and timelapses | Yes | Yes |
 | Record, move a PTZ camera, talk through a camera | Yes | Yes |
-| Restart, reboot, or snooze camera alerts | Yes | Yes |
-| Reorder cameras on the live grid (the order also picks each child's measuring camera) | No | Yes |
+| Restart, reboot, or snooze camera alerts (recorded with your username; see below) | Yes | Yes |
+| Reorder cameras on the live grid (the order also picks the measuring camera of a child whose sleep camera is on Automatic) | No | Yes |
 | Assign a camera to a child | No | Yes |
 | Add / edit / enable / delete a camera | No | Yes |
 | Change a child's name, birthday, colour and photo | Yes | Yes |
-| Add a child; turn a child's sleep tracking on or off; change their bedtime and wake time | No | Yes |
-| Answer the morning sleep review | Yes | Yes |
+| Add a child; turn a child's sleep tracking on or off; change their bedtime and wake time; choose the camera their sleep is measured from | No | Yes |
+| Answer the morning sleep review (the review shows who last answered it) | Yes | Yes |
 | Delete an alert clip, a recording or a wake clip | No | Yes |
 | Delete a timelapse | No | Yes |
 | Delete a child and its media | No | Yes |
@@ -726,8 +750,19 @@ destroy or reconfigure.**
 
 Deleting by hand is not the same as **retention**: the automatic sweep of old alert clips and wake clips
 (Settings → Recording, admin only to configure) runs on a timer on every install, whoever is signed in.
-On a caregiver's screen the admin-only controls are not shown (sleep tracking and the window are shown,
-greyed out, with a note); the server refuses them too, so a page opened before an update that changed a
+
+**Who did it is recorded.** Silencing a camera's alerts, un-silencing them, restarting its stream and
+rebooting it each add a row to **Camera history** naming the account by its **username** (the login name
+an admin sets, never the first name, which anyone can change on their own account); a restart or reboot
+that failed is recorded too. While a camera is silenced, its tile shows who silenced it, to everyone. The
+morning review shows who last answered it (above). Details, including what happens when the history
+cannot be written, are in [docs/camera-controls.md](docs/camera-controls.md#silencing-a-cameras-alerts-and-who-did-what).
+If a camera's alerts are kept silenced, on and off, for a long time (more than an hour by default, short gaps
+between renewals included), the admins are sent one notification for it, which names no one; on Pushover, ntfy
+and Gotify everyone on them gets it too. See [Long-silence alerts](docs/camera-controls.md#long-silence-alerts).
+
+On a caregiver's screen the admin-only controls are not shown (sleep tracking, the window and the sleep
+camera are shown, greyed out, with a note); the server refuses them too, so a page opened before an update that changed a
 permission gets a refusal rather than a change.
 
 The **Settings** hub itself is visible to caregivers too — its admin-only pages (general,
@@ -938,6 +973,31 @@ same protection.
 
 Timestamps use your container's local time (see the `TZ` variable above) rather than
 UTC, so they line up with when you actually remember something happening.
+
+## Times and your timezone
+
+Every time the app shows is in your **home** time: the timezone set in **Settings → General** (an IANA
+name such as `Europe/London`; **default `UTC`** until you set it, so set it first). It is the same zone
+the sleep reports, the morning review and the alert schedule already use, so an alert at "7:00 pm" is
+the same moment on every phone, and it agrees with the sleep card. It is **not** the zone of the phone or
+browser you happen to be using.
+
+- **When your device is in a different zone** (travelling, or someone watching from abroad), a time
+  carries a short zone label after it, such as **7:00 pm GMT-7**, so it cannot be mistaken for the
+  device's own clock. **When the device is in your home zone nothing is added**, so a household that
+  stays put sees no change. Clock format (12 or 24 hour) and date order follow the device's own language
+  settings, not the timezone.
+- **Where it applies:** the alert and camera-history lists (the exact time is in the tooltip on each row
+  and in the clip player), **Clip Management** (clips are grouped under their home-time **day**, and the
+  date filter and its "today" use home days, so two people never see the same clip on different days),
+  the **Recordings** card, a camera tile's **silenced until** time, and the nightly timelapse dates (a
+  night is a calendar date worked out in home time, so it never shifts).
+- **Not affected:** ages such as "3h ago" (elapsed time is the same everywhere), the sleep screens (they
+  were already in home time), and the build date under **About**.
+- **Known limits.** The label appears whenever the device's zone *name* differs from home, even if the two
+  happen to share an offset today (Paris and Berlin, say); it never hides a real difference. A time from
+  before a daylight-saving change shows the offset that applied then. Right after the page opens, before the setting has
+  loaded, times show in `UTC` for a moment and then switch to your home zone.
 
 ## Troubleshooting
 

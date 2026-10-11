@@ -41,7 +41,7 @@ A quick tour of the app's main screens.
 
 The home screen is a live grid of camera tiles. Each tile plays low-latency video and shows
 the camera's name, which child it's assigned to, a connection indicator, and controls for
-audio, fullscreen, picture-in-picture, and stream quality. Tiles can be dragged to reorder (admin only, because the order picks the main camera for a child with more than one).
+audio, fullscreen, picture-in-picture, and stream quality. Tiles can be dragged to reorder (admin only, because for a child with more than one camera and the sleep camera left on **Automatic**, the order picks the main camera their sleep is measured from; an admin can choose that camera explicitly in the child's settings instead, and then the order is only layout).
 
 On a phone, with the bottom tab bar:
 
@@ -68,7 +68,9 @@ two-way-audio credentials here.
 ## Settings
 
 Admins can theme the app (name, colors, font), set the timezone and temperature unit, and
-connect an MQTT broker to show room temperature/humidity on each tile.
+connect an MQTT broker to show room temperature/humidity on each tile. The timezone (default
+`UTC`) is the **home** time every time in the app is shown in; a zone label appears next to a time only
+when the device is in a different zone (see [Times and your timezone](../README.md#times-and-your-timezone)).
 
 ![The settings screen on a phone](screenshots/settings-mobile.png)
 

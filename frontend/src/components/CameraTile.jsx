@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { startTalk } from '../lib/twoWayTalk.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
+import { useHomeTime } from '../lib/useHomeTime.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { isNativeApp, isIOS, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip, hasNativePip, subscribeBackgroundPaused, isBackgroundPaused, setBackgroundPaused, setPipAutoEnteredFullscreen } from '../lib/nativeBridge.js';
@@ -304,8 +305,15 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   const [showSilenceMenu, setShowSilenceMenu] = useState(false); // "Silence alerts" → pick a duration
   const snoozedUntil = camera.alerts_snoozed_until && camera.alerts_snoozed_until > Date.now()
     ? camera.alerts_snoozed_until : null;
-  const snoozeLabel = snoozedUntil
-    ? new Date(snoozedUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
+  // The mute's end time sits next to quiet hours, which are edited and applied in HOME time, so it is
+  // shown in home time too (with a zone label when this device is elsewhere) — #561.
+  const home = useHomeTime();
+  const snoozeLabel = snoozedUntil ? home.time(new Date(snoozedUntil)) : null;
+  // WHO silenced it (#552): their username, so everyone looking at this tile can see who to ask. Only while
+  // the silence lasts (the server also nulls it after expiry), and nothing at all when the server sent
+  // none: a silence set before this existed, or by an older server.
+  const snoozedBy = snoozedUntil && camera.alerts_snoozed_by ? camera.alerts_snoozed_by : null;
+  const snoozeText = snoozedBy ? `${snoozeLabel} by ${snoozedBy}` : snoozeLabel;
   async function snoozeAlerts(minutes) {
     if (snoozeBusy) return;
     setShowSilenceMenu(false);
@@ -835,7 +843,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
                     onClick={() => snoozeAlerts(0)}
                   >
                     <BellOff size={16} aria-hidden="true" />
-                    Muted until {snoozeLabel} · tap to un-mute
+                    Muted until {snoozeText} · tap to un-mute
                   </button>
                 ) : showSilenceMenu ? (
                   <div className="silence-menu" role="group" aria-label="Silence duration">
@@ -1044,7 +1052,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
         </div>
         <div className="status-row">
           {snoozedUntil && (
-            <span className="camera-tile__reading" title={`Alerts muted until ${snoozeLabel}`}>
+            <span className="camera-tile__reading" title={`Alerts muted until ${snoozeText}`}>
               <BellOff size={16} className="camera-tile__reading-icon" aria-hidden="true" />
               {snoozeLabel}
             </span>

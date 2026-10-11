@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
+import { useHomeTime } from '../lib/useHomeTime.js';
 import Modal from './Modal.jsx';
 
 // Detection alerts (motion now, sound later) — see backend lib/detectionEvents.js ALERT.
@@ -8,7 +9,8 @@ const TYPE_META = {
   sound: { label: 'Sound', className: 'event-log__dot--sound' },
 };
 
-// SQLite stores created_at as UTC — parse as UTC, render in the viewer's local time.
+// SQLite stores created_at as UTC — parse as UTC. The row shows an age; its tooltip shows the clock
+// time in HOME time (settings.timezone), with a zone label when this device is elsewhere (#561).
 function parseUtc(s) {
   return new Date(s.replace(' ', 'T') + 'Z');
 }
@@ -25,6 +27,7 @@ function relativeTime(date) {
 }
 
 export default function RecentAlerts() {
+  const home = useHomeTime();
   const [alerts, setAlerts] = useState([]);
   const [error, setError] = useState('');
   const [loaded, setLoaded] = useState(false);
@@ -116,7 +119,7 @@ export default function RecentAlerts() {
                   </div>
                   {ev.detail && <div className="event-log__detail">{ev.detail}</div>}
                 </div>
-                <time className="event-log__time" dateTime={when.toISOString()} title={when.toLocaleString()}>
+                <time className="event-log__time" dateTime={when.toISOString()} title={home.dateTime(when)}>
                   {relativeTime(when)}
                 </time>
               </li>

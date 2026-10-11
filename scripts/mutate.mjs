@@ -21,6 +21,8 @@
 //                                           # way to find stale anchors before a full run, #575, #604). CI runs it via
 //                                           # backend/test/mutants-catalogue.test.js, so a drifted entry fails at PR time.
 //   node scripts/mutate.mjs --timeout=<ms>  # wall-clock limit per mutant, overriding the default and every `timeoutMs`
+//   node scripts/mutate.mjs --help          # (or -h) print the usage and exit 0, touching nothing
+//   Any other flag (or a bare word) exits 2 with the usage before a file is read, instead of running everything (#654).
 //
 // ⚠️ THE THREE WAYS A MUTATION RUN LIES, all of which have happened in this repo and all of which are
 // guarded against below. Read these before adding a mutant:
@@ -80,6 +82,55 @@ const BACKEND = path.join(REPO, 'backend');
 const FRONTEND = path.join(REPO, 'frontend');
 
 const args = process.argv.slice(2);
+
+// Validate the command line BEFORE anything else (#654). The flags used to be looked up one by one with
+// `flag()`/`value()`, and anything not looked up was ignored, so `--help` (or a typo such as `--ful`) fell through
+// to "run every mutant" and started a battery that takes the better part of an hour and writes into source files;
+// when the pipe it was being read through closed, the run died and left `clipStorage.js` mutated on disk. A
+// command line that this script does not understand must therefore stop here: nothing has been read, nothing has
+// been written, no journal recovery has run. Keep the lists in step with the USAGE block in the header.
+const BOOLEAN_FLAGS = ['full', 'list', 'check', 'help'];
+const VALUE_FLAGS = ['only', 'timeout'];
+const USAGE = [
+  'usage: node scripts/mutate.mjs [--full] [--only=<substring>] [--timeout=<ms>]',
+  '       node scripts/mutate.mjs --list | --check | --help',
+  '',
+  '  (no flags)        every mutant, each against the tests it names',
+  '  --full            every mutant against the WHOLE suite (slow)',
+  '  --only=<text>     only the mutants whose label contains <text>',
+  '  --timeout=<ms>    wall-clock limit per mutant',
+  '  --list            print the catalogue and exit',
+  '  --check           run no tests; verify every catalogue entry still applies',
+  '  -h, --help        print this and exit 0',
+].join('\n');
+// The reasons this command line is not understood, one per argument; empty means it is fine. A flag that needs a
+// value but has none (`--only`), a flag given a value it does not take (`--full=1`), and a bare word are rejected
+// along with unknown flags: each is a typo that used to be ignored and run the whole battery.
+const argProblems = args.flatMap((a) => {
+  if (a === '-h') return [];
+  if (!a.startsWith('--')) return [`unexpected argument "${a}"`];
+  const [name, ...rest] = a.slice(2).split('=');
+  const hasValue = rest.length > 0;
+  if (BOOLEAN_FLAGS.includes(name)) return hasValue ? [`${a}: --${name} takes no value`] : [];
+  // An EMPTY value counts as missing: `--only=` is falsy, so the run took it as "no filter" and selected the whole
+  // catalogue (a typo, or an unset shell variable in `--only=$X`, started the full battery), and `--timeout=` only
+  // failed later, after the catalogue was read and without the usage. Both are refused here.
+  if (VALUE_FLAGS.includes(name)) return rest.join('=') !== '' ? [] : [`${a}: --${name} needs a non-empty value, as --${name}=<value>`];
+  return [`unknown flag ${a}`];
+});
+// Problems are reported BEFORE --help is honoured, so `--help --bogus` exits 2 and names `--bogus`. Deliberate:
+// exit 0 means "the command line you typed was understood", and a script that wraps this one would otherwise
+// take `--help --typo` as a success. A lone `--help` is unaffected.
+if (argProblems.length) {
+  for (const p of argProblems) console.error(`mutate.mjs: ${p}`);
+  console.error(`\n${USAGE}`);
+  process.exit(2);
+}
+if (args.includes('--help') || args.includes('-h')) {
+  console.log(USAGE);
+  process.exit(0);
+}
+
 const flag = (name) => args.some((a) => a === `--${name}`);
 const value = (name) => args.find((a) => a.startsWith(`--${name}=`))?.split('=').slice(1).join('=');
 

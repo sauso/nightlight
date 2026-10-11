@@ -263,6 +263,27 @@ points at a different scheme, host, port, username or path, the stored password 
 and you will need to enter it again. That is deliberate: it stops one camera's credential being sent
 to a machine you just typed the name of.
 
+### The picture behind the Bed area editor
+
+The **Bed area** editor on the same screen paints the zone over a still frame from the camera. It
+comes from the **Alert image URL** above when one is set (and answers), otherwise from one frame of
+the camera's stream, which can take up to about 8 seconds on a camera with a long keyframe interval.
+With an Alert image URL set, one grab can therefore last about 13 seconds: up to 5 seconds trying
+the address, then up to 8 seconds from the stream. **Refresh frame** asks for a new one.
+
+**One grab per camera at a time.** When several requests for the same camera's frame arrive while a
+grab is under way (two people opening the editor, **Refresh frame** pressed repeatedly, a page
+reloaded), they share that one grab: each later request waits for it and gets the same picture, or
+the same *Couldn't grab a frame*. On a slow camera, the second person therefore waits for the first
+person's grab instead of starting another one, and a **Refresh frame** pressed mid-grab shows that
+grab's picture (press it again once it has loaded for a newer one). The next request after a grab has
+finished starts a fresh one, including after a failed grab. Each camera has its own grab, so one
+camera never shows another's picture. This is only this editor's frame: alert images, the bed exit
+and entry frames, and timelapse frames are grabbed separately and are not affected. There is no
+overall limit beyond one per camera: with several cameras, each can be grabbing at the same time.
+Known limit: if a stream grab that was stopped for taking too long never exits, that camera's frame
+stays unavailable until the app restarts; see [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
+
 ### Alert schedule (quiet hours)
 
 **Cameras → edit a camera → Alert schedule.** Off by default, which means the camera alerts 24/7.
@@ -276,7 +297,10 @@ Turn on **Only alert during set hours** and set a **From** and **To** time.
 - **Overnight windows work.** From 20:00 to 07:00 is one window that crosses midnight, not an empty one.
 - **The window is shared by motion and sound** — there is not one schedule each.
 - **Times are in the app timezone** (**Settings → General**), not the browser's or the camera's. On a
-  fresh install that timezone is **UTC** until you set it, so set it before relying on a schedule.
+  fresh install that timezone is **UTC** until you set it, so set it before relying on a schedule. The
+  times the app *shows* (alert and history lists, clips, recordings, the time a camera's alerts are
+  silenced until) are in that same zone, with a zone label added only when the device you are looking
+  at is in a different one; see [Times and your timezone](../README.md#times-and-your-timezone).
 - ⚠️ **It suppresses alerts, not detection.** Outside the window there is no push *and* no in-app
   alert, but the camera is still watched: **sleep tracking keeps recording normally**, so a night is
   unaffected by the schedule. This is the opposite of turning motion or sound detection off, which
@@ -438,6 +462,16 @@ summary still catches up on its next check, but no "Sleep report updated" goes o
 A corrected night is also **locked** (README, "A night you have corrected is locked"): its saved summary
 stops being refined, which is the other half of why no later wake time is pushed.
 
+## Long-silence notifications (admins)
+
+Separate again: when a camera's alerts are kept silenced, on and off, for longer than the admins allow (on by
+default, 60 minutes, under **Settings → Camera controls → Long silence alerts**), one notification goes out for
+that silence. It says how long, never who: no username goes to any provider. Unlike everything above, it is
+meant for the **admins**, not the person who silenced the camera, and only the Nightlight app's own push
+(Firebase) can do that: Pushover, ntfy and Gotify cannot address one person, so everyone on them receives it
+too. What counts as one silence, who receives it on each channel, and the known limits are in
+[camera-controls.md](camera-controls.md#long-silence-alerts).
+
 ## Troubleshooting
 
 - **"Send test" says it timed out after 10s.** Nightlight gives any notification provider **10
@@ -467,5 +501,18 @@ stops being refined, which is the other half of why no later wake time is pushed
   `[push] send failed for batch N/M` and still sends the remaining batches; the `[push] alert sent
   to X/Y device(s)` line counts every batch. Devices in a failed batch miss that one alert and are
   **not** removed (only tokens Firebase reports as dead are). Before this was fixed (issue #546), 501 or more registered
-  devices made every Firebase alert fail. The number of tokens one account can register is not
-  limited yet (issue #546).
+  devices made every Firebase alert fail.
+- **Limits on registering a device (issue #546).** Each signed-in account can have at most **25**
+  devices registered (default and fixed, not a setting). When an account registers a 26th, the server
+  does **not** refuse it: it quietly drops that account's **oldest** registration (least recently
+  opened) and keeps the new one, so a phone that just registered always works; a phone whose
+  registration was dropped gets alerts again the next time its app is opened while signed in. The limit
+  is enforced when a device registers, not at upgrade: an account that already had more than 25 devices
+  registered before this limit existed keeps them all until one of its devices next registers, which then
+  trims it down to the 25 most recently opened. Opening
+  the app again on a device that is already registered never counts as a new device. The limit is per
+  account, so one account's devices never push another's out. A device token longer than **4096**
+  characters is refused (`token is too long (at most 4096 characters)`); real Firebase tokens are
+  roughly 150-200 characters. Both numbers are generous guesses, not measured on any particular
+  household. Unlike the batching above, this is a per-account limit: the total across all accounts is
+  still unlimited (the server batches those).

@@ -4,6 +4,7 @@ import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Modal from '../components/Modal.jsx';
 import ClipDatePicker from '../components/ClipDatePicker.jsx';
+import { useHomeTime } from '../lib/useHomeTime.js';
 
 // Admin Clip Management: browse every recorded clip, filter by day, and bulk-select + delete. Deleting
 // removes the video only — the alert and its snapshot stay. Reachable from Settings (admin).
@@ -12,8 +13,10 @@ const TYPE = {
   sound: { label: 'Sound', Icon: AudioLines },
 };
 const parseUtc = (s) => new Date(String(s).replace(' ', 'T') + 'Z');
-// Stable local day key 'YYYY-MM-DD' — shared by grouping, the filter, and the calendar picker.
-const dayKeyOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+// The day key 'YYYY-MM-DD' is the HOME-zone calendar day (home.dayKey, #561) — shared by grouping, the
+// filter, and the calendar picker. It used to be the browser's own local day, so one clip filed under a
+// different day heading for two viewers (a phone twelve hours ahead of home saw a 23:30 clip as
+// tomorrow's). In home time every viewer sees the same days, matching the sleep report's nights.
 
 function fmtBytes(b) {
   if (b == null || !isFinite(b)) return '';
@@ -30,6 +33,7 @@ export default function ClipManagement() {
   const [playing, setPlaying] = useState(null);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
+  const home = useHomeTime();
 
   async function load() {
     try {
@@ -43,24 +47,38 @@ export default function ClipManagement() {
   }
   useEffect(() => { load(); }, []);
 
-  // Group by local calendar day (clips come newest-first, so groups stay in order). Keyed by the
-  // stable 'YYYY-MM-DD' day key, carrying a display label for the section heading.
+  // A change of HOME ZONE after mount (the real setting arriving and replacing the placeholder 'UTC', or an
+  // admin changing it) re-buckets every clip into different days. `selectedDays` holds day KEYS of the old
+  // zone and `selected` holds ids picked from a list grouped under them, so both would now describe a
+  // screen that no longer exists: a day filter naming the wrong days, and — worse — a clip hidden by the
+  // new grouping that is still in `selected` and would be sent by Delete without being visible (Codex
+  // review of #561). Clear both rather than translate them. An empty set is returned as the SAME object so
+  // the mount-time run (and any run with nothing chosen) causes no extra render.
+  useEffect(() => {
+    setSelectedDays((prev) => (prev.size ? new Set() : prev));
+    setSelected((prev) => (prev.size ? new Set() : prev));
+  }, [home.zone]);
+
+  // Group by HOME-zone calendar day (clips come newest-first, so groups stay in order). Keyed by the
+  // stable 'YYYY-MM-DD' day key, carrying a display label for the section heading. The heading is a
+  // plain date (no zone label): the label rides on each row's clock time below. `home` changes identity
+  // only when the zone does (e.g. the real setting arriving after boot), so the groups rebuild then.
   const groups = useMemo(() => {
     const map = new Map();
     for (const c of clips || []) {
       const dt = parseUtc(c.created_at);
-      const k = dayKeyOf(dt);
-      if (!map.has(k)) map.set(k, { label: dt.toLocaleDateString(), rows: [] });
+      const k = home.dayKey(dt);
+      if (!map.has(k)) map.set(k, { label: home.dayLabel(k), rows: [] });
       map.get(k).rows.push(c);
     }
     return map;
-  }, [clips]);
+  }, [clips, home]);
 
   const availableDays = useMemo(() => new Set(groups.keys()), [groups]);
   const filterActive = selectedDays.size > 0;
   const visible = useMemo(
-    () => (clips || []).filter((c) => !filterActive || selectedDays.has(dayKeyOf(parseUtc(c.created_at)))),
-    [clips, selectedDays, filterActive]
+    () => (clips || []).filter((c) => !filterActive || selectedDays.has(home.dayKey(parseUtc(c.created_at)))),
+    [clips, selectedDays, filterActive, home]
   );
   function toggleDay(k) {
     setSelectedDays((prev) => { const next = new Set(prev); if (next.has(k)) next.delete(k); else next.add(k); return next; });
@@ -163,7 +181,7 @@ export default function ClipManagement() {
                         <div className="clip-row__name">{c.camera_name}</div>
                         <div className="clip-row__meta">
                           <Icon size={13} className="alert-item__ico" aria-hidden="true" />
-                          {t.label} · {when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {t.label} · {home.time(when, { hour: '2-digit', minute: '2-digit' })}
                           {c.clip_duration_s ? ` · ${c.clip_duration_s}s` : ''}{c.clip_bytes ? ` · ${fmtBytes(c.clip_bytes)}` : ''}
                         </div>
                       </div>
@@ -190,7 +208,7 @@ export default function ClipManagement() {
             poster={playing.snapshot ? api.url(`/cameras/alerts/${playing.id}/snapshot`) : undefined}
             controls autoPlay playsInline />
           <div className="clip-player__meta">
-            {parseUtc(playing.created_at).toLocaleString()}{playing.clip_duration_s ? ` · ${playing.clip_duration_s}s` : ''}
+            {home.dateTime(parseUtc(playing.created_at))}{playing.clip_duration_s ? ` · ${playing.clip_duration_s}s` : ''}
           </div>
         </Modal>
       )}

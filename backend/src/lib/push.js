@@ -154,6 +154,20 @@ export function normalizeBaseUrl(value) {
   }
 }
 
+// Limits on POST /api/push/register (issue #546, second half). Both exist only to bound what a signed-in
+// account can make the server store and later send to; neither is meant to be reached in normal use.
+//
+// ⚠️ Both numbers are GENEROUS GUESSES, not measurements from this or any house.
+//   - MAX_PUSH_TOKEN_LENGTH 4096: a real FCM registration token is roughly 150-200 characters, so this is
+//     over twenty times longer than anything seen. It is deliberately NOT tight: rejecting a real token
+//     would silently cost a device its alerts, while accepting a long hostile one costs a few kilobytes.
+//   - MAX_PUSH_TOKENS_PER_USER 25: one person's phones, tablets and stale tokens left by reinstalls
+//     (every reinstall mints a new token and the old one lingers until FCM reports it dead). A household
+//     would have to sign one account in on 25 devices to see it, and at the cap the oldest simply make way.
+//     Without a cap one account could register without bound and make every alert fan out to all of it.
+export const MAX_PUSH_TOKEN_LENGTH = 4096;
+export const MAX_PUSH_TOKENS_PER_USER = 25;
+
 function isAdminUser(userId) {
   if (!userId) return false;
   return !!db.prepare("SELECT 1 FROM users WHERE id = ? AND role = 'admin'").get(userId);
@@ -171,14 +185,49 @@ export function registerToken(token, platform, userId, baseUrl, sessionId) {
   const origin = normalizeBaseUrl(baseUrl);
   // COALESCE on base_url so a re-register from an older app that doesn't send it keeps the last
   // known good value rather than nulling out the device's snapshot-fetch base.
-  db.prepare(
-    `INSERT INTO push_tokens (token, user_id, platform, base_url, session_id, updated_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now'))
-     ON CONFLICT(token) DO UPDATE SET
-       user_id = excluded.user_id, platform = excluded.platform,
-       base_url = COALESCE(excluded.base_url, push_tokens.base_url),
-       session_id = excluded.session_id, updated_at = datetime('now')`
-  ).run(token, userId || null, platform || null, origin, sessionId || null);
+  //
+  // The upsert and the cap's eviction below are ONE transaction: as two autocommit statements, a crash
+  // or error between them would leave the account one over its cap (found in review of #662). The
+  // admin public-URL write further down stays outside it on purpose — it is already best-effort and
+  // must never roll back a registration.
+  db.transaction(() => {
+    db.prepare(
+      `INSERT INTO push_tokens (token, user_id, platform, base_url, session_id, updated_at)
+         VALUES (?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(token) DO UPDATE SET
+         user_id = excluded.user_id, platform = excluded.platform,
+         base_url = COALESCE(excluded.base_url, push_tokens.base_url),
+         session_id = excluded.session_id, updated_at = datetime('now')`
+    ).run(token, userId || null, platform || null, origin, sessionId || null);
+    // Per-user cap, applied AFTER the upsert so that (a) re-registering a token the user already has is a
+    // plain refresh that can never be turned away, and (b) a NEW token still registers at the cap, by
+    // retiring that user's oldest ones. Rejecting the new token instead would be the wrong trade: the
+    // newest token is the live device, the oldest are the likeliest to be stale (a reinstall mints a new
+    // token and orphans the old), and a refusal would leave a working phone without alerts with no way
+    // for the user to fix it. Keeps the token just registered plus the (MAX - 1) most recently updated
+    // others; the tie-break on rowid matters because updated_at has one-second resolution. Scoped to this
+    // user_id only, so one account can never evict another's devices. A row with no user (not reachable
+    // through the route, which always has one) is not capped.
+    //
+    // ⚠️ KNOWN LIMIT: the cap is enforced only when an account registers, and it only ever removes down to
+    // the cap. An account that already holds more than MAX tokens (registered before this limit existed)
+    // is trimmed to MAX the next time ONE of its devices registers — not at upgrade, and not on its own.
+    // No startup migration, on purpose: it would be a silent bulk delete of stored data on upgrade, and the
+    // next app launch trims it anyway.
+    //
+    // ⚠️ The `token != ?` guards matter beyond the "never evict the new token" case: a token that MOVES
+    // here from another account keeps its old (low) rowid, so on an updated_at tie it would rank oldest
+    // and be the one evicted — the guards are what keep it.
+    if (userId) {
+      db.prepare(
+        `DELETE FROM push_tokens
+          WHERE user_id = ? AND token != ?
+            AND token NOT IN (
+              SELECT token FROM push_tokens WHERE user_id = ? AND token != ?
+               ORDER BY updated_at DESC, rowid DESC LIMIT ?)`
+      ).run(userId, token, userId, token, MAX_PUSH_TOKENS_PER_USER - 1);
+    }
+  })();
   // Zero-config learning of THIS server's own public URL: the origin an app reaches us through is an
   // address that opens us in that app. Stash it so deep links can carry it and a tap always lands on
   // the sending server (see getPublicBaseUrl / detectionAlert.js).
@@ -272,16 +321,30 @@ export function removeToken(token) {
 // the table — kept "alive" by unrelated activity from the same device — well past when its holder's
 // API access has already, correctly, stopped working. Checking created_at here closes that gap
 // directly rather than silently trusting row presence alone.
-export function activePushTokens() {
-  return db
-    .prepare(
-      `SELECT pt.token, pt.base_url FROM push_tokens pt
+//
+// Two optional narrowings (#552, the long-silence notice, which is for the admins and not for whoever set the
+// silence), both OFF by default so every existing caller still reaches every live device:
+//   adminsOnly     only devices of accounts that are admins NOW, read from `users` at send time, so a demoted
+//                  admin stops receiving at once. The positive `IN (admins)` form, not `NOT IN (caregivers)`,
+//                  for the reason newestAdminDeviceBaseUrl gives: a row naming a user that no longer exists, or
+//                  a role this build does not know, must not match. Aliased `u` on purpose: the same filter
+//                  unaliased is newestAdminDeviceBaseUrl's, and scripts/mutants.json anchors each by its exact
+//                  text, which must appear exactly once in this file.
+//   excludeUserId  not this account's devices (the person who set the silence).
+// Both sit on top of the user and session filters above, never instead of them.
+export function activePushTokens({ adminsOnly = false, excludeUserId = null } = {}) {
+  let sql = `SELECT pt.token, pt.base_url FROM push_tokens pt
         WHERE pt.user_id IN (SELECT id FROM users)
           AND pt.session_id IN (
             SELECT id FROM sessions WHERE created_at > datetime('now', ?)
-          )`
-    )
-    .all(`-${SESSION_TOKEN_TTL_DAYS} days`);
+          )`;
+  const params = [`-${SESSION_TOKEN_TTL_DAYS} days`];
+  if (adminsOnly) sql += `\n          AND pt.user_id IN (SELECT u.id FROM users u WHERE u.role = 'admin')`;
+  if (excludeUserId) {
+    sql += '\n          AND pt.user_id != ?';
+    params.push(excludeUserId);
+  }
+  return db.prepare(sql).all(...params);
 }
 
 // `tag` (ROADMAP §1.6) is a notification-tray dedup key: posting a later message with the SAME tag
@@ -290,9 +353,12 @@ export function activePushTokens() {
 // format, `sleep_report_<childId>_<nightDate>`, comfortably fits a UUID childId). Optional and backward
 // compatible — every existing caller omits it and gets today's exact behavior (no `tag`/`apns` key at
 // all).
-export async function sendToAll(title, body, data = {}, imageBuffer = null, { tag } = {}) {
+//
+// `adminsOnly` / `excludeUserId` (#552) narrow the recipients, as activePushTokens documents; omitted, every
+// live device is messaged, exactly as before.
+export async function sendToAll(title, body, data = {}, imageBuffer = null, { tag, adminsOnly = false, excludeUserId = null } = {}) {
   if (!pushEnabled()) return;
-  const rows = activePushTokens();
+  const rows = activePushTokens({ adminsOnly, excludeUserId });
   if (rows.length === 0) return;
   // FCM data payload values must all be strings.
   const stringData = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)]));

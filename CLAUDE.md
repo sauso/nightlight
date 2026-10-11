@@ -144,6 +144,9 @@ node scripts/mutate.mjs            # MUTATION TESTING. Breaks the source one way
                                    #   --only=<substring>  just the mutants whose label matches
                                    #   --full              every mutant against the WHOLE suite
                                    #   --list              print the catalogue
+                                   #   --help / -h         print the usage, exit 0. Any flag the script
+                                   #                       does not know exits 2 BEFORE touching a file
+                                   #                       (it used to start the full battery, #654)
                                    #   --check             run NO tests; fail if any `find` no longer
                                    #                       matches exactly once and every namePattern still
                                    #                       selects a test (stale entries, #575, #604). CI runs

@@ -8537,8 +8537,8 @@
   {
     "label": "in-bed/lock fix2 R2: the route ALSO runs saveNightReview's store-first step (every first correction computes the night twice)",
     "file": "backend/src/routes/children.js",
-    "find": "saveNightReview(req.params.id, req.params.date, patch, { storeFirst: false });",
-    "replace": "saveNightReview(req.params.id, req.params.date, patch);",
+    "find": "saveNightReview(req.params.id, req.params.date, patch, { storeFirst: false, actor, answered });",
+    "replace": "saveNightReview(req.params.id, req.params.date, patch, { actor, answered });",
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
     "namePattern": "save-time compute throws"
@@ -10544,8 +10544,8 @@
   {
     "label": "#454 M7: the detection PUT (the frontend's autosave) forgets the camera's stamp",
     "file": "backend/src/routes/cameras.js",
-    "find": "router.put('/:id/detection', requireAdmin, async (req, res) => {",
-    "replace": "router.put('/:id/detection', requireAdmin, async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
+    "find": "router.put('/:id/detection', requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/:id/detection', requireAdmin, asyncHandler(async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
     "expect": "killed",
     "tests": ["motion-alert-cooldown-routes.test.js"],
     "namePattern": "^#454 C5:"
@@ -10553,8 +10553,8 @@
   {
     "label": "#454 M7b: PUT /:id (a rename, an address edit) forgets the camera's stamp",
     "file": "backend/src/routes/cameras.js",
-    "find": "router.put('/:id', requireAdmin, async (req, res) => {",
-    "replace": "router.put('/:id', requireAdmin, async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
+    "find": "router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
     "expect": "killed",
     "tests": ["motion-alert-cooldown-routes.test.js"],
     "namePattern": "^#454 C5:"
@@ -10562,8 +10562,8 @@
   {
     "label": "#454 M7c: PUT /:id/assign forgets the camera's stamp",
     "file": "backend/src/routes/cameras.js",
-    "find": "router.put('/:id/assign', requireAdmin, async (req, res) => {",
-    "replace": "router.put('/:id/assign', requireAdmin, async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
+    "find": "router.put('/:id/assign', requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/:id/assign', requireAdmin, asyncHandler(async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
     "expect": "killed",
     "tests": ["motion-alert-cooldown-routes.test.js"],
     "namePattern": "^#454 C5:"
@@ -10571,8 +10571,8 @@
   {
     "label": "#454 M7d: PUT /:id/enabled forgets the camera's stamp",
     "file": "backend/src/routes/cameras.js",
-    "find": "router.put('/:id/enabled', requireAdmin, async (req, res) => {",
-    "replace": "router.put('/:id/enabled', requireAdmin, async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
+    "find": "router.put('/:id/enabled', requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/:id/enabled', requireAdmin, asyncHandler(async (req, res) => {\r\n  forgetMotionAlert(req.params.id);",
     "expect": "killed",
     "tests": ["motion-alert-cooldown-routes.test.js"],
     "namePattern": "^#454 C5:"
@@ -12939,8 +12939,8 @@
   {
     "label": "#563 gate: POST /api/cameras without requireAdmin (a caregiver can add a camera)",
     "file": "backend/src/routes/cameras.js",
-    "find": "router.post('/', requireAdmin, async (req, res) => {",
-    "replace": "router.post('/', async (req, res) => {",
+    "find": "router.post('/', requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.post('/', asyncHandler(async (req, res) => {",
     "expect": "killed",
     "tests": ["route-permissions.test.js"],
     "note": "One of the eleven requireAdmin deletions that left the whole suite green before route-permissions.test.js (#563)."
@@ -13038,8 +13038,8 @@
   {
     "label": "#563 gate: GET /api/diagnostics without requireAdmin",
     "file": "backend/src/routes/diagnostics.js",
-    "find": "router.get('/', requireAuth, requireAdmin, async (req, res) => {",
-    "replace": "router.get('/', requireAuth, async (req, res) => {",
+    "find": "router.get('/', requireAuth, requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.get('/', requireAuth, asyncHandler(async (req, res) => {",
     "expect": "killed",
     "tests": ["route-permissions.test.js"],
     "note": "Survived the whole suite before #563."
@@ -13056,8 +13056,8 @@
   {
     "label": "#563 gate: PUT /api/pushover/config without requireAdmin",
     "file": "backend/src/routes/pushover.js",
-    "find": "router.put('/config', requireAuth, requireAdmin, async (req, res) => {",
-    "replace": "router.put('/config', requireAuth, async (req, res) => {",
+    "find": "router.put('/config', requireAuth, requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/config', requireAuth, asyncHandler(async (req, res) => {",
     "expect": "killed",
     "tests": ["route-permissions.test.js"],
     "note": "Survived the whole suite before #563."
@@ -13065,8 +13065,8 @@
   {
     "label": "#563 gate: POST /api/gotify/test without requireAdmin",
     "file": "backend/src/routes/gotify.js",
-    "find": "router.post('/test', requireAuth, requireAdmin, async (req, res) => {",
-    "replace": "router.post('/test', requireAuth, async (req, res) => {",
+    "find": "router.post('/test', requireAuth, requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.post('/test', requireAuth, asyncHandler(async (req, res) => {",
     "expect": "killed",
     "tests": ["route-permissions.test.js"],
     "note": "Survived the whole suite before #563."
@@ -13074,8 +13074,8 @@
   {
     "label": "#563 gate: PUT /api/push/enable without requireAdmin",
     "file": "backend/src/routes/push.js",
-    "find": "router.put('/enable', requireAuth, requireAdmin, async (req, res) => {",
-    "replace": "router.put('/enable', requireAuth, async (req, res) => {",
+    "find": "router.put('/enable', requireAuth, requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/enable', requireAuth, asyncHandler(async (req, res) => {",
     "expect": "killed",
     "tests": ["route-permissions.test.js"],
     "note": "Survived the whole suite before #563."
@@ -13561,8 +13561,8 @@
   {
     "label": "W5 role gate M4: PUT /api/cameras/:id/assign loses requireAdmin (a caregiver unassigns a camera)",
     "file": "backend/src/routes/cameras.js",
-    "find": "router.put('/:id/assign', requireAdmin, async (req, res) => {",
-    "replace": "router.put('/:id/assign', async (req, res) => {",
+    "find": "router.put('/:id/assign', requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/:id/assign', asyncHandler(async (req, res) => {",
     "expect": "killed",
     "tests": ["route-permissions.test.js", "cameras-assign-exposure.test.js"],
     "note": "#552: unassigning stops tracking like track_sleep off. cameras-assign-exposure pins child_id unchanged after the 403."
@@ -13758,5 +13758,1549 @@
     "expect": "killed",
     "tests": ["liveMonitor.test.jsx"],
     "namePattern": "no drag handle"
+  },
+  {
+    "label": "#552 PR2 M01: the snooze history row loses its actor",
+    "file": "backend/src/routes/cameras.js",
+    "find": "insertCameraEvent(cam.id, cam.name, EVENT.SNOOZE, until ? `muted for ${minutes} min` : 'un-muted', actor);",
+    "replace": "insertCameraEvent(cam.id, cam.name, EVENT.SNOOZE, until ? `muted for ${minutes} min` : 'un-muted');",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "a silence: muted"
+  },
+  {
+    "label": "#552 PR2 M02: restart reads the actor AFTER the await (an account deleted mid-restart is named by its stale token claim)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "  const actor = actorOf(req);\r\n  const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);\r\n  if (!cam) return res.status(404).json({ error: 'Camera not found' });\r\n  if (cam.disabled) return res.status(400).json({ error: 'Camera is disabled' });\r\n  try {\r\n    await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);",
+    "replace": "  let actor = null;\r\n  const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);\r\n  if (!cam) return res.status(404).json({ error: 'Camera not found' });\r\n  if (cam.disabled) return res.status(400).json({ error: 'Camera is disabled' });\r\n  try {\r\n    await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);\r\n    actor = actorOf(req);",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "deleted while its restart"
+  },
+  {
+    "label": "#552 PR2 M03: the snooze uses the swallowing recordCameraEvent (a failed history write no longer stops the silence)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "insertCameraEvent(cam.id, cam.name, EVENT.SNOOZE,",
+    "replace": "recordCameraEvent(cam.id, cam.name, EVENT.SNOOZE,",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "the row cannot be written"
+  },
+  {
+    "label": "#552 PR2 M04: the mute is written OUTSIDE the transaction with its history row",
+    "file": "backend/src/routes/cameras.js",
+    "find": "    db.transaction(() => {\r\n      snoozeStmt.run(until, by, cam.id);",
+    "replace": "    snoozeStmt.run(until, by, cam.id);\r\n    db.transaction(() => {",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "the row cannot be written"
+  },
+  {
+    "label": "#552 PR2 M05: publicCamera sends the silencer's name after the silence has run out",
+    "file": "backend/src/routes/cameras.js",
+    "find": "alerts_snoozed_by: cam.alerts_snoozed_until > Date.now() ? (cam.alerts_snoozed_by ?? null) : null,",
+    "replace": "alerts_snoozed_by: cam.alerts_snoozed_by ?? null,",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "only while the camera is muted"
+  },
+  {
+    "label": "#552 PR2 M06: an un-mute leaves the name behind",
+    "file": "backend/src/routes/cameras.js",
+    "find": "const by = until ? (actor?.username ?? null) : null;",
+    "replace": "const by = actor?.username ?? null;",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "an un-mute"
+  },
+  {
+    "label": "#552 PR2 M07: a failed restart is not recorded",
+    "file": "backend/src/routes/cameras.js",
+    "find": "    recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'stream restart failed', actor);\r\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "a restart that failed"
+  },
+  {
+    "label": "#552 PR2 M08: an unconfirmed reboot is not recorded",
+    "file": "backend/src/routes/cameras.js",
+    "find": "    recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'camera reboot requested (ONVIF); the camera did not confirm', actor);\r\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "did not confirm"
+  },
+  {
+    "label": "#552 PR2 M09: insertCameraEvent drops the username",
+    "file": "backend/src/lib/cameraEvents.js",
+    "find": "    actor_username: actor?.username ?? null,",
+    "replace": "    actor_username: null,",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "a silence: muted"
+  },
+  {
+    "label": "#552 PR2 M10: actorOf records the self-chosen first name instead of the username (impersonation)",
+    "file": "backend/src/lib/actor.js",
+    "find": "u.username AS username FROM sessions s",
+    "replace": "u.first_name AS username FROM sessions s",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js",
+      "morning-review.test.js"
+    ],
+    "namePattern": "first name"
+  },
+  {
+    "label": "#552 PR2 M11: answered_by_username missing from the review upsert's ON CONFLICT SET (the first answerer is named forever)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "     answered_by_username     = excluded.answered_by_username,\r\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ],
+    "namePattern": "ONLY an event answer"
+  },
+  {
+    "label": "#552 PR2 M12: previewNightReview stamps the actor on every save, a dismissal included",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  const by = answered\r\n    ? {",
+    "replace": "  const by = true\r\n    ? {",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ],
+    "namePattern": "B dismisses"
+  },
+  {
+    "label": "#552 PR2 M13: the route treats every save as an answer",
+    "file": "backend/src/routes/children.js",
+    "find": "const answered = onset != null ||",
+    "replace": "const answered = true || onset != null ||",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ],
+    "namePattern": "B dismisses"
+  },
+  {
+    "label": "#552 PR2 M14: a note of only spaces counts as an answer",
+    "file": "backend/src/routes/children.js",
+    "find": "const hasText = (v) => typeof v === 'string' && v.trim() !== '';",
+    "replace": "const hasText = (v) => typeof v === 'string';",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ],
+    "namePattern": "C saves ONLY a note"
+  },
+  {
+    "label": "#552 PR2 M15: the upgrade guard for cameras.alerts_snoozed_by tests the wrong column (never added on upgrade)",
+    "file": "backend/src/db.js",
+    "find": "if (!camerasColumns.includes('alerts_snoozed_by')) {",
+    "replace": "if (!camerasColumns.includes('alerts_snoozed_until')) {",
+    "expect": "killed",
+    "tests": [
+      "who-did-it-migration.test.js"
+    ]
+  },
+  {
+    "label": "#552 PR2 M16: the upgrade guard for the camera_events actor columns tests the wrong column",
+    "file": "backend/src/db.js",
+    "find": "if (!cameraEventsColumns.includes(col))",
+    "replace": "if (!cameraEventsColumns.includes('camera_id'))",
+    "expect": "killed",
+    "tests": [
+      "who-did-it-migration.test.js"
+    ]
+  },
+  {
+    "label": "#552 PR2 M17: the diagnostics bundle carries the Camera history rows unstripped (usernames to a public issue)",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "camera_history: getRecentEvents(200).map(bundleCameraEvent),",
+    "replace": "camera_history: getRecentEvents(200),",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "carries no username"
+  },
+  {
+    "label": "#552 PR2 M18: the bundle calls every history row a person",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "actor: actor_user_id != null || actor_username != null ? 'person' : 'system'",
+    "replace": "actor: 'person'",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "carries no username"
+  },
+  {
+    "label": "#552 PR2 M19: the tile says \"by null\" when the server sent no name",
+    "file": "frontend/src/components/CameraTile.jsx",
+    "find": "const snoozeText = snoozedBy ? `${snoozeLabel} by ${snoozedBy}` : snoozeLabel;",
+    "replace": "const snoozeText = `${snoozeLabel} by ${snoozedBy}`;",
+    "expect": "killed",
+    "tests": [
+      "liveMonitor.test.jsx"
+    ],
+    "namePattern": "muted with no name"
+  },
+  {
+    "label": "#552 PR2 M20: the un-mute button no longer names who silenced the camera",
+    "file": "frontend/src/components/CameraTile.jsx",
+    "find": "Muted until {snoozeText} · tap to un-mute",
+    "replace": "Muted until {snoozeLabel} · tap to un-mute",
+    "expect": "killed",
+    "tests": [
+      "liveMonitor.test.jsx"
+    ],
+    "namePattern": "muted by someone"
+  },
+  {
+    "label": "#552 PR2 M21: Camera history says \"by null\" on a system row",
+    "file": "frontend/src/components/EventLog.jsx",
+    "find": "ev.actor_username ? `by ${ev.actor_username}` : null",
+    "replace": "`by ${ev.actor_username}`",
+    "expect": "killed",
+    "tests": [
+      "twoFactorAndEvents.test.jsx"
+    ],
+    "namePattern": "a person caused names them"
+  },
+  {
+    "label": "#552 PR2 M22: the review shows an \"Answered by\" line with no name",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "{data.review?.answered_by_username && (",
+    "replace": "{data.review && (",
+    "expect": "killed",
+    "tests": [
+      "MorningReview.test.jsx"
+    ],
+    "namePattern": "no \"Answered by\" line at all"
+  },
+  {
+    "label": "#552 PR2 M23: reboot reads the actor AFTER the await (an account renamed then deleted mid-reboot is named by its stale claim)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'camera reboot requested (ONVIF)', actor);",
+    "replace": "recordCameraEvent(cam.id, cam.name, EVENT.RESTART, 'camera reboot requested (ONVIF)', actorOf(req));",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "C5, the reboot"
+  },
+  {
+    "label": "#552 PR2 M24: an in-bed time no longer counts as an answer",
+    "file": "backend/src/routes/children.js",
+    "find": "const answered = onset != null || wake != null || inBed != null || typeof nobodyInBed === 'boolean'",
+    "replace": "const answered = onset != null || wake != null || typeof nobodyInBed === 'boolean'",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ],
+    "namePattern": "an in-bed time on its own"
+  },
+  {
+    "label": "#552 PR2 M25: an asleep time no longer counts as an answer",
+    "file": "backend/src/routes/children.js",
+    "find": "const answered = onset != null || wake != null || inBed != null || typeof nobodyInBed === 'boolean'",
+    "replace": "const answered = wake != null || inBed != null || typeof nobodyInBed === 'boolean'",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ],
+    "namePattern": "an asleep time on its own"
+  },
+  {
+    "label": "#552 PR2 M26: an event-answer map that only clears (all null) counts as an answer",
+    "file": "backend/src/routes/children.js",
+    "find": "Object.values(m).some((v) => v != null)",
+    "replace": "Object.keys(m).length > 0",
+    "expect": "killed",
+    "tests": [
+      "morning-review.test.js"
+    ],
+    "namePattern": "only CLEARS"
+  },
+  {
+    "label": "#552 PR2 M27: an un-mute of an un-muted camera writes a row again (one account can flood the shared 2,000-row cap)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "if (!until && !(cam.alerts_snoozed_until > now)) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "the flood"
+  },
+  {
+    "label": "#552 PR2 M28: every un-mute is treated as a no-op, a real one included",
+    "file": "backend/src/routes/cameras.js",
+    "find": "if (!until && !(cam.alerts_snoozed_until > now)) {",
+    "replace": "if (!until) {",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "IS muted still records"
+  },
+  {
+    "label": "#552 PR2 M29: the snooze no longer prunes Camera history after its commit",
+    "file": "backend/src/routes/cameras.js",
+    "find": "  pruneCameraEvents();\r\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "who-did-it.test.js"
+    ],
+    "namePattern": "prunes Camera history back to its cap"
+  },
+  {
+    "label": "#552 PR3: control - a comment edit in lib/silences.js must change nothing",
+    "file": "backend/src/lib/silences.js",
+    "find": "// The long-silence notice (#552).",
+    "replace": "// The long-silence notice (#552). [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": [
+      "silences.test.js"
+    ],
+    "note": "Validates the harness for the lib/silences.js mutants below. If this is ever KILLED, none of their results means anything."
+  },
+  {
+    "label": "#552 PR3: control - a comment edit in lib/cameraStatusAlert.js must change nothing",
+    "file": "backend/src/lib/cameraStatusAlert.js",
+    "find": "// Also the long-silence notice (#552)",
+    "replace": "// Also the long-silence notice (#552) [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": [
+      "long-silence-notice.test.js"
+    ],
+    "note": "Validates the harness for the lib/cameraStatusAlert.js mutants below."
+  },
+  {
+    "label": "#552 PR3 M01: the rejoin gap becomes exclusive (a renewal at exactly 30 minutes starts a new count)",
+    "file": "backend/src/lib/silences.js",
+    "find": "now <= row.ended_at + REJOIN_GAP_MS",
+    "replace": "now < row.ended_at + REJOIN_GAP_MS",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "EXACTLY the gap"
+  },
+  {
+    "label": "#552 PR3 M02: no rejoin gap at all (only a renewal while still muted continues; the tile can never renew that way)",
+    "file": "backend/src/lib/silences.js",
+    "find": "now <= row.ended_at + REJOIN_GAP_MS",
+    "replace": "now <= row.ended_at",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "the second set 5 minutes after"
+  },
+  {
+    "label": "#552 PR3 M03: the notified flag is ignored (every renewal of a long silence notifies again)",
+    "file": "backend/src/lib/silences.js",
+    "find": "SET notified = 1 WHERE camera_id = ? AND notified = 0",
+    "replace": "SET notified = 1 WHERE camera_id = ?",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "third renewal"
+  },
+  {
+    "label": "#552 PR3 M04: the threshold becomes inclusive (exactly 60 minutes notifies)",
+    "file": "backend/src/lib/silences.js",
+    "find": "if (!(length > s.snooze_alert_minutes * 60_000)) return null;",
+    "replace": "if (!(length >= s.snooze_alert_minutes * 60_000)) return null;",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "exactly the threshold sends nothing"
+  },
+  {
+    "label": "#552 PR3 M05: the on/off setting is not checked (notifies while switched off)",
+    "file": "backend/src/lib/silences.js",
+    "find": "if (!s?.snooze_alert_enabled) return null;",
+    "replace": "if (!s) return null;",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "off: no notice"
+  },
+  {
+    "label": "#552 PR3 M06: an un-mute does not bring the silence's end forward",
+    "file": "backend/src/lib/silences.js",
+    "find": "  endEarlyStmt.run(now, cameraId, now);",
+    "replace": "  void endEarlyStmt;",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "re-mute after the gap"
+  },
+  {
+    "label": "#552 PR3 M07: an un-mute can move a silence's end LATER (an un-mute after it ran out extends it)",
+    "file": "backend/src/lib/silences.js",
+    "find": "WHERE camera_id = ? AND ended_at > ?",
+    "replace": "WHERE camera_id = ? AND ? IS NOT NULL",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "never moves the end LATER"
+  },
+  {
+    "label": "#552 PR3 M08: the notice's try no longer swallows (a failed notice turns an applied silence into a 500)",
+    "file": "backend/src/lib/silences.js",
+    "find": "logger.error(`[silence-alert] ",
+    "replace": "throw err; logger.error(`[silence-alert] ",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "the notice throws"
+  },
+  {
+    "label": "#552 PR3 M09: the minutes in the notice are rounded to nearest (a just-over-60 silence reads as 60)",
+    "file": "backend/src/lib/silences.js",
+    "find": "Math.ceil(length / 60_000)",
+    "replace": "Math.round(length / 60_000)",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "rounded UP"
+  },
+  {
+    "label": "#552 PR3 M10: the snooze route never records the silence (nothing is ever counted)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "noteSilence(cam.id, now, until);",
+    "replace": "void noteSilence;",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "a 12-hour silence notifies once"
+  },
+  {
+    "label": "#552 PR3 M11: the silence record is best-effort (a silence the notice cannot count is applied anyway)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "noteSilence(cam.id, now, until);",
+    "replace": "try { noteSilence(cam.id, now, until); } catch { /* best-effort */ }",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "the silence record is written with the mute"
+  },
+  {
+    "label": "#552 PR3 M12: an un-mute also asks for the notice",
+    "file": "backend/src/routes/cameras.js",
+    "find": "if (until) sendLongSilenceNotice(cam, actor);",
+    "replace": "sendLongSilenceNotice(cam, actor);",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "an un-mute never sends a notice"
+  },
+  {
+    "label": "#552 PR3 M13: the admins-only filter is dropped (a caregiver's device gets the admins' notice)",
+    "file": "backend/src/lib/push.js",
+    "find": "AND pt.user_id IN (SELECT u.id FROM users u WHERE u.role = 'admin')",
+    "replace": "AND pt.user_id IN (SELECT u.id FROM users u)",
+    "expect": "killed",
+    "tests": [
+      "push.test.js"
+    ],
+    "namePattern": "adminsOnly: only devices"
+  },
+  {
+    "label": "#552 PR3 M14: activePushTokens defaults to admins only (every existing alert stops reaching caregivers)",
+    "file": "backend/src/lib/push.js",
+    "find": "export function activePushTokens({ adminsOnly = false",
+    "replace": "export function activePushTokens({ adminsOnly = true",
+    "expect": "killed",
+    "tests": [
+      "push.test.js"
+    ],
+    "namePattern": "is unchanged: every live device"
+  },
+  {
+    "label": "#552 PR3 M15: excludeUserId is ignored (the person who set the silence is notified about themselves)",
+    "file": "backend/src/lib/push.js",
+    "find": "  if (excludeUserId) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": [
+      "push.test.js"
+    ],
+    "namePattern": "the other admins only"
+  },
+  {
+    "label": "#552 PR3 M16: sendToAll does not pass the narrowing to the query it sends from",
+    "file": "backend/src/lib/push.js",
+    "find": "const rows = activePushTokens({ adminsOnly, excludeUserId });",
+    "replace": "const rows = activePushTokens();",
+    "expect": "killed",
+    "tests": [
+      "push.test.js"
+    ],
+    "namePattern": "messages only the other admins"
+  },
+  {
+    "label": "#552 PR3 M17: fanOut does not hand the tag and the narrowing to sendToAll",
+    "file": "backend/src/lib/cameraStatusAlert.js",
+    "find": "sendToAll(title, body, { cameraId, type }, null, { tag, adminsOnly, excludeUserId })",
+    "replace": "sendToAll(title, body, { cameraId, type })",
+    "expect": "killed",
+    "tests": [
+      "long-silence-notice.test.js"
+    ],
+    "namePattern": "narrowed to admins"
+  },
+  {
+    "label": "#552 PR3 M18: fanOut defaults to admins only (offline and back-online notices stop reaching caregivers)",
+    "file": "backend/src/lib/cameraStatusAlert.js",
+    "find": "{ tag, adminsOnly = false, excludeUserId = null } = {}) {",
+    "replace": "{ tag, adminsOnly = true, excludeUserId = null } = {}) {",
+    "expect": "killed",
+    "tests": [
+      "long-silence-notice.test.js"
+    ],
+    "namePattern": "offline and back-online notices are unchanged"
+  },
+  {
+    "label": "#552 PR3 M19: the long-silence notice is not narrowed to admins",
+    "file": "backend/src/lib/cameraStatusAlert.js",
+    "find": "    adminsOnly: true,",
+    "replace": "    adminsOnly: false,",
+    "expect": "killed",
+    "tests": [
+      "long-silence-notice.test.js"
+    ],
+    "namePattern": "narrowed to admins"
+  },
+  {
+    "label": "#552 PR3 M20: the person who set the silence is not left out of the app's push",
+    "file": "backend/src/lib/cameraStatusAlert.js",
+    "find": "    excludeUserId: actorUserId,",
+    "replace": "    excludeUserId: null,",
+    "expect": "killed",
+    "tests": [
+      "long-silence-notice.test.js"
+    ],
+    "namePattern": "narrowed to admins"
+  },
+  {
+    "label": "#552 PR3 M21: the person's account id goes into the log line (logs reach the diagnostics bundle)",
+    "file": "backend/src/lib/cameraStatusAlert.js",
+    "find": "notifying the admins`);",
+    "replace": "notifying the admins (latest by ${actorUserId})`);",
+    "expect": "killed",
+    "tests": [
+      "long-silence-notice.test.js"
+    ],
+    "namePattern": "absent from every channel"
+  },
+  {
+    "label": "#552 PR3 M22: the threshold ceiling raised from 719 to 720",
+    "file": "backend/src/routes/settings.js",
+    "find": "n >= 1 && n <= 719",
+    "replace": "n >= 1 && n <= 720",
+    "expect": "killed",
+    "tests": [
+      "input-validation.test.js",
+      "silences.test.js"
+    ],
+    "namePattern": "snooze_alert_minutes|the range is 1-719"
+  },
+  {
+    "label": "#552 PR3 M23: the threshold floor loosened from 1 to 0",
+    "file": "backend/src/routes/settings.js",
+    "find": "n >= 1 && n <= 719",
+    "replace": "n >= 0 && n <= 719",
+    "expect": "killed",
+    "tests": [
+      "input-validation.test.js",
+      "silences.test.js"
+    ],
+    "namePattern": "snooze_alert_minutes|the range is 1-719"
+  },
+  {
+    "label": "#552 PR3 M24: the threshold is validated but never written",
+    "file": "backend/src/routes/settings.js",
+    "find": "snooze_alert_enabled = ?, snooze_alert_minutes = ?,",
+    "replace": "snooze_alert_enabled = ?, snooze_alert_minutes = snooze_alert_minutes + 0 * ?,",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "round trip"
+  },
+  {
+    "label": "#552 PR3 M25: the on/off switch is never written",
+    "file": "backend/src/routes/settings.js",
+    "find": "snooze_alert_enabled = ?, snooze_alert_minutes = ?,",
+    "replace": "snooze_alert_enabled = snooze_alert_enabled + 0 * ?, snooze_alert_minutes = ?,",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "round trip"
+  },
+  {
+    "label": "#552 PR3 M26: GET /settings stops sending the threshold to the admin (the form shows its fallback)",
+    "file": "backend/src/routes/settings.js",
+    "find": "  'snooze_alert_minutes',",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "settings-exposure.test.js"
+    ],
+    "namePattern": "gets every field the settings forms bind"
+  },
+  {
+    "label": "#552 PR3 M27: the upgrade guard for the two settings tests the wrong column (never added on upgrade)",
+    "file": "backend/src/db.js",
+    "find": "if (!settingsColumns.includes('snooze_alert_enabled')) {",
+    "replace": "if (!settingsColumns.includes('camera_offline_alert_enabled')) {",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "an install from before this change"
+  },
+  {
+    "label": "#552 PR3 M28: long-silence alerts default to off",
+    "file": "backend/src/db.js",
+    "find": "ADD COLUMN snooze_alert_enabled INTEGER NOT NULL DEFAULT 1",
+    "replace": "ADD COLUMN snooze_alert_enabled INTEGER NOT NULL DEFAULT 0",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "defaults to on, 60 minutes"
+  },
+  {
+    "label": "#552 PR3 M29: the default threshold moves from 60 to 59 minutes",
+    "file": "backend/src/db.js",
+    "find": "ADD COLUMN snooze_alert_minutes INTEGER NOT NULL DEFAULT 60",
+    "replace": "ADD COLUMN snooze_alert_minutes INTEGER NOT NULL DEFAULT 59",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "defaults to on, 60 minutes"
+  },
+  {
+    "label": "#552 PR3 M30: deleting a camera leaves its silence record behind",
+    "file": "backend/src/db.js",
+    "find": "FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE",
+    "replace": "CHECK (1)",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "deleting a camera deletes its silence record"
+  },
+  {
+    "label": "#552 PR3 M31: Camera controls stops saving the long-silence threshold",
+    "file": "frontend/src/pages/SettingsCamera.jsx",
+    "find": "        snooze_alert_minutes: form.snooze_alert_minutes,",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "cameras.test.jsx"
+    ],
+    "namePattern": "saves ONLY its own five fields"
+  },
+  {
+    "label": "#552 PR3 M32: Camera controls saves its fallback (on) over a stored value it never received",
+    "file": "frontend/src/pages/SettingsCamera.jsx",
+    "find": "snooze_alert_enabled: form.snooze_alert_enabled === undefined ? undefined : !!form.snooze_alert_enabled,",
+    "replace": "snooze_alert_enabled: !!(form.snooze_alert_enabled ?? 1),",
+    "expect": "killed",
+    "tests": [
+      "cameras.test.jsx"
+    ],
+    "namePattern": "values that never arrived are NOT saved"
+  },
+  {
+    "label": "#552 PR3 M33: an unknown long-silence setting shows as off, not the server's default (on)",
+    "file": "frontend/src/pages/SettingsCamera.jsx",
+    "find": "const silenceOn = form.snooze_alert_enabled === undefined ? true : !!form.snooze_alert_enabled;",
+    "replace": "const silenceOn = !!form.snooze_alert_enabled;",
+    "expect": "killed",
+    "tests": [
+      "cameras.test.jsx"
+    ],
+    "namePattern": "falls back to the documented defaults"
+  },
+  {
+    "label": "#552 PR3 M34: the threshold is read with parseInt again (59.5 stored as 59, 1e100 as 1)",
+    "file": "backend/src/routes/settings.js",
+    "find": "const n = Number.isInteger(v) ? v : typeof v === 'string' &&",
+    "replace": "const n = parseInt(v, 10); const unused = typeof v === 'string' &&",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "whole numbers only"
+  },
+  {
+    "label": "#552 PR3 M35: any string is read as a number (\"59.5\" and \"0x10\" accepted)",
+    "file": "backend/src/routes/settings.js",
+    "find": "/.test(v) ? Number(v) : NaN;",
+    "replace": "/.test(v) || typeof v === 'string' ? Number(v) : NaN;",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "whole numbers only"
+  },
+  {
+    "label": "#552 PR3 M36: any number is accepted, not only a whole one (59.5 stored)",
+    "file": "backend/src/routes/settings.js",
+    "find": "const n = Number.isInteger(v) ? v :",
+    "replace": "const n = typeof v === 'number' ? v :",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "whole numbers only"
+  },
+  {
+    "label": "#552 PR3 M37: the switch is read by truthiness again (the string \"false\" stored as ON)",
+    "file": "backend/src/routes/settings.js",
+    "find": "if (![true, false, 1, 0].includes(snooze_alert_enabled)) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "takes only true/false/1/0"
+  },
+  {
+    "label": "#552 PR3 M38: a mute after the clock was set back continues the old silence (a negative length that never notifies)",
+    "file": "backend/src/lib/silences.js",
+    "find": "now >= row.started_at && ",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "clock set BACK"
+  },
+  {
+    "label": "#552 PR3 M39: the notice text names the account that set the silence (it leaves the house on Pushover/ntfy/Gotify)",
+    "file": "backend/src/lib/cameraStatusAlert.js",
+    "find": "have been silenced on and off for ${length}.",
+    "replace": "have been silenced on and off for ${length} (by ${actorUserId}).",
+    "expect": "killed",
+    "tests": [
+      "long-silence-notice.test.js"
+    ],
+    "namePattern": "absent from every channel"
+  },
+  {
+    "label": "#552 PR3 M40: the username is handed to the notice instead of the account id",
+    "file": "backend/src/lib/silences.js",
+    "find": "notifyLongSilence(cam, Math.ceil(length / 60_000), actor?.user_id ?? null);",
+    "replace": "notifyLongSilence(cam, Math.ceil(length / 60_000), actor?.username ?? null);",
+    "expect": "killed",
+    "tests": [
+      "long-silence-notice.test.js"
+    ],
+    "namePattern": "absent from every channel"
+  },
+  {
+    "label": "#552 PR3 M41 (review R05): the notice is sent INSIDE the transaction, before its commit",
+    "file": "backend/src/routes/cameras.js",
+    "find": "noteSilence(cam.id, now, until);",
+    "replace": "noteSilence(cam.id, now, until); if (until) sendLongSilenceNotice(cam, actor);",
+    "expect": "killed",
+    "tests": [
+      "silences.test.js"
+    ],
+    "namePattern": "COMMIT fails"
+  },
+  {
+    "label": "#552 PR4 single-flight M1 (review B9): the flight is released when the answer settles, not when the ffmpeg has exited",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "if (flight.settled && flight.exited && liveFrameFlights.get(key) === flight) liveFrameFlights.delete(key);",
+    "replace": "if (flight.settled && liveFrameFlights.get(key) === flight) liveFrameFlights.delete(key);",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "holds the camera until its process exits|killed ffmpeg that has not exited yet"
+  },
+  {
+    "label": "#552 PR4 single-flight M2: a finished flight is never deleted, so the camera's first answer is served forever",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "liveFrameFlights.delete(key);",
+    "replace": "void key;",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "after the process exited starts a new grab"
+  },
+  {
+    "label": "#552 PR4 single-flight M3: one key for every camera, so two cameras share a grab",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "const key = cam.id;",
+    "replace": "const key = 'one-key-for-every-camera';",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "two cameras get two grabs"
+  },
+  {
+    "label": "#552 PR4 single-flight M4: the running flight is never looked up, so every request starts its own grab",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "const current = liveFrameFlights.get(key);",
+    "replace": "const current = undefined;",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "five requests at once share one capture"
+  },
+  {
+    "label": "#552 PR4 single-flight M5: release() loses its identity check, so a stale onExit ends the newer flight",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "flight.exited && liveFrameFlights.get(key) === flight)",
+    "replace": "flight.exited)",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "late or repeated onExit"
+  },
+  {
+    "label": "#552 PR4 single-flight M6: the stream grab is not given onExit",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "img = await capture(cam.mediamtx_path, { onExit });",
+    "replace": "img = await capture(cam.mediamtx_path);",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "killed ffmpeg that has not exited yet"
+  },
+  {
+    "label": "#552 PR4 single-flight M7: starting a stream grab does not mark the flight as having a process",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "flight.exited = false;",
+    "replace": "/* the flight is not marked as running a process */",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "holds the camera until its process exits"
+  },
+  {
+    "label": "#552 PR4 single-flight M8: a rejected capture is not treated as exited, so it wedges the camera",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "img = null;\r\n        onExit();",
+    "replace": "img = null;",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "a rejected capture"
+  },
+  {
+    "label": "#552 PR4 single-flight M9: the still-exiting warning is logged on every turned-away request",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "if (current.settled && !current.exited && !current.warned) {",
+    "replace": "if (current.settled && !current.exited) {",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "says so once"
+  },
+  {
+    "label": "#552 PR4 single-flight M10: the still-exiting warning is never logged",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "if (current.settled && !current.exited && !current.warned) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "says so once"
+  },
+  {
+    "label": "#552 PR4 single-flight M11: the child's 'exit' does not report onExit",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "    proc.on('exit', (code) => {\r\n      exitOnce();",
+    "replace": "    proc.on('exit', (code) => {",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "exit then close",
+    "note": "Since the 'close' fallback (PR #665 review) a child that exits also closes, so most tests still see onExit, one event later; the exit-then-close test asserts the release happens AT 'exit'."
+  },
+  {
+    "label": "#552 PR4 single-flight M12: every 'error' counts as an exit, even a failed kill on a running process",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "if (proc.pid === undefined) exitOnce();",
+    "replace": "exitOnce();",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "still running"
+  },
+  {
+    "label": "#552 PR4 single-flight M13: a spawn that fails later (no pid) never reports onExit",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "if (proc.pid === undefined) exitOnce();",
+    "replace": "/* an error never counts as an exit */",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "a spawn that fails later"
+  },
+  {
+    "label": "#552 PR4 single-flight M14: a spawn that throws never reports onExit",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "exitOnce(); // nothing was started, so nothing is left running",
+    "replace": "// nothing was started",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "a spawn that throws"
+  },
+  {
+    "label": "#552 PR4 single-flight M15: onExit is not guarded to fire once",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "if (exited) return;",
+    "replace": "/* not once */",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "a spawn that fails later"
+  },
+  {
+    "label": "#552 PR4 single-flight M16: onExit is called unconditionally, so the detection callers (who pass none) crash",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "onExit?.();",
+    "replace": "onExit();",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "without onExit"
+  },
+  {
+    "label": "#552 PR4 single-flight M17: the route calls the grabbers directly again (one grab per request)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "import { grabLiveFrame } from '../lib/snapshot.js';",
+    "replace": "import { captureSnapshot, fetchHttpSnapshot } from '../lib/snapshot.js';\r\nconst grabLiveFrame = async (cam) => ((cam.snapshot_url && String(cam.snapshot_url).trim() && (await fetchHttpSnapshot(cam.snapshot_url).catch(() => null))) || (await captureSnapshot(cam.mediamtx_path).catch(() => null)));",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "five concurrent GETs"
+  },
+  {
+    "label": "#552 PR4 single-flight M18 (PR #665 review): the 'close' fallback removed, so a child heard only as 'close' is never released",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "proc.on('close', exitOnce);",
+    "replace": "/* no close fallback */",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "close and no exit|until the child closes"
+  },
+  {
+    "label": "#552 PR4 single-flight M19 (PR #665 review R12): the route's default capture never grabs a frame",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "capture = captureSnapshot } = {}) {",
+    "replace": "capture = async () => null } = {}) {",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "start ONE ffmpeg"
+  },
+  {
+    "label": "#552 PR4 single-flight M20 (PR #665 review R15): the restart warning loses `current.settled &&`, so joining a RUNNING grab logs it",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "if (current.settled && !current.exited && !current.warned) {",
+    "replace": "if (!current.exited && !current.warned) {",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "five requests at once share one capture|start ONE ffmpeg"
+  },
+  {
+    "label": "#552 PR4 single-flight M21 (PR #665 review R16): the restart warning is reduced to `if (!current.warned)`, so any join logs it once",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "if (current.settled && !current.exited && !current.warned) {",
+    "replace": "if (!current.warned) {",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "five requests at once share one capture|five concurrent GETs|start ONE ffmpeg"
+  },
+  {
+    "label": "#552 PR4 single-flight M22 (PR #665 review R13b): a live frame is served without Cache-Control: no-store",
+    "file": "backend/src/routes/cameras.js",
+    "find": "res.set('Cache-Control', 'no-store');",
+    "replace": "/* cacheable */",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "five concurrent GETs|start ONE ffmpeg"
+  },
+  {
+    "label": "#552 PR4 single-flight M23 (PR #665 review R13): the no-frame answer is a 500 instead of a 503",
+    "file": "backend/src/routes/cameras.js",
+    "find": "if (!img) return res.status(503).json({ error: 'Could not grab a frame right now' });",
+    "replace": "if (!img) return res.status(500).json({ error: 'Could not grab a frame right now' });",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "both fail"
+  },
+  {
+    "label": "#552 PR4 single-flight M24 (PR #665 review R13): the no-frame answer's JSON body changes",
+    "file": "backend/src/routes/cameras.js",
+    "find": "res.status(503).json({ error: 'Could not grab a frame right now' })",
+    "replace": "res.status(503).json({ error: 'No frame' })",
+    "expect": "killed",
+    "tests": [
+      "snapshot-single-flight.test.js"
+    ],
+    "namePattern": "both fail"
+  },
+  {
+    "label": "#544 asyncHandler: a rejected async handler is no longer passed to next (the request hangs again)",
+    "file": "backend/src/lib/asyncHandler.js",
+    "find": "Promise.resolve(fn(req, res, next)).catch((e) => next(asError(e)));",
+    "replace": "Promise.resolve(fn(req, res, next));",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "rejected handler calls next"
+  },
+  {
+    "label": "#544 asyncHandler: a synchronous throw is no longer caught",
+    "file": "backend/src/lib/asyncHandler.js",
+    "find": "next(asError(err));",
+    "replace": "throw err;",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "synchronous throw from the handler"
+  },
+  {
+    "label": "#544 asyncHandler: a falsy rejection is passed to next as-is (Express reads it as carry on)",
+    "file": "backend/src/lib/asyncHandler.js",
+    "find": "const asError = (e) => e || new Error('Handler rejected without a value');",
+    "replace": "const asError = (e) => e;",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "FALSY|falsy value"
+  },
+  {
+    "label": "#544 errorHandler: a 500 answers with the error's own message (leaks SqliteError text and the like)",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "return res.status(500).json({ error: GENERIC_500 });",
+    "replace": "return res.status(500).json({ error: String(err && err.message || GENERIC_500) });",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "NONE of the error|OTHER SQLite constraint"
+  },
+  {
+    "label": "#544 errorHandler: the headers-already-sent branch is dropped (a streamed failure gets a second response)",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "if (res.headersSent) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "mid-stream|delegation, unit level"
+  },
+  {
+    "label": "#544 errorHandler: a finished response is delegated too (destroys a completed keep-alive socket)",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "if (!res.writableEnded) return next(err);",
+    "replace": "return next(err);",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "delegation, unit level"
+  },
+  {
+    "label": "#544 errorHandler: a 401 on a thrown error is honoured (the web UI would sign the user out)",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "|| candidate === 401) continue;",
+    "replace": "|| false) continue;",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "NEVER become a 401"
+  },
+  {
+    "label": "#544 errorHandler: a bare (not expose) 403 is honoured",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "if (candidate === 403 && err.expose !== true) continue;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "NEVER become a 401"
+  },
+  {
+    "label": "#544 errorHandler: a 403 is never honoured (res.sendFile's denied dotfile becomes a 500 again)",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "if (candidate === 403 && err.expose !== true) continue;",
+    "replace": "if (candidate === 403) continue;",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "http-errors style 403|res.sendFile through the handler"
+  },
+  {
+    "label": "#544 errorHandler: the expose flag is ignored (any error's own message is sent with its 4xx)",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "err.expose === true && typeof err.message === 'string'",
+    "replace": "typeof err.message === 'string'",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "keeps that status; the message stays generic"
+  },
+  {
+    "label": "#544 errorHandler: an exposed message is no longer cut at 200 characters",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "err.message.slice(0, 200)",
+    "replace": "err.message",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "cut at 200"
+  },
+  {
+    "label": "#544 errorHandler: a status above 499 is honoured as a client error",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "candidate > 499",
+    "replace": "candidate > 599",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "5xx status on the error"
+  },
+  {
+    "label": "#544 errorHandler: a status below 400 is honoured as a client error",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "candidate < 400",
+    "replace": "candidate < 300",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "outside 400-499"
+  },
+  {
+    "label": "#544 errorHandler: a foreign-key failure is no longer a 409",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "if (err?.code === FOREIGN_KEY) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "foreign-key failure"
+  },
+  {
+    "label": "#544 errorHandler: the query string (it can hold a media token) goes to the log",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": ".split('?')[0]",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "query string"
+  },
+  {
+    "label": "#544 errorHandler: a 4xx the caller caused is logged again (anyone can flood the in-app log)",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "const message = exposable ? err.message.slice(0, 200)",
+    "replace": "logger.warn(`[http] ${where}: ${describe(err)}`);\r\n    const message = exposable ? err.message.slice(0, 200)",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "add NO log lines"
+  },
+  {
+    "label": "#544 errorHandler: a 4xx after the response started is logged (the log-skip is only on the ordinary path)",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "if (!requestedClientStatus(err)) logger.error(",
+    "replace": "logger.error(",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "delegation, unit level"
+  },
+  {
+    "label": "#655 resolver: a turned-off named primary still counts",
+    "file": "backend/src/lib/primaryCamera.js",
+    "find": "WHERE id = ? AND child_id = ? AND disabled = 0",
+    "replace": "WHERE id = ? AND child_id = ?",
+    "expect": "killed",
+    "tests": ["primary-camera.test.js"],
+    "namePattern": "turned-off primary"
+  },
+  {
+    "label": "#655 resolver: a named primary that is not this child's camera is accepted",
+    "file": "backend/src/lib/primaryCamera.js",
+    "find": "WHERE id = ? AND child_id = ? AND disabled = 0",
+    "replace": "WHERE id = ? AND ? IS NOT NULL AND disabled = 0",
+    "expect": "killed",
+    "tests": ["primary-camera.test.js"],
+    "namePattern": "hostile|moved to another child"
+  },
+  {
+    "label": "#655 resolver: the named primary is ignored (always the sort_order rule)",
+    "file": "backend/src/lib/primaryCamera.js",
+    "find": "if (named) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["primary-camera.test.js"],
+    "namePattern": "named primary wins|THE ISSUE"
+  },
+  {
+    "label": "#655 resolver: the id tie-break is dropped from scoring's ORDER BY",
+    "file": "backend/src/lib/primaryCamera.js",
+    "find": "id: 'ORDER BY sort_order, id',",
+    "replace": "id: 'ORDER BY sort_order',",
+    "expect": "killed",
+    "tests": ["primary-camera.test.js"],
+    "namePattern": "sort_order tie"
+  },
+  {
+    "label": "#655 scoring: breaks a sort_order tie by rowid (the timelapse's) instead of id",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "primaryCameraRowFor(childId, { tieBreak: 'id' })",
+    "replace": "primaryCameraRowFor(childId, { tieBreak: 'rowid' })",
+    "expect": "killed",
+    "tests": ["primary-camera.test.js"],
+    "namePattern": "scoring still breaks it by id"
+  },
+  {
+    "label": "#655 timelapse: breaks a sort_order tie by id (scoring's) instead of rowid",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "primaryCameraRowFor(childId, { tieBreak: 'rowid' })",
+    "replace": "primaryCameraRowFor(childId, { tieBreak: 'id' })",
+    "expect": "killed",
+    "tests": ["timelapse-capture.test.js"],
+    "namePattern": "still broken by rowid"
+  },
+  {
+    "label": "#655 PUT child: an unchanged (echoed) primary is validated too, blocking re-saves of a stale one",
+    "file": "backend/src/routes/children.js",
+    "find": "if (primaryChanged && nextPrimary !== null) {",
+    "replace": "if (nextPrimary !== null) {",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "stored primary was"
+  },
+  {
+    "label": "#655 PUT child: a changed primary is not validated at all",
+    "file": "backend/src/routes/children.js",
+    "find": "if (primaryChanged && nextPrimary !== null) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "hostile|does not exist|CHANGING to a stale"
+  },
+  {
+    "label": "#655 PUT child: the caregiver gate skips the primary camera",
+    "file": "backend/src/routes/children.js",
+    "find": "if (primaryChanged) fields.push('primary_camera_id');",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["children-role-fields.test.js"],
+    "namePattern": "choosing one|switching it|clearing it with"
+  },
+  {
+    "label": "#655 PUT child: '' is not normalised to NULL (a caregiver's '' against a stored NULL reads as a change)",
+    "file": "backend/src/routes/children.js",
+    "find": "primary_camera_id !== undefined ? primary_camera_id || null : existing.primary_camera_id",
+    "replace": "primary_camera_id !== undefined ? primary_camera_id : existing.primary_camera_id",
+    "expect": "killed",
+    "tests": ["children-role-fields.test.js"],
+    "namePattern": "is not a change"
+  },
+  {
+    "label": "#655 PUT/POST child: the type check is dropped (a non-string reaches SQLite)",
+    "file": "backend/src/routes/children.js",
+    "find": "const primaryNotId = (v) => v !== undefined && v !== null && typeof v !== 'string';",
+    "replace": "const primaryNotId = () => false;",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "not a 500"
+  },
+  {
+    "label": "#655 POST child: a camera id on a new child is silently ignored",
+    "file": "backend/src/routes/children.js",
+    "find": "if (requestedPrimary) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "a camera id is a 400 and no child is created"
+  },
+  {
+    "label": "#655 child responses: primary_camera is never filled in",
+    "file": "backend/src/routes/children.js",
+    "find": "primary_camera: primary ? { id: primary.id, name: primary.name } : null",
+    "replace": "primary_camera: null",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "an admin sets it|a chosen camera|NULL primary: the first enabled"
+  },
+  {
+    "label": "#655 cameras: /assign no longer clears the old child's primary pointer",
+    "file": "backend/src/routes/cameras.js",
+    "find": "clearStalePrimaryPointers(existing.id);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "assign to another child clears|unassign\\) clears"
+  },
+  {
+    "label": "#655 cameras: PUT /:id no longer clears the old child's primary pointer",
+    "file": "backend/src/routes/cameras.js",
+    "find": "clearStalePrimaryPointers(req.params.id);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "moving it to another child clears"
+  },
+  {
+    "label": "#655 cameras: the pointer cleanup also clears the camera owner's own choice",
+    "file": "backend/src/lib/primaryCamera.js",
+    "find": "WHERE primary_camera_id = ? AND id IS NOT (SELECT child_id FROM cameras WHERE id = ?)",
+    "replace": "WHERE primary_camera_id = ? AND ? IS NOT NULL",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "to the SAME child keeps it|renaming it keeps"
+  },
+  {
+    "label": "#655 diagnostics: the support bundle drops primary_camera_id",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "created_at, primary_camera_id FROM children",
+    "replace": "created_at FROM children",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "support bundle carries"
+  },
+  {
+    "label": "#655 db.js: the migration only runs where track_sleep is also missing (nested in the older guard)",
+    "file": "backend/src/db.js",
+    "find": "if (!childrenColumns.includes('primary_camera_id')) {",
+    "replace": "if (!childrenColumns.includes('primary_camera_id') && !childrenColumns.includes('track_sleep')) {",
+    "expect": "killed",
+    "tests": ["primary-camera-migration.test.js"],
+    "namePattern": "pre-#655 install"
+  },
+  {
+    "label": "#655 UI: the sleep camera picker stays enabled for a caregiver",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "<select id=\"child-sleep-camera\" value={form.primary_camera_id} disabled={!isAdmin}",
+    "replace": "<select id=\"child-sleep-camera\" value={form.primary_camera_id} disabled={false}",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "sees it disabled"
+  },
+  {
+    "label": "#655 UI: a stale stored camera gets no (unavailable) option, so a save drops it",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "{missingPrimary && (",
+    "replace": "{false && (",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "stale stored camera"
+  },
+  {
+    "label": "#655 UI: a caregiver's save sends primary_camera_id",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "const CAREGIVER_FIELDS = ['name', 'birthday', 'color', 'photo'];",
+    "replace": "const CAREGIVER_FIELDS = ['name', 'birthday', 'color', 'photo', 'primary_camera_id'];",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "leaves it OUT"
+  },
+  {
+    "label": "#655 UI: the picker shows for a one-camera child with no choice made",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "(assignedCams.length >= 2 || !!storedPrimary)",
+    "replace": "(assignedCams.length >= 1 || !!storedPrimary)",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "hidden for a child with one camera"
+  },
+  {
+    "label": "#655 UI: Currently measured from is re-derived from the stored choice instead of the server's answer",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "<>Currently measured from <strong>{kid.primary_camera.name}</strong>.</>",
+    "replace": "<>Currently measured from <strong>{assignedCams.find((c) => c.id === storedPrimary)?.name || kid.primary_camera.name}</strong>.</>",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "names the camera the SERVER resolved"
+  },
+  {
+    "label": "#655 UI: other children's cameras are offered",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "(cameras || []).filter((c) => c.child_id === id)",
+    "replace": "(cameras || [])",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "every camera of this child"
+  },
+  {
+    "label": "#655 POST child: the POST type check is deleted (false and 0 create the child as automatic)",
+    "file": "backend/src/routes/children.js",
+    "find": "if (primaryNotId(requestedPrimary)) return res.status(400).json({ error: PRIMARY_NOT_ID });",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "is a 400 saying so"
+  },
+  {
+    "label": "#655 child responses: primary_camera breaks a sort_order tie by rowid, not scoring's id",
+    "file": "backend/src/routes/children.js",
+    "find": "const primary = primaryCameraRowFor(child.id, { tieBreak: 'id' });",
+    "replace": "const primary = primaryCameraRowFor(child.id, { tieBreak: 'rowid' });",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "names the camera SCORING would use"
+  },
+  {
+    "label": "#655 db.js: the migration guard is always true (an already-migrated install fails to boot)",
+    "file": "backend/src/db.js",
+    "find": "if (!childrenColumns.includes('primary_camera_id')) {",
+    "replace": "if (true) {",
+    "expect": "killed",
+    "tests": ["primary-camera-migration.test.js"],
+    "namePattern": "ALREADY has the column"
+  },
+  {
+    "label": "#655 DELETE child: another child's stale pointer to its cameras is left behind (and revives on reassignment)",
+    "file": "backend/src/routes/children.js",
+    "find": "for (const camId of affectedCameraIds) clearStalePrimaryPointers(camId);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "does not revive on reassignment"
+  },
+  {
+    "label": "#655 UI: the copy drops last night's re-score (back to 'saved summaries keep their numbers')",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "be updated for a few hours after the wake time, and a review correction or a Recompute",
+    "replace": "keep their numbers, and a review correction or a Recompute",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "says truthfully which saved nights"
+  },
+  {
+    "label": "#552 no-id N1: the GET review sends the stored row whole (the answerer's account id included)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "review: reviewForBrowser(getReviewStmt.get(childId, nightDate)),",
+    "replace": "review: getReviewStmt.get(childId, nightDate) || null,",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"],
+    "namePattern": "#552 no account id"
+  },
+  {
+    "label": "#552 no-id N2: the PUT review response sends the stored row whole (a dismissal hands back someone else's account id)",
+    "file": "backend/src/routes/children.js",
+    "find": "res.json({ review: reviewForBrowser(review), verdicts_applied",
+    "replace": "res.json({ review, verdicts_applied",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"],
+    "namePattern": "#552 no account id"
+  },
+  {
+    "label": "#552 no-id N3: reviewForBrowser strips nothing",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "delete out.answered_by_user_id;",
+    "replace": "/* stripped nothing */",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"],
+    "namePattern": "#552 no account id"
+  },
+  {
+    "label": "#552 no-id N4: reviewForBrowser nulls the id instead of removing the key",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "delete out.answered_by_user_id;",
+    "replace": "out.answered_by_user_id = null;",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"],
+    "namePattern": "#552 no account id"
+  },
+  {
+    "label": "#552 no-id N5: reviewForBrowser strips the username too (the name every user is meant to see)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "delete out.answered_by_user_id;",
+    "replace": "delete out.answered_by_user_id; delete out.answered_by_username;",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"],
+    "namePattern": "#552 no account id"
+  },
+  {
+    "label": "#552 no-id N6: an unreviewed night's review reads as an empty object instead of null",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "if (!row) return null;",
+    "replace": "if (!row) return {};",
+    "expect": "killed",
+    "tests": ["morning-review.test.js"],
+    "namePattern": "#552 no account id"
+  },
+  {
+    "label": "#552 no-id N7: Camera history (which carries account ids) opens to caregivers",
+    "file": "backend/src/routes/events.js",
+    "find": "router.get('/', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.get('/', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["who-did-it.test.js"],
+    "namePattern": "#552 no account id"
+  },
+  {
+    "label": "#552 no-id N8: the tile's 'muted by' carries the account id instead of the username",
+    "file": "backend/src/routes/cameras.js",
+    "find": "const by = until ? (actor?.username ?? null) : null;",
+    "replace": "const by = until ? (actor?.user_id ?? null) : null;",
+    "expect": "killed",
+    "tests": ["who-did-it.test.js"],
+    "namePattern": "#552 no account id"
   }
 ]
