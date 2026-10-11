@@ -15393,10 +15393,10 @@
     "file": "backend/src/lib/sleepAnalysis.js",
     "find": "const nextPutDown = earlyPutDowns.find((p) => p.idx > q && !isolatedPutDown(p.idx));",
     "replace": "const nextPutDown = earlyPutDowns.find((p) => p.idx > putDown && !isolatedPutDown(p.idx));",
-    "expect": "equivalent",
+    "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
-    "namePattern": "#669",
-    "note": "EQUIVALENT. Every into_bed of a settling episode (the put-down and the re-settles before the child goes still) shares the same settle q. Cut after the put-down, every member but the last is rejected (its cut falls before q), and the last member, which has no later member, gets the same q and the same cut as the rule cuts at, so onset is identical; the in-bed marker walks back over the episode independently of which member was accepted. Verified on 2026-10-10, 09-20, 09-27 and 10-07 (5-6 members each) in the plan review. Only null minutes around a member could separate them. q is kept as the anchor because it states the rule."
+    "namePattern": "#669 T4b:",
+    "note": "First catalogued as equivalent, and that was wrong (found by the PR #676 review). Usually every member of a settling episode shares the same settle q, and then the last member gets the same cut, so onset does not move. But a member can have its OWN, later settle: T4b puts the second into_bed inside a camera gap before the first settle, its 15 quiet minutes reach a later stir, and it settles at 19:21 instead of 19:07. Cut after the put-down, that member rejects the first one and the night starts at 19:21."
   },
   {
     "label": "#669 M-669-10: B1x removed: every later into_bed cuts, an isolated blip too (the plain bound)",
@@ -15434,5 +15434,63 @@
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
     "namePattern": "#669 T9: \\.\\.\\.an UNOBSERVED"
+  },
+  {
+    "label": "#669 M-669-14: the cut is the LAST later put-down instead of the first (`findLast`)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const nextPutDown = earlyPutDowns.find((p) => p.idx > q && !isolatedPutDown(p.idx));",
+    "replace": "const nextPutDown = earlyPutDowns.findLast((p) => p.idx > q && !isolatedPutDown(p.idx));",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#669 T1b:",
+    "note": "Survived the first round (PR #676 review): no test had a put-down after the real one. A mid-night re-settle then moves the cut past the 150 minutes and the real put-down vouches for the false one again."
+  },
+  {
+    "label": "#669 M-669-15: isolation judged on movement IN the bed alone (sound and outside-the-bed movement ignored)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const isolatedPutDown = (i) => state[i - 1] === false && state[i + 1] === false;",
+    "replace": "const isolatedPutDown = (i) => state[i - 1] != null && state[i + 1] != null && !(bedPeakAt[i - 1] > MOTION_ACTIVE) && !(bedPeakAt[i + 1] > MOTION_ACTIVE);",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#669 T10:",
+    "note": "The design the code comment rejects (prod 2026-09-27: it would hand a real put-down's evidence back to a false 18:06 episode). Survived the first round (PR #676 review); T10's second half has a parent seen outside the bed the minute before the real put-down, which only `state` sees."
+  },
+  {
+    "label": "#669 M-669-16: into_beds within 10 minutes of the settle do not cut",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const nextPutDown = earlyPutDowns.find((p) => p.idx > q && !isolatedPutDown(p.idx));",
+    "replace": "const nextPutDown = earlyPutDowns.find((p) => p.idx > q + 10 && !isolatedPutDown(p.idx));",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#669 T8b:"
+  },
+  {
+    "label": "#669 M-669-17: into_beds within 20 minutes of the settle do not cut",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const nextPutDown = earlyPutDowns.find((p) => p.idx > q && !isolatedPutDown(p.idx));",
+    "replace": "const nextPutDown = earlyPutDowns.find((p) => p.idx > q + 20 && !isolatedPutDown(p.idx));",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#669 T8b:"
+  },
+  {
+    "label": "#669 M-669-18: into_beds within 23 minutes of the settle do not cut (the real 2026-10-10 gap)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const nextPutDown = earlyPutDowns.find((p) => p.idx > q && !isolatedPutDown(p.idx));",
+    "replace": "const nextPutDown = earlyPutDowns.find((p) => p.idx > q + 23 && !isolatedPutDown(p.idx));",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#669 T7b:",
+    "note": "Survived the first round (PR #676 review): T7's real put-down is 24 minutes after the false settle, one more than the real night's 22-23."
+  },
+  {
+    "label": "#669 M-669-19: an unobserved LEFT neighbour counts as quiet (left side lenient only)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const isolatedPutDown = (i) => state[i - 1] === false && state[i + 1] === false;",
+    "replace": "const isolatedPutDown = (i) => state[i - 1] !== true && state[i + 1] === false;",
+    "expect": "equivalent",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#669",
+    "note": "EQUIVALENT, as the code comment on isolatedPutDown says. The into_bed is after the settle q, so its left neighbour idx - 1 is at or after q and inside the count whether or not this into_bed cuts (cut: the count runs to idx; not cut: it runs past idx, unless idx - 1 is already past the 150 minutes, where the cut changes nothing). A null minute there makes bedOccupiedAfter fail open either way, and 3 occupied minutes before it return true either way."
   }
 ]

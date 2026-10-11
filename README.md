@@ -321,14 +321,22 @@ measurement**, and (like everything here) never a safety device — see the warn
   to be accepted on the real bedtime's movement, and could even end the night in the evening when a
   parent then left the room). A *got into bed* with recorded quiet in the minute either side of it (at
   most a lone minute of movement, such as a parent reaching in) is not treated as a new put-down for
-  this. There is no setting for any of it, and the numbers are
+  this. "Quiet" there means the same as everywhere else in the timeline: no movement in the bed, no
+  movement elsewhere in the picture, and no noise. There is no setting for any of it, and the numbers are
   unchanged: at least 3 minutes with movement in the bed, however slight, in the 2½ hours after the
   child settles.
   **Known limits** (details, and the nights they come from, in [KNOWN-ISSUES.md](KNOWN-ISSUES.md)):
-  - A very still child whose bedtime is followed by a second *got into bed* with movement around it
-    (a parent at the bed for a couple of minutes, or the same put-down logged twice) before the bed has
-    shown 3 such minutes loses that bedtime: the in-bed and asleep times move later, to after the
-    second event.
+  - A very still child whose bedtime is followed by a second *got into bed* that is not quiet either
+    side (a parent at the bed for a couple of minutes, the same put-down logged twice, or a one-minute
+    check with a noise from elsewhere in the house beside it) before the bed has shown 3 such minutes
+    loses that bedtime: the in-bed and asleep times move later, to that second event or after it.
+    There is no grace period: this holds a few minutes after the child settles as much as an hour.
+  - The other way round: the **real** put-down, if it happens to be logged with quiet either side (a
+    quiet house, a put-down that pauses), is not treated as a new put-down either, so a false earlier
+    one is still believed, exactly as before this change.
+  - Where the false put-down is discarded but the real one settled after the window had already
+    opened on a quiet evening, the **In bed** time can now show nothing on a night where it used to
+    show the false put-down.
   - The parent's approach in the minute or two before the real put-down still counts for a false
     earlier one, so a false put-down with exactly that much movement before the real one is still
     believed.

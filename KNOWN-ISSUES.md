@@ -1435,8 +1435,9 @@ progress, when the exit is earlier than the start of the activity, or on a night
 
 **What you see:** after the update, some nights' **In bed** and **asleep** times are later than they were.
 Usually that is a false put-down before the real bedtime being discarded. Occasionally it is a real bedtime
-being lost: the asleep time then lands after the window opens and the in-bed time on a parent's check of the
-bed. And on a few nights an in-bed time well before the child was put down is still reported.
+being lost: the asleep time then lands later and the in-bed time on a parent's check of the bed. On some
+nights **In bed** now shows nothing where it used to show the false put-down. And on a few nights an in-bed
+time well before the child was put down is still reported.
 
 **Why:** a put-down is only believed when the bed then looks occupied: at least 3 minutes with movement in
 the bed, however slight (a reading at or above 0.0005), in the 2½ hours after the child settles. Those 2½
@@ -1446,8 +1447,10 @@ hour or two before the real bedtime, the real bedtime's movement vouched for the
 37 minutes early, and one child's night ended at 20:06, when a parent left the room, with 21 minutes asleep,
 which was then pushed as the night's report. Since #669 the count stops at the next *got into bed* after the
 child settles. A *got into bed* whose neighbouring minutes were both recorded and quiet (one minute of
-movement on its own: an adult reaching in) does not stop it. None of the numbers changed (3 minutes, 2½
-hours, 0.0005), and there is no setting.
+movement on its own: an adult reaching in) does not stop it. "Quiet" is the sleep timeline's own meaning of
+the word, not "the bed did not move": a minute is not quiet if anything moved in the bed, anything moved
+elsewhere in the picture (outside the bed zone), or the microphone heard a noise. None of the numbers
+changed (3 minutes, 2½ hours, 0.0005), and there is no setting.
 
 **What it changes, stated rather than guessed:**
 - **Measured on two cameras in one house.** Replaying every stored night on both databases with the cut
@@ -1458,14 +1461,29 @@ hours, 0.0005), and there is no setting.
   which is why the one-minute exception exists. In principle a night can still change status (the "nobody
   was in the bed" verdict depends on the asleep time), and the morning wake can move either way when the
   asleep time moves, because the wake search starts there.
-- **A very still child, then a second put-down with movement around it.** If a parent is at the bed for a
-  couple of minutes shortly after a real bedtime (or the classifier logs the same put-down twice during a
-  stir), and the child lies so still that the bed shows fewer than 3 such minutes before it, the real bedtime
-  is discarded: the asleep time falls back to the first long quiet stretch after the window opens, and the
-  in-bed time to that second event. On the replay a *got into bed* followed an accepted settle within 30
-  minutes on 5 of 51 staging and 2 of 52 production nights. The night that shaped the exception (staging,
-  2026-09-20, one child) settled about 19:04 and had a one-minute parent check at 19:32; without the
-  exception the asleep time moved from 19:04 to 19:33.
+- **A very still child, then a second put-down that is not quiet either side.** If a parent is at the bed
+  for a couple of minutes shortly after a real bedtime (or the classifier logs the same put-down twice during
+  a stir), and the child lies so still that the bed shows fewer than 3 such minutes before it, the real
+  bedtime is discarded: the asleep time falls back to the first long quiet stretch after the window opens, or
+  to the second event's own settle, and the in-bed time moves to that second event. On the replay a *got into
+  bed* followed an accepted settle within 30 minutes on 5 of 51 staging and 2 of 52 production nights. The
+  night that shaped the exception (staging, 2026-09-20, one child) settled about 19:04 and had a one-minute
+  parent check at 19:32; without the exception the asleep time moved from 19:04 to 19:33. There is no grace
+  period: a duplicate logged a few minutes after the settle cuts just the same.
+- **Because quiet includes sound, a household noise next to a one-minute check makes it cut.** Tested on
+  the 2026-09-20 shape with a noise from elsewhere in the house (another child's bedtime, a door) added in the
+  minute before the check (a constructed case, not a recorded night): the check is no longer alone in a quiet
+  stretch, it cuts, and the asleep time moves from 19:04 to 19:33 again. A bedroom microphone hears the whole house, so this is likelier in a noisy home; a
+  duplicate logged during a stretch of household noise cuts the same way.
+- **A real put-down logged with quiet either side is exempt too, so a false earlier one is still
+  believed.** The exception looks only at the minute either side of the *got into bed*, not at the
+  put-down around it. In a quiet house, a real put-down whose movement pauses for a minute at the moment the
+  classifier logs it is treated like a parent's glance: it does not stop the count, and a false put-down an
+  hour or two before it is accepted on its movement, exactly as before this change.
+- **In bed can now be blank where it used to show the false put-down.** When the false put-down is discarded
+  but the real one settled after the first long quiet stretch after the window opened (a quiet evening over
+  the empty bed), the night falls back to that quiet stretch, and no put-down lies close enough before it to
+  be drawn as the in-bed time. Before this change the same night showed the false put-down there.
 - **The real bedtime's approach still counts for a false earlier one.** The minute or two before the real
   put-down is logged (a parent carrying the child in) is inside the count. On production, 2026-09-17, one
   child: a false 18:48 put-down reaches exactly 3 that way and stays the bedtime, 43 minutes early (staging

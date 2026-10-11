@@ -1102,7 +1102,17 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // `cribActExt`; this has to work here and on a night still in progress. And judged by in-bed motion alone,
   // prod 2026-09-27's 19:00:14 into_bed (the REAL put-down that night; the minute after it reads 0.0004) would
   // count as isolated, hand its evidence back to a false 18:06 episode and return prod to in-bed 18:06. Judged
-  // by `state` it is not isolated.
+  // by `state` it is not isolated (pinned by the second #669 T10 test).
+  //
+  // ⚠️ What judging on `state` costs, all three pinned as known limits (#669 T9 noise, T10) and in README and
+  // KNOWN-ISSUES. `state` is not "the bed moved": a minute is active for a household NOISE or for movement
+  // OUTSIDE the bed zone too. So (a) a one-minute parent check with a noise from elsewhere in the house next
+  // to it is not isolated and cuts (the 09-20 shape plus one noise: onset 19:04 -> 19:33); (b) the exemption
+  // reads only the two minutes around the into_bed, so a REAL put-down that happens to be logged between two
+  // quiet minutes (a quiet house, a put-down that pauses) is exempt, and a false earlier put-down is then
+  // accepted on its movement exactly as before #669; (c) where the real put-down does cut but settles after the
+  // plain search's answer, the night falls back to the plain onset with no put-down close enough before it to
+  // draw: the in-bed marker becomes BLANK where it used to show the false earlier put-down.
   //
   // ⚠️ STRICT `=== false`, the same rule as `bridged` (issue #350): an unobserved neighbour (null), or one
   // outside the timeline (undefined), is not evidence of quiet, so such an into_bed is not isolated and still
@@ -1112,8 +1122,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   //
   // Known limit, not handled: a second into_bed WITH movement next to it (a parent at the bed for two
   // minutes, a duplicate logged during a stir) shortly after a real settle still cuts, and a child lying so
-  // still that fewer than 3 occupied minutes fall before it loses the put-down to the plain search (README,
-  // KNOWN-ISSUES; pinned by the #669 T8 test).
+  // still that fewer than 3 occupied minutes fall before it loses the put-down: to the plain search, or to that
+  // second into_bed's own settle (README, KNOWN-ISSUES; pinned by the #669 T8 and T8b tests).
   const isolatedPutDown = (i) => state[i - 1] === false && state[i + 1] === false;
   for (const { idx: putDown } of earlyPutDowns) {
     const q = firstQuietRunFrom(putDown, true);
@@ -1157,10 +1167,16 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     // One house, two cameras: a hypothesis about every other house, not a measurement of it.
     //
     // Cut after the SETTLE `q`, not after the put-down: the into_beds logged while the child fusses before
-    // settling (between the put-down and q) belong to this put-down, not to the next one. (Cutting after the
-    // put-down instead would reject every member of a settling episode but its last, which shares the same
-    // q and so gives the same onset; no test can tell the two apart, and the mutant is catalogued as
-    // equivalent.) An into_bed past the window end is not in `earlyPutDowns`, so it never cuts.
+    // settling (between the put-down and q) belong to this put-down, not to the next one. Cutting after the
+    // put-down instead usually gives the same onset (it rejects every member of a settling episode but the
+    // last, and the members usually share q), but not always: a member can have its own, LATER settle (one
+    // logged inside a camera gap before the settle, whose own 15 quiet minutes then reach a later stir), and
+    // cut after the put-down it would reject the earlier member whose settle was the right one. Pinned by the
+    // #669 T4b test (19:07 against 19:21); found by review after this was first written down as making no
+    // difference. And it is the FIRST such into_bed (`find`), never a later one: a mid-night re-settle must not
+    // move the cut past the real bedtime (#669 T1b). An into_bed past the window end is not in
+    // `earlyPutDowns`, so it never cuts. There is no grace period after q either: an into_bed one minute after
+    // the settle cuts like one an hour after (#669 T8b, T7b).
     //
     // Known limit, NOT fixed here: the LEAD-IN of the next put-down (the parent approaching, a minute or two
     // before its into_bed) still counts for the earlier one. On prod 2026-09-17 child B a false 18:48
