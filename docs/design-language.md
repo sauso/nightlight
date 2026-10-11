@@ -203,10 +203,11 @@ Semantic assignments already established — reuse rather than reinvent:
 `Moon` sleep · `Thermometer`/`Droplet` climate · `Cctv` cameras · `Baby` children · `Video` live ·
 `Settings` settings · `Trash2` destructive · `DoorOpen` out-of-bed.
 
-**Record** on a camera tile: idle is `RecordIcon` (a ring with a centre dot, a hand-written component,
-see 4.2), white with the same soft black glow as the other tile controls; while recording it is the
-solid `Circle` disc inside the red chip with the elapsed timer. The idle icon is a ring on purpose: a
-solid white disc is a lot of light on a bedside screen at night.
+**Record** on a camera tile: `RecordIcon` (a ring with a centre dot, a hand-written component, see 4.2) in
+BOTH states, white with the same soft black glow as the other tile controls; while recording the button
+becomes the red chip with the elapsed timer and the icon keeps its shape. It is a ring on purpose: a
+solid white disc is a lot of light on a bedside screen at night, and the icon must not swell into one
+when recording starts.
 
 ### 4.2 Brand / service icons — local SVG components
 

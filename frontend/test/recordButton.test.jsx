@@ -1,5 +1,5 @@
-// The Record button on the camera tile (#680): ring-and-dot icon when idle, the old solid disc +
-// timer in the red chip while recording.
+// The Record button on the camera tile (#680): the ring-and-dot icon in BOTH states; while recording the
+// button is the red chip with the timer, the icon itself does not change shape.
 //
 // WHY this exists: the idle icon used to be lucide's solid `<Circle fill="currentColor" />`, which is a
 // lot of white on a bedside screen at night. The owner asked for the classic record symbol (ring with a
@@ -72,7 +72,7 @@ describe('Record button, idle', () => {
 });
 
 describe('Record button, recording', () => {
-  test('★ pressing it switches to the red chip: solid disc and the timer, not the ring', async () => {
+  test('★ pressing it switches to the red chip and the timer, with the SAME ring-and-dot icon', async () => {
     vi.spyOn(api, 'post').mockResolvedValue({ recording: true, elapsed_s: 65 });
     mount();
     await userEvent.click(screen.getByRole('button', { name: 'Record Nursery' }));
@@ -81,11 +81,12 @@ describe('Record button, recording', () => {
     expect(api.post).toHaveBeenCalledWith('/cameras/c1/record/start', {});
     expect(btn.classList.contains('rec-btn--active')).toBe(true);
     expect(btn.querySelector('.rec-btn__time').textContent).toBe('1:05');
-    // The old behaviour, kept: the solid disc, and no ring/dot.
-    expect(solidDisc(btn)).not.toBeNull();
-    expect(solidDisc(btn).getAttribute('fill')).toBe('currentColor');
-    expect(ring(btn)).toBeNull();
-    expect(dot(btn)).toBeNull();
+    // The icon does not change shape: the ring and the dot, never the solid disc (the owner saw it
+    // swell into "a big round circle" when recording started).
+    expect(ring(btn)).not.toBeNull();
+    expect(dot(btn)).not.toBeNull();
+    expect(solidDisc(btn)).toBeNull();
+    expect(btn.querySelector('svg').getAttribute('width')).toBe('16');
   });
 
   test('a camera that is already recording (from the server) opens in the active state', () => {
@@ -94,8 +95,9 @@ describe('Record button, recording', () => {
     expect(btn.getAttribute('aria-pressed')).toBe('true');
     expect(btn.getAttribute('title')).toBe('Tap to stop and save');
     expect(btn.querySelector('.rec-btn__time').textContent).toBe('0:05');
-    expect(solidDisc(btn)).not.toBeNull();
-    expect(ring(btn)).toBeNull();
+    expect(solidDisc(btn)).toBeNull();
+    expect(ring(btn)).not.toBeNull();
+    expect(dot(btn)).not.toBeNull();
   });
 
   test('stopping goes back to the ring-and-dot icon', async () => {

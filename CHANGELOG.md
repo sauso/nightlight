@@ -15,7 +15,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
-- **The Record button on a camera tile is now a ring with a dot in the middle while idle, instead of a solid white disc (#680).** A solid white disc is a lot of light on a bedside screen at night; the ring is the usual "record" symbol and lights far less of the tile. Nothing else about the button changed: it is the same size and place, still white with the soft dark glow, the same label and tap, and when you press it, it turns into the red chip with the elapsed time and the pulse, with the solid disc inside, exactly as before. Only the idle icon changed, so there is no setting. See [docs/design-language.md](docs/design-language.md#41-ui-icons--lucide-react).
+- **The Record button on a camera tile is now a ring with a dot in the middle, instead of a solid white disc, idle and while recording (#680).** A solid white disc is a lot of light on a bedside screen at night; the ring is the usual "record" symbol and lights far less of the tile. Nothing else about the button changed: it is the same size and place, still white with the soft dark glow, the same label and tap, and when you press it, it turns into the red chip with the elapsed time and the pulse, exactly as before, with the same ring-and-dot icon inside (it no longer swells into a big solid circle). There is no setting. See [docs/design-language.md](docs/design-language.md#41-ui-icons--lucide-react).
 
 ### Fixed
 
