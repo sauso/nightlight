@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet, Zap, AudioLines, Bell, Square, Play, RotateCcw, Power, BellOff, Circle } from 'lucide-react';
+import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet, Zap, AudioLines, Bell, Square, Play, RotateCcw, Power, BellOff } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { startTalk } from '../lib/twoWayTalk.js';
@@ -1019,7 +1019,10 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
                 screen at night. Recording keeps the solid disc inside the red chip, so the state change
                 (disc + timer + pulse) stays unmistakable. Same 16px footprint, so the tap target is
                 unchanged. */}
-            {recording ? <Circle size={16} fill="currentColor" /> : <RecordIcon size={16} />}
+            {/* The same ring-and-dot in both states (#680): the owner saw the solid disc swell into a big round
+                circle the moment recording started and wanted the icon to stay the same. Recording is
+                signalled by the red chip and the timer, not by a different shape. */}
+            <RecordIcon size={16} />
             {recording && <span className="rec-btn__time">{fmtElapsed(recElapsed)}</span>}
           </button>
         )}
