@@ -12,6 +12,7 @@ import { queuePatch, minToHHMM } from '../lib/detectionSaves.js';
 import WhepPlayer from './WhepPlayer.jsx';
 import HlsPlayer from './HlsPlayer.jsx';
 import BreathingDot from './BreathingDot.jsx';
+import RecordIcon from './icons/RecordIcon.jsx';
 
 // The tile's quick motion/sound/schedule toggles write to the same /detection endpoint the full
 // DetectionSettings screens do, and since #444 both go through the same per-camera save queue
@@ -1014,7 +1015,11 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
             disabled={recBusy}
             title={recError || (recording ? 'Tap to stop and save' : 'Record this moment')}
           >
-            <Circle size={16} fill="currentColor" />
+            {/* Idle = ring with a centre dot (#680): the old solid disc was a lot of white on a bedside
+                screen at night. Recording keeps the solid disc inside the red chip, so the state change
+                (disc + timer + pulse) stays unmistakable. Same 16px footprint, so the tap target is
+                unchanged. */}
+            {recording ? <Circle size={16} fill="currentColor" /> : <RecordIcon size={16} />}
             {recording && <span className="rec-btn__time">{fmtElapsed(recElapsed)}</span>}
           </button>
         )}
