@@ -314,6 +314,31 @@ measurement**, and (like everything here) never a safety device — see the warn
   never perfectly still for hours — they move a little, repeatedly — so a bed that stirs once and
   then nothing is an empty one, and the bedtime it seemed to start is discarded. The same applies at the other end: a morning wake
   is still found if it comes after the configured wake time.
+
+  Only movement **before the next put-down** counts towards that occupied-bed check: a later bedtime
+  never vouches for an earlier one. So a *put-down* the camera got wrong an hour or two before the
+  real one, with the bed empty in between, is discarded rather than reported as the bedtime (it used
+  to be accepted on the real bedtime's movement, and could even end the night in the evening when a
+  parent then left the room). A *got into bed* with recorded quiet in the minute either side of it (at
+  most a lone minute of movement, such as a parent reaching in) is not treated as a new put-down for
+  this. There is no setting for any of it, and the numbers are
+  unchanged: at least 3 minutes with movement in the bed, however slight, in the 2½ hours after the
+  child settles.
+  **Known limits** (details, and the nights they come from, in [KNOWN-ISSUES.md](KNOWN-ISSUES.md)):
+  - A very still child whose bedtime is followed by a second *got into bed* with movement around it
+    (a parent at the bed for a couple of minutes, or the same put-down logged twice) before the bed has
+    shown 3 such minutes loses that bedtime: the in-bed and asleep times move later, to after the
+    second event.
+  - The parent's approach in the minute or two before the real put-down still counts for a false
+    earlier one, so a false put-down with exactly that much movement before the real one is still
+    believed.
+  - While a night is still in progress, a false put-down can show as tonight's bedtime for up to about
+    2½ hours after it; the figures worked out after that, and in the morning, use the full rule.
+  - Not fixed by this: a nap the child was lifted out of without waking can still be taken as the
+    start of the night, and on a quiet evening (no household noise to break the stillness) an empty
+    bed can still be read as a child asleep from the moment the window opens, for example when a
+    discarded false put-down came first. That is still later, and closer to the truth, than the false
+    put-down it replaces.
 - **One camera does the measuring.** If a child has several cameras, sleep is worked out from their
   **main camera**, and an admin can choose which one it is: **Camera used for this child's sleep** in
   the child's settings (shown once a child has two or more cameras).

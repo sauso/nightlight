@@ -283,7 +283,14 @@ const EMPTY_BED_MAX_PEAK = 0.1;
 // 3 minutes sits between them with the same margin either way (2 above the worst empty, 2 below the
 // quietest real). The 0.0005 floor is load-bearing too: at 0.002 the quietest real night falls to 1-2
 // minutes and the separation is gone. 150 minutes is long enough that the stillest child on record
-// clears it, and short enough to fit between a spurious afternoon put-down and a real bedtime.
+// clears it.
+//
+// ⚠️ It is NOT short enough to fit between a false put-down and the real bedtime, which this comment used
+// to claim (issue #669). On 2026-10-10 (staging, both children) false put-downs over an empty bed came 23
+// to 100 minutes before the real one, the 150 minutes reached FORWARD into the real put-down's movement,
+// and the real put-down vouched for the false one: in-bed was stored 100 and 37 minutes early, and one
+// child's night ended at 20:06 on a parent leaving the room. So the window is now also cut at the next
+// put-down after the settle (see bedOccupiedAfter and guard 3); these three numbers did not change.
 const OCCUPANCY_WITNESS_MIN = 150;
 const OCCUPANCY_MIN_PEAK = 0.0005;
 const OCCUPANCY_MIN_MINUTES = 3;
@@ -985,11 +992,34 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // gets, and the old rejection rested on "no movement" readings nobody took. The residual risk, named:
   // a FALSE put-down over an empty bed followed at once by a stall is no longer caught by this guard. It
   // still has to pass every other onset guard, and the stall itself is reported as unknown minutes.
-  const bedOccupiedAfter = (from) => {
+  //
+  // `until` (issue #669): the count stops BEFORE minute `until` (exclusive), so it runs over
+  // [from, min(from + OCCUPANCY_WITNESS_MIN, until)). The only caller passes the minute of the next put-down
+  // after this one's settle; see guard 3 for why. Exclusive because that minute is the next put-down's own
+  // movement (or its lead-in), which is exactly the evidence that must not vouch for this one.
+  // ⚠️ The default is Infinity, NOT undefined: `Math.min(x, undefined)` is NaN, `i < NaN` is false, the loop
+  // never runs, and every put-down with no later one (the ordinary night) would be REJECTED.
+  //
+  // ⚠️ BOTH FAIL-OPEN RETURNS ARE KEPT EXACTLY AS THEY WERE, AND IN THE SAME ORDER: the end-of-timeline test
+  // first, then a null minute inside the (now bounded) count. The before/after replay of every stored night
+  // on both databases was measured with this order, and the 2026-09-21 nights (both children, both databases,
+  // counts of 0-1) are accepted only through the data-gap fail-open at +71 minutes, which the bound leaves
+  // alone. The consequence, a known limit pinned by the #669 T6 tests: a settle within OCCUPANCY_WITNESS_MIN
+  // of the END of the timeline escapes the bound entirely, because the first return fires before the bound
+  // is looked at. In practice that is an in-progress night (the timeline ends "now"), so tonight's live
+  // figures can show a false early put-down for up to 150 minutes after its settle; the night is worked
+  // out again with the bound once enough of it has passed, and the stored row is computed in the morning.
+  // A null minute AFTER `until` no longer fails open; that is the bound working (it can only matter when
+  // the old count also returned true), not a change of contract.
+  //
+  // Monotone by construction: every `true` the bounded count returns, the unbounded one returned too, so the
+  // bound can only REJECT a put-down the old code accepted, never accept a new one.
+  const bedOccupiedAfter = (from, until = Infinity) => {
     const to = from + OCCUPANCY_WITNESS_MIN;
     if (to > totalMin) return true; // not enough timeline left to judge
+    const end = Math.min(to, until);
     let moved = 0;
-    for (let i = from; i < to; i++) {
+    for (let i = from; i < end; i++) {
       if (state[i] === null) return true; // a gap: can't prove the bed was empty through it
       if (bedPeakAt[i] >= OCCUPANCY_MIN_PEAK && ++moved >= OCCUPANCY_MIN_MINUTES) return true;
     }
@@ -1052,6 +1082,39 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     .map((t) => ({ idx: txIdx(t.created_at) }))
     .filter((p) => p.idx >= 0 && p.idx < totalMin)
     .sort((a, b) => a.idx - b.idx);
+  // An into_bed that is an ISOLATED BLIP does not end the previous put-down's occupancy count (guard 3). Isolated
+  // means both neighbouring minutes, idx-1 and idx+1, were observed and NOT active in `state`; the into_bed's
+  // own minute is not consulted. Kept as this one helper so the plain bound (every later into_bed cuts) is a
+  // one-line switch at its single call site.
+  //
+  // ★ Why it exists (issue #669, measured on both databases before the build): with the plain bound, staging
+  // 2026-09-20 child A loses its real put-down. The child settled about 19:04 (true onset 18:52) and a parent
+  // checked the bed at 19:32: one active minute (peak 1.0) with quiet minutes either side, logged as an
+  // into_bed. Cut there, the real put-down has 1 occupied minute (threshold 3), is rejected, and onset falls to
+  // the plain search at 19:33: an onset error of 12 minutes becomes 41, and the in-bed marker becomes the
+  // parent check itself. A real put-down is a child being lowered and settled, which takes more than one
+  // minute of movement; a lone minute in a still room is an adult reaching in. On 2026-10-10 the 19:07, 19:45
+  // and 19:47 into_beds all have an active neighbour, so this exemption leaves the night it was built for
+  // alone.
+  //
+  // ⚠️ Defined on `state` (movement, sound, or movement outside the bed), deliberately not on in-bed motion
+  // alone and not as the departure scan's `bridged`. `bridged` is built later, only for a completed night, from
+  // `cribActExt`; this has to work here and on a night still in progress. And judged by in-bed motion alone,
+  // prod 2026-09-27's 19:00:14 into_bed (the REAL put-down that night; the minute after it reads 0.0004) would
+  // count as isolated, hand its evidence back to a false 18:06 episode and return prod to in-bed 18:06. Judged
+  // by `state` it is not isolated.
+  //
+  // ⚠️ STRICT `=== false`, the same rule as `bridged` (issue #350): an unobserved neighbour (null), or one
+  // outside the timeline (undefined), is not evidence of quiet, so such an into_bed is not isolated and still
+  // cuts. The strictness only matters on the right-hand side: a null LEFT neighbour lies inside the count
+  // (idx - 1 >= q) and makes bedOccupiedAfter fail open whatever this returns. It is strict there anyway, so
+  // the rule reads the same from either side.
+  //
+  // Known limit, not handled: a second into_bed WITH movement next to it (a parent at the bed for two
+  // minutes, a duplicate logged during a stir) shortly after a real settle still cuts, and a child lying so
+  // still that fewer than 3 occupied minutes fall before it loses the put-down to the plain search (README,
+  // KNOWN-ISSUES; pinned by the #669 T8 test).
+  const isolatedPutDown = (i) => state[i - 1] === false && state[i + 1] === false;
   for (const { idx: putDown } of earlyPutDowns) {
     const q = firstQuietRunFrom(putDown, true);
     if (q == null) continue; // never settled after this put-down
@@ -1077,7 +1140,35 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     // above, because the plain search reads the undiscounted `active` view, where household noise
     // already breaks the quiet run over an empty bed; it is the sound discount that this search turns on
     // — correctly, for a real put-down — that removes that protection.
-    if (!bedOccupiedAfter(q)) continue;
+    //
+    // A PUT-DOWN'S EVIDENCE ENDS WHERE THE NEXT PUT-DOWN BEGINS (issue #669): a later put-down never vouches
+    // for an earlier one. The count runs from the settle to the first later into_bed that is not an isolated
+    // blip (isolatedPutDown above), and only to the full OCCUPANCY_WITNESS_MIN when there is none. Without the
+    // cut the 150 minutes reached forward into the real bedtime: on 2026-10-10 (staging, both children) false
+    // put-downs over an empty bed 23-100 minutes before the real one were accepted on the real one's movement.
+    // Measured with the cut on both databases: child A's 18:06 candidate drops to 1 occupied minute and its
+    // 19:07 candidate to 2 (both rejected, margin 1: those 2 are the real put-down's lead-in, 19:45-19:46),
+    // child B's 19:11-19:21 episode to 0. Over every accepted early put-down (51 staging, 52 prod) the count
+    // fell below 3 on 6 staging and 3 prod nights; no onset or in-bed time moved earlier and no night changed
+    // status. Of the reviewed ones, three got much closer to the owner's times (errors of 43, 67 and 127
+    // minutes became 8, 7 and 5), one got 7 minutes worse (2026-09-27 child A) and one, 2026-09-20 child A,
+    // 29 minutes worse, which is what isolatedPutDown exists for. Those counts were taken with the plain cut,
+    // before the isolated-blip exemption; it can only accept more, never fewer.
+    // One house, two cameras: a hypothesis about every other house, not a measurement of it.
+    //
+    // Cut after the SETTLE `q`, not after the put-down: the into_beds logged while the child fusses before
+    // settling (between the put-down and q) belong to this put-down, not to the next one. (Cutting after the
+    // put-down instead would reject every member of a settling episode but its last, which shares the same
+    // q and so gives the same onset; no test can tell the two apart, and the mutant is catalogued as
+    // equivalent.) An into_bed past the window end is not in `earlyPutDowns`, so it never cuts.
+    //
+    // Known limit, NOT fixed here: the LEAD-IN of the next put-down (the parent approaching, a minute or two
+    // before its into_bed) still counts for the earlier one. On prod 2026-09-17 child B a false 18:48
+    // put-down reaches exactly 3 that way and stays accepted. Trimming the lead-in was tested and rejected
+    // (cutting at the start of the occupied run before the next into_bed zeroes a child still stirring:
+    // staging 2026-09-30 child A, 14 -> 0).
+    const nextPutDown = earlyPutDowns.find((p) => p.idx > q && !isolatedPutDown(p.idx));
+    if (!bedOccupiedAfter(q, nextPutDown?.idx)) continue;
     onset = q;
     break; // earliest qualifying put-down wins
   }
@@ -1215,6 +1306,14 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     // a return that never happened, or wasn't this one. This is a named, accepted residual risk (plan
     // §0.4), not a bug to fix here — the alternative is a genuinely new, asymmetric occupancy primitive,
     // which is a redesign, not this function's job.
+    //
+    // ⚠️ Same forward reach as bedOccupiedAfter had before issue #669, and deliberately NOT given its bound.
+    // #669 cut bedOccupiedAfter's window at the next put-down because a later bedtime was vouching for an
+    // earlier false one; that was measured for the evening put-down guard only, and neither caller here was
+    // measured. The two also fail in OPPOSITE directions on missing data: this one fails CLOSED (an unobserved
+    // minute is simply not counted, so a gap reads as "no witness"), bedOccupiedAfter fails OPEN (a null minute
+    // returns true, "can't prove the bed was empty"). Do not copy the bound, or the fail-open, across on the
+    // strength of the other.
     bedOccupiedFrom = (from) => {
       const to = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt);
       let moved = 0;

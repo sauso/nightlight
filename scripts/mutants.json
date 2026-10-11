@@ -15302,5 +15302,137 @@
     "expect": "killed",
     "tests": ["who-did-it.test.js"],
     "namePattern": "#552 no account id"
+  },
+  {
+    "label": "#669 M-669-00: control, a comment edit beside guard 3 must change nothing",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "// Known limit, NOT fixed here: the LEAD-IN of the next put-down (the parent approaching, a minute or two",
+    "replace": "// Known limit, NOT fixed here: the LEAD-IN of the next put-down (the parent approaching, a minute or two [CONTROL MUTANT]",
+    "expect": "survives",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#669"
+  },
+  {
+    "label": "#669 M-669-01: no bound: the occupancy count runs the full 150 minutes again (the old code)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const end = Math.min(to, until);",
+    "replace": "const end = to;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#669 T(1|7):",
+    "note": "The whole fix reverted. T1: the 18:06 false put-down over an empty bed is accepted on the real 19:47 put-down's movement (in bed 18:06). T7: the 2026-10-10 child B shape ends the night at 20:01 on a parent leaving (22 minutes asleep)."
+  },
+  {
+    "label": "#669 M-669-02: the occupancy threshold drops to 2",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const OCCUPANCY_MIN_MINUTES = 3;",
+    "replace": "const OCCUPANCY_MIN_MINUTES = 2;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#669 T2:",
+    "note": "2 accepts the 2026-10-10 child A 19:07 candidate (exactly 2 occupied minutes before the next put-down) on both databases. The knob is the bound, not the threshold."
+  },
+  {
+    "label": "#669 M-669-03: the occupancy threshold rises to 4",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const OCCUPANCY_MIN_MINUTES = 3;",
+    "replace": "const OCCUPANCY_MIN_MINUTES = 4;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#669 T2:",
+    "note": "4 would be fitted to one night and eats into the measured floor of real onsets (5-9 occupied minutes in 150). T2's second half (exactly 3 = accepted) pins it."
+  },
+  {
+    "label": "#669 M-669-04: the bound is inclusive (`<=`): the next put-down's own minute is counted",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "for (let i = from; i < end; i++) {",
+    "replace": "for (let i = from; i <= end; i++) {",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#669 T3:"
+  },
+  {
+    "label": "#669 M-669-05: fail-open 1 removed (a settle near the end of the timeline is judged by the bounded count)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (to > totalMin) return true; // not enough timeline left to judge",
+    "replace": "// fail-open 1 removed (mutant)",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#669 T6a:",
+    "note": "Kept deliberately and FIRST: the before/after replay was measured with this order. T6a pins the known limit it leaves (an in-progress night at 20:30 still shows the false 18:06 put-down)."
+  },
+  {
+    "label": "#669 M-669-06: fail-open 2 removed (an unobserved minute inside the count reads as an empty bed)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (state[i] === null) return true; // a gap: can't prove the bed was empty through it",
+    "replace": "// fail-open 2 removed (mutant)",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#669 T6b:"
+  },
+  {
+    "label": "#669 M-669-07: the bound's default is gone (undefined -> Math.min is NaN -> every put-down with no later one is rejected)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const bedOccupiedAfter = (from, until = Infinity) => {",
+    "replace": "const bedOccupiedAfter = (from, until) => {",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#669 T5:"
+  },
+  {
+    "label": "#669 M-669-08: the cut is taken AT the settle (`>= q`), so an into_bed in the settle minute ends its own put-down's evidence",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const nextPutDown = earlyPutDowns.find((p) => p.idx > q && !isolatedPutDown(p.idx));",
+    "replace": "const nextPutDown = earlyPutDowns.find((p) => p.idx >= q && !isolatedPutDown(p.idx));",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#669 T4:"
+  },
+  {
+    "label": "#669 M-669-09: the cut is taken after the PUT-DOWN instead of after the settle q",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const nextPutDown = earlyPutDowns.find((p) => p.idx > q && !isolatedPutDown(p.idx));",
+    "replace": "const nextPutDown = earlyPutDowns.find((p) => p.idx > putDown && !isolatedPutDown(p.idx));",
+    "expect": "equivalent",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#669",
+    "note": "EQUIVALENT. Every into_bed of a settling episode (the put-down and the re-settles before the child goes still) shares the same settle q. Cut after the put-down, every member but the last is rejected (its cut falls before q), and the last member, which has no later member, gets the same q and the same cut as the rule cuts at, so onset is identical; the in-bed marker walks back over the episode independently of which member was accepted. Verified on 2026-10-10, 09-20, 09-27 and 10-07 (5-6 members each) in the plan review. Only null minutes around a member could separate them. q is kept as the anchor because it states the rule."
+  },
+  {
+    "label": "#669 M-669-10: B1x removed: every later into_bed cuts, an isolated blip too (the plain bound)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const nextPutDown = earlyPutDowns.find((p) => p.idx > q && !isolatedPutDown(p.idx));",
+    "replace": "const nextPutDown = earlyPutDowns.find((p) => p.idx > q);",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#669 T9: an ISOLATED",
+    "note": "The plain-bound arm of the A/B. Staging 2026-09-20 child A: a parent check at 19:32 (one active minute) cut the real put-down's count to 1, and onset fell to the plain search (error 12 -> 41 minutes)."
+  },
+  {
+    "label": "#669 M-669-11: B1x checks only the RIGHT neighbour",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const isolatedPutDown = (i) => state[i - 1] === false && state[i + 1] === false;",
+    "replace": "const isolatedPutDown = (i) => state[i + 1] === false;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#669 T9: \\.\\.\\.an active LEFT"
+  },
+  {
+    "label": "#669 M-669-12: B1x checks only the LEFT neighbour",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const isolatedPutDown = (i) => state[i - 1] === false && state[i + 1] === false;",
+    "replace": "const isolatedPutDown = (i) => state[i - 1] === false;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#669 T8:"
+  },
+  {
+    "label": "#669 M-669-13: B1x is lenient: an unobserved neighbour counts as quiet (`!== true` instead of `=== false`)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const isolatedPutDown = (i) => state[i - 1] === false && state[i + 1] === false;",
+    "replace": "const isolatedPutDown = (i) => state[i - 1] !== true && state[i + 1] !== true;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#669 T9: \\.\\.\\.an UNOBSERVED"
   }
 ]

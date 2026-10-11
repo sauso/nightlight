@@ -1431,6 +1431,60 @@ progress, when the exit is earlier than the start of the activity, or on a night
   is looked for up to 3 hours past it, so the same night can read differently under a 07:00 and a 07:30
   window.
 
+## A bedtime around a second put-down: a false early one discarded, a real one sometimes lost (#669)
+
+**What you see:** after the update, some nights' **In bed** and **asleep** times are later than they were.
+Usually that is a false put-down before the real bedtime being discarded. Occasionally it is a real bedtime
+being lost: the asleep time then lands after the window opens and the in-bed time on a parent's check of the
+bed. And on a few nights an in-bed time well before the child was put down is still reported.
+
+**Why:** a put-down is only believed when the bed then looks occupied: at least 3 minutes with movement in
+the bed, however slight (a reading at or above 0.0005), in the 2½ hours after the child settles. Those 2½
+hours used to reach forward into the next put-down, so on a night with a false put-down over an empty bed an
+hour or two before the real bedtime, the real bedtime's movement vouched for the false one. On 2026-10-10
+(staging, both children, corrected by the owner against the timelapse) the stored in-bed times were 100 and
+37 minutes early, and one child's night ended at 20:06, when a parent left the room, with 21 minutes asleep,
+which was then pushed as the night's report. Since #669 the count stops at the next *got into bed* after the
+child settles. A *got into bed* whose neighbouring minutes were both recorded and quiet (one minute of
+movement on its own: an adult reaching in) does not stop it. None of the numbers changed (3 minutes, 2½
+hours, 0.0005), and there is no setting.
+
+**What it changes, stated rather than guessed:**
+- **Measured on two cameras in one house.** Replaying every stored night on both databases with the cut
+  (before the one-minute exception was added): the count fell below 3 for 6 of 51 accepted early put-downs on
+  staging and 3 of 52 on production; no in-bed or asleep time moved earlier and no night changed status. Of
+  the nights the owner had reviewed, three got much closer to the owner's times (errors of 43, 67 and 127
+  minutes became 8, 7 and 5), one got 7 minutes worse, and one got 29 minutes worse (2026-09-20, below),
+  which is why the one-minute exception exists. In principle a night can still change status (the "nobody
+  was in the bed" verdict depends on the asleep time), and the morning wake can move either way when the
+  asleep time moves, because the wake search starts there.
+- **A very still child, then a second put-down with movement around it.** If a parent is at the bed for a
+  couple of minutes shortly after a real bedtime (or the classifier logs the same put-down twice during a
+  stir), and the child lies so still that the bed shows fewer than 3 such minutes before it, the real bedtime
+  is discarded: the asleep time falls back to the first long quiet stretch after the window opens, and the
+  in-bed time to that second event. On the replay a *got into bed* followed an accepted settle within 30
+  minutes on 5 of 51 staging and 2 of 52 production nights. The night that shaped the exception (staging,
+  2026-09-20, one child) settled about 19:04 and had a one-minute parent check at 19:32; without the
+  exception the asleep time moved from 19:04 to 19:33.
+- **The real bedtime's approach still counts for a false earlier one.** The minute or two before the real
+  put-down is logged (a parent carrying the child in) is inside the count. On production, 2026-09-17, one
+  child: a false 18:48 put-down reaches exactly 3 that way and stays the bedtime, 43 minutes early (staging
+  got that night right, because it logged two more *got into bed* that cut earlier). Trimming the approach
+  was tried and rejected: it also zeroes a child who is still stirring when the next put-down is logged.
+- **A night still in progress.** The count is only cut once 2½ hours after the settle have passed; before
+  that, "not enough of the night yet to judge" accepts the put-down, as it always did. So tonight's live
+  figures can show a false early put-down as the bedtime until about 2½ hours after it. Figures worked out
+  later, and the stored night, use the full rule.
+- **Not fixed:** a nap the child was lifted out of without waking (nothing between the nap and bedtime shows
+  they woke), and a quiet evening with nothing to break the stillness over the empty bed, which can still be
+  read as a child asleep from the window's opening. A camera outage between a false put-down and the next
+  put-down still makes the false one believed: an unrecorded stretch is not proof of an empty bed.
+- **Saved nights keep their old answer** on the child's page; the detail view works a night out afresh, so
+  the two can differ until an admin uses **Recompute this night** (README, "Re-working out a night").
+
+**What to do:** nothing, there is no setting for this. If a bedtime looks wrong, correct it in the morning
+review ("Was last night right?"): the reviewed nights are what this change was checked against.
+
 ## The Bed area editor's picture says it couldn't grab a frame, and keeps saying so (`[snapshot] still frame` in the log)
 
 **What you see:** On one camera's **Bed area** editor, *Couldn't grab a frame* every time, including after
