@@ -179,6 +179,13 @@ test('the flag reaches /sleep?nights, /sleep/:date (with and without detail) and
   const hh = (h) => `${String(h % 24).padStart(2, '0')}:00`;
   db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(hh(hNow + 2), hh(hNow + 3), CHILD);
   assert.equal(currentNightDate(CHILD), null, 'precondition: no night in progress, so /sleep/live reads the stored row');
+  // /sleep/live serves a saved row only when it is the child's LAST COMPLETED night (#683); an older one
+  // is not "last night" and the route computes the real last night fresh instead. This fixture's night is
+  // a fixed July date, so move its saved row and its review onto the real last night's date, which keeps
+  // this test about what it is for: the overlay reaching a SAVED row read through /sleep/live.
+  const lastNight = lastCompletedNightDate(CHILD);
+  db.prepare('UPDATE sleep_nights SET night_date = ? WHERE child_id = ? AND night_date = ?').run(lastNight, CHILD, DATE);
+  db.prepare('UPDATE sleep_reviews SET night_date = ? WHERE child_id = ? AND night_date = ?').run(lastNight, CHILD, DATE);
   const live = (await get('/sleep/live')).body;
   assert.equal(live.scope, 'last');
   check(live.night, '/sleep/live');

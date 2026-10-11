@@ -6,8 +6,8 @@ import { normalizePhoto } from '../lib/photo.js';
 import { actorOf } from '../lib/actor.js';
 import { primaryCameraRowFor, clearStalePrimaryPointers } from '../lib/primaryCamera.js';
 import {
-  getStoredNights, computeNight, computeAndStoreNight, currentNightDate, childTracksSleep, sleepInsights,
-  nightIsLocked, storeNightBeforeCorrection, reportableSpanMs, MIN_COVERAGE_FRAC, EMPTY_MIN_COVERAGE_FRAC,
+  getStoredNights, computeNight, computeAndStoreNight, currentNightDate, lastCompletedNightDate,
+  childTracksSleep, sleepInsights, nightIsLocked, storeNightBeforeCorrection, reportableSpanMs, MIN_COVERAGE_FRAC, EMPTY_MIN_COVERAGE_FRAC,
 } from '../lib/sleepAnalysis.js';
 import { startMotionDetector } from '../lib/motionDetector.js';
 import { reconcileClipRing } from '../lib/clipCapture.js';
@@ -208,8 +208,9 @@ router.put('/:id', (req, res) => {
 });
 
 // The night to show on the summary tile: the night IN PROGRESS computed live (capped at "now") if a
-// window is currently open, otherwise the latest stored completed night. `scope` tells the UI which it
-// is so it can say "Tonight · so far" vs "Last night". Computed on demand — cheap, always fresh.
+// window is currently open, otherwise the LAST COMPLETED night (the saved row when it exists, else
+// computed fresh, see below). `scope` tells the UI which it is so it can say "Tonight · so far" vs
+// "Last night". Computed on demand — cheap, always fresh.
 router.get('/:id/sleep/live', (req, res) => {
   const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
@@ -218,10 +219,29 @@ router.get('/:id/sleep/live', (req, res) => {
   if (current) {
     return res.json({ scope: 'tonight', night: computeNight(req.params.id, current) });
   }
-  // Corrections are laid over the stored row — see applyCorrection. A night somebody has told us
-  // the truth about must not keep showing the algorithm's version of it.
-  const nights = applyCorrections(req.params.id, getStoredNights(req.params.id, 1));
-  return res.json({ scope: 'last', night: nights[0] || null });
+  // "Last night" must mean the last COMPLETED night, not "the newest row we happen to have saved" (#683).
+  // The row for the night that just ended is only written by the nightly job, a 30-minute timer that
+  // starts at process boot, so for up to 30 minutes after the window closes (and for as long as the job's
+  // store is refused or skipped: a locked night, a `would_downgrade` refusal) the newest row is the night
+  // BEFORE last. The card then read "Last night · <two nights ago>", and the detail page, which takes its
+  // starting night from this answer, opened on the same stale night.
+  const last = lastCompletedNightDate(req.params.id);
+  const stored = getStoredNights(req.params.id, 1)[0];
+  if (stored && stored.night_date === last) {
+    // The saved row for the last completed night exists: keep serving it, so the card and the morning
+    // push (which reads the same row) keep agreeing. Corrections are laid over the stored row — see
+    // applyCorrection. A night somebody has told us the truth about must not keep showing the
+    // algorithm's version of it.
+    const nights = applyCorrections(req.params.id, [stored]);
+    return res.json({ scope: 'last', night: nights[0] || null });
+  }
+  // No saved row for it yet: compute that night fresh, exactly like the `tonight` branch above and
+  // GET /:id/sleep/:date do. READ-ONLY: nothing is stored here (storing stays the nightly job's and the
+  // Recompute button's business, with their allowDowngrade / lock guards). Corrections are laid over the
+  // fresh night too, so a night a parent has already corrected is not shown as the detector's version. A
+  // fresh `no_data` is returned as it is (the card has wording for it) rather than falling back to an
+  // older night, which is the very bug.
+  return res.json({ scope: 'last', night: applyCorrection(req.params.id, computeNight(req.params.id, last)) });
 });
 
 // Phase 5: does room temperature correlate with this child's sleep across their recent nights? A

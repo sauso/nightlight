@@ -15582,5 +15582,49 @@
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
     "namePattern": "needs nobody_in_bed:false"
+  },
+  {
+    "label": "sleep/live #683: the newest saved row is served even when it is not the last completed night (the stale card)",
+    "file": "backend/src/routes/children.js",
+    "find": "  if (stored && stored.night_date === last) {",
+    "replace": "  if (stored) {",
+    "expect": "killed",
+    "tests": [
+      "sleep-live-last-night.test.js"
+    ],
+    "namePattern": "an older one exists"
+  },
+  {
+    "label": "sleep/live #683: the saved row for the last completed night is ignored and recomputed (card and push could disagree)",
+    "file": "backend/src/routes/children.js",
+    "find": "  if (stored && stored.night_date === last) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": [
+      "sleep-live-last-night.test.js"
+    ],
+    "namePattern": "it is served as it is stored"
+  },
+  {
+    "label": "sleep/live #683: the fresh last night has no correction laid over it",
+    "file": "backend/src/routes/children.js",
+    "find": "night: applyCorrection(req.params.id, computeNight(req.params.id, last)) });",
+    "replace": "night: computeNight(req.params.id, last) });",
+    "expect": "killed",
+    "tests": [
+      "sleep-live-last-night.test.js"
+    ],
+    "namePattern": "the correction is laid over the fresh night"
+  },
+  {
+    "label": "sleep/live #683: the fresh last night is STORED by a read (bypasses the job's lock and downgrade guards)",
+    "file": "backend/src/routes/children.js",
+    "find": "night: applyCorrection(req.params.id, computeNight(req.params.id, last)) });",
+    "replace": "night: applyCorrection(req.params.id, computeAndStoreNight(req.params.id, last)) });",
+    "expect": "killed",
+    "tests": [
+      "sleep-live-last-night.test.js"
+    ],
+    "namePattern": "an older one exists"
   }
 ]

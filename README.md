@@ -745,6 +745,14 @@ measurement**, and (like everything here) never a safety device — see the warn
   happened so far, so a bedtime can be revised later in the evening and the morning wake isn't
   looked for at all until the night is complete. The settled numbers are the ones on the card the
   following day.
+  - **"Last night" is always the last night that has finished.** The saved summary for a night is
+    written by the nightly update, which runs every 30 minutes, so for up to half an hour after the
+    window closes (and for as long as that update is refused or skipped, for example for a night you
+    corrected in the morning review) there is no saved summary for it yet. The card, and the detail
+    page it opens, then show last night **worked out fresh** instead of the night before; once the
+    saved summary exists they show that, so the card keeps agreeing with the morning notification.
+    Reading the card never saves anything. If the night was not watched enough to score it reads "no
+    data" rather than falling back to an older night.
 - **The detail view.** Tap the sleep summary for the full **night timeline**: a to-scale bar of
   asleep / stirring / awake stretches on a real time axis, every wake-up listed with its time
   and length, a **movement outside the bed** list, and a date picker to step back through
