@@ -3,6 +3,7 @@ import { logger } from './logger.js';
 import { notifySleepReports, notifySleepReportUpdates, sleepAlertChannelsConfigured } from './sleepReportAlert.js';
 import { getBedTransitions, TRANSITION } from './bedTransitions.js';
 import { listChildWakeClips } from './recordings.js';
+import { primaryCameraRowFor } from './primaryCamera.js';
 
 // A computed night is "fresh" (worth notifying about) only if its window closed within this long — so a
 // mid-day container restart that re-computes an already-seen night does NOT re-send the report push.
@@ -739,9 +740,19 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // detail view. Both are things where more cameras genuinely means more information, and neither can
   // move a reported time.
   //
-  // `scoreCams` — the ONE camera the night is actually SCORED from: the child's main camera, meaning
-  // the enabled one with the lowest sort_order (the order shown in the UI). Motion, sound and bed
-  // transitions all come from it and nothing else.
+  // `scoreCams` — the ONE camera the night is actually SCORED from: the child's primary camera, chosen
+  // by lib/primaryCamera.js. That is the camera an admin named in the child's settings (#655) while it is
+  // still assigned to this child and enabled; otherwise (and for every child with no choice made, the
+  // default) the enabled one with the lowest sort_order, the order of the Live tiles, ties broken by id
+  // as this query always has. Motion, sound and bed transitions all come from it and nothing else.
+  //
+  // Why it can be named (#655): with sort_order alone, dragging a tile on the Live page silently changed
+  // which camera a stored night came from. ⚠️ This is read on EVERY compute, so changing the primary
+  // re-scores any night that is computed again, not only new ones: the nightly job's re-store of the
+  // last completed night (until ~3h after its window), storeNightBeforeCorrection, the admin Recompute
+  // button, and every fresh read (the detail page, the morning review, /sleep/live). A stored row that is
+  // never re-stored keeps the numbers of the camera it was scored from; sleep_nights does not record
+  // which camera that was (`analysis_camera_*` below is on the computed result only).
   //
   // Why one and not all (owner's call, 2026-08-29): the old code ORed every camera's timeline together,
   // so a minute counted as active if ANY camera saw something. That is not the conservative choice it
@@ -755,9 +766,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // NB this also fixes a quieter bug: the old query filtered nothing at all, so a DISABLED camera's
   // historical samples were still being merged into the analysis.
   const cams = db.prepare('SELECT id FROM cameras WHERE child_id = ?').all(childId).map((c) => c.id);
-  const mainCam = db
-    .prepare('SELECT id, name FROM cameras WHERE child_id = ? AND disabled = 0 ORDER BY sort_order, id LIMIT 1')
-    .get(childId);
+  // tieBreak 'id': this query's own tie-break before #655, kept so a child with no primary is unchanged.
+  const mainCam = primaryCameraRowFor(childId, { tieBreak: 'id' });
   const scoreCams = mainCam ? [mainCam.id] : [];
   // Room climate over the window so far — present on every non-off status (independent of whether we
   // detected sleep). The bigger per-5-min series only when a timeline is asked for (the detail view).

@@ -120,7 +120,9 @@ router.get('/', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
   try {
     const settings = db.prepare('SELECT * FROM settings WHERE id = ?').get('app') || {};
     const cameras = db.prepare('SELECT * FROM cameras ORDER BY sort_order, created_at').all();
-    const children = db.prepare('SELECT id, name, birthday, color, created_at FROM children').all();
+    // primary_camera_id (#655): which camera a child's sleep is scored from is the first thing to check when
+    // a night looks wrong, and NULL (automatic: first enabled camera in sort_order) is a meaningful answer.
+    const children = db.prepare('SELECT id, name, birthday, color, created_at, primary_camera_id FROM children').all();
     const userRows = db.prepare('SELECT role FROM users').all();
 
     const camerasWithStatus = await Promise.all(

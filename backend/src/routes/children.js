@@ -4,6 +4,7 @@ import db from '../db.js';
 import { requireAuth, requireAdmin, isAdminRequest } from '../middleware/auth.js';
 import { normalizePhoto } from '../lib/photo.js';
 import { actorOf } from '../lib/actor.js';
+import { primaryCameraRowFor } from '../lib/primaryCamera.js';
 import {
   getStoredNights, computeNight, computeAndStoreNight, currentNightDate, childTracksSleep, sleepInsights,
   nightIsLocked, storeNightBeforeCorrection, reportableSpanMs, MIN_COVERAGE_FRAC, EMPTY_MIN_COVERAGE_FRAC,
@@ -25,12 +26,25 @@ const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 // client echoes back as "what you showed me"; times a person TYPES arrive as wall-clock 'HH:MM'.
 const UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
+// `primary_camera` (#655, ADDED to the shape; every existing key is unchanged): the camera this child's
+// sleep is measured from RIGHT NOW, resolved by the same function scoring uses (lib/primaryCamera.js), or
+// null when the child has no enabled camera. Resolved here rather than in the browser so the UI never
+// re-implements the rule: the stored `primary_camera_id` alone does not say it (it may be NULL = automatic,
+// or name a camera since turned off or moved), and GET /cameras sorts by `sort_order, created_at`, a third
+// tie-break that would disagree with scoring's `sort_order, id` on a tie.
 function withCameras(child) {
   const cameras = db
     .prepare('SELECT id, name, mediamtx_path FROM cameras WHERE child_id = ?')
     .all(child.id);
-  return { ...child, cameras };
+  const primary = primaryCameraRowFor(child.id, { tieBreak: 'id' });
+  return { ...child, cameras, primary_camera: primary ? { id: primary.id, name: primary.name } : null };
 }
+
+// `primary_camera_id` as sent: `undefined` = not sent (keep the stored one), `null` or `''` = automatic
+// (the edit form's "Automatic" option has the value ''), a string = a camera id. Anything else is a 400
+// rather than reaching SQLite as an unbindable value, which would be a 500 whose body Cloudflare strips.
+const PRIMARY_NOT_ID = 'The sleep camera must be a camera id, or empty for automatic';
+const primaryNotId = (v) => v !== undefined && v !== null && typeof v !== 'string';
 
 // A child's sleep-tracking state or window changed — (re)evaluate the motion activity leg for each of
 // their cameras so it reflects the new setting immediately (rather than waiting up to 5 min for the
@@ -78,6 +92,14 @@ router.post('/', requireAdmin, (req, res) => {
   try { photo = normalizePhoto(req.body?.photo, null); } catch (e) { return res.status(400).json({ error: e.message }); }
   if (sleep_window_start !== undefined && !HHMM.test(sleep_window_start)) return res.status(400).json({ error: 'Bedtime must be a time like 19:00' });
   if (sleep_window_end !== undefined && !HHMM.test(sleep_window_end)) return res.status(400).json({ error: 'Wake time must be a time like 07:00' });
+  // A new child has no cameras yet, so the only valid primary camera is "automatic" (null / '' / not sent),
+  // which is what the column defaults to; it is not written. A camera id is refused rather than ignored:
+  // it can never be this child's camera, and silently dropping it would leave the caller believing it was set.
+  const { primary_camera_id } = req.body || {};
+  if (primaryNotId(primary_camera_id)) return res.status(400).json({ error: PRIMARY_NOT_ID });
+  if (primary_camera_id) {
+    return res.status(400).json({ error: 'A new child has no cameras yet. Assign a camera to them first, then choose it in their settings.' });
+  }
   const id = uuid();
   db.prepare(
     `INSERT INTO children (id, name, birthday, color, photo, track_sleep, sleep_window_start, sleep_window_end)
@@ -104,14 +126,21 @@ router.put('/:id', (req, res) => {
   try { photo = normalizePhoto(req.body?.photo, existing.photo); } catch (e) { return res.status(400).json({ error: e.message }); }
   if (sleep_window_start !== undefined && !HHMM.test(sleep_window_start)) return res.status(400).json({ error: 'Bedtime must be a time like 19:00' });
   if (sleep_window_end !== undefined && !HHMM.test(sleep_window_end)) return res.status(400).json({ error: 'Wake time must be a time like 07:00' });
-  // The three sleep values the UPDATE below will write, computed once so the role gate and the write
-  // cannot disagree about them.
+  const { primary_camera_id } = req.body || {};
+  if (primaryNotId(primary_camera_id)) return res.status(400).json({ error: PRIMARY_NOT_ID });
+  // The four sleep values the UPDATE below will write, computed once so the role gate and the write
+  // cannot disagree about them. '' and null both mean "automatic" and are written as NULL, so a form
+  // re-sending '' for a child with no primary compares equal to the stored NULL.
   const newTrack = track_sleep === undefined ? existing.track_sleep : track_sleep ? 1 : 0;
   const nextStart = sleep_window_start !== undefined ? sleep_window_start : existing.sleep_window_start;
   const nextEnd = sleep_window_end !== undefined ? sleep_window_end : existing.sleep_window_end;
-  // Sleep tracking and the bedtime window are admin-only (owner decision 2026-10-10, #542): a caregiver can
-  // watch and act in the moment but not reconfigure, and turning tracking off stops a child's nights, wake
-  // clips and timelapses being recorded at all. Name, birthday, colour and photo stay open to both roles.
+  const nextPrimary = primary_camera_id !== undefined ? primary_camera_id || null : existing.primary_camera_id;
+  const primaryChanged = nextPrimary !== existing.primary_camera_id;
+  // Sleep tracking, the bedtime window and the primary camera are admin-only (owner decision 2026-10-10,
+  // #542 and #655): a caregiver can watch and act in the moment but not reconfigure, and turning tracking
+  // off stops a child's nights, wake clips and timelapses being recorded at all, while changing the
+  // primary camera changes which camera every re-scored night is measured from. Name, birthday, colour and
+  // photo stay open to both roles.
   // The gate is in the handler, not a requireAdmin, because the same request carries both kinds of field.
   //   1. COMPARE, never test for presence. The SPA's edit form (pages/ChildSettings.jsx) has always re-sent
   //      the whole form, so a page opened before this gate existed sends `track_sleep: true` against a
@@ -126,17 +155,35 @@ router.put('/:id', (req, res) => {
     if (newTrack !== existing.track_sleep) fields.push('track_sleep');
     if (nextStart !== existing.sleep_window_start) fields.push('sleep_window_start');
     if (nextEnd !== existing.sleep_window_end) fields.push('sleep_window_end');
+    if (primaryChanged) fields.push('primary_camera_id');
     if (fields.length > 0) {
       return res.status(403).json({
-        error: 'Only an admin can turn sleep tracking on or off or change the sleep window. Your other changes were not saved.',
+        error: 'Only an admin can turn sleep tracking on or off, change the sleep window or choose the camera '
+          + "a child's sleep is measured from. Your other changes were not saved.",
         reason: 'admin_only_fields',
         fields,
       });
     }
   }
+  // A CHANGED primary must be one of this child's cameras. Only a change is checked, never the stored
+  // value echoed back: the edit form re-sends the whole record, so a primary camera that was turned off,
+  // deleted or moved to another child since it was chosen would otherwise block every later save of
+  // this child, a rename included, until someone noticed and cleared it. A stale stored pointer is
+  // harmless (lib/primaryCamera.js falls back to the sort_order rule).
+  // A turned-off camera of this child IS accepted: the picker lists it, marked "(turned off)", and the
+  // choice takes effect when it is turned back on (until then the resolver falls back).
+  // 400, not 404/500: it is the request that is wrong, and a 5xx body would be stripped by Cloudflare.
+  if (primaryChanged && nextPrimary !== null) {
+    const cam = db.prepare('SELECT id FROM cameras WHERE id = ? AND child_id = ?').get(nextPrimary, req.params.id);
+    if (!cam) {
+      return res.status(400).json({
+        error: "That camera isn't assigned to this child. Assign it to them first, or choose another camera.",
+      });
+    }
+  }
   db.prepare(
     `UPDATE children SET name = ?, birthday = ?, color = ?, photo = ?, track_sleep = ?,
-       sleep_window_start = ?, sleep_window_end = ? WHERE id = ?`
+       sleep_window_start = ?, sleep_window_end = ?, primary_camera_id = ? WHERE id = ?`
   ).run(
     name?.trim() || existing.name,
     birthday !== undefined ? birthday : existing.birthday,
@@ -145,6 +192,7 @@ router.put('/:id', (req, res) => {
     newTrack,
     nextStart,
     nextEnd,
+    nextPrimary,
     req.params.id
   );
   // Turning tracking on/off — or moving the window so it no longer contains "now" — changes whether the

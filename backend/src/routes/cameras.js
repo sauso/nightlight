@@ -44,6 +44,23 @@ function childExists(child_id) {
   return !!db.prepare('SELECT id FROM children WHERE id = ?').get(child_id);
 }
 
+// A camera that leaves a child stops being that child's primary camera (#655). Clears the pointer on
+// every child that names this camera but is not its owner now (so moving it to another child, or
+// unassigning it, clears the old child's choice; the owner's own choice is kept). Run after every write of
+// a camera's child_id, changed or not, which makes it idempotent and also mends a pointer left stale by
+// anything else.
+// Hygiene, not correctness: lib/primaryCamera.js already ignores a pointer to a camera that is not the
+// child's. What it prevents is the camera coming BACK: without this, assigning it to the child again later
+// would silently make it their primary again, long after an admin last saw that choice.
+// Disabling or deleting a camera deliberately does NOT clear it (the resolver falls back, and turning the
+// camera back on revives the choice; a deleted camera's id is never reused).
+function clearStalePrimaryPointers(cameraId) {
+  db.prepare(
+    `UPDATE children SET primary_camera_id = NULL
+      WHERE primary_camera_id = ? AND id IS NOT (SELECT child_id FROM cameras WHERE id = ?)`
+  ).run(cameraId, cameraId);
+}
+
 // App version for the camera report (read once). Best-effort — matches routes/diagnostics.js.
 let appVersion = 'unknown';
 try {
@@ -705,12 +722,13 @@ router.post('/clips/delete', requireAdmin, (req, res) => {
 
 // Persists a custom drag-and-drop order for the Nursery page. Mounted before /:id so
 // Express matches this literal path first, rather than treating "reorder" as an :id.
-// Admin-only (owner decision 2026-10-10, #552). `sort_order` is not only layout: the first enabled camera
-// in it is the ONE a child's sleep is scored from (lib/sleepAnalysis.js, the main-camera query), the one
-// the nightly timelapse is built from (lib/timelapse.js) and the first in the morning review's camera
-// list (lib/sleepReviews.js). A caregiver's drag would therefore reconfigure sleep tracking. The cost: a
-// caregiver can no longer rearrange the tiles, and the order is shared by every viewer anyway (one
-// sort_order per camera, not per person).
+// Admin-only (owner decision 2026-10-10, #552). `sort_order` is not only layout: for a child with no
+// primary camera chosen (children.primary_camera_id NULL, the default; #655), or whose chosen one is
+// turned off or gone, the first enabled camera in it is the ONE that child's sleep is scored from and the
+// nightly timelapse is built from (lib/primaryCamera.js, used by lib/sleepAnalysis.js and lib/timelapse.js).
+// A caregiver's drag would therefore still reconfigure sleep tracking for such a child, which is why this
+// stays admin-only after #655 (reopening it is a follow-up). The cost: a caregiver can no longer rearrange
+// the tiles, and the order is shared by every viewer anyway (one sort_order per camera, not per person).
 router.put('/reorder', requireAdmin, (req, res) => {
   const { order } = req.body || {};
   if (!Array.isArray(order) || order.some((id) => typeof id !== 'string')) {
@@ -1002,6 +1020,9 @@ router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {
     onvifPass,
     req.params.id
   );
+  // The child may have changed (#655): see clearStalePrimaryPointers. Synchronous, straight after the
+  // UPDATE, so no other request can run between the two.
+  clearStalePrimaryPointers(req.params.id);
   // Apply the sub-stream change to the running pipeline (unless the camera is disabled): start/
   // restart its transcoder if a sub-stream is configured, or tear it down if it was cleared.
   if (!existing.disabled) {
@@ -1229,6 +1250,9 @@ router.put('/:id/assign', requireAdmin, asyncHandler(async (req, res) => {
   const { child_id } = req.body || {};
   if (!childExists(child_id)) return res.status(400).json({ error: 'Child not found' });
   db.prepare('UPDATE cameras SET child_id = ? WHERE id = ?').run(child_id || null, req.params.id);
+  // See clearStalePrimaryPointers (#655). Synchronous, straight after the UPDATE, so no other request can
+  // run between the two.
+  clearStalePrimaryPointers(existing.id);
   const updated = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   // Child assignment drives the activity-only sleep-motion leg (motionLegWanted keys off child_id), so
   // (un)assigning may start or stop it. No-op for a camera already covered by the frame-diff alert leg.

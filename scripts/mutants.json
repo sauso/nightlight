@@ -14969,5 +14969,221 @@
     "expect": "killed",
     "tests": ["async-errors.test.js"],
     "namePattern": "delegation, unit level"
+  },
+  {
+    "label": "#655 resolver: a turned-off named primary still counts",
+    "file": "backend/src/lib/primaryCamera.js",
+    "find": "WHERE id = ? AND child_id = ? AND disabled = 0",
+    "replace": "WHERE id = ? AND child_id = ?",
+    "expect": "killed",
+    "tests": ["primary-camera.test.js"],
+    "namePattern": "turned-off primary"
+  },
+  {
+    "label": "#655 resolver: a named primary that is not this child's camera is accepted",
+    "file": "backend/src/lib/primaryCamera.js",
+    "find": "WHERE id = ? AND child_id = ? AND disabled = 0",
+    "replace": "WHERE id = ? AND ? IS NOT NULL AND disabled = 0",
+    "expect": "killed",
+    "tests": ["primary-camera.test.js"],
+    "namePattern": "hostile|moved to another child"
+  },
+  {
+    "label": "#655 resolver: the named primary is ignored (always the sort_order rule)",
+    "file": "backend/src/lib/primaryCamera.js",
+    "find": "if (named) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["primary-camera.test.js"],
+    "namePattern": "named primary wins|THE ISSUE"
+  },
+  {
+    "label": "#655 resolver: the id tie-break is dropped from scoring's ORDER BY",
+    "file": "backend/src/lib/primaryCamera.js",
+    "find": "id: 'ORDER BY sort_order, id',",
+    "replace": "id: 'ORDER BY sort_order',",
+    "expect": "killed",
+    "tests": ["primary-camera.test.js"],
+    "namePattern": "sort_order tie"
+  },
+  {
+    "label": "#655 scoring: breaks a sort_order tie by rowid (the timelapse's) instead of id",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "primaryCameraRowFor(childId, { tieBreak: 'id' })",
+    "replace": "primaryCameraRowFor(childId, { tieBreak: 'rowid' })",
+    "expect": "killed",
+    "tests": ["primary-camera.test.js"],
+    "namePattern": "scoring still breaks it by id"
+  },
+  {
+    "label": "#655 timelapse: breaks a sort_order tie by id (scoring's) instead of rowid",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "primaryCameraRowFor(childId, { tieBreak: 'rowid' })",
+    "replace": "primaryCameraRowFor(childId, { tieBreak: 'id' })",
+    "expect": "killed",
+    "tests": ["timelapse-capture.test.js"],
+    "namePattern": "still broken by rowid"
+  },
+  {
+    "label": "#655 PUT child: an unchanged (echoed) primary is validated too, blocking re-saves of a stale one",
+    "file": "backend/src/routes/children.js",
+    "find": "if (primaryChanged && nextPrimary !== null) {",
+    "replace": "if (nextPrimary !== null) {",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "stored primary was"
+  },
+  {
+    "label": "#655 PUT child: a changed primary is not validated at all",
+    "file": "backend/src/routes/children.js",
+    "find": "if (primaryChanged && nextPrimary !== null) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "hostile|does not exist|CHANGING to a stale"
+  },
+  {
+    "label": "#655 PUT child: the caregiver gate skips the primary camera",
+    "file": "backend/src/routes/children.js",
+    "find": "if (primaryChanged) fields.push('primary_camera_id');",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["children-role-fields.test.js"],
+    "namePattern": "choosing one|switching it|clearing it with"
+  },
+  {
+    "label": "#655 PUT child: '' is not normalised to NULL (a caregiver's '' against a stored NULL reads as a change)",
+    "file": "backend/src/routes/children.js",
+    "find": "primary_camera_id !== undefined ? primary_camera_id || null : existing.primary_camera_id",
+    "replace": "primary_camera_id !== undefined ? primary_camera_id : existing.primary_camera_id",
+    "expect": "killed",
+    "tests": ["children-role-fields.test.js"],
+    "namePattern": "is not a change"
+  },
+  {
+    "label": "#655 PUT/POST child: the type check is dropped (a non-string reaches SQLite)",
+    "file": "backend/src/routes/children.js",
+    "find": "const primaryNotId = (v) => v !== undefined && v !== null && typeof v !== 'string';",
+    "replace": "const primaryNotId = () => false;",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "not a 500"
+  },
+  {
+    "label": "#655 POST child: a camera id on a new child is silently ignored",
+    "file": "backend/src/routes/children.js",
+    "find": "if (primary_camera_id) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "a camera id is a 400 and no child is created"
+  },
+  {
+    "label": "#655 child responses: primary_camera is never filled in",
+    "file": "backend/src/routes/children.js",
+    "find": "primary_camera: primary ? { id: primary.id, name: primary.name } : null",
+    "replace": "primary_camera: null",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "an admin sets it|a chosen camera|NULL primary: the first enabled"
+  },
+  {
+    "label": "#655 cameras: /assign no longer clears the old child's primary pointer",
+    "file": "backend/src/routes/cameras.js",
+    "find": "clearStalePrimaryPointers(existing.id);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "assign to another child clears|unassign\\) clears"
+  },
+  {
+    "label": "#655 cameras: PUT /:id no longer clears the old child's primary pointer",
+    "file": "backend/src/routes/cameras.js",
+    "find": "clearStalePrimaryPointers(req.params.id);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "moving it to another child clears"
+  },
+  {
+    "label": "#655 cameras: the pointer cleanup also clears the camera owner's own choice",
+    "file": "backend/src/routes/cameras.js",
+    "find": "WHERE primary_camera_id = ? AND id IS NOT (SELECT child_id FROM cameras WHERE id = ?)",
+    "replace": "WHERE primary_camera_id = ? AND ? IS NOT NULL",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "to the SAME child keeps it|renaming it keeps"
+  },
+  {
+    "label": "#655 diagnostics: the support bundle drops primary_camera_id",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "created_at, primary_camera_id FROM children",
+    "replace": "created_at FROM children",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "support bundle carries"
+  },
+  {
+    "label": "#655 db.js: the migration only runs where track_sleep is also missing (nested in the older guard)",
+    "file": "backend/src/db.js",
+    "find": "if (!childrenColumns.includes('primary_camera_id')) {",
+    "replace": "if (!childrenColumns.includes('primary_camera_id') && !childrenColumns.includes('track_sleep')) {",
+    "expect": "killed",
+    "tests": ["primary-camera-migration.test.js"],
+    "namePattern": "pre-#655 install"
+  },
+  {
+    "label": "#655 UI: the sleep camera picker stays enabled for a caregiver",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "<select id=\"child-sleep-camera\" value={form.primary_camera_id} disabled={!isAdmin}",
+    "replace": "<select id=\"child-sleep-camera\" value={form.primary_camera_id} disabled={false}",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "sees it disabled"
+  },
+  {
+    "label": "#655 UI: a stale stored camera gets no (unavailable) option, so a save drops it",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "{missingPrimary && (",
+    "replace": "{false && (",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "stale stored camera"
+  },
+  {
+    "label": "#655 UI: a caregiver's save sends primary_camera_id",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "const CAREGIVER_FIELDS = ['name', 'birthday', 'color', 'photo'];",
+    "replace": "const CAREGIVER_FIELDS = ['name', 'birthday', 'color', 'photo', 'primary_camera_id'];",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "leaves it OUT"
+  },
+  {
+    "label": "#655 UI: the picker shows for a one-camera child with no choice made",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "(assignedCams.length >= 2 || !!storedPrimary)",
+    "replace": "(assignedCams.length >= 1 || !!storedPrimary)",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "hidden for a child with one camera"
+  },
+  {
+    "label": "#655 UI: Currently measured from is re-derived from the stored choice instead of the server's answer",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "<>Currently measured from <strong>{kid.primary_camera.name}</strong>.</>",
+    "replace": "<>Currently measured from <strong>{assignedCams.find((c) => c.id === storedPrimary)?.name || kid.primary_camera.name}</strong>.</>",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "names the camera the SERVER resolved"
+  },
+  {
+    "label": "#655 UI: other children's cameras are offered",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "(cameras || []).filter((c) => c.child_id === id)",
+    "replace": "(cameras || [])",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "every camera of this child"
   }
 ]
