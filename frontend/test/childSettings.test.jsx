@@ -334,6 +334,19 @@ describe('★★ the sleep camera picker (#655)', () => {
     expect(line.textContent).toMatch(/The chosen camera is turned off or no longer assigned/);
   });
 
+  test('★ says truthfully which saved nights a change can still reach', async () => {
+    // The first wording said "saved summaries keep their numbers", which is false: last night's summary
+    // is re-scored for ~3h after the wake time, and a review correction or Recompute re-scores a night
+    // (#655 review). Pinned on the parts a reader acts on, not the whole sentence.
+    mount({ kid: { ...KID, primary_camera_id: null, primary_camera: { id: 'cam-1', name: 'Cam one' } }, cameras: CAMS });
+    await screen.findByLabelText(LABEL);
+    const text = screen.getByText(/Currently measured from/).textContent;
+    expect(text).toMatch(/A night's detail page always\s+uses the new camera\./);
+    expect(text).toMatch(/last night's can still\s+be updated for a few hours after the wake time/);
+    expect(text).toMatch(/a review correction or a Recompute\s+works a night out again/);
+    expect(text).not.toMatch(/saved summaries keep their\s+numbers/);
+  });
+
   test('says so when no camera of the child is on', async () => {
     mount({ kid: { ...KID, primary_camera_id: 'cam-2', primary_camera: null }, cameras: CAMS });
     await screen.findByLabelText(LABEL);

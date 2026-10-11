@@ -64,3 +64,22 @@ export function primaryCameraRowFor(childId, { tieBreak = 'id' } = {}) {
   }
   return fallback.get(childId) || null;
 }
+
+// A camera that leaves a child stops being that child's primary camera. Clears the pointer on every child
+// that names this camera but is not its owner now (so moving it to another child, unassigning it, or
+// deleting the child that owned it clears any other child's choice of it; the owner's own choice is kept).
+// Called after every write of a camera's child_id, changed or not (routes/cameras.js: /assign and PUT
+// /:id; routes/children.js: DELETE /:id), which makes it idempotent and also mends a pointer left stale by
+// anything else.
+// Hygiene, not correctness: primaryCameraRowFor above already ignores a pointer to a camera that is not
+// the child's. What it prevents is the camera coming BACK: without this, assigning it to that child later
+// would silently make it their primary again, long after an admin last saw that choice.
+// Disabling or deleting a CAMERA deliberately does NOT clear it (the resolver falls back, and turning the
+// camera back on revives the choice; a deleted camera's id is a uuid and never reused).
+const clearStaleStmt = db.prepare(
+  `UPDATE children SET primary_camera_id = NULL
+    WHERE primary_camera_id = ? AND id IS NOT (SELECT child_id FROM cameras WHERE id = ?)`
+);
+export function clearStalePrimaryPointers(cameraId) {
+  clearStaleStmt.run(cameraId, cameraId);
+}

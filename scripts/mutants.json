@@ -15072,7 +15072,7 @@
   {
     "label": "#655 POST child: a camera id on a new child is silently ignored",
     "file": "backend/src/routes/children.js",
-    "find": "if (primary_camera_id) {",
+    "find": "if (requestedPrimary) {",
     "replace": "if (false) {",
     "expect": "killed",
     "tests": ["children-primary-camera.test.js"],
@@ -15107,7 +15107,7 @@
   },
   {
     "label": "#655 cameras: the pointer cleanup also clears the camera owner's own choice",
-    "file": "backend/src/routes/cameras.js",
+    "file": "backend/src/lib/primaryCamera.js",
     "find": "WHERE primary_camera_id = ? AND id IS NOT (SELECT child_id FROM cameras WHERE id = ?)",
     "replace": "WHERE primary_camera_id = ? AND ? IS NOT NULL",
     "expect": "killed",
@@ -15185,5 +15185,50 @@
     "expect": "killed",
     "tests": ["childSettings.test.jsx"],
     "namePattern": "every camera of this child"
+  },
+  {
+    "label": "#655 POST child: the POST type check is deleted (false and 0 create the child as automatic)",
+    "file": "backend/src/routes/children.js",
+    "find": "if (primaryNotId(requestedPrimary)) return res.status(400).json({ error: PRIMARY_NOT_ID });",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "is a 400 saying so"
+  },
+  {
+    "label": "#655 child responses: primary_camera breaks a sort_order tie by rowid, not scoring's id",
+    "file": "backend/src/routes/children.js",
+    "find": "const primary = primaryCameraRowFor(child.id, { tieBreak: 'id' });",
+    "replace": "const primary = primaryCameraRowFor(child.id, { tieBreak: 'rowid' });",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "names the camera SCORING would use"
+  },
+  {
+    "label": "#655 db.js: the migration guard is always true (an already-migrated install fails to boot)",
+    "file": "backend/src/db.js",
+    "find": "if (!childrenColumns.includes('primary_camera_id')) {",
+    "replace": "if (true) {",
+    "expect": "killed",
+    "tests": ["primary-camera-migration.test.js"],
+    "namePattern": "ALREADY has the column"
+  },
+  {
+    "label": "#655 DELETE child: another child's stale pointer to its cameras is left behind (and revives on reassignment)",
+    "file": "backend/src/routes/children.js",
+    "find": "for (const camId of affectedCameraIds) clearStalePrimaryPointers(camId);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["children-primary-camera.test.js"],
+    "namePattern": "does not revive on reassignment"
+  },
+  {
+    "label": "#655 UI: the copy drops last night's re-score (back to 'saved summaries keep their numbers')",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "be updated for a few hours after the wake time, and a review correction or a Recompute",
+    "replace": "keep their numbers, and a review correction or a Recompute",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "says truthfully which saved nights"
   }
 ]

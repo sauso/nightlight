@@ -27,6 +27,7 @@ const { default: db } = await import('../src/db.js');
 const { default: childrenRouter } = await import('../src/routes/children.js');
 const { default: camerasRouter } = await import('../src/routes/cameras.js');
 const { default: diagnosticsRouter } = await import('../src/routes/diagnostics.js');
+const { computeNight } = await import('../src/lib/sleepAnalysis.js');
 
 const KID = 'kid-pc';
 const OTHER = 'kid-other';
@@ -168,10 +169,19 @@ describe('POST /api/children — a new child has no cameras, so only automatic',
     assert.equal(count(), before);
   });
 
-  test('a non-string is a 400', async () => {
-    const res = await post({ name: 'New child', primary_camera_id: 7 });
-    assert.equal(res.status, 400);
-  });
+  // `false` and `0` matter most: they are falsy, so only the type check stands between them and a 201
+  // that reads them as "automatic". A truthy non-string (7) is also caught by the camera-id refusal,
+  // which is why the message is asserted, not only the status.
+  for (const value of [7, false, 0]) {
+    test(`a non-string (${JSON.stringify(value)}) is a 400 saying so, and no child is created`, async () => {
+      const count = () => db.prepare('SELECT COUNT(*) AS c FROM children').get().c;
+      const before = count();
+      const res = await post({ name: 'New child', primary_camera_id: value });
+      assert.equal(res.status, 400, JSON.stringify(res.body));
+      assert.deepEqual(res.body, { error: 'The sleep camera must be a camera id, or empty for automatic' });
+      assert.equal(count(), before);
+    });
+  }
 
   for (const value of ['', null, undefined]) {
     test(`${JSON.stringify(value)} creates the child with no primary`, async () => {
@@ -201,6 +211,17 @@ describe('GET /api/children — `primary_camera` is the camera the night is meas
 
   test('no enabled camera: null', async () => {
     assert.equal((await get()).primary_camera, null);
+  });
+
+  test('★ a sort_order tie: names the camera SCORING would use (tie broken by id, not insert order)', async () => {
+    // Inserted z first, so rowid order (z, a) disagrees with id order (a, z). Both sort ahead of the
+    // fixture's cameras. The answer is checked against computeNight itself, not against a constant, so
+    // the response and the score cannot drift apart.
+    makeCamera(db, { id: 'cam-z', name: 'Zed', childId: KID, extra: { sort_order: -1 } });
+    makeCamera(db, { id: 'cam-a', name: 'Ay', childId: KID, extra: { sort_order: -1 } });
+    const scoredFrom = computeNight(KID, '2026-07-01').analysis_camera_id;
+    assert.equal(scoredFrom, 'cam-a');
+    assert.deepEqual((await get()).primary_camera, { id: 'cam-a', name: 'Ay' });
   });
 
   test('every key a client already reads is still there (the shape is only ADDED to)', async () => {
@@ -253,6 +274,28 @@ describe('a camera that leaves the child stops being its primary (camera routes)
     setStored('cam-1');
     assert.equal((await assign('cam-2', OTHER)).status, 200);
     assert.equal(row().primary_camera_id, 'cam-1');
+  });
+});
+
+describe('deleting a child: its cameras are unassigned, and no other child keeps naming one', () => {
+  const del = () => call(`${kids.url}/api/children/${KID}`, { method: 'DELETE', token: adminToken });
+  const assign = (camId, child_id) => call(`${cams.url}/api/cameras/${camId}/assign`, { method: 'PUT', token: adminToken, body: { child_id } });
+
+  test('★★ hostile: another child\'s stale pointer to a deleted child\'s camera does not revive on reassignment', async () => {
+    // Written straight to the DB: OTHER names KID's camera, which no route would allow. Without the cleanup
+    // in DELETE, the camera is unassigned with the pointer left in place, and assigning it to OTHER later
+    // keeps the pointer (the camera routes keep the OWNER's choice), silently making it OTHER's primary.
+    setStored('cam-1', OTHER);
+    assert.equal((await del()).status, 204);
+    assert.equal(row(OTHER).primary_camera_id, null, 'the stale pointer survived the delete');
+    assert.equal((await assign('cam-1', OTHER)).status, 200);
+    assert.equal(row(OTHER).primary_camera_id, null, 'the stale choice revived');
+  });
+
+  test('the control: another child\'s choice of its OWN camera is untouched', async () => {
+    setStored('cam-theirs', OTHER);
+    assert.equal((await del()).status, 204);
+    assert.equal(row(OTHER).primary_camera_id, 'cam-theirs');
   });
 });
 

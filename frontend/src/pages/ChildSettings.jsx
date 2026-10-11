@@ -262,8 +262,13 @@ export default function ChildSettings() {
                         {storedPrimary && kid?.primary_camera?.id !== storedPrimary && (
                           <> The chosen camera is turned off or no longer assigned, so the automatic choice is used until it is back.</>
                         )}
-                        {' '}A change is used from the next time a night is worked out: saved summaries keep their
-                        numbers, while a night's detail page uses the new camera.
+                        {/* Same facts as README "What a change affects". NOT "saved summaries keep their numbers":
+                            last night's summary is re-scored for ~3h after the wake time, and a review correction
+                            or an admin's Recompute re-scores a night (#655 review). */}
+                        {' '}A change applies whenever a night is next worked out. A night's detail page always
+                        uses the new camera. A saved summary stays as saved, except that last night's can still
+                        be updated for a few hours after the wake time, and a review correction or a Recompute
+                        works a night out again.
                       </div>
                     </div>
                   )}

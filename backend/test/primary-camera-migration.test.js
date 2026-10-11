@@ -55,3 +55,30 @@ test('★ a pre-#655 install (track_sleep present, no primary_camera_id) gains t
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('★ an install that ALREADY has the column boots again, and keeps every stored choice', () => {
+  // Every restart after the first one. A guard that is missing or always true re-runs the ALTER, which
+  // SQLite refuses ("duplicate column name"), so the app would not start. A fresh database (every other
+  // test file) never meets this case: there the column is always missing at boot.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-test-pcmig2-'));
+  try {
+    runInFreshProcess(
+      dir,
+      `const { default: db } = await import(${JSON.stringify(DB_JS_URL)});
+       db.prepare("INSERT INTO children (id, name, primary_camera_id) VALUES ('kid-chosen', 'A child', 'cam-x')").run();
+       db.close();`
+    );
+
+    const out = runInFreshProcess(
+      dir,
+      `const { default: db } = await import(${JSON.stringify(DB_JS_URL)});
+       const kid = db.prepare("SELECT primary_camera_id FROM children WHERE id = 'kid-chosen'").get();
+       console.log(JSON.stringify(kid));
+       db.close();`
+    );
+
+    assert.deepEqual(JSON.parse(out.trim()), { primary_camera_id: 'cam-x' });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

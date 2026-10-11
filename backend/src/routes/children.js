@@ -4,7 +4,7 @@ import db from '../db.js';
 import { requireAuth, requireAdmin, isAdminRequest } from '../middleware/auth.js';
 import { normalizePhoto } from '../lib/photo.js';
 import { actorOf } from '../lib/actor.js';
-import { primaryCameraRowFor } from '../lib/primaryCamera.js';
+import { primaryCameraRowFor, clearStalePrimaryPointers } from '../lib/primaryCamera.js';
 import {
   getStoredNights, computeNight, computeAndStoreNight, currentNightDate, childTracksSleep, sleepInsights,
   nightIsLocked, storeNightBeforeCorrection, reportableSpanMs, MIN_COVERAGE_FRAC, EMPTY_MIN_COVERAGE_FRAC,
@@ -95,9 +95,11 @@ router.post('/', requireAdmin, (req, res) => {
   // A new child has no cameras yet, so the only valid primary camera is "automatic" (null / '' / not sent),
   // which is what the column defaults to; it is not written. A camera id is refused rather than ignored:
   // it can never be this child's camera, and silently dropping it would leave the caller believing it was set.
-  const { primary_camera_id } = req.body || {};
-  if (primaryNotId(primary_camera_id)) return res.status(400).json({ error: PRIMARY_NOT_ID });
-  if (primary_camera_id) {
+  // The type check comes FIRST and is not redundant with the truthiness check below: `false` and `0` are
+  // falsy, so without it they would create the child as if "automatic" had been sent.
+  const { primary_camera_id: requestedPrimary } = req.body || {};
+  if (primaryNotId(requestedPrimary)) return res.status(400).json({ error: PRIMARY_NOT_ID });
+  if (requestedPrimary) {
     return res.status(400).json({ error: 'A new child has no cameras yet. Assign a camera to them first, then choose it in their settings.' });
   }
   const id = uuid();
@@ -661,6 +663,10 @@ router.delete('/:id', requireAdmin, (req, res) => {
   // wake-only reason is gone" should take effect immediately, same as reconcileChildLegs does elsewhere.
   const affectedCameraIds = db.prepare('SELECT id FROM cameras WHERE child_id = ?').all(id).map((r) => r.id);
   db.prepare('UPDATE cameras SET child_id = NULL WHERE child_id = ?').run(id);
+  // These cameras now belong to nobody, so no OTHER child may keep naming one as its primary camera (#655):
+  // such a pointer could only be stale, and it would silently revive if the camera were later assigned to
+  // that child. Same helper as the camera routes. (This child's own pointer goes with its row below.)
+  for (const camId of affectedCameraIds) clearStalePrimaryPointers(camId);
   for (const camId of affectedCameraIds) {
     const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(camId);
     if (cam) reconcileClipRing(cam); // no `else` needed -- a stale id just has nothing to reconcile
