@@ -17,8 +17,11 @@ import { logger } from '../lib/logger.js';
 //     logged here and never sent. A SqliteError message names tables and columns and a stack names source
 //     paths; neither belongs in a response to a caller who may be unauthenticated.
 //
-// Errors are never swallowed: every 5xx, and every 4xx that did not come with a client-safe message, is
-// logged.
+// WHAT IS LOGGED: every 5xx, with its stack. NOT an error that already carries a 4xx status: those are the
+// caller's doing, and an unauthenticated caller can make as many as it likes (a malformed percent escape in
+// any `/:id` URL is a URIError 400; every sendFile miss is a 404 with an ENOENT stack). Logging them would let
+// anyone fill the 1000-line in-app log buffer with attacker-chosen text and evict the lines an operator needs.
+// (The foreign-key 409 is logged, as one short line without a stack: only a signed-in admin reaches it.)
 
 const GENERIC_500 = 'Something went wrong on the server. Check the Nightlight logs for details.';
 
@@ -37,15 +40,20 @@ const FOREIGN_KEY = 'SQLITE_CONSTRAINT_FOREIGNKEY';
 const FOREIGN_KEY_MESSAGE =
   'That refers to something that no longer exists (it may have been deleted in another tab). Reload the page and try again.';
 
-// A 4xx the error asked for, or 0. 401 and 403 are excluded on purpose: the web UI treats them as "your
-// session ended" / "you may not", so a library error that happens to carry the HTTP status of ITS upstream
-// (a 401 from a push provider, say) must not sign the user out of Nightlight. Auth responses are only ever
-// produced by middleware/auth.js.
+// A 4xx the error asked for, or 0.
+//   - 401 is NEVER honoured: frontend/src/lib/api.js clears the session token and redirects to the login page
+//     on ANY 401, so a library error that happens to carry the HTTP status of ITS upstream (a 401 from a push
+//     provider, say) would sign the user out of Nightlight. A 401 is only ever produced by middleware/auth.js.
+//   - 403 is honoured only for an http-errors style error (`expose === true`), which is what `send` (behind
+//     res.sendFile) throws for a denied dotfile or a `..` path, and answered its own 403 before this handler
+//     existed. The UI does not sign anyone out on a 403, but a bare `{ status: 403 }` from some other library
+//     says nothing about THIS request, so it stays a 500.
+//   - Everything else in 400-499 (404 for a missing file, body-parser's 400 and 413, ...) is honoured.
 function requestedClientStatus(err) {
   for (const candidate of [err?.status, err?.statusCode]) {
-    if (Number.isInteger(candidate) && candidate >= 400 && candidate <= 499 && candidate !== 401 && candidate !== 403) {
-      return candidate;
-    }
+    if (!Number.isInteger(candidate) || candidate < 400 || candidate > 499 || candidate === 401) continue;
+    if (candidate === 403 && err.expose !== true) continue;
+    return candidate;
   }
   return 0;
 }
@@ -72,23 +80,24 @@ export function errorHandler(err, req, res, next) {
     // there is nothing to close, so just record that something went wrong AFTER the reply (before this
     // existed that case was an unhandled rejection that was logged and ignored; destroying a finished
     // keep-alive socket over it would be a new, worse behaviour).
-    logger.error(`[http] ${where}: error after the response was started: ${describe(err)}`);
+    // (Not logged if it is a 4xx the caller caused; see "WHAT IS LOGGED" above.)
+    if (!requestedClientStatus(err)) logger.error(`[http] ${where}: error after the response was started: ${describe(err)}`);
     if (!res.writableEnded) return next(err);
     return undefined;
   }
 
   if (err?.code === FOREIGN_KEY) {
-    logger.warn(`[http] ${where}: foreign key failed (answered 409): ${describe(err)}`);
+    // The message only, no stack: it is SQLite's fixed text, and this is a stale-tab event, not a bug.
+    logger.warn(`[http] ${where}: foreign key failed (answered 409): ${err.message}`);
     return res.status(409).json({ error: FOREIGN_KEY_MESSAGE });
   }
 
   const clientStatus = requestedClientStatus(err);
   if (clientStatus) {
-    // Only `expose === true` (http-errors / body-parser's "safe to show a client" flag) lets the message out.
-    // A bare `{ status: 400 }` from some other library gets the generic text for its status, and is logged
-    // so it is not invisible.
+    // Only `expose === true` (http-errors / body-parser's "safe to show a client" flag) lets the message out,
+    // capped at 200 characters. A bare `{ status: 400 }` from some other library gets the generic text for
+    // its status. NOT logged either way (see "WHAT IS LOGGED" above).
     const exposable = err.expose === true && typeof err.message === 'string' && err.message;
-    if (!exposable) logger.warn(`[http] ${where}: answered ${clientStatus} from an error that carried that status: ${describe(err)}`);
     const message = exposable ? err.message.slice(0, 200) : (GENERIC_4XX[clientStatus] || GENERIC_4XX[400]);
     return res.status(clientStatus).json({ error: message });
   }

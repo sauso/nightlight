@@ -155,15 +155,20 @@ page and only a 4xx message reaches the person:
   a 4xx *before* any write (`PUT /api/cameras/:id` answers 400 `Child not found` for a deleted child,
   like `/assign`). The safety nets behind that: a SQLite foreign-key failure (typically a stale tab
   saving a reference to something another tab deleted) is a 409; an error that carries its own 4xx
-  `status`/`statusCode` keeps it (malformed JSON is 400, an oversized body 413) and its message is shown
-  only when the error is marked `expose: true` (the `http-errors` / body-parser convention), otherwise a
-  generic message for that status is used. A 401 or 403 on a thrown error is **not** honoured (the web UI
-  reads those as "signed out" / "not allowed", and a library error can carry its upstream's status); those
-  come only from `middleware/auth.js`.
+  `status`/`statusCode` keeps it (malformed JSON is 400, an oversized body 413, a missing file from
+  `res.sendFile` 404) and its message is shown only when the error is marked `expose: true` (the
+  `http-errors` / body-parser / `send` convention), capped at 200 characters; otherwise a generic message
+  for that status is used. Two exceptions: a **401** on a thrown error is never honoured (the web UI signs
+  the user out on any 401, and a library error can carry its upstream's status), so 401 comes only from
+  `middleware/auth.js`; and a **403** is honoured only when the error is `expose: true`, which is what
+  `res.sendFile` throws for a denied dotfile or a `..` path (a bare `{ status: 403 }` from some other
+  library stays a 500).
 - **5xx: a server bug.** The response is `500` with a generic message. The real error (message and stack)
   is written to the log with the method and path (never the query string, which can hold a media token) and
   is never sent to the client, because a SQLite message names tables and columns and a stack names source
-  files.
+  files. Errors that already carry a 4xx status are the opposite: **not logged** at all, since anyone,
+  signed in or not, can cause them (a malformed `%` escape in a URL, a missing file) and they would fill the
+  1000-line in-app log with caller-chosen text.
 - If the response has already started streaming when the error happens, Express's default handler closes
   the connection so the client sees a failure rather than a truncated body that looks complete. If the
   reply already finished, the error is only logged.

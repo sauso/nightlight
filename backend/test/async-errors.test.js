@@ -29,6 +29,7 @@ import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import express from 'express';
@@ -53,6 +54,12 @@ const listen = (app) => new Promise((resolve) => {
 const closeServer = (s) => new Promise((resolve) => { s.closeAllConnections?.(); s.close(resolve); });
 const logText = () => logger.getRecent().join('\n');
 
+// A directory holding a dot-folder with a file in it, for the res.sendFile cases below.
+const SENDFILE_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'nl-sendfile-'));
+fs.mkdirSync(path.join(SENDFILE_ROOT, '.hidden'));
+fs.writeFileSync(path.join(SENDFILE_ROOT, '.hidden', 'secret.txt'), 'x');
+after(() => fs.rmSync(SENDFILE_ROOT, { recursive: true, force: true }));
+
 // Top level, so it runs after EVERY suite below: the class guard imports every router, and some of them
 // touch the database as they load.
 after(() => {
@@ -70,6 +77,20 @@ describe('asyncHandler', () => {
     h({}, {}, (e) => calls.push(e));
     await new Promise((r) => setImmediate(r));
     assert.deepEqual(calls, [boom]);
+  });
+
+  test('a rejection or throw with a FALSY value reaches next as a real Error (next(undefined) means "carry on" in Express)', async () => {
+    const calls = [];
+    for (const v of [undefined, null, 0, '', false]) {
+      asyncHandler(() => Promise.reject(v))({}, {}, (e) => calls.push(e));
+      asyncHandler(() => { throw v; })({}, {}, (e) => calls.push(e));
+    }
+    await new Promise((r) => setImmediate(r));
+    assert.equal(calls.length, 10);
+    for (const e of calls) {
+      assert.ok(e instanceof Error);
+      assert.equal(e.message, 'Handler rejected without a value');
+    }
   });
 
   test('a synchronous throw from the handler calls next(err) too', () => {
@@ -133,7 +154,20 @@ describe('errorHandler over real HTTP', () => {
       throw Object.assign(new Error('Pick a smaller photo.'), { status: 400, expose: true });
     }));
     app.get('/status-401', asyncHandler(async () => { throw Object.assign(new Error(`${MARKER} upstream says 401`), { status: 401 }); }));
+    app.get('/status-401-exposed', asyncHandler(async () => { throw Object.assign(new Error(`${MARKER} 401 exposed`), { status: 401, expose: true }); }));
     app.get('/status-403', asyncHandler(async () => { throw Object.assign(new Error(`${MARKER} upstream says 403`), { statusCode: 403 }); }));
+    app.get('/status-403-exposed', asyncHandler(async () => { throw Object.assign(new Error('Forbidden'), { status: 403, expose: true }); }));
+    app.get('/status-302', asyncHandler(async () => { throw Object.assign(new Error(`${MARKER} redirect-ish`), { status: 302 }); }));
+    app.get('/status-499', asyncHandler(async () => { throw Object.assign(new Error(`${MARKER} edge`), { status: 499 }); }));
+    app.get('/exposed-long', asyncHandler(async () => { throw Object.assign(new Error('x'.repeat(500)), { status: 400, expose: true }); }));
+    app.get('/p/:x', (req, res) => res.json({ x: req.params.x })); // a malformed %-escape: Express throws a URIError (400)
+    // The real `send` errors, through res.sendFile with no callback (so it calls next(err) itself, as the
+    // app's routes do): a denied dotfile is a 403 and a missing file a 404, both http-errors.
+    app.get('/sendfile/:which', (req, res) => res.sendFile(
+      req.params.which === 'dot' ? '.hidden/secret.txt' : 'nope.txt', { root: SENDFILE_ROOT, dotfiles: 'deny' },
+    ));
+    app.get('/reject-undefined', (req, res, next) => asyncHandler(() => Promise.reject())(req, res, next));
+    app.get('/reject-zero', (req, res, next) => asyncHandler(async () => { throw 0; })(req, res, next)); // eslint-disable-line no-throw-literal
     app.get('/status-503', asyncHandler(async () => { throw Object.assign(new Error(`${MARKER} unavailable`), { status: 503 }); }));
     app.get('/non-error', asyncHandler(async () => { throw `${MARKER} a thrown string`; })); // eslint-disable-line no-throw-literal
     app.get('/query-secret', asyncHandler(async () => { throw new Error('boom for the query-secret route'); }));
@@ -209,21 +243,79 @@ describe('errorHandler over real HTTP', () => {
     const a = await get('/status-418');
     assert.equal(a.status, 418);
     noLeak(a);
+    // 418 has no entry in the generic table and no `expose`: the body must still say SOMETHING.
+    assert.ok(typeof a.body.error === 'string' && a.body.error.length > 0, JSON.stringify(a.body));
     const b = await get('/statusCode-422');
     assert.equal(b.status, 422);
     noLeak(b);
     const c = await get('/exposed-400');
     assert.equal(c.status, 400);
     assert.deepEqual(c.body, { error: 'Pick a smaller photo.' });
-    assert.ok(logText().includes(`${MARKER} teapot`), 'a 4xx that was not client-safe is still logged');
+    const edge = await get('/status-499');
+    assert.equal(edge.status, 499);
   });
 
-  test('a library error carrying 401 or 403 must NOT become a 401/403 (the UI would sign the user out); it is a 500', async () => {
-    for (const p of ['/status-401', '/status-403']) {
+  test('an exposed message is cut at 200 characters', async () => {
+    const res = await get('/exposed-long');
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'x'.repeat(200));
+  });
+
+  test('a status outside 400-499 is not honoured as a client error: a 3xx is a generic 500', async () => {
+    const res = await get('/status-302');
+    assert.equal(res.status, 500);
+    noLeak(res);
+  });
+
+  test('a library error carrying 401 must NEVER become a 401 (api.js signs the user out on any 401), exposed or not; a bare 403 is a 500 too', async () => {
+    for (const p of ['/status-401', '/status-401-exposed', '/status-403']) {
       const res = await get(p);
       assert.equal(res.status, 500, p);
       noLeak(res);
     }
+  });
+
+  test('an http-errors style 403 (expose: true, as `send` throws) keeps its 403 and its message', async () => {
+    const res = await get('/status-403-exposed');
+    assert.equal(res.status, 403);
+    assert.deepEqual(res.body, { error: 'Forbidden' });
+  });
+
+  test('res.sendFile through the handler: a denied dotfile is a 403, a missing file a 404 (as before the handler existed), both JSON', async () => {
+    const denied = await get('/sendfile/dot');
+    assert.equal(denied.status, 403);
+    assert.equal(typeof denied.body.error, 'string');
+    const missing = await get('/sendfile/missing');
+    assert.equal(missing.status, 404);
+    assert.equal(typeof missing.body.error, 'string');
+    noLeak(missing);
+  });
+
+  test('4xx errors the CALLER can cause add NO log lines (a malformed %-escape, a missing file, a dotfile, a thrown 4xx), however many', async () => {
+    const before = logger.getRecent().length;
+    for (let i = 0; i < 5; i++) {
+      assert.equal((await get('/p/%E0%A4%A')).status, 400);
+      assert.equal((await get('/sendfile/missing')).status, 404);
+      assert.equal((await get('/sendfile/dot')).status, 403);
+      assert.equal((await get('/status-418')).status, 418);
+    }
+    assert.equal(logger.getRecent().length, before, 'no log entry for a 4xx; they would let anyone fill the in-app log');
+    assert.ok(!logText().includes('teapot'));
+  });
+
+  test('a 5xx is still logged WITH its stack (the 4xx exemption must not swallow server bugs)', async () => {
+    const before = logger.getRecent().length;
+    await get('/reject');
+    assert.ok(logger.getRecent().length > before);
+  });
+
+  test('a handler rejecting with a falsy value (undefined, 0) is a 500, not Express\'s "carry on" 404 page', async () => {
+    for (const p of ['/reject-undefined', '/reject-zero']) {
+      const res = await get(p);
+      assert.equal(res.status, 500, p);
+      assert.deepEqual(Object.keys(res.body), ['error'], p);
+    }
+    assert.ok(logText().includes('Handler rejected without a value'), 'and it is logged');
   });
 
   test('a 5xx status on the error is still a generic 500', async () => {
@@ -284,6 +376,12 @@ describe('errorHandler over real HTTP', () => {
     delegated = null;
     errorHandler(err, req, { headersSent: true, writableEnded: true }, (e) => { delegated = e; });
     assert.equal(delegated, null);
+    // A 4xx the caller caused is not logged on this path either; a 5xx is.
+    const lines = logger.getRecent().length;
+    errorHandler(Object.assign(new Error('late 4xx'), { status: 400 }), req, { headersSent: true, writableEnded: true }, () => {});
+    assert.equal(logger.getRecent().length, lines);
+    errorHandler(new Error('late 5xx'), req, { headersSent: true, writableEnded: true }, () => {});
+    assert.equal(logger.getRecent().length, lines + 1);
     let sent;
     const res = { headersSent: false, status(c) { sent = { c }; return this; }, json(b) { sent.b = b; return this; } };
     errorHandler(err, req, res, () => assert.fail('must not delegate'));
@@ -342,6 +440,11 @@ describe('issue #544 repros against the real routers', () => {
     res = await callWithin(`${cams.url}/api/cameras/cam-1`, { method: 'PUT', token: adminToken, body: { child_id: null } });
     assert.equal(res.status, 200);
     assert.equal(row().child_id, null);
+    // The empty string unassigns too (the route stores `child_id || null`); it must not be looked up as a child.
+    db.prepare("UPDATE cameras SET child_id = 'kid-1' WHERE id = 'cam-1'").run();
+    res = await callWithin(`${cams.url}/api/cameras/cam-1`, { method: 'PUT', token: adminToken, body: { child_id: '' } });
+    assert.equal(res.status, 200);
+    assert.equal(row().child_id, null);
     db.prepare("UPDATE cameras SET name = 'Original', child_id = 'kid-1' WHERE id = 'cam-1'").run();
   });
 
@@ -367,7 +470,8 @@ describe('issue #544 repros against the real routers', () => {
 
   test('PUT /api/pushover/config with app_token: 5 is a 400, not a hang, and the saved config is untouched', async () => {
     db.prepare("UPDATE settings SET pushover_app_token = 'saved-token' WHERE id = 'app'").run();
-    for (const body of [{ app_token: 5 }, { user_key: { a: 1 } }, { device: 7 }, { app_token: ['x'] }]) {
+    // device uses `?? ''` in the route, so a falsy non-string (0, false) used to throw there just as 7 does.
+    for (const body of [{ app_token: 5 }, { user_key: { a: 1 } }, { device: 7 }, { device: 0 }, { device: false }, { app_token: ['x'] }]) {
       const res = await callWithin(`${pov.url}/api/pushover/config`, { method: 'PUT', token: adminToken, body });
       assert.equal(res.status, 400, JSON.stringify(body));
       assert.match(res.body.error, /must be text/);

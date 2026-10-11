@@ -14816,5 +14816,158 @@
       "snapshot-single-flight.test.js"
     ],
     "namePattern": "both fail"
+  },
+  {
+    "label": "#544 asyncHandler: a rejected async handler is no longer passed to next (the request hangs again)",
+    "file": "backend/src/lib/asyncHandler.js",
+    "find": "Promise.resolve(fn(req, res, next)).catch((e) => next(asError(e)));",
+    "replace": "Promise.resolve(fn(req, res, next));",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "rejected handler calls next"
+  },
+  {
+    "label": "#544 asyncHandler: a synchronous throw is no longer caught",
+    "file": "backend/src/lib/asyncHandler.js",
+    "find": "next(asError(err));",
+    "replace": "throw err;",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "synchronous throw from the handler"
+  },
+  {
+    "label": "#544 asyncHandler: a falsy rejection is passed to next as-is (Express reads it as carry on)",
+    "file": "backend/src/lib/asyncHandler.js",
+    "find": "const asError = (e) => e || new Error('Handler rejected without a value');",
+    "replace": "const asError = (e) => e;",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "FALSY|falsy value"
+  },
+  {
+    "label": "#544 errorHandler: a 500 answers with the error's own message (leaks SqliteError text and the like)",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "return res.status(500).json({ error: GENERIC_500 });",
+    "replace": "return res.status(500).json({ error: String(err && err.message || GENERIC_500) });",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "NONE of the error|OTHER SQLite constraint"
+  },
+  {
+    "label": "#544 errorHandler: the headers-already-sent branch is dropped (a streamed failure gets a second response)",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "if (res.headersSent) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "mid-stream|delegation, unit level"
+  },
+  {
+    "label": "#544 errorHandler: a finished response is delegated too (destroys a completed keep-alive socket)",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "if (!res.writableEnded) return next(err);",
+    "replace": "return next(err);",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "delegation, unit level"
+  },
+  {
+    "label": "#544 errorHandler: a 401 on a thrown error is honoured (the web UI would sign the user out)",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "|| candidate === 401) continue;",
+    "replace": "|| false) continue;",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "NEVER become a 401"
+  },
+  {
+    "label": "#544 errorHandler: a bare (not expose) 403 is honoured",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "if (candidate === 403 && err.expose !== true) continue;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "NEVER become a 401"
+  },
+  {
+    "label": "#544 errorHandler: a 403 is never honoured (res.sendFile's denied dotfile becomes a 500 again)",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "if (candidate === 403 && err.expose !== true) continue;",
+    "replace": "if (candidate === 403) continue;",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "http-errors style 403|res.sendFile through the handler"
+  },
+  {
+    "label": "#544 errorHandler: the expose flag is ignored (any error's own message is sent with its 4xx)",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "err.expose === true && typeof err.message === 'string'",
+    "replace": "typeof err.message === 'string'",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "keeps that status; the message stays generic"
+  },
+  {
+    "label": "#544 errorHandler: an exposed message is no longer cut at 200 characters",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "err.message.slice(0, 200)",
+    "replace": "err.message",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "cut at 200"
+  },
+  {
+    "label": "#544 errorHandler: a status above 499 is honoured as a client error",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "candidate > 499",
+    "replace": "candidate > 599",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "5xx status on the error"
+  },
+  {
+    "label": "#544 errorHandler: a status below 400 is honoured as a client error",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "candidate < 400",
+    "replace": "candidate < 300",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "outside 400-499"
+  },
+  {
+    "label": "#544 errorHandler: a foreign-key failure is no longer a 409",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "if (err?.code === FOREIGN_KEY) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "foreign-key failure"
+  },
+  {
+    "label": "#544 errorHandler: the query string (it can hold a media token) goes to the log",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": ".split('?')[0]",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "query string"
+  },
+  {
+    "label": "#544 errorHandler: a 4xx the caller caused is logged again (anyone can flood the in-app log)",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "const message = exposable ? err.message.slice(0, 200)",
+    "replace": "logger.warn(`[http] ${where}: ${describe(err)}`);\r\n    const message = exposable ? err.message.slice(0, 200)",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "add NO log lines"
+  },
+  {
+    "label": "#544 errorHandler: a 4xx after the response started is logged (the log-skip is only on the ordinary path)",
+    "file": "backend/src/middleware/errorHandler.js",
+    "find": "if (!requestedClientStatus(err)) logger.error(",
+    "replace": "logger.error(",
+    "expect": "killed",
+    "tests": ["async-errors.test.js"],
+    "namePattern": "delegation, unit level"
   }
 ]

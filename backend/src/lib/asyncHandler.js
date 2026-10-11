@@ -7,8 +7,9 @@
 //
 // `asyncHandler(fn)` hands a rejection to `next(err)`, which reaches the error middleware mounted last in
 // index.js (middleware/errorHandler.js) and so ends in a JSON response. EVERY `async` route handler in
-// src/routes must be wrapped; backend/test/async-handler-wrapped.test.js walks the real router stacks and
-// fails for an `async` function registered directly, so a new route cannot quietly bring the hang back.
+// src/routes must be wrapped; the class guard at the bottom of backend/test/async-errors.test.js walks the
+// real router stacks and fails for an `async` function registered directly, so a new route cannot quietly
+// bring the hang back.
 //
 // Calls `fn` SYNCHRONOUSLY (not inside `Promise.resolve().then(...)`) so a handler's timing is exactly what
 // it was before it was wrapped: nothing that answered in the same tick now answers a microtask later.
@@ -19,15 +20,20 @@
 // registered", without relying on the function's name.
 export const WRAPPED = Symbol.for('nightlight.asyncHandler');
 
+// Express treats `next(<falsy>)` as "no error, carry on to the next route", so a handler that rejects with
+// undefined / null / 0 / '' (`Promise.reject()`, `throw undefined`) would fall through to the 404 page with
+// nothing logged: the same silent failure this file exists to remove. Give it a real Error instead.
+const asError = (e) => e || new Error('Handler rejected without a value');
+
 export function asyncHandler(fn) {
   if (typeof fn !== 'function') throw new TypeError('asyncHandler needs a function');
   // Three declared parameters on purpose: Express tells an error handler from a normal one by
   // `fn.length === 4`, and this must never be mistaken for one.
   const wrapped = function asyncHandlerWrapper(req, res, next) {
     try {
-      Promise.resolve(fn(req, res, next)).catch(next);
+      Promise.resolve(fn(req, res, next)).catch((e) => next(asError(e)));
     } catch (err) {
-      next(err);
+      next(asError(err));
     }
   };
   wrapped[WRAPPED] = true;
