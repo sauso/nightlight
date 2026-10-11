@@ -939,6 +939,119 @@ test('?stored=1 says whether the night is locked, beside the saved row it always
   assert.equal((await get(`/sleep/${DATE}?stored=1`)).body.locked, false);
 });
 
+// ================================ "Remove my correction" (the Recompute dialog's unlock) ================================
+// The Recompute dialog's locked branch says "Removing your correction unlocks it" and, until this, had no
+// control that did. The button saves through THIS route with ONLY the six time fields as null (and the flag as
+// false only when the stored review has it). Nothing new on the server: these tests pin the contract that UI
+// depends on, so a change here that made `null` mean "keep", or made a time-only save touch the answers, fails
+// by name. The frontend test (RecomputeNight.test.jsx) pins the body the button sends.
+
+const TIME_COLS = ['true_onset_at', 'true_wake_at', 'true_onset_transition_id', 'true_wake_transition_id',
+  'true_in_bed_at', 'true_in_bed_transition_id'];
+// Exactly what RecomputeNight.removeCorrection sends for a night with no "no one was in the bed" flag.
+const REMOVE_CORRECTION = {
+  true_onset_local: null, true_wake_local: null, true_in_bed_local: null,
+  true_onset_transition_id: null, true_wake_transition_id: null, true_in_bed_transition_id: null,
+};
+const txRows = () => db.prepare('SELECT id, verdict, wrong_reason FROM bed_transitions ORDER BY id').all();
+
+test('★ the six times as null on a corrected, locked night: 200, unlocked, and every answer and the stored night untouched', async () => {
+  // A finished, final stored row with planted figures, so "unchanged" cannot be a recompute that agrees.
+  plantNight(finishedNight({
+    onset_at: sql(at(19, 10)), wake_at: sql(at(6, 10, 1)), asleep_minutes: 600, awake_minutes: 30, unknown_minutes: 7,
+  }));
+  const a = layTransition(TRANSITION.INTO_BED, sql(at(19, 1)));
+  const b = layTransition(TRANSITION.OUT_OF_BED, sql(at(19, 2)));
+  // Every kind of answer, from the CAREGIVER, so "who answered" has a name that must survive the removal.
+  const saved = await put({
+    true_onset_local: '19:12', true_wake_local: '06:10', true_in_bed_local: '19:05',
+    note: 'a cold', verdicts: { [a]: 'correct', [b]: 'wrong' }, reasons: { [b]: 'adult' },
+    computed_onset_at: sql(at(19, 10)), computed_wake_at: sql(at(6, 10, 1)),
+  }, { token: caregiverToken });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.equal((await put({ dismissed: true }, { token: caregiverToken })).status, 200);
+  assert.equal(nightIsLocked(CHILD, DATE), true, 'precondition: corrected, so locked');
+
+  const reviewBefore = reviewRow();
+  const nightBefore = storedRow();
+  const txBefore = txRows();
+  // Preconditions that make "unchanged" mean something: every answer is really there to be lost.
+  assert.equal(reviewBefore.note, 'a cold');
+  assert.equal(reviewBefore.dismissed, 1);
+  assert.equal(reviewBefore.answered_by_username, 'nanny');
+  assert.ok(reviewBefore.computed_onset_at && reviewBefore.computed_wake_at);
+  for (const c of TIME_COLS.filter((c) => !/transition_id/.test(c))) assert.ok(reviewBefore[c], `${c} was set`);
+  assert.deepEqual(txBefore.map((t) => [t.verdict, t.wrong_reason]), [['correct', null], ['wrong', 'adult']]);
+
+  // The admin removes it. The route has no admin gate (any signed-in user may save a review), and the
+  // caregiver's own request below proves it stays that way.
+  const res = await put(REMOVE_CORRECTION);
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(nightIsLocked(CHILD, DATE), false, 'the lock is lifted');
+
+  const after = reviewRow();
+  for (const c of TIME_COLS) assert.equal(after[c], null, `${c} was cleared`);
+  // Every OTHER column, taken from the schema so a future column is held to it too (reviewed_at is the
+  // save's own timestamp).
+  for (const c of reviewCols().map((col) => col.name).filter((n) => !TIME_COLS.includes(n) && n !== 'reviewed_at')) {
+    assert.deepEqual(after[c], reviewBefore[c], `${c} must be exactly as it was`);
+  }
+  assert.deepEqual(storedRow(), nightBefore, 'the detector\'s stored night was not touched or re-scored');
+  assert.deepEqual(txRows(), txBefore, 'the event answers and reasons are kept');
+  assert.equal(reviewCorrectsNight(after), false, 'the overlay agrees: nothing corrects the night now');
+});
+
+test('★ clearing only the in-bed time leaves a night with an asleep and a wake time LOCKED (the owner\'s case); removing all three unlocks it', async () => {
+  plantNight(finishedNight({ onset_at: sql(at(19, 10)), wake_at: sql(at(6, 10, 1)) }));
+  assert.equal((await put({ true_onset_local: '19:12', true_wake_local: '06:10', true_in_bed_local: '19:05' })).status, 200);
+
+  // What the review screen sends when only "In bed" is emptied: the asleep and wake inputs always carry a value.
+  const onlyInBed = await put({ true_in_bed_local: null, true_in_bed_transition_id: null });
+  assert.equal(onlyInBed.status, 200);
+  assert.equal(reviewRow().true_in_bed_at, null);
+  assert.equal(nightIsLocked(CHILD, DATE), true, 'still locked by the asleep and wake times, which is why a control was missing');
+
+  assert.equal((await put(REMOVE_CORRECTION)).status, 200);
+  assert.equal(nightIsLocked(CHILD, DATE), false);
+  assert.equal(reviewRow().true_onset_at, null);
+  assert.equal(reviewRow().true_wake_at, null);
+});
+
+test('★ a night corrected only by "no one was in the bed" needs nobody_in_bed:false: the six nulls alone leave it locked', async () => {
+  plantNight(finishedNight({ onset_at: sql(at(19, 10)), wake_at: sql(at(6, 10, 1)), asleep_minutes: 600 }));
+  assert.equal((await put({ nobody_in_bed: true, note: 'bed was empty' }, { token: caregiverToken })).status, 200);
+  assert.equal(nightIsLocked(CHILD, DATE), true, 'precondition: the flag locks');
+  const nightBefore = storedRow();
+
+  // Why the button sends the flag: the times are already null, so nothing here clears it.
+  assert.equal((await put(REMOVE_CORRECTION)).status, 200);
+  assert.equal(reviewRow().nobody_in_bed, 1, 'the flag survives a times-only removal');
+  assert.equal(nightIsLocked(CHILD, DATE), true);
+
+  const res = await put({ ...REMOVE_CORRECTION, nobody_in_bed: false });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(reviewRow().nobody_in_bed, 0);
+  assert.equal(nightIsLocked(CHILD, DATE), false, 'unlocked');
+  for (const c of TIME_COLS) assert.equal(reviewRow()[c], null, `${c} stays null: a flag and times are exclusive`);
+  assert.equal(reviewRow().note, 'bed was empty', 'the note is kept');
+  assert.deepEqual(storedRow(), nightBefore, 'the stored night is untouched');
+});
+
+test('the flag, sent as false, is itself an answer (resets a dismissal, names the sender): so the button sends it ONLY when it is set', async () => {
+  // Pins what RecomputeNight.removeCorrection's comment claims, so a server change that stops counting it
+  // fails here and the frontend comment can be updated. Neither effect is wanted for a times-only removal, and
+  // the first test above proves a times-only removal has neither.
+  plantNight(finishedNight({ onset_at: sql(at(19, 10)), wake_at: sql(at(6, 10, 1)) }));
+  assert.equal((await put({ nobody_in_bed: true }, { token: caregiverToken })).status, 200);
+  assert.equal((await put({ dismissed: true }, { token: caregiverToken })).status, 200);
+  assert.equal(reviewRow().dismissed, 1);
+  assert.equal(reviewRow().answered_by_username, 'nanny');
+
+  assert.equal((await put({ ...REMOVE_CORRECTION, nobody_in_bed: false })).status, 200);
+  assert.equal(reviewRow().dismissed, 0, 'an explicit flag resets the dismissal');
+  assert.equal(reviewRow().answered_by_username, 'admin', 'and names the sender');
+});
+
 // ================================ Fix round 3 (2026-10-02) ================================
 // Each finding below was found by a reviewer TRACING the code (Opus and Codex, round 3). Two kinds of test
 // here, labelled so the next reader can tell them apart (reworded in fix round 4, Opus #4 / Codex #2, because

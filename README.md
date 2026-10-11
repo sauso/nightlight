@@ -573,6 +573,24 @@ measurement**, and (like everything here) never a safety device — see the warn
     - **Removing your last correction unlocks the night.** While it is still "last night", the nightly
       update then refines it once more if it had not finished doing so before you corrected it. Past the
       ~3 hours that pass only updates the saved summary: no "Sleep report updated" push goes out that late.
+    - **How to remove a correction (unlock a night).** Either:
+      - an admin opens **Recompute this night** on the sleep detail page, which says the night is locked,
+        and presses **Remove my correction** (it asks you to confirm first); or
+      - anyone edits the review (**Change what you told us about this night**) and empties **all three**
+        times, **In bed**, **Fell asleep** and **Got up for the day** (or, for a night you marked "No one was
+        in the bed", presses **Someone was in the bed**). Emptying only some of them leaves the night
+        locked: the review form starts with the app's own asleep and wake-up times filled in, so clearing
+        just **In bed** still counts as a correction.
+
+      The button **removes** the times you entered (or your "No one was in the bed" answer); it does not
+      hide them, and nothing brings them back. Your answers to the individual events (and their reasons)
+      and your note are kept, and so is the night's saved summary: the button only unlocks the night, it
+      does not recompute it. Press **Recompute this night** afterwards to see the app's own figures beside
+      the saved ones, which may be wrong (that is why you corrected the night). To keep a correction after
+      that, enter your times again, and the night locks again when you save them. Removing a correction is
+      allowed for any signed-in user through the review itself, but the button is in the admin-only
+      Recompute dialog. The one side effect: removing a "No one was in the bed" answer counts as answering
+      the review, so a dismissed prompt returns and the review names the person who removed it.
     - **Known limits, all documented rather than fixed:**
       - A night corrected early (say 07:15, when the window closed at 07:00) keeps any time you did
         *not* correct at the value it had then. A detected wake-up that would have settled from 06:50
@@ -698,7 +716,8 @@ measurement**, and (like everything here) never a safety device — see the warn
   you exactly what would change (bedtime, wake time, how long they slept, how many wake-ups) *before*
   anything is saved. You can cancel. Admins only. **A night someone has corrected in the morning review
   is locked and is not recomputed** — the dialog says so, and the API answers `409` with
-  `reason: "reviewed"`. Remove the correction first if the night really should be re-scored.
+  `reason: "reviewed"`. Remove the correction first if the night really should be re-scored: the dialog
+  has a **Remove my correction** button for it (see "How to remove a correction", above).
   **It can never make a night worse:** the minute-by-minute data behind a night is only kept for 30
   days — the same span the date picker offers — so the oldest night you can browse sits right on that
   edge. If its data has aged out, the recompute is refused and the saved summary is left alone, rather

@@ -61,7 +61,7 @@ function mockApi({ stored = STORED, onStore = FRESH, overlaid = FRESH, locked } 
 const setup = (renderer, props = {}) =>
   renderer(
     <RecomputeNight childId="c-1" date="2026-08-28" night={props.night || FRESH} fmtTime={fmtTime}
-      onRecomputed={props.onRecomputed || vi.fn()} />
+      onRecomputed={props.onRecomputed || vi.fn()} onCorrectionRemoved={props.onCorrectionRemoved} />
   );
 
 beforeEach(() => mockApi());
@@ -94,7 +94,9 @@ describe('a LOCKED night (the server says so in ?stored=1)', () => {
     await user.click(screen.getByRole('button', { name: /recompute this night/i }));
 
     expect(await screen.findByText(/This night is locked because you corrected it/)).toBeInTheDocument();
-    expect(screen.getByText(/Removing your correction unlocks it/)).toBeInTheDocument();
+    // Said as an instruction now that there is a control for it (see "Remove my correction" below).
+    expect(screen.getByText(/remove your correction here to unlock it/)).toBeInTheDocument();
+    expect(screen.queryByText(/Removing your correction unlocks it/)).not.toBeInTheDocument();
     expect(screen.queryByText(/no longer matches/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^cancel$/i })).not.toBeInTheDocument(); // nothing to cancel
@@ -119,6 +121,204 @@ describe('a LOCKED night (the server says so in ?stored=1)', () => {
     await user.click(screen.getByRole('button', { name: /recompute this night/i }));
     await waitFor(() => expect(screen.getByText(/no longer matches/i)).toBeInTheDocument());
     expect(screen.queryByText(/locked/)).not.toBeInTheDocument();
+  });
+});
+
+// "Remove my correction" (the missing control behind "Removing your correction unlocks it").
+//
+// The PUT body is the claim worth testing, so every assertion on it is EXACT (`toEqual` on the whole body)
+// and the keys that must be absent are named: the route reads an omitted key as "keep what is stored", so a
+// body that also carried `verdicts`, `note` or `computed_*` would silently re-save them as this person's
+// answer. `calls` records the ORDER the requests happened in: the review is read before the write (to know
+// about the flag) and the saved row is read again after it (so the dialog can leave "locked").
+describe('"Remove my correction" on a LOCKED night', () => {
+  const OVERLAID_UNCORRECTED = { ...FRESH, night__marker: 'after-removal' };
+  const TIMES_ONLY = {
+    true_onset_local: null,
+    true_wake_local: null,
+    true_in_bed_local: null,
+    true_onset_transition_id: null,
+    true_wake_transition_id: null,
+    true_in_bed_transition_id: null,
+  };
+
+  function mockLockedApi({ review = { review: { nobody_in_bed: 0, true_onset_at: '2026-08-28 10:30:00' } },
+    lockedAfter = false, putError = null, overlaidError = null } = {}) {
+    const state = { locked: true, calls: [] };
+    vi.spyOn(api, 'get').mockImplementation((url) => {
+      state.calls.push(`GET ${url}`);
+      if (url.includes('stored=1')) return Promise.resolve({ night: STORED, locked: state.locked });
+      if (url.includes('/review/')) return Promise.resolve(review);
+      if (url.includes('detail=1')) {
+        return overlaidError ? Promise.reject(overlaidError) : Promise.resolve(OVERLAID_UNCORRECTED);
+      }
+      return Promise.reject(new Error(`unexpected call: ${url}`));
+    });
+    vi.spyOn(api, 'put').mockImplementation((url, body) => {
+      state.calls.push(`PUT ${url}`);
+      if (putError) return Promise.reject(putError);
+      state.locked = lockedAfter;
+      return Promise.resolve({ review: body });
+    });
+    return state;
+  }
+
+  async function openLocked(props = {}) {
+    const rendered = setup(renderAsAdmin, { night: { ...FRESH, corrected: true }, ...props });
+    await rendered.user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await screen.findByText(/This night is locked because you corrected it/);
+    return rendered;
+  }
+
+  test('★ the locked dialog offers it', async () => {
+    mockLockedApi();
+    await openLocked();
+    expect(screen.getByRole('button', { name: /^remove my correction$/i })).toBeInTheDocument();
+  });
+
+  test('an UNLOCKED dialog has nothing to remove, so it does not offer it', async () => {
+    // Not locked (a corrected night whose saved row is stale): the ordinary preview, no removal.
+    mockApi({ locked: false });
+    const { user } = setup(renderAsAdmin, { night: { ...FRESH, corrected: true } });
+    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await waitFor(() => expect(screen.getByText(/no longer matches/i)).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /remove my correction/i })).not.toBeInTheDocument();
+  });
+
+  test('★ it asks first, in the modal, says what it does, and sends nothing until confirmed', async () => {
+    const state = mockLockedApi();
+    const confirm = vi.spyOn(window, 'confirm');
+    const { user } = await openLocked();
+
+    await user.click(screen.getByRole('button', { name: /^remove my correction$/i }));
+    // The wording the owner required: REMOVED not hidden; the estimate may be wrong; enter them again.
+    expect(screen.getByText(/They are removed, not hidden/)).toBeInTheDocument();
+    expect(screen.getByText(/your answers to the events and your note are kept/i)).toBeInTheDocument();
+    expect(screen.getByText(/the app’s own estimate, which may be wrong/)).toBeInTheDocument();
+    expect(screen.getByText(/you will need to enter them again/)).toBeInTheDocument();
+    expect(screen.getByText(/a corrected night locks again when you save it/)).toBeInTheDocument();
+    expect(confirm).not.toHaveBeenCalled(); // an in-app step, never window.confirm
+    expect(api.put).not.toHaveBeenCalled();
+
+    // The unlocking button is the one in the confirm step now (there is exactly one of that name).
+    expect(screen.getAllByRole('button', { name: /^remove my correction$/i })).toHaveLength(1);
+    expect(state.calls.some((c) => c.startsWith('PUT'))).toBe(false);
+  });
+
+  test('★ "Keep my correction" goes back to the locked view and sends nothing', async () => {
+    mockLockedApi();
+    const { user } = await openLocked();
+    await user.click(screen.getByRole('button', { name: /^remove my correction$/i }));
+    await user.click(screen.getByRole('button', { name: /^keep my correction$/i }));
+
+    expect(screen.getByText(/This night is locked because you corrected it/)).toBeInTheDocument();
+    expect(screen.queryByText(/They are removed, not hidden/)).not.toBeInTheDocument();
+    expect(api.put).not.toHaveBeenCalled();
+  });
+
+  test('★ confirming sends ONLY the six time fields, as nulls: no verdicts, reasons, note, computed_* or flag', async () => {
+    const state = mockLockedApi();
+    const { user } = await openLocked();
+    await user.click(screen.getByRole('button', { name: /^remove my correction$/i }));
+    await user.click(screen.getByRole('button', { name: /^remove my correction$/i }));
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+
+    const [url, body] = api.put.mock.calls[0];
+    expect(url).toBe('/children/c-1/review/2026-08-28');
+    expect(body).toEqual(TIMES_ONLY);
+    // Named, because `toEqual` alone would not say WHICH omission matters: each of these, sent, would be
+    // re-saved as this person's answer, and `null` would not mean "keep" for them.
+    for (const key of ['verdicts', 'reasons', 'note', 'computed_onset_at', 'computed_wake_at', 'dismissed', 'nobody_in_bed']) {
+      expect(Object.hasOwn(body, key)).toBe(false);
+    }
+    // Order: the stored review is read, then written, then the saved row is read again.
+    const order = state.calls.map((c) => (c.startsWith('PUT') ? 'put' : /\/review\//.test(c) ? 'review' : /stored=1/.test(c) ? 'stored' : 'night'));
+    expect(order).toEqual(['stored', 'review', 'put', 'stored', 'night']);
+  });
+
+  test('★ a night corrected by "no one was in the bed" also sends nobody_in_bed false, and still no times', async () => {
+    mockLockedApi({ review: { review: { nobody_in_bed: 1, true_onset_at: null, true_wake_at: null, true_in_bed_at: null } } });
+    const { user } = await openLocked();
+    await user.click(screen.getByRole('button', { name: /^remove my correction$/i }));
+    await user.click(screen.getByRole('button', { name: /^remove my correction$/i }));
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+
+    expect(api.put.mock.calls[0][1]).toEqual({ ...TIMES_ONLY, nobody_in_bed: false });
+  });
+
+  // `0` is the stored column's own "no"; `-1` is a value the server's saidNobody (exactly 1) does not read
+  // as the flag either, so the button must not send an answer for it; null is a review row with no flag.
+  for (const [label, review] of [
+    ['an absent review', { review: null }],
+    ['nobody_in_bed 0', { review: { nobody_in_bed: 0 } }],
+    ['nobody_in_bed -1 (not the flag, as the server reads it)', { review: { nobody_in_bed: -1 } }],
+  ]) {
+    test(`★ a flag that is not set is NOT sent as false: ${label} (sending it would also reset a dismissal and name the sender)`, async () => {
+      mockLockedApi({ review });
+      const { user } = await openLocked();
+      await user.click(screen.getByRole('button', { name: /^remove my correction$/i }));
+      await user.click(screen.getByRole('button', { name: /^remove my correction$/i }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+      expect(Object.hasOwn(api.put.mock.calls[0][1], 'nobody_in_bed')).toBe(false);
+    });
+  }
+
+  test('★ after success the dialog is UNLOCKED (the ordinary preview) and the page is refreshed with the overlaid night', async () => {
+    const state = mockLockedApi();
+    const onRecomputed = vi.fn();
+    const onCorrectionRemoved = vi.fn();
+    const { user } = await openLocked({ onRecomputed, onCorrectionRemoved });
+    await user.click(screen.getByRole('button', { name: /^remove my correction$/i }));
+    await user.click(screen.getByRole('button', { name: /^remove my correction$/i }));
+
+    await waitFor(() => expect(screen.getByText(/no longer matches/i)).toBeInTheDocument());
+    // So the page can drop anything that quotes the removed correction (the "that's recorded" receipt).
+    expect(onCorrectionRemoved).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/This night is locked/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /remove my correction/i })).not.toBeInTheDocument();
+    // The ordinary recompute is on offer now, and nothing has been recomputed or stored yet.
+    expect(screen.getByRole('button', { name: /save the new numbers/i })).toBeInTheDocument();
+    expect(state.calls.some((c) => /[?&]store=1/.test(c))).toBe(false);
+    // The page is told, with the NORMAL (overlaid) read, not a store response.
+    expect(onRecomputed).toHaveBeenCalledWith(OVERLAID_UNCORRECTED);
+  });
+
+  test('★ the dialog trusts the server\'s `locked`, not the PUT: still locked after it stays locked', async () => {
+    // A second phone corrected the night in between, or the save did not clear everything.
+    mockLockedApi({ lockedAfter: true });
+    const { user } = await openLocked();
+    await user.click(screen.getByRole('button', { name: /^remove my correction$/i }));
+    await user.click(screen.getByRole('button', { name: /^remove my correction$/i }));
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText(/This night is locked because you corrected it/)).toBeInTheDocument());
+    expect(screen.queryByText(/no longer matches/i)).not.toBeInTheDocument();
+  });
+
+  test('★ a failed removal shows the error, stays locked, and does not touch the page', async () => {
+    mockLockedApi({ putError: new Error('Could not save that review') });
+    const onRecomputed = vi.fn();
+    const onCorrectionRemoved = vi.fn();
+    const { user } = await openLocked({ onRecomputed, onCorrectionRemoved });
+    await user.click(screen.getByRole('button', { name: /^remove my correction$/i }));
+    await user.click(screen.getByRole('button', { name: /^remove my correction$/i }));
+
+    expect(await screen.findByText(/Could not save that review/)).toBeInTheDocument();
+    expect(onRecomputed).not.toHaveBeenCalled();
+    expect(onCorrectionRemoved).not.toHaveBeenCalled(); // nothing was removed, so the receipt stays true
+    // Back where it was: asking again is possible, and it is still the confirm step (nothing was removed).
+    expect(screen.getByRole('button', { name: /^remove my correction$/i })).not.toBeDisabled();
+    expect(screen.queryByText(/no longer matches/i)).not.toBeInTheDocument();
+    expect(api.get.mock.calls.filter(([u]) => /stored=1/.test(u))).toHaveLength(1); // only the opening read
+  });
+
+  test('a refresh that fails AFTER the removal says the correction was removed, not that the removal failed', async () => {
+    mockLockedApi({ overlaidError: new Error('network down') });
+    const { user } = await openLocked();
+    await user.click(screen.getByRole('button', { name: /^remove my correction$/i }));
+    await user.click(screen.getByRole('button', { name: /^remove my correction$/i }));
+
+    expect(await screen.findByText(/Your correction was removed, but this page could not refresh/)).toBeInTheDocument();
   });
 });
 

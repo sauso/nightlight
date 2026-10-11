@@ -201,7 +201,7 @@ export default function SleepDetail() {
         )}
 
         <NightBody night={night} fmtTime={fmtTime} tz={tz} tempUnit={settings.temp_unit}
-          childId={id} date={date} onRecomputed={setNight} />
+          childId={id} date={date} onRecomputed={setNight} onCorrectionRemoved={() => setReceipt(null)} />
 
         <SleepInsights childId={id} tempUnit={settings.temp_unit} childName={kid?.name} />
 
@@ -214,7 +214,7 @@ export default function SleepDetail() {
   );
 }
 
-function NightBody({ night, fmtTime, tz, tempUnit, childId, date, onRecomputed }) {
+function NightBody({ night, fmtTime, tz, tempUnit, childId, date, onRecomputed, onCorrectionRemoved }) {
   // The wake↔alert clip currently open in the shared player (or null). Lives here so it survives a
   // 2-min live refresh of `night` without tearing the modal down mid-watch.
   const [clipFor, setClipFor] = useState(null);
@@ -316,7 +316,8 @@ function NightBody({ night, fmtTime, tz, tempUnit, childId, date, onRecomputed }
         {!night.in_progress && (
           <ReviewNightButton childId={childId} date={date} corrected={night.corrected} />
         )}
-        <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime} onRecomputed={onRecomputed} />
+        <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime} onRecomputed={onRecomputed}
+          onCorrectionRemoved={onCorrectionRemoved} />
       </div>
 
       <div className="card">

@@ -8200,8 +8200,8 @@
   {
     "label": "in-bed/lock F12: RecomputeNight ignores the server's `locked`",
     "file": "frontend/src/components/RecomputeNight.jsx",
-    "find": "setLocked(r?.locked === true);",
-    "replace": "setLocked(false);",
+    "find": "which must read as unlocked.\r\n            setLocked(r?.locked === true);",
+    "replace": "which must read as unlocked.\r\n            setLocked(false);",
     "expect": "killed",
     "tests": ["RecomputeNight.test.jsx"],
     "namePattern": "offers no save"
@@ -8209,8 +8209,8 @@
   {
     "label": "in-bed/lock F13: RecomputeNight keys the lock on `night.corrected` instead of the server (R8)",
     "file": "frontend/src/components/RecomputeNight.jsx",
-    "find": "setLocked(r?.locked === true);",
-    "replace": "setLocked(!!night?.corrected);",
+    "find": "which must read as unlocked.\r\n            setLocked(r?.locked === true);",
+    "replace": "which must read as unlocked.\r\n            setLocked(!!night?.corrected);",
     "expect": "killed",
     "tests": ["RecomputeNight.test.jsx"],
     "namePattern": "keys on the SERVER"
@@ -15492,5 +15492,95 @@
     "tests": ["sleepAnalysis.test.js"],
     "namePattern": "#669",
     "note": "EQUIVALENT, as the code comment on isolatedPutDown says. The into_bed is after the settle q, so its left neighbour idx - 1 is at or after q and inside the count whether or not this into_bed cuts (cut: the count runs to idx; not cut: it runs past idx, unless idx - 1 is already past the 150 minutes, where the cut changes nothing). A null minute there makes bedOccupiedAfter fail open either way, and 3 occupied minutes before it return true either way."
+  },
+  {
+    "label": "unlock-correction F1: Remove my correction never sends nobody_in_bed:false (a flag-only night stays locked)",
+    "file": "frontend/src/components/RecomputeNight.jsx",
+    "find": "if (review?.review?.nobody_in_bed === 1) body.nobody_in_bed = false;",
+    "replace": "if (false) body.nobody_in_bed = false;",
+    "expect": "killed",
+    "tests": ["RecomputeNight.test.jsx"],
+    "namePattern": "also sends nobody_in_bed false"
+  },
+  {
+    "label": "unlock-correction F2: Remove my correction sends nobody_in_bed:false for every night (resets a dismissal, names the sender)",
+    "file": "frontend/src/components/RecomputeNight.jsx",
+    "find": "if (review?.review?.nobody_in_bed === 1) body.nobody_in_bed = false;",
+    "replace": "body.nobody_in_bed = false;",
+    "expect": "killed",
+    "tests": ["RecomputeNight.test.jsx"],
+    "namePattern": "is NOT sent as false"
+  },
+  {
+    "label": "unlock-correction F3: the flag is read as truthy, not exactly 1 as the server reads it",
+    "file": "frontend/src/components/RecomputeNight.jsx",
+    "find": "nobody_in_bed === 1) body",
+    "replace": "nobody_in_bed) body",
+    "expect": "killed",
+    "tests": ["RecomputeNight.test.jsx"],
+    "namePattern": "is NOT sent as false"
+  },
+  {
+    "label": "unlock-correction F4: Remove my correction also sends the note (null clears it)",
+    "file": "frontend/src/components/RecomputeNight.jsx",
+    "find": "true_onset_local: null,",
+    "replace": "true_onset_local: null, note: null,",
+    "expect": "killed",
+    "tests": ["RecomputeNight.test.jsx"],
+    "namePattern": "confirming sends ONLY"
+  },
+  {
+    "label": "unlock-correction F9: Remove my correction removes at once, with no confirm step",
+    "file": "frontend/src/components/RecomputeNight.jsx",
+    "find": "onClick={() => { setError(null); setConfirming(true); }}",
+    "replace": "onClick={removeCorrection}",
+    "expect": "killed",
+    "tests": ["RecomputeNight.test.jsx"],
+    "namePattern": "it asks first"
+  },
+  {
+    "label": "unlock-correction F7: the page is never told a correction was removed (a stale receipt stays)",
+    "file": "frontend/src/components/RecomputeNight.jsx",
+    "find": "onCorrectionRemoved?.();",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["RecomputeNight.test.jsx"],
+    "namePattern": "after success the dialog is UNLOCKED"
+  },
+  {
+    "label": "unlock-correction F15: the detail page keeps its receipt after a correction is removed",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "onCorrectionRemoved={() => setReceipt(null)}",
+    "replace": "onCorrectionRemoved={() => {}}",
+    "expect": "killed",
+    "tests": ["sleepDetail.test.jsx"],
+    "namePattern": "drops the"
+  },
+  {
+    "label": "unlock-correction F13: .field is inline again (the margin under the note field does nothing)",
+    "file": "frontend/src/index.css",
+    "find": "  display: block;\r\n  margin-bottom: 14px;",
+    "replace": "  margin-bottom: 14px;",
+    "expect": "killed",
+    "tests": ["reviewFieldSpacing.test.js"],
+    "namePattern": "is a block"
+  },
+  {
+    "label": "unlock-correction B1: a null time no longer clears a stored time (the six nulls would keep the correction)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "const pick = (key, val) => blankToNull(val === undefined ? (existing[key] ?? null) : (val ?? null));",
+    "replace": "const pick = (key, val) => blankToNull(val == null ? (existing[key] ?? null) : val);",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "the six times as null"
+  },
+  {
+    "label": "unlock-correction B2: nobody_in_bed:false no longer clears a stored flag",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "const nobody = flagGiven ? (patch.nobodyInBed ? 1 : 0) :",
+    "replace": "const nobody = flagGiven ? (patch.nobodyInBed ? 1 : (saidNobody(existing) ? 1 : 0)) :",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "needs nobody_in_bed:false"
   }
 ]
