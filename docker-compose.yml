@@ -28,6 +28,13 @@ services:
       # Only ever list an address you control - see the README and .env.example.
       - TRUST_PROXY=${TRUST_PROXY:-}
       - PGID=${PGID:-100}
+      # Who else may read the data volume. 077 (the default) = owner only: the database holds every
+      # stored secret in plaintext, and each start takes group/other access off existing files too.
+      # Range 000-077 (3 or 4 octal digits, owner digit 0); an invalid value logs a warning and 077
+      # is used. 022 = the old world-readable modes, for when another user/container reads the
+      # volume: set it BEFORE upgrading, it only affects new files after one start at 077.
+      # See docs/operations.md, "Who can read the data directory".
+      - UMASK=${UMASK:-077}
       # Your local timezone (e.g. Australia/Melbourne) - affects log timestamps only.
       # Defaults to UTC if unset. Full list: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
       - TZ=${TZ:-UTC}

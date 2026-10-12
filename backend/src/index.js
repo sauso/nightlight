@@ -49,6 +49,7 @@ import { startWakeWatcher, stopWakeWatcher } from './lib/wakeWatcher.js';
 import { startTimelapseSampler, stopTimelapseSampler } from './lib/timelapse.js';
 import { startObservationLog, stopObservationLog } from './lib/observationClock.js';
 import { logger } from './lib/logger.js';
+import { logDataDirModes } from './lib/dataDirModes.js';
 import { applyTrustProxy } from './lib/trustProxy.js';
 import { safeInterval, installCrashGuards, markBootComplete } from './lib/processGuards.js';
 import {
@@ -298,6 +299,9 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 4000;
 const server = app.listen(PORT, () => {
   logger.info(`Baby monitor backend listening on port ${PORT}`);
+  // #549: the mask this process (and every FFmpeg/MediaMTX it starts) creates files with, and the database's mode.
+  // Read-only and cannot throw; see lib/dataDirModes.js and docs/operations.md, "Who can read the data directory".
+  logDataDirModes(DATA_DIR);
   // From here on a background fault should be survived, not fatal. BEFORE this point it is a failed
   // start, and the guards exit non-zero instead of leaving a healthy-looking container with no server
   // bound — see the boot/steady-state note in lib/processGuards.js.

@@ -50,6 +50,12 @@ a trusted device.
 
 - PUID/PGID default to 99/100 (Unraid's own "nobody"/"users" convention) if left
   unset. Find your own with `id <username>` on other systems.
+- `UMASK` defaults to `077`: everything in the data directory is owner-only (the
+  database holds every stored secret), and each start also tightens existing files.
+  Range `000`-`077` (owner digit `0`); an invalid value logs a warning and `077` is
+  used. If another user or container reads the data directory, set `-e UMASK=022`
+  **before** upgrading - after one start at `077` it only affects new files. Details:
+  [Who can read the data directory](https://github.com/sauso/nightlight/blob/main/docs/operations.md#who-can-read-the-data-directory).
 - `--stop-timeout 30` lets Nightlight shut down cleanly - a recording in progress is
   assembled from its buffer as the app stops, and being killed part-way loses it.
   Stopping normally takes a few seconds; the container exits as soon as it's done, so

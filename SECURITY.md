@@ -4,6 +4,10 @@ Nightlight is a self-hosted baby monitor. It stores camera credentials, a JWT si
 notification-provider tokens, and recordings/snapshots of your home and family. Please report
 security issues privately, not as a public GitHub issue.
 
+Those secrets sit in the data directory in plaintext; at rest they are protected by file
+permissions (owner-only by default, `UMASK`), so keep that directory private to the container. See
+[Who can read the data directory](docs/operations.md#who-can-read-the-data-directory).
+
 ## Supported versions
 
 Nightlight is pre-1.0 and released continuously. Only the **most recently released version**

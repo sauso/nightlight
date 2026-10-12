@@ -196,6 +196,19 @@ Container starts as root, remaps a pre-baked user to `PUID`/`PGID` (default 99/1
 app via `su-exec` — the app process itself never runs as root. `tini` is PID 1 to reap zombies
 from the MediaMTX + per-camera-FFmpeg child process tree and forward signals correctly.
 
+Before the `mkdir`/`chown` it sets the **umask** from `UMASK` (default `077`, validated, #549), so
+the data dir, the database (SQLite gives `-wal`/`-shm` the database file's own mode), snapshots,
+clips and everything FFmpeg/MediaMTX write are owner-only: a umask is inherited through `su-exec`
+and every fork. Missing PARENTS of a non-default `DATA_DIR` are created under `022` (they are
+root-owned and `chown` does not reach them, so `0700` would lock the app out). At `077` only, it
+then strips group/other bits from existing entries
+(`find "$DATA_DIR" ! -type l -perm /077 -exec chmod go-rwx {} +`, every start, never fatal; no
+trailing slash, so it starts at the same root `chown -R` does and a symlinked `DATA_DIR` is left
+alone, as `chown -R` leaves it) and logs one `[entrypoint] umask …` line with the count it found;
+the app logs `[data-dir] app umask …` once it is up (`lib/dataDirModes.js`). User-facing rules and limits: `docs/operations.md`, "Who can read the
+data directory". Tests: `entrypoint-umask.test.js` (Linux only) and
+`scripts/entrypoint-umask.mutants.sh`, both run in CI.
+
 ## Frontend structure (`frontend/src/`)
 
 React + react-router, no Redux/state library — three context providers (`AuthContext`,
