@@ -16524,5 +16524,178 @@
     "expect": "killed",
     "tests": ["touchTargets.test.js"],
     "namePattern": "is the positioning anchor"
+  },
+  {
+    "label": "#562 WHEP resource: the origin check is dropped (another host, port or scheme is accepted)",
+    "file": "frontend/src/lib/whep.js",
+    "find": "if (u.origin !== pageOrigin) return null;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "refuses an address on another site"
+  },
+  {
+    "label": "#562 WHEP resource: the one-segment rule is dropped (a deeper path or an empty segment is accepted)",
+    "file": "frontend/src/lib/whep.js",
+    "find": "if (session === '' || session.includes('/')) return null;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "more or less than one segment"
+  },
+  {
+    "label": "#562 WHEP resource: the prefix rule is dropped (killed by a same-site /api path)",
+    "file": "frontend/src/lib/whep.js",
+    "find": "if (!u.pathname.startsWith(prefix)) return null;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["whep.test.js", "whepPlayer.test.jsx"],
+    "namePattern": "outside this camera|off the camera path",
+    "note": "Same mutation as the next entry, run against a different test: the plan requires it to die on an /api path AND on a //host path, and one entry can only show that it dies on one of them."
+  },
+  {
+    "label": "#562 WHEP resource: the prefix rule is dropped (killed by a path that normalises to //evil.example)",
+    "file": "frontend/src/lib/whep.js",
+    "find": "if (!u.pathname.startsWith(prefix)) return null;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "normalise to the protocol-relative path",
+    "note": "Dies only on the long-tail forms (//evil.example/steal-token): the 16-character //evil.example/x slices to an empty segment and is refused by the one-segment rule by accident. See the note at the top of whep.test.js."
+  },
+  {
+    "label": "#562 WHEP resource: the encoded-separator rule is dropped (%2f / %5c accepted)",
+    "file": "frontend/src/lib/whep.js",
+    "find": "if (ENCODED_SEPARATOR.test(u.pathname)) return null;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "encoded slash or backslash"
+  },
+  {
+    "label": "#562 WHEP player: the call site stores the raw Location header again",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "resourceUrlRef.current = resolveWhepResource(",
+    "replace": "resourceUrlRef.current = ((rawLocation) => rawLocation)(",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "WhepPlayer session DELETE"
+  },
+  {
+    "label": "#562 WHEP resource: returns the full URL (host included) instead of path and query",
+    "file": "frontend/src/lib/whep.js",
+    "find": "return u.pathname + u.search;",
+    "replace": "return u.href;",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "accepts the session under the POST path"
+  },
+  {
+    "label": "#562 WHEP resource: a relative Location is resolved against the page origin, not the POST URL",
+    "file": "frontend/src/lib/whep.js",
+    "find": "const u = new URL(locationHeader, base);",
+    "replace": "const u = new URL(locationHeader, pageOrigin);",
+    "expect": "killed",
+    "tests": ["whep.test.js", "whepPlayer.test.jsx"],
+    "namePattern": "accepts the session under the POST path|relative Location is resolved"
+  },
+  {
+    "label": "#562 WHEP player: the cleanup DELETE follows redirects again (the redirect flag is removed)",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "redirect: 'error',",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "redirect in answer to the DELETE|exactly one DELETE"
+  },
+  {
+    "label": "#562 WHEP resource: the no-% rule for the session segment is dropped (%252f accepted)",
+    "file": "frontend/src/lib/whep.js",
+    "find": "if (session.includes('%')) return null;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "any percent sign in the session segment"
+  },
+  {
+    "label": "#562 WHEP resource: the typeof check is dropped (a non-string header is stringified and accepted)",
+    "file": "frontend/src/lib/whep.js",
+    "find": "if (typeof locationHeader !== 'string' || locationHeader === '') return null;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "returns null instead of throwing"
+  },
+  {
+    "label": "#562 WHEP resource: the catch rethrows instead of returning null",
+    "file": "frontend/src/lib/whep.js",
+    "find": "} catch {",
+    "replace": "} catch (e) { throw e;",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "returns null instead of throwing"
+  },
+  {
+    "label": "#562 WHEP resource: the prefix loses its trailing slash (whepabc passes, a real session is two segments)",
+    "file": "frontend/src/lib/whep.js",
+    "find": "const prefix = `${base.pathname}/`;",
+    "replace": "const prefix = base.pathname;",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "accepts the session under the POST path|outside this camera"
+  },
+  {
+    "label": "#562 WHEP resource: an empty session segment is accepted",
+    "file": "frontend/src/lib/whep.js",
+    "find": "if (session === '' || session.includes('/')) return null;",
+    "replace": "if (session.includes('/')) return null;",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "more or less than one segment"
+  },
+  {
+    "label": "#562 WHEP resource: the encoded-separator rule becomes case-sensitive (%2F and %5C accepted in the camera part)",
+    "file": "frontend/src/lib/whep.js",
+    "find": "const ENCODED_SEPARATOR = /%2f|%5c/i;",
+    "replace": "const ENCODED_SEPARATOR = /%2f|%5c/;",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "encoded slash or backslash"
+  },
+  {
+    "label": "#562 WHEP resource: the query is dropped from the result",
+    "file": "frontend/src/lib/whep.js",
+    "find": "return u.pathname + u.search;",
+    "replace": "return u.pathname;",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "accepts the session under the POST path"
+  },
+  {
+    "label": "#562 WHEP resource: the fragment is kept in the result",
+    "file": "frontend/src/lib/whep.js",
+    "find": "return u.pathname + u.search;",
+    "replace": "return u.pathname + u.search + u.hash;",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "accepts the session under the POST path"
+  },
+  {
+    "label": "#562 WHEP player: the call site passes the page URL instead of its origin",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "window.location.origin,",
+    "replace": "window.location.href,",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "exactly one DELETE|relative Location is resolved|second camera's player DELETEs"
+  },
+  {
+    "label": "#562 WHEP player: the call site resolves against one fixed camera path instead of this camera's POST URL",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "res.headers.get('Location'),\n          whepUrl(mediamtxPath),",
+    "replace": "res.headers.get('Location'),\n          '/live/cam1/whep',",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "second camera"
   }
 ]
