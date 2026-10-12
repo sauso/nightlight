@@ -187,20 +187,55 @@ function localReading(sqlUtc, tz) {
 // another child's event, in the one table everything else gets measured against.
 //
 // Returns the UTC timestamp, null when no frame was named, or undefined when the id is not a
-// transition of this night — which the caller must reject rather than quietly store as "no answer".
+// transition of this night (or not an id at all) — which the caller must reject rather than quietly
+// store as "no answer".
 //
 // `wantType` (optional, added 2026-09-30 for the put-down): also undefined when the transition is not of
 // that type. Only the in-bed frame passes it, because "they went into bed" can only be read off a
 // got-into-bed event. The onset and wake ids are NOT type-checked, and that is kept on purpose: a page
 // loaded before the split still sends a got-into-bed id as `true_onset_transition_id` from its old "Put
 // down here" button, and it must keep saving exactly as it did.
+//
+// The id is read by parseTransitionId (below), the same parser the review route uses for the id it stores,
+// so the two can no longer disagree about what was sent (#522).
 export function transitionInstant(childId, nightDate, id, wantType = null) {
-  if (id == null || id === '') return null;
-  const n = Number(id);
-  if (!Number.isInteger(n) || n <= 0) return undefined;
+  const n = parseTransitionId(id);
+  if (n === null) return null;
+  if (Number.isNaN(n)) return undefined;
   const match = transitionsFor(childId, nightDate).find((t) => t.id === n);
   if (!match || (wantType && match.type !== wantType)) return undefined;
   return match.created_at;
+}
+
+// A frame id as a review request sends it (true_onset/wake/in_bed_transition_id): null when no frame was
+// named, the id as a positive integer, or NaN when the value is not an id at all.
+//
+// ⚠️ ONE PARSER, FOR BOTH PLACES THAT READ THE ID (#522). The route used to coerce the id with its own
+// Number() while transitionInstant used another, and they agreed only by luck: on '' they disagreed
+// (transitionInstant read "no frame", the route stored Number('') = 0), and with "no one was in the bed"
+// that became a 500 after the verdicts had been written (#571 fix round 2, 2026-09-30, fixed '' alone).
+//
+// Absent is null, undefined or ''. '' stays absent because that is what shipped with #571 and is pinned
+// by a test: an emptied field is "no frame", never an error.
+//
+// An id is a JSON number that is a positive SAFE integer, or a string of ASCII digits with no leading
+// zero (a string is kept because an older page or a <select> could send one; the shipped page sends
+// numbers). Everything else is NaN, including shapes Number() quietly turned into a real id: true (1), [5],
+// "0x10", "1e1", " 5 ", "5.0", "007". Refused rather than read as "no frame", because quietly dropping a
+// frame the client meant to send hides a client bug, and a 400 is a message that survives Cloudflare (a 5xx
+// body does not). Beyond 2**53 - 1 the number is no longer the id that was typed (Number("9007199254740993")
+// is ...992), so that is refused too rather than matched against the wrong row.
+//
+// NaN, never undefined, for malformed: in the route `undefined` already means "this key was not sent, keep
+// what is stored", and a malformed id must not slip into that meaning.
+export function parseTransitionId(v) {
+  if (v == null || v === '') return null;
+  if (typeof v === 'number') return Number.isSafeInteger(v) && v > 0 ? v : NaN;
+  if (typeof v === 'string' && /^[1-9][0-9]*$/.test(v)) {
+    const n = Number(v);
+    return Number.isSafeInteger(n) ? n : NaN;
+  }
+  return NaN;
 }
 
 function transitionsFor(childId, nightDate) {

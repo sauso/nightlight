@@ -21,6 +21,7 @@
 
 import { test, before, after, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
+import { isDeepStrictEqual } from 'node:util';
 import { useTempDataDir, cleanupTempDataDirs, makeUser, makeSession, signToken, mountRouter, call } from './helpers/harness.js';
 
 useTempDataDir();
@@ -28,7 +29,7 @@ useTempDataDir();
 const { default: db } = await import('../src/db.js');
 const { computeAndStoreNight, runNightlySleepJob, nightIsLocked, storeNightBeforeCorrection, isEvidenceFinal,
   lastCompletedNightDate, reportableSpanMs, childSamplingActiveNow } = await import('../src/lib/sleepAnalysis.js');
-const { saveNightReview, applyCorrection, reviewCardState, reviewCorrectsNight, localHmToUtcSql } = await import('../src/lib/sleepReviews.js');
+const { saveNightReview, applyCorrection, reviewCardState, reviewCorrectsNight, localHmToUtcSql, parseTransitionId } = await import('../src/lib/sleepReviews.js');
 const { TRANSITION } = await import('../src/lib/bedTransitions.js');
 const { logger } = await import('../src/lib/logger.js');
 const { default: childrenRouter } = await import('../src/routes/children.js');
@@ -440,6 +441,172 @@ test('an empty frame id is "no frame", with the flag or without it: never a 500,
     assert.equal((await put({ [key]: '' })).status, 200);
     assert.equal(reviewRow()[key], null, `${key}: '' is stored as no frame, not as frame 0`);
   }
+});
+
+// --- #522: one strict parser for a frame id, checked before anything writes ---------------------------------
+//
+// #522 (filed 2026-09-29) reported this exact body 500ing AFTER its verdict had been written. #571's fix round
+// 2 (2026-09-30, the test just above) had already made '' mean "no frame" in the route, so on dev f837c48 it was
+// a 200 with nothing partial. This is a PIN, not a regression test: it passes before and after #522's change,
+// and keeps the issue's own request working, verdict and all.
+test('PIN #522: the issue\'s exact body (the flag, an empty onset id, a real verdict) is a 200 that stores all of it', async () => {
+  const exit = layTransition(TRANSITION.OUT_OF_BED, sql(at(6, 30, 1)));
+  const res = await put({ nobody_in_bed: true, true_onset_transition_id: '', verdicts: { [exit]: 'wrong' } });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(reviewRow().nobody_in_bed, 1, 'the flag is stored');
+  assert.equal(reviewRow().true_onset_transition_id, null, "'' is no frame, never frame 0");
+  assert.equal(verdictOf(exit), 'wrong', 'and the verdict in the same request is stored');
+});
+
+// Every row of the three tables a review save can write, every column read from PRAGMA rather than a typed
+// list, so a write to a column added later still shows up as a difference. bed_transitions holds the
+// verdicts and reasons, sleep_reviews the answer, sleep_nights what the save-time store (storeNightBeforeCorrection) writes.
+const SAVE_TABLES = ['bed_transitions', 'sleep_reviews', 'sleep_nights'];
+function snapshotSaveTables() {
+  const out = {};
+  for (const t of SAVE_TABLES) {
+    const cols = db.prepare(`PRAGMA table_info('${t}')`).all().map((c) => c.name);
+    out[t] = db.prepare(`SELECT ${cols.map((c) => `"${c}"`).join(', ')} FROM ${t} ORDER BY rowid`).all();
+  }
+  return out;
+}
+
+// The existing per-key refusals: a value that is not an id gets the same message as an id from another night.
+const NOT_THIS_NIGHTS = {
+  true_onset_transition_id: 'true_onset_transition_id is not an event of this night',
+  true_wake_transition_id: 'true_wake_transition_id is not an event of this night',
+  true_in_bed_transition_id: 'true_in_bed_transition_id is not a got-into-bed event of this night',
+};
+
+// One real event per key that the key accepts on its own (the put-down is a got-into-bed event, which the
+// in-bed key requires and the untyped onset key takes as an old page's "Put down here"), plus one more event
+// that carries the verdict sent beside the id. A transition of ANOTHER child is laid first, so none of this
+// child's ids is 1: Number(true) is 1, and `true` must be refused for being a boolean, not by luck.
+function layReviewFixture() {
+  layTransition(TRANSITION.INTO_BED, sql(at(19, 2)), OTHER_CAM);
+  const putDown = layTransition(TRANSITION.INTO_BED, sql(at(18, 49)));
+  const exit = layTransition(TRANSITION.OUT_OF_BED, sql(at(6, 30, 1)));
+  const answered = layTransition(TRANSITION.OUT_OF_BED, sql(at(23, 0)));
+  assert.ok(![putDown, exit, answered].includes(1), 'precondition: no event of this child has id 1');
+  return {
+    answered,
+    keys: [['true_onset_transition_id', putDown], ['true_wake_transition_id', exit], ['true_in_bed_transition_id', putDown]],
+  };
+}
+
+// Sends `value` for `key` beside a real verdict, with and without "no one was in the bed", and returns every
+// way that save was not a clean refusal: not a 400, not the key's own message, or ANY row written. With the
+// flag the snapshot is the proof, not the 400 text: on dev f837c48 such a request was already a 400 ("not
+// both"), for the frame's resolved time rather than for the id.
+async function refusalProblems(key, value, label, answered) {
+  const problems = [];
+  for (const flag of [{}, { nobody_in_bed: true }]) {
+    const where = `${key} = ${label}${flag.nobody_in_bed ? ', with the flag' : ''}`;
+    const before = snapshotSaveTables();
+    const res = await put({ ...flag, [key]: value, verdicts: { [answered]: 'wrong' } });
+    if (res.status !== 400) problems.push(`${where}: ${res.status} ${JSON.stringify(res.body)}`);
+    else if (res.body.error !== NOT_THIS_NIGHTS[key]) problems.push(`${where}: refused for another reason: ${res.body.error}`);
+    if (!isDeepStrictEqual(snapshotSaveTables(), before)) problems.push(`${where}: wrote to the database`);
+  }
+  return problems;
+}
+
+test('★ #522: an id shape Number() used to read as a REAL event is refused with a 400, and nothing is written, verdicts included', async () => {
+  // Each shape is derived from a real event of this night, so on dev f837c48 each one resolved to that event
+  // and saved (Number([5]), Number("0x5"), Number("5e0"), Number(" 5 "), Number("5.0") and Number("05") are
+  // all 5). That is what makes this table fail without the strict parser, rather than pass by luck.
+  const { answered, keys } = layReviewFixture();
+  const problems = [];
+  for (const [key, id] of keys) {
+    for (const [shape, value] of [
+      ['a one-element array', [id]], ['hex', `0x${id.toString(16)}`], ['an exponent', `${id}e0`],
+      ['padded with spaces', ` ${id} `], ['a decimal point', `${id}.0`], ['a leading zero', `0${id}`],
+    ]) {
+      assert.equal(Number(value), id, `precondition: Number() reads ${shape} as the real id ${id}`);
+      problems.push(...await refusalProblems(key, value, `${JSON.stringify(value)} (${shape})`, answered));
+    }
+  }
+  assert.deepEqual(problems, [], 'every malformed id is a 400 with its own message, before anything writes');
+  assert.equal(verdictOf(answered), null, 'the verdict beside them never landed');
+
+  // The instrument can see the writes it is asserting are absent: the same request with a VALID id saves,
+  // and the snapshot changes (the verdict lands, the review row appears).
+  const before = snapshotSaveTables();
+  assert.equal((await put({ true_wake_transition_id: keys[1][1], verdicts: { [answered]: 'wrong' } })).status, 200);
+  assert.ok(!isDeepStrictEqual(snapshotSaveTables(), before), 'a valid save shows up in the snapshot');
+  assert.equal(verdictOf(answered), 'wrong');
+});
+
+test('#522 pin: the values that were ALREADY refused stay refused, with the same message, and write nothing', async () => {
+  // A pin, not a regression test: on dev f837c48 each of these was already a 400 before anything wrote
+  // (`true` only because no event of the night had id 1, which the fixture makes certain).
+  const { answered, keys } = layReviewFixture();
+  const problems = [];
+  for (const [key] of keys) {
+    for (const [label, value] of [
+      ['0', 0], ['-1', -1], ['1.5', 1.5], ['{}', {}], ['false', false], ["'abc'", 'abc'], ['true', true],
+    ]) problems.push(...await refusalProblems(key, value, label, answered));
+  }
+  assert.deepEqual(problems, []);
+});
+
+test('#522: a valid id stores the identical row whether it is sent as a number or as a string of digits', async () => {
+  // What any valid request stores must not change: the shipped page sends numbers, and a string of digits
+  // (an older page, a <select>) saved the same row before #522 and still does.
+  const { keys } = layReviewFixture();
+  for (const [key, id] of keys) {
+    const rows = [];
+    for (const value of [id, String(id)]) {
+      db.prepare('DELETE FROM sleep_reviews').run();
+      db.prepare('DELETE FROM sleep_nights').run();
+      const res = await put({ [key]: value });
+      assert.equal(res.status, 200, `${key} = ${JSON.stringify(value)}: ${JSON.stringify(res.body)}`);
+      // The save time is the only column that may differ between the two saves.
+      db.prepare("UPDATE sleep_reviews SET reviewed_at = 'the clock'").run();
+      rows.push(reviewRow());
+    }
+    assert.equal(rows[0][key], id, `${key}: the id itself is stored`);
+    assert.deepEqual(rows[1], rows[0], `${key}: the digit string stores exactly what the number does`);
+  }
+});
+
+test('#522: a frame key that is NOT SENT keeps the stored frame; only null or \'\' clears it', async () => {
+  // The parser reads undefined as "no frame", but the route must not: a stale card on a second phone that
+  // sends only a note must not blank the frames a parent named on the first (see the patch in the route).
+  const { keys } = layReviewFixture();
+  const frames = Object.fromEntries(keys);
+  assert.equal((await put(frames)).status, 200, 'precondition: all three frames stored');
+  const stored = reviewRow();
+  for (const [key, id] of keys) assert.equal(stored[key], id, `precondition: ${key} stored`);
+
+  assert.equal((await put({ note: 'a cold' })).status, 200);
+  for (const [key, id] of keys) assert.equal(reviewRow()[key], id, `${key}: a save that does not send it keeps it`);
+  assert.equal(reviewRow().true_wake_at, stored.true_wake_at, 'and the time it resolved to');
+
+  assert.equal((await put({ true_wake_transition_id: '', true_wake_local: null })).status, 200);
+  assert.equal(reviewRow().true_wake_transition_id, null, "'' clears it");
+  assert.equal(reviewRow().true_onset_transition_id, frames.true_onset_transition_id, 'and only the key that was sent');
+});
+
+test('#522 parseTransitionId: null when absent, the integer for an id, NaN (never undefined) for anything else', () => {
+  for (const [label, v] of [['null', null], ['undefined', undefined], ["''", '']]) {
+    assert.equal(parseTransitionId(v), null, `${label} is "no frame"`);
+  }
+  const MAX = Number.MAX_SAFE_INTEGER;
+  for (const [label, v, want] of [
+    ['1', 1, 1], ['42', 42, 42], ["'42'", '42', 42], ["'10'", '10', 10],
+    ['2**53 - 1', MAX, MAX], ["'9007199254740991'", '9007199254740991', MAX],
+  ]) assert.equal(parseTransitionId(v), want, label);
+  for (const [label, v] of [
+    ['0', 0], ['-1', -1], ['-0', -0], ['1.5', 1.5], ['NaN', NaN], ['Infinity', Infinity],
+    // Past 2**53 - 1 the number is no longer the id that was sent: "...993" reads as ...992.
+    ['2**53', 2 ** 53], ["'9007199254740992'", '9007199254740992'], ["'9007199254740993'", '9007199254740993'],
+    ["'0'", '0'], ["'007'", '007'], ["'-5'", '-5'], ["'+5'", '+5'], ["'5.0'", '5.0'], ["'5e0'", '5e0'],
+    ["'0x10'", '0x10'], ["' 5'", ' 5'], ["'5 '", '5 '], ["' 5 '", ' 5 '], ["'\\t5'", '\t5'], ["'5\\n'", '5\n'],
+    ["'1_000'", '1_000'], ["'abc'", 'abc'],
+    ['true', true], ['false', false], ['[]', []], ['[5]', [5]], ["['5']", ['5']], ['{}', {}],
+    ['an object whose valueOf is 5', { valueOf: () => 5 }], ['5n', 5n],
+  ]) assert.ok(Number.isNaN(parseTransitionId(v)), `${label} is not an id`);
 });
 
 test('a second in-bed answer REPLACES the first (the upsert updates it), undefined keeps it, null clears it', async () => {

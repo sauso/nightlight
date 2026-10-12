@@ -173,6 +173,22 @@ page and only a 4xx message reaches the person:
   the connection so the client sees a failure rather than a truncated body that looks complete. If the
   reply already finished, the error is only logged.
 
+**Example of "4xx before any write": the morning review's frame ids** (`PUT /api/children/:id/review/:date`,
+#522). `true_onset_transition_id`, `true_wake_transition_id` and `true_in_bed_transition_id` each name one
+recorded *got into / out of bed* event of that child and that night.
+
+| Sent as | Means |
+|---|---|
+| key not sent | keep the stored frame (an older page never sends the newer keys) |
+| `null` or `""` | no frame; clears a stored one (`""` has meant this since #571) |
+| a positive whole number up to 2^53 - 1, or a string of ASCII digits without a leading zero (`42`, `"42"`) | that event; it must be one of this night's, and the in-bed one a *got into bed* event |
+| anything else (`true`, `[42]`, `"0x2a"`, `"42e0"`, `" 42 "`, `"42.0"`, `"042"`, `0`, `-1`, `1.5`, `{}`) | **400**, the key's usual message (`<key> is not an event of this night`, or `... is not a got-into-bed event of this night` for the in-bed one), before anything in the request is written, verdicts included |
+
+One parser, `parseTransitionId` in `lib/sleepReviews.js`, reads the id for both the check and what is stored,
+so the two cannot disagree (they did on `""` before #571). Before #522 the shapes in the last row that
+`Number()` reads as a real id (`[42]`, `"0x2a"`, `" 42 "` and the like) were accepted and saved as that id.
+Pinned by `backend/test/review-in-bed-and-lock.test.js`.
+
 ## Runtime identity (`backend/entrypoint.sh`, `Dockerfile`)
 
 Container starts as root, remaps a pre-baked user to `PUID`/`PGID` (default 99/100, Unraid's
