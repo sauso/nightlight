@@ -1006,9 +1006,14 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // counts of 0-1) are accepted only through the data-gap fail-open at +71 minutes, which the bound leaves
   // alone. The consequence, a known limit pinned by the #669 T6 tests: a settle within OCCUPANCY_WITNESS_MIN
   // of the END of the timeline escapes the bound entirely, because the first return fires before the bound
-  // is looked at. In practice that is an in-progress night (the timeline ends "now"), so tonight's live
-  // figures can show a false early put-down for up to 150 minutes after its settle; the night is worked
-  // out again with the bound once enough of it has passed, and the stored row is computed in the morning.
+  // is looked at. That is NOT only an in-progress night (corrected 2026-10-12, #679; the first version of
+  // this comment said it was, and so did README and KNOWN-ISSUES): it is any candidate whose 150-minute
+  // window runs past the end of the timeline. On an in-progress night the timeline ends "now", so tonight's
+  // live figures can show a false early put-down for up to 150 minutes after its settle, and the night is
+  // worked out again with the bound once enough of it has passed. A COMPLETED night escapes too when the
+  // candidate is within 150 minutes of its window end: a false 05:15 put-down over an empty bed, a real
+  // 06:00 one and a window ending 07:00 give in_progress false with 05:15 kept as onset and In bed (shown
+  // by a fixture on the #676 review). Not a new false acceptance: dev before #669 behaved the same.
   // A null minute AFTER `until` no longer fails open; that is the bound working (it can only matter when
   // the old count also returned true), not a change of contract.
   //

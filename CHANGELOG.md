@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **Removing a correction can no longer be undone on screen by a slow page load, and the docs now say when the evening put-down check can be skipped (#679).** Arriving on a night's page from a save, then pressing Recompute and "Remove my correction" before the page had finished reading the saved review, could leave the "Thanks — that's recorded" card up quoting the times just removed; an older answer is now ignored once the correction is removed. The README and KNOWN-ISSUES also said the check that a put-down is followed by movement in the bed is skipped only for a night still in progress. It is skipped for any put-down within 2½ hours of the end of the timeline, so a finished night's false put-down near the end of its window is still believed. That is documentation only: the behaviour is unchanged.
+
 ## [0.38.0] - 2026-10-12
 
 ### Added

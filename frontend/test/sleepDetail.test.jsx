@@ -20,7 +20,7 @@
 // "no sleep detected" and "nobody in the bed" mean quite different things, and collapsing them would
 // send someone to check the wrong thing.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor, within, fireEvent } from '@testing-library/react';
+import { screen, waitFor, within, fireEvent, act } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
 import { renderAsAdmin } from './helpers/render.jsx';
 import SleepDetail, { addDays } from '../src/pages/SleepDetail.jsx';
@@ -250,6 +250,51 @@ describe('which night it opens on', () => {
 
     await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByText('Thanks — that’s recorded')).toBeNull());
+  });
+
+  // ★ A SLOW RECEIPT FETCH MUST NOT BRING BACK A RECEIPT THAT WAS JUST REMOVED (#679, from the #678 review).
+  // The page reads the review for the receipt on arrival; if that GET is still in flight when the person
+  // opens Recompute and removes the correction, `onCorrectionRemoved` clears the receipt and the OLDER
+  // response then lands and sets it again, quoting times that no longer exist. The effect's own `alive`
+  // guard cannot see this: it only flips on cleanup (a date or id change), not on a removal.
+  //
+  // The receipt fetch is held by hand (the FIRST `/review/` GET; the dialog's own read before its PUT is
+  // the second and answers at once), so the order is exactly the bad one: removal first, stale answer
+  // after. The answer carries the removed times, as a real one would.
+  test('★ a receipt fetch still in flight when the correction is removed does not bring the receipt back', async () => {
+    const corrected = { ...NIGHT, night_date: '2026-08-24', corrected: true };
+    let reviewReads = 0;
+    let releaseReceipt;
+    let removed = false;
+    const get = vi.fn((path) => {
+      if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'tonight', night: { night_date: '2026-08-30' } });
+      if (path.includes('/sleep/insights')) return Promise.resolve(null);
+      if (path.includes('/review/')) {
+        reviewReads += 1;
+        if (reviewReads === 1) return new Promise((resolve) => { releaseReceipt = () => resolve(REVIEW_RESPONSE); });
+        return Promise.resolve(REVIEW_RESPONSE);
+      }
+      if (path.includes('stored=1')) return Promise.resolve({ night: { ...NIGHT, night_date: '2026-08-24' }, locked: !removed });
+      if (path.includes('/sleep/')) return Promise.resolve(corrected);
+      return Promise.resolve(null);
+    });
+    vi.spyOn(api, 'get').mockImplementation(get);
+    const put = vi.spyOn(api, 'put').mockImplementation(() => { removed = true; return Promise.resolve({ review: {} }); });
+    const { user } = mountAt('/children/kid-1/sleep?date=2026-08-24&saved=1');
+
+    await user.click(await screen.findByRole('button', { name: /recompute this night/i }));
+    // The receipt's GET is the one still pending: no receipt yet, and it has been asked for exactly once.
+    expect(reviewReads).toBe(1);
+    expect(screen.queryByText('Thanks — that’s recorded')).toBeNull();
+    await user.click(await screen.findByRole('button', { name: /^remove my correction$/i }));
+    await user.click(await screen.findByRole('button', { name: /^remove my correction$/i }));
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+    // The dialog has finished (the locked notice goes once its refresh has read the unlocked row).
+    await waitFor(() => expect(screen.queryByText(/This night is locked because you corrected it/)).toBeNull());
+
+    // NOW the older read answers. It must be ignored.
+    await act(async () => { releaseReceipt(); });
+    expect(screen.queryByText('Thanks — that’s recorded')).toBeNull();
   });
 
   test('★ but never past the newest browsable night', async () => {

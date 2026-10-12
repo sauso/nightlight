@@ -15550,11 +15550,38 @@
   {
     "label": "unlock-correction F15: the detail page keeps its receipt after a correction is removed",
     "file": "frontend/src/pages/SleepDetail.jsx",
-    "find": "onCorrectionRemoved={() => setReceipt(null)}",
+    "find": "onCorrectionRemoved={() => { receiptRemovals.current += 1; setReceipt(null); }}",
     "replace": "onCorrectionRemoved={() => {}}",
     "expect": "killed",
     "tests": ["sleepDetail.test.jsx"],
     "namePattern": "drops the"
+  },
+  {
+    "label": "#679: a receipt fetch that started before a correction was removed may still set the receipt (the removal counter is not consulted)",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "if (!alive || removalsAtStart !== receiptRemovals.current) return;",
+    "replace": "if (!alive) return;",
+    "expect": "killed",
+    "tests": ["sleepDetail.test.jsx"],
+    "namePattern": "still in flight when the correction is removed"
+  },
+  {
+    "label": "#679: removing a correction does not move the counter (the in-flight receipt fetch cannot tell it was overtaken)",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "receiptRemovals.current += 1; setReceipt(null);",
+    "replace": "setReceipt(null);",
+    "expect": "killed",
+    "tests": ["sleepDetail.test.jsx"],
+    "namePattern": "still in flight when the correction is removed"
+  },
+  {
+    "label": "#679: the confirm button stays enabled while the removal runs (a double tap sends two removals)",
+    "file": "frontend/src/components/RecomputeNight.jsx",
+    "find": "onClick={removeCorrection} disabled={busy}",
+    "replace": "onClick={removeCorrection}",
+    "expect": "killed",
+    "tests": ["RecomputeNight.test.jsx"],
+    "namePattern": "double tap on the confirm button"
   },
   {
     "label": "unlock-correction F13: .field is inline again (the margin under the note field does nothing)",

@@ -1489,10 +1489,16 @@ changed (3 minutes, 2½ hours, 0.0005), and there is no setting.
   child: a false 18:48 put-down reaches exactly 3 that way and stays the bedtime, 43 minutes early (staging
   got that night right, because it logged two more *got into bed* that cut earlier). Trimming the approach
   was tried and rejected: it also zeroes a child who is still stirring when the next put-down is logged.
-- **A night still in progress.** The count is only cut once 2½ hours after the settle have passed; before
-  that, "not enough of the night yet to judge" accepts the put-down, as it always did. So tonight's live
-  figures can show a false early put-down as the bedtime until about 2½ hours after it. Figures worked out
-  later, and the stored night, use the full rule.
+- **Any put-down whose 2½ hours run past the end of the timeline, in progress or not.** The count is only
+  cut once 2½ hours after the settle have been recorded; before that, "not enough of the night yet to
+  judge" accepts the put-down, as it always did. On a night still in progress that is tonight's live
+  figures showing a false early put-down as the bedtime until about 2½ hours after it; figures worked out
+  later, and the stored night, use the full rule. **A finished night is not exempt:** a false put-down
+  within 2½ hours of the end of the night's window is accepted the same way, and so the real put-down
+  after it is never considered. For example a false 05:15 put-down over an empty bed, a real one at 06:00
+  and a window ending at 07:00 give a night that is not in progress with 05:15 as the bedtime and as
+  In bed. This is how the code behaved before #669 too, so it is a limit that stays, not a new one; it
+  needs a false put-down in the last 2½ hours of the window, which the usual evening bedtime is not.
 - **Not fixed:** a nap the child was lifted out of without waking (nothing between the nap and bedtime shows
   they woke), and a quiet evening with nothing to break the stillness over the empty bed, which can still be
   read as a child asleep from the window's opening. A camera outage between a false put-down and the next
