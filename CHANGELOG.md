@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-10-12
+
 ### Added
 
 - **Developer tooling (not part of the image): a sleep accuracy scoreboard, `node scripts/scoreboard.mjs <snapshot.db>`.** It recomputes every reviewed night of a database snapshot with the backend's own `computeNight` and scores it against the morning review: the share of nights within 10 minutes (in-bed), 15 (onset) and 10 (wake), median and mean error, wakes left blank and wakes off by more than an hour, per child ("child 1", "child 2" by creation order, no names) and overall, in two sets: "fitted-to" (reviewed at or before `--unseen-after`, default 2026-10-11) and "unseen". Only "unseen" measures progress, and it is small, so every row prints its number of nights. It works on a temporary copy and never writes to the snapshot, and it refuses to write its output inside the repository (the ledger it feeds is kept outside); `--backend=<dir>` scores another checkout's backend on the same snapshot for an old-versus-new comparison. Dismissed reviews, "nobody in the bed" reviews, reviews with no true time and nights older than the 30-day activity retention (which cannot be recomputed) are counted, not scored, so the scoreboard covers roughly the last month of reviews. No behaviour changed. See [Scoring a sleep change](planning/sleep-marker-review-runbook.md#6-scoring-a-sleep-change-against-the-reviews-the-accuracy-scoreboard).
