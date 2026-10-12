@@ -556,6 +556,29 @@ describe('removing a camera', () => {
     expect(await screen.findByText('at /cameras')).toBeTruthy();
   });
 
+  test('★ #378 pressing Remove again clears the old failure WHILE the retry is in flight', async () => {
+    // The message from the failed attempt must not sit there, contradicting "Removing…", until the retry
+    // settles: it would read as the retry having already failed. Held pending so the in-flight moment is
+    // observable; then rejected with a DIFFERENT message to show the new failure replaces it.
+    delSpy = vi.spyOn(api, 'del').mockRejectedValueOnce(new Error('First refusal #378'));
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Remove camera' }));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('First refusal #378');
+
+    let rejectRetry;
+    delSpy.mockImplementationOnce(() => new Promise((_, reject) => { rejectRetry = reject; }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('button', { name: 'Removing…' })).toBeDisabled();
+    expect(within(dialog).queryByRole('alert'), 'the first failure is gone while the retry runs').toBeNull();
+    expect(within(dialog).queryByText('First refusal #378')).toBeNull();
+
+    rejectRetry(new Error('Second refusal #378'));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Second refusal #378');
+    expect(within(dialog).getByRole('button', { name: 'Remove' })).toBeEnabled();
+  });
+
   test('★ #378 a stale message is gone when the dialog is cancelled and reopened', async () => {
     delSpy = vi.spyOn(api, 'del').mockRejectedValue(new Error('Refused once #378'));
     const { user } = mount();

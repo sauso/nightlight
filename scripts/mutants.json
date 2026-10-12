@@ -13845,8 +13845,8 @@
   {
     "label": "W5 role UI M20: the Cameras tab gives a caregiver the assign <select>",
     "file": "frontend/src/pages/Cameras.jsx",
-    "find": "              {isAdmin ? (\r\n                <select value={cam.child_id || ''}",
-    "replace": "              {true ? (\r\n                <select value={cam.child_id || ''}",
+    "find": "              {isAdmin ? (\r\n                <select id={`assign-${cam.id}`} value={cam.child_id || ''}",
+    "replace": "              {true ? (\r\n                <select id={`assign-${cam.id}`} value={cam.child_id || ''}",
     "expect": "killed",
     "tests": ["cameras.test.jsx"],
     "namePattern": "SEES each camera"
@@ -13890,7 +13890,7 @@
   {
     "label": "W5 role UI M24: a caregiver's live tiles get the drag handle again",
     "file": "frontend/src/components/LiveMonitor.jsx",
-    "find": "  const canReorder = user?.role === 'admin';",
+    "find": "  const canReorder = isAdmin;",
     "replace": "  const canReorder = true;",
     "expect": "killed",
     "tests": ["liveMonitor.test.jsx"],
@@ -16153,7 +16153,7 @@
     "find": "String(form[k] ?? '') !== String(saved[k] ?? '')",
     "replace": "form[k] !== saved[k]",
     "expect": "killed",
-    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "tests": ["pushSendTestUnsaved.test.jsx", "unsavedEdits.test.js"],
     "namePattern": "Gotify priority|same number"
   },
   {
@@ -16162,7 +16162,7 @@
     "find": "String(saved[k] ?? '')",
     "replace": "String(saved[k] || '')",
     "expect": "killed",
-    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "tests": ["pushSendTestUnsaved.test.jsx", "unsavedEdits.test.js"],
     "namePattern": "Gotify priority|null, undefined and empty"
   },
   {
@@ -16171,7 +16171,7 @@
     "find": "if (secrets.some((s) => String(s ?? '') !== '')) return true;",
     "replace": "if (secrets.length > 99) return true;",
     "expect": "killed",
-    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "tests": ["pushSendTestUnsaved.test.jsx", "unsavedEdits.test.js"],
     "namePattern": "typed secret|non-empty secret"
   },
   {
@@ -16180,7 +16180,7 @@
     "find": "if (!form || !saved) return false;",
     "replace": "if (!form || !saved) return true;",
     "expect": "killed",
-    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "tests": ["unsavedEdits.test.js"],
     "namePattern": "nothing to compare"
   },
   {
@@ -16348,7 +16348,7 @@
   {
     "label": "#562 LiveMonitor: a drop is computed from the order the page loaded with, not the current one",
     "file": "frontend/src/components/LiveMonitor.jsx",
-    "find": "reorderCameras(orderedCameras, active.id, over.id)",
+    "find": "reorderCameras(orderRef.current, active.id, over.id)",
     "replace": "reorderCameras(cameras, active.id, over.id)",
     "expect": "killed",
     "tests": ["liveMonitorReorder.test.jsx"],
@@ -16461,5 +16461,68 @@
     "expect": "killed",
     "tests": ["touchTargets.test.js"],
     "namePattern": "neighbours are far enough apart"
+  },
+  {
+    "label": "#562 LiveMonitor: the handler reads the render closure, not the ref (two drops in one batch undo each other)",
+    "file": "frontend/src/components/LiveMonitor.jsx",
+    "find": "reorderCameras(orderRef.current, active.id, over.id)",
+    "replace": "reorderCameras(orderedCameras, active.id, over.id)",
+    "expect": "killed",
+    "tests": ["liveMonitorReorder.test.jsx"],
+    "namePattern": "ONE React batch"
+  },
+  {
+    "label": "#562 LiveMonitor: the ref is not advanced after a drop (the next drop in the same batch uses the old order)",
+    "file": "frontend/src/components/LiveMonitor.jsx",
+    "find": "orderRef.current = next;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["liveMonitorReorder.test.jsx"],
+    "namePattern": "ONE React batch"
+  },
+  {
+    "label": "#396 unsavedEdits: the Enable switch is ignored",
+    "file": "frontend/src/lib/unsavedEdits.js",
+    "find": "Object.keys(form).some((k) =>",
+    "replace": "Object.keys(form).filter((k) => k !== 'enabled').some((k) =>",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx", "unsavedEdits.test.js"],
+    "namePattern": "Enable switch|toggled boolean"
+  },
+  {
+    "label": "#379 App: the catch-all is narrowed to one prefix",
+    "file": "frontend/src/App.jsx",
+    "find": "<Route path=\"*\" element={<NotFound />} />",
+    "replace": "<Route path=\"/children/*\" element={<NotFound />} />",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "unknown addresses at other depths"
+  },
+  {
+    "label": "#378 CameraSettings: a retry keeps the previous failure on screen while it runs",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "setRemoveBusy(true); setPageError(''); setRemoveError('');",
+    "replace": "setRemoveBusy(true); setPageError('');",
+    "expect": "killed",
+    "tests": ["cameraSettings.test.jsx"],
+    "namePattern": "pressing Remove again clears"
+  },
+  {
+    "label": "#381 index.css: the tile buttons' ::after cannot receive a tap (pointer-events: none)",
+    "file": "frontend/src/index.css",
+    "find": ".rec-btn::after {\r\n  content: '';",
+    "replace": ".rec-btn::after {\r\n  pointer-events: none;\r\n  content: '';",
+    "expect": "killed",
+    "tests": ["touchTargets.test.js"],
+    "namePattern": "one shared ::after rule"
+  },
+  {
+    "label": "#381 index.css: the drag handle's ::after cannot receive a tap (pointer-events: none)",
+    "file": "frontend/src/index.css",
+    "find": ".drag-handle::after {\r\n  content: '';",
+    "replace": ".drag-handle::after {\r\n  pointer-events: none;\r\n  content: '';",
+    "expect": "killed",
+    "tests": ["touchTargets.test.js"],
+    "namePattern": "is the positioning anchor"
   }
 ]

@@ -99,6 +99,22 @@ describe('★★ dropping a tile (#562)', () => {
     expect(api.put).toHaveBeenNthCalledWith(2, '/cameras/reorder', { order: ['c3', 'c2', 'c1'] });
   });
 
+  test('★ two drops reported inside ONE React batch: the second is built on the first, not on the stale render', () => {
+    // No render happens between these two calls (one act), so the handler's closure still holds the order
+    // the page loaded with. A handler that read only that closure would build the second move from
+    // [c1, c2, c3] and send [c1, c3, c2]: the first drop silently undone. The old updater form did not
+    // have this problem, and the ref in LiveMonitor exists so that moving the PUT out of it does not lose it.
+    renderAsAdmin(<StrictMode><LiveMonitor /></StrictMode>, { cameras: CAMS });
+    act(() => {
+      latestOnDragEnd({ active: { id: 'c1' }, over: { id: 'c3' } }); // [c2, c3, c1]
+      latestOnDragEnd({ active: { id: 'c3' }, over: { id: 'c2' } }); // [c3, c2, c1]
+    });
+    expect(api.put).toHaveBeenCalledTimes(2);
+    expect(api.put).toHaveBeenNthCalledWith(1, '/cameras/reorder', { order: ['c2', 'c3', 'c1'] });
+    expect(api.put).toHaveBeenNthCalledWith(2, '/cameras/reorder', { order: ['c3', 'c2', 'c1'] });
+    expect(gridOrder()).toEqual(['Playroom', 'Nursery']);
+  });
+
   test('a drop onto itself, or onto nothing, sends nothing', () => {
     renderAsAdmin(<StrictMode><LiveMonitor /></StrictMode>, { cameras: CAMS });
     drop('c1', 'c1');

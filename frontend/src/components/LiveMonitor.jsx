@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { RefreshCw } from 'lucide-react';
 import {
@@ -92,6 +92,15 @@ export default function LiveMonitor() {
   // reordering keeps their saved position rather than dropping them out of the order.
   const visibleCameras = orderedCameras.filter((cam) => !cam.disabled);
 
+  // The newest order, readable from an event handler between renders (#562). handleDragEnd closes over
+  // `orderedCameras` from the render it was created in, so two drops reported inside ONE React batch (before
+  // any render) would both build from the same old order and the second would silently undo the first. The
+  // old updater form (`setOrderedCameras((current) => ...)`) did not have that problem; moving the PUT out of
+  // the updater must not lose it, so the handler reads and advances this ref, which every render re-syncs
+  // from state (so a cameras refresh from the context still wins).
+  const orderRef = useRef(orderedCameras);
+  orderRef.current = orderedCameras;
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
@@ -109,7 +118,9 @@ export default function LiveMonitor() {
     // reorder twice. An updater must be pure.
     // The fire-and-forget `.catch` stays: telling the person a reorder did not save is a design change
     // (where to show it, whether to roll the grid back), tracked on the issue rather than done here.
-    const next = reorderCameras(orderedCameras, active.id, over.id);
+    // Built from the ref, not the closure, and the ref is advanced at once: see orderRef above.
+    const next = reorderCameras(orderRef.current, active.id, over.id);
+    orderRef.current = next;
     setOrderedCameras(next);
     api.put('/cameras/reorder', { order: next.map((c) => c.id) }).catch(() => {});
   }

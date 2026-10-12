@@ -1,4 +1,5 @@
-// "Send test" on the three push provider pages (Pushover, Gotify, ntfy), and the helper behind it (#396).
+// "Send test" on the three push provider pages (Pushover, Gotify, ntfy) (#396). The helper behind it is
+// unit-tested in unsavedEdits.test.js; this file only goes through the pages.
 //
 // ★ THE DEFECT. Send test POSTs with NO body: the server tests whatever is SAVED. The button was enabled
 // whenever the provider was `configured`, including while the person had typed a new value that had not
@@ -19,13 +20,17 @@ import { renderAsAdmin } from './helpers/render.jsx';
 import SettingsPushPushover from '../src/pages/SettingsPushPushover.jsx';
 import SettingsPushGotify from '../src/pages/SettingsPushGotify.jsx';
 import SettingsPushNtfy from '../src/pages/SettingsPushNtfy.jsx';
-import { hasUnsavedEdits, UNSAVED_TEST_HINT } from '../src/lib/unsavedEdits.js';
 import { api } from '../src/lib/api.js';
 
 afterEach(() => vi.restoreAllMocks());
 
+// ⚠️ This file deliberately does NOT import src/lib/unsavedEdits.js, and matches the hint by a literal
+// regexp. The pages are what is under test; importing the new helper would make the whole file fail at
+// import on the old source (where it does not exist) and the old, always-enabled button would never be
+// exercised, so a red-on-old run would fail for the wrong reason. The helper has its own file
+// (unsavedEdits.test.js).
 const sendTest = () => screen.getByRole('button', { name: /Send test/i });
-const hint = () => screen.queryByText(UNSAVED_TEST_HINT);
+const hint = () => screen.queryByText(/Save your changes first/);
 
 // One row per page: how to render it, what its saved config is, a text field to edit, and its secrets.
 const PAGES = [
@@ -116,6 +121,25 @@ describe.each(PAGES)('$name: Send test follows the SAVED settings (#396)', (p) =
     expect(sendTest()).toBeEnabled();
   });
 
+  test('★ the Enable switch is an edit too: toggling it holds Send test back, toggling it back releases it', async () => {
+    // `enabled` is saved with the rest of the form, so a switch flipped and not yet saved is an unsaved
+    // change like any text field. (A helper that skipped booleans, or this one key, would leave the button
+    // live while the screen says something the saved config does not.)
+    const { user, post } = await mount(p);
+    expect(p.config.enabled).toBe(true); // the fixture is saved ON, so one click is a real change
+    await user.click(screen.getByRole('switch'));
+    expect(screen.getByRole('switch')).not.toBeChecked();
+    expect(sendTest()).toBeDisabled();
+    expect(hint()).not.toBeNull();
+    await user.click(sendTest());
+    expect(post).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('switch'));
+    expect(screen.getByRole('switch')).toBeChecked();
+    expect(sendTest()).toBeEnabled();
+    expect(hint()).toBeNull();
+  });
+
   test('★ a FAILED save leaves it held back: the screen still differs from what is saved', async () => {
     const { user } = await mount(p, { putImpl: () => Promise.reject(new Error('Save refused #396')) });
     await user.type(p.field(), 'x');
@@ -179,40 +203,3 @@ describe('Gotify priority: a number from the server, a string once typed (#396)'
   });
 });
 
-describe('hasUnsavedEdits', () => {
-  const saved = { a: 'x', n: 5, flag: false, nothing: null };
-
-  test('identical objects are clean, and so is a fresh copy', () => {
-    expect(hasUnsavedEdits(saved, saved)).toBe(false);
-    expect(hasUnsavedEdits({ ...saved }, saved)).toBe(false);
-  });
-
-  test('any changed key is an edit', () => {
-    expect(hasUnsavedEdits({ ...saved, a: 'y' }, saved)).toBe(true);
-    expect(hasUnsavedEdits({ ...saved, flag: true }, saved)).toBe(true);
-  });
-
-  test('a number and the same number as a string are the same value', () => {
-    expect(hasUnsavedEdits({ ...saved, n: '5' }, saved)).toBe(false);
-    expect(hasUnsavedEdits({ ...saved, n: '6' }, saved)).toBe(true);
-  });
-
-  test('null, undefined and empty string are the same "nothing", but 0 is not nothing', () => {
-    expect(hasUnsavedEdits({ ...saved, nothing: '' }, saved)).toBe(false);
-    expect(hasUnsavedEdits({ ...saved, nothing: undefined }, saved)).toBe(false);
-    expect(hasUnsavedEdits({ ...saved, nothing: 0 }, saved)).toBe(true);
-    expect(hasUnsavedEdits({ k: 0 }, { k: null })).toBe(true);
-    expect(hasUnsavedEdits({ k: 0 }, { k: 0 })).toBe(false);
-  });
-
-  test('any non-empty secret is an edit; empty, null and undefined are not', () => {
-    expect(hasUnsavedEdits(saved, saved, ['', null, undefined])).toBe(false);
-    expect(hasUnsavedEdits(saved, saved, ['', 'tok'])).toBe(true);
-    expect(hasUnsavedEdits(saved, saved, [' '])).toBe(true);
-  });
-
-  test('nothing to compare against is clean, not an error', () => {
-    expect(hasUnsavedEdits(null, saved)).toBe(false);
-    expect(hasUnsavedEdits(saved, null)).toBe(false);
-  });
-});

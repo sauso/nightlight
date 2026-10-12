@@ -181,6 +181,20 @@ describe('the route table', () => {
     unmount();
   });
 
+  test('★ #379 unknown addresses at other depths are not-found too, not just one prefix', async () => {
+    // A catch-all narrowed to one prefix (`/children/*`) passes the deep address above and fails these:
+    // a top-level unknown and one under a section that has real routes of its own.
+    for (const route of ['/nonsense', '/settings/nonsense']) {
+      const { unmount } = await openAt(route);
+      expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeInTheDocument();
+      unmount();
+      vi.restoreAllMocks();
+      vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(false);
+      vi.spyOn(nativeBridge, 'hasActiveBackgroundAudio').mockReturnValue(false);
+      vi.spyOn(push, 'initPushNotifications').mockResolvedValue(undefined);
+    }
+  });
+
   test('★ #379 the real routes, and the retired /family, are NOT the not-found page', async () => {
     for (const [route, heading] of [
       ['/children', 'Children'],

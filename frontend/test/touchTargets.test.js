@@ -44,6 +44,11 @@ describe('★ the over-video controls have a 44px hit area (#381)', () => {
     expect(body).toMatch(/inset:\s*-7px/);
     // Invisible: a background or border here would draw a visible box around a bare icon.
     expect(body).not.toMatch(/background|border|box-shadow|outline/);
+    // ...and still HIT: `pointer-events: none` (or display/visibility hiding) keeps the pseudo-element in
+    // the stylesheet but makes it unable to receive a tap, so every assertion above would still pass.
+    expect(body).not.toMatch(/pointer-events:\s*none/);
+    expect(body).not.toMatch(/display:\s*none/);
+    expect(body).not.toMatch(/visibility:\s*hidden/);
   });
 
   test('★ every one of the seven is itself position:absolute, which is what the ::after positions against', () => {
@@ -94,6 +99,10 @@ describe('★ the drag handle has a 44px hit area (#381)', () => {
     expect(after).toMatch(/position:\s*absolute/);
     expect(after).toMatch(/inset:\s*-10px/);
     expect(after).not.toMatch(/background|border|box-shadow|outline/);
+    // Must still receive the tap: see the same assertion on the tile buttons' rule above.
+    expect(after).not.toMatch(/pointer-events:\s*none/);
+    expect(after).not.toMatch(/display:\s*none/);
+    expect(after).not.toMatch(/visibility:\s*hidden/);
   });
 
   test('it keeps touch-action:none (a drag must not scroll the page), which the pseudo-element inherits', () => {
