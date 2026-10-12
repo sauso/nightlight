@@ -233,6 +233,19 @@ describe('DiagnosticsCard', () => {
     expect(screen.getByRole('button', { name: /Download diagnostics/ })).toBeEnabled();
   });
 
+  test('#547: the card says names are replaced and what is still included, not only "no passwords"', () => {
+    // The card is the only thing between a person and a public issue: a promise limited to credentials let
+    // them believe a child's name was not in the file. Pin both halves, what is replaced and what remains.
+    mockBundle();
+    asBrowser();
+    renderAsAdmin(<DiagnosticsCard title="Report a problem" />);
+    const card = screen.getByText('Report a problem').closest('.card');
+    const text = card.textContent.replace(/\s+/g, ' ');
+    expect(text).toMatch(/children, cameras and user accounts appear as Child 1, Camera 1 and User 1/);
+    expect(text).toMatch(/birthdays left out/);
+    expect(text).toMatch(/still include your camera and MQTT addresses and topics, your timezone, and the time of each event/);
+  });
+
   test('the browser path builds a timestamped .json blob and offers it as a download', async () => {
     mockBundle();
     asBrowser();

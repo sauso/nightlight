@@ -85,8 +85,11 @@ export default function DiagnosticsCard({ title }) {
         Hit a bug? Download a diagnostics bundle and attach it to a GitHub issue — it packages your
         version and build, host/runtime info, camera &amp; detection settings, live stream status,
         and recent logs into one file to help pin down the problem.{' '}
-        <strong>No passwords or tokens are included</strong>, so you can open the file and review it
-        before sharing. Found something sensitive in it anyway, or have a security concern?{' '}
+        <strong>No passwords or tokens are included</strong>, and children, cameras and user accounts
+        appear as Child 1, Camera 1 and User 1, with birthdays left out. It <strong>does</strong>{' '}
+        still include your camera and MQTT addresses and topics, your timezone, and the time of each
+        event, which shows when a child slept, so open the file and review it before sharing. Found
+        something sensitive in it anyway, or have a security concern?{' '}
         <a href="https://github.com/sauso/nightlight/blob/main/SECURITY.md" target="_blank" rel="noreferrer">
           Report it privately
         </a>{' '}

@@ -14074,8 +14074,8 @@
   {
     "label": "#552 PR2 M17: the diagnostics bundle carries the Camera history rows unstripped (usernames to a public issue)",
     "file": "backend/src/routes/diagnostics.js",
-    "find": "camera_history: getRecentEvents(200).map(bundleCameraEvent),",
-    "replace": "camera_history: getRecentEvents(200),",
+    "find": "camera_history: getRecentEvents(200).map((ev) => ({ ...bundleCameraEvent(ev), camera_name: ident.cameraAlias(ev.camera_id) })),",
+    "replace": "camera_history: getRecentEvents(200).map((ev) => ({ ...ev, camera_name: ident.cameraAlias(ev.camera_id) })),",
     "expect": "killed",
     "tests": [
       "who-did-it.test.js"
@@ -15801,5 +15801,206 @@
       "sleep-live-last-night.test.js"
     ],
     "namePattern": "an older one exists"
+  },
+  {
+    "label": "#547 route: the bundle is published without the identity scrub",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "[k, keep.has(k) ? v : ident.scrub(v)]",
+    "replace": "[k, v]",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"]
+  },
+  {
+    "label": "#547 route: the name check never fires",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "if (nameLeak) {",
+    "replace": "if (false && nameLeak) {",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"],
+    "namePattern": "the gate"
+  },
+  {
+    "label": "#547 route: a birthday is published",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "birthday: null,",
+    "replace": "birthday: '2020-01-01',",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"]
+  },
+  {
+    "label": "#547 route: a child's list entry keeps its real name (found only for names under 3 characters)",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "name: ident.childAlias(c.id),",
+    "replace": "name: c.name,",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"],
+    "namePattern": "under 3 characters"
+  },
+  {
+    "label": "#547 route: a camera's list entry keeps its real name",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "name: ident.cameraAlias(cam.id),",
+    "replace": "name: cam.name,",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"],
+    "namePattern": "under 3 characters"
+  },
+  {
+    "label": "#547 route: detection events keep the camera name stored in the row",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "getRecentDetectionEvents(100).map((ev) => ({ ...ev, camera_name: ident.cameraAlias(ev.camera_id) })),",
+    "replace": "getRecentDetectionEvents(100),",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"],
+    "namePattern": "under 3 characters"
+  },
+  {
+    "label": "#547 route: the app name is published as typed",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "app_name: settings.app_name === 'Nightlight' ? 'Nightlight' : '(customised)',",
+    "replace": "app_name: settings.app_name,",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"]
+  },
+  {
+    "label": "#547 route: aliases are numbered by insertion order, not created_at",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "FROM children ORDER BY created_at, id'",
+    "replace": "FROM children'",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"],
+    "namePattern": "numbering follows"
+  },
+  {
+    "label": "#547 route: a camera that only the detection history remembers is not known to the redactor",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "`SELECT camera_id, camera_name FROM camera_events UNION SELECT camera_id, camera_name FROM detection_events`",
+    "replace": "`SELECT camera_id, camera_name FROM camera_events`",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"],
+    "namePattern": "renamed or removed"
+  },
+  {
+    "label": "#547 route: a former account's login is not known to the redactor",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "'SELECT DISTINCT actor_username FROM camera_events WHERE actor_username IS NOT NULL'",
+    "replace": "'SELECT DISTINCT actor_username FROM camera_events WHERE 0'",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"],
+    "namePattern": "no longer in the users table"
+  },
+  {
+    "label": "#547 route: the bundle's own note is run through the scrub",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "const EXEMPT_KEYS = new Set(['report', 'note', 'redaction', 'app', 'system', 'counts']);",
+    "replace": "const EXEMPT_KEYS = new Set([]);",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"],
+    "namePattern": "look like the bundle"
+  },
+  {
+    "label": "#547 lib: shortest literal first, so a longer name is split",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": ".sort((a, b) => b.text.length - a.text.length || Number(b.keep) - Number(a.keep) || a.text.localeCompare(b.text));",
+    "replace": ".sort((a, b) => a.text.length - b.text.length || Number(b.keep) - Number(a.keep) || a.text.localeCompare(b.text));",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js"],
+    "namePattern": "longest literal first"
+  },
+  {
+    "label": "#547 lib: no boundary after a name (Eli matches inside Elis)",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "const NOT_AFTER = '(?![\\\\p{L}\\\\p{N}])';",
+    "replace": "const NOT_AFTER = '';",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js"],
+    "namePattern": "word"
+  },
+  {
+    "label": "#547 lib: no boundary before a name",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "const NOT_BEFORE = '(?<![\\\\p{L}\\\\p{N}])';",
+    "replace": "const NOT_BEFORE = '';",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js"],
+    "namePattern": "word"
+  },
+  {
+    "label": "#547 lib: a 1-character name is searched for in free text",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "const MIN_LITERAL_CHARS = 3;",
+    "replace": "const MIN_LITERAL_CHARS = 1;",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js"],
+    "namePattern": "under 3 characters"
+  },
+  {
+    "label": "#547 lib: generic account names are treated as identity",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "if (account && GENERIC_ACCOUNT_NAMES.has(text.toLowerCase())) return;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
+    "namePattern": "generic account name"
+  },
+  {
+    "label": "#547 lib: the percent-encoded form of a name is not searched for",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "if (e) out.push(e);",
+    "replace": "if (false) out.push(e);",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
+    "namePattern": "percent-encoded"
+  },
+  {
+    "label": "#547 lib: a removed camera gets no alias of its own",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "if (!cameraAliases.has(row.camera_id)) cameraAliases.set(row.camera_id, `Camera (removed) ${++removed}`);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"]
+  },
+  {
+    "label": "#547 lib: the check never reports a name",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "if (!matchedBranch(args).keep) found = true;",
+    "replace": "if (false) found = true;",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"]
+  },
+  {
+    "label": "#547 lib: the check flags the bundle's own aliases as names",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "if (!matchedBranch(args).keep) found = true;",
+    "replace": "found = true;",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"]
+  },
+  {
+    "label": "#547 lib: an issued alias beats a longer name that starts with it (Camera 1 Nursery leaks Nursery)",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": ".sort((a, b) => b.text.length - a.text.length || Number(b.keep) - Number(a.keep) || a.text.localeCompare(b.text));",
+    "replace": ".sort((a, b) => Number(b.keep) - Number(a.keep) || b.text.length - a.text.length || a.text.localeCompare(b.text));",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
+    "namePattern": "Camera 1"
+  },
+  {
+    "label": "#547 route: the timezone is run through the scrub (a child called Phoenix)",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "published.settings = scrubExcept(bundle.settings, new Set(['timezone']));",
+    "replace": "published.settings = scrubExcept(bundle.settings, new Set([]));",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"],
+    "namePattern": "timezone"
+  },
+  {
+    "label": "#547 card: the copy no longer says names are replaced",
+    "file": "frontend/src/components/DiagnosticsCard.jsx",
+    "find": "appear as Child 1, Camera 1 and User 1, with birthdays left out.",
+    "replace": "are not included.",
+    "expect": "killed",
+    "tests": ["logsScreen.test.jsx"],
+    "namePattern": "#547"
   }
 ]

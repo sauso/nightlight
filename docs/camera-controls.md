@@ -161,7 +161,8 @@ Known limits: Camera history keeps at most 2,000 rows and 30 days, shared by eve
 silence can be pruned away (by age, or by enough newer rows from any camera), and **Clear log** removes
 every row. Silences, restarts and reboots from before this was recorded show no name. The diagnostics
 bundle (Settings → Logs), which is meant to be attached to a public issue, keeps only whether each
-history row was a *person* or the *system*, never the username.
+history row was a *person* or the *system*, never the username, and shows camera names as `Camera 1`,
+`Camera 2` (see [what the bundle replaces and keeps](../SECURITY.md#what-the-diagnostics-bundle-replaces-and-what-it-keeps-547)).
 
 **Going back to an older version is not safe for privacy.** An older version's diagnostics bundle
 includes Camera history as stored, so after a downgrade it carries the username and account id of

@@ -57,7 +57,7 @@ beforeEach(() => {
   db.prepare('DELETE FROM cameras').run();
   db.prepare('DELETE FROM children').run();
   makeChild(db, { id: KID, name: 'Original' });
-  makeChild(db, { id: OTHER, name: 'Other' });
+  makeChild(db, { id: OTHER, name: 'Sibling' });
   makeCamera(db, { id: 'cam-1', name: 'Cam one', childId: KID, extra: { disabled: 1, sort_order: 0 } });
   makeCamera(db, { id: 'cam-2', name: 'Cam two', childId: KID, extra: { disabled: 1, sort_order: 1 } });
   makeCamera(db, { id: 'cam-theirs', name: 'Their cam', childId: OTHER, extra: { disabled: 1, sort_order: 2 } });
