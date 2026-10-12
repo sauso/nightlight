@@ -77,6 +77,17 @@ so they're usually already correct there. On another system, find your own with
 `id your_username`. TZ (e.g. `Australia/Melbourne`) affects log timestamps only -
 [full list of values](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
 
+`UMASK` (optional, default `077`) decides who else can read what the container writes there. The
+database holds every stored secret (camera passwords, notification tokens) in plaintext, so by
+default everything is **owner-only** (files `600`, folders `700`), and each start takes group/other
+access off anything that still has it. Range: 3 or 4 octal digits with an owner digit of `0`
+(`000`-`077`, e.g. `022` for the old world-readable modes); anything else is ignored with a warning
+and `077` is used. **If another user or container reads your data directory, set `UMASK=022`
+*before* upgrading** - after one start at `077` the opt-out only affects new files. Known limits:
+a default ACL on the host folder overrides it, and an external `CLIPS_DIR` mount's existing files
+are not tightened. Details, including what this means for SMB shares and backups:
+[Who can read the data directory](docs/operations.md#who-can-read-the-data-directory).
+
 The `--log-opt` flags cap Docker's own log storage at 10MB × 3 files - without them,
 logs default to growing unbounded, which can be a real problem on Unraid specifically
 since Docker's storage there is a fixed-size image that can break the whole Docker

@@ -20,6 +20,76 @@ you've moved clips elsewhere:
 Firebase push credentials, if you use them, are entered through the UI and stored in the
 database, not as a separate file.
 
+### Who can read the data directory
+
+The database holds every secret Nightlight keeps — camera passwords, notification-provider tokens,
+MFA secrets, the list of signed-in sessions — **in plaintext, by design**: the app has to read them
+back to use them, so it cannot lock them away from itself. `.jwt_secret` signs every session, and
+snapshots and clips show your home. What protects all of this at rest is **the file mode**, so
+don't share the data directory with anything that doesn't need it.
+
+Since #549 the container makes everything in it **owner-only** — files `600`, folders `700`, owned
+by `PUID`:`PGID` — and on every start takes group/other access off anything in it that still has
+some. Before that, new files were readable by every account on the host (`644`, folders `755`).
+
+| `UMASK` | The file-creation mask for the app and the FFmpeg/MediaMTX processes it starts. |
+|---|---|
+| Default | `077` (owner only). Blank or unset means the default. |
+| Range | 3 or 4 octal digits whose **owner digit is `0`**: `000`–`077`, or `0000`–`0077`. For example `077`, `027` (the group may read), `022` (everyone may read, as before #549). |
+| Anything else | Ignored with one warning in the log, and `077` is used. That includes a mask with an owner digit (`700`, `0777`): it would create files the app itself cannot open. A bad value never stops the container starting. |
+| Existing files | Tightened on every start **only at `077`**. With any other value, files already there are left exactly as they are, and only new ones follow the mask. |
+
+Each start logs two lines (`docker logs nightlight`). The first is the container's start-up script,
+the second is the app itself, which shows the mask actually reached it:
+
+```
+[entrypoint] umask 077; existing entries tightened: 0; modes: babymonitor.db=600 babymonitor.db-wal=600 babymonitor.db-shm=600 .jwt_secret=600
+[data-dir] app umask 077; babymonitor.db mode 600
+```
+
+`absent` in the first line is normal on a first start (no database or `.jwt_secret` yet), and for
+`-wal`/`-shm`, which come and go with the open database. The first start after upgrading counts
+every file and folder it tightened, so expect a large number there once and `0` after that.
+
+**Who keeps access, and who loses it**, at the default, from the first start after upgrading:
+
+- **Unchanged:** the app, FFmpeg and MediaMTX (they run as `PUID`), and anything running as
+  **root**: Unraid's CA Appdata Backup, `docker exec`, a file manager running as root.
+- **Loses access:** anything that reads the data directory as a **different user** — a backup job
+  or `rsync` running as a non-root user, another container that mounts the same folder with a
+  different `PUID`, any other account on the host.
+- **SMB (Unraid shares), unverified:** access mapped to `nobody` (uid 99, the default `PUID`), such
+  as guest access to a Public share, should be unchanged, because that user owns the files. A
+  **named** Unraid user on a Secure or Private share is not the owner, and loses read access once
+  the group bits go; so does every SMB user if you set a non-default `PUID`. This has not yet been
+  checked on a real Unraid share.
+- **Unraid's "New Permissions" tool**, run on the share that holds the data directory, makes it
+  world-readable again; the next container start tightens it back. (The "Docker Safe New Perms"
+  variant is meant to skip appdata.)
+
+**Opting out is one-way, so decide before you upgrade.** If something else has to read the data
+directory, set **`UMASK=022`** *before* the first start of a version with this change. After one
+start at `077`, existing folders are `700` and files `600`, and `UMASK=022` only changes files
+created after that: nothing loosens the old ones automatically. To loosen them by hand, as root on
+the host, then keep `UMASK=022` set (or the next start tightens everything again):
+
+```bash
+chmod -R go+rX /mnt/user/appdata/nightlight     # your Data Directory / APPDATA_DIR
+```
+
+**Known limits:**
+
+- A **default ACL** on the host folder (`setfacl -d …`) overrides the umask: new files get the ACL's
+  permissions, not `600`. Check with `getfacl` if the log shows `600` but another user can still read.
+- The start-up pass walks the data directory the way the ownership fix (`chown -R`) always has: a
+  **hard link** to a file elsewhere, or **another mount nested inside** the data directory, is
+  changed too. A **symbolic link** is never followed: what it points to keeps its mode. On a large
+  `clips/` folder the pass takes about as long as the ownership fix does.
+- An **external `CLIPS_DIR`** (e.g. a `/recordings` mount) is neither re-owned nor tightened: new
+  clips there are `600`, files already there keep their mode.
+- Only the image's start-up script sets the mask. Running the backend directly (`node src/index.js`,
+  development) uses your own shell's umask and tightens nothing.
+
 ## 1. Check the current version and image revision
 
 **Settings → About** shows the running version. For the exact commit, check the image's build
@@ -56,6 +126,7 @@ write happened to be the one still sitting in the WAL.
 
 ```bash
 docker exec nightlight node -e "
+process.umask(0o077);
 const Database = require('/app/node_modules/better-sqlite3');
 const db = new Database('/app/data/babymonitor.db', { readonly: true });
 db.backup('/app/data/backup-$(date +%Y%m%d-%H%M%S).db')
@@ -68,6 +139,13 @@ This uses SQLite's official online-backup API (via `better-sqlite3`, already ins
 image) — safe to run at any time, including while Nightlight is actively writing. Copy the
 resulting `backup-<timestamp>.db` file out of the data volume; it's a single self-contained
 file, no `-wal`/`-shm` companions needed.
+
+The first line, `process.umask(0o077)`, makes the copy owner-only (`600`). `docker exec` does not
+go through the container's start-up script, so without it the copy would be created with Docker's
+`022`: a world-readable file holding every secret in the database, sitting in the data directory
+until the next start tightens it (at the default `UMASK`; see
+[Who can read the data directory](#who-can-read-the-data-directory)).
+The copy belongs to root until then, so copy it out as root.
 
 **If you'd rather back up with the container stopped**, copy **all three** files together —
 `babymonitor.db`, `babymonitor.db-wal`, and `babymonitor.db-shm` (the last two may not exist if
@@ -86,7 +164,9 @@ losing a few recent clips, arguably more disposable than the database.
    `.jwt_secret` and `clips/` for a full restore.
 3. **Ownership matters**: the container `chown`s the data directory to `PUID`/`PGID` on startup,
    so restoring as root (or a different user) and starting with the usual `PUID=99`/`PGID=100`
-   self-corrects — you don't need to manually `chown` first.
+   self-corrects — you don't need to manually `chown` first. At the default `UMASK` the same
+   start also makes the restored files owner-only again (see
+   [Who can read the data directory](#who-can-read-the-data-directory)).
 4. Start the container. Existing sessions from the backup are still valid if `.jwt_secret` was
    restored too; otherwise everyone signs in fresh.
 5. Confirm cameras, children and recent recordings all show up before considering the restore
@@ -101,7 +181,14 @@ docker compose pull && docker compose up -d          # Compose
 ```
 
 Migrations run automatically and are additive (new columns, sentinel-gated, wrapped in a
-transaction per group) — there's no separate migration step to run by hand. After upgrading:
+transaction per group) — there's no separate migration step to run by hand.
+
+**Upgrading to a version with #549 for the first time?** That start makes the data directory
+owner-only. If a backup job, another container or an SMB user other than `nobody` reads it, read
+[Who can read the data directory](#who-can-read-the-data-directory) **before** you upgrade: the
+opt-out (`UMASK=022`) has to be set before that first start to keep the old modes.
+
+After upgrading:
 
 1. Check `docker logs nightlight` for a clean startup with no error lines.
 2. `curl http://<host>:4000/api/health` should return `{"ok":true}`.

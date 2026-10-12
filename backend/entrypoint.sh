@@ -13,6 +13,33 @@ PUID=${PUID:-99}
 PGID=${PGID:-100}
 DATA_DIR=${DATA_DIR:-/app/data}
 
+# --- Who can read the data directory (#549) ---------------------------------------------------
+# The database holds every secret the app has, in plaintext by design (camera passwords, provider
+# tokens, MFA secrets, sessions), and the snapshots and clips show a child's bedroom. The FILE MODE
+# is the only thing between them and every other account on the host, and until #549 everything
+# here was created 0644 / 0755: readable by all of them. docs/operations.md, "Who can read the data
+# directory", is the user-facing half of this block.
+#
+# UMASK: default 077 (owner only). Name and meaning follow the LinuxServer.io images Unraid users
+# already know. Accepted: 3 or 4 octal digits whose OWNER digit is 0 (0[0-7][0-7] or 00[0-7][0-7]):
+# a mask with an owner bit (0277, 0700, 0777) would create files the app itself cannot open, so it
+# is refused like any other typo. Blank or unset = the default, silently (Unraid passes a cleared
+# template field as an empty string; PORT behaves the same way). Anything else = ONE warning and the
+# default: a typo must never stop a baby monitor starting (the same rule as TRUST_PROXY,
+# src/lib/trustProxy.js), and failing safe means failing to private, not to world-readable.
+DEFAULT_UMASK=077
+case "${UMASK:-}" in
+  '') UMASK=$DEFAULT_UMASK ;;
+  0[0-7][0-7]) ;;
+  # 0077 -> 077: one spelling, so the "only at 077" test below is a single comparison.
+  00[0-7][0-7]) UMASK=${UMASK#0} ;;
+  *)
+    # printf, not echo: dash's echo interprets backslashes in the value it is handed.
+    printf '[entrypoint] warning: UMASK=%s is not valid (3 or 4 octal digits with an owner digit of 0, e.g. 077 or 022); using %s\n' "$UMASK" "$DEFAULT_UMASK" >&2
+    UMASK=$DEFAULT_UMASK
+    ;;
+esac
+
 CURRENT_UID=$(id -u nightlight)
 CURRENT_GID=$(id -g nightlight)
 
@@ -24,10 +51,57 @@ if [ "$PUID" != "$CURRENT_UID" ]; then
   usermod -o -u "$PUID" nightlight
 fi
 
+# Set HERE: after the user remap (so /etc/passwd and friends are written exactly as before #549) and
+# BEFORE `mkdir -p`, so on a first boot the data directory itself is created with the mask. A umask
+# is inherited across su-exec and every fork, so the app and the FFmpeg and MediaMTX processes it
+# starts (same uid, #553) create the database, snapshots, clips and recordings with it. SQLite gives
+# -wal/-shm the database file's own mode, so they follow the database rather than the mask.
+umask "$UMASK"
 mkdir -p "$DATA_DIR"
 # Runs on every start, not just first install - this is also what makes it safe to
 # adopt on an existing deployment: any files left over from an earlier root-only setup
 # get fixed up automatically, no separate migration step needed.
 chown -R nightlight:nightlight "$DATA_DIR"
+
+# A umask only shapes NEW files. An install upgraded from before #549 has every file 0644 and every
+# folder 0755, so at the default 077 the group/other bits come off whatever still has any. Why each
+# part:
+#   - ONLY at 077. An opt-out (UMASK=022) must never be re-tightened behind the owner's back, and a
+#     custom mask is not reverse-engineered into a chmod: with any other value nothing existing
+#     changes. That makes the opt-out one-way (a tightened tree stays tight), which the docs say.
+#   - EVERY start, like the chown above and for the same reason: a restore from a backup, or Unraid's
+#     "New Permissions" tool run over appdata (it makes a share world-readable), heals on the next start, with
+#     no marker file to get out of step. -perm /077 matches only entries that still have a bit to
+#     take, so an already-tight tree costs one walk (the chown has just warmed it) and no writes.
+#   - "$DATA_DIR/" WITH the slash: a DATA_DIR that is itself a symlink is walked, not skipped.
+#   - ! -type l: chmod follows a symlink, so a link in here pointing at another share or /etc would
+#     otherwise change THAT file's mode. (find never descends into a linked folder either.) Hard
+#     links and mounts nested inside the data directory ARE walked, exactly as chown -R walks them.
+#   - -print BEFORE -exec: counts the entries for the line below. -print is always true, so every
+#     entry still reaches chmod.
+#   - NEVER fatal under set -e: an unreadable subfolder (a root-squashed network share, say) must not
+#     become a container that will not start. A pipeline's status is its last command's (wc), so the
+#     walk cannot stop the script; `|| printf` is only there to SAY that it fell short.
+if [ "$UMASK" = 077 ]; then
+  TIGHTENED=$( { find "$DATA_DIR/" ! -type l -perm /077 -print -exec chmod go-rwx {} + || printf '[entrypoint] warning: could not tighten every entry under %s (see the error above); starting anyway\n' "$DATA_DIR" >&2; } | wc -l)
+  DONE="existing entries tightened: $TIGHTENED"
+else
+  DONE="existing entries left as they are (UMASK is not 077)"
+fi
+
+# One line to check after an upgrade (`docker logs`; on staging, `hx.sh logs`): the mask, what the
+# walk did, and the modes of the files that hold the secrets. Each is existence-guarded: on a first
+# boot there is no database or .jwt_secret yet, and -wal/-shm come and go with the open database.
+# stat -L: if one of them is a symlink, report the file the app actually opens, not the link.
+# The app logs its own `[data-dir]` line once it is up, which shows the mask actually REACHED it.
+MODES=
+for f in babymonitor.db babymonitor.db-wal babymonitor.db-shm .jwt_secret; do
+  m=absent
+  if [ -e "$DATA_DIR/$f" ]; then
+    m=$(stat -L -c %a "$DATA_DIR/$f" 2>/dev/null) || m=unknown
+  fi
+  MODES="$MODES $f=$m"
+done
+printf '[entrypoint] umask %s; %s; modes:%s\n' "$UMASK" "$DONE" "$MODES"
 
 exec su-exec nightlight "$@"
