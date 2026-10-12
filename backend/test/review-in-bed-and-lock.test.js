@@ -588,13 +588,35 @@ test('#522: a frame key that is NOT SENT keeps the stored frame; only null or \'
   assert.equal(reviewRow().true_onset_transition_id, frames.true_onset_transition_id, 'and only the key that was sent');
 });
 
+test('#522: "Remove my correction" (every time and frame sent as null) clears all three frames AND their times', async () => {
+  // null is "no frame", not "not sent": it is what RecomputeNight's "Remove my correction" sends for all six
+  // fields (and what the review page sends for a frame chip nobody pressed). Read as "not sent", the stored
+  // frame ids would survive while their times were cleared: a review naming three frames and holding no times
+  // (#688 review, mutant X3 survived every test before this one).
+  const { keys } = layReviewFixture();
+  assert.equal((await put(Object.fromEntries(keys))).status, 200, 'precondition: all three frames stored');
+  const TIMES = ['true_onset_at', 'true_wake_at', 'true_in_bed_at'];
+  for (const col of TIMES) assert.notEqual(reviewRow()[col], null, `precondition: ${col} stored from its frame`);
+
+  // RecomputeNight.jsx's removeCorrection body, field for field (the stored review has no flag, so it is not sent).
+  const res = await put({
+    true_onset_local: null, true_wake_local: null, true_in_bed_local: null,
+    true_onset_transition_id: null, true_wake_transition_id: null, true_in_bed_transition_id: null,
+  });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  for (const [key] of keys) assert.equal(reviewRow()[key], null, `${key}: null clears the stored frame`);
+  for (const col of TIMES) assert.equal(reviewRow()[col], null, `${col}: and the time it resolved to`);
+});
+
 test('#522 parseTransitionId: null when absent, the integer for an id, NaN (never undefined) for anything else', () => {
   for (const [label, v] of [['null', null], ['undefined', undefined], ["''", '']]) {
     assert.equal(parseTransitionId(v), null, `${label} is "no frame"`);
   }
   const MAX = Number.MAX_SAFE_INTEGER;
   for (const [label, v, want] of [
-    ['1', 1, 1], ['42', 42, 42], ["'42'", '42', 42], ["'10'", '10', 10],
+    // Single digits too, as a number and as a string (#688 review, mutant X2: `[0-9]+` refused "5").
+    ['1', 1, 1], ["'1'", '1', 1], ['5', 5, 5], ["'5'", '5', 5], ["'9'", '9', 9],
+    ['42', 42, 42], ["'42'", '42', 42], ["'10'", '10', 10],
     ['2**53 - 1', MAX, MAX], ["'9007199254740991'", '9007199254740991', MAX],
   ]) assert.equal(parseTransitionId(v), want, label);
   for (const [label, v] of [

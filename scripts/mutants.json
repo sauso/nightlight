@@ -8652,6 +8652,24 @@
     "namePattern": "NOT SENT keeps the stored frame"
   },
   {
+    "label": "#522 X2 (#688 review): a single-digit string id (\"5\") is refused",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "/^[1-9][0-9]*$/.test(v)",
+    "replace": "/^[1-9][0-9]+$/.test(v)",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "parseTransitionId: null when absent"
+  },
+  {
+    "label": "#522 X3 (#688 review): the route reads a null frame id as NOT SENT (\"Remove my correction\" keeps the frames while clearing their times)",
+    "file": "backend/src/routes/children.js",
+    "find": "const frameIdOf = (v) => (v === undefined ? undefined : parseTransitionId(v));",
+    "replace": "const frameIdOf = (v) => (v == null ? undefined : parseTransitionId(v));",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "every time and frame sent as null"
+  },
+  {
     "label": "#522 M12: the route stores the raw body value instead of the parsed id",
     "file": "backend/src/routes/children.js",
     "find": "    trueWakeTransitionId: wakeFrameId,",

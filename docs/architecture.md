@@ -180,7 +180,7 @@ recorded *got into / out of bed* event of that child and that night.
 | Sent as | Means |
 |---|---|
 | key not sent | keep the stored frame (an older page never sends the newer keys) |
-| `null` or `""` | no frame; clears a stored one (`""` has meant this since #571) |
+| `null` or `""` | no frame; clears a stored one (`""` has meant this since #571). Sent even without its time field, it also clears that moment's stored time (`true_wake_transition_id: null` alone clears the stored wake time; likewise onset and in bed) |
 | a positive whole number up to 2^53 - 1, or a string of ASCII digits without a leading zero (`42`, `"42"`) | that event; it must be one of this night's, and the in-bed one a *got into bed* event |
 | anything else (`true`, `[42]`, `"0x2a"`, `"42e0"`, `" 42 "`, `"42.0"`, `"042"`, `0`, `-1`, `1.5`, `{}`) | **400**, the key's usual message (`<key> is not an event of this night`, or `... is not a got-into-bed event of this night` for the in-bed one), before anything in the request is written, verdicts included |
 
