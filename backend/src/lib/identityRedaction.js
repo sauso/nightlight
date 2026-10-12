@@ -24,13 +24,6 @@
 //   - A name that exists ONLY in the in-memory log buffer and is no longer in the database (a child or an
 //     account renamed since the line was logged) is unknowable here. Documented in SECURITY.md.
 
-// An alias is a placeholder BY FORM, and the matcher below tries this shape FIRST at every position. That
-// does two jobs: the aliases the route already wrote into the structured fields are not rescanned (a camera
-// named "Child" must not split "Child 1"), and a name that already looks like one (a child actually named
-// "Child 1") is left as it is: publishing it reveals nothing, and treating it as identity would make the
-// check flag the bundle's own aliases.
-const ALIAS_SHAPE = '(?:Child|Camera|User)(?: \\((?:removed|former)\\))? \\d+';
-
 // A letter or digit on either side means "inside a longer word": `Eli` must not hit `elimination`, `Zed`
 // must hit `Zed's`. \p{L}\p{N} needs the `u` flag, which also makes `i` fold non-ASCII case.
 const NOT_BEFORE = '(?<![\\p{L}\\p{N}])';
@@ -122,33 +115,48 @@ export function createIdentityRedactor({ children = [], cameras = [], users = []
   // "Child 1 / Camera 1" sorts children first, then cameras, then accounts; the order is not significant,
   // only that it is the same every time.
   const rank = (a) => (a.startsWith('Child') ? 0 : a.startsWith('Camera') ? 1 : 2);
-  const entries = [...byLiteral.values()]
-    .map((e) => ({ text: e.text, alias: [...e.aliases].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)).join(' / ') }))
+  // The aliases this redactor hands out. They are matched too, as text to LEAVE ALONE, for two reasons:
+  // the route has already written them into the structured fields (a camera named "Child" must not split
+  // "Child 1"), and a name that is itself one of them (a child actually named "Child 1") reveals nothing,
+  // so it is not treated as identity (the check would otherwise flag the bundle's own aliases).
+  // Only the aliases actually issued are protected, not "anything shaped like one": a camera named
+  // "Camera 1 Nursery" is longer than the alias "Camera 1" and must win over it (found in code review: a
+  // shape-based first branch swallowed "Camera 1" and published the rest of the name).
+  const issued = new Set([
+    ...childAliases.values(), ...cameraAliases.values(), ...userAlias.values(),
+    ...users.map((_, i) => `User ${i + 1}`), 'Child (removed) 0', 'Camera (removed) 0',
+  ]);
+  const issuedKeys = new Set([...issued].map((a) => a.toLowerCase()));
+
+  const literalEntries = [...byLiteral.entries()]
+    // A literal equal to an issued alias IS that alias: nothing to replace.
+    .filter(([key]) => !issuedKeys.has(key))
+    .map(([, e]) => ({ text: e.text, alias: [...e.aliases].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)).join(' / '), keep: false }));
+  const entries = [...literalEntries, ...[...issued].map((a) => ({ text: a, alias: a, keep: true }))]
     // Longest first: "Zed Room" must win over "Zed" at the same position, because an alternation takes
-    // the first branch that matches, not the longest.
-    .sort((a, b) => b.text.length - a.text.length || a.text.localeCompare(b.text));
+    // the first branch that matches, not the longest. At equal length an issued alias wins.
+    .sort((a, b) => b.text.length - a.text.length || Number(b.keep) - Number(a.keep) || a.text.localeCompare(b.text));
 
   // One alternation, one pass: a replacement is never rescanned, so a camera named like another entity's
-  // alias cannot be rewritten twice. The first branch swallows an existing alias whole, so a literal that is
-  // a PREFIX of one ("Child" inside "Child 1", for a camera named "Child") cannot split the alias the
-  // structured fields already carry.
-  const branches = []; // [{ alias }] per capture group, in group order
-  const parts = [`(${ALIAS_SHAPE})`];
-  branches.push(null);
+  // alias cannot be rewritten twice.
+  const branches = []; // per capture group, in group order: { alias, keep }
+  const parts = [];
   for (const e of entries) {
-    for (const v of variants(e.text)) {
+    for (const v of e.keep ? [e.text] : variants(e.text)) {
       parts.push(`(${escapeRe(v)})`);
-      branches.push(e.alias);
+      branches.push(e);
     }
   }
-  const scrubRe = entries.length ? new RegExp(`${NOT_BEFORE}(?:${parts.join('|')})${NOT_AFTER}`, 'giu') : null;
+  // Nothing to search for unless at least one real name exists.
+  const scrubRe = literalEntries.length ? new RegExp(`${NOT_BEFORE}(?:${parts.join('|')})${NOT_AFTER}`, 'giu') : null;
 
+  const matchedBranch = (args) => branches[args.slice(1, 1 + branches.length).findIndex((g) => g !== undefined)];
   const replaceIn = (s) => {
     if (!scrubRe) return s;
     return s.replace(scrubRe, (...args) => {
-      // args = [match, g1..gN, offset, string]; the group that matched is the first defined one.
-      const idx = args.slice(1, 1 + branches.length).findIndex((g) => g !== undefined);
-      return idx <= 0 ? args[0] : branches[idx];
+      // args = [match, g1..gN, offset, string]; the group that matched is the first defined one. An issued
+      // alias maps to itself, so it passes through unchanged.
+      return matchedBranch(args).alias;
     });
   };
 
@@ -176,7 +184,7 @@ export function createIdentityRedactor({ children = [], cameras = [], users = []
     if (!scrubRe) return false;
     let found = false;
     s.replace(scrubRe, (...args) => {
-      if (args.slice(1, 1 + branches.length).findIndex((g) => g !== undefined) > 0) found = true;
+      if (!matchedBranch(args).keep) found = true;
       return args[0];
     });
     return found;

@@ -15805,7 +15805,7 @@
   {
     "label": "#547 route: the bundle is published without the identity scrub",
     "file": "backend/src/routes/diagnostics.js",
-    "find": "[k, STATIC_KEYS.has(k) ? v : ident.scrub(v)]",
+    "find": "[k, keep.has(k) ? v : ident.scrub(v)]",
     "replace": "[k, v]",
     "expect": "killed",
     "tests": ["diagnostics-identity.test.js"]
@@ -15892,8 +15892,8 @@
   {
     "label": "#547 route: the bundle's own note is run through the scrub",
     "file": "backend/src/routes/diagnostics.js",
-    "find": "const STATIC_KEYS = new Set(['report', 'note', 'redaction']);",
-    "replace": "const STATIC_KEYS = new Set([]);",
+    "find": "const EXEMPT_KEYS = new Set(['report', 'note', 'redaction', 'app', 'system', 'counts']);",
+    "replace": "const EXEMPT_KEYS = new Set([]);",
     "expect": "killed",
     "tests": ["diagnostics-identity.test.js"],
     "namePattern": "look like the bundle"
@@ -15901,8 +15901,8 @@
   {
     "label": "#547 lib: shortest literal first, so a longer name is split",
     "file": "backend/src/lib/identityRedaction.js",
-    "find": ".sort((a, b) => b.text.length - a.text.length || a.text.localeCompare(b.text));",
-    "replace": ".sort((a, b) => a.text.length - b.text.length || a.text.localeCompare(b.text));",
+    "find": ".sort((a, b) => b.text.length - a.text.length || Number(b.keep) - Number(a.keep) || a.text.localeCompare(b.text));",
+    "replace": ".sort((a, b) => a.text.length - b.text.length || Number(b.keep) - Number(a.keep) || a.text.localeCompare(b.text));",
     "expect": "killed",
     "tests": ["identity-redaction.test.js"],
     "namePattern": "longest literal first"
@@ -15963,19 +15963,36 @@
   {
     "label": "#547 lib: the check never reports a name",
     "file": "backend/src/lib/identityRedaction.js",
-    "find": "if (args.slice(1, 1 + branches.length).findIndex((g) => g !== undefined) > 0) found = true;",
+    "find": "if (!matchedBranch(args).keep) found = true;",
     "replace": "if (false) found = true;",
     "expect": "killed",
     "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"]
   },
   {
-    "label": "#547 lib: an existing alias is not skipped, so a camera named Child splits Child 1",
+    "label": "#547 lib: the check flags the bundle's own aliases as names",
     "file": "backend/src/lib/identityRedaction.js",
-    "find": "return idx <= 0 ? args[0] : branches[idx];",
-    "replace": "return branches[idx];",
+    "find": "if (!matchedBranch(args).keep) found = true;",
+    "replace": "found = true;",
     "expect": "killed",
-    "tests": ["identity-redaction.test.js"],
-    "namePattern": "does not split the alias"
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"]
+  },
+  {
+    "label": "#547 lib: an issued alias beats a longer name that starts with it (Camera 1 Nursery leaks Nursery)",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": ".sort((a, b) => b.text.length - a.text.length || Number(b.keep) - Number(a.keep) || a.text.localeCompare(b.text));",
+    "replace": ".sort((a, b) => Number(b.keep) - Number(a.keep) || b.text.length - a.text.length || a.text.localeCompare(b.text));",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
+    "namePattern": "Camera 1"
+  },
+  {
+    "label": "#547 route: the timezone is run through the scrub (a child called Phoenix)",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "published.settings = scrubExcept(bundle.settings, new Set(['timezone']));",
+    "replace": "published.settings = scrubExcept(bundle.settings, new Set([]));",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"],
+    "namePattern": "timezone"
   },
   {
     "label": "#547 card: the copy no longer says names are replaced",

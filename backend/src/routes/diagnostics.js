@@ -248,12 +248,23 @@ router.get('/', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
     // The names that remain are in free text (`server_logs`, each row's `detail`), written by call sites
     // this file does not control: replace them wherever they occur (#547). Plain objects and strings only;
     // anything else is passed through and caught by the check below.
-    // The three keys this file writes itself are exempt: their text ("camera and MQTT addresses") is
-    // written by this file and would be rewritten for a household whose camera is called "Camera".
-    const STATIC_KEYS = new Set(['report', 'note', 'redaction']);
-    const published = Object.fromEntries(
-      Object.entries(bundle).map(([k, v]) => [k, STATIC_KEYS.has(k) ? v : ident.scrub(v)])
+    // NOT scrubbed, and not checked: text this file or the platform writes, which no person typed. The note
+    // ("camera and MQTT addresses") would be rewritten for a household whose camera is called "Camera"; the
+    // timezone (`America/Phoenix`) for a child called Phoenix, which would remove the one fact a bedtime-off-
+    // by-an-hour bug is diagnosed from (found in code review). `app` and `system` are version strings, the
+    // runtime and the timezone; `counts` are numbers. Anything else, including a camera's own settings, is
+    // scrubbed: a child called "Motion" will see `detect_source` read "Camera 1", a known limit (SECURITY.md).
+    const EXEMPT_KEYS = new Set(['report', 'note', 'redaction', 'app', 'system', 'counts']);
+    const scrubExcept = (obj, keep) => Object.fromEntries(
+      Object.entries(obj).map(([k, v]) => [k, keep.has(k) ? v : ident.scrub(v)])
     );
+    const published = scrubExcept(bundle, EXEMPT_KEYS);
+    published.settings = scrubExcept(bundle.settings, new Set(['timezone']));
+    // What the name check looks at: the same bundle without what was exempted above.
+    const withoutExempt = (b) => {
+      const { timezone, ...settings } = b.settings; // eslint-disable-line no-unused-vars
+      return Object.fromEntries(Object.entries({ ...b, settings }).filter(([k]) => !EXEMPT_KEYS.has(k)));
+    };
 
     // ...and then CHECK, rather than trust. Every field above is meant to be secret-free by
     // construction, but `server_logs` in particular is built from whatever child-process output
@@ -267,7 +278,7 @@ router.get('/', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
     }
     // The same check for names (#547), on what would be SENT, for the same reason: the scrub above passes a
     // class instance through untouched, and a future field is not in this file yet.
-    const nameLeak = ident.findLeak(Object.fromEntries(Object.entries(published).filter(([k]) => !STATIC_KEYS.has(k))));
+    const nameLeak = ident.findLeak(withoutExempt(published));
     if (nameLeak) {
       logger.error(`[diagnostics] refused to send a bundle that still contained a name: ${nameLeak}`);
       return res.status(500).json({ error: 'Diagnostics bundle failed a privacy check — nothing was sent. Please report this.' });

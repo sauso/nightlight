@@ -218,6 +218,29 @@ test('the birthday is not a search term: a timestamp on the day of birth is left
   assert.equal(res.body.camera_history[0].detail, 'down since 2026-10-12 07:59');
 });
 
+test('the timezone, version and runtime fields are not rewritten when a name is also a place (code review)', async () => {
+  // A child called Phoenix (or Sydney) must not turn "America/Phoenix" into "America/Child 1": the timezone
+  // is the one fact a bedtime-off-by-an-hour bug is diagnosed from.
+  db.prepare("INSERT INTO children (id, name, created_at) VALUES ('kid-p', 'Phoenix', '2021-01-01 00:00:00')").run();
+  db.prepare("UPDATE settings SET timezone = 'America/Phoenix' WHERE id = 'app'").run();
+  logger.info('[sleep] Phoenix slept');
+  const res = await bundle();
+  assert.equal(res.status, 200, text(res).slice(0, 300));
+  assert.equal(res.body.settings.timezone, 'America/Phoenix');
+  assert.equal(res.body.children[0].name, 'Child 1');
+  assert.match(res.body.server_logs.join('\n'), /Child 1 slept/);
+});
+
+test('a camera whose name begins with another alias is replaced whole, not "Camera 1" plus the rest', async () => {
+  insertCamera('cam-1', 'ZZ Hall');
+  insertCamera('cam-2', 'Camera 1 ZZ Nursery', { sort_order: 2 });
+  logger.info('[detect] motion on "Camera 1 ZZ Nursery"');
+  const res = await bundle();
+  assert.equal(res.status, 200, text(res).slice(0, 300));
+  assert.ok(!/Nursery/.test(text(res)), text(res).match(/.{0,20}Nursery.{0,20}/)?.[0]);
+  assert.match(res.body.server_logs.join('\n'), /motion on "Camera 2"/);
+});
+
 test('a name under 3 characters is still aliased in every list, though it is not searched for in log text', async () => {
   // The free-text scrub skips "Jo" (it would rewrite ordinary words), so the lists must not depend on it:
   // the route aliases by id. This is the test that fails if a list is left to the text scrub.

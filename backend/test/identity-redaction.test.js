@@ -32,6 +32,21 @@ test('a name is matched as a whole word, case-insensitively, and through a posse
   assert.equal(r.scrub('Eli2 and Elis'), 'Eli2 and Elis', 'inside a longer word or number: not the name');
 });
 
+test('a name that starts with another entity\'s alias is replaced whole (code review: "Camera 1 Nursery")', () => {
+  // The alias "Camera 1" is a PREFIX of this camera's real name. If the alias won, the line would come out
+  // as "motion on Camera 1" with the rest of the name ("Nursery") published beside it, and the check, which
+  // asks the same matcher, would call it clean.
+  const r = make({ children: [], cameras: [{ id: 'c1', name: 'Hall' }, { id: 'c2', name: 'Camera 1 Nursery' }] });
+  assert.equal(r.scrub('motion on Camera 1 Nursery, Hall, Camera 1'), 'motion on Camera 2, Camera 1, Camera 1');
+  assert.ok(!r.scrub('Camera 1 Nursery').includes('Nursery'));
+  assert.equal(r.findLeak({ line: 'Camera 1 Nursery' }), 'a child, camera or account name survived redaction');
+});
+
+test('a name is not matched inside a longer word on its LEFT either', () => {
+  const r = make({ children: [{ id: 'k1', name: 'Eli' }], cameras: [] });
+  assert.equal(r.scrub('Beli and Eli'), 'Beli and Child 1');
+});
+
 test('non-ASCII names, and regex metacharacters in a name, are matched literally', () => {
   const r = make({
     children: [{ id: 'k1', name: 'Zoë' }],
