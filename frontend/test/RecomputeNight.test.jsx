@@ -290,6 +290,9 @@ describe('"Remove my correction" on a LOCKED night', () => {
     await user.dblClick(screen.getByRole('button', { name: /^remove my correction$/i }));
 
     expect(state.calls.filter((c) => /\/review\//.test(c))).toHaveLength(1);
+    // The affordance too, not only the count: the button says it is working and cannot be pressed again.
+    // (Codex review on #687: a handler-side guard alone passed the count assertion with the button live.)
+    expect(screen.getByRole('button', { name: /^removing…$/i })).toBeDisabled();
     release();
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByText(/no longer matches/i)).toBeInTheDocument());
