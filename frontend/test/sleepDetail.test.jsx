@@ -224,6 +224,34 @@ describe('which night it opens on', () => {
     expect(screen.getByText('You said in bed 6:49 pm, asleep 7:28 pm to 6:14 am. Tap to change it.')).toBeInTheDocument();
   });
 
+  // ★ A RECEIPT MUST NOT OUTLIVE THE CORRECTION IT QUOTES. Arriving from a save and pressing "Recompute this
+  // night" is the natural way to meet the locked dialog, and "Remove my correction" there deletes the very
+  // times the receipt reads back. Without `onCorrectionRemoved` the "Thanks — that's recorded" card stayed
+  // up, saying the removed times had been recorded. Crosses the seam the unit tests cannot: the callback is
+  // wired in SleepDetail, not in RecomputeNight.
+  test('★ removing the correction from the locked Recompute dialog drops the "that\'s recorded" receipt', async () => {
+    const corrected = { ...NIGHT, night_date: '2026-08-24', corrected: true };
+    const get = vi.fn((path) => {
+      if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'tonight', night: { night_date: '2026-08-30' } });
+      if (path.includes('/sleep/insights')) return Promise.resolve(null);
+      if (path.includes('/review/')) return Promise.resolve(REVIEW_RESPONSE);
+      if (path.includes('stored=1')) return Promise.resolve({ night: { ...NIGHT, night_date: '2026-08-24' }, locked: true });
+      if (path.includes('/sleep/')) return Promise.resolve(corrected);
+      return Promise.resolve(null);
+    });
+    vi.spyOn(api, 'get').mockImplementation(get);
+    const put = vi.spyOn(api, 'put').mockResolvedValue({ review: {} });
+    const { user } = mountAt('/children/kid-1/sleep?date=2026-08-24&saved=1');
+
+    expect(await screen.findByText('Thanks — that’s recorded')).toBeVisible();
+    await user.click(await screen.findByRole('button', { name: /recompute this night/i }));
+    await user.click(await screen.findByRole('button', { name: /^remove my correction$/i }));
+    await user.click(await screen.findByRole('button', { name: /^remove my correction$/i }));
+
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByText('Thanks — that’s recorded')).toBeNull());
+  });
+
   test('★ but never past the newest browsable night', async () => {
     // With the clock pinned (above) the newest night is 2026-08-30, so 08-31 is exactly ONE day past it:
     // the picker could not reach it, and a URL must not either. One day, not a month, so a clamp widened

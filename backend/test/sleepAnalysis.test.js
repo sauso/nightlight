@@ -1815,6 +1815,369 @@ test('a child who moves just three times in two and a half hours still counts as
 });
 
 // -------------------------------------------------------------------------------------------
+// ★★★ #669: A PUT-DOWN'S OCCUPANCY EVIDENCE ENDS WHERE THE NEXT PUT-DOWN BEGINS.
+//
+// The night this was built on (staging, 2026-10-10, both children, corrected by the owner against the
+// timelapse): a false put-down over an EMPTY bed 23-100 minutes before the real one was accepted, because
+// guard 3's 150-minute occupancy window reached forward into the real put-down's movement. In-bed was stored
+// 100 and 37 minutes early, and one child's night ended at 20:06 on a parent leaving the room.
+//
+// ⚠️ HOW A FIXTURE HERE REACHES GUARD 3 AT ALL, which is why several of them are noisy. A put-down is only
+// asked for occupancy evidence if (a) its settle q is EARLIER than the plain onset search's answer (the loop
+// skips `q >= onset`), and (b) guard 2 finds no awakening between q and the window opening (19:30 here). So:
+//   - the plain search (raw `state`, sound included) must be broken over the empty bed by household noise from
+//     19:30 until after the real settle. Without it the plain search answers 19:30 on the empty bed, the real
+//     put-down settles later and is skipped, and the result is the known limit "the plain search can still
+//     adopt an empty bed", not this fix;
+//   - the real put-down's movement must come AFTER 19:30, or guard 2 rejects the false put-down for the wrong
+//     reason and the test is green on the old code.
+// T1, T7 and T9 were run against the code before #669 (927b516) and fail there.
+describe('★★★ #669: a later put-down never vouches for an earlier one', () => {
+  // The 2026-10-10 child A shape, simplified: a false put-down at 18:06 over an empty bed in a noisy house,
+  // then the real one at 19:47 (101 minutes later), moving until 19:55. The noise runs on to 20:10, so the
+  // plain search answers 20:10 and BOTH put-downs reach guard 3; the real one settles at 19:57 (the onset view
+  // counts a noise as movement for 2 minutes after real movement, ONSET_SOUND_MOTION_WITHIN_MIN).
+  //   `occupied`      minutes in the empty stretch that carry an occupancy-level twitch (STILL_OCCUPIED: at or
+  //                   above OCCUPANCY_MIN_PEAK, under MOTION_ACTIVE). Exactly what guard 3 counts.
+  //   `realMoveFrom`  the first minute the real put-down moves the bed (and the first minute the bed is
+  //                   occupied). Default: the real into_bed's own minute.
+  //   `realAt`        the real into_bed.
+  function layFalseThenRealPutDown({ occupied = [], realMoveFrom = at(19, 47), realAt = at(19, 47) } = {}) {
+    layNight(at(16, 30), realMoveFrom, { noise: [[at(17, 0), realMoveFrom]], still: STILL_EMPTY });
+    layNight(realMoveFrom, at(7, 0, 1), {
+      move: [[realMoveFrom, at(19, 55)]],
+      noise: [[realMoveFrom, at(20, 10)]],
+      still: STILL_OCCUPIED,
+    });
+    for (const m of occupied) insertFull.run(CAM, sqlTime(m), STILL_OCCUPIED, STILL_OCCUPIED, 0.5, 0.0004);
+    insertTransition.run(CAM, 'into_bed', 0.076, sqlTime(at(18, 6))); // the false one
+    insertTransition.run(CAM, 'into_bed', 0.121, sqlTime(realAt)); // the real one
+  }
+
+  test('#669 T1: a false put-down over an empty bed 100 minutes before the real one no longer becomes the bedtime', () => {
+    // Before #669: in bed 18:06, asleep 18:06, on a bed that read STILL_EMPTY for 101 minutes.
+    layFalseThenRealPutDown();
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(hhmm(night.in_bed_at), '19:47', 'in bed at the REAL put-down, not the false one');
+    assert.equal(hhmm(night.onset_at), '19:57', 'asleep at the real settle, not on an empty bed');
+  });
+
+  test('#669 T2: 2 occupied minutes before the next put-down are not enough: the false put-down is rejected', () => {
+    // The 10-10 knife-edge: child A's 19:07 candidate had exactly 2 (19:45 and 19:46, the real put-down's
+    // lead-in) against a threshold of 3. Here the real put-down's own minute reads an EMPTY bed (its movement
+    // starts at 19:48), so this test is about the threshold alone and not about the exclusive end (T3).
+    layFalseThenRealPutDown({ occupied: [at(19, 45), at(19, 46)], realMoveFrom: at(19, 48) });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.onset_at), '19:57');
+    assert.equal(hhmm(night.in_bed_at), '19:47');
+  });
+
+  test('#669 T2: ...3 are: the earlier put-down is accepted (OCCUPANCY_MIN_MINUTES is unchanged)', () => {
+    layFalseThenRealPutDown({ occupied: [at(19, 44), at(19, 45), at(19, 46)], realMoveFrom: at(19, 48) });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.onset_at), '18:06');
+    assert.equal(hhmm(night.in_bed_at), '18:06');
+  });
+
+  test('#669 T3: the next put-down\'s OWN minute is not counted (the end is exclusive)', () => {
+    // Two occupied minutes before it, and the into_bed minute itself occupied (the real put-down moves the bed
+    // from 19:47): 2, not 3, so the false put-down is rejected.
+    layFalseThenRealPutDown({ occupied: [at(19, 45), at(19, 46)] });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.onset_at), '19:57');
+    assert.equal(hhmm(night.in_bed_at), '19:47');
+  });
+
+  test('#669 T3: ...the same occupied minute one minute BEFORE the next into_bed is counted', () => {
+    // The other side of the boundary: the real into_bed is logged at 19:48, a minute after its movement began,
+    // so 19:47 now lies before the cut and makes 3.
+    layFalseThenRealPutDown({ occupied: [at(19, 45), at(19, 46)], realAt: at(19, 48) });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.onset_at), '18:06');
+  });
+
+  test('#669 T4: into_beds between a put-down and its settle (and one AT the settle minute) do not cut it', () => {
+    // A child put down at 19:00, fussing until 19:10 with the detector logging re-settles at 19:04 and 19:07, and
+    // one more at 19:10:30, the settle minute itself. All of them belong to this put-down, so none of them may
+    // end its evidence: the cut is the first into_bed AFTER the settle q, not after the put-down, and not at q.
+    // (The 02:00 stir only keeps it an ordinary occupied night: with no movement inside the window the whole
+    // night reads as an empty bed, for a reason unrelated to this test.)
+    layNight(at(16, 30), at(7, 0, 1), { move: [[at(19, 0), at(19, 10)], [at(2, 0, 1), at(2, 8, 1)]], still: STILL_OCCUPIED });
+    for (const t of [at(19, 0), at(19, 4), at(19, 7), at(19, 10, 0, 30)]) {
+      insertTransition.run(CAM, 'into_bed', 0.3, sqlTime(t));
+    }
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(hhmm(night.onset_at), '19:10', 'the settle before the window opens, kept');
+    assert.equal(hhmm(night.in_bed_at), '19:00', 'the start of the settling episode');
+  });
+
+  test('#669 T4b: a second into_bed inside a camera gap before the settle can have its OWN, later settle: the cut follows the first put-down\'s', () => {
+    // Why the cut is anchored on the settle q and not on the put-down, and the one shape found (by review) where
+    // the two give different answers. Put down at 19:00, moving until 19:04; the camera saw nothing at 19:05-19:06
+    // and a second into_bed was logged at 19:06:10; the child is still from 19:07, with one stir at 19:20. The
+    // 19:00 put-down's settle is 19:07 (its quiet run 19:05-19:19 tolerates the unknown minutes and stops short of
+    // 19:20). The 19:06 into_bed's own settle is 19:21, because its 15 minutes reach the 19:20 stir. Cut after
+    // the PUT-DOWN, the 19:06 into_bed would end the 19:00 put-down's evidence before its own settle and reject
+    // it, and the night would start at 19:21; cut after q, it does not, and the night starts at 19:07.
+    layNight(at(16, 30), at(7, 0, 1), {
+      move: [[at(19, 0), at(19, 5)], [at(19, 20), at(19, 21)], [at(2, 0, 1), at(2, 8, 1)]],
+      still: STILL_OCCUPIED,
+    });
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+      .run(CAM, sqlTime(at(19, 5)), sqlTime(at(19, 7))); // 19:05 and 19:06 unobserved
+    insertTransition.run(CAM, 'into_bed', 0.3, sqlTime(at(19, 0)));
+    insertTransition.run(CAM, 'into_bed', 0.3, sqlTime(at(19, 6, 0, 10)));
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(hhmm(night.onset_at), '19:07', 'the first put-down\'s settle, not the second into_bed\'s');
+    assert.equal(hhmm(night.in_bed_at), '19:00');
+  });
+
+  test('#669 T1b: a mid-night re-settle later on does not move the cut: the FIRST later put-down ends the evidence', () => {
+    // T1's night plus an ordinary re-settle at 23:02 (the child stirs 23:00-23:04 and the detector logs an
+    // into_bed). The cut for the 18:06 put-down is still the real 19:47 one. Cutting at the LAST later put-down
+    // instead would put the cut past the 150 minutes and bring the real put-down's movement back into the count.
+    layFalseThenRealPutDown();
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+      .run(CAM, sqlTime(at(23, 0)), sqlTime(at(23, 5)));
+    layNight(at(23, 0), at(23, 5), { move: [[at(23, 0), at(23, 5)]], still: STILL_OCCUPIED });
+    insertTransition.run(CAM, 'into_bed', 0.2, sqlTime(at(23, 2)));
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(hhmm(night.in_bed_at), '19:47');
+    assert.equal(hhmm(night.onset_at), '19:57');
+  });
+
+  // A child who lies so still that the bed reads like an empty one (STILL_EMPTY) apart from `twitches`, put
+  // down at 18:58, settled at 19:04, before the 19:30 window. The plain search answers 19:30 or later, so the
+  // put-down needs guard 3. `extra` adds bed-movement ranges, `noise` household-noise ranges (sound with nothing
+  // moving); `strayAt` an extra into_bed (a parent check).
+  function layStillChild({ twitches, extra = [], noise = [], strayAt = null }) {
+    layNight(at(16, 30), at(7, 0, 1), {
+      move: [[at(18, 58), at(19, 4)], ...extra, [at(5, 0, 1), at(5, 9, 1)]],
+      noise,
+      still: STILL_EMPTY,
+    });
+    for (const m of twitches) insertFull.run(CAM, sqlTime(m), STILL_OCCUPIED, STILL_OCCUPIED, 0.5, 0.0004);
+    insertTransition.run(CAM, 'into_bed', 0.3, sqlTime(at(18, 58)));
+    if (strayAt) insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(strayAt));
+  }
+  // The quietest genuine onsets on record show 5-9 occupied minutes in 150 (OCCUPANCY_MIN_PEAK). These are 5,
+  // all of them AFTER the 19:32 parent check used below, so a cut there leaves 0.
+  const SPARSE = [at(19, 50), at(20, 10), at(20, 30), at(20, 50), at(21, 10)];
+
+  test('#669 T5: with no later put-down the count runs the full 150 minutes, and the put-down is ACCEPTED as before', () => {
+    // Exactly 3 twitches in the 150 minutes after the settle, the threshold, and no other into_bed: accepted, as
+    // it was before #669. This is the ordinary night. (A missing default for the bound reads as NaN, the count
+    // never runs and this put-down would be rejected; the assertion is acceptance, not "same as before".)
+    layStillChild({ twitches: [at(19, 50), at(20, 20), at(20, 50)] });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(hhmm(night.onset_at), '19:04', 'accepted: asleep at the settle, before the window');
+    assert.equal(hhmm(night.in_bed_at), '18:58');
+  });
+
+  test('#669 T5: ...and a put-down AFTER the 150 minutes (a mid-night re-settle) changes nothing', () => {
+    // The cut is min(150 minutes, next put-down): a later into_bed with real movement around it, at 23:00, is
+    // past the window and must not shorten it.
+    layStillChild({ twitches: [at(19, 50), at(20, 20), at(20, 50)], extra: [[at(23, 0), at(23, 5)]], strayAt: at(23, 1) });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.onset_at), '19:04');
+  });
+
+  test('#669 T6a: KNOWN LIMIT, pinned: a settle within 150 minutes of the END of the timeline escapes the bound', (t) => {
+    // Fail-open 1 of bedOccupiedAfter, "not enough timeline left to judge", kept and kept FIRST: it returns
+    // before the bound is looked at. On a night still in progress the timeline ends now, so at 20:30 the
+    // 18:06 settle (+150 = 20:36) is judged by this return alone and the false put-down shows as the bedtime in
+    // tonight's live figures. From 20:36 on the bound applies and it goes; at 21:00 the real one wins.
+    layFalseThenRealPutDown();
+    t.mock.timers.enable({ apis: ['Date'], now: at(20, 30).getTime() });
+    const early = computeNight(CHILD, DATE);
+    assert.equal(early.in_progress, true, 'precondition: an open night, whose timeline ends at 20:30');
+    assert.equal(hhmm(early.onset_at), '18:06', 'fail-open 1 kept: the false put-down escapes the bound');
+    t.mock.timers.setTime(at(21, 0).getTime());
+    const later = computeNight(CHILD, DATE);
+    assert.equal(later.in_progress, true);
+    assert.equal(hhmm(later.onset_at), '19:57', 'enough timeline now: the bound applies and the false put-down goes');
+  });
+
+  test('#669 T6b: a camera outage between the settle and the next put-down still fails OPEN (accepted)', () => {
+    // Fail-open 2, "a gap: can't prove the bed was empty through it", kept: a null minute INSIDE the bounded
+    // count still accepts the put-down, so a false put-down followed by an outage before the next one is still
+    // believed. The residual risk bedOccupiedAfter's #508 note already names; #669 does not change it.
+    layFalseThenRealPutDown();
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+      .run(CAM, sqlTime(at(18, 30)), sqlTime(at(18, 40)));
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.onset_at), '18:06', 'fail-open 2 kept: an unobserved minute is not proof of an empty bed');
+  });
+
+  // The 2026-10-10 child B shape. A false settling episode (into_beds 19:11, 19:16, 19:21: someone at the bed,
+  // then an EMPTY bed from its 19:22 settle), household noise from 19:30 until the real put-down `realAt`, which
+  // moves the bed until 20:05, the parent walking out at 20:01 (inside the settling), and the real morning exit
+  // at 05:09.
+  function layFalseEpisodeThenParentExit(realAt) {
+    layNight(at(16, 30), realAt, {
+      move: [[at(19, 11), at(19, 22)]], // the false episode
+      noise: [[at(19, 30), realAt]], // the house: breaks the plain search over the empty bed
+      still: STILL_EMPTY,
+    });
+    layNight(realAt, at(7, 0, 1), {
+      move: [[realAt, at(20, 5)], [at(5, 0, 1), at(5, 9, 1)]],
+      out: [[at(19, 58), at(20, 2)]], // the parent, out of the bed zone, leaving
+      still: STILL_OCCUPIED,
+    });
+    for (const t of [at(19, 11), at(19, 16), at(19, 21)]) insertTransition.run(CAM, 'into_bed', 0.2, sqlTime(t));
+    insertTransition.run(CAM, 'into_bed', 0.3, sqlTime(realAt));
+    insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(20, 1))); // the parent leaving, NOT a wake
+    insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(5, 9, 1))); // the real morning exit
+  }
+
+  test('#669 T7: the 2026-10-10 child B shape: a parent leaving 15 minutes after the real put-down no longer ends the night', () => {
+    // A false settling episode (into_beds 19:11, 19:16, 19:21, someone at the bed, then an EMPTY bed from 19:22),
+    // the real put-down at 19:46, settling until 20:05, and the parent walking out at 20:01. Before #669 the
+    // false 19:22 settle was accepted on the real put-down's movement, the parent's exit came after that onset,
+    // and the exit scan ended the night at 20:01 (on 10-10: "up 20:06", 21 minutes asleep, and a push).
+    //
+    // ⚠️ The parent's exit sits INSIDE the settling, before the settle at 20:05. That is the shape #669 fixes:
+    // with the onset back on the real settle, the exit predates it and the before-onset guard drops it. An exit
+    // AFTER the real settle would still end the night (a parent leaving reads as the child leaving: classifier
+    // flaw 3, open), so a fixture with the exit later fails on the new code too.
+    layFalseEpisodeThenParentExit(at(19, 46)); // the false episode settles at 19:22: the real put-down is +24 min
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(hhmm(night.in_bed_at), '19:46', 'in bed at the real put-down');
+    assert.equal(hhmm(night.onset_at), '20:05', 'asleep at the real settle');
+    assert.equal(hhmm(night.wake_at), '05:09', 'the morning exit, not the parent leaving at 20:01');
+    assert.ok(night.asleep_minutes > 400, `a full night, not ${night.asleep_minutes} minutes`);
+  });
+
+  test('#669 T7b: ...with the real night\'s own gap: the real put-down 23 minutes after the false settle still cuts', () => {
+    // On 2026-10-10 the false episode settled at 19:22-19:23 and the real put-down was logged at 19:45:48, 22-23
+    // minutes later. T7's put-down is 24 minutes after; this one is 23 (19:45 against the 19:22 settle), so a rule
+    // that let into_beds within 23 minutes of a settle go uncut would fail here, not only one within 24.
+    layFalseEpisodeThenParentExit(at(19, 45));
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.in_bed_at), '19:45');
+    assert.equal(hhmm(night.onset_at), '20:05');
+    assert.equal(hhmm(night.wake_at), '05:09', 'the morning exit, not the parent leaving at 20:01');
+  });
+
+  test('#669 T8: KNOWN LIMIT, pinned: a very still child plus a parent at the bed 28 minutes later loses the put-down', () => {
+    // The risk the bound brings. The parent's check (19:32-19:33, TWO active minutes, logged as an into_bed) is
+    // not an isolated blip, so it cuts; the child is so still that no occupied minute falls in 19:04-19:31, and
+    // the real put-down is rejected. Onset falls back to the plain search, 19:34, 30 minutes late, and the in-bed
+    // marker becomes the parent's check. Before #669: 19:04 and 18:58, right. Stated in README and KNOWN-ISSUES.
+    layStillChild({ twitches: SPARSE, extra: [[at(19, 32), at(19, 34)]], strayAt: at(19, 32) });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(hhmm(night.onset_at), '19:34');
+    assert.equal(hhmm(night.in_bed_at), '19:32');
+  });
+
+  test('#669 T8b: KNOWN LIMIT, pinned: there is no grace period: a duplicate into_bed 8 minutes after the settle, in a noisy house, cuts', () => {
+    // How an into_bed can cut this soon at all: the settle q needs 15 quiet minutes in the onset view, so an
+    // into_bed inside them cannot have MOVEMENT beside it. But the onset view discounts a household noise with
+    // nothing moving, and `state`, which isolation is judged on, does not. Here the house is loud 19:08-19:19
+    // (another child's bedtime) while this child lies still, and the classifier logs a weak duplicate into_bed at
+    // 19:12 (a twitch under MOTION_ACTIVE). Its neighbours are active by sound, so it is not isolated and cuts 8
+    // minutes after the 19:04 settle; the still child has no occupied minute before it and the 18:58 put-down is
+    // rejected. The duplicate is then a put-down of its own (its settle 19:12, the sparse twitches after it), so
+    // the night starts 8 minutes late and the in-bed marker is 14 minutes late.
+    layStillChild({ twitches: [at(19, 12), ...SPARSE], noise: [[at(19, 8), at(19, 20)]], strayAt: at(19, 12) });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(hhmm(night.onset_at), '19:12', 'was 19:04 before #669');
+    assert.equal(hhmm(night.in_bed_at), '19:12', 'was 18:58 before #669');
+  });
+
+  test('#669 T9: an ISOLATED into_bed (quiet minutes both sides) does not cut: the 2026-09-20 parent check', () => {
+    // Staging 2026-09-20 child A: settled about 19:04, a parent checked the bed at 19:32, ONE active minute with
+    // quiet either side, logged as an into_bed. With every later into_bed cutting, the real put-down was
+    // rejected and onset fell to the plain search (19:33), 41 minutes from the truth instead of 12.
+    layStillChild({ twitches: SPARSE, extra: [[at(19, 32), at(19, 33)]], strayAt: at(19, 32) });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(hhmm(night.onset_at), '19:04', 'the real settle is kept');
+    assert.equal(hhmm(night.in_bed_at), '18:58', 'and so is the real put-down');
+  });
+
+  test('#669 T9: ...an active LEFT neighbour makes it a person at the bed, and it cuts', () => {
+    // 19:31-19:32 active, the into_bed at 19:32: quiet only on the right.
+    layStillChild({ twitches: SPARSE, extra: [[at(19, 31), at(19, 33)]], strayAt: at(19, 32) });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.onset_at), '19:33');
+    assert.equal(hhmm(night.in_bed_at), '19:32');
+  });
+
+  test('#669 T9: ...an UNOBSERVED right neighbour is not evidence of quiet, so it cuts too', () => {
+    // The one-minute check of the isolated case, but the camera recorded nothing at 19:33. Isolation rests on
+    // quiet both sides, observed (the same strict rule as the departure scan's `bridged`, issue #350). (A null
+    // LEFT neighbour cannot be tested this way: it lies inside the count, which fails open on it either way.)
+    layStillChild({ twitches: SPARSE, extra: [[at(19, 32), at(19, 33)]], strayAt: at(19, 32) });
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ? AND bucket_start = ?').run(CAM, sqlTime(at(19, 33)));
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.onset_at), '19:34');
+    assert.equal(hhmm(night.in_bed_at), '19:32');
+  });
+
+  test('#669 T9: ...KNOWN LIMIT, pinned: a household NOISE beside a one-minute check also makes it cut (isolation is judged on `state`)', () => {
+    // `state` counts sound and movement outside the bed as well as movement in it, so "quiet either side" means
+    // no noise either. The isolated case above, plus a noise elsewhere in the house in the minute before the
+    // check: the check now cuts, the still child's put-down is rejected and onset falls to the plain search.
+    layStillChild({ twitches: SPARSE, extra: [[at(19, 32), at(19, 33)]], noise: [[at(19, 31), at(19, 32)]], strayAt: at(19, 32) });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.onset_at), '19:33', 'was 19:04 without the noise');
+    assert.equal(hhmm(night.in_bed_at), '19:32');
+  });
+
+  // A QUIET house (no household noise at all) with a false put-down at 18:06 (someone at the empty bed 18:04-18:06)
+  // and the real put-down logged at 19:47:20, which moves the bed at 19:47 and again 19:49-19:52 with one still
+  // minute between. Nothing breaks the plain search, so it answers 19:30, on the empty bed. `parentOutside` adds a
+  // parent seen OUTSIDE the bed zone at 19:46, the minute before the real put-down.
+  function layQuietHouseFalseThenReal({ parentOutside }) {
+    layNight(at(16, 30), at(19, 47), {
+      move: [[at(18, 4), at(18, 7)]],
+      out: parentOutside ? [[at(19, 46), at(19, 47)]] : [],
+      still: STILL_EMPTY,
+    });
+    layNight(at(19, 47), at(7, 0, 1), {
+      move: [[at(19, 47), at(19, 48)], [at(19, 49), at(19, 53)], [at(5, 0, 1), at(5, 9, 1)]],
+      still: STILL_OCCUPIED,
+    });
+    insertTransition.run(CAM, 'into_bed', 0.1, sqlTime(at(18, 6)));
+    insertTransition.run(CAM, 'into_bed', 0.3, sqlTime(at(19, 47, 0, 20)));
+  }
+
+  test('#669 T10: KNOWN LIMIT, pinned: a real put-down logged with recorded quiet either side is exempt, so a false earlier one is believed as before', () => {
+    // The price of the isolated-blip exemption: it reads the minutes either side of the into_bed, not the put-down
+    // around it. Here those two minutes (19:46 and 19:48) are both quiet, so the real put-down does not cut, the
+    // 150 minutes reach its movement again, and the false 18:06 put-down is accepted exactly as before #669.
+    layQuietHouseFalseThenReal({ parentOutside: false });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(hhmm(night.in_bed_at), '18:06');
+    assert.equal(hhmm(night.onset_at), '18:07');
+  });
+
+  test('#669 T10: ...KNOWN LIMIT, pinned: the same night with the parent seen OUTSIDE the bed the minute before cuts, and the in-bed marker goes BLANK', () => {
+    // Movement outside the bed counts in `state`, so the real put-down is no longer isolated and cuts: the false
+    // put-down is rejected. In this quiet house the real put-down settles (19:53) after the plain search's 19:30,
+    // so it is never asked, and the night falls back to 19:30 on the empty bed, with no put-down within 45 minutes
+    // before it to draw: in bed shows NOTHING where it used to show the false 18:06. (A rule judged on movement IN
+    // the bed alone would call this into_bed isolated, since 19:46 and 19:48 read under MOTION_ACTIVE in the bed,
+    // and give back 18:06: the rejected design the code comment names, from production 2026-09-27.)
+    layQuietHouseFalseThenReal({ parentOutside: true });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(night.in_bed_at, null, 'blank, where the code before #669 showed the false 18:06');
+    assert.equal(hhmm(night.onset_at), '19:30');
+  });
+});
+
+// -------------------------------------------------------------------------------------------
 describe('⚠️ seconds on a bed transition — the trap fixture, and the gap it was hiding (#260, #263)', () => {
   // `sqlTime` above used to force `:00` onto every timestamp it wrote. For activity_samples that was
   // harmless (they really are minute buckets); for bed_transitions it erased the real second of the

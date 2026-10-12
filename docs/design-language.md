@@ -203,6 +203,12 @@ Semantic assignments already established — reuse rather than reinvent:
 `Moon` sleep · `Thermometer`/`Droplet` climate · `Cctv` cameras · `Baby` children · `Video` live ·
 `Settings` settings · `Trash2` destructive · `DoorOpen` out-of-bed.
 
+**Record** on a camera tile: `RecordIcon` (a ring with a centre dot, a hand-written component, see 4.2) in
+BOTH states, white with the same soft black glow as the other tile controls; while recording the button
+becomes the red chip with the elapsed timer and the icon keeps its shape. It is a ring on purpose: a
+solid white disc is a lot of light on a bedside screen at night, and the icon must not swell into one
+when recording starts.
+
 ### 4.2 Brand / service icons — local SVG components
 
 Third-party marks that lucide doesn't carry live in `frontend/src/components/icons/` as hand-written
@@ -212,6 +218,10 @@ They keep the vendor's own viewBox (`0 0 600 599`, `0 0 48 48`, `0 0 50.8 50.8`,
 the vendor's own colours — a brand mark must stay recognisable, so these are the **one exception** to
 `currentColor`. Add a new one here, as a component, never as a remote image (CSP blocks it, and the
 app must work offline on a LAN).
+
+`RecordIcon` lives in the same folder but is not a brand mark: it is a UI glyph lucide does not
+carry (the classic record ring-and-dot), and unlike the marks above it **does** use `currentColor`
+(its `color` prop defaults to it), so it themes like the lucide icons.
 
 ### 4.3 App icons — raster PNG
 

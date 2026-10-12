@@ -314,6 +314,39 @@ measurement**, and (like everything here) never a safety device — see the warn
   never perfectly still for hours — they move a little, repeatedly — so a bed that stirs once and
   then nothing is an empty one, and the bedtime it seemed to start is discarded. The same applies at the other end: a morning wake
   is still found if it comes after the configured wake time.
+
+  Only movement **before the next put-down** counts towards that occupied-bed check: a later bedtime
+  never vouches for an earlier one. So a *put-down* the camera got wrong an hour or two before the
+  real one, with the bed empty in between, is discarded rather than reported as the bedtime (it used
+  to be accepted on the real bedtime's movement, and could even end the night in the evening when a
+  parent then left the room). A *got into bed* with recorded quiet in the minute either side of it (at
+  most a lone minute of movement, such as a parent reaching in) is not treated as a new put-down for
+  this. "Quiet" there means the same as everywhere else in the timeline: no movement in the bed, no
+  movement elsewhere in the picture, and no noise. There is no setting for any of it, and the numbers are
+  unchanged: at least 3 minutes with movement in the bed, however slight, in the 2½ hours after the
+  child settles.
+  **Known limits** (details, and the nights they come from, in [KNOWN-ISSUES.md](KNOWN-ISSUES.md)):
+  - A very still child whose bedtime is followed by a second *got into bed* that is not quiet either
+    side (a parent at the bed for a couple of minutes, the same put-down logged twice, or a one-minute
+    check with a noise from elsewhere in the house beside it) before the bed has shown 3 such minutes
+    loses that bedtime: the in-bed and asleep times move later, to that second event or after it.
+    There is no grace period: this holds a few minutes after the child settles as much as an hour.
+  - The other way round: the **real** put-down, if it happens to be logged with quiet either side (a
+    quiet house, a put-down that pauses), is not treated as a new put-down either, so a false earlier
+    one is still believed, exactly as before this change.
+  - Where the false put-down is discarded but the real one settled after the window had already
+    opened on a quiet evening, the **In bed** time can now show nothing on a night where it used to
+    show the false put-down.
+  - The parent's approach in the minute or two before the real put-down still counts for a false
+    earlier one, so a false put-down with exactly that much movement before the real one is still
+    believed.
+  - While a night is still in progress, a false put-down can show as tonight's bedtime for up to about
+    2½ hours after it; the figures worked out after that, and in the morning, use the full rule.
+  - Not fixed by this: a nap the child was lifted out of without waking can still be taken as the
+    start of the night, and on a quiet evening (no household noise to break the stillness) an empty
+    bed can still be read as a child asleep from the moment the window opens, for example when a
+    discarded false put-down came first. That is still later, and closer to the truth, than the false
+    put-down it replaces.
 - **One camera does the measuring.** If a child has several cameras, sleep is worked out from their
   **main camera**, and an admin can choose which one it is: **Camera used for this child's sleep** in
   the child's settings (shown once a child has two or more cameras).
@@ -540,6 +573,24 @@ measurement**, and (like everything here) never a safety device — see the warn
     - **Removing your last correction unlocks the night.** While it is still "last night", the nightly
       update then refines it once more if it had not finished doing so before you corrected it. Past the
       ~3 hours that pass only updates the saved summary: no "Sleep report updated" push goes out that late.
+    - **How to remove a correction (unlock a night).** Either:
+      - an admin opens **Recompute this night** on the sleep detail page, which says the night is locked,
+        and presses **Remove my correction** (it asks you to confirm first); or
+      - anyone edits the review (**Change what you told us about this night**) and empties **all three**
+        times, **In bed**, **Fell asleep** and **Got up for the day** (or, for a night you marked "No one was
+        in the bed", presses **Someone was in the bed**). Emptying only some of them leaves the night
+        locked: the review form starts with the app's own asleep and wake-up times filled in, so clearing
+        just **In bed** still counts as a correction.
+
+      The button **removes** the times you entered (or your "No one was in the bed" answer); it does not
+      hide them, and nothing brings them back. Your answers to the individual events (and their reasons)
+      and your note are kept, and so is the night's saved summary: the button only unlocks the night, it
+      does not recompute it. Press **Recompute this night** afterwards to see the app's own figures beside
+      the saved ones, which may be wrong (that is why you corrected the night). To keep a correction after
+      that, enter your times again, and the night locks again when you save them. Removing a correction is
+      allowed for any signed-in user through the review itself, but the button is in the admin-only
+      Recompute dialog. The one side effect: removing a "No one was in the bed" answer counts as answering
+      the review, so a dismissed prompt returns and the review names the person who removed it.
     - **Known limits, all documented rather than fixed:**
       - A night corrected early (say 07:15, when the window closed at 07:00) keeps any time you did
         *not* correct at the value it had then. A detected wake-up that would have settled from 06:50
@@ -665,7 +716,8 @@ measurement**, and (like everything here) never a safety device — see the warn
   you exactly what would change (bedtime, wake time, how long they slept, how many wake-ups) *before*
   anything is saved. You can cancel. Admins only. **A night someone has corrected in the morning review
   is locked and is not recomputed** — the dialog says so, and the API answers `409` with
-  `reason: "reviewed"`. Remove the correction first if the night really should be re-scored.
+  `reason: "reviewed"`. Remove the correction first if the night really should be re-scored: the dialog
+  has a **Remove my correction** button for it (see "How to remove a correction", above).
   **It can never make a night worse:** the minute-by-minute data behind a night is only kept for 30
   days — the same span the date picker offers — so the oldest night you can browse sits right on that
   edge. If its data has aged out, the recompute is refused and the saved summary is left alone, rather
@@ -693,6 +745,14 @@ measurement**, and (like everything here) never a safety device — see the warn
   happened so far, so a bedtime can be revised later in the evening and the morning wake isn't
   looked for at all until the night is complete. The settled numbers are the ones on the card the
   following day.
+  - **"Last night" is always the last night that has finished.** The saved summary for a night is
+    written by the nightly update, which runs every 30 minutes, so for up to half an hour after the
+    window closes (and for as long as that update is refused or skipped, for example for a night you
+    corrected in the morning review) there is no saved summary for it yet. The card, and the detail
+    page it opens, then show last night **worked out fresh** instead of the night before; once the
+    saved summary exists they show that, so the card keeps agreeing with the morning notification.
+    Reading the card never saves anything. If the night was not watched enough to score it reads "no
+    data" rather than falling back to an older night.
 - **The detail view.** Tap the sleep summary for the full **night timeline**: a to-scale bar of
   asleep / stirring / awake stretches on a real time axis, every wake-up listed with its time
   and length, a **movement outside the bed** list, and a date picker to step back through

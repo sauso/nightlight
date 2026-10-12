@@ -132,3 +132,44 @@ distribution before any fix to the gap is attempted again — see
     enough to confirm an out_of_bed). Residual theoretical risk only if a child sleeps well past
     window+lookahead with truly no motion and no exit; watch for a wake that lands suspiciously
     early with no nearby transition.
+
+## 6. Scoring a sleep change against the reviews: the accuracy scoreboard
+
+`node scripts/scoreboard.mjs <snapshot.db>` answers "are we getting closer to what the parent said
+happened?" with one table instead of a handful of remembered nights. It is read-only: it copies the
+snapshot to a temp directory (the backend's `db.js` migrates whatever it opens), freezes the clock, runs
+the backend's own `computeNight` for every `sleep_reviews` row and compares the FRESH result (not the
+stored `sleep_nights` row) with the review's `true_in_bed_at` / `true_onset_at` / `true_wake_at`, each
+falling back to the time of the transition the parent picked.
+
+```
+node scripts/scoreboard.mjs path/to/snapshot.db --label=dev@abc1234 --out=C:/somewhere/outside/the/repo/row.md
+node scripts/scoreboard.mjs path/to/snapshot.db --backend=path/to/old/checkout/backend   # the OLD code, same snapshot
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--clock=<ISO>` | the snapshot file's modification time | the instant the recompute is frozen at; only a night still in progress cares |
+| `--unseen-after=<ISO>` | `2026-10-11T00:00:00Z` | reviews saved at or before it are "fitted-to", after it "unseen" |
+| `--json` | off | JSON instead of Markdown (adds a signed per-night error list) |
+| `--out=<file>` | stdout | write there; refused inside this repo (the ledger lives outside it) |
+| `--label=<text>` | none | carried into the ledger row (a short sha, `staging`, `prod`) |
+| `--backend=<dir>` | this checkout's `backend/` | score another tree's `computeNight` (needs `npm ci` there) |
+
+Reading it:
+
+- **Only "unseen" measures progress.** Reviewed nights are not a random sample (they are the nights
+  somebody checked), and "fitted-to" nights shaped the thresholds, so that set flatters us. Read the
+  `n` first: a set under 10 nights is flagged with `*`, and three nights is a story, not a measurement.
+- **A blank counts against the percentage, not the error.** "Within" is out of every night that has a
+  true time, so a night where the app gave no wake is a miss; median and mean are absolute minutes over
+  the nights where both times exist, so a blank cannot flatter them. Blank wakes and wakes off by more than
+  60 minutes are counted in their own columns.
+- **Unscored nights are counted in the header**: dismissed, "nobody in the bed", no true time, and
+  `no_data`. `activity_samples` are kept 30 days, so on a snapshot taken today every reviewed night older
+  than that is `no_data`: 21 of 60 on the first staging run. The scoreboard therefore covers roughly the last
+  month of reviews and "fitted-to" shrinks as nights age out; two ledger rows are only comparable when taken
+  from snapshots of the same age, or on the nights both have.
+- Child labels are "child 1" and "child 2" by creation order. No name is read or printed.
+- The thresholds (10 min in-bed, 15 min onset, 10 min wake) are the owner's targets for this table, not a
+  clinical definition, and the cameras behind every number are two in one house.

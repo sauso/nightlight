@@ -1672,7 +1672,12 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
 }
 
 /* --- Forms --- */
+/* `display: block` matters for ONE caller: the "Was this right?" edit card writes its fields as
+   <label class="field">, and a <label> is inline, so its bottom margin did nothing and the "No one was in the
+   bed" button sat flush against the note input above it. Every other `.field` is a <div>, already block, so
+   this changes nothing for them. */
 .field {
+  display: block;
   margin-bottom: 14px;
 }
 
@@ -1691,7 +1696,10 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   .field-row { grid-template-columns: 1fr; gap: 12px; }
 }
 
-.field label {
+/* `.field__label` is the same label for a field whose wrapper IS the <label> (the review edit card), where
+   `.field label` cannot match. It had no rule at all, so the text sat inline and tight against its input. */
+.field label,
+.field__label {
   display: block;
   font-size: 12px;
   color: var(--text-secondary);
