@@ -340,8 +340,12 @@ measurement**, and (like everything here) never a safety device — see the warn
   - The parent's approach in the minute or two before the real put-down still counts for a false
     earlier one, so a false put-down with exactly that much movement before the real one is still
     believed.
-  - While a night is still in progress, a false put-down can show as tonight's bedtime for up to about
-    2½ hours after it; the figures worked out after that, and in the morning, use the full rule.
+  - The check needs the 2½ hours after a put-down to have been recorded. A put-down closer than that to
+    the end of what has been recorded is believed without it: while a night is still in progress, a false
+    put-down can show as tonight's bedtime for up to about 2½ hours after it, and the figures worked out
+    after that use the full rule. The same is true of a night that has ended, for a put-down within 2½
+    hours of the end of its window: a false one over an empty bed there is kept as the bedtime, and a real
+    one after it is not looked at.
   - Not fixed by this: a nap the child was lifted out of without waking can still be taken as the
     start of the night, and on a quiet evening (no household noise to break the stillness) an empty
     bed can still be read as a child asleep from the moment the window opens, for example when a
