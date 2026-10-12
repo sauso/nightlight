@@ -89,6 +89,17 @@ camera.
 Motion read this way goes through the **same per-camera cooldown and active-hours schedule** as
 Nightlight's own frame-diff detection — it isn't a raw firehose of every message.
 
+⚠️ **An MQTT motion alert is only as trustworthy as your broker's access rules.** Nightlight alerts on
+any message on the camera's motion topic that reads as motion; it cannot tell the camera from anything
+else that publishes there. Whoever can publish to that topic can raise a false alert (a push and an
+entry in the Alerts feed), and because each alert starts the camera's cooldown (60 seconds by
+default), a real event that follows within the cooldown raises no alert of its own. The
+connection is plain `mqtt://` (above), so the broker password also travels in the clear, and anyone who
+reads it can publish as the camera. Nightlight's own frame-diff detection and ONVIF motion take their
+signal from the camera itself, not from a broker, so they do not have this weakness. If you use this
+source, give each camera its own broker account that may publish only to its own motion topic, and let
+no other account publish to it; if your broker cannot do that, prefer one of the other two sources.
+
 ## Troubleshooting: "connected but no readings"
 
 1. **Confirm the broker is actually publishing on that exact topic.** `mosquitto_sub -h

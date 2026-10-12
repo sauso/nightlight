@@ -127,6 +127,10 @@ minutes (12 hours) for one silence; the tile only offers up to an hour. Keeping 
 and off, for longer than the admins' threshold (an hour by default, so by renewing it) tells the
 admins: see [Long-silence alerts](#long-silence-alerts) above.
 
+A silenced camera raises no alert, so it saves **no alert clip** either, even with **Save a clip when
+triggered** on: the clip is cut from an alert that never fired (the same as outside the camera's alert
+schedule). See [Recording](recording.md#automatic-clips-detection-triggered).
+
 **Who did it is recorded, by username.** That is the login name an admin sets for each account, never
 the first name, which anyone can change on their own account (so it cannot be used to put someone
 else's name on what you did). It is copied at the time, so renaming or deleting the account later does
