@@ -73,8 +73,9 @@ because that would rewrite ordinary words); (3) a name written in an MQTT topic 
 in a form other than as typed or percent-encoded. The reverse also holds: (4) a name that is an
 ordinary word (a child called "Max", "Motion" or "Sound") is replaced wherever that word appears in
 the log text and in a camera's own settings, so a line can read "Child 1 detected" or a
-`detect_source` can read "Camera 1"; the timezone setting, the version and the system section are
-never rewritten. If the bundle ever contains a name after the replacement, the download is refused
+`detect_source` can read "Camera 1" (and an id that happens to contain such a word is rewritten, the
+same way everywhere, so it still correlates); the timezone setting, the version and the system section
+are never rewritten. If the bundle ever contains a name after the replacement, the download is refused
 with a "privacy check" error and nothing is sent; please report it.
 
 **Never paste any of the following into a public issue, PR, or discussion:**

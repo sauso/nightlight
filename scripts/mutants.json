@@ -15914,7 +15914,7 @@
     "replace": "const NOT_AFTER = '';",
     "expect": "killed",
     "tests": ["identity-redaction.test.js"],
-    "namePattern": "whole word"
+    "namePattern": "word"
   },
   {
     "label": "#547 lib: no boundary before a name",
@@ -15923,7 +15923,7 @@
     "replace": "const NOT_BEFORE = '';",
     "expect": "killed",
     "tests": ["identity-redaction.test.js"],
-    "namePattern": "whole word"
+    "namePattern": "word"
   },
   {
     "label": "#547 lib: a 1-character name is searched for in free text",
