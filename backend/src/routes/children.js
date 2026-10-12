@@ -16,7 +16,7 @@ import { deleteTimelapse, discardAllTimelapseFrames } from '../lib/timelapse.js'
 import { TRANSITION } from '../lib/bedTransitions.js';
 import { getNightReview, saveNightReview, previewNightReview, inBedAfterOnset, asleepAfterWake, reviewCorrectsNight,
   reviewCardState, localHmToUtcSql, applyVerdicts, applyCorrection, applyCorrections, transitionInstant,
-  reviewForBrowser } from '../lib/sleepReviews.js';
+  parseTransitionId, reviewForBrowser } from '../lib/sleepReviews.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -476,15 +476,30 @@ router.put('/:id/review/:date', (req, res) => {
   // memory, and it records WHICH picture means "they got up". So when a frame is named it WINS over
   // any typed value — the client clears the id the moment somebody edits the time by hand, which keeps
   // exactly one source of truth for each of the moments.
-  const onsetFromFrame = transitionInstant(req.params.id, req.params.date, body.true_onset_transition_id);
-  const wakeFromFrame = transitionInstant(req.params.id, req.params.date, body.true_wake_transition_id);
+  //
+  // The three frame ids are parsed ONCE, here, by the parser transitionInstant also uses (#522), and the
+  // checks below and the stored patch both read these values, so what is checked is exactly what is stored.
+  // Two separate Number() calls used to agree only by luck, and on '' they did not (see parseTransitionId).
+  // `undefined` is kept apart from the parse on purpose: HERE it means "this key was not sent, keep what is
+  // stored" (a page loaded before a field existed never sends it), while parseTransitionId reads it as "no
+  // frame". A value that is not an id at all parses to NaN, which transitionInstant answers as "not an event
+  // of this night", so it gets the existing 400 below, before anything writes. Deliberately no separate NaN
+  // check: it would be a second copy of this same refusal that no request could tell apart from the first.
+  // The message is the same as for an id from another night on purpose: to the person both mean the frame
+  // sent is not one of this night's.
+  const frameIdOf = (v) => (v === undefined ? undefined : parseTransitionId(v));
+  const onsetFrameId = frameIdOf(body.true_onset_transition_id);
+  const wakeFrameId = frameIdOf(body.true_wake_transition_id);
+  const inBedFrameId = frameIdOf(body.true_in_bed_transition_id);
+  const onsetFromFrame = transitionInstant(req.params.id, req.params.date, onsetFrameId);
+  const wakeFromFrame = transitionInstant(req.params.id, req.params.date, wakeFrameId);
   for (const [label, v] of [['true_onset_transition_id', onsetFromFrame], ['true_wake_transition_id', wakeFromFrame]]) {
     if (v === undefined) return res.status(400).json({ error: `${label} is not an event of this night` });
   }
   // The put-down frame must be a GOT-INTO-BED event of this night: "they went into bed" cannot be read
   // off a got-out-of-bed frame. New with this field only; the onset and wake ids keep their old,
   // untyped check (see transitionInstant) so an already-open page cannot start failing.
-  const inBedFromFrame = transitionInstant(req.params.id, req.params.date, body.true_in_bed_transition_id, TRANSITION.INTO_BED);
+  const inBedFromFrame = transitionInstant(req.params.id, req.params.date, inBedFrameId, TRANSITION.INTO_BED);
   if (inBedFromFrame === undefined) {
     return res.status(400).json({ error: 'true_in_bed_transition_id is not a got-into-bed event of this night' });
   }
@@ -516,21 +531,20 @@ router.put('/:id/review/:date', (req, res) => {
     return res.status(400).json({ error: 'Choose either "no one was in the bed" or the times, not both' });
   }
 
-  // A frame id as the patch stores it: `undefined` (not sent) keeps what is stored, and null or '' is "no
-  // frame", exactly as transitionInstant reads them. '' used to become Number('') = 0 here, which
-  // saveNightReview reads as a frame: sent beside "no one was in the bed" it tripped the flag-plus-times throw,
-  // a 500 whose body Cloudflare strips, and without the flag it stored a frame id of 0 (fix round 2,
-  // 2026-09-30). Anything else was already checked by transitionInstant above.
-  const frameId = (v) => (v === undefined ? undefined : (v == null || v === '' ? null : Number(v)));
+  // The patch stores the frame ids parsed and checked above: `undefined` (not sent) keeps what is stored,
+  // and null or '' is "no frame". '' used to become Number('') = 0 here, which saveNightReview reads as a
+  // frame: sent beside "no one was in the bed" it tripped the flag-plus-times throw, a 500 whose body
+  // Cloudflare strips, and without the flag it stored a frame id of 0 (fix round 2, 2026-09-30). Since #522
+  // there is no second coercion here to drift from the check.
   const patch = {
     // `undefined` means "not supplied, keep what is stored" — a stale card on a second phone sending
     // only `{dismissed:true}` must not blank times a parent entered on the first.
     trueOnsetAt: onsetHm === undefined && body.true_onset_transition_id === undefined ? undefined : onset,
     trueWakeAt: wakeHm === undefined && body.true_wake_transition_id === undefined ? undefined : wake,
-    trueOnsetTransitionId: frameId(body.true_onset_transition_id),
-    trueWakeTransitionId: frameId(body.true_wake_transition_id),
+    trueOnsetTransitionId: onsetFrameId,
+    trueWakeTransitionId: wakeFrameId,
     trueInBedAt: inBedHm === undefined && body.true_in_bed_transition_id === undefined ? undefined : inBed,
-    trueInBedTransitionId: frameId(body.true_in_bed_transition_id),
+    trueInBedTransitionId: inBedFrameId,
     // What the person was LOOKING at when they judged, echoed back from the GET. Deliberately not
     // recomputed here — see saveNightReview.
     computedOnsetAt: body.computed_onset_at,
