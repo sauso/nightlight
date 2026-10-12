@@ -15,7 +15,14 @@ import { captureWakeClip, pruneWakeClips, getWakeClipSettings, WAKE_CLIP_LEAD_SE
 // parent for a creak. Rather than make alerting noisier, this records the wake and stays silent.
 //
 // It mirrors the nightly job's wake rule minute by minute, using the SAME thresholds
-// (SLEEP_THRESHOLDS, imported — never copied), so a clip exists exactly when the timeline shows a wake:
+// (SLEEP_THRESHOLDS, imported — never copied). Sharing the numbers does NOT make the two decisions
+// equal (#358): this is a streaming approximation, so the timeline can show a wake that has no clip.
+// What differs, read from sleepAnalysis.js (the nightly rule can use hindsight, this one cannot):
+//   * nightly, a minute is also active on motion OUTSIDE the bed (motion_out_peak); here it is not;
+//   * nightly scores ONE camera, the child's primary; this tracks every camera assigned to the child;
+//   * nightly applies the put-down/occupancy onset rules and the sound-witness rules around onset
+//     (SETTLING_WITNESS_MIN_QUIET, POST_ONSET_SOUND_WITNESS_MIN); this has only the ONSET_QUIET_MIN gate.
+// What this watcher itself does:
 //   * a minute is ACTIVE if in-bed motion or sound crosses its threshold;
 //   * a run of active minutes, bridging quiet gaps up to WAKE_GAP_MIN, is a WAKE once it contains
 //     WAKE_ACTIVE_MIN active minutes;

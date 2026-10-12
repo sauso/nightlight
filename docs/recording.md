@@ -44,6 +44,18 @@ Alerts that have a clip show a **play button** on their thumbnail; tapping opens
 with a **Download** button. In the mobile app, Download saves the video into your phone's Downloads
 folder.
 
+**A silenced camera, or one outside its alert hours, saves no clip.** A clip belongs to an alert, and
+is cut only when an alert actually fires. While a camera is **silenced** (**Silence alerts** on its
+tile) or outside its **Alert schedule**, motion and sound raise no alert at all (no push and no entry
+in the Alerts feed), so there is nothing to attach a clip to, even with **Save a clip when triggered**
+on. The detector itself keeps watching, so sleep tracking is unaffected, but no alert clip of that
+moment is kept. This is different from having no notification provider set up, or switching one off: an
+alert that fires is still recorded in the feed and still gets its clip, whether or not anything is
+pushed. So "stop the notifications" and "stop the alert" are different things here, and there is no
+per-camera setting that mutes only the push while keeping the alert and its clip: the schedule and
+the silence both stop the alert itself. See [Alert schedule](notifications.md#alert-schedule-quiet-hours)
+and [Silencing a camera's alerts](camera-controls.md#silencing-a-cameras-alerts-and-who-did-what).
+
 ---
 
 ## Wake clips (recorded, never announced)
@@ -280,6 +292,23 @@ Both are exposed as optional fields in the Unraid template (**Recordings Directo
 under *Advanced view*). With Docker Compose, uncomment the commented `recordings` volume line in
 `docker-compose.yml` and set `CLIPS_DIR` in your `.env` — see the comments in `.env.example`. With a
 plain `docker run`, add `-v /path/to/recordings:/recordings -e CLIPS_DIR=/recordings`.
+
+**The folder must be writable by the user Nightlight runs as (`PUID:PGID`, 99:100 unless you changed
+them).** At start-up the container fixes the ownership of the **data directory** only; an external
+`CLIPS_DIR` keeps whatever owner and mode the host gave it. On Unraid a share is usually owned by
+`nobody:users`, which is 99:100, so it works as it is. On another host a folder you created is often
+owned by root: `chown` it to `PUID:PGID` (or otherwise make it writable for that user) before
+starting. A read-only mount counts as not writable. If it is not writable, Nightlight does not stop.
+It logs this once, at start-up:
+
+```
+[clips] CLIPS_DIR "<path>" is not writable (<reason>). Clip recording disabled.
+```
+
+and **Settings → Recording → Storage** shows the path with a warning that reads "not a mapped volume"
+(the same wording for either cause). Until the folder is fixed and the container restarted, no
+automatic clip, wake clip, on-demand recording or timelapse is saved; alerts still go out, without a
+clip.
 
 **Safety guard:** at startup Nightlight checks `CLIPS_DIR` is writable and backed by a real mounted
 volume. If it resolves to an unmapped path (the container's ephemeral layer), recording is **disabled**

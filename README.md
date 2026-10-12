@@ -8,6 +8,16 @@ iOS** ([nightlight-mobile](https://github.com/sauso/nightlight-mobile)) for reli
 background audio and picture-in-picture (see [Mobile apps](#mobile-apps-android--ios)
 below). No cloud, no subscription, no account anywhere but your own network.
 
+> **One thing to know about "no cloud".** Nightlight has no cloud service of its own, but the
+> **Low latency (WebRTC)** live view is set up to use Google's public STUN server
+> (`stun.l.google.com:19302`), both in the browser and in the bundled MediaMTX. STUN is how WebRTC
+> works out a public address: the browser asks that server, so Google can see the viewer's public IP
+> address and when each live view connected. It does nothing useful on a home network, and there is
+> **no setting to turn it off** in this version (it is fixed in the frontend and in
+> `mediamtx/mediamtx.yml`). **Compatibility (HLS)** viewing does not use WebRTC and does not contact
+> it. Push notifications, if you enable a provider, also leave your network: see
+> [Push notifications](docs/notifications.md).
+
 > **⚠️ Not a safety device.** Nightlight is a convenience tool, not a safety device. It is
 > not a medical device, is not certified for safety monitoring of any kind, and must never
 > be used as a substitute for adult supervision. Streams can drop, apps can be killed by
@@ -16,9 +26,9 @@ below). No cloud, no subscription, no account anywhere but your own network.
 
 ## Screenshots
 
-See the [visual walkthrough](docs/README.md) for a tour of the main screens (sign-in, the
-nursery dashboard, adding a camera, and settings). Those images are generated automatically
-by the end-to-end test suite, so they stay in sync with the actual UI.
+See the [visual walkthrough](docs/README.md) for a tour of the main screens (the nursery
+dashboard, adding a camera, and settings). The images are captured by the end-to-end test
+suite but committed by hand, so they can lag behind the actual UI.
 
 ## How it works
 
@@ -130,6 +140,17 @@ cameras to children.
   something like `/stream1`).
 - **ONVIF is optional but handy**: if a camera supports it, Nightlight can fetch the stream
   details from just its IP, and enable pan/tilt controls on cameras that report PTZ.
+- **Capacity has not been measured.** There is no stated or tested limit on the number of
+  cameras or viewers, no minimum Raspberry Pi model, RAM or free disk, and no CPU-per-camera
+  figure: Nightlight enforces no limit, and none has been benchmarked. What a camera costs depends
+  on what you switch on: every camera has its own FFmpeg stream process, and motion analysis, sound
+  analysis (sleep tracking uses both) and the recording buffer each add another one. Add cameras
+  gradually and watch the host's CPU.
+- **Browsers: the automated tests cover desktop Chromium only.** The end-to-end suite runs in
+  Chromium (Playwright's "Desktop Chrome" profile) and nothing else. Safari, Firefox, Edge, Samsung
+  Internet and the native apps have no automated coverage, and no tested-version list is kept. The
+  table under [Installing to your home screen](#installing-to-your-home-screen) describes how each
+  platform treats installs; it is not a statement of tested versions.
 
 ## Running on Unraid
 
@@ -239,6 +260,15 @@ stream codecs, with any password replaced by `***`. It is meant to be attached t
 it is worth opening and reading before you post it: the redaction covers passwords, not everything a
 particular camera's firmware might put in an error message. If you find something sensitive that
 shouldn't be there, see [SECURITY.md](SECURITY.md) for how to report it privately instead.
+
+**Cameras are trusted input.** Nightlight trusts everything a camera sends it: the video and audio
+stream, the ONVIF replies and the snapshot images. The stream is parsed by FFmpeg and ffprobe, and
+the rest by the server itself, all as the same user that owns the data directory (the database, the
+saved secrets and the recordings) and with the container's environment: nothing separates the media
+processes from the data. Cameras are often the least-updated devices on a network, so put them on
+**their own VLAN or network segment**, ideally with no route to the internet and no access to your
+other devices, and let only the Nightlight host reach them (RTSP, plus ONVIF and the snapshot URL if
+you use them). This is advice: Nightlight does not check or enforce it.
 
 **Adding a camera**
 
