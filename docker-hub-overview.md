@@ -56,6 +56,13 @@ a trusted device.
   used. If another user or container reads the data directory, set `-e UMASK=022`
   **before** upgrading - after one start at `077` it only affects new files. Details:
   [Who can read the data directory](https://github.com/sauso/nightlight/blob/main/docs/operations.md#who-can-read-the-data-directory).
+- `CLOUDFLARE_ANALYTICS` is off by default: Cloudflare Web Analytics' beacon, which
+  Cloudflare's proxy injects into every page, is blocked by Nightlight's
+  Content-Security-Policy. Set `-e CLOUDFLARE_ANALYTICS=1` (or `true`, `yes`, `on`) only
+  if you serve Nightlight through Cloudflare with Web Analytics on; blank, `0`, `false`,
+  `no` and `off` keep it blocked, and any other value also blocks it and logs a warning.
+  It used to be allowed on every install: if you rely on it, set this when you upgrade. Details:
+  [`CLOUDFLARE_ANALYTICS`](https://github.com/sauso/nightlight#cloudflare_analytics--cloudflare-web-analytics-through-cloudflares-proxy).
 - `--stop-timeout 30` lets Nightlight shut down cleanly - a recording in progress is
   assembled from its buffer as the app stops, and being killed part-way loses it.
   Stopping normally takes a few seconds; the container exits as soon as it's done, so

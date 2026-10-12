@@ -16697,5 +16697,320 @@
     "expect": "killed",
     "tests": ["whepPlayer.test.jsx"],
     "namePattern": "second camera"
+  },
+  {
+    "label": "#562 viewport: the native app is relaxed too",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "  if (native) return false;",
+    "replace": "  if (false) return false;",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport native|#562 viewport defaults"
+  },
+  {
+    "label": "#562 viewport: maximum-scale is no longer removed",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "new Set(['maximum-scale', 'user-scalable'])",
+    "replace": "new Set(['user-scalable'])",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: user-scalable is no longer removed",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "new Set(['maximum-scale', 'user-scalable'])",
+    "replace": "new Set(['maximum-scale'])",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: the token name is matched case-sensitively",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "token.split('=')[0].trim().toLowerCase()",
+    "replace": "token.split('=')[0].trim()",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: spaces before = hide a locking token",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "token.split('=')[0].trim().toLowerCase()",
+    "replace": "token.split('=')[0].toLowerCase()",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: ; is not treated as a separator",
+    "file": "frontend/src/lib/viewport.js",
+    "find": ".split(/[,;]/)",
+    "replace": ".split(',')",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: kept tokens are not trimmed",
+    "file": "frontend/src/lib/viewport.js",
+    "find": ".map((token) => token.trim())",
+    "replace": ".map((token) => token)",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: empty tokens are kept",
+    "file": "frontend/src/lib/viewport.js",
+    "find": ".filter((token) => token && !LOCKING",
+    "replace": ".filter((token) => !LOCKING",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: tokens are rejoined without the space",
+    "file": "frontend/src/lib/viewport.js",
+    "find": ".join(', ');",
+    "replace": ".join(',');",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: every meta is rewritten, not only the viewport",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "doc.querySelectorAll('meta[name=\"viewport\"]')",
+    "replace": "doc.querySelectorAll('meta')",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: only the first viewport meta is relaxed",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "doc.querySelectorAll('meta[name=\"viewport\"]')",
+    "replace": "[doc.querySelector('meta[name=\"viewport\"]')].filter(Boolean)",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: a meta with no content attribute gains one",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "meta.getAttribute('content') ?? ''",
+    "replace": "meta.getAttribute('content')",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: every run reports and writes a change",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "    if (after !== before) {",
+    "replace": "    if (true) {",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: with no arguments every page is treated as a browser",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "native = isNativeApp()",
+    "replace": "native = false",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport defaults"
+  },
+  {
+    "label": "#562 viewport App: the policy is never applied at start",
+    "file": "frontend/src/App.jsx",
+    "find": "    applyViewportPolicy(document, isNativeApp());",
+    "replace": "    void 0;",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "#562 viewport app"
+  },
+  {
+    "label": "#562 viewport App: the native check is ignored at start",
+    "file": "frontend/src/App.jsx",
+    "find": "    applyViewportPolicy(document, isNativeApp());",
+    "replace": "    applyViewportPolicy(document, false);",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "#562 viewport app"
+  },
+  {
+    "label": "#562 CSP: the Cloudflare script origin is allowed on every install",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "const cfScript = enabled ? [CLOUDFLARE_SCRIPT_ORIGIN] : [];",
+    "replace": "const cfScript = [CLOUDFLARE_SCRIPT_ORIGIN];",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP default"
+  },
+  {
+    "label": "#562 CSP: the Cloudflare beacon origin is allowed on every install",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "const cfConnect = enabled ? [CLOUDFLARE_BEACON_ORIGIN] : [];",
+    "replace": "const cfConnect = [CLOUDFLARE_BEACON_ORIGIN];",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP default"
+  },
+  {
+    "label": "#562 CSP: ON never allows the beacon's POST target",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "const cfConnect = enabled ? [CLOUDFLARE_BEACON_ORIGIN] : [];",
+    "replace": "const cfConnect = [];",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP on"
+  },
+  {
+    "label": "#562 CSP: yes no longer turns it on",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "const ON_VALUES = new Set(['1', 'true', 'yes', 'on']);",
+    "replace": "const ON_VALUES = new Set(['1', 'true', 'on']);",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP parse"
+  },
+  {
+    "label": "#562 CSP: on no longer turns it on",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "const ON_VALUES = new Set(['1', 'true', 'yes', 'on']);",
+    "replace": "const ON_VALUES = new Set(['1', 'true', 'yes']);",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP parse"
+  },
+  {
+    "label": "#562 CSP: the value is matched case-sensitively",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "const v = s.toLowerCase();",
+    "replace": "const v = s;",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP parse"
+  },
+  {
+    "label": "#562 CSP: the value is not trimmed",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "typeof raw === 'string' ? raw.trim() : ''",
+    "replace": "typeof raw === 'string' ? raw : ''",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP parse"
+  },
+  {
+    "label": "#562 CSP: an unrecognised value fails OPEN",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "    enabled: false,\n    warning:",
+    "replace": "    enabled: true,\n    warning:",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP parse"
+  },
+  {
+    "label": "#562 CSP: a recognised OFF value is warned about as a typo",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "if (v === '' || OFF_VALUES.has(v)) return",
+    "replace": "if (v === '') return",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP parse|#562 CSP log"
+  },
+  {
+    "label": "#562 CSP: unset or blank is warned about as a typo",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "if (v === '' || OFF_VALUES.has(v)) return",
+    "replace": "if (OFF_VALUES.has(v)) return",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP parse|#562 CSP log"
+  },
+  {
+    "label": "#562 CSP: an unrecognised value is not logged",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "if (warning) log.warn(",
+    "replace": "if (false) log.warn(",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP log|#562 CSP wiring"
+  },
+  {
+    "label": "#562 CSP: ON is not logged at start",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "else if (enabled) log.info(",
+    "replace": "else if (false) log.info(",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP log"
+  },
+  {
+    "label": "#562 CSP: helmet adds its own default directives",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "useDefaults: false,",
+    "replace": "useDefaults: true,",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP default|#562 CSP header"
+  },
+  {
+    "label": "#562 CSP: an unrelated directive is loosened in the move (object-src)",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "objectSrc: [\"'none'\"],",
+    "replace": "objectSrc: [\"'self'\"],",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP default"
+  },
+  {
+    "label": "#562 CSP: an unrelated directive is dropped in the move (frame-ancestors)",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "    frameAncestors: [\"'none'\"],\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP default"
+  },
+  {
+    "label": "#562 CSP index.js: the environment is not passed to the builder",
+    "file": "backend/src/index.js",
+    "find": "app.use(helmet(buildHelmetOptions(process.env, logger)));",
+    "replace": "app.use(helmet(buildHelmetOptions({}, logger)));",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP wiring"
+  },
+  {
+    "label": "#562 CSP index.js: the logger is not passed, so a typo fails closed in silence",
+    "file": "backend/src/index.js",
+    "find": "app.use(helmet(buildHelmetOptions(process.env, logger)));",
+    "replace": "app.use(helmet(buildHelmetOptions(process.env)));",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP wiring"
+  },
+  {
+    "label": "#562 CSP index.js: a hard-coded policy with the Cloudflare origin comes back",
+    "file": "backend/src/index.js",
+    "find": "app.use(helmet(buildHelmetOptions(process.env, logger)));",
+    "replace": "app.use(helmet({ contentSecurityPolicy: { useDefaults: false, directives: { ...buildHelmetOptions(process.env, logger).contentSecurityPolicy.directives, scriptSrc: [\"'self'\", 'https://static.cloudflareinsights.com'] } } }));",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP wiring"
+  },
+  {
+    "label": "#562 CSP index.js: helmet is called with no options (its own default policy)",
+    "file": "backend/src/index.js",
+    "find": "app.use(helmet(buildHelmetOptions(process.env, logger)));",
+    "replace": "app.use(helmet());",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP wiring"
   }
 ]

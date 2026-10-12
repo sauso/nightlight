@@ -51,6 +51,7 @@ import { startObservationLog, stopObservationLog } from './lib/observationClock.
 import { logger } from './lib/logger.js';
 import { logDataDirModes } from './lib/dataDirModes.js';
 import { applyTrustProxy } from './lib/trustProxy.js';
+import { buildHelmetOptions } from './lib/cspDirectives.js';
 import { safeInterval, installCrashGuards, markBootComplete } from './lib/processGuards.js';
 import {
   createCameraWatchdog, createAudioWatchdog, WATCHDOG_INTERVAL_MS, AUDIO_CHECK_INTERVAL_MS,
@@ -109,39 +110,13 @@ const app = express();
 // See lib/trustProxy.js; it falls back to 'loopback' with a loud log rather than exiting.
 applyTrustProxy(app, process.env.TRUST_PROXY);
 
-// Content-Security-Policy — ENFORCING (validated via a report-only rollout on staging that exercised
-// every feature). The report-uri below still logs any future
-// violation to /api/csp-report, so a regression (e.g. a new dependency pulling a third-party script)
-// shows up in the container log instead of silently. Directives are tuned to this app:
-//  - script-src 'self' + static.cloudflareinsights.com: Vite emits one external module script (no
-//    inline scripts — don't add unsafe-*); the Cloudflare Web Analytics beacon is allowed by choice.
-//  - style-src 'self': theming uses element.style.setProperty (CSSOM), which CSP doesn't police; app
-//    CSS is an external <link>. (If real style violations show up, add 'unsafe-inline' — low risk.)
-//  - media-src/worker-src blob:: hls.js feeds <video> via MSE blob URLs and runs its demuxer worker
-//    from a blob: URL. img-src data:: snapshot posters/icons. font-src data:: any inlined @font-face.
-//  - connect-src adds the client-side WebRTC STUN host (WhepPlayer.jsx) + the CF beacon POST target —
-//    keep the STUN host in sync if it ever changes.
-//  - No upgrade-insecure-requests: the app is also served over plain http on the LAN.
-app.use(helmet({
-  contentSecurityPolicy: {
-    useDefaults: false,
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", 'https://static.cloudflareinsights.com'],
-      styleSrc: ["'self'"],
-      imgSrc: ["'self'", 'data:'],
-      mediaSrc: ["'self'", 'blob:'],
-      workerSrc: ["'self'", 'blob:'],
-      connectSrc: ["'self'", 'stun.l.google.com:19302', 'https://cloudflareinsights.com'],
-      fontSrc: ["'self'", 'data:'],
-      objectSrc: ["'none'"],
-      baseUri: ["'self'"],
-      formAction: ["'self'"],
-      frameAncestors: ["'none'"],
-      reportUri: ['/api/csp-report'],
-    },
-  },
-}));
+// Content-Security-Policy, ENFORCING, plus helmet's other headers. The policy and the reasoning behind each
+// directive live in lib/cspDirectives.js, which builds the WHOLE options object (#562 bullet 6): this file
+// cannot be imported by a test, so a policy written here could only be read as text, never served and
+// checked. Keep it that way: no directive or origin belongs here (csp-directives.test.js pins it). The
+// third-party analytics allowance is opt-in through the environment (CLOUDFLARE_ANALYTICS, off by default);
+// passing the logger makes an unrecognised value log one warning, here, at start.
+app.use(helmet(buildHelmetOptions(process.env, logger)));
 
 // Unlike the read-only guard below, this must also cover the media proxies: the guest-session cap
 // bounds concurrent sign-ins, but one admitted token can otherwise open many WHEP sessions or make

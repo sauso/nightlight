@@ -14,6 +14,8 @@ import { describe, test, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import { HashRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import App from '../src/App.jsx';
 
 // ⚠️ The Router lives in main.jsx (the bootstrap, excluded from coverage), NOT in App.jsx — so a
@@ -238,6 +240,40 @@ describe('the route table', () => {
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
     expect(screen.getByText('About')).toBeInTheDocument();
     expect(screen.queryByText('MQTT')).not.toBeInTheDocument();
+  });
+});
+
+// ★ #562 bullet 3. The policy itself is unit-tested in lib/viewport.test.js; this proves the app RUNS it at
+// start, with the real native check, on the real index.html string. Signed out on purpose: Shell must relax
+// the viewport before (and whether or not) anyone signs in, so the login screen is zoomable too.
+describe('#562 viewport the app applies the zoom policy at start', () => {
+  // The viewport meta exactly as index.html ships it, read from disk (process.cwd() is the frontend folder).
+  const SHIPPED = /<meta name="viewport" content="([^"]*)"/.exec(
+    readFileSync(resolve(process.cwd(), 'index.html'), 'utf8'),
+  )?.[1];
+  let meta;
+  beforeEach(() => {
+    meta = document.createElement('meta');
+    meta.setAttribute('name', 'viewport');
+    meta.setAttribute('content', SHIPPED);
+    document.head.appendChild(meta);
+  });
+  afterEach(() => meta.remove());
+
+  test('#562 viewport app: in a browser, booting the app removes maximum-scale and user-scalable and keeps the rest', async () => {
+    expect(SHIPPED).toMatch(/maximum-scale=1, user-scalable=no/); // the fixture really is locked
+    mockApi(null);
+    await boot('/');
+    await waitFor(() => expect(meta.getAttribute('content')).toBe('width=device-width, initial-scale=1, viewport-fit=cover'));
+  });
+
+  test('#562 viewport app: in the native app, booting leaves the locked viewport exactly as shipped', async () => {
+    nativeBridge.isNativeApp.mockReturnValue(true);
+    mockApi(null);
+    await boot('/');
+    // Something the boot does AFTER Shell's effects have run, so "unchanged" is not just "not yet".
+    expect(await screen.findByLabelText(/username/i)).toBeInTheDocument();
+    expect(meta.getAttribute('content')).toBe(SHIPPED);
   });
 });
 
