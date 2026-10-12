@@ -42,6 +42,37 @@ open and read either file before attaching it anywhere public. If you find a sec
 shouldn't be there, that's itself worth a private report under "Reporting a vulnerability" above,
 rather than a public issue.
 
+### What the diagnostics bundle replaces, and what it keeps (#547)
+
+The bundle is for a public issue, so it does not carry who your household is:
+
+| In the bundle | Shown as |
+|---|---|
+| Each child's name | `Child 1`, `Child 2` … (in the order the children were added) |
+| Each child's birthday | left out (`birthday` is always `null`) |
+| Camera names, wherever they appear: the camera list, the history, the log lines | `Camera 1`, `Camera 2` … (in the order of the live grid); a camera removed since is `Camera (removed) 1` |
+| Account usernames, first and last names (where they appear in log lines) | `User 1`, `User 2` … (in the order accounts were created); an account renamed or deleted since is `User (former) 1` |
+| The app name, when you changed it | `(customised)` |
+
+The same alias is used everywhere in one bundle, so `Camera 2` can be followed from the camera list
+into the history and the logs. A child's name and a camera's name that are the same text show as
+`Child 1 / Camera 1`.
+
+**Still included, on purpose:** camera and MQTT host addresses (often private LAN addresses),
+MQTT topics, the camera's own login name (not its password), your timezone, and the time of every
+event. Support needs the addresses and timezone to diagnose a connection or a bedtime that is off by an
+hour, and the times **are** the diagnosis, but they also show when a child slept and woke. Read the file
+before attaching it.
+
+**Known limits.** The replacement looks for the names stored right now, plus every camera name and
+username the history remembers. It does **not** find: (1) a name in an in-memory log line that you
+have since changed (a child or account renamed after the line was logged: **Clear log** in Settings →
+Logs empties that buffer, and a restart does too); (2) a name shorter than 3 characters inside free
+text (it is still replaced in the child and camera lists, but "Jo" is not searched for in log lines,
+because that would rewrite ordinary words); (3) a name written in an MQTT topic or a camera's address
+in a form other than as typed or percent-encoded. If the bundle ever contains a name after the
+replacement, the download is refused with a "privacy check" error and nothing is sent; please report it.
+
 **Never paste any of the following into a public issue, PR, or discussion:**
 
 - Camera usernames/passwords or RTSP/ONVIF URLs containing credentials
