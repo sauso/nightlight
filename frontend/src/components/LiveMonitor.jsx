@@ -62,7 +62,8 @@ export default function LiveMonitor() {
   // from, so a caregiver's tiles get no drag handle and their sortables are disabled, and no PUT is ever
   // sent for them (the server would refuse it anyway).
   const { user } = useAuth() || {};
-  const canReorder = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin';
+  const canReorder = isAdmin;
 
   // Bumping this remounts every camera player (see CameraTile), which rebuilds each
   // stream connection from scratch - the in-app equivalent of restarting the app to
@@ -102,11 +103,15 @@ export default function LiveMonitor() {
   function handleDragEnd(event) {
     const { active, over } = event;
     if (!canReorder || !over || active.id === over.id) return;
-    setOrderedCameras((current) => {
-      const next = reorderCameras(current, active.id, over.id);
-      api.put('/cameras/reorder', { order: next.map((c) => c.id) }).catch(() => {});
-      return next;
-    });
+    // The new order is computed HERE and the PUT is sent from the handler, not from inside the
+    // setOrderedCameras updater (#562). React may call an updater more than once (StrictMode does it on
+    // purpose in development, to flush out exactly this), and a side effect inside it sent the same
+    // reorder twice. An updater must be pure.
+    // The fire-and-forget `.catch` stays: telling the person a reorder did not save is a design change
+    // (where to show it, whether to roll the grid back), tracked on the issue rather than done here.
+    const next = reorderCameras(orderedCameras, active.id, over.id);
+    setOrderedCameras(next);
+    api.put('/cameras/reorder', { order: next.map((c) => c.id) }).catch(() => {});
   }
 
   // Native Android tells us when it enters/leaves PiP; toggle a body class so the CSS can
@@ -224,7 +229,12 @@ export default function LiveMonitor() {
 
         {visibleCameras.length === 0 && (
           <div className="empty-state">
-            No cameras yet. Add one from the Cameras tab to start watching.
+            {/* Adding a camera is admin-only (the server refuses a caregiver's POST /cameras, and the
+                Cameras tab shows them no Add button), so telling a caregiver to "add one" sends them to
+                a screen that cannot do it (#380). They are told who can. The admin's copy is unchanged. */}
+            {isAdmin
+              ? 'No cameras yet. Add one from the Cameras tab to start watching.'
+              : 'No cameras yet. Ask an administrator to add or enable a camera.'}
           </div>
         )}
 

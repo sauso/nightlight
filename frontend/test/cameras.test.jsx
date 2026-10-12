@@ -280,6 +280,90 @@ describe('the Cameras tab', () => {
       expect(screen.getByRole('dialog')).toBeInTheDocument();
       expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' })).toBeEnabled();
     });
+
+    // ★ #378. The test above only asks that the text is in the DOCUMENT, which is also true when it sits
+    // in the page's error banner underneath the modal overlay: that is exactly how it passed while the
+    // person saw a Remove button that did nothing. These ask where it is.
+    //
+    // ⚠️ WHAT THIS DOES AND DOES NOT PROVE. jsdom does no layout and paints no overlay, so it cannot see
+    // "hidden behind the scrim". It proves the message is a descendant of the dialog (role=alert) and is
+    // NOT also in the page banner; whether that reads right on a phone is not browser-checked.
+    test('★ #378 a failed delete is shown INSIDE the dialog, and only there', async () => {
+      mockApi();
+      api.del.mockRejectedValue(new Error('Cannot remove: still recording #378'));
+      const { user, camerasValue } = renderAsAdmin(<Cameras />, withCams());
+      await user.click(within(card('Hallway')).getByRole('button', { name: 'Remove' }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }));
+
+      const alert = await within(screen.getByRole('dialog')).findByRole('alert');
+      expect(alert).toHaveTextContent('Cannot remove: still recording #378');
+      // Once on the page: not mirrored into the banner under the overlay (which would be a second copy).
+      expect(screen.getAllByText('Cannot remove: still recording #378')).toHaveLength(1);
+      expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' })).toBeEnabled();
+      expect(camerasValue.refresh).not.toHaveBeenCalled();
+    });
+
+    test('★ #378 retrying clears the old message, and a stale one is not shown when the dialog reopens', async () => {
+      mockApi();
+      api.del.mockRejectedValueOnce(new Error('first failure #378'));
+      const { user } = renderAsAdmin(<Cameras />, withCams());
+      await user.click(within(card('Hallway')).getByRole('button', { name: 'Remove' }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }));
+      await within(screen.getByRole('dialog')).findByText('first failure #378');
+
+      // Retry, held in flight: the failed attempt's message must be gone while the new one runs.
+      let release;
+      api.del.mockImplementationOnce(() => new Promise((r) => { release = r; }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }));
+      expect(within(screen.getByRole('dialog')).queryByRole('alert')).toBeNull();
+      release({});
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+      // A different failure, cancelled, then the dialog opened again for another camera: no leftover.
+      api.del.mockRejectedValueOnce(new Error('second failure #378'));
+      await user.click(within(card('Child B Room')).getByRole('button', { name: 'Remove' }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }));
+      await within(screen.getByRole('dialog')).findByText('second failure #378');
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+      await user.click(within(card('Hallway')).getByRole('button', { name: 'Remove' }));
+      expect(within(screen.getByRole('dialog')).queryByRole('alert')).toBeNull();
+    });
+
+    test('an error from another action (a failed assign) still uses the page banner, not a dialog', async () => {
+      // The fix moved the REMOVE failure only. Assign has no dialog, so its banner is where it belongs;
+      // pinning this stops "put every error in the modal" from being a way to break it.
+      mockApi();
+      api.put.mockRejectedValue(new Error('assign failed #378'));
+      const { user } = renderAsAdmin(<Cameras />, withCams());
+      await user.selectOptions(within(card('Hallway')).getByRole('combobox'), 'kid-1');
+      expect(await screen.findByText('assign failed #378')).toBeInTheDocument();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+  });
+
+  // ★ #381. The label was `<label>Assigned to</label>` with no `for`: not associated with the select, so
+  // a screen reader announced an unnamed combobox, and there are as many of them as there are cameras.
+  describe('the Assigned to label (#381)', () => {
+    test('★ each camera card\'s label is tied to ITS OWN select', () => {
+      mockApi();
+      renderAsAdmin(<Cameras />, withCams());
+      const labelled = screen.getAllByLabelText('Assigned to');
+      expect(labelled).toHaveLength(2);
+      // Distinct ids, and each is inside the card it belongs to (a shared id would label the first only).
+      expect(new Set(labelled.map((el) => el.id)).size).toBe(2);
+      expect(within(card('Child B Room')).getByLabelText('Assigned to')).toBe(labelled[0]);
+      expect(within(card('Hallway')).getByLabelText('Assigned to')).toBe(labelled[1]);
+      expect(labelled[0]).toHaveValue('kid-1');
+      expect(labelled[1]).toHaveValue('');
+    });
+
+    test('a caregiver\'s plain text has no orphan `for` pointing at nothing', () => {
+      mockApi();
+      renderAsCaregiver(<Cameras />, withCams());
+      const labels = screen.getAllByText('Assigned to');
+      expect(labels).toHaveLength(2);
+      for (const l of labels) expect(l).not.toHaveAttribute('for');
+    });
   });
 });
 

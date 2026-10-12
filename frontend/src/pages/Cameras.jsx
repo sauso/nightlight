@@ -20,6 +20,10 @@ export default function Cameras() {
   const [error, setError] = useState('');
   const [removing, setRemoving] = useState(null);
   const [removeBusy, setRemoveBusy] = useState(false);
+  // The failure of the Remove dialog's own request, shown INSIDE the dialog (#378). It is separate from the
+  // page `error` on purpose: that banner renders in <main>, underneath the modal overlay, so a failed
+  // remove used to look like the button did nothing.
+  const [removeError, setRemoveError] = useState('');
   const [togglingId, setTogglingId] = useState(null);
 
   async function assign(cam, childId) {
@@ -48,12 +52,14 @@ export default function Cameras() {
     if (!removing) return;
     setRemoveBusy(true);
     setError('');
+    setRemoveError('');
     try {
       await api.del(`/cameras/${removing.id}`);
       setRemoving(null);
       await refresh();
     } catch (err) {
-      setError(err.message);
+      // Stay open with the button re-enabled (finally below): the person can read why and retry or cancel.
+      setRemoveError(err.message);
     } finally {
       setRemoveBusy(false);
     }
@@ -80,7 +86,7 @@ export default function Cameras() {
                     {togglingId === cam.id ? '…' : cam.disabled ? 'Enable' : 'Disable'}
                   </button>
                   <button className="icon-btn" onClick={() => navigate(`/cameras/${cam.id}`, BACK)}>Edit</button>
-                  <button className="icon-btn" onClick={() => setRemoving(cam)}>Remove</button>
+                  <button className="icon-btn" onClick={() => { setRemoveError(''); setRemoving(cam); }}>Remove</button>
                 </div>
               )}
             </div>
@@ -91,11 +97,15 @@ export default function Cameras() {
               <span className={`cam-badge ${cam.backchannel_supported === 'yes' ? 'cam-badge--ok' : 'cam-badge--bad'}`}>Two-way Audio</span>
             </div>
             <div className="field" style={{ marginBottom: 0, marginTop: 12 }}>
-              <label>Assigned to</label>
+              {/* htmlFor/id (#381): without it the label is not associated with the select, so a screen reader
+                  announced an unnamed combobox. The id carries the camera id because there is one select per
+                  card and ids must be unique on the page. The caregiver's plain text has no control to
+                  point at, so it gets no `for` (an orphan `for` would label nothing). */}
+              <label htmlFor={isAdmin ? `assign-${cam.id}` : undefined}>Assigned to</label>
               {/* Admin-only (#552): which child a camera belongs to decides whether its nights are tracked,
                   so a caregiver sees the assignment but cannot change it (the server refuses it). */}
               {isAdmin ? (
-                <select value={cam.child_id || ''} onChange={(e) => assign(cam, e.target.value)}>
+                <select id={`assign-${cam.id}`} value={cam.child_id || ''} onChange={(e) => assign(cam, e.target.value)}>
                   <option value="">Unassigned</option>
                   {children.map((child) => <option key={child.id} value={child.id}>{child.name}</option>)}
                 </select>
@@ -112,7 +122,7 @@ export default function Cameras() {
       </main>
 
       {removing && (
-        <Modal title="Remove camera" placement="top" onClose={() => (removeBusy ? null : setRemoving(null))}>
+        <Modal title="Remove camera" placement="top" error={removeError} onClose={() => (removeBusy ? null : setRemoving(null))}>
           <p style={{ marginTop: 0 }}>
             Remove <strong>{removing.name}</strong>? This stops its stream and deletes it from Nightlight.
             It can't be undone (you can always add it again).

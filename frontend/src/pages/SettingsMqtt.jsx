@@ -89,6 +89,11 @@ export default function SettingsMqtt() {
               <input
                 id="mqtt-port"
                 type="number"
+                // A TCP port (#562): the server rejects anything outside 1-65535 (routes/settings.js), so
+                // the field says so before Save instead of after. Left blank stays valid: the server
+                // then uses the default, 1883 (the placeholder).
+                min="1"
+                max="65535"
                 placeholder="1883"
                 value={form.mqtt_port || ''}
                 onChange={(e) => setForm({ ...form, mqtt_port: e.target.value })}

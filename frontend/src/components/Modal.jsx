@@ -16,7 +16,12 @@ import { useEffect, useId, useRef } from 'react';
 // so the only exit is whatever explicit button the caller renders inside. On a phone a tap just outside the
 // card, or a scroll that ends as a click, is an easy accident, and the default closes on both. Any future
 // "close on Escape" handling (#376) must honour this flag too.
-export default function Modal({ title, onClose, children, placement = 'bottom', headerAction = null, wide = false, dismissible = true }) {
+//
+// `error` (#378) is the failure of the dialog's OWN action (a Remove that the server refused). It renders
+// INSIDE the card, under the title. Before this prop the callers set the page's `.error-banner`, which sits
+// in <main> underneath the overlay: the person tapped Remove, nothing happened, and the only explanation
+// was behind the dark scrim. An empty/absent `error` renders nothing, so every existing caller is unchanged.
+export default function Modal({ title, onClose, children, placement = 'bottom', headerAction = null, wide = false, dismissible = true, error = '' }) {
   const top = placement === 'top';
   const titleId = useId();
   const overlayRef = useRef(null);
@@ -65,6 +70,7 @@ export default function Modal({ title, onClose, children, placement = 'bottom', 
             {dismissible && <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>}
           </div>
         </div>
+        {error && <div className="error-banner" role="alert">{error}</div>}
         {children}
       </div>
     </div>

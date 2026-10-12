@@ -13,6 +13,7 @@
 import { describe, test, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import { HashRouter } from 'react-router-dom';
+import userEvent from '@testing-library/user-event';
 import App from '../src/App.jsx';
 
 // ⚠️ The Router lives in main.jsx (the bootstrap, excluded from coverage), NOT in App.jsx — so a
@@ -161,6 +162,47 @@ describe('the route table', () => {
       vi.spyOn(nativeBridge, 'hasActiveBackgroundAudio').mockReturnValue(false);
       vi.spyOn(push, 'initPushNotifications').mockResolvedValue(undefined);
     }
+  });
+
+  // ★ #379. The inner <Routes> had no catch-all, so an address that matched nothing rendered the app chrome
+  // around a blank page. These pin the catch-all AND that it does not swallow a real route (react-router
+  // ranks by specificity, not order, so a `*` placed last cannot win; a mutant moving it or widening it
+  // is what the second test is for).
+  test('★ #379 an address that matches no screen says so, and Go to Live leads home', async () => {
+    const { unmount } = await openAt('/children/kid-1/no-such-screen/at-all');
+    expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeInTheDocument();
+    expect(screen.getByText(/nothing at this address/i)).toBeInTheDocument();
+    // The nav is still there: the person is not stranded outside the app.
+    expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument();
+
+    await userEvent.setup().click(screen.getByText('Go to Live'));
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Page not found' })).not.toBeInTheDocument());
+    expect(window.location.hash).toBe('#/');
+    unmount();
+  });
+
+  test('★ #379 the real routes, and the retired /family, are NOT the not-found page', async () => {
+    for (const [route, heading] of [
+      ['/children', 'Children'],
+      ['/cameras', 'Cameras'],
+      ['/settings/mqtt', 'MQTT'],
+      ['/family', 'Children'], // retired, redirects: must still redirect, not fall through to `*`
+    ]) {
+      const { unmount } = await openAt(route);
+      expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Page not found' })).not.toBeInTheDocument();
+      unmount();
+      vi.restoreAllMocks();
+      vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(false);
+      vi.spyOn(nativeBridge, 'hasActiveBackgroundAudio').mockReturnValue(false);
+      vi.spyOn(push, 'initPushNotifications').mockResolvedValue(undefined);
+    }
+  });
+
+  test('#379 the Live route itself (/) is not the not-found page either', async () => {
+    await openAt('/');
+    await waitFor(() => expect(document.querySelector('.live-monitor--active')).not.toBeNull());
+    expect(screen.queryByRole('heading', { name: 'Page not found' })).not.toBeInTheDocument();
   });
 
   test('an admin-only screen sends a CAREGIVER home, and shows nothing of it on the way', async () => {

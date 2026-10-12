@@ -70,6 +70,29 @@ describe('★★ which cameras reach the grid', () => {
     mount({ cameras: [{ id: 'c2', name: 'Spare room', mediamtx_path: 'p2', disabled: 1 }] });
     expect(screen.getByText(/No cameras yet/)).toBeTruthy();
   });
+
+  // ★ #380. Adding a camera is admin-only (the Cameras tab shows a caregiver no Add button and the server
+  // refuses their POST), but the empty state told everyone to "Add one from the Cameras tab".
+  test('★ #380 an admin is told to add a camera; a caregiver is told who can', () => {
+    mount({ cameras: [] });
+    expect(screen.getByText('No cameras yet. Add one from the Cameras tab to start watching.')).toBeTruthy();
+  });
+
+  test('★ #380 a caregiver is NOT sent to a tab that cannot add one', () => {
+    renderAsCaregiver(<LiveMonitor />, { cameras: [], kids: KIDS });
+    expect(screen.getByText('No cameras yet. Ask an administrator to add or enable a camera.')).toBeTruthy();
+    expect(screen.queryByText(/Add one from the Cameras tab/)).toBeNull();
+  });
+
+  test('#380 the caregiver copy also covers "all cameras are switched off"', () => {
+    // The same branch (visibleCameras empty) fires when every camera is disabled; "or enable" is the half
+    // of the sentence that is true for that install, and enabling is admin-only too.
+    renderAsCaregiver(<LiveMonitor />, {
+      cameras: [{ id: 'c2', name: 'Spare room', mediamtx_path: 'p2', disabled: 1 }],
+      kids: KIDS,
+    });
+    expect(screen.getByText(/Ask an administrator to add or enable a camera/)).toBeTruthy();
+  });
 });
 
 describe('what a tile is labelled with', () => {
@@ -184,8 +207,8 @@ describe('★ who silenced a camera, on its tile (#552)', () => {
   });
 });
 
-// ⚠️ NOT TESTED HERE, and deliberately not faked into looking tested: the drag itself. `handleDragEnd`
-// only runs on a dnd-kit drop, which needs real pointer events against real layout — jsdom has
-// neither. A test that called `reorderCameras` directly and claimed to be exercising the screen would
-// be the very thing this file was written to correct: it would duplicate liveMonitorHelpers.test.jsx
-// while its NAME promised something more. The PUT that follows a drop is e2e's.
+// ⚠️ NOT TESTED HERE, and deliberately not faked into looking tested: the drag GESTURE itself. dnd-kit
+// starts a drag from real pointer events against real layout — jsdom has neither. What happens once a
+// drop has been REPORTED (the order written, once, under StrictMode) is tested in
+// liveMonitorReorder.test.jsx, which wraps DndContext to call the real `onDragEnd`; that file says what it
+// does and does not prove. That a finger produces the drop event is dnd-kit's, and e2e's.

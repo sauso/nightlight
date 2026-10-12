@@ -10,7 +10,7 @@ import NtfyIcon from '../components/icons/NtfyIcon.jsx';
 
 // Push notifications is now a hub, like the top-level Settings screen: one row per provider, each
 // drilling into its own config page. An alert fires to every provider that's enabled. State comes
-// from /notifications/status so each row can show On / Off at a glance.
+// from /notifications/status so each row can show On / Off / Not set up at a glance (see badgeFor).
 const PERI = 'var(--peri)';
 const BACK = { state: { from: { to: '/settings/push', label: 'Push notifications' } } };
 
@@ -21,18 +21,33 @@ const PROVIDERS = [
   { key: 'ntfy', to: '/settings/push/ntfy', Icon: NtfyIcon, label: 'ntfy', desc: 'ntfy.sh or self-hosted. Snapshots included.' },
 ];
 
+// Four answers, and no row is ever blank once the status request has settled (#385). It used to return
+// null for "never set up" AND, because the request's failure was swallowed, for "could not ask", so a hub
+// where nothing was configured looked identical to a hub that failed to load.
+//   On              enabled (checked first: if the server ever says enabled+unconfigured, On is the truth,
+//                   the server decides whether it delivers).
+//   Off             credentials are saved and someone switched it off.
+//   Not set up      nothing saved. A different WORD from Off on purpose: "Off" reads as "was on, turned
+//                   off", which this provider never was.
+//   Status unavailable  the request failed, or the server did not mention this provider: we were not
+//                   told, so the row must not claim either way.
+const UNAVAILABLE = { text: 'Status unavailable', cls: 'status-badge--off' };
 function badgeFor(s) {
-  if (!s) return null;
+  if (!s) return UNAVAILABLE;
   if (s.enabled) return { text: 'On', cls: 'status-badge--ok' };
   if (s.configured) return { text: 'Off', cls: 'status-badge--off' };
-  return null;
+  return { text: 'Not set up', cls: 'status-badge--off' };
 }
 
 export default function SettingsPush() {
   const navigate = useNavigate();
   const [status, setStatus] = useState(null);
+  const [statusFailed, setStatusFailed] = useState(false);
 
-  useEffect(() => { api.get('/notifications/status').then(setStatus).catch(() => {}); }, []);
+  // The hub stays usable if this fails (the rows are static and each page loads its own config); the
+  // failure only changes what the badges say. No badge at all only while the request is in flight.
+  useEffect(() => { api.get('/notifications/status').then(setStatus).catch(() => setStatusFailed(true)); }, []);
+  const badgeOf = (key) => (statusFailed ? UNAVAILABLE : status ? badgeFor(status[key]) : null);
 
   return (
     <>
@@ -45,7 +60,7 @@ export default function SettingsPush() {
         </div>
         <div className="card" style={{ padding: 0 }}>
           {PROVIDERS.map((p) => (
-            <Row key={p.key} {...p} badge={badgeFor(status?.[p.key])} onClick={() => navigate(p.to, BACK)} />
+            <Row key={p.key} {...p} badge={badgeOf(p.key)} onClick={() => navigate(p.to, BACK)} />
           ))}
         </div>
       </main>

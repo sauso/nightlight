@@ -235,6 +235,41 @@ describe('Settings → MQTT', () => {
     await waitFor(() => expect(screen.getByLabelText('Broker host')).toHaveValue(''));
     expect(screen.getByLabelText('Broker port')).toHaveValue(null);
   });
+
+  // ★ #562. The broker port was a bare number input: the browser would accept 188333 or 0 and the server
+  // would refuse it only after Save (routes/settings.js: 1-65535, blank = 1883). The range is now on the
+  // field, so the browser says so first.
+  // ⚠️ jsdom implements the constraint-validation flags (rangeOverflow/rangeUnderflow) but not the popup the
+  // browser draws; this proves the field REPORTS invalid, which is what blocks the form's submit.
+  test('★ #562 the broker port is bounded 1-65535, and blank stays valid (the server default)', async () => {
+    loadMqtt({ mqtt_host: null, mqtt_port: null, mqtt_username: null });
+    const { user } = renderAsAdmin(<SettingsMqtt />);
+    const port = await screen.findByLabelText('Broker port');
+    expect(port).toHaveAttribute('min', '1');
+    expect(port).toHaveAttribute('max', '65535');
+
+    await user.type(port, '188333');
+    expect(port.validity.rangeOverflow).toBe(true);
+    expect(port.validity.valid).toBe(false);
+
+    await user.clear(port);
+    await user.type(port, '65535');
+    expect(port.validity.valid).toBe(true);
+    await user.clear(port);
+    await user.type(port, '65536');
+    expect(port.validity.rangeOverflow).toBe(true);
+
+    await user.clear(port);
+    await user.type(port, '0');
+    expect(port.validity.rangeUnderflow).toBe(true);
+    await user.clear(port);
+    await user.type(port, '1');
+    expect(port.validity.valid).toBe(true);
+
+    // Blank is valid: it means "use 1883", which the server stores as NULL.
+    await user.clear(port);
+    expect(port.validity.valid).toBe(true);
+  });
 });
 
 // --- ntfy ---------------------------------------------------------------------------------------

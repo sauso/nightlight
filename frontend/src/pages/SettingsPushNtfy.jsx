@@ -3,11 +3,17 @@ import { api } from '../lib/api.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
 import SecretField from '../components/SecretField.jsx';
+import { hasUnsavedEdits, UNSAVED_TEST_HINT } from '../lib/unsavedEdits.js';
 
 const BACK = { to: '/settings/push', label: 'Push notifications' };
 
+const INITIAL = { enabled: false, configured: false, server_url: 'https://ntfy.sh', topic: '', token_set: false, token_masked: '', username: '', password_set: false };
+
 export default function SettingsPushNtfy() {
-  const [form, setForm] = useState({ enabled: false, configured: false, server_url: 'https://ntfy.sh', topic: '', token_set: false, token_masked: '', username: '', password_set: false });
+  const [form, setForm] = useState(INITIAL);
+  // The config as last loaded or last successfully SAVED, never touched by typing: Send test tests this,
+  // so it is what the on-screen form is compared against (#396). A failed save leaves it alone.
+  const [lastSaved, setLastSaved] = useState(INITIAL);
   const [token, setToken] = useState(''); // secret — blank means keep the stored one
   const [password, setPassword] = useState(''); // separate — blank means keep the stored one
   const [loaded, setLoaded] = useState(false);
@@ -17,7 +23,7 @@ export default function SettingsPushNtfy() {
   const [testMsg, setTestMsg] = useState(null);
 
   useEffect(() => {
-    api.get('/ntfy/config').then((c) => { setForm(c); setLoaded(true); }).catch(() => setLoaded(true));
+    api.get('/ntfy/config').then((c) => { setForm(c); setLastSaved(c); setLoaded(true); }).catch(() => setLoaded(true));
   }, []);
 
   async function save(e) {
@@ -27,9 +33,12 @@ export default function SettingsPushNtfy() {
       const payload = { enabled: form.enabled, server_url: form.server_url, topic: form.topic, token, username: form.username };
       if (password) payload.password = password;
       const next = await api.put('/ntfy/config', payload);
-      setForm(next); setToken(''); setPassword(''); setSaved(true); setTimeout(() => setSaved(false), 2500);
+      setForm(next); setLastSaved(next); setToken(''); setPassword(''); setSaved(true); setTimeout(() => setSaved(false), 2500);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
+
+  // Send test goes to the SAVED config (POST has no body), so it is held back while the screen differs.
+  const dirty = hasUnsavedEdits(form, lastSaved, [token, password]);
 
   async function sendTest() {
     setBusy(true); setTestMsg(null); setError('');
@@ -91,8 +100,10 @@ export default function SettingsPushNtfy() {
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button className="btn btn-primary" type="submit" disabled={busy || !loaded}>{busy ? 'Working…' : 'Save changes'}</button>
-            <button className="btn btn-secondary" type="button" disabled={busy || !form.configured} onClick={sendTest}>Send test</button>
+            <button className="btn btn-secondary" type="button" disabled={busy || !form.configured || dirty}
+              aria-describedby={dirty ? 'ntfy-test-hint' : undefined} onClick={sendTest}>Send test with saved settings</button>
           </div>
+          {dirty && <div id="ntfy-test-hint" className="camera-tile__sub" style={{ marginTop: 8 }}>{UNSAVED_TEST_HINT}</div>}
           {testMsg && (
             <div className="camera-tile__sub" style={{ marginTop: 8, color: testMsg.ok ? 'var(--live)' : 'var(--offline)' }}>{testMsg.text}</div>
           )}
