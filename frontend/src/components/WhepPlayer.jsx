@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { getToken } from '../lib/api.js';
+import { resolveWhepResource } from '../lib/whep.js';
 import { useNowPlayingSession, NOW_PLAYING_ARTWORK } from '../lib/useNowPlaying.js';
 
 // Re-exported for backwards compatibility with any importer that reached for it here; the
@@ -221,7 +222,27 @@ export default function WhepPlayer({
           body: offer.sdp,
         });
         if (!res.ok) throw new Error(`Camera stream unavailable (${res.status})`);
-        resourceUrlRef.current = res.headers.get('Location');
+        // WHY the Location header is not used as it comes (#562). The cleanup below sends `DELETE <this
+        // address>` with the person's full session token in `Authorization`. The header has passed through
+        // everything between the browser and MediaMTX (the backend's keepUnderPrefix hook, its proxy
+        // library, any reverse proxy in front), so a bug or a rewrite there would decide where the token
+        // goes. resolveWhepResource (lib/whep.js) keeps it only if it is exactly this POST's path plus one
+        // session segment, on this page's origin, and hands back a PATH; anything else stores null.
+        //  * It is the PATH rule, not the origin rule, that keeps a `//host` form off the wire: a same-origin
+        //    address whose path normalises to `//evil.example/x` passes an origin check, and
+        //    `fetch('//evil.example/x')` would go to that other host.
+        //  * In a normal install the CSP (`connect-src 'self'`, backend/src/index.js) already blocks a
+        //    cross-origin fetch, so that case needs a proxy that also strips the CSP. The realistic remainder
+        //    is a same-origin address on a different path, e.g. a DELETE to an /api route with an admin's token.
+        //  * Cost of a refusal: no DELETE. The peer connection is closed first (cleanup below), so the DELETE
+        //    is only a courtesy that lets MediaMTX free the session at once; without it the session lasts
+        //    until MediaMTX notices the peer has gone. How long that is has NOT been measured. In a correct
+        //    deployment (a Location of /live/<camera>/whep/<id>) the DELETE is still sent, unchanged.
+        resourceUrlRef.current = resolveWhepResource(
+          res.headers.get('Location'),
+          whepUrl(mediamtxPath),
+          window.location.origin,
+        );
         const answerSdp = await res.text();
         if (cancelled) return;
         await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
