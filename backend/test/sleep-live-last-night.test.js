@@ -143,6 +143,25 @@ test('the saved row for the last completed night exists: it is served as it is s
   assert.equal(r.body.night.asleep_minutes, 1234, 'the saved row, not a recompute');
 });
 
+test('a LATER-dated saved row does not hide the saved row for last night', async () => {
+  // Found in review of #684. The first version judged only the NEWEST saved row, so a row dated after
+  // last night (an admin's ?store=1 of a later date) made the route ignore last night's saved row and
+  // serve a fresh result in its place. Fails with the newest-row lookup: the marker value is lost.
+  const last = lastCompletedNightDate(CHILD);
+  layOkNight(last);
+  assert.equal(computeAndStoreNight(CHILD, last).status, 'ok', 'precondition: last night is saved');
+  db.prepare('UPDATE sleep_nights SET asleep_minutes = 1234 WHERE child_id = ? AND night_date = ?').run(CHILD, last);
+  const later = addDays(last, 1);
+  computeAndStoreNight(CHILD, later);
+  assert.ok(rowFor(later), 'precondition: a row dated after last night exists');
+  assert.equal(currentNightDate(CHILD), null, 'precondition: no night in progress');
+
+  const r = await live();
+  assert.equal(r.body.scope, 'last');
+  assert.equal(r.body.night.night_date, last, 'the last completed night, not the later-dated row');
+  assert.equal(r.body.night.asleep_minutes, 1234, 'and its SAVED row, not a recompute');
+});
+
 test('a corrected night with a saved row still has the correction laid over it', async () => {
   // The pre-existing behaviour of this route (nobody-in-bed.test.js pins the same through its own
   // fixture); pinned here too because the branch now has two ways to build the answer.

@@ -226,8 +226,14 @@ router.get('/:id/sleep/live', (req, res) => {
   // BEFORE last. The card then read "Last night · <two nights ago>", and the detail page, which takes its
   // starting night from this answer, opened on the same stale night.
   const last = lastCompletedNightDate(req.params.id);
-  const stored = getStoredNights(req.params.id, 1)[0];
-  if (stored && stored.night_date === last) {
+  // Looked up BY DATE, not as "the newest row, then compare its date": a LATER-dated row can exist (an
+  // admin's `?store=1` of a later date), and judging only the newest row then ignored the saved row for
+  // `last` and served a fresh result in its place, so the card and the morning push disagreed (found in
+  // review of #684).
+  const stored = db
+    .prepare('SELECT * FROM sleep_nights WHERE child_id = ? AND night_date = ?')
+    .get(req.params.id, last);
+  if (stored) {
     // The saved row for the last completed night exists: keep serving it, so the card and the morning
     // push (which reads the same row) keep agreeing. Corrections are laid over the stored row — see
     // applyCorrection. A night somebody has told us the truth about must not keep showing the
