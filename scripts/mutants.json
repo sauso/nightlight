@@ -8011,8 +8011,8 @@
   {
     "label": "in-bed/lock A9: the route accepts a got-OUT-of-bed event as the put-down",
     "file": "backend/src/routes/children.js",
-    "find": "body.true_in_bed_transition_id, TRANSITION.INTO_BED);",
-    "replace": "body.true_in_bed_transition_id);",
+    "find": "inBedFrameId, TRANSITION.INTO_BED);",
+    "replace": "inBedFrameId);",
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
     "namePattern": "only a got-into-bed event"
@@ -8544,13 +8544,150 @@
     "namePattern": "save-time compute throws"
   },
   {
-    "label": "in-bed/lock fix2 E1: an empty frame id becomes frame 0 again (with the flag: a 500)",
-    "file": "backend/src/routes/children.js",
-    "find": "(v == null || v === '' ? null : Number(v))",
-    "replace": "(v == null ? null : Number(v))",
+    "label": "in-bed/lock fix2 E1 (moved into parseTransitionId by #522): an empty frame id stops being \"no frame\" (before #522 a frame 0, with the flag a 500; now a 400)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  if (v == null || v === '') return null;",
+    "replace": "  if (v == null) return null;",
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
     "namePattern": "empty frame id"
+  },
+  {
+    "label": "#522 M1: parseTransitionId reads undefined as malformed, not absent (every save without a frame key is refused)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  if (v == null || v === '') return null;",
+    "replace": "  if (v === null || v === '') return null;",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "parseTransitionId: null when absent"
+  },
+  {
+    "label": "#522 M2: a number past 2**53 - 1 is accepted as an id (Number.isInteger instead of isSafeInteger)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "return Number.isSafeInteger(v) && v > 0 ? v : NaN;",
+    "replace": "return Number.isInteger(v) && v > 0 ? v : NaN;",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "parseTransitionId: null when absent"
+  },
+  {
+    "label": "#522 M3: the number 0 is accepted as an id",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "Number.isSafeInteger(v) && v > 0 ? v : NaN;",
+    "replace": "Number.isSafeInteger(v) && v >= 0 ? v : NaN;",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "parseTransitionId: null when absent"
+  },
+  {
+    "label": "#522 M4: a digit string with a leading zero (\"007\", \"0\" + a real id) is accepted",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "/^[1-9][0-9]*$/.test(v)",
+    "replace": "/^[0-9]+$/.test(v)",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "REAL event is refused"
+  },
+  {
+    "label": "#522 M5: the digit string is not anchored at its end (\"5.0\", \"5e0\", \"5 \" accepted)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "/^[1-9][0-9]*$/.test(v)",
+    "replace": "/^[1-9][0-9]*/.test(v)",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "REAL event is refused"
+  },
+  {
+    "label": "#522 M6: the digit string is not anchored at its start (\" 5\", \"+5\", \"0x10\" accepted)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "/^[1-9][0-9]*$/.test(v)",
+    "replace": "/[1-9][0-9]*$/.test(v)",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "REAL event is refused"
+  },
+  {
+    "label": "#522 M7: multiline anchors (\"5\\n\" accepted)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "/^[1-9][0-9]*$/.test(v)",
+    "replace": "/^[1-9][0-9]*$/m.test(v)",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "parseTransitionId: null when absent"
+  },
+  {
+    "label": "#522 M8: a digit string past 2**53 - 1 is accepted, and matched as a DIFFERENT id (\"...993\" reads as ...992)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "    return Number.isSafeInteger(n) ? n : NaN;",
+    "replace": "    return n;",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "parseTransitionId: null when absent"
+  },
+  {
+    "label": "#522 M9: anything whose String() is digits is read as a string id ([5] and ['5'] accepted)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "if (typeof v === 'string' && /^[1-9][0-9]*$/.test(v)) {",
+    "replace": "if (/^[1-9][0-9]*$/.test(v)) {",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "REAL event is refused"
+  },
+  {
+    "label": "#522 M10: anything else falls back to Number() (true read as id 1)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  return NaN;",
+    "replace": "  return Number(v) > 0 ? Number(v) : NaN;",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "parseTransitionId: null when absent"
+  },
+  {
+    "label": "#522 M11: the route reads a frame key that was NOT SENT as \"no frame\" (a note-only save blanks the stored frames)",
+    "file": "backend/src/routes/children.js",
+    "find": "const frameIdOf = (v) => (v === undefined ? undefined : parseTransitionId(v));",
+    "replace": "const frameIdOf = (v) => parseTransitionId(v);",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "NOT SENT keeps the stored frame"
+  },
+  {
+    "label": "#522 X2 (#688 review): a single-digit string id (\"5\") is refused",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "/^[1-9][0-9]*$/.test(v)",
+    "replace": "/^[1-9][0-9]+$/.test(v)",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "parseTransitionId: null when absent"
+  },
+  {
+    "label": "#522 X3 (#688 review): the route reads a null frame id as NOT SENT (\"Remove my correction\" keeps the frames while clearing their times)",
+    "file": "backend/src/routes/children.js",
+    "find": "const frameIdOf = (v) => (v === undefined ? undefined : parseTransitionId(v));",
+    "replace": "const frameIdOf = (v) => (v == null ? undefined : parseTransitionId(v));",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "every time and frame sent as null"
+  },
+  {
+    "label": "#522 M12: the route stores the raw body value instead of the parsed id",
+    "file": "backend/src/routes/children.js",
+    "find": "    trueWakeTransitionId: wakeFrameId,",
+    "replace": "    trueWakeTransitionId: body.true_wake_transition_id,",
+    "expect": "equivalent",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "number or as a string of digits",
+    "note": "EQUIVALENT, verified by running it against a scratch copy (#522 build, 2026-10-12; all 205 tests of the five files that reach the review route survive it): every malformed value is refused by transitionInstant before the patch is built, '' is turned into NULL by previewNightReview's blankToNull, and a digit string is stored as the integer by the column's INTEGER affinity. Storing the parsed value is for the reader, not a behaviour."
+  },
+  {
+    "label": "#522 M13: transitionInstant drops its NaN guard",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  if (Number.isNaN(n)) return undefined;",
+    "replace": "",
+    "expect": "equivalent",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "REAL event is refused",
+    "note": "EQUIVALENT, verified by running it against a scratch copy (#522 build, 2026-10-12; all 205 tests of the five files that reach the review route survive it): without the guard NaN reaches `find((t) => t.id === NaN)`, which matches nothing, so transitionInstant still returns undefined (one more DB read). The guard says what NaN means; it does not decide it."
   },
   {
     "label": "in-bed/lock fix2 F1: the follow-up has no freshness limit (an owed pass hours past the horizon pushes \"Sleep report updated\")",
