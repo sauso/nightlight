@@ -27,6 +27,12 @@ export default function UserSettings() {
   const [mfaEnabled, setMfaEnabled] = useState(false);
   const [resettingMfa, setResettingMfa] = useState(false);
   const [mfaResetBusy, setMfaResetBusy] = useState(false);
+  // The failure of each dialog's OWN request, rendered inside that dialog (#378). `error` is a banner in
+  // <main>, which sits under the modal overlay, so a refused Remove / Reset used to look like the button did
+  // nothing. One state each (not shared): the two dialogs can never be open together, but a stale message
+  // from one must not appear in the other the next time it opens.
+  const [removeError, setRemoveError] = useState('');
+  const [resetError, setResetError] = useState('');
   const [photoStatus, setPhotoStatus] = useState(''); // '' | 'saving' | 'saved'
   // #441: true only when this account IS an admin AND is the only one. The backend enforces the
   // invariant either way (routes/auth.js's keepingAnAdmin) - this just explains it before a demotion
@@ -109,12 +115,13 @@ export default function UserSettings() {
   async function confirmResetMfa() {
     setMfaResetBusy(true);
     setError('');
+    setResetError('');
     try {
       await api.del(`/auth/users/${id}/mfa`);
       setMfaEnabled(false);
       setResettingMfa(false);
     } catch (err) {
-      setError(err.message);
+      setResetError(err.message);
     } finally {
       setMfaResetBusy(false);
     }
@@ -123,11 +130,13 @@ export default function UserSettings() {
   async function confirmRemove() {
     setRemoveBusy(true);
     setError('');
+    setRemoveError('');
     try {
       await api.del(`/auth/users/${id}`);
       navigate(back.to);
     } catch (err) {
-      setError(err.message);
+      // Dialog stays open, button re-enabled: the person can read why and retry or cancel.
+      setRemoveError(err.message);
       setRemoveBusy(false);
     }
   }
@@ -216,7 +225,7 @@ export default function UserSettings() {
                   This account has two-factor enabled. If they've lost their authenticator and backup
                   codes, reset it so they can sign in with just their password and set it up again.
                 </div>
-                <button className="btn btn-danger" type="button" onClick={() => setResettingMfa(true)}>
+                <button className="btn btn-danger" type="button" onClick={() => { setResetError(''); setResettingMfa(true); }}>
                   Reset two-factor
                 </button>
               </div>
@@ -227,7 +236,7 @@ export default function UserSettings() {
               {busy ? 'Saving…' : isNew ? 'Add caregiver' : 'Save changes'}
             </button>
             {!isNew && id !== me?.id && (
-              <button className="btn btn-danger" type="button" style={{ marginTop: 10 }} onClick={() => setRemoving(true)}>
+              <button className="btn btn-danger" type="button" style={{ marginTop: 10 }} onClick={() => { setRemoveError(''); setRemoving(true); }}>
                 Remove caregiver
               </button>
             )}
@@ -236,7 +245,7 @@ export default function UserSettings() {
       </main>
 
       {resettingMfa && (
-        <Modal title="Reset two-factor" placement="top" onClose={() => (mfaResetBusy ? null : setResettingMfa(false))}>
+        <Modal title="Reset two-factor" placement="top" error={resetError} onClose={() => (mfaResetBusy ? null : setResettingMfa(false))}>
           <p style={{ marginTop: 0 }}>
             Turn off two-factor for <strong>{fullName}</strong>? They'll be able to sign in with just their
             password and will need to set two-factor up again.
@@ -251,7 +260,7 @@ export default function UserSettings() {
       )}
 
       {removing && (
-        <Modal title="Remove caregiver" placement="top" onClose={() => (removeBusy ? null : setRemoving(false))}>
+        <Modal title="Remove caregiver" placement="top" error={removeError} onClose={() => (removeBusy ? null : setRemoving(false))}>
           <p style={{ marginTop: 0 }}>Remove <strong>{fullName}</strong>? They'll be signed out everywhere and can no longer log in.</p>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
             <button className="btn" type="button" onClick={() => setRemoving(false)} disabled={removeBusy}>Cancel</button>

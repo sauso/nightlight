@@ -368,6 +368,26 @@ describe('adding and editing a caregiver', () => {
       expect(await screen.findByText('Cannot remove the last admin')).toBeTruthy();
       expect(screen.getByText('at /settings/users/u-care')).toBeTruthy();
     });
+
+    // ★ #378: the same blind spot as the test above, which passes whether the text is in the dialog or in
+    // the page banner under the overlay. See childSettings.test.jsx for what jsdom can and cannot see.
+    test('★ #378 the failure is shown INSIDE the dialog, once, and the dialog stays open to retry', async () => {
+      delSpy = vi.spyOn(api, 'del').mockRejectedValue(new Error('Refused: owns a session #378'));
+      const { user } = mountEdit();
+      await user.click(await screen.findByRole('button', { name: 'Remove caregiver' }));
+      await user.click(await screen.findByRole('button', { name: 'Remove' }));
+
+      const dialog = screen.getByRole('dialog');
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent('Refused: owns a session #378');
+      expect(screen.getAllByText('Refused: owns a session #378')).toHaveLength(1);
+      expect(within(dialog).getByRole('button', { name: 'Remove' })).toBeEnabled();
+      expect(screen.getByText('at /settings/users/u-care')).toBeTruthy();
+
+      await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      await user.click(screen.getByRole('button', { name: 'Remove caregiver' }));
+      expect(within(screen.getByRole('dialog')).queryByRole('alert')).toBeNull();
+    });
   });
 
   describe('★ resetting someone else\'s two-factor', () => {
@@ -413,6 +433,34 @@ describe('adding and editing a caregiver', () => {
       await user.click(await screen.findByRole('button', { name: 'Reset two-factor' }));
       await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Reset two-factor' }));
       expect(await screen.findByText('Not permitted')).toBeTruthy();
+    });
+
+    // ★ #378: same shape as Remove. The Reset dialog is also a modal over the page banner.
+    test('★ #378 a failed reset is shown INSIDE its dialog, and not carried into the Remove dialog', async () => {
+      // A caregiver with two-factor on, so BOTH dialogs exist on one screen: a message shared between the
+      // two (or never cleared on open) would turn up in the wrong one.
+      mockApi({ users: [ME, { ...NANNY, mfa_enabled: 1 }] });
+      delSpy = vi.spyOn(api, 'del').mockRejectedValue(new Error('Reset refused #378'));
+      const { user } = mountEdit();
+      await user.click(await screen.findByRole('button', { name: 'Reset two-factor' }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Reset two-factor' }));
+
+      const dialog = screen.getByRole('dialog');
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent('Reset refused #378');
+      expect(screen.getAllByText('Reset refused #378')).toHaveLength(1);
+      expect(within(dialog).getByRole('button', { name: 'Reset two-factor' })).toBeEnabled();
+
+      await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      // The Reset dialog reopened is clean...
+      await user.click(screen.getByRole('button', { name: 'Reset two-factor' }));
+      expect(within(screen.getByRole('dialog')).queryByRole('alert')).toBeNull();
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      // ...and so is the Remove dialog: the reset failure is not its message.
+      await user.click(screen.getByRole('button', { name: 'Remove caregiver' }));
+      expect(within(screen.getByRole('dialog')).queryByText('Reset refused #378')).toBeNull();
+      expect(within(screen.getByRole('dialog')).queryByRole('alert')).toBeNull();
     });
   });
 

@@ -37,6 +37,7 @@ import UserSettings from './pages/UserSettings.jsx';
 import SettingsLogs from './pages/SettingsLogs.jsx';
 import ClipManagement from './pages/ClipManagement.jsx';
 import About from './pages/About.jsx';
+import NotFound from './pages/NotFound.jsx';
 
 // How long the app needs to have been backgrounded before we reload on return. Short
 // enough to catch a real "put the phone away for a bit" gap, long enough that quickly
@@ -166,6 +167,11 @@ function Shell() {
                     <Route path="/settings/clips" element={<AdminProtected><ClipManagement /></AdminProtected>} />
                     <Route path="/account" element={<Account />} />
                     <Route path="/about" element={<About />} />
+                    {/* Catch-all, LAST (#379). react-router ranks by specificity, not order, so every
+                        route above still wins; this only receives an address nothing else matched.
+                        Known gap, not fixed here (the #375 bundle): /cameras/<id>/<unknown kind>
+                        matches /cameras/:id/:kind above and renders DetectionSettings, not this. */}
+                    <Route path="*" element={<NotFound />} />
                   </Routes>
                   <NavBar />
                 </div>

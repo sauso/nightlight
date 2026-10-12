@@ -13845,8 +13845,8 @@
   {
     "label": "W5 role UI M20: the Cameras tab gives a caregiver the assign <select>",
     "file": "frontend/src/pages/Cameras.jsx",
-    "find": "              {isAdmin ? (\r\n                <select value={cam.child_id || ''}",
-    "replace": "              {true ? (\r\n                <select value={cam.child_id || ''}",
+    "find": "              {isAdmin ? (\r\n                <select id={`assign-${cam.id}`} value={cam.child_id || ''}",
+    "replace": "              {true ? (\r\n                <select id={`assign-${cam.id}`} value={cam.child_id || ''}",
     "expect": "killed",
     "tests": ["cameras.test.jsx"],
     "namePattern": "SEES each camera"
@@ -13890,7 +13890,7 @@
   {
     "label": "W5 role UI M24: a caregiver's live tiles get the drag handle again",
     "file": "frontend/src/components/LiveMonitor.jsx",
-    "find": "  const canReorder = user?.role === 'admin';",
+    "find": "  const canReorder = isAdmin;",
     "replace": "  const canReorder = true;",
     "expect": "killed",
     "tests": ["liveMonitor.test.jsx"],
@@ -16002,5 +16002,527 @@
     "expect": "killed",
     "tests": ["logsScreen.test.jsx"],
     "namePattern": "#547"
+  },
+  {
+    "label": "#378 Modal: the error prop is not rendered",
+    "file": "frontend/src/components/Modal.jsx",
+    "find": "{error && <div className=\"error-banner\" role=\"alert\">{error}</div>}",
+    "replace": "{null}",
+    "expect": "killed",
+    "tests": ["modal.test.jsx"],
+    "namePattern": "alert INSIDE the dialog"
+  },
+  {
+    "label": "#378 Cameras: a failed remove goes to the page banner under the overlay, not the dialog",
+    "file": "frontend/src/pages/Cameras.jsx",
+    "find": "setRemoveError(err.message);",
+    "replace": "setError(err.message);",
+    "expect": "killed",
+    "tests": ["cameras.test.jsx"],
+    "namePattern": "#378 a failed delete is shown INSIDE"
+  },
+  {
+    "label": "#378 Cameras: the dialog is not given its error",
+    "file": "frontend/src/pages/Cameras.jsx",
+    "find": "error={removeError} ",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["cameras.test.jsx"],
+    "namePattern": "#378 a failed delete is shown INSIDE"
+  },
+  {
+    "label": "#378 Cameras: opening the dialog keeps the previous failure",
+    "file": "frontend/src/pages/Cameras.jsx",
+    "find": "onClick={() => { setRemoveError(''); setRemoving(cam); }}",
+    "replace": "onClick={() => { setRemoving(cam); }}",
+    "expect": "killed",
+    "tests": ["cameras.test.jsx"],
+    "namePattern": "#378 retrying clears"
+  },
+  {
+    "label": "#378 Cameras: a retry keeps the previous failure on screen while it runs",
+    "file": "frontend/src/pages/Cameras.jsx",
+    "find": "setRemoveError('');\r\n    try {",
+    "replace": "    try {",
+    "expect": "killed",
+    "tests": ["cameras.test.jsx"],
+    "namePattern": "#378 retrying clears"
+  },
+  {
+    "label": "#378 CameraSettings: a failed remove goes to the page banner under the overlay, not the dialog",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "setRemoveError(err.message);",
+    "replace": "setPageError(err.message);",
+    "expect": "killed",
+    "tests": ["cameraSettings.test.jsx"],
+    "namePattern": "#378 the failure is shown INSIDE"
+  },
+  {
+    "label": "#378 CameraSettings: opening the dialog keeps the previous failure",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "onClick={() => { setRemoveError(''); setRemoving(true); }}",
+    "replace": "onClick={() => { setRemoving(true); }}",
+    "expect": "killed",
+    "tests": ["cameraSettings.test.jsx"],
+    "namePattern": "#378 a stale message is gone"
+  },
+  {
+    "label": "#378 ChildSettings: a failed remove goes to the page banner under the overlay, not the dialog",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "setRemoveError(err.message);",
+    "replace": "setError(err.message);",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "#378 the failure is shown INSIDE"
+  },
+  {
+    "label": "#378 ChildSettings: opening the dialog keeps the previous failure",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "onClick={() => { setRemoveError(''); setRemoving(true); }}",
+    "replace": "onClick={() => { setRemoving(true); }}",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "#378 the failure is shown INSIDE"
+  },
+  {
+    "label": "#378 UserSettings: a failed remove goes to the page banner under the overlay, not the dialog",
+    "file": "frontend/src/pages/UserSettings.jsx",
+    "find": "setRemoveError(err.message);",
+    "replace": "setError(err.message);",
+    "expect": "killed",
+    "tests": ["users.test.jsx"],
+    "namePattern": "#378 the failure is shown INSIDE"
+  },
+  {
+    "label": "#378 UserSettings: a failed two-factor reset goes to the page banner under the overlay, not the dialog",
+    "file": "frontend/src/pages/UserSettings.jsx",
+    "find": "setResetError(err.message);",
+    "replace": "setError(err.message);",
+    "expect": "killed",
+    "tests": ["users.test.jsx"],
+    "namePattern": "#378 a failed reset"
+  },
+  {
+    "label": "#378 UserSettings: opening the reset dialog keeps the previous failure",
+    "file": "frontend/src/pages/UserSettings.jsx",
+    "find": "onClick={() => { setResetError(''); setResettingMfa(true); }}",
+    "replace": "onClick={() => { setResettingMfa(true); }}",
+    "expect": "killed",
+    "tests": ["users.test.jsx"],
+    "namePattern": "#378 a failed reset"
+  },
+  {
+    "label": "#383 CameraSettings: Back and the landing go to the retired /family again",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "const back = location.state?.from || { to: '/cameras', label: 'Cameras' };",
+    "replace": "const back = { to: '/family', label: 'Family' };",
+    "expect": "killed",
+    "tests": ["cameraSettings.test.jsx"],
+    "namePattern": "no router state|opened from a child"
+  },
+  {
+    "label": "#383 CameraSettings: the landing ignores where the page was opened from",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "const back = location.state?.from || { to: '/cameras', label: 'Cameras' };",
+    "replace": "const back = { to: '/cameras', label: 'Cameras' };",
+    "expect": "killed",
+    "tests": ["cameraSettings.test.jsx"],
+    "namePattern": "opened from a child"
+  },
+  {
+    "label": "#380 LiveMonitor: a caregiver is told to add a camera again",
+    "file": "frontend/src/components/LiveMonitor.jsx",
+    "find": ": 'No cameras yet. Ask an administrator to add or enable a camera.'",
+    "replace": ": 'No cameras yet. Add one from the Cameras tab to start watching.'",
+    "expect": "killed",
+    "tests": ["liveMonitor.test.jsx"],
+    "namePattern": "#380 a caregiver is NOT sent"
+  },
+  {
+    "label": "#380 LiveMonitor: an admin is no longer told to add one",
+    "file": "frontend/src/components/LiveMonitor.jsx",
+    "find": "? 'No cameras yet. Add one from the Cameras tab to start watching.'",
+    "replace": "? 'No cameras yet. Ask an administrator to add or enable a camera.'",
+    "expect": "killed",
+    "tests": ["liveMonitor.test.jsx"],
+    "namePattern": "#380 an admin is told"
+  },
+  {
+    "label": "#396 unsavedEdits: compares with !== so a number 5 and the string \"5\" differ",
+    "file": "frontend/src/lib/unsavedEdits.js",
+    "find": "String(form[k] ?? '') !== String(saved[k] ?? '')",
+    "replace": "form[k] !== saved[k]",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx", "unsavedEdits.test.js"],
+    "namePattern": "Gotify priority|same number"
+  },
+  {
+    "label": "#396 unsavedEdits: a saved 0 is read as unset",
+    "file": "frontend/src/lib/unsavedEdits.js",
+    "find": "String(saved[k] ?? '')",
+    "replace": "String(saved[k] || '')",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx", "unsavedEdits.test.js"],
+    "namePattern": "Gotify priority|null, undefined and empty"
+  },
+  {
+    "label": "#396 unsavedEdits: a typed secret is not an edit",
+    "file": "frontend/src/lib/unsavedEdits.js",
+    "find": "if (secrets.some((s) => String(s ?? '') !== '')) return true;",
+    "replace": "if (secrets.length > 99) return true;",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx", "unsavedEdits.test.js"],
+    "namePattern": "typed secret|non-empty secret"
+  },
+  {
+    "label": "#396 unsavedEdits: with nothing to compare against it reports an edit",
+    "file": "frontend/src/lib/unsavedEdits.js",
+    "find": "if (!form || !saved) return false;",
+    "replace": "if (!form || !saved) return true;",
+    "expect": "killed",
+    "tests": ["unsavedEdits.test.js"],
+    "namePattern": "nothing to compare"
+  },
+  {
+    "label": "#396 Pushover: Send test ignores unsaved edits",
+    "file": "frontend/src/pages/SettingsPushPushover.jsx",
+    "find": "disabled={busy || !po.configured || dirty}",
+    "replace": "disabled={busy || !po.configured}",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "namePattern": "holds Send test back"
+  },
+  {
+    "label": "#396 Pushover: a successful save does not move the saved snapshot",
+    "file": "frontend/src/pages/SettingsPushPushover.jsx",
+    "find": "setLastSaved(next); ",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "namePattern": "successful save re-enables"
+  },
+  {
+    "label": "#396 Pushover: the loaded config is not taken as the saved snapshot",
+    "file": "frontend/src/pages/SettingsPushPushover.jsx",
+    "find": "setLastSaved(c); ",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "namePattern": "clean and configured"
+  },
+  {
+    "label": "#396 Gotify: Send test ignores unsaved edits",
+    "file": "frontend/src/pages/SettingsPushGotify.jsx",
+    "find": "disabled={busy || !form.configured || dirty}",
+    "replace": "disabled={busy || !form.configured}",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "namePattern": "holds Send test back"
+  },
+  {
+    "label": "#396 Gotify: a successful save does not move the saved snapshot",
+    "file": "frontend/src/pages/SettingsPushGotify.jsx",
+    "find": "setLastSaved(next); ",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "namePattern": "successful save re-enables"
+  },
+  {
+    "label": "#396 Gotify: the loaded config is not taken as the saved snapshot",
+    "file": "frontend/src/pages/SettingsPushGotify.jsx",
+    "find": "setLastSaved(c); ",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "namePattern": "clean and configured"
+  },
+  {
+    "label": "#396 ntfy: Send test ignores unsaved edits",
+    "file": "frontend/src/pages/SettingsPushNtfy.jsx",
+    "find": "disabled={busy || !form.configured || dirty}",
+    "replace": "disabled={busy || !form.configured}",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "namePattern": "holds Send test back"
+  },
+  {
+    "label": "#396 ntfy: a successful save does not move the saved snapshot",
+    "file": "frontend/src/pages/SettingsPushNtfy.jsx",
+    "find": "setLastSaved(next); ",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "namePattern": "successful save re-enables"
+  },
+  {
+    "label": "#396 ntfy: the loaded config is not taken as the saved snapshot",
+    "file": "frontend/src/pages/SettingsPushNtfy.jsx",
+    "find": "setLastSaved(c); ",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "namePattern": "clean and configured"
+  },
+  {
+    "label": "#396 ntfy: the password box is not counted as an edit",
+    "file": "frontend/src/pages/SettingsPushNtfy.jsx",
+    "find": "hasUnsavedEdits(form, lastSaved, [token, password])",
+    "replace": "hasUnsavedEdits(form, lastSaved, [token])",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "namePattern": "typed secret"
+  },
+  {
+    "label": "#560 HlsPlayer: the loadedmetadata listener is not removed on teardown",
+    "file": "frontend/src/components/HlsPlayer.jsx",
+    "find": "if (onLoadedMetadata) video.removeEventListener('loadedmetadata', onLoadedMetadata);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["hlsPlayerNative.test.jsx"],
+    "namePattern": "listener count is flat"
+  },
+  {
+    "label": "#560 HlsPlayer: the error listener is not removed on teardown",
+    "file": "frontend/src/components/HlsPlayer.jsx",
+    "find": "if (onVideoError) video.removeEventListener('error', onVideoError);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["hlsPlayerNative.test.jsx"],
+    "namePattern": "listener count is flat"
+  },
+  {
+    "label": "#560 HlsPlayer: the listeners are removed AFTER load() (a teardown error reaches a stale handler)",
+    "file": "frontend/src/components/HlsPlayer.jsx",
+    "find": "      if (onLoadedMetadata) video.removeEventListener('loadedmetadata', onLoadedMetadata);\r\n      if (onVideoError) video.removeEventListener('error', onVideoError);\r\n      if (hlsRef.current) {\r\n        hlsRef.current.destroy();\r\n        hlsRef.current = null;\r\n      }\r\n      video.removeAttribute('src');\r\n      video.load();",
+    "replace": "      if (hlsRef.current) {\r\n        hlsRef.current.destroy();\r\n        hlsRef.current = null;\r\n      }\r\n      video.removeAttribute('src');\r\n      video.load();\r\n      if (onLoadedMetadata) video.removeEventListener('loadedmetadata', onLoadedMetadata);\r\n      if (onVideoError) video.removeEventListener('error', onVideoError);",
+    "expect": "killed",
+    "tests": ["hlsPlayerNative.test.jsx"],
+    "namePattern": "already off when the teardown"
+  },
+  {
+    "label": "#379 App: the catch-all route renders nothing",
+    "file": "frontend/src/App.jsx",
+    "find": "<Route path=\"*\" element={<NotFound />} />",
+    "replace": "<Route path=\"*\" element={null} />",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "#379 an address that matches no screen"
+  },
+  {
+    "label": "#379 NotFound: Go to Live leads nowhere",
+    "file": "frontend/src/pages/NotFound.jsx",
+    "find": "navigate('/')",
+    "replace": "navigate('/nowhere')",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "#379 an address that matches no screen"
+  },
+  {
+    "label": "#562 SettingsMqtt: the broker port has no upper bound",
+    "file": "frontend/src/pages/SettingsMqtt.jsx",
+    "find": "max=\"65535\"",
+    "replace": "max=\"65536\"",
+    "expect": "killed",
+    "tests": ["settingsForms.test.jsx"],
+    "namePattern": "#562 the broker port is bounded"
+  },
+  {
+    "label": "#562 SettingsMqtt: the broker port accepts 0",
+    "file": "frontend/src/pages/SettingsMqtt.jsx",
+    "find": "min=\"1\"",
+    "replace": "min=\"0\"",
+    "expect": "killed",
+    "tests": ["settingsForms.test.jsx"],
+    "namePattern": "#562 the broker port is bounded"
+  },
+  {
+    "label": "#562 LiveMonitor: the reorder is sent from inside the state updater as well (a second request under StrictMode)",
+    "file": "frontend/src/components/LiveMonitor.jsx",
+    "find": "setOrderedCameras(next);",
+    "replace": "setOrderedCameras(() => { api.put('/cameras/reorder', { order: next.map((c) => c.id) }).catch(() => {}); return next; });",
+    "expect": "killed",
+    "tests": ["liveMonitorReorder.test.jsx"],
+    "namePattern": "ONE PUT per drop"
+  },
+  {
+    "label": "#562 LiveMonitor: a drop is computed from the order the page loaded with, not the current one",
+    "file": "frontend/src/components/LiveMonitor.jsx",
+    "find": "reorderCameras(orderRef.current, active.id, over.id)",
+    "replace": "reorderCameras(cameras, active.id, over.id)",
+    "expect": "killed",
+    "tests": ["liveMonitorReorder.test.jsx"],
+    "namePattern": "second drop is built"
+  },
+  {
+    "label": "#385 SettingsPush: a provider with nothing saved shows no badge",
+    "file": "frontend/src/pages/SettingsPush.jsx",
+    "find": "return { text: 'Not set up', cls: 'status-badge--off' };",
+    "replace": "return null;",
+    "expect": "killed",
+    "tests": ["settingsPush.test.jsx"],
+    "namePattern": "Not set up for untouched|#385 all four states"
+  },
+  {
+    "label": "#385 SettingsPush: a provider the server did not mention shows no badge",
+    "file": "frontend/src/pages/SettingsPush.jsx",
+    "find": "if (!s) return UNAVAILABLE;",
+    "replace": "if (!s) return null;",
+    "expect": "killed",
+    "tests": ["settingsPush.test.jsx"],
+    "namePattern": "#385 all four states"
+  },
+  {
+    "label": "#385 SettingsPush: a failed status request is swallowed again (no badge)",
+    "file": "frontend/src/pages/SettingsPush.jsx",
+    "find": ".catch(() => setStatusFailed(true))",
+    "replace": ".catch(() => {})",
+    "expect": "killed",
+    "tests": ["settingsPush.test.jsx"],
+    "namePattern": "failed status lookup"
+  },
+  {
+    "label": "#385 SettingsPush: a badge is shown while the status is still loading",
+    "file": "frontend/src/pages/SettingsPush.jsx",
+    "find": ": status ? badgeFor(status[key]) : null);",
+    "replace": ": badgeFor(status?.[key]));",
+    "expect": "killed",
+    "tests": ["settingsPush.test.jsx"],
+    "namePattern": "#385 no badge while"
+  },
+  {
+    "label": "#381 Cameras: the label is not tied to the select",
+    "file": "frontend/src/pages/Cameras.jsx",
+    "find": "htmlFor={isAdmin ? `assign-${cam.id}` : undefined}",
+    "replace": "data-x=\"1\"",
+    "expect": "killed",
+    "tests": ["cameras.test.jsx"],
+    "namePattern": "label is tied to ITS OWN select"
+  },
+  {
+    "label": "#381 Cameras: every select shares one id",
+    "file": "frontend/src/pages/Cameras.jsx",
+    "find": "<select id={`assign-${cam.id}`}",
+    "replace": "<select id=\"assign\"",
+    "expect": "killed",
+    "tests": ["cameras.test.jsx"],
+    "namePattern": "label is tied to ITS OWN select"
+  },
+  {
+    "label": "#381 index.css: the over-video controls' hit area shrinks to 36px",
+    "file": "frontend/src/index.css",
+    "find": "  inset: -7px;",
+    "replace": "  inset: -3px;",
+    "expect": "killed",
+    "tests": ["touchTargets.test.js"],
+    "namePattern": "one shared ::after rule"
+  },
+  {
+    "label": "#381 index.css: the drag handle's hit area shrinks to 34px",
+    "file": "frontend/src/index.css",
+    "find": "  inset: -10px;",
+    "replace": "  inset: -5px;",
+    "expect": "killed",
+    "tests": ["touchTargets.test.js"],
+    "namePattern": "is the positioning anchor"
+  },
+  {
+    "label": "#381 index.css: the drag handle loses its positioning anchor",
+    "file": "frontend/src/index.css",
+    "find": "  position: relative;\r\n}\r\n\r\n/* The handle is 24px",
+    "replace": "}\r\n\r\n/* The handle is 24px",
+    "expect": "killed",
+    "tests": ["touchTargets.test.js"],
+    "namePattern": "is the positioning anchor"
+  },
+  {
+    "label": "#381 index.css: Picture-in-Picture moves back beside Fullscreen (overlapping hit areas)",
+    "file": "frontend/src/index.css",
+    "find": "right: 54px; /* was 48; 54",
+    "replace": "right: 48px; /* was 48; 54",
+    "expect": "killed",
+    "tests": ["touchTargets.test.js"],
+    "namePattern": "neighbours are far enough apart"
+  },
+  {
+    "label": "#381 index.css: Record moves back beside Mute (overlapping hit areas)",
+    "file": "frontend/src/index.css",
+    "find": "right: 54px; /* was 48; see",
+    "replace": "right: 48px; /* was 48; see",
+    "expect": "killed",
+    "tests": ["touchTargets.test.js"],
+    "namePattern": "neighbours are far enough apart"
+  },
+  {
+    "label": "#381 index.css: PTZ moves back beside Settings (overlapping hit areas)",
+    "file": "frontend/src/index.css",
+    "find": "left: 54px; /* was 48; 54",
+    "replace": "left: 48px; /* was 48; 54",
+    "expect": "killed",
+    "tests": ["touchTargets.test.js"],
+    "namePattern": "neighbours are far enough apart"
+  },
+  {
+    "label": "#562 LiveMonitor: the handler reads the render closure, not the ref (two drops in one batch undo each other)",
+    "file": "frontend/src/components/LiveMonitor.jsx",
+    "find": "reorderCameras(orderRef.current, active.id, over.id)",
+    "replace": "reorderCameras(orderedCameras, active.id, over.id)",
+    "expect": "killed",
+    "tests": ["liveMonitorReorder.test.jsx"],
+    "namePattern": "ONE React batch"
+  },
+  {
+    "label": "#562 LiveMonitor: the ref is not advanced after a drop (the next drop in the same batch uses the old order)",
+    "file": "frontend/src/components/LiveMonitor.jsx",
+    "find": "orderRef.current = next;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["liveMonitorReorder.test.jsx"],
+    "namePattern": "ONE React batch"
+  },
+  {
+    "label": "#396 unsavedEdits: the Enable switch is ignored",
+    "file": "frontend/src/lib/unsavedEdits.js",
+    "find": "Object.keys(form).some((k) =>",
+    "replace": "Object.keys(form).filter((k) => k !== 'enabled').some((k) =>",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx", "unsavedEdits.test.js"],
+    "namePattern": "Enable switch|toggled boolean"
+  },
+  {
+    "label": "#379 App: the catch-all is narrowed to one prefix",
+    "file": "frontend/src/App.jsx",
+    "find": "<Route path=\"*\" element={<NotFound />} />",
+    "replace": "<Route path=\"/children/*\" element={<NotFound />} />",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "unknown addresses at other depths"
+  },
+  {
+    "label": "#378 CameraSettings: a retry keeps the previous failure on screen while it runs",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "setRemoveBusy(true); setPageError(''); setRemoveError('');",
+    "replace": "setRemoveBusy(true); setPageError('');",
+    "expect": "killed",
+    "tests": ["cameraSettings.test.jsx"],
+    "namePattern": "pressing Remove again clears"
+  },
+  {
+    "label": "#381 index.css: the tile buttons' ::after cannot receive a tap (pointer-events: none)",
+    "file": "frontend/src/index.css",
+    "find": ".rec-btn::after {\r\n  content: '';",
+    "replace": ".rec-btn::after {\r\n  pointer-events: none;\r\n  content: '';",
+    "expect": "killed",
+    "tests": ["touchTargets.test.js"],
+    "namePattern": "one shared ::after rule"
+  },
+  {
+    "label": "#381 index.css: the drag handle's ::after cannot receive a tap (pointer-events: none)",
+    "file": "frontend/src/index.css",
+    "find": ".drag-handle::after {\r\n  content: '';",
+    "replace": ".drag-handle::after {\r\n  pointer-events: none;\r\n  content: '';",
+    "expect": "killed",
+    "tests": ["touchTargets.test.js"],
+    "namePattern": "is the positioning anchor"
   }
 ]
