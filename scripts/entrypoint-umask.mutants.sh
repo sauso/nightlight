@@ -28,7 +28,7 @@ if ! grep -q '^# skipped 0$' "$T/out.tap" || ! grep -q '^# fail 0$' "$T/out.tap"
   echo "BASELINE ran with skips or failures"; tail -20 "$T/out.tap"; exit 1
 fi
 PASS=$(sed -n 's/^# pass \([0-9][0-9]*\)$/\1/p' "$T/out.tap")
-[ "${PASS:-0}" -ge 20 ] || { echo "BASELINE ran only ${PASS:-0} tests (expected at least 20)"; exit 1; }
+[ "${PASS:-0}" -ge 22 ] || { echo "BASELINE ran only ${PASS:-0} tests (expected at least 22)"; exit 1; }
 echo "  baseline ok ($PASS tests, none skipped)"
 
 mutant() {  # mutant <name> <perl -pe expression>
@@ -48,6 +48,9 @@ elif run_test "$T/entrypoint.sh"; then echo "  control ok (a comment edit passes
 mutant "the umask is never set (the app inherits Docker's 022)"            's/^umask "\$UMASK"$//'
 mutant "the umask is set after mkdir -p (a first-boot data dir is 0755)"   'if (/^umask "\$UMASK"$/) { $_ = "" } s/^(mkdir -p "\$DATA_DIR")$/$1\numask "\$UMASK"/'
 mutant "the default is 022"                                                's/^DEFAULT_UMASK=077$/DEFAULT_UMASK=022/'
+# missing PARENTS of DATA_DIR must be 0755 (review of #549, PR #689): only the data directory itself takes the mask
+mutant "the parents of a new DATA_DIR are made under the mask (no 022 step)" 's/^\( umask 022; mkdir -p "\$\(dirname "\$DATA_DIR"\)" \)$//'
+mutant "the parents' step loses its 022 (they inherit the mask)"           's/^\( umask 022; mkdir -p /( mkdir -p /'
 
 # --- validation ---
 mutant "no validation (any value reaches umask)"                           's/^  0\[0-7\]\[0-7\]\) ;;$/  *) ;;/'
@@ -62,19 +65,25 @@ mutant "the 077 guard is inverted"                                         's/^i
 mutant "the tighten never runs"                                            's/^if \[ "\$UMASK" = 077 \]; then$/if false; then/'
 
 # --- the tighten: what ---
-# (these three are scoped to the TIGHTENED= line, so the comments that mention the same words stay as they are)
-mutant "symlinks are followed (! -type l dropped)"                         'if (/^  TIGHTENED=/) { s/ ! -type l// }'
-mutant "only group bits are looked at (-perm /077 -> /070)"                'if (/^  TIGHTENED=/) { s/-perm \/077/-perm \/070/ }'
-mutant "no -perm filter (every entry is chmod-ed on every start)"          'if (/^  TIGHTENED=/) { s/ -perm \/077// }'
+# (these are scoped to the FOUND= line, so the comments that mention the same words stay as they are)
+mutant "symlinks are followed (! -type l dropped)"                         'if (/^  FOUND=/) { s/ ! -type l// }'
+mutant "only group bits are looked at (-perm /077 -> /070)"                'if (/^  FOUND=/) { s/-perm \/077/-perm \/070/ }'
+mutant "only other bits are looked at (-perm /077 -> /007)"                'if (/^  FOUND=/) { s/-perm \/077/-perm \/007/ }'
+mutant "only other-read is looked at (-perm /077 -> /004)"                 'if (/^  FOUND=/) { s/-perm \/077/-perm \/004/ }'
+mutant "no -perm filter (every entry is chmod-ed on every start)"          'if (/^  FOUND=/) { s/ -perm \/077// }'
+mutant "the walk stops two levels down (-maxdepth 2: clips/<camera>/x)"     'if (/^  FOUND=/) { s/find "\$DATA_DIR" /find "\$DATA_DIR" -maxdepth 2 / }'
 mutant "chmod takes only the group bits (go-rwx -> g-rwx)"                 's/chmod go-rwx/chmod g-rwx/'
-mutant "only the visible top level is walked (\"\$DATA_DIR\"/*)"           's/find "\$DATA_DIR\/" /find "\$DATA_DIR"\/* /'
-mutant "a symlinked DATA_DIR is skipped (no trailing slash)"               's/find "\$DATA_DIR\/" /find "\$DATA_DIR" /'
+mutant "only the visible top level is walked (\"\$DATA_DIR\"/*)"           'if (/^  FOUND=/) { s/find "\$DATA_DIR" /find "\$DATA_DIR"\/* / }'
+# PR #689: the walk must start where chown -R starts, so a symlinked DATA_DIR is NOT walked (files behind it may be
+# another uid's, and 0600 would lock the app out). A trailing slash would follow the link.
+mutant "the walk follows a symlinked DATA_DIR (trailing slash added)"      'if (/^  FOUND=/) { s/find "\$DATA_DIR" /find "\$DATA_DIR\/" / }'
 
 # --- the tighten: failure and reporting ---
 mutant "nothing is counted (-print dropped)"                               's/ -print -exec / -exec /'
 mutant "a failed walk is not reported"                                     's/ \|\| printf .\[entrypoint\] warning: could not tighten.*?>&2;/;/'
-mutant "a failed walk stops the container (set -e)"                        's/^  TIGHTENED=.*$/  TIGHTENED=\$(find "\$DATA_DIR\/" ! -type l -perm \/077 -print | wc -l); find "\$DATA_DIR\/" ! -type l -perm \/077 -exec chmod go-rwx {} +/'
+mutant "a failed walk stops the container (set -e)"                        's/^  FOUND=.*$/  FOUND=\$(find "\$DATA_DIR" ! -type l -perm \/077 -print | wc -l); find "\$DATA_DIR" ! -type l -perm \/077 -exec chmod go-rwx {} +/'
 mutant "the report is not existence-guarded (a first boot says unknown)"   's/^  if \[ -e "\$DATA_DIR\/\$f" \]; then$/  if true; then/'
+mutant "the report follows no link (stat -L -> stat: a linked db shows 777)" 's/stat -L -c %a/stat -c %a/'
 mutant "the report line is never printed"                                  's/^printf .\[entrypoint\] umask .*$/:/'
 
 echo "== killed $KILLED, survived/error $SURVIVED"

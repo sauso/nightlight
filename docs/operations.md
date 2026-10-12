@@ -43,13 +43,16 @@ Each start logs two lines (`docker logs nightlight`). The first is the container
 the second is the app itself, which shows the mask actually reached it:
 
 ```
-[entrypoint] umask 077; existing entries tightened: 0; modes: babymonitor.db=600 babymonitor.db-wal=600 babymonitor.db-shm=600 .jwt_secret=600
+[entrypoint] umask 077; existing entries with group/other access found: 0; modes: babymonitor.db=600 babymonitor.db-wal=600 babymonitor.db-shm=600 .jwt_secret=600
 [data-dir] app umask 077; babymonitor.db mode 600
 ```
 
 `absent` in the first line is normal on a first start (no database or `.jwt_secret` yet), and for
-`-wal`/`-shm`, which come and go with the open database. The first start after upgrading counts
-every file and folder it tightened, so expect a large number there once and `0` after that.
+`-wal`/`-shm`, which come and go with the open database. The count is the files and folders the
+start **found** with group/other access; the same start then takes that access away, and the
+modes after it are what the line shows. So expect a large number once, on the first start after
+upgrading, and `0` after that. A number that comes back on **every** start means the modes are not
+sticking (see the filesystem limit below); a change that failed is logged as a separate warning.
 
 **Who keeps access, and who loses it**, at the default, from the first start after upgrading:
 
@@ -58,11 +61,11 @@ every file and folder it tightened, so expect a large number there once and `0` 
 - **Loses access:** anything that reads the data directory as a **different user** — a backup job
   or `rsync` running as a non-root user, another container that mounts the same folder with a
   different `PUID`, any other account on the host.
-- **SMB (Unraid shares), unverified:** access mapped to `nobody` (uid 99, the default `PUID`), such
-  as guest access to a Public share, should be unchanged, because that user owns the files. A
-  **named** Unraid user on a Secure or Private share is not the owner, and loses read access once
-  the group bits go; so does every SMB user if you set a non-default `PUID`. This has not yet been
-  checked on a real Unraid share.
+- **SMB (Unraid shares) — not verified:** access mapped to `nobody` (uid 99, the default `PUID`),
+  such as guest access to a Public share, should be unchanged, because that user owns the files. A
+  **named** Unraid user on a Secure or Private share is not the owner, and **may lose access (not
+  verified)** once the group bits go; so may every SMB user if you set a non-default `PUID`. None of
+  this has been checked on a real Unraid share yet.
 - **Unraid's "New Permissions" tool**, run on the share that holds the data directory, makes it
   world-readable again; the next container start tightens it back. (The "Docker Safe New Perms"
   variant is meant to skip appdata.)
@@ -81,12 +84,21 @@ chmod -R go+rX /mnt/user/appdata/nightlight     # your Data Directory / APPDATA_
 
 - A **default ACL** on the host folder (`setfacl -d …`) overrides the umask: new files get the ACL's
   permissions, not `600`. Check with `getfacl` if the log shows `600` but another user can still read.
+- On a filesystem that **ignores `chmod`** — a Docker Desktop for Windows bind mount (which is what
+  the Compose default `./data` is there), or a CIFS/NTFS mount with a fixed `file_mode` — modes
+  cannot change: the start-up line reports the same count on every start and the modes it shows stay
+  as they were. What protects the data there is that filesystem's own access control.
 - The start-up pass walks the data directory the way the ownership fix (`chown -R`) always has: a
   **hard link** to a file elsewhere, or **another mount nested inside** the data directory, is
   changed too. A **symbolic link** is never followed: what it points to keeps its mode. On a large
   `clips/` folder the pass takes about as long as the ownership fix does.
+- A `DATA_DIR` that is **itself a symbolic link** is neither re-owned nor tightened (the ownership
+  fix stops at the link, and tightening files another user still owns would lock the app out of
+  them); only new files in it follow the mask. The default `/app/data` mount is not a link.
 - An **external `CLIPS_DIR`** (e.g. a `/recordings` mount) is neither re-owned nor tightened: new
   clips there are `600`, files already there keep their mode.
+- **Demo mode**'s reset ([demo-mode.md](demo-mode.md)) copies its sample pictures and clips with
+  the image's own modes (`644`), not the mask. They are stock media, not secrets.
 - Only the image's start-up script sets the mask. Running the backend directly (`node src/index.js`,
   development) uses your own shell's umask and tightens nothing.
 

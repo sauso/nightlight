@@ -111,20 +111,36 @@ function seedUpgradedInstall(base) {
   // middleware/auth.js creates it 0600, but a copy restored as root, or written by an older version, is 0644.
   mkfile(path.join(data, '.jwt_secret'), 0o644);
   mkfile(path.join(data, 'already-tight.txt'), 0o600);
-  // Only the OTHER class has a bit (no group bit): a tighten that looks at group bits only (-perm /070) misses it.
+  // Only the OTHER class has a bit (no group bit): a tighten that looks at group bits only (-perm /070) misses them.
   mkfile(path.join(data, 'other-only.txt'), 0o604);
+  mkfile(path.join(data, 'other-only-0004.txt'), 0o004);
+  mkdir(path.join(data, 'other-only-dir'), 0o705);
+  // Only the GROUP class has a bit (no other bit): a tighten that looks at other bits only (-perm /007, /004)
+  // misses them. 0640/0750 is exactly what a UMASK=027 install leaves behind.
+  mkfile(path.join(data, 'group-only.txt'), 0o640);
+  mkdir(path.join(data, 'group-only-dir'), 0o750);
+  // clips/<camera>/... is how deep real clips sit (depth 3), and deeper still (depth 5): a walk with a depth limit
+  // (-maxdepth 2) would leave them readable.
   mkdir(path.join(data, 'clips'), 0o755);
   mkfile(path.join(data, 'clips', 'a.mp4'), 0o644);
-  mkdir(path.join(data, 'other-only-dir'), 0o705);
+  mkdir(path.join(data, 'clips', 'cam1'), 0o755);
+  mkfile(path.join(data, 'clips', 'cam1', 'x.mp4'), 0o644);
+  mkdir(path.join(data, 'clips', 'cam1', 'a'), 0o755);
+  mkdir(path.join(data, 'clips', 'cam1', 'a', 'b'), 0o755);
+  mkfile(path.join(data, 'clips', 'cam1', 'a', 'b', 'y.mp4'), 0o644);
   mkdir(path.join(outside, 'dir'), 0o755);
   mkfile(path.join(outside, 'target.txt'), 0o644);
   mkfile(path.join(outside, 'dir', 'inner.txt'), 0o644);
   fs.symlinkSync(path.join(outside, 'target.txt'), path.join(data, 'link-to-file'));
   fs.symlinkSync(path.join(outside, 'dir'), path.join(data, 'link-to-dir'));
-  // '.', the three database files, .jwt_secret, other-only.txt, clips, clips/a.mp4, other-only-dir
-  return { data, outside, loose: 9 };
+  // '.', the three database files, .jwt_secret, other-only.txt, other-only-0004.txt, other-only-dir, group-only.txt,
+  // group-only-dir, clips, clips/a.mp4, clips/cam1, clips/cam1/x.mp4, clips/cam1/a, clips/cam1/a/b,
+  // clips/cam1/a/b/y.mp4
+  return { data, outside, loose: 17 };
 }
 
+// The count is what the walk FOUND (printed before chmod runs), so the line says found, not tightened (PR #689).
+const FOUND = (n) => `existing entries with group/other access found: ${n}`;
 const REPORT_TIGHT = 'modes: babymonitor.db=600 babymonitor.db-wal=600 babymonitor.db-shm=600 .jwt_secret=600';
 const REPORT_ABSENT = 'modes: babymonitor.db=absent babymonitor.db-wal=absent babymonitor.db-shm=absent .jwt_secret=absent';
 
@@ -154,9 +170,17 @@ describe('entrypoint.sh: data directory file modes (#549)', () => {
       '.jwt_secret': '600',
       'already-tight.txt': '600',
       'other-only.txt': '600',
+      'other-only-0004.txt': '000',
+      'other-only-dir': '700',
+      'group-only.txt': '600',
+      'group-only-dir': '700',
       clips: '700',
       'clips/a.mp4': '600',
-      'other-only-dir': '700',
+      'clips/cam1': '700',
+      'clips/cam1/x.mp4': '600',
+      'clips/cam1/a': '700',
+      'clips/cam1/a/b': '700',
+      'clips/cam1/a/b/y.mp4': '600',
       'link-to-file': 'link',
       'link-to-dir': 'link',
       'app-file': '600',
@@ -164,7 +188,7 @@ describe('entrypoint.sh: data directory file modes (#549)', () => {
     });
     // `! -type l`: chmod follows a symlink, so a link in the data directory must never reach what it points at.
     assert.deepEqual(modes(outside), outsideBefore, 'a file or folder OUTSIDE the data directory changed mode');
-    assert.equal(r.report, `[entrypoint] umask 077; existing entries tightened: ${loose}; ${REPORT_TIGHT}`, r.ctx);
+    assert.equal(r.report, `[entrypoint] umask 077; ${FOUND(loose)}; ${REPORT_TIGHT}`, r.ctx);
     // Pins of what was there before #549: ownership is still fixed on every start, and the default 99/100 needs
     // no remap.
     assert.ok(r.stdout.split('\n').includes(`STUB chown -R nightlight:nightlight ${data}`), r.ctx);
@@ -176,12 +200,12 @@ describe('entrypoint.sh: data directory file modes (#549)', () => {
     runEntrypoint(data);
     const r = runEntrypoint(data);
     assert.equal(r.status, 0, r.ctx);
-    assert.equal(r.report, `[entrypoint] umask 077; existing entries tightened: 0; ${REPORT_TIGHT}`, r.ctx);
+    assert.equal(r.report, `[entrypoint] umask 077; ${FOUND(0)}; ${REPORT_TIGHT}`, r.ctx);
     // ...and a later loosening (a restore as root, Unraid's New Permissions tool) heals on the next start.
     fs.chmodSync(path.join(data, 'babymonitor.db'), 0o666);
     fs.chmodSync(data, 0o777);
     const healed = runEntrypoint(data);
-    assert.equal(healed.report, `[entrypoint] umask 077; existing entries tightened: 2; ${REPORT_TIGHT}`, healed.ctx);
+    assert.equal(healed.report, `[entrypoint] umask 077; ${FOUND(2)}; ${REPORT_TIGHT}`, healed.ctx);
     assert.equal(modeOf(path.join(data, 'babymonitor.db')), '600');
     assert.equal(modeOf(data), '700');
   });
@@ -194,7 +218,7 @@ describe('entrypoint.sh: data directory file modes (#549)', () => {
     assert.equal(r.appUmask, 0o077, r.ctx);
     assert.equal(modeOf(path.join(data, '.jwt_secret')), '600');
     assert.equal(modeOf(path.join(data, 'clips')), '700');
-    assert.equal(r.report, `[entrypoint] umask 077; existing entries tightened: ${loose}; ${REPORT_TIGHT}`, r.ctx);
+    assert.equal(r.report, `[entrypoint] umask 077; ${FOUND(loose)}; ${REPORT_TIGHT}`, r.ctx);
   });
 
   test('UMASK=022 (the opt-out): new files are 0644 again and NOTHING existing is touched', { skip }, () => {
@@ -216,15 +240,16 @@ describe('entrypoint.sh: data directory file modes (#549)', () => {
   });
 
   test('a custom mask (027) on a first boot: the data directory itself is created with it, nothing is chmod-ed', { skip }, () => {
-    // Not-yet-existing, two levels deep. The mask must be set BEFORE `mkdir -p`: set after it, the folders mkdir
-    // creates get Docker's 022 (0755), and at a non-077 mask nothing tightens them afterwards.
+    // Not-yet-existing, with a missing parent too. The mask must be set BEFORE `mkdir -p`: set after it, the data
+    // directory gets Docker's 022 (0755), and at a non-077 mask nothing tightens it afterwards. The PARENT is
+    // created under 022 on purpose (0755, see the next test), not with the mask.
     const base = freshCase();
     const data = path.join(base, 'fresh', 'data');
     const r = runEntrypoint(data, '027');
     assert.equal(r.status, 0, r.ctx);
     assert.ok(r.appRan, r.ctx);
     assert.equal(r.appUmask, 0o027, r.ctx);
-    assert.equal(modeOf(path.join(base, 'fresh')), '750');
+    assert.equal(modeOf(path.join(base, 'fresh')), '755');
     assert.deepEqual(modes(data), { '.': '750', 'app-file': '640', 'app-dir': '750' });
     assert.equal(r.report, `[entrypoint] umask 027; existing entries left as they are (UMASK is not 077); ${REPORT_ABSENT}`, r.ctx);
   });
@@ -235,9 +260,24 @@ describe('entrypoint.sh: data directory file modes (#549)', () => {
     assert.equal(r.status, 0, `a first boot must not abort (no database, no .jwt_secret yet)${r.ctx}`);
     assert.ok(r.appRan, r.ctx);
     assert.deepEqual(r.warnings, [], r.ctx);
-    // 0 tightened: mkdir -p already ran under 077. (With the mask set after mkdir, this would say 1.)
-    assert.equal(r.report, `[entrypoint] umask 077; existing entries tightened: 0; ${REPORT_ABSENT}`, r.ctx);
+    // 0 found: mkdir -p already ran under 077. (With the mask set after mkdir, this would say 1.)
+    assert.equal(r.report, `[entrypoint] umask 077; ${FOUND(0)}; ${REPORT_ABSENT}`, r.ctx);
     assert.deepEqual(modes(data), { '.': '700', 'app-file': '600', 'app-dir': '700' });
+  });
+
+  test('first boot with the PARENTS missing too: they are 0755, so the app user can reach the data directory', { skip }, () => {
+    // A non-default DATA_DIR two levels below anything that exists. mkdir -p runs as root in the image: under 077
+    // the parents would be root:0700, the chown only re-owns the data directory itself, and the app user could not
+    // even get to it (review of #549, PR #689). Only the data directory takes the mask.
+    const base = freshCase();
+    const data = path.join(base, 'p1', 'p2', 'data');
+    const r = runEntrypoint(data);
+    assert.equal(r.status, 0, r.ctx);
+    assert.ok(r.appRan, r.ctx);
+    assert.equal(modeOf(path.join(base, 'p1')), '755');
+    assert.equal(modeOf(path.join(base, 'p1', 'p2')), '755');
+    assert.deepEqual(modes(data), { '.': '700', 'app-file': '600', 'app-dir': '700' });
+    assert.equal(r.report, `[entrypoint] umask 077; ${FOUND(0)}; ${REPORT_ABSENT}`, r.ctx);
   });
 
   test('an existing but EMPTY data directory: tightened, reported as all absent, startup goes on', { skip }, () => {
@@ -246,24 +286,64 @@ describe('entrypoint.sh: data directory file modes (#549)', () => {
     const r = runEntrypoint(data);
     assert.equal(r.status, 0, r.ctx);
     assert.ok(r.appRan, r.ctx);
-    assert.equal(r.report, `[entrypoint] umask 077; existing entries tightened: 1; ${REPORT_ABSENT}`, r.ctx);
+    assert.equal(r.report, `[entrypoint] umask 077; ${FOUND(1)}; ${REPORT_ABSENT}`, r.ctx);
     assert.equal(modeOf(data), '700');
   });
 
-  test('a DATA_DIR that is itself a symlink is walked (find "$DATA_DIR/", with the slash)', { skip }, () => {
+  test('a DATA_DIR that is itself a symlink is NOT walked, as chown -R does not re-own it; new files still get the mask', { skip }, () => {
+    // chown -R stops at a starting-point link, so files behind it may still belong to another uid. Tightening them
+    // would make them 0600 to THAT uid and lock the app out (review of #549, PR #689), so the walk starts at the same
+    // root, "$DATA_DIR" with no trailing slash, and find does not follow a starting-point link either.
     const base = freshCase();
     const real = path.join(base, 'real');
     mkdir(real, 0o755);
     mkfile(path.join(real, 'babymonitor.db'), 0o644);
     mkdir(path.join(real, 'clips'), 0o755);
+    mkfile(path.join(real, 'clips', 'a.mp4'), 0o644);
     const link = path.join(base, 'link');
     fs.symlinkSync(real, link);
     const r = runEntrypoint(link);
     assert.equal(r.status, 0, r.ctx);
-    assert.deepEqual(modes(real), { '.': '700', 'babymonitor.db': '600', clips: '700', 'app-file': '600', 'app-dir': '700' });
+    assert.ok(r.appRan, r.ctx);
+    assert.deepEqual(r.warnings, [], r.ctx);
+    assert.equal(r.appUmask, 0o077, r.ctx);
+    assert.deepEqual(modes(real), {
+      '.': '755',
+      'babymonitor.db': '644',
+      clips: '755',
+      'clips/a.mp4': '644',
+      'app-file': '600',
+      'app-dir': '700',
+    });
     assert.equal(
       r.report,
-      '[entrypoint] umask 077; existing entries tightened: 3; ' +
+      `[entrypoint] umask 077; ${FOUND(0)}; ` +
+        'modes: babymonitor.db=644 babymonitor.db-wal=absent babymonitor.db-shm=absent .jwt_secret=absent',
+      r.ctx
+    );
+  });
+
+  test('a babymonitor.db that is a symlink: the report shows the file it points to (stat -L), not the link', { skip }, () => {
+    // The link itself is skipped by the walk (! -type l); its target, inside the tree, is tightened like any file.
+    // Without -L, stat would report the link's own 777, which says nothing about who can read the database.
+    const data = path.join(freshCase(), 'data');
+    mkdir(data, 0o755);
+    mkdir(path.join(data, 'db-real'), 0o755);
+    mkfile(path.join(data, 'db-real', 'babymonitor.db'), 0o644);
+    fs.symlinkSync(path.join('db-real', 'babymonitor.db'), path.join(data, 'babymonitor.db'));
+    const r = runEntrypoint(data);
+    assert.equal(r.status, 0, r.ctx);
+    assert.deepEqual(modes(data), {
+      '.': '700',
+      'babymonitor.db': 'link',
+      'db-real': '700',
+      'db-real/babymonitor.db': '600',
+      'app-file': '600',
+      'app-dir': '700',
+    });
+    assert.equal(
+      r.report,
+      `[entrypoint] umask 077; ${FOUND(3)}; ` +
         'modes: babymonitor.db=600 babymonitor.db-wal=absent babymonitor.db-shm=absent .jwt_secret=absent',
       r.ctx
     );
@@ -282,7 +362,7 @@ describe('entrypoint.sh: data directory file modes (#549)', () => {
       assert.ok(r.warnings[0].includes(`UMASK=${bad} is not valid`) && r.warnings[0].endsWith('using 077'), r.ctx);
       assert.equal(r.appUmask, 0o077, r.ctx);
       assert.equal(modeOf(path.join(data, 'babymonitor.db')), '600');
-      assert.ok(r.report.startsWith('[entrypoint] umask 077; existing entries tightened: 2; '), r.ctx);
+      assert.ok(r.report.startsWith(`[entrypoint] umask 077; ${FOUND(2)}; `), r.ctx);
     });
   }
 
@@ -295,7 +375,7 @@ describe('entrypoint.sh: data directory file modes (#549)', () => {
     assert.deepEqual(r.warnings, [], `a blank UMASK is not a mistake, so no warning${r.ctx}`);
     assert.equal(r.appUmask, 0o077, r.ctx);
     assert.equal(modeOf(path.join(data, 'babymonitor.db')), '600');
-    assert.ok(r.report.startsWith('[entrypoint] umask 077; existing entries tightened: 2; '), r.ctx);
+    assert.ok(r.report.startsWith(`[entrypoint] umask 077; ${FOUND(2)}; `), r.ctx);
   });
 
   test('a subfolder the walk cannot read: a warning, the rest is still tightened, and the app still starts', { skip: skipAsRoot }, () => {
@@ -311,7 +391,8 @@ describe('entrypoint.sh: data directory file modes (#549)', () => {
       assert.equal(r.warnings.length, 1, r.ctx);
       assert.match(r.warnings[0], /could not tighten every entry under .*; starting anyway$/, r.ctx);
       assert.equal(modeOf(path.join(data, 'babymonitor.db')), '600');
-      assert.match(r.report, /^\[entrypoint\] umask 077; existing entries tightened: 2; modes: babymonitor\.db=600 /, r.ctx);
+      // The count is what was FOUND: the unreadable folder itself has no group/other bit, so it is not in it.
+      assert.ok(r.report.startsWith(`[entrypoint] umask 077; ${FOUND(2)}; modes: babymonitor.db=600 `), r.ctx);
     } finally {
       fs.chmodSync(locked, 0o700);
     }

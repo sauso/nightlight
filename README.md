@@ -84,8 +84,11 @@ access off anything that still has it. Range: 3 or 4 octal digits with an owner 
 (`000`-`077`, e.g. `022` for the old world-readable modes); anything else is ignored with a warning
 and `077` is used. **If another user or container reads your data directory, set `UMASK=022`
 *before* upgrading** - after one start at `077` the opt-out only affects new files. Known limits:
-a default ACL on the host folder overrides it, and an external `CLIPS_DIR` mount's existing files
-are not tightened. Details, including what this means for SMB shares and backups:
+a default ACL on the host folder overrides it, an external `CLIPS_DIR` mount's existing files are
+not tightened, and on a filesystem that ignores `chmod` (a Docker Desktop for Windows bind mount,
+a CIFS mount with a fixed `file_mode`) modes cannot change at all, so that filesystem's own access
+control is what protects the data. Details, including what this may mean for SMB shares (not
+verified) and backups:
 [Who can read the data directory](docs/operations.md#who-can-read-the-data-directory).
 
 The `--log-opt` flags cap Docker's own log storage at 10MB × 3 files - without them,

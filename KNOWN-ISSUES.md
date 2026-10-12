@@ -1528,13 +1528,14 @@ line followed by a working frame a moment later was only the normal short wait f
 **What to do:** Restart the container. Alert images, the bed exit and entry frames and timelapse frames do not
 go through this shared grab, so it does not hold them up, and other cameras' frames are not affected.
 
-## After upgrading, a backup job, another container or an SMB user can no longer read the data directory
+## After upgrading, a backup job or another container can no longer read the data directory
 
 **What you see:** Something other than Nightlight that used to read the data directory (a backup or `rsync`
-running as a non-root user, another container mounting the same folder with a different `PUID`, a named
-Unraid user browsing the share) now gets *permission denied*. The log has a line like
-`[entrypoint] umask 077; existing entries tightened: 1234; modes: babymonitor.db=600 ...` on the first start
-after the upgrade.
+running as a non-root user, another container mounting the same folder with a different `PUID`) now gets
+*permission denied*. A named Unraid user browsing the share over SMB may lose access too (not verified). The
+log has a line like
+`[entrypoint] umask 077; existing entries with group/other access found: 1234; modes: babymonitor.db=600 ...`
+on the first start after the upgrade.
 
 **Why:** On purpose (#549). The database keeps every stored secret in plaintext, so by default the container
 makes everything in the data directory owner-only (`PUID`, files `600`, folders `700`), and each start takes
@@ -1545,6 +1546,21 @@ The app itself, and anything running as root, are not affected.
 `chmod -R go+rX <your data directory>`. Both are needed: `UMASK=022` only affects new files, and nothing
 loosens the old ones automatically. Better still, give the other reader the same `PUID`, or run it as root,
 and keep the default. See
+[Who can read the data directory](docs/operations.md#who-can-read-the-data-directory).
+
+## The `[entrypoint]` line reports the same number of entries "with group/other access found" on every start
+
+**What you see:** At the default `UMASK=077`, every start logs the same non-zero count, e.g.
+`[entrypoint] umask 077; existing entries with group/other access found: 57; modes: babymonitor.db=644 ...`,
+and the modes it lists stay `644` (or `777`) instead of becoming `600`.
+
+**Why:** The data directory is on a filesystem that ignores `chmod`: a Docker Desktop for Windows bind mount
+(which is what the Compose default `./data` is there), or a CIFS/NTFS mount with a fixed `file_mode`. The
+start-up pass finds the same entries each time and cannot change them. The count is what it *found*; a
+change that fails with an error is logged as a separate warning.
+
+**What to do:** Nothing in Nightlight can change this. On such a filesystem the protection is its own access
+control (the Windows folder's permissions, the share's mount options), so set that up instead. See
 [Who can read the data directory](docs/operations.md#who-can-read-the-data-directory).
 
 ## Confirmed bugs (fix pending)

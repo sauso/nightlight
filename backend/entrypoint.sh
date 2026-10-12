@@ -57,6 +57,11 @@ fi
 # starts (same uid, #553) create the database, snapshots, clips and recordings with it. SQLite gives
 # -wal/-shm the database file's own mode, so they follow the database rather than the mask.
 umask "$UMASK"
+# ...but a non-default DATA_DIR whose PARENTS do not exist yet gets those parents under 022, in a
+# subshell so the mask above stays. Made under 077 they would be root:0700, the chown below only
+# re-owns the data directory itself, and the app user could not even reach it (review of #549, PR
+# #689). Before #549 they were 0755 too. Only the data directory itself takes the mask.
+( umask 022; mkdir -p "$(dirname "$DATA_DIR")" )
 mkdir -p "$DATA_DIR"
 # Runs on every start, not just first install - this is also what makes it safe to
 # adopt on an existing deployment: any files left over from an earlier root-only setup
@@ -73,24 +78,32 @@ chown -R nightlight:nightlight "$DATA_DIR"
 #     "New Permissions" tool run over appdata (it makes a share world-readable), heals on the next start, with
 #     no marker file to get out of step. -perm /077 matches only entries that still have a bit to
 #     take, so an already-tight tree costs one walk (the chown has just warmed it) and no writes.
-#   - "$DATA_DIR/" WITH the slash: a DATA_DIR that is itself a symlink is walked, not skipped.
+#   - "$DATA_DIR" with NO trailing slash: the SAME root the chown -R above walks. A DATA_DIR that is
+#     itself a symlink is not re-owned by chown -R (it stops at the link), so it must not be
+#     tightened either: files still owned by another uid would become 0600 to THAT uid and lock the
+#     app out (review of #549, PR #689). find does not follow a starting-point link either, so such
+#     a DATA_DIR is simply left alone; new files in it still get the mask.
 #   - ! -type l: chmod follows a symlink, so a link in here pointing at another share or /etc would
 #     otherwise change THAT file's mode. (find never descends into a linked folder either.) Hard
 #     links and mounts nested inside the data directory ARE walked, exactly as chown -R walks them.
 #   - -print BEFORE -exec: counts the entries for the line below. -print is always true, so every
-#     entry still reaches chmod.
+#     entry still reaches chmod. The count is what was FOUND, printed before chmod ran, so the line
+#     says "found", not "tightened": a chmod that fails is reported by the warning below, and on a
+#     filesystem that ignores chmod (a Docker Desktop for Windows bind mount, say) the same count
+#     comes back on every start, which is how that case shows itself.
 #   - NEVER fatal under set -e: an unreadable subfolder (a root-squashed network share, say) must not
 #     become a container that will not start. A pipeline's status is its last command's (wc), so the
 #     walk cannot stop the script; `|| printf` is only there to SAY that it fell short.
 if [ "$UMASK" = 077 ]; then
-  TIGHTENED=$( { find "$DATA_DIR/" ! -type l -perm /077 -print -exec chmod go-rwx {} + || printf '[entrypoint] warning: could not tighten every entry under %s (see the error above); starting anyway\n' "$DATA_DIR" >&2; } | wc -l)
-  DONE="existing entries tightened: $TIGHTENED"
+  FOUND=$( { find "$DATA_DIR" ! -type l -perm /077 -print -exec chmod go-rwx {} + || printf '[entrypoint] warning: could not tighten every entry under %s (see the error above); starting anyway\n' "$DATA_DIR" >&2; } | wc -l)
+  DONE="existing entries with group/other access found: $FOUND"
 else
   DONE="existing entries left as they are (UMASK is not 077)"
 fi
 
 # One line to check after an upgrade (`docker logs`; on staging, `hx.sh logs`): the mask, what the
-# walk did, and the modes of the files that hold the secrets. Each is existence-guarded: on a first
+# walk found, and the modes of the files that hold the secrets (read AFTER the chmod, so they show
+# whether it took). Each is existence-guarded: on a first
 # boot there is no database or .jwt_secret yet, and -wal/-shm come and go with the open database.
 # stat -L: if one of them is a symlink, report the file the app actually opens, not the link.
 # The app logs its own `[data-dir]` line once it is up, which shows the mask actually REACHED it.
