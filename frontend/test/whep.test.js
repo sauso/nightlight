@@ -6,7 +6,9 @@
 //   * another origin is refused in every spelling the URL parser accepts for one;
 //   * a same-origin path that is not this camera's session is refused, including the three forms found in plan
 //     review that normalise to the protocol-relative path `//evil.example/x`;
-//   * exactly one non-empty segment after the POST path, and no encoded `/` or `\` in it;
+//   * exactly one non-empty segment after the POST path, with no `%` in it, and no encoded `/` or `\` anywhere in
+//     the path (the camera part included), while an escape the camera part legitimately needs is kept;
+//   * userinfo in front of THIS host is accepted and dropped (only a path is returned);
 //   * garbage in gives null, never an exception.
 // Fixtures are hostile on purpose: each refused input would be a token sent somewhere it should not go.
 //
@@ -48,9 +50,18 @@ describe('resolveWhepResource (#562)', () => {
     expect(resolve('whep/abc')).toBe('/live/cam1/whep/abc');
     // A camera path with more than one segment works the same way.
     expect(resolve('whep/abc', PAGE, '/live/room/cam1/whep')).toBe('/live/room/cam1/whep/abc');
+    // An escape in the CAMERA part is this app's own (it must equal the POST's path), so the session rule's
+    // "no `%`" does not reach it: a camera path that needs one keeps its DELETE.
+    expect(resolve('/live/cam%20one/whep/abc', PAGE, '/live/cam%20one/whep')).toBe('/live/cam%20one/whep/abc');
   });
 
-  test('refuses an address on another site: other host, scheme, port, userinfo, protocol-relative, backslash, non-http schemes', () => {
+  test('accepts userinfo in front of THIS host and drops it with the host: only the path is returned', () => {
+    // Same origin (an origin has no userinfo), so rule 1 lets it through; the credentials cannot reach the wire
+    // because the caller is handed a path.
+    expect(resolve('https://user:pw@nightlight.example/live/cam1/whep/abc')).toBe('/live/cam1/whep/abc');
+  });
+
+  test('refuses an address on another site: other host, scheme, port, userinfo with another host, protocol-relative, backslash, non-http schemes', () => {
     expectRefused([
       'https://evil.example/live/cam1/whep/abc',
       '//evil.example/live/cam1/whep/abc',
@@ -108,6 +119,7 @@ describe('resolveWhepResource (#562)', () => {
 
   test('refuses an encoded slash or backslash in the path, in either case', () => {
     expectRefused([
+      // In the session segment (the "no %" rule refuses these too).
       '/live/cam1/whep/a%2fb',
       '/live/cam1/whep/a%2Fb',
       '/live/cam1/whep/a%5cb',
@@ -115,9 +127,36 @@ describe('resolveWhepResource (#562)', () => {
       // One segment to this parser; `DELETE /api/auth/users/1` to a front proxy that decodes %2F.
       '/live/cam1/whep/..%2f..%2f..%2fapi%2fauth%2fusers%2f1',
     ]);
+    // In the CAMERA part, where only this rule applies (the "no %" rule is for the session segment alone). The
+    // Location matches the POST path exactly, so nothing else refuses these; both cases of each escape are here
+    // so the rule's case-insensitivity is pinned too.
+    for (const camera of ['a%2fb', 'a%2Fb', 'a%5cb', 'a%5Cb']) {
+      const post = `/live/${camera}/whep`;
+      expect(resolve(`${post}/abc`, PAGE, post), `should refuse a camera path ${camera}`).toBeNull();
+    }
+  });
+
+  test('refuses any percent sign in the session segment: double-encoded, harmless-looking and malformed escapes', () => {
+    expectRefused([
+      // `%25` is `%`: a layer that decodes twice turns this into `/` (found in code review: it passed the
+      // `%2f|%5c` rule).
+      '/live/cam1/whep/a%252fb',
+      '/live/cam1/whep/..%252f..%252f..%252fapi',
+      // Harmless-looking escapes: refused all the same, since no session id needs one.
+      '/live/cam1/whep/%41',
+      '/live/cam1/whep/a%2eb',
+      // A lone or malformed escape: the URL parser leaves it as it is.
+      '/live/cam1/whep/%',
+      '/live/cam1/whep/abc%',
+      '/live/cam1/whep/%zz',
+    ]);
+    // A whole-segment `%2e` is `.` to the URL parser and normalises away (refused as an empty segment).
+    expect(resolve('/live/cam1/whep/%2e')).toBeNull();
   });
 
   test('returns null instead of throwing on a missing, non-string or unparseable input', () => {
+    // The array is the hostile one: its string form is a valid session address, so only the `typeof` check
+    // refuses it (`new URL` would happily stringify it).
     for (const location of ['', null, undefined, 42, {}, ['/live/cam1/whep/abc']]) {
       expect(resolve(location), `should refuse ${String(location)}`).toBeNull();
     }

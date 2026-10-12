@@ -268,6 +268,16 @@ export default function WhepPlayer({
         fetch(resourceUrlRef.current, {
           method: 'DELETE',
           headers: { Authorization: `Bearer ${getToken()}` },
+          // WHY no redirects (#562, found in code review with a stub server): a same-origin 307/308 answer
+          // to this DELETE is followed with the method AND the Authorization header kept (the Fetch spec
+          // keeps a DELETE's method on a 301/302 as well; not tried), so checking the first address
+          // (resolveWhepResource above) would not bound where the token ends up: a redirect to an /api
+          // route would replay the DELETE there. Refusing to follow costs nothing: the DELETE is
+          // a courtesy and its failure is already swallowed by the catch below.
+          // The POST above is deliberately left on the default (follow): it goes to the fixed address this
+          // file builds, not one a response named, and a legitimate reverse proxy may redirect it (to
+          // https, say); refusing there could break the live view for that install.
+          redirect: 'error',
         }).catch(() => {});
         resourceUrlRef.current = null;
       }
