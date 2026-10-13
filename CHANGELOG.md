@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Security
+
+- **Updated three dependencies with published security advisories: `proxy-addr` 2.0.7 → 2.0.8 (GHSA-jqcg-44mw-7w3h), `@fastify/busboy` 3.2.0 → 3.2.3 (GHSA-xjh9-v7x6-24jw, GHSA-x8mw-p69m-v3mx, GHSA-gxm5-99cw-xjw9) and `ip-address` 10.5.0 → 10.7.4 (GHSA-rpw4-54j3-4h4q, GHSA-2vr4-cq9g-pvrc, GHSA-j6r3-76f7-8jcv, GHSA-h3mg-xc3c-68pw).** Patch and minor bumps inside the ranges already in `package.json`, so only the lockfile changes. One behaviour change: an IPv6 `TRUST_PROXY` range is now compared with IPv4 peers by the rules in the `proxy-addr` advisory, so a value such as `::/1` no longer counts an IPv4 address as trusted (IPv4 ranges and the named ranges are unaffected). `http-proxy-middleware` (GHSA-vfj7-8cjw-p6xm, via `micromatch` and `braces`) is **not** fixed: no `braces` release carries the fix, and `http-proxy-middleware` 4.x depends on the same `micromatch`, so a major bump would not clear it.
+
 ## [0.39.0] - 2026-10-13
 
 ### Fixed

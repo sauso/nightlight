@@ -957,6 +957,10 @@ Set it to the address your proxy connects *from*:
 > `X-Forwarded-For` and slip the login rate limit entirely, which is worse than leaving it unset. If
 > you are not sure, leave it alone.
 
+IPv6 ranges only ever match IPv6 peers, and IPv4 ranges only IPv4 peers (an IPv4-mapped IPv6 address such
+as `::ffff:10.0.0.20` counts as the IPv4 address it wraps). Before the `proxy-addr` 2.0.8 update an IPv6 range such as `::/1` could
+also match IPv4 peers; if you relied on that, list the IPv4 address or range instead.
+
 A value Nightlight can't make sense of is **ignored, with a warning in the log**, and the safe default
 is used instead — a typo here will never stop the app starting.
 
