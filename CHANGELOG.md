@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+
+- **A `STUN_SERVERS` setting decides which STUN servers Low latency (WebRTC) contacts, the image reports its own health, and a few packaging gaps are closed (#558, #567).** Until now Google's public STUN server was fixed in three places (the browser, the bundled MediaMTX and the security policy), so every live view told Google the viewer's public IP and when it connected, with no way to stop it. `STUN_SERVERS` takes a comma-separated list of `stun:host[:port]` URLs; **unset keeps Google's server exactly as before**, a **blank value uses no STUN server at all** (nothing then contacts Google), and an entry that is not a `stun:` URL is ignored with one warning (if none is valid, STUN is off). One setting now drives all three places. Watching on your home network never needs STUN; a viewer outside it, behind NAT, may. The README's "no cloud" note now says this accurately. Also: the image has a Docker `HEALTHCHECK` (`GET /api/health`, 2 minute start period), which only marks the container healthy or unhealthy and restarts nothing; the start-up script no longer re-owns the whole data directory on every start, only when the directory, the database or `.jwt_secret` has the wrong owner, which makes starts with many gigabytes of clips much faster (a wrong owner deeper in the tree is no longer repaired at start: see docs/operations.md); the Unraid template gained the missing **Trusted Proxy** (`TRUST_PROXY`) and **STUN Servers** fields; and a stray empty `package-lock.json` at the repository root was removed. `GET /api/about` gained a `stunServers` field.
+
 ## [0.39.0] - 2026-10-13
 
 ### Fixed

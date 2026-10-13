@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { getToken } from '../lib/api.js';
 import { resolveWhepResource } from '../lib/whep.js';
+import { getIceServers } from '../lib/iceServers.js';
 import { useNowPlayingSession, NOW_PLAYING_ARTWORK } from '../lib/useNowPlaying.js';
 
 // Re-exported for backwards compatibility with any importer that reached for it here; the
@@ -121,11 +122,12 @@ export default function WhepPlayer({
       setState('connecting');
       setErrorMsg('');
       try {
-        const pc = new RTCPeerConnection({
-          // STUN helps both sides discover a reachable address when connecting over the
-          // internet. Harmless and effectively unused for same-LAN viewing.
-          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-        });
+        // STUN helps both sides discover a reachable address when connecting over the internet and is
+        // not used for same-network viewing. Which servers (possibly none) is the server's STUN_SERVERS
+        // setting, not a constant here: see lib/iceServers.js (#558).
+        const iceServers = await getIceServers();
+        if (cancelled) return;
+        const pc = new RTCPeerConnection({ iceServers });
         pcRef.current = pc;
         pc.addTransceiver('video', { direction: 'recvonly' });
         pc.addTransceiver('audio', { direction: 'recvonly' });

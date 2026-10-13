@@ -88,10 +88,12 @@ chmod -R go+rX /mnt/user/appdata/nightlight     # your Data Directory / APPDATA_
   the Compose default `./data` is there), or a CIFS/NTFS mount with a fixed `file_mode` — modes
   cannot change: the start-up line reports the same count on every start and the modes it shows stay
   as they were. What protects the data there is that filesystem's own access control.
-- The start-up pass walks the data directory the way the ownership fix (`chown -R`) always has: a
-  **hard link** to a file elsewhere, or **another mount nested inside** the data directory, is
+- The start-up pass walks the data directory the way the ownership fix (`chown -R`) does when it
+  runs: a **hard link** to a file elsewhere, or **another mount nested inside** the data directory, is
   changed too. A **symbolic link** is never followed: what it points to keeps its mode. On a large
-  `clips/` folder the pass takes about as long as the ownership fix does.
+  `clips/` folder this pass still reads every entry on every start (it writes only what needs
+  tightening); the ownership fix, which rewrites every entry, now runs only when the data directory,
+  the database or `.jwt_secret` has the wrong owner.
 - A `DATA_DIR` that is **itself a symbolic link** is neither re-owned nor tightened (the ownership
   fix stops at the link, and tightening files another user still owns would lock the app out of
   them); only new files in it follow the mask. The default `/app/data` mount is not a link.
@@ -101,6 +103,19 @@ chmod -R go+rX /mnt/user/appdata/nightlight     # your Data Directory / APPDATA_
   the image's own modes (`644`), not the mask. They are stock media, not secrets.
 - Only the image's start-up script sets the mask. Running the backend directly (`node src/index.js`,
   development) uses your own shell's umask and tightens nothing.
+
+### Health check
+
+The image defines a Docker `HEALTHCHECK`: every 30 seconds it requests `GET /api/health` (no login
+needed; it answers `{"ok":true}`) on the port the app listens on (`PORT`, default 4000), with a
+5 second timeout. After 3 failures in a row the container is marked **unhealthy**; failures during
+the first **120 seconds** after start do not count, because MediaMTX and the detectors start slowly.
+`docker ps`, `docker inspect` and Unraid's Docker tab show it.
+
+**It only shows a state. Nothing restarts an unhealthy container**: plain Docker, Compose and
+Unraid ignore it for restarts (`restart: unless-stopped` acts only when the process exits). It
+answers "is the web server responding", not "is every camera streaming". If you want automatic
+restarts, that needs something outside the image that watches the health status.
 
 ## 1. Check the current version and image revision
 
@@ -174,9 +189,13 @@ losing a few recent clips, arguably more disposable than the database.
 2. Put the backed-up files in the target's data directory (`APPDATA_DIR` / Data Directory) —
    just `babymonitor.db` if you used the online-backup method, or all three database files plus
    `.jwt_secret` and `clips/` for a full restore.
-3. **Ownership matters**: the container `chown`s the data directory to `PUID`/`PGID` on startup,
-   so restoring as root (or a different user) and starting with the usual `PUID=99`/`PGID=100`
-   self-corrects — you don't need to manually `chown` first. At the default `UMASK` the same
+3. **Ownership matters**: the container `chown`s the data directory to `PUID`/`PGID` on startup
+   when the directory itself, or the database / `.jwt_secret`, is not already owned by them, so
+   restoring those as root (or a different user) and starting with the usual `PUID=99`/`PGID=100`
+   self-corrects — you don't need to manually `chown` first. ⚠️ It no longer walks the whole tree
+   on every start (that was slow with many GB of clips): a **restored `clips/` folder** owned by
+   someone else, inside a data directory that is already right, is not fixed. Run
+   `chown -R 99:100 <data directory>` on the host (your `PUID:PGID`) after restoring clips. At the default `UMASK` the same
    start also makes the restored files owner-only again (see
    [Who can read the data directory](#who-can-read-the-data-directory)).
 4. Start the container. Existing sessions from the backup are still valid if `.jwt_secret` was
