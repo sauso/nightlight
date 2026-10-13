@@ -282,6 +282,34 @@ describe('★ at the default, a session ends at its 30th day on EVERY path (#562
     assert.equal(purgeExpiredSessions(), 0, 'a second run finds nothing');
   });
 
+  test('★ the purge\'s idle rule is 31 days: a push-only phone idle 29.5 days and a future-dated row idle 30.5 days stay', () => {
+    // Review of #696: the case above only pins that an idle rule EXISTS (-32 days goes); '-31 days' could
+    // become '-1 days' and it would still pass. A phone that only RECEIVES push never makes a request, so its
+    // last_seen_at stays at its sign-in time: it must keep its session and its push token until the lifetime
+    // ends, however long it has been idle inside it. Half-day margins either side of each threshold.
+    const at = (userId, created, seen) => {
+      const sid = makeSession(db, userId);
+      db.prepare("UPDATE sessions SET created_at = datetime('now', ?, ?), last_seen_at = datetime('now', ?, ?) WHERE id = ?")
+        .run(...created, ...seen, sid);
+      return sid;
+    };
+    const pushOnly = at(admin.id, ['-29 days', '-12 hours'], ['-29 days', '-12 hours']);
+    // created_at in the future (a clock that went backwards): only the idle rule applies to these two.
+    const idle30 = at(carer.id, ['+1 day', '+0 minutes'], ['-30 days', '-12 hours']);
+    const idle31 = at(carer.id, ['+1 day', '+0 minutes'], ['-31 days', '-12 hours']);
+    addPush('tok-push-only', admin.id, pushOnly);
+    addPush('tok-idle-30', carer.id, idle30);
+    addPush('tok-idle-31', carer.id, idle31);
+
+    assert.equal(purgeExpiredSessions(), 1);
+    assert.deepEqual(db.prepare('SELECT id FROM sessions').all().map((r) => r.id).sort(), [pushOnly, idle30].sort());
+    assert.deepEqual(
+      db.prepare('SELECT token FROM push_tokens ORDER BY token').all().map((r) => r.token),
+      ['tok-idle-30', 'tok-push-only'],
+      'a session the purge keeps must keep its push registration too'
+    );
+  });
+
   test('★ GET /sessions and GET /sessions/all do not list a session past its lifetime', async () => {
     const current = makeSession(db, admin.id);
     const dead = aged(admin.id, 30, '-1 minute');
@@ -302,6 +330,27 @@ describe('★ at the default, a session ends at its 30th day on EVERY path (#562
     assert.equal(all.body.find((s) => s.id === carersLive).username, 'carer', 'the join still names the account');
   });
 
+  test('★ both session lists put the most recently active device first (ORDER BY last_seen_at DESC)', async () => {
+    // Review of #696: the case above sorts ids before comparing, so it cannot see the order. Fixed ids,
+    // created in the REVERSE of the expected order, so neither insertion (rowid) order nor id order can pass
+    // for newest-first. All inside the lifetime; the current session was seen just now (no touch happens).
+    const seen = (id, userId, ago) => {
+      makeSession(db, userId, { id });
+      db.prepare("UPDATE sessions SET created_at = datetime('now', '-1 day'), last_seen_at = datetime('now', ?) WHERE id = ?").run(ago, id);
+      return id;
+    };
+    seen('sess-1', admin.id, '-3 hours');
+    seen('sess-2', carer.id, '-1 hour');
+    seen('sess-3', admin.id, '-10 minutes');
+    const current = seen('sess-4', admin.id, '+0 minutes');
+    const token = sessionToken(admin, current);
+
+    const own = await call(`${api.url}/api/auth/sessions`, { token });
+    assert.deepEqual(own.body.map((s) => s.id), ['sess-4', 'sess-3', 'sess-1']);
+    const all = await call(`${api.url}/api/auth/sessions/all`, { token });
+    assert.deepEqual(all.body.map((s) => s.id), ['sess-4', 'sess-3', 'sess-2', 'sess-1']);
+  });
+
   test('★ the token issued at login carries exp - iat = 30 days', async () => {
     const res = await call(`${api.url}/api/auth/login`, { method: 'POST', body: { username: 'admin', password: 'hunter22-long' } });
     assert.equal(res.status, 200, JSON.stringify(res.body));
@@ -312,14 +361,16 @@ describe('★ at the default, a session ends at its 30th day on EVERY path (#562
 
 // ---------------------------------------------------------------------------------------------------
 // ⚠️ A PIN, NOT A BEHAVIOURAL TEST. index.js cannot be imported (it boots the app), so the one line that hands
-// the sweep its liveness rule, and the purge it schedules, are checked by reading the source. It fails if the
-// sweep goes back to an inline query (the copy that drifted) or stops using the shared function.
-test('index.js pin: the sweep hands sessionsToKick isLiveSessionId, and the purge is the one from middleware/auth.js', () => {
+// the sweep its liveness rule, and the purge it runs at start and schedules daily, are checked by reading the
+// source. It fails if the sweep goes back to an inline query (the copy that drifted) or stops using the shared
+// function, or if either purge call goes (review of #696: the start-up call was not pinned).
+test('index.js pin: the sweep hands sessionsToKick isLiveSessionId, and the purge from middleware/auth.js runs at start and daily', () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const raw = fs.readFileSync(path.join(here, '..', 'src', 'index.js'), 'utf8');
   const code = stripCommentsAndStrings(raw);
   assert.match(raw, /import \{[^}]*\bisLiveSessionId\b[^}]*\bpurgeExpiredSessions\b[^}]*\} from '\.\/middleware\/auth\.js';/);
   assert.match(code, /sessionsToKick\(sessions, webrtcSessionOwners, isLiveSessionId, listStartedAt\)/);
+  assert.match(code, /^purgeExpiredSessions\(\);\r?$/m, 'the purge no longer runs at start (only after the first day)');
   assert.match(code, /safeInterval\('', 24 \* 60 \* 60 \* 1000, purgeExpiredSessions\)/);
   assert.doesNotMatch(code, /function purgeExpiredSessions/, 'a local purge would shadow the shared one');
   assert.doesNotMatch(raw, /FROM sessions/, 'index.js has its own sessions query again: use middleware/auth.js');

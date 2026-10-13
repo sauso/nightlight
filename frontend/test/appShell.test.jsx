@@ -275,6 +275,7 @@ describe('★ #562 a request answered 401 while the app is open', () => {
 
   test('★ shows the sign-in form at once, without a reload, and drops the token and the media token', async () => {
     await signedInShell();
+    const reset = vi.spyOn(push, 'resetPushRegistration');
     globalThis.fetch = vi.fn(async () => reply(401, { error: 'Invalid or expired session' }));
 
     await act(async () => { await api.get('/cameras').catch(() => {}); });
@@ -284,6 +285,10 @@ describe('★ #562 a request answered 401 while the app is open', () => {
     expect(document.querySelector('.app-shell')).toBeNull();
     expect(getToken()).toBeNull();
     expect(getMediaToken()).toBeNull();
+    // Review of #696: push registration is forgotten too, so signing in again in this page registers push
+    // under the new session (pushNotifications.test.js proves what the reset does to the flag). At least once,
+    // not exactly once: every request the app still makes here answers 401 too, and each one resets again.
+    expect(reset).toHaveBeenCalled();
   });
 
   test('★ a request that TIMED OUT cannot sign anyone out when its 401 arrives late', async () => {

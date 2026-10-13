@@ -158,3 +158,16 @@ export async function unregisterPushNotifications() {
     /* ignore */
   }
 }
+
+// Forget that this device registered, and tell the server NOTHING (#562). For AuthContext's 401 listener:
+// when a sign-in ends server-side (its lifetime ran out, it was signed out elsewhere) the app drops the
+// user and shows the sign-in form in the same page. Signing in again then calls initPushNotifications(),
+// and without this reset its `registered` early return would skip re-registering, so the device stayed
+// bound to the dead session and got no alerts until the app was relaunched (found by review of #696).
+//
+// ⚠️ NOT unregisterPushNotifications(): that POSTs /push/unregister with a token the server has already
+// refused, the answer is another 401, which fires the same listener again, which unregisters again: a
+// loop. Nothing needs sending anyway: the server stops pushing to a session once it has ended.
+export function resetPushRegistration() {
+  registered = false;
+}

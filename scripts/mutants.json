@@ -16971,10 +16971,10 @@
   {
     "label": "#562 TTL F3: the 401 listener drops the user but keeps the media token",
     "file": "frontend/src/lib/AuthContext.jsx",
-    "find": "    clearMediaToken();\n    setUser(null);",
-    "replace": "    setUser(null);",
+    "find": "    clearMediaToken();\n    resetPushRegistration();",
+    "replace": "    resetPushRegistration();",
     "expect": "killed",
-    "tests": ["appShell.test.jsx"],
+    "tests": ["appShell.test.jsx", "lib/AuthContext.test.jsx"],
     "namePattern": "#562"
   },
   {
@@ -17012,5 +17012,88 @@
     "expect": "killed",
     "tests": ["lib/api.test.js"],
     "namePattern": "registered DURING"
+  },
+  {
+    "label": "#562 TTL F8: the 401 listener no longer resets push registration (signing in again in the same page never re-registers push)",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "    resetPushRegistration();\n    setUser(null);",
+    "replace": "    setUser(null);",
+    "expect": "killed",
+    "tests": ["lib/AuthContext.test.jsx", "appShell.test.jsx"],
+    "namePattern": "#562"
+  },
+  {
+    "label": "#562 TTL F9: resetPushRegistration does not clear the registered flag",
+    "file": "frontend/src/lib/pushNotifications.js",
+    "find": "export function resetPushRegistration() {\n  registered = false;\n}",
+    "replace": "export function resetPushRegistration() {\n}",
+    "expect": "killed",
+    "tests": ["lib/pushNotifications.test.js"],
+    "namePattern": "#562"
+  },
+  {
+    "label": "#562 TTL F10: AuthProvider's 401 effect returns no cleanup (an unmounted provider is still called)",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "  useEffect(() => onUnauthorized(() => {",
+    "replace": "  useEffect(() => void onUnauthorized(() => {",
+    "expect": "killed",
+    "tests": ["lib/AuthContext.test.jsx"],
+    "namePattern": "unmounts"
+  },
+  {
+    "label": "#562 TTL M28: the purge's idle threshold is 1 day instead of 31 (a push-only phone loses its session)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "const purgeable = `last_seen_at < datetime('now', '-31 days') OR",
+    "replace": "const purgeable = `last_seen_at < datetime('now', '-1 days') OR",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "idle rule is 31 days"
+  },
+  {
+    "label": "#562 TTL M29: the purge's idle threshold is 30 days instead of 31",
+    "file": "backend/src/middleware/auth.js",
+    "find": "const purgeable = `last_seen_at < datetime('now', '-31 days') OR",
+    "replace": "const purgeable = `last_seen_at < datetime('now', '-30 days') OR",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "idle rule is 31 days",
+    "note": "Only the future-dated row idle 30.5 days separates 30 from 31: at the default lifetime any other row idle that long is already past its lifetime."
+  },
+  {
+    "label": "#562 TTL M30: the purge's idle threshold is 32 days instead of 31",
+    "file": "backend/src/middleware/auth.js",
+    "find": "const purgeable = `last_seen_at < datetime('now', '-31 days') OR",
+    "replace": "const purgeable = `last_seen_at < datetime('now', '-32 days') OR",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "idle rule is 31 days"
+  },
+  {
+    "label": "#562 TTL M31: GET /sessions lists the least recently active device first",
+    "file": "backend/src/routes/auth.js",
+    "find": "AND ${listAge.sql} ORDER BY last_seen_at DESC`",
+    "replace": "AND ${listAge.sql} ORDER BY last_seen_at ASC`",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "most recently active"
+  },
+  {
+    "label": "#562 TTL M32: GET /sessions/all lists the least recently active device first",
+    "file": "backend/src/routes/auth.js",
+    "find": "   ORDER BY last_seen_at DESC`",
+    "replace": "   ORDER BY last_seen_at ASC`",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "most recently active"
+  },
+  {
+    "label": "#562 TTL M33: index.js no longer purges at start (only after the first day)",
+    "file": "backend/src/index.js",
+    "find": "purgeExpiredSessions();",
+    "replace": "void purgeExpiredSessions;",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "index.js pin",
+    "note": "Killed by a SOURCE PIN, not a behavioural test: index.js boots the app and cannot be imported."
   }
 ]

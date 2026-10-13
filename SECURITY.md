@@ -112,8 +112,10 @@ this setting existed. 7 is the least on purpose: because the end is silent for a
 lifetime would stop a parent's alerts at the same hour every night.
 
 **Lowering it signs out every sign-in older than the new value, at that device's next request**, push
-and live views included: they all check the same rule. Raising it again does not bring a signed-out
-device back; that device signs in again.
+and live views included: they all check the same rule. **Raising it does not lengthen sign-ins already
+made**: each sign-in's token carries the lifetime in force when it was issued, so a sign-in made while the
+setting was 7 still ends on its 7th day after you raise it to 30; only sign-ins made after the change get
+the longer lifetime. Nor does raising it bring a signed-out device back; that device signs in again.
 
 **What else to know:**
 

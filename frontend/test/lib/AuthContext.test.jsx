@@ -8,11 +8,14 @@ import { useContext } from 'react';
 // Logout best-effort unregisters this device for push. Stubbed so the test doesn't need a service
 // worker; asserted on, because "sign out stops the alerts" is the user-visible promise.
 const unregisterPushNotifications = vi.fn();
+// #562: the 401 listener resets push registration locally (see the describe at the end).
+const resetPushRegistration = vi.fn();
 vi.mock('../../src/lib/pushNotifications.js', () => ({
   unregisterPushNotifications: () => unregisterPushNotifications(),
+  resetPushRegistration: () => resetPushRegistration(),
 }));
 
-let AuthProvider, AuthContext, setToken, getToken, getMediaToken;
+let AuthProvider, AuthContext, setToken, getToken, getMediaToken, api;
 
 function stubFetch(handler) {
   globalThis.fetch = vi.fn(async (url, init) => {
@@ -56,7 +59,8 @@ beforeEach(async () => {
   // re-arm it here rather than once at declaration.
   unregisterPushNotifications.mockReset();
   unregisterPushNotifications.mockResolvedValue(undefined);
-  ({ setToken, getToken, getMediaToken } = await import('../../src/lib/api.js'));
+  resetPushRegistration.mockReset();
+  ({ setToken, getToken, getMediaToken, api } = await import('../../src/lib/api.js'));
   ({ AuthProvider, AuthContext } = await import('../../src/lib/AuthContext.jsx'));
 });
 
@@ -217,5 +221,46 @@ describe('media-token keepalive', () => {
 
     await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60 * 60 * 1000); });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// #562: a sign-in can end server-side while the app is open; the provider listens for the 401 (api.js's
+// onUnauthorized). The app-level proof that the sign-in form then appears is in appShell.test.jsx; these pin
+// what the provider itself does and that it stops listening when it unmounts.
+describe('★ #562 a 401 on any request while signed in', () => {
+  async function signedIn() {
+    setToken('stored');
+    stubFetch((url) =>
+      url.endsWith('/auth/me')
+        ? { body: { id: 'u1', username: 'nacho', role: 'admin' } }
+        : { body: { token: 'media-abc', expires_in: 43200 } }
+    );
+    const utils = renderProvider();
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('nacho'));
+    expect(getMediaToken()).toBe('media-abc');
+    return utils;
+  }
+  const answer401 = () => stubFetch(() => ({ status: 401, body: { error: 'Invalid or expired session' } }));
+
+  test('★ drops the user and the media token, and resets push registration WITHOUT an unregister request', async () => {
+    await signedIn();
+    const fetchMock = answer401();
+    await act(async () => { await api.get('/cameras').catch(() => {}); });
+
+    expect(screen.getByTestId('user')).toHaveTextContent('none');
+    expect(getMediaToken()).toBeNull();
+    // Reset locally, so signing in again in this page registers push afresh (pushNotifications.test.js
+    // proves the flag); never unregister, whose request would answer 401 and fire this listener again.
+    expect(resetPushRegistration).toHaveBeenCalledTimes(1);
+    expect(unregisterPushNotifications).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1); // the one request that answered 401, nothing after it
+  });
+
+  test('★ after the provider unmounts, a 401 no longer reaches it (the effect returns the unsubscribe)', async () => {
+    const { unmount } = await signedIn();
+    unmount();
+    answer401();
+    await act(async () => { await api.get('/cameras').catch(() => {}); });
+    expect(resetPushRegistration).not.toHaveBeenCalled();
   });
 });

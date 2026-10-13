@@ -912,8 +912,9 @@ admin loses their authenticator.
 - **It can only shorten.** 30 is the most, as before this setting existed; 7 is the least, because a shorter,
   silent end would stop alerts at the same hour every few nights.
 - **Lowering it signs out every sign-in older than the new value at that device's next request**, push and
-  live views included (they check the same rule). A changed value needs a restart, and one other than 30 is
-  logged at start.
+  live views included (they check the same rule). **Raising it does not lengthen sign-ins already made**: a
+  sign-in's token carries the lifetime in force when it was issued, so one made at 7 still ends on its 7th
+  day after you raise it to 30. A changed value needs a restart, and one other than 30 is logged at start.
 - **There is no idle sign-out**: an unused device stays signed in until its lifetime ends.
 - The sign-in token is kept in the browser's (or the Android app's) `localStorage`, and every sign-in can be
   ended from the server at once (sign out a device, remove an account, change a password). Since this
