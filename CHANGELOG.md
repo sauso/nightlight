@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **Typing the wrong current password when changing your password, or the wrong password when turning off two-factor, no longer signs you out (#697).** The server answered 401, which the web app reads as "this sign-in is over", so a typo cleared your session and showed the sign-in form. It now answers 400 with the same message, shown next to the field, and you stay signed in. Only the status code changed; the response body, rate limits and sessions are as before. Known gap: an app that treats these two answers as a sign-out by status code (for example the Android shell) is not checked here.
+
 ## [0.39.0] - 2026-10-13
 
 ### Fixed

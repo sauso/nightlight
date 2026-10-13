@@ -166,7 +166,8 @@ page and only a 4xx message reaches the person:
   `http-errors` / body-parser / `send` convention), capped at 200 characters; otherwise a generic message
   for that status is used. Two exceptions: a **401** on a thrown error is never honoured (the web UI signs
   the user out on any 401, and a library error can carry its upstream's status), so 401 comes only from
-  `middleware/auth.js`; and a **403** is honoured only when the error is `expose: true`, which is what
+  `middleware/auth.js` (and the pre-sign-in `/login` steps). A wrong *confirmation* password on a signed-in
+  route (`PUT /auth/me/password`, `POST /auth/me/mfa/disable`) is a **400**, never a 401, for the same reason (#697); and a **403** is honoured only when the error is `expose: true`, which is what
   `res.sendFile` throws for a denied dotfile or a `..` path (a bare `{ status: 403 }` from some other
   library stays a 500).
 - **5xx: a server bug.** The response is `500` with a generic message. The real error (message and stack)

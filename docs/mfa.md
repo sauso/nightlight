@@ -27,6 +27,9 @@ the same field instead of an app code.
 
 **Account → Two-factor authentication → Turn off two-factor**, confirmed with your password.
 
+A wrong password is refused with a message in the dialog (HTTP 400) and two-factor stays on. It does **not**
+sign you out; only a dead sign-in answers 401 (#697).
+
 ## Recovery
 
 Lost your authenticator? Use a **backup code** at login. If you're also out of backup codes:

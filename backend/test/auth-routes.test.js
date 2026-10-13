@@ -222,7 +222,7 @@ describe('PUT /me/password — the CURRENT password is required', () => {
     const token = await login();
     const before = db.prepare('SELECT password_hash FROM users WHERE id = ?').get('u-admin').password_hash;
     const res = await put('/me/password', { current_password: 'wrong', new_password: 'a-new-long-password' }, token);
-    assert.equal(res.status, 401, 'the current password was not verified');
+    assert.equal(res.status, 400, 'the current password was not verified');
     const after = db.prepare('SELECT password_hash FROM users WHERE id = ?').get('u-admin').password_hash;
     assert.equal(after, before, 'the password was changed despite the wrong current password');
   });
@@ -279,6 +279,76 @@ describe('PUT /me/password — the CURRENT password is required', () => {
   });
 });
 
+// #697. frontend/src/lib/api.js treats ANY 401 as "this sign-in is over" and clears the token, so a mistyped
+// confirmation password must never answer 401: the sign-in is fine, only the typed value is wrong.
+// MUTANTS THIS KILLS: either route going back to 401 (status), a wrong password revoking the caller's
+// session (it must stay usable), and the body drifting (same message, same single `error` field).
+describe('#697 a wrong confirmation password does not look like a dead sign-in', () => {
+  const sessionRow = (token) => db.prepare('SELECT * FROM sessions WHERE id = ?').get(jwt.decode(token).sid);
+  const mfaToken = async () => {
+    const { body } = await post('/login', { username: 'bob', password: PASSWORD });
+    return (await post('/login/mfa', { mfaToken: body.mfaToken, code: totp(mfaSecret) })).body.token;
+  };
+  const cases = [
+    {
+      name: 'PUT /me/password',
+      token: async () => (await post('/login', { username: 'alice', password: PASSWORD })).body.token,
+      wrong: (t) => put('/me/password', { current_password: 'wrong', new_password: 'a-new-long-password' }, t),
+      right: (t) => put('/me/password', { current_password: PASSWORD, new_password: 'a-new-long-password' }, t),
+      message: 'Current password is incorrect',
+    },
+    {
+      name: 'POST /me/mfa/disable',
+      token: mfaToken,
+      wrong: (t) => post('/me/mfa/disable', { password: 'wrong' }, t),
+      right: (t) => post('/me/mfa/disable', { password: PASSWORD }, t),
+      message: 'Password is incorrect',
+    },
+  ];
+
+  for (const c of cases) {
+    test(`★ ${c.name}: wrong password answers a 4xx that is not 401, with the same body`, async () => {
+      const res = await c.wrong(await c.token());
+      assert.notEqual(res.status, 401, 'a 401 makes the web client clear the token and show the sign-in form');
+      assert.equal(res.status, 400);
+      // Exactly one field, same text: additive-only response changes, and no rename.
+      assert.deepEqual(res.body, { error: c.message });
+    });
+
+    test(`★ ${c.name}: after a wrong password the token and session are still valid`, async () => {
+      const token = await c.token();
+      const sid = jwt.decode(token).sid;
+      // Stale on purpose: requireAuth's normal throttled touch (60 s) then runs on this request, and
+      // nothing else may touch the row, so the only change allowed is that normal one.
+      db.prepare("UPDATE sessions SET last_seen_at = datetime('now', '-10 minutes') WHERE id = ?").run(sid);
+      const before = sessionRow(token);
+
+      await c.wrong(token);
+
+      const after = sessionRow(token);
+      assert.ok(after, 'the wrong password deleted the caller’s session');
+      assert.equal(after.user_id, before.user_id);
+      assert.equal(after.created_at, before.created_at, 'the session was replaced rather than kept');
+      assert.equal(sessionsFor(before.user_id).length, 1, 'a session appeared or disappeared');
+      const me = await call(`${server.url}/api/auth/me`, { token });
+      assert.equal(me.status, 200, 'the token stopped working after a wrong password');
+    });
+
+    test(`${c.name}: the right password still works — the control`, async () => {
+      const res = await c.right(await c.token());
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      assert.deepEqual(res.body, { ok: true });
+    });
+  }
+
+  test('a wrong password writes nothing on either route', async () => {
+    const hashBefore = db.prepare('SELECT password_hash FROM users WHERE id = ?').get('u-mfa').password_hash;
+    await cases[1].wrong(await mfaToken());
+    assert.equal(db.prepare('SELECT mfa_enabled FROM users WHERE id = ?').get('u-mfa').mfa_enabled, 1);
+    assert.equal(db.prepare('SELECT password_hash FROM users WHERE id = ?').get('u-mfa').password_hash, hashBefore);
+  });
+});
+
 describe('POST /me/mfa/disable — the password is required', () => {
   // MUTANT THIS KILLS: dropping the password check, so anyone holding a token can strip the second
   // factor off the account it belongs to.
@@ -286,7 +356,7 @@ describe('POST /me/mfa/disable — the password is required', () => {
     const { body } = await post('/login', { username: 'bob', password: PASSWORD });
     const token = (await post('/login/mfa', { mfaToken: body.mfaToken, code: totp(mfaSecret) })).body.token;
     const res = await post('/me/mfa/disable', { password: 'wrong' }, token);
-    assert.equal(res.status, 401, 'MFA was disabled without the password');
+    assert.equal(res.status, 400, 'MFA was disabled without the password');
     assert.equal(db.prepare('SELECT mfa_enabled FROM users WHERE id = ?').get('u-mfa').mfa_enabled, 1);
   });
 
