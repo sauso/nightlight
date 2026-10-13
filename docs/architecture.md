@@ -86,7 +86,13 @@ unconditional reconcile-on-every-tick would cause constant disconnects.
 
 JWT-based, but a valid JWT alone isn't sufficient — every request also checks a `sessions` row
 in SQLite still exists (`backend/src/db.js`). This is what makes "sign out this device" and
-"delete this caregiver" take effect immediately rather than waiting for token expiry. Two auth
+"delete this caregiver" take effect immediately rather than waiting for token expiry. The same lookup
+checks the session's age: a session lasts `SESSION_TTL_DAYS` (default 30, range 7-30) from sign-in,
+judged by `sessions.created_at`, not by the token's `exp`, so lowering the setting ends older sessions at
+their next request even though their tokens say 30 days (#562). One helper, `sessionAgeCondition` in
+`middleware/auth.js`, supplies that condition to every place that asks: the request check (and so media
+tokens and the talk socket's `verifyToken`), push recipients (`lib/push.js`), the WebRTC live-view sweep
+(`isLiveSessionId`), the daily purge (`purgeExpiredSessions`) and the two session lists. Two auth
 middlewares exist: `requireAuth` (Bearer header) and `requireAuthQueryOrHeader` (also accepts
 `?token=`, needed because Safari's native `<video>` fetches HLS segments itself with no way to
 attach headers). Roles are `admin` / `caregiver`; `requireAdmin` gates account/settings management.

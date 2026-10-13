@@ -23,7 +23,7 @@ import App from '../src/App.jsx';
 // HashRouter is what production mounts, and it reads window.location.hash, which is how `boot` below
 // picks a starting route.
 const app = () => <HashRouter><App /></HashRouter>;
-import { api, setToken } from '../src/lib/api.js';
+import { api, setToken, getToken, getMediaToken, clearMediaToken } from '../src/lib/api.js';
 import * as nativeBridge from '../src/lib/nativeBridge.js';
 import * as push from '../src/lib/pushNotifications.js';
 
@@ -240,6 +240,79 @@ describe('the route table', () => {
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
     expect(screen.getByText('About')).toBeInTheDocument();
     expect(screen.queryByText('MQTT')).not.toBeInTheDocument();
+  });
+});
+
+// ★ #562 bullet 7. A session can now end while a tab is open (a lowered SESSION_TTL_DAYS signs older sessions
+// out at their next request; so do signing out from another device and removing the account). The server
+// answers 401, and api.js cleared the token and set #/login, but AuthProvider kept its user, so the router
+// sent #/login straight back to `/`: a dead live screen, no sign-in form, until a reload. A tablet left on the
+// live view is never backgrounded, so the reload-after-background rule never rescued it.
+//
+// These go through the REAL api.js and the REAL AuthProvider: only `fetch` is faked. The request is made by
+// the test through the same api module the app uses (the app's own polls would do it after 15 s; waiting for
+// one adds time, not coverage).
+describe('★ #562 a request answered 401 while the app is open', () => {
+  const realFetch = globalThis.fetch;
+  const reply = (status, body) => ({ ok: status >= 200 && status < 300, status, text: async () => JSON.stringify(body) });
+  // Answers the media-token request with a real-looking token, so the test can see it being dropped.
+  const healthy = (url) => (String(url).endsWith('/auth/media-token')
+    ? reply(200, { token: 'media-abc', expires_in: 43200 })
+    : reply(200, null));
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    clearMediaToken();
+  });
+
+  const signedInShell = async () => {
+    globalThis.fetch = vi.fn(async (url) => healthy(url));
+    setToken('a-token');
+    mockApi(ADMIN);
+    await boot('/');
+    await waitFor(() => expect(document.querySelector('.app-shell')).not.toBeNull());
+    expect(getMediaToken()).toBe('media-abc'); // precondition: there is a media token to drop
+    api.get.mockRestore(); // from here on, requests go through the real client
+  };
+
+  test('★ shows the sign-in form at once, without a reload, and drops the token and the media token', async () => {
+    await signedInShell();
+    const reset = vi.spyOn(push, 'resetPushRegistration');
+    globalThis.fetch = vi.fn(async () => reply(401, { error: 'Invalid or expired session' }));
+
+    await act(async () => { await api.get('/cameras').catch(() => {}); });
+
+    // The same render, no reload: jsdom cannot reload, so the form appearing in this document is the proof.
+    expect(await screen.findByLabelText(/username/i)).toBeInTheDocument();
+    expect(document.querySelector('.app-shell')).toBeNull();
+    expect(getToken()).toBeNull();
+    expect(getMediaToken()).toBeNull();
+    // Review of #696: push registration is forgotten too, so signing in again in this page registers push
+    // under the new session (pushNotifications.test.js proves what the reset does to the flag). At least once,
+    // not exactly once: every request the app still makes here answers 401 too, and each one resets again.
+    expect(reset).toHaveBeenCalled();
+  });
+
+  test('★ a request that TIMED OUT cannot sign anyone out when its 401 arrives late', async () => {
+    // The existing `signal.aborted` guard in api.js (review of 0.36.0) must keep covering the new listener:
+    // the person may have signed in again since, and a stale answer must not end that.
+    await signedInShell();
+    let answerLate;
+    globalThis.fetch = vi.fn((url) => (String(url).includes('/late-401-probe')
+      ? new Promise((resolve) => { answerLate = resolve; }) // ignores the abort signal, like a slow proxy
+      : Promise.resolve(healthy(url))));
+
+    const err = await api.get('/late-401-probe', { timeoutMs: 20 }).catch((e) => e);
+    expect(err.timedOut).toBe(true);
+    await act(async () => {
+      answerLate(reply(401, { error: 'Invalid or expired session' }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(document.querySelector('.app-shell')).not.toBeNull();
+    expect(screen.queryByLabelText(/username/i)).not.toBeInTheDocument();
+    expect(getToken()).toBe('a-token');
+    expect(getMediaToken()).toBe('media-abc');
   });
 });
 

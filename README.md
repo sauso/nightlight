@@ -895,6 +895,32 @@ Any account can also turn on **two-factor authentication** for its own login —
 **[docs/mfa.md](docs/mfa.md)** for enrolling, one-time backup codes, and how to recover if an
 admin loses their authenticator.
 
+### `SESSION_TTL_DAYS` — how long a sign-in lasts
+
+> **⚠️ A sign-in ends at the same time of day it began, and the app's push alerts stop with it, without
+> warning.** The lifetime is counted from sign-in, not from the last use: a phone that signed in at 02:00
+> is signed out at 02:00, `SESSION_TTL_DAYS` days later. From then until someone opens the app (which
+> shows the sign-in screen), that phone gets no Nightlight push alerts, and a live view or background
+> audio playing on it stops. Pushover, ntfy and Gotify are not affected. The session lists show when each
+> device was last active, not when it will be signed out: if you rely on a phone's alerts, sign in on it
+> again at a time that suits you before its lifetime runs out.
+
+| Variable | Default | Range | What it does |
+|---|---|---|---|
+| `SESSION_TTL_DAYS` | `30` (blank = 30) | `7`-`30` whole days | How many days a sign-in lasts, counted from sign-in. Anything else is ignored with a warning in the log and 30 is used. |
+
+- **It can only shorten.** 30 is the most, as before this setting existed; 7 is the least, because a shorter,
+  silent end would stop alerts at the same hour every few nights.
+- **Lowering it signs out every sign-in older than the new value at that device's next request**, push and
+  live views included (they check the same rule). **Raising it does not lengthen sign-ins already made**: a
+  sign-in's token carries the lifetime in force when it was issued, so one made at 7 still ends on its 7th
+  day after you raise it to 30. A changed value needs a restart, and one other than 30 is logged at start.
+- **There is no idle sign-out**: an unused device stays signed in until its lifetime ends.
+- The sign-in token is kept in the browser's (or the Android app's) `localStorage`, and every sign-in can be
+  ended from the server at once (sign out a device, remove an account, change a password). Since this
+  setting, the 12-hour token in video and snapshot URLs also stops when its sign-in ends. What this means
+  for security: [SECURITY.md](SECURITY.md#how-long-a-sign-in-lasts-and-where-it-is-kept).
+
 ## Running behind a reverse proxy (e.g. SWAG on Unraid)
 
 A ready-to-use config is in `reverse-proxy/nightlight.subdomain.conf`. Copy it to

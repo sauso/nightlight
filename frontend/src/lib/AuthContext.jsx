@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
-import { api, getToken, setToken, refreshMediaToken, clearMediaToken } from './api.js';
-import { unregisterPushNotifications } from './pushNotifications.js';
+import { api, getToken, setToken, refreshMediaToken, clearMediaToken, onUnauthorized } from './api.js';
+import { unregisterPushNotifications, resetPushRegistration } from './pushNotifications.js';
 
 // Exported so tests can inject a value directly — chiefly to render a screen as an admin and
 // again as a caregiver, since role gating is real in this UI and is where bugs hide.
@@ -32,6 +32,21 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     refresh();
   }, []);
+
+  // A 401 on ANY request means this sign-in is over (#562; see onUnauthorized in api.js). api.js has
+  // already cleared the stored token; dropping the user here is what makes the router show the sign-in
+  // form instead of bouncing #/login back to a screen whose every request now fails. The media token goes
+  // too, so nothing on screen keeps loading media with it. Not logout(): the server already ended this
+  // session, so there is nothing to sign out of and no token left to unregister push with (and an
+  // unregister request would answer 401 and fire this listener again). resetPushRegistration() only forgets
+  // locally that push was registered, so signing in again in this same page registers push afresh under the
+  // new session instead of hitting initPushNotifications()'s "already registered" early return.
+  // The effect returns onUnauthorized's unsubscribe, so an unmounted provider is never called.
+  useEffect(() => onUnauthorized(() => {
+    clearMediaToken();
+    resetPushRegistration();
+    setUser(null);
+  }), []);
 
   // Keep the in-memory media token fresh while signed in (its own TTL is 12h; refresh hourly so any
   // newly-built media URL always carries a comfortably-valid token).
