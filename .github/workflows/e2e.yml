@@ -16,6 +16,11 @@ on:
     - cron: '0 15 * * *' # 15:00 UTC nightly
   workflow_dispatch: {}
 
+# Least privilege (#566 bullet 5): this workflow only reads the repository, so the token it is handed is
+# limited to that instead of the repository default (which may include write).
+permissions:
+  contents: read
+
 # Don't pile up runs; a newer commit on the same PR/branch supersedes an in-flight one.
 concurrency:
   group: e2e-${{ github.event_name }}-${{ github.ref }}
