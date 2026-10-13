@@ -296,9 +296,15 @@ Also: `@media (prefers-reduced-motion: reduce)` — see §7.
 
 ### Viewport and safe areas
 
-- The app is **fixed-layout, not a scrollable document**: page zoom is disabled in `index.html`
-  (`maximum-scale=1, user-scalable=no`) because double-tap zoom left the Android PiP window stuck.
-  Don't re-enable it without reading that comment.
+- The app is **fixed-layout, not a scrollable document**, but page zoom differs by where it runs
+  (#562). `index.html` ships the locked viewport (`maximum-scale=1, user-scalable=no`), and the
+  **native app keeps it**: double-tap zoom left the Android PiP window stuck. In a **browser**
+  (a home-screen install included) `lib/viewport.js` relaxes it at start: an Android or desktop
+  browser loses both tokens, so pinch-zoom works for anyone who needs larger text; an **iOS
+  browser** loses only `user-scalable=no` and keeps `maximum-scale=1`, because WebKit pinch-zooms
+  regardless and that token is what stops Safari zooming into a focused field (see Fields). A
+  zoomed-in browser is now a state the layout can be in. Read the comment in `index.html` before
+  changing either side.
 - Heights use `100dvh` behind `@supports`, so fixed elements don't drift as mobile browser chrome
   hides. `html, body, #root` are painted `var(--bg)` so iOS elastic overscroll doesn't flash white.
 - **Every fixed edge must respect the safe area:** `env(safe-area-inset-top)` in the header,
@@ -339,9 +345,11 @@ legible on *any* user-chosen accent. Keep it.
 
 ### Fields
 Label 12px `--text-secondary`, 6px below. Input: full width, `--field-bg`, 1px `--border`, radius
-10px, `padding: 11px 12px`, **15px text** (≥16px would be ideal to stop iOS zoom, but page zoom is
-disabled app-wide so 15 is safe here). `.field` has `margin-bottom: 14px`; `.field-row` puts two
-side by side on a `1fr 1fr` grid.
+10px, `padding: 11px 12px`, **15px text**. iOS Safari zooms the page in when a field under 16px is
+focused unless the viewport has `maximum-scale=1`, which is why an iOS browser keeps that token
+when the app relaxes page zoom (#562, `lib/viewport.js`); 15 is safe there only because of it.
+Expected from WebKit's behaviour, not checked on a device. `.field` has `margin-bottom: 14px`;
+`.field-row` puts two side by side on a `1fr 1fr` grid.
 
 **Focus is global and must not be removed:**
 ```css

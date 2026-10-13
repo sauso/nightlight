@@ -32,6 +32,10 @@ services:
       # signed in and gets no Nightlight push alerts until it signs in again; lowering it signs out older
       # sign-ins at their next request. See .env.example and SECURITY.md.
       - SESSION_TTL_DAYS=${SESSION_TTL_DAYS:-}
+      # Allow Cloudflare Web Analytics' beacon in the Content-Security-Policy: 1/true/yes/on = allow,
+      # blank (the default) or 0/false/no/off = blocked; anything else is also blocked, with a warning.
+      # Only for a site served through Cloudflare's proxy with Web Analytics on. See .env.example.
+      - CLOUDFLARE_ANALYTICS=${CLOUDFLARE_ANALYTICS:-}
       - PGID=${PGID:-100}
       # Who else may read the data volume. 077 (the default) = owner only: the database holds every
       # stored secret in plaintext, and each start takes group/other access off existing files too.
