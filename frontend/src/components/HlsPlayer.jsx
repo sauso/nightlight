@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import Hls from 'hls.js';
 import { getMediaToken } from '../lib/api.js';
 
 // The token travels as a query param (not an Authorization header) because Safari's
@@ -97,6 +96,7 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false }) {
     // hls.js path, which has no DOM listeners of its own to remove (hls.destroy() detaches its own).
     let onLoadedMetadata = null;
     let onVideoError = null;
+    let cancelled = false;
 
     if (canPlayNatively) {
       // Safari: let the browser's own (hardware-accelerated) HLS support handle it,
@@ -112,30 +112,46 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false }) {
       onVideoError = () => setState('error');
       video.addEventListener('loadedmetadata', onLoadedMetadata);
       video.addEventListener('error', onVideoError);
-    } else if (Hls.isSupported()) {
-      const hls = new Hls({
-        backBufferLength: 10,
-        // Target staying close to the live edge instead of hls.js's more conservative
-        // default (which alone accounted for several extra seconds of the ~15s delay).
-        liveSyncDurationCount: 1,
-        liveMaxLatencyDurationCount: 3,
-        // If playback ever falls behind, speed up slightly (imperceptible) to catch
-        // back up to the live edge rather than staying permanently delayed.
-        liveDurationInfinity: false,
-        maxLiveSyncPlaybackRate: 1.3,
-      });
-      hlsRef.current = hls;
-      hls.loadSource(hlsUrl(mediamtxPath));
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => setState('live'));
-      hls.on(Hls.Events.ERROR, (event, data) => {
-        if (data.fatal) setState('error');
-      });
     } else {
-      setState('error');
+      // #386: hls.js is ~560 kB of the ~1.1 MB entry chunk and this branch is the only code that needs
+      // it, so it is fetched on demand. It is NOT needed by the WebRTC path (the default) or by the
+      // native-HLS branch above (Safari/iOS), so most sessions never download it.
+      // `cancelled` covers the window between asking for the module and getting it: the effect re-runs
+      // (a mode switch, a retry) or unmounts in that gap, and a player created after teardown would
+      // attach to a video that is being replaced and never be destroyed.
+      import('hls.js').then(({ default: Hls }) => {
+        if (cancelled) return;
+        if (!Hls.isSupported()) {
+          setState('error');
+          return;
+        }
+        const hls = new Hls({
+          backBufferLength: 10,
+          // Target staying close to the live edge instead of hls.js's more conservative
+          // default (which alone accounted for several extra seconds of the ~15s delay).
+          liveSyncDurationCount: 1,
+          liveMaxLatencyDurationCount: 3,
+          // If playback ever falls behind, speed up slightly (imperceptible) to catch
+          // back up to the live edge rather than staying permanently delayed.
+          liveDurationInfinity: false,
+          maxLiveSyncPlaybackRate: 1.3,
+        });
+        hlsRef.current = hls;
+        hls.loadSource(hlsUrl(mediamtxPath));
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => setState('live'));
+        hls.on(Hls.Events.ERROR, (event, data) => {
+          if (data.fatal) setState('error');
+        });
+      }).catch(() => {
+        // The chunk could not be fetched (offline). Same state as any other failure to connect, so the
+        // existing 5 s retry above tries the import again rather than leaving "Connecting…" forever.
+        if (!cancelled) setState('error');
+      });
     }
 
     return () => {
+      cancelled = true;
       // Listeners off BEFORE the src is removed and load() called: tearing the source down is itself
       // something browsers may answer with an `error` event, and it must not reach this run's handler
       // and flip a player that is being replaced into the error state.

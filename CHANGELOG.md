@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+
+- **The app now downloads much less before it shows the live view (#386).** The first download was one 1,098 kB file (333 kB compressed); screens you open less often (sleep detail, night review, every Settings sub-page, clips, About) and the video library used by Compatibility (HLS) mode are now fetched when first needed. The first download is about 332 kB (107 kB compressed). Nothing looks or behaves differently, except that a screen may show "Loading…" for a moment the first time it is opened. If the phone is offline when it is opened, the screen says it could not be loaded and offers a Retry button, instead of going blank. Measured as file sizes only, not load time on a device.
+
 ## [0.39.0] - 2026-10-13
 
 ### Fixed

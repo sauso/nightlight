@@ -17644,5 +17644,29 @@
     "expect": "killed",
     "tests": ["csp-directives.test.js"],
     "namePattern": "#562 CSP wiring"
+  },
+  {
+    "label": "#386 lazyPage: Retry reuses the failed lazy component, so the screen can never load after an offline failure",
+    "file": "frontend/src/lib/lazyPage.jsx",
+    "find": "const retry = () => { Inner = lazy(load); setAttempt((n) => n + 1); };",
+    "replace": "const retry = () => { setAttempt((n) => n + 1); };",
+    "expect": "killed",
+    "tests": ["lazyPage.test.jsx"]
+  },
+  {
+    "label": "#386 lazyPage: every render error is treated as a chunk failure, hiding crashes from the app ErrorBoundary",
+    "file": "frontend/src/lib/lazyPage.jsx",
+    "find": "if (!(error instanceof ChunkLoadError)) throw error;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["lazyPage.test.jsx"]
+  },
+  {
+    "label": "#386 HlsPlayer: a torn-down effect still builds an hls.js player once the lazy import resolves",
+    "file": "frontend/src/components/HlsPlayer.jsx",
+    "find": "        if (cancelled) return;\n        if (!Hls.isSupported()) {",
+    "replace": "        if (!Hls.isSupported()) {",
+    "expect": "killed",
+    "tests": ["lazyPage.test.jsx"]
   }
 ]
