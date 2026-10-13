@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-10-13
+
 ### Fixed
 
 - **When removing a camera, child or caregiver fails, or resetting someone's two-factor fails, the reason now appears inside the dialog instead of behind it (#378).** The message used to be put in the page's error banner, which sits underneath the dark overlay, so pressing **Remove** looked as if nothing had happened. It now shows at the top of the dialog, which stays open with its button usable so you can read it and try again or cancel; the message is cleared when you retry and when the dialog is opened again. Errors from things that are not in a dialog (such as assigning a camera) still use the page banner. Not done in this change: a "Retry removal" label and moving keyboard focus to the message (the issue stays open for those).
