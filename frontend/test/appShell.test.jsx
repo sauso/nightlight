@@ -13,6 +13,9 @@
 import { describe, test, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import { HashRouter } from 'react-router-dom';
+import userEvent from '@testing-library/user-event';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import App from '../src/App.jsx';
 
 // ⚠️ The Router lives in main.jsx (the bootstrap, excluded from coverage), NOT in App.jsx — so a
@@ -20,7 +23,7 @@ import App from '../src/App.jsx';
 // HashRouter is what production mounts, and it reads window.location.hash, which is how `boot` below
 // picks a starting route.
 const app = () => <HashRouter><App /></HashRouter>;
-import { api, setToken } from '../src/lib/api.js';
+import { api, setToken, getToken, getMediaToken, clearMediaToken } from '../src/lib/api.js';
 import * as nativeBridge from '../src/lib/nativeBridge.js';
 import * as push from '../src/lib/pushNotifications.js';
 
@@ -163,6 +166,61 @@ describe('the route table', () => {
     }
   });
 
+  // ★ #379. The inner <Routes> had no catch-all, so an address that matched nothing rendered the app chrome
+  // around a blank page. These pin the catch-all AND that it does not swallow a real route (react-router
+  // ranks by specificity, not order, so a `*` placed last cannot win; a mutant moving it or widening it
+  // is what the second test is for).
+  test('★ #379 an address that matches no screen says so, and Go to Live leads home', async () => {
+    const { unmount } = await openAt('/children/kid-1/no-such-screen/at-all');
+    expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeInTheDocument();
+    expect(screen.getByText(/nothing at this address/i)).toBeInTheDocument();
+    // The nav is still there: the person is not stranded outside the app.
+    expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument();
+
+    await userEvent.setup().click(screen.getByText('Go to Live'));
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Page not found' })).not.toBeInTheDocument());
+    expect(window.location.hash).toBe('#/');
+    unmount();
+  });
+
+  test('★ #379 unknown addresses at other depths are not-found too, not just one prefix', async () => {
+    // A catch-all narrowed to one prefix (`/children/*`) passes the deep address above and fails these:
+    // a top-level unknown and one under a section that has real routes of its own.
+    for (const route of ['/nonsense', '/settings/nonsense']) {
+      const { unmount } = await openAt(route);
+      expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeInTheDocument();
+      unmount();
+      vi.restoreAllMocks();
+      vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(false);
+      vi.spyOn(nativeBridge, 'hasActiveBackgroundAudio').mockReturnValue(false);
+      vi.spyOn(push, 'initPushNotifications').mockResolvedValue(undefined);
+    }
+  });
+
+  test('★ #379 the real routes, and the retired /family, are NOT the not-found page', async () => {
+    for (const [route, heading] of [
+      ['/children', 'Children'],
+      ['/cameras', 'Cameras'],
+      ['/settings/mqtt', 'MQTT'],
+      ['/family', 'Children'], // retired, redirects: must still redirect, not fall through to `*`
+    ]) {
+      const { unmount } = await openAt(route);
+      expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Page not found' })).not.toBeInTheDocument();
+      unmount();
+      vi.restoreAllMocks();
+      vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(false);
+      vi.spyOn(nativeBridge, 'hasActiveBackgroundAudio').mockReturnValue(false);
+      vi.spyOn(push, 'initPushNotifications').mockResolvedValue(undefined);
+    }
+  });
+
+  test('#379 the Live route itself (/) is not the not-found page either', async () => {
+    await openAt('/');
+    await waitFor(() => expect(document.querySelector('.live-monitor--active')).not.toBeNull());
+    expect(screen.queryByRole('heading', { name: 'Page not found' })).not.toBeInTheDocument();
+  });
+
   test('an admin-only screen sends a CAREGIVER home, and shows nothing of it on the way', async () => {
     setToken('a-token');
     mockApi(CAREGIVER);
@@ -182,6 +240,143 @@ describe('the route table', () => {
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
     expect(screen.getByText('About')).toBeInTheDocument();
     expect(screen.queryByText('MQTT')).not.toBeInTheDocument();
+  });
+});
+
+// ★ #562 bullet 7. A session can now end while a tab is open (a lowered SESSION_TTL_DAYS signs older sessions
+// out at their next request; so do signing out from another device and removing the account). The server
+// answers 401, and api.js cleared the token and set #/login, but AuthProvider kept its user, so the router
+// sent #/login straight back to `/`: a dead live screen, no sign-in form, until a reload. A tablet left on the
+// live view is never backgrounded, so the reload-after-background rule never rescued it.
+//
+// These go through the REAL api.js and the REAL AuthProvider: only `fetch` is faked. The request is made by
+// the test through the same api module the app uses (the app's own polls would do it after 15 s; waiting for
+// one adds time, not coverage).
+describe('★ #562 a request answered 401 while the app is open', () => {
+  const realFetch = globalThis.fetch;
+  const reply = (status, body) => ({ ok: status >= 200 && status < 300, status, text: async () => JSON.stringify(body) });
+  // Answers the media-token request with a real-looking token, so the test can see it being dropped.
+  const healthy = (url) => (String(url).endsWith('/auth/media-token')
+    ? reply(200, { token: 'media-abc', expires_in: 43200 })
+    : reply(200, null));
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    clearMediaToken();
+  });
+
+  const signedInShell = async () => {
+    globalThis.fetch = vi.fn(async (url) => healthy(url));
+    setToken('a-token');
+    mockApi(ADMIN);
+    await boot('/');
+    await waitFor(() => expect(document.querySelector('.app-shell')).not.toBeNull());
+    expect(getMediaToken()).toBe('media-abc'); // precondition: there is a media token to drop
+    api.get.mockRestore(); // from here on, requests go through the real client
+  };
+
+  test('★ shows the sign-in form at once, without a reload, and drops the token and the media token', async () => {
+    await signedInShell();
+    const reset = vi.spyOn(push, 'resetPushRegistration');
+    globalThis.fetch = vi.fn(async () => reply(401, { error: 'Invalid or expired session' }));
+
+    await act(async () => { await api.get('/cameras').catch(() => {}); });
+
+    // The same render, no reload: jsdom cannot reload, so the form appearing in this document is the proof.
+    expect(await screen.findByLabelText(/username/i)).toBeInTheDocument();
+    expect(document.querySelector('.app-shell')).toBeNull();
+    expect(getToken()).toBeNull();
+    expect(getMediaToken()).toBeNull();
+    // Review of #696: push registration is forgotten too, so signing in again in this page registers push
+    // under the new session (pushNotifications.test.js proves what the reset does to the flag). At least once,
+    // not exactly once: every request the app still makes here answers 401 too, and each one resets again.
+    expect(reset).toHaveBeenCalled();
+  });
+
+  test('★ a request that TIMED OUT cannot sign anyone out when its 401 arrives late', async () => {
+    // The existing `signal.aborted` guard in api.js (review of 0.36.0) must keep covering the new listener:
+    // the person may have signed in again since, and a stale answer must not end that.
+    await signedInShell();
+    let answerLate;
+    globalThis.fetch = vi.fn((url) => (String(url).includes('/late-401-probe')
+      ? new Promise((resolve) => { answerLate = resolve; }) // ignores the abort signal, like a slow proxy
+      : Promise.resolve(healthy(url))));
+
+    const err = await api.get('/late-401-probe', { timeoutMs: 20 }).catch((e) => e);
+    expect(err.timedOut).toBe(true);
+    await act(async () => {
+      answerLate(reply(401, { error: 'Invalid or expired session' }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(document.querySelector('.app-shell')).not.toBeNull();
+    expect(screen.queryByLabelText(/username/i)).not.toBeInTheDocument();
+    expect(getToken()).toBe('a-token');
+    expect(getMediaToken()).toBe('media-abc');
+  });
+});
+
+// ★ #562 bullet 3. The policy itself is unit-tested in lib/viewport.test.js; this proves the app RUNS it at
+// start, with the real native check and the real iOS check (navigator stubbed), on the real index.html string.
+// Signed out on purpose: Shell must relax the viewport before (and whether or not) anyone signs in, so the
+// login screen is zoomable too.
+describe('#562 viewport the app applies the zoom policy at start', () => {
+  // The viewport meta exactly as index.html ships it, read from disk (process.cwd() is the frontend folder).
+  const SHIPPED = /<meta name="viewport" content="([^"]*)"/.exec(
+    readFileSync(resolve(process.cwd(), 'index.html'), 'utf8'),
+  )?.[1];
+  const ANDROID_CHROME = {
+    userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+    platform: 'Linux armv81',
+    maxTouchPoints: 5,
+  };
+  const IPHONE_SAFARI = {
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+    platform: 'iPhone',
+    maxTouchPoints: 5,
+  };
+  // Own properties on the global navigator, deleted after each test so jsdom's own values come back.
+  const stubbedKeys = [];
+  const stubNavigator = (values) => {
+    for (const [key, value] of Object.entries(values)) {
+      Object.defineProperty(globalThis.navigator, key, { configurable: true, get: () => value });
+      stubbedKeys.push(key);
+    }
+  };
+  let meta;
+  beforeEach(() => {
+    meta = document.createElement('meta');
+    meta.setAttribute('name', 'viewport');
+    meta.setAttribute('content', SHIPPED);
+    document.head.appendChild(meta);
+  });
+  afterEach(() => {
+    meta.remove();
+    for (const key of stubbedKeys.splice(0)) delete globalThis.navigator[key];
+  });
+
+  test('#562 viewport app: in an Android or desktop browser, booting the app removes maximum-scale and user-scalable and keeps the rest', async () => {
+    expect(SHIPPED).toMatch(/maximum-scale=1, user-scalable=no/); // the fixture really is locked
+    stubNavigator(ANDROID_CHROME);
+    mockApi(null);
+    await boot('/');
+    await waitFor(() => expect(meta.getAttribute('content')).toBe('width=device-width, initial-scale=1, viewport-fit=cover'));
+  });
+
+  test('#562 viewport app: in an iOS browser, booting the app removes only user-scalable and keeps maximum-scale', async () => {
+    stubNavigator(IPHONE_SAFARI);
+    mockApi(null);
+    await boot('/');
+    await waitFor(() => expect(meta.getAttribute('content')).toBe('width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover'));
+  });
+
+  test('#562 viewport app: in the native app, booting leaves the locked viewport exactly as shipped', async () => {
+    nativeBridge.isNativeApp.mockReturnValue(true);
+    mockApi(null);
+    await boot('/');
+    // Something the boot does AFTER Shell's effects have run, so "unchanged" is not just "not yet".
+    expect(await screen.findByLabelText(/username/i)).toBeInTheDocument();
+    expect(meta.getAttribute('content')).toBe(SHIPPED);
   });
 });
 

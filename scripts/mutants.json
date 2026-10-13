@@ -8011,8 +8011,8 @@
   {
     "label": "in-bed/lock A9: the route accepts a got-OUT-of-bed event as the put-down",
     "file": "backend/src/routes/children.js",
-    "find": "body.true_in_bed_transition_id, TRANSITION.INTO_BED);",
-    "replace": "body.true_in_bed_transition_id);",
+    "find": "inBedFrameId, TRANSITION.INTO_BED);",
+    "replace": "inBedFrameId);",
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
     "namePattern": "only a got-into-bed event"
@@ -8544,13 +8544,150 @@
     "namePattern": "save-time compute throws"
   },
   {
-    "label": "in-bed/lock fix2 E1: an empty frame id becomes frame 0 again (with the flag: a 500)",
-    "file": "backend/src/routes/children.js",
-    "find": "(v == null || v === '' ? null : Number(v))",
-    "replace": "(v == null ? null : Number(v))",
+    "label": "in-bed/lock fix2 E1 (moved into parseTransitionId by #522): an empty frame id stops being \"no frame\" (before #522 a frame 0, with the flag a 500; now a 400)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  if (v == null || v === '') return null;",
+    "replace": "  if (v == null) return null;",
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
     "namePattern": "empty frame id"
+  },
+  {
+    "label": "#522 M1: parseTransitionId reads undefined as malformed, not absent (every save without a frame key is refused)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  if (v == null || v === '') return null;",
+    "replace": "  if (v === null || v === '') return null;",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "parseTransitionId: null when absent"
+  },
+  {
+    "label": "#522 M2: a number past 2**53 - 1 is accepted as an id (Number.isInteger instead of isSafeInteger)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "return Number.isSafeInteger(v) && v > 0 ? v : NaN;",
+    "replace": "return Number.isInteger(v) && v > 0 ? v : NaN;",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "parseTransitionId: null when absent"
+  },
+  {
+    "label": "#522 M3: the number 0 is accepted as an id",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "Number.isSafeInteger(v) && v > 0 ? v : NaN;",
+    "replace": "Number.isSafeInteger(v) && v >= 0 ? v : NaN;",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "parseTransitionId: null when absent"
+  },
+  {
+    "label": "#522 M4: a digit string with a leading zero (\"007\", \"0\" + a real id) is accepted",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "/^[1-9][0-9]*$/.test(v)",
+    "replace": "/^[0-9]+$/.test(v)",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "REAL event is refused"
+  },
+  {
+    "label": "#522 M5: the digit string is not anchored at its end (\"5.0\", \"5e0\", \"5 \" accepted)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "/^[1-9][0-9]*$/.test(v)",
+    "replace": "/^[1-9][0-9]*/.test(v)",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "REAL event is refused"
+  },
+  {
+    "label": "#522 M6: the digit string is not anchored at its start (\" 5\", \"+5\", \"0x10\" accepted)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "/^[1-9][0-9]*$/.test(v)",
+    "replace": "/[1-9][0-9]*$/.test(v)",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "REAL event is refused"
+  },
+  {
+    "label": "#522 M7: multiline anchors (\"5\\n\" accepted)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "/^[1-9][0-9]*$/.test(v)",
+    "replace": "/^[1-9][0-9]*$/m.test(v)",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "parseTransitionId: null when absent"
+  },
+  {
+    "label": "#522 M8: a digit string past 2**53 - 1 is accepted, and matched as a DIFFERENT id (\"...993\" reads as ...992)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "    return Number.isSafeInteger(n) ? n : NaN;",
+    "replace": "    return n;",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "parseTransitionId: null when absent"
+  },
+  {
+    "label": "#522 M9: anything whose String() is digits is read as a string id ([5] and ['5'] accepted)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "if (typeof v === 'string' && /^[1-9][0-9]*$/.test(v)) {",
+    "replace": "if (/^[1-9][0-9]*$/.test(v)) {",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "REAL event is refused"
+  },
+  {
+    "label": "#522 M10: anything else falls back to Number() (true read as id 1)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  return NaN;",
+    "replace": "  return Number(v) > 0 ? Number(v) : NaN;",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "parseTransitionId: null when absent"
+  },
+  {
+    "label": "#522 M11: the route reads a frame key that was NOT SENT as \"no frame\" (a note-only save blanks the stored frames)",
+    "file": "backend/src/routes/children.js",
+    "find": "const frameIdOf = (v) => (v === undefined ? undefined : parseTransitionId(v));",
+    "replace": "const frameIdOf = (v) => parseTransitionId(v);",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "NOT SENT keeps the stored frame"
+  },
+  {
+    "label": "#522 X2 (#688 review): a single-digit string id (\"5\") is refused",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "/^[1-9][0-9]*$/.test(v)",
+    "replace": "/^[1-9][0-9]+$/.test(v)",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "parseTransitionId: null when absent"
+  },
+  {
+    "label": "#522 X3 (#688 review): the route reads a null frame id as NOT SENT (\"Remove my correction\" keeps the frames while clearing their times)",
+    "file": "backend/src/routes/children.js",
+    "find": "const frameIdOf = (v) => (v === undefined ? undefined : parseTransitionId(v));",
+    "replace": "const frameIdOf = (v) => (v == null ? undefined : parseTransitionId(v));",
+    "expect": "killed",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "every time and frame sent as null"
+  },
+  {
+    "label": "#522 M12: the route stores the raw body value instead of the parsed id",
+    "file": "backend/src/routes/children.js",
+    "find": "    trueWakeTransitionId: wakeFrameId,",
+    "replace": "    trueWakeTransitionId: body.true_wake_transition_id,",
+    "expect": "equivalent",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "number or as a string of digits",
+    "note": "EQUIVALENT, verified by running it against a scratch copy (#522 build, 2026-10-12; all 205 tests of the five files that reach the review route survive it): every malformed value is refused by transitionInstant before the patch is built, '' is turned into NULL by previewNightReview's blankToNull, and a digit string is stored as the integer by the column's INTEGER affinity. Storing the parsed value is for the reader, not a behaviour."
+  },
+  {
+    "label": "#522 M13: transitionInstant drops its NaN guard",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  if (Number.isNaN(n)) return undefined;",
+    "replace": "",
+    "expect": "equivalent",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "REAL event is refused",
+    "note": "EQUIVALENT, verified by running it against a scratch copy (#522 build, 2026-10-12; all 205 tests of the five files that reach the review route survive it): without the guard NaN reaches `find((t) => t.id === NaN)`, which matches nothing, so transitionInstant still returns undefined (one more DB read). The guard says what NaN means; it does not decide it."
   },
   {
     "label": "in-bed/lock fix2 F1: the follow-up has no freshness limit (an owed pass hours past the horizon pushes \"Sleep report updated\")",
@@ -13708,8 +13845,8 @@
   {
     "label": "W5 role UI M20: the Cameras tab gives a caregiver the assign <select>",
     "file": "frontend/src/pages/Cameras.jsx",
-    "find": "              {isAdmin ? (\r\n                <select value={cam.child_id || ''}",
-    "replace": "              {true ? (\r\n                <select value={cam.child_id || ''}",
+    "find": "              {isAdmin ? (\r\n                <select id={`assign-${cam.id}`} value={cam.child_id || ''}",
+    "replace": "              {true ? (\r\n                <select id={`assign-${cam.id}`} value={cam.child_id || ''}",
     "expect": "killed",
     "tests": ["cameras.test.jsx"],
     "namePattern": "SEES each camera"
@@ -13753,7 +13890,7 @@
   {
     "label": "W5 role UI M24: a caregiver's live tiles get the drag handle again",
     "file": "frontend/src/components/LiveMonitor.jsx",
-    "find": "  const canReorder = user?.role === 'admin';",
+    "find": "  const canReorder = isAdmin;",
     "replace": "  const canReorder = true;",
     "expect": "killed",
     "tests": ["liveMonitor.test.jsx"],
@@ -13937,8 +14074,8 @@
   {
     "label": "#552 PR2 M17: the diagnostics bundle carries the Camera history rows unstripped (usernames to a public issue)",
     "file": "backend/src/routes/diagnostics.js",
-    "find": "camera_history: getRecentEvents(200).map(bundleCameraEvent),",
-    "replace": "camera_history: getRecentEvents(200),",
+    "find": "camera_history: getRecentEvents(200).map((ev) => ({ ...bundleCameraEvent(ev), camera_name: ident.cameraAlias(ev.camera_id) })),",
+    "replace": "camera_history: getRecentEvents(200).map((ev) => ({ ...ev, camera_name: ident.cameraAlias(ev.camera_id) })),",
     "expect": "killed",
     "tests": [
       "who-did-it.test.js"
@@ -15550,11 +15687,38 @@
   {
     "label": "unlock-correction F15: the detail page keeps its receipt after a correction is removed",
     "file": "frontend/src/pages/SleepDetail.jsx",
-    "find": "onCorrectionRemoved={() => setReceipt(null)}",
+    "find": "onCorrectionRemoved={() => { receiptRemovals.current += 1; setReceipt(null); }}",
     "replace": "onCorrectionRemoved={() => {}}",
     "expect": "killed",
     "tests": ["sleepDetail.test.jsx"],
     "namePattern": "drops the"
+  },
+  {
+    "label": "#679: a receipt fetch that started before a correction was removed may still set the receipt (the removal counter is not consulted)",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "if (!alive || removalsAtStart !== receiptRemovals.current) return;",
+    "replace": "if (!alive) return;",
+    "expect": "killed",
+    "tests": ["sleepDetail.test.jsx"],
+    "namePattern": "still in flight when the correction is removed"
+  },
+  {
+    "label": "#679: removing a correction does not move the counter (the in-flight receipt fetch cannot tell it was overtaken)",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "receiptRemovals.current += 1; setReceipt(null);",
+    "replace": "setReceipt(null);",
+    "expect": "killed",
+    "tests": ["sleepDetail.test.jsx"],
+    "namePattern": "still in flight when the correction is removed"
+  },
+  {
+    "label": "#679: the confirm button stays enabled while the removal runs (a double tap sends two removals)",
+    "file": "frontend/src/components/RecomputeNight.jsx",
+    "find": "onClick={removeCorrection} disabled={busy}",
+    "replace": "onClick={removeCorrection}",
+    "expect": "killed",
+    "tests": ["RecomputeNight.test.jsx"],
+    "namePattern": "double tap on the confirm button"
   },
   {
     "label": "unlock-correction F13: .field is inline again (the margin under the note field does nothing)",
@@ -15637,5 +15801,1848 @@
       "sleep-live-last-night.test.js"
     ],
     "namePattern": "an older one exists"
+  },
+  {
+    "label": "#547 route: the bundle is published without the identity scrub",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "[k, keep.has(k) ? v : ident.scrub(v)]",
+    "replace": "[k, v]",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"]
+  },
+  {
+    "label": "#547 route: the name check never fires",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "if (nameLeak) {",
+    "replace": "if (false && nameLeak) {",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"],
+    "namePattern": "the gate"
+  },
+  {
+    "label": "#547 route: a birthday is published",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "birthday: null,",
+    "replace": "birthday: '2020-01-01',",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"]
+  },
+  {
+    "label": "#547 route: a child's list entry keeps its real name (found only for names under 3 characters)",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "name: ident.childAlias(c.id),",
+    "replace": "name: c.name,",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"],
+    "namePattern": "under 3 characters"
+  },
+  {
+    "label": "#547 route: a camera's list entry keeps its real name",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "name: ident.cameraAlias(cam.id),",
+    "replace": "name: cam.name,",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"],
+    "namePattern": "under 3 characters"
+  },
+  {
+    "label": "#547 route: detection events keep the camera name stored in the row",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "getRecentDetectionEvents(100).map((ev) => ({ ...ev, camera_name: ident.cameraAlias(ev.camera_id) })),",
+    "replace": "getRecentDetectionEvents(100),",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"],
+    "namePattern": "under 3 characters"
+  },
+  {
+    "label": "#547 route: the app name is published as typed",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "app_name: settings.app_name === 'Nightlight' ? 'Nightlight' : '(customised)',",
+    "replace": "app_name: settings.app_name,",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"]
+  },
+  {
+    "label": "#547 route: aliases are numbered by insertion order, not created_at",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "FROM children ORDER BY created_at, id'",
+    "replace": "FROM children'",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"],
+    "namePattern": "numbering follows"
+  },
+  {
+    "label": "#547 route: a camera that only the detection history remembers is not known to the redactor",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "`SELECT camera_id, camera_name FROM camera_events UNION SELECT camera_id, camera_name FROM detection_events`",
+    "replace": "`SELECT camera_id, camera_name FROM camera_events`",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"],
+    "namePattern": "renamed or removed"
+  },
+  {
+    "label": "#547 route: a former account's login is not known to the redactor",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "'SELECT DISTINCT actor_username FROM camera_events WHERE actor_username IS NOT NULL'",
+    "replace": "'SELECT DISTINCT actor_username FROM camera_events WHERE 0'",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"],
+    "namePattern": "no longer in the users table"
+  },
+  {
+    "label": "#547 route: the bundle's own note is run through the scrub",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "const EXEMPT_KEYS = new Set(['report', 'note', 'redaction', 'app', 'system', 'counts']);",
+    "replace": "const EXEMPT_KEYS = new Set([]);",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"],
+    "namePattern": "look like the bundle"
+  },
+  {
+    "label": "#547 lib: shortest literal first, so a longer name is split",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": ".sort((a, b) => b.text.length - a.text.length || Number(b.keep) - Number(a.keep) || a.text.localeCompare(b.text));",
+    "replace": ".sort((a, b) => a.text.length - b.text.length || Number(b.keep) - Number(a.keep) || a.text.localeCompare(b.text));",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js"],
+    "namePattern": "longest literal first"
+  },
+  {
+    "label": "#547 lib: no boundary after a name (Eli matches inside Elis)",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "const NOT_AFTER = '(?![\\\\p{L}\\\\p{N}])';",
+    "replace": "const NOT_AFTER = '';",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js"],
+    "namePattern": "word"
+  },
+  {
+    "label": "#547 lib: no boundary before a name",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "const NOT_BEFORE = '(?<![\\\\p{L}\\\\p{N}])';",
+    "replace": "const NOT_BEFORE = '';",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js"],
+    "namePattern": "word"
+  },
+  {
+    "label": "#547 lib: a 1-character name is searched for in free text",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "const MIN_LITERAL_CHARS = 3;",
+    "replace": "const MIN_LITERAL_CHARS = 1;",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js"],
+    "namePattern": "under 3 characters"
+  },
+  {
+    "label": "#547 lib: generic account names are treated as identity",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "if (account && GENERIC_ACCOUNT_NAMES.has(text.toLowerCase())) return;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
+    "namePattern": "generic account name"
+  },
+  {
+    "label": "#547 lib: the percent-encoded form of a name is not searched for",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "if (e) out.push(e);",
+    "replace": "if (false) out.push(e);",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
+    "namePattern": "percent-encoded"
+  },
+  {
+    "label": "#547 lib: a removed camera gets no alias of its own",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "if (!cameraAliases.has(row.camera_id)) cameraAliases.set(row.camera_id, `Camera (removed) ${++removed}`);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"]
+  },
+  {
+    "label": "#547 lib: the check never reports a name",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "if (!matchedBranch(args).keep) found = true;",
+    "replace": "if (false) found = true;",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"]
+  },
+  {
+    "label": "#547 lib: the check flags the bundle's own aliases as names",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "if (!matchedBranch(args).keep) found = true;",
+    "replace": "found = true;",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"]
+  },
+  {
+    "label": "#547 lib: an issued alias beats a longer name that starts with it (Camera 1 Nursery leaks Nursery)",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": ".sort((a, b) => b.text.length - a.text.length || Number(b.keep) - Number(a.keep) || a.text.localeCompare(b.text));",
+    "replace": ".sort((a, b) => Number(b.keep) - Number(a.keep) || b.text.length - a.text.length || a.text.localeCompare(b.text));",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
+    "namePattern": "Camera 1"
+  },
+  {
+    "label": "#547 route: the timezone is run through the scrub (a child called Phoenix)",
+    "file": "backend/src/routes/diagnostics.js",
+    "find": "published.settings = scrubExcept(bundle.settings, new Set(['timezone']));",
+    "replace": "published.settings = scrubExcept(bundle.settings, new Set([]));",
+    "expect": "killed",
+    "tests": ["diagnostics-identity.test.js"],
+    "namePattern": "timezone"
+  },
+  {
+    "label": "#547 card: the copy no longer says names are replaced",
+    "file": "frontend/src/components/DiagnosticsCard.jsx",
+    "find": "appear as Child 1, Camera 1 and User 1, with birthdays left out.",
+    "replace": "are not included.",
+    "expect": "killed",
+    "tests": ["logsScreen.test.jsx"],
+    "namePattern": "#547"
+  },
+  {
+    "label": "#378 Modal: the error prop is not rendered",
+    "file": "frontend/src/components/Modal.jsx",
+    "find": "{error && <div className=\"error-banner\" role=\"alert\">{error}</div>}",
+    "replace": "{null}",
+    "expect": "killed",
+    "tests": ["modal.test.jsx"],
+    "namePattern": "alert INSIDE the dialog"
+  },
+  {
+    "label": "#378 Cameras: a failed remove goes to the page banner under the overlay, not the dialog",
+    "file": "frontend/src/pages/Cameras.jsx",
+    "find": "setRemoveError(err.message);",
+    "replace": "setError(err.message);",
+    "expect": "killed",
+    "tests": ["cameras.test.jsx"],
+    "namePattern": "#378 a failed delete is shown INSIDE"
+  },
+  {
+    "label": "#378 Cameras: the dialog is not given its error",
+    "file": "frontend/src/pages/Cameras.jsx",
+    "find": "error={removeError} ",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["cameras.test.jsx"],
+    "namePattern": "#378 a failed delete is shown INSIDE"
+  },
+  {
+    "label": "#378 Cameras: opening the dialog keeps the previous failure",
+    "file": "frontend/src/pages/Cameras.jsx",
+    "find": "onClick={() => { setRemoveError(''); setRemoving(cam); }}",
+    "replace": "onClick={() => { setRemoving(cam); }}",
+    "expect": "killed",
+    "tests": ["cameras.test.jsx"],
+    "namePattern": "#378 retrying clears"
+  },
+  {
+    "label": "#378 Cameras: a retry keeps the previous failure on screen while it runs",
+    "file": "frontend/src/pages/Cameras.jsx",
+    "find": "setRemoveError('');\r\n    try {",
+    "replace": "    try {",
+    "expect": "killed",
+    "tests": ["cameras.test.jsx"],
+    "namePattern": "#378 retrying clears"
+  },
+  {
+    "label": "#378 CameraSettings: a failed remove goes to the page banner under the overlay, not the dialog",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "setRemoveError(err.message);",
+    "replace": "setPageError(err.message);",
+    "expect": "killed",
+    "tests": ["cameraSettings.test.jsx"],
+    "namePattern": "#378 the failure is shown INSIDE"
+  },
+  {
+    "label": "#378 CameraSettings: opening the dialog keeps the previous failure",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "onClick={() => { setRemoveError(''); setRemoving(true); }}",
+    "replace": "onClick={() => { setRemoving(true); }}",
+    "expect": "killed",
+    "tests": ["cameraSettings.test.jsx"],
+    "namePattern": "#378 a stale message is gone"
+  },
+  {
+    "label": "#378 ChildSettings: a failed remove goes to the page banner under the overlay, not the dialog",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "setRemoveError(err.message);",
+    "replace": "setError(err.message);",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "#378 the failure is shown INSIDE"
+  },
+  {
+    "label": "#378 ChildSettings: opening the dialog keeps the previous failure",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "onClick={() => { setRemoveError(''); setRemoving(true); }}",
+    "replace": "onClick={() => { setRemoving(true); }}",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"],
+    "namePattern": "#378 the failure is shown INSIDE"
+  },
+  {
+    "label": "#378 UserSettings: a failed remove goes to the page banner under the overlay, not the dialog",
+    "file": "frontend/src/pages/UserSettings.jsx",
+    "find": "setRemoveError(err.message);",
+    "replace": "setError(err.message);",
+    "expect": "killed",
+    "tests": ["users.test.jsx"],
+    "namePattern": "#378 the failure is shown INSIDE"
+  },
+  {
+    "label": "#378 UserSettings: a failed two-factor reset goes to the page banner under the overlay, not the dialog",
+    "file": "frontend/src/pages/UserSettings.jsx",
+    "find": "setResetError(err.message);",
+    "replace": "setError(err.message);",
+    "expect": "killed",
+    "tests": ["users.test.jsx"],
+    "namePattern": "#378 a failed reset"
+  },
+  {
+    "label": "#378 UserSettings: opening the reset dialog keeps the previous failure",
+    "file": "frontend/src/pages/UserSettings.jsx",
+    "find": "onClick={() => { setResetError(''); setResettingMfa(true); }}",
+    "replace": "onClick={() => { setResettingMfa(true); }}",
+    "expect": "killed",
+    "tests": ["users.test.jsx"],
+    "namePattern": "#378 a failed reset"
+  },
+  {
+    "label": "#383 CameraSettings: Back and the landing go to the retired /family again",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "const back = location.state?.from || { to: '/cameras', label: 'Cameras' };",
+    "replace": "const back = { to: '/family', label: 'Family' };",
+    "expect": "killed",
+    "tests": ["cameraSettings.test.jsx"],
+    "namePattern": "no router state|opened from a child"
+  },
+  {
+    "label": "#383 CameraSettings: the landing ignores where the page was opened from",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "const back = location.state?.from || { to: '/cameras', label: 'Cameras' };",
+    "replace": "const back = { to: '/cameras', label: 'Cameras' };",
+    "expect": "killed",
+    "tests": ["cameraSettings.test.jsx"],
+    "namePattern": "opened from a child"
+  },
+  {
+    "label": "#380 LiveMonitor: a caregiver is told to add a camera again",
+    "file": "frontend/src/components/LiveMonitor.jsx",
+    "find": ": 'No cameras yet. Ask an administrator to add or enable a camera.'",
+    "replace": ": 'No cameras yet. Add one from the Cameras tab to start watching.'",
+    "expect": "killed",
+    "tests": ["liveMonitor.test.jsx"],
+    "namePattern": "#380 a caregiver is NOT sent"
+  },
+  {
+    "label": "#380 LiveMonitor: an admin is no longer told to add one",
+    "file": "frontend/src/components/LiveMonitor.jsx",
+    "find": "? 'No cameras yet. Add one from the Cameras tab to start watching.'",
+    "replace": "? 'No cameras yet. Ask an administrator to add or enable a camera.'",
+    "expect": "killed",
+    "tests": ["liveMonitor.test.jsx"],
+    "namePattern": "#380 an admin is told"
+  },
+  {
+    "label": "#396 unsavedEdits: compares with !== so a number 5 and the string \"5\" differ",
+    "file": "frontend/src/lib/unsavedEdits.js",
+    "find": "String(form[k] ?? '') !== String(saved[k] ?? '')",
+    "replace": "form[k] !== saved[k]",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx", "unsavedEdits.test.js"],
+    "namePattern": "Gotify priority|same number"
+  },
+  {
+    "label": "#396 unsavedEdits: a saved 0 is read as unset",
+    "file": "frontend/src/lib/unsavedEdits.js",
+    "find": "String(saved[k] ?? '')",
+    "replace": "String(saved[k] || '')",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx", "unsavedEdits.test.js"],
+    "namePattern": "Gotify priority|null, undefined and empty"
+  },
+  {
+    "label": "#396 unsavedEdits: a typed secret is not an edit",
+    "file": "frontend/src/lib/unsavedEdits.js",
+    "find": "if (secrets.some((s) => String(s ?? '') !== '')) return true;",
+    "replace": "if (secrets.length > 99) return true;",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx", "unsavedEdits.test.js"],
+    "namePattern": "typed secret|non-empty secret"
+  },
+  {
+    "label": "#396 unsavedEdits: with nothing to compare against it reports an edit",
+    "file": "frontend/src/lib/unsavedEdits.js",
+    "find": "if (!form || !saved) return false;",
+    "replace": "if (!form || !saved) return true;",
+    "expect": "killed",
+    "tests": ["unsavedEdits.test.js"],
+    "namePattern": "nothing to compare"
+  },
+  {
+    "label": "#396 Pushover: Send test ignores unsaved edits",
+    "file": "frontend/src/pages/SettingsPushPushover.jsx",
+    "find": "disabled={busy || !po.configured || dirty}",
+    "replace": "disabled={busy || !po.configured}",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "namePattern": "holds Send test back"
+  },
+  {
+    "label": "#396 Pushover: a successful save does not move the saved snapshot",
+    "file": "frontend/src/pages/SettingsPushPushover.jsx",
+    "find": "setLastSaved(next); ",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "namePattern": "successful save re-enables"
+  },
+  {
+    "label": "#396 Pushover: the loaded config is not taken as the saved snapshot",
+    "file": "frontend/src/pages/SettingsPushPushover.jsx",
+    "find": "setLastSaved(c); ",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "namePattern": "clean and configured"
+  },
+  {
+    "label": "#396 Gotify: Send test ignores unsaved edits",
+    "file": "frontend/src/pages/SettingsPushGotify.jsx",
+    "find": "disabled={busy || !form.configured || dirty}",
+    "replace": "disabled={busy || !form.configured}",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "namePattern": "holds Send test back"
+  },
+  {
+    "label": "#396 Gotify: a successful save does not move the saved snapshot",
+    "file": "frontend/src/pages/SettingsPushGotify.jsx",
+    "find": "setLastSaved(next); ",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "namePattern": "successful save re-enables"
+  },
+  {
+    "label": "#396 Gotify: the loaded config is not taken as the saved snapshot",
+    "file": "frontend/src/pages/SettingsPushGotify.jsx",
+    "find": "setLastSaved(c); ",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "namePattern": "clean and configured"
+  },
+  {
+    "label": "#396 ntfy: Send test ignores unsaved edits",
+    "file": "frontend/src/pages/SettingsPushNtfy.jsx",
+    "find": "disabled={busy || !form.configured || dirty}",
+    "replace": "disabled={busy || !form.configured}",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "namePattern": "holds Send test back"
+  },
+  {
+    "label": "#396 ntfy: a successful save does not move the saved snapshot",
+    "file": "frontend/src/pages/SettingsPushNtfy.jsx",
+    "find": "setLastSaved(next); ",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "namePattern": "successful save re-enables"
+  },
+  {
+    "label": "#396 ntfy: the loaded config is not taken as the saved snapshot",
+    "file": "frontend/src/pages/SettingsPushNtfy.jsx",
+    "find": "setLastSaved(c); ",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "namePattern": "clean and configured"
+  },
+  {
+    "label": "#396 ntfy: the password box is not counted as an edit",
+    "file": "frontend/src/pages/SettingsPushNtfy.jsx",
+    "find": "hasUnsavedEdits(form, lastSaved, [token, password])",
+    "replace": "hasUnsavedEdits(form, lastSaved, [token])",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx"],
+    "namePattern": "typed secret"
+  },
+  {
+    "label": "#560 HlsPlayer: the loadedmetadata listener is not removed on teardown",
+    "file": "frontend/src/components/HlsPlayer.jsx",
+    "find": "if (onLoadedMetadata) video.removeEventListener('loadedmetadata', onLoadedMetadata);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["hlsPlayerNative.test.jsx"],
+    "namePattern": "listener count is flat"
+  },
+  {
+    "label": "#560 HlsPlayer: the error listener is not removed on teardown",
+    "file": "frontend/src/components/HlsPlayer.jsx",
+    "find": "if (onVideoError) video.removeEventListener('error', onVideoError);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["hlsPlayerNative.test.jsx"],
+    "namePattern": "listener count is flat"
+  },
+  {
+    "label": "#560 HlsPlayer: the listeners are removed AFTER load() (a teardown error reaches a stale handler)",
+    "file": "frontend/src/components/HlsPlayer.jsx",
+    "find": "      if (onLoadedMetadata) video.removeEventListener('loadedmetadata', onLoadedMetadata);\r\n      if (onVideoError) video.removeEventListener('error', onVideoError);\r\n      if (hlsRef.current) {\r\n        hlsRef.current.destroy();\r\n        hlsRef.current = null;\r\n      }\r\n      video.removeAttribute('src');\r\n      video.load();",
+    "replace": "      if (hlsRef.current) {\r\n        hlsRef.current.destroy();\r\n        hlsRef.current = null;\r\n      }\r\n      video.removeAttribute('src');\r\n      video.load();\r\n      if (onLoadedMetadata) video.removeEventListener('loadedmetadata', onLoadedMetadata);\r\n      if (onVideoError) video.removeEventListener('error', onVideoError);",
+    "expect": "killed",
+    "tests": ["hlsPlayerNative.test.jsx"],
+    "namePattern": "already off when the teardown"
+  },
+  {
+    "label": "#379 App: the catch-all route renders nothing",
+    "file": "frontend/src/App.jsx",
+    "find": "<Route path=\"*\" element={<NotFound />} />",
+    "replace": "<Route path=\"*\" element={null} />",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "#379 an address that matches no screen"
+  },
+  {
+    "label": "#379 NotFound: Go to Live leads nowhere",
+    "file": "frontend/src/pages/NotFound.jsx",
+    "find": "navigate('/')",
+    "replace": "navigate('/nowhere')",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "#379 an address that matches no screen"
+  },
+  {
+    "label": "#562 SettingsMqtt: the broker port has no upper bound",
+    "file": "frontend/src/pages/SettingsMqtt.jsx",
+    "find": "max=\"65535\"",
+    "replace": "max=\"65536\"",
+    "expect": "killed",
+    "tests": ["settingsForms.test.jsx"],
+    "namePattern": "#562 the broker port is bounded"
+  },
+  {
+    "label": "#562 SettingsMqtt: the broker port accepts 0",
+    "file": "frontend/src/pages/SettingsMqtt.jsx",
+    "find": "min=\"1\"",
+    "replace": "min=\"0\"",
+    "expect": "killed",
+    "tests": ["settingsForms.test.jsx"],
+    "namePattern": "#562 the broker port is bounded"
+  },
+  {
+    "label": "#562 LiveMonitor: the reorder is sent from inside the state updater as well (a second request under StrictMode)",
+    "file": "frontend/src/components/LiveMonitor.jsx",
+    "find": "setOrderedCameras(next);",
+    "replace": "setOrderedCameras(() => { api.put('/cameras/reorder', { order: next.map((c) => c.id) }).catch(() => {}); return next; });",
+    "expect": "killed",
+    "tests": ["liveMonitorReorder.test.jsx"],
+    "namePattern": "ONE PUT per drop"
+  },
+  {
+    "label": "#562 LiveMonitor: a drop is computed from the order the page loaded with, not the current one",
+    "file": "frontend/src/components/LiveMonitor.jsx",
+    "find": "reorderCameras(orderRef.current, active.id, over.id)",
+    "replace": "reorderCameras(cameras, active.id, over.id)",
+    "expect": "killed",
+    "tests": ["liveMonitorReorder.test.jsx"],
+    "namePattern": "second drop is built"
+  },
+  {
+    "label": "#385 SettingsPush: a provider with nothing saved shows no badge",
+    "file": "frontend/src/pages/SettingsPush.jsx",
+    "find": "return { text: 'Not set up', cls: 'status-badge--off' };",
+    "replace": "return null;",
+    "expect": "killed",
+    "tests": ["settingsPush.test.jsx"],
+    "namePattern": "Not set up for untouched|#385 all four states"
+  },
+  {
+    "label": "#385 SettingsPush: a provider the server did not mention shows no badge",
+    "file": "frontend/src/pages/SettingsPush.jsx",
+    "find": "if (!s) return UNAVAILABLE;",
+    "replace": "if (!s) return null;",
+    "expect": "killed",
+    "tests": ["settingsPush.test.jsx"],
+    "namePattern": "#385 all four states"
+  },
+  {
+    "label": "#385 SettingsPush: a failed status request is swallowed again (no badge)",
+    "file": "frontend/src/pages/SettingsPush.jsx",
+    "find": ".catch(() => setStatusFailed(true))",
+    "replace": ".catch(() => {})",
+    "expect": "killed",
+    "tests": ["settingsPush.test.jsx"],
+    "namePattern": "failed status lookup"
+  },
+  {
+    "label": "#385 SettingsPush: a badge is shown while the status is still loading",
+    "file": "frontend/src/pages/SettingsPush.jsx",
+    "find": ": status ? badgeFor(status[key]) : null);",
+    "replace": ": badgeFor(status?.[key]));",
+    "expect": "killed",
+    "tests": ["settingsPush.test.jsx"],
+    "namePattern": "#385 no badge while"
+  },
+  {
+    "label": "#381 Cameras: the label is not tied to the select",
+    "file": "frontend/src/pages/Cameras.jsx",
+    "find": "htmlFor={isAdmin ? `assign-${cam.id}` : undefined}",
+    "replace": "data-x=\"1\"",
+    "expect": "killed",
+    "tests": ["cameras.test.jsx"],
+    "namePattern": "label is tied to ITS OWN select"
+  },
+  {
+    "label": "#381 Cameras: every select shares one id",
+    "file": "frontend/src/pages/Cameras.jsx",
+    "find": "<select id={`assign-${cam.id}`}",
+    "replace": "<select id=\"assign\"",
+    "expect": "killed",
+    "tests": ["cameras.test.jsx"],
+    "namePattern": "label is tied to ITS OWN select"
+  },
+  {
+    "label": "#381 index.css: the over-video controls' hit area shrinks to 36px",
+    "file": "frontend/src/index.css",
+    "find": "  inset: -7px;",
+    "replace": "  inset: -3px;",
+    "expect": "killed",
+    "tests": ["touchTargets.test.js"],
+    "namePattern": "one shared ::after rule"
+  },
+  {
+    "label": "#381 index.css: the drag handle's hit area shrinks to 34px",
+    "file": "frontend/src/index.css",
+    "find": "  inset: -10px;",
+    "replace": "  inset: -5px;",
+    "expect": "killed",
+    "tests": ["touchTargets.test.js"],
+    "namePattern": "is the positioning anchor"
+  },
+  {
+    "label": "#381 index.css: the drag handle loses its positioning anchor",
+    "file": "frontend/src/index.css",
+    "find": "  position: relative;\r\n}\r\n\r\n/* The handle is 24px",
+    "replace": "}\r\n\r\n/* The handle is 24px",
+    "expect": "killed",
+    "tests": ["touchTargets.test.js"],
+    "namePattern": "is the positioning anchor"
+  },
+  {
+    "label": "#381 index.css: Picture-in-Picture moves back beside Fullscreen (overlapping hit areas)",
+    "file": "frontend/src/index.css",
+    "find": "right: 54px; /* was 48; 54",
+    "replace": "right: 48px; /* was 48; 54",
+    "expect": "killed",
+    "tests": ["touchTargets.test.js"],
+    "namePattern": "neighbours are far enough apart"
+  },
+  {
+    "label": "#381 index.css: Record moves back beside Mute (overlapping hit areas)",
+    "file": "frontend/src/index.css",
+    "find": "right: 54px; /* was 48; see",
+    "replace": "right: 48px; /* was 48; see",
+    "expect": "killed",
+    "tests": ["touchTargets.test.js"],
+    "namePattern": "neighbours are far enough apart"
+  },
+  {
+    "label": "#381 index.css: PTZ moves back beside Settings (overlapping hit areas)",
+    "file": "frontend/src/index.css",
+    "find": "left: 54px; /* was 48; 54",
+    "replace": "left: 48px; /* was 48; 54",
+    "expect": "killed",
+    "tests": ["touchTargets.test.js"],
+    "namePattern": "neighbours are far enough apart"
+  },
+  {
+    "label": "#562 LiveMonitor: the handler reads the render closure, not the ref (two drops in one batch undo each other)",
+    "file": "frontend/src/components/LiveMonitor.jsx",
+    "find": "reorderCameras(orderRef.current, active.id, over.id)",
+    "replace": "reorderCameras(orderedCameras, active.id, over.id)",
+    "expect": "killed",
+    "tests": ["liveMonitorReorder.test.jsx"],
+    "namePattern": "ONE React batch"
+  },
+  {
+    "label": "#562 LiveMonitor: the ref is not advanced after a drop (the next drop in the same batch uses the old order)",
+    "file": "frontend/src/components/LiveMonitor.jsx",
+    "find": "orderRef.current = next;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["liveMonitorReorder.test.jsx"],
+    "namePattern": "ONE React batch"
+  },
+  {
+    "label": "#396 unsavedEdits: the Enable switch is ignored",
+    "file": "frontend/src/lib/unsavedEdits.js",
+    "find": "Object.keys(form).some((k) =>",
+    "replace": "Object.keys(form).filter((k) => k !== 'enabled').some((k) =>",
+    "expect": "killed",
+    "tests": ["pushSendTestUnsaved.test.jsx", "unsavedEdits.test.js"],
+    "namePattern": "Enable switch|toggled boolean"
+  },
+  {
+    "label": "#379 App: the catch-all is narrowed to one prefix",
+    "file": "frontend/src/App.jsx",
+    "find": "<Route path=\"*\" element={<NotFound />} />",
+    "replace": "<Route path=\"/children/*\" element={<NotFound />} />",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "unknown addresses at other depths"
+  },
+  {
+    "label": "#378 CameraSettings: a retry keeps the previous failure on screen while it runs",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "setRemoveBusy(true); setPageError(''); setRemoveError('');",
+    "replace": "setRemoveBusy(true); setPageError('');",
+    "expect": "killed",
+    "tests": ["cameraSettings.test.jsx"],
+    "namePattern": "pressing Remove again clears"
+  },
+  {
+    "label": "#381 index.css: the tile buttons' ::after cannot receive a tap (pointer-events: none)",
+    "file": "frontend/src/index.css",
+    "find": ".rec-btn::after {\r\n  content: '';",
+    "replace": ".rec-btn::after {\r\n  pointer-events: none;\r\n  content: '';",
+    "expect": "killed",
+    "tests": ["touchTargets.test.js"],
+    "namePattern": "one shared ::after rule"
+  },
+  {
+    "label": "#381 index.css: the drag handle's ::after cannot receive a tap (pointer-events: none)",
+    "file": "frontend/src/index.css",
+    "find": ".drag-handle::after {\r\n  content: '';",
+    "replace": ".drag-handle::after {\r\n  pointer-events: none;\r\n  content: '';",
+    "expect": "killed",
+    "tests": ["touchTargets.test.js"],
+    "namePattern": "is the positioning anchor"
+  },
+  {
+    "label": "#562 WHEP resource: the origin check is dropped (another host, port or scheme is accepted)",
+    "file": "frontend/src/lib/whep.js",
+    "find": "if (u.origin !== pageOrigin) return null;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "refuses an address on another site"
+  },
+  {
+    "label": "#562 WHEP resource: the one-segment rule is dropped (a deeper path or an empty segment is accepted)",
+    "file": "frontend/src/lib/whep.js",
+    "find": "if (session === '' || session.includes('/')) return null;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "more or less than one segment"
+  },
+  {
+    "label": "#562 WHEP resource: the prefix rule is dropped (killed by a same-site /api path)",
+    "file": "frontend/src/lib/whep.js",
+    "find": "if (!u.pathname.startsWith(prefix)) return null;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["whep.test.js", "whepPlayer.test.jsx"],
+    "namePattern": "outside this camera|off the camera path",
+    "note": "Same mutation as the next entry, run against a different test: the plan requires it to die on an /api path AND on a //host path, and one entry can only show that it dies on one of them."
+  },
+  {
+    "label": "#562 WHEP resource: the prefix rule is dropped (killed by a path that normalises to //evil.example)",
+    "file": "frontend/src/lib/whep.js",
+    "find": "if (!u.pathname.startsWith(prefix)) return null;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "normalise to the protocol-relative path",
+    "note": "Dies only on the long-tail forms (//evil.example/steal-token): the 16-character //evil.example/x slices to an empty segment and is refused by the one-segment rule by accident. See the note at the top of whep.test.js."
+  },
+  {
+    "label": "#562 WHEP resource: the encoded-separator rule is dropped (%2f / %5c accepted)",
+    "file": "frontend/src/lib/whep.js",
+    "find": "if (ENCODED_SEPARATOR.test(u.pathname)) return null;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "encoded slash or backslash"
+  },
+  {
+    "label": "#562 WHEP player: the call site stores the raw Location header again",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "resourceUrlRef.current = resolveWhepResource(",
+    "replace": "resourceUrlRef.current = ((rawLocation) => rawLocation)(",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "WhepPlayer session DELETE"
+  },
+  {
+    "label": "#562 WHEP resource: returns the full URL (host included) instead of path and query",
+    "file": "frontend/src/lib/whep.js",
+    "find": "return u.pathname + u.search;",
+    "replace": "return u.href;",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "accepts the session under the POST path"
+  },
+  {
+    "label": "#562 WHEP resource: a relative Location is resolved against the page origin, not the POST URL",
+    "file": "frontend/src/lib/whep.js",
+    "find": "const u = new URL(locationHeader, base);",
+    "replace": "const u = new URL(locationHeader, pageOrigin);",
+    "expect": "killed",
+    "tests": ["whep.test.js", "whepPlayer.test.jsx"],
+    "namePattern": "accepts the session under the POST path|relative Location is resolved"
+  },
+  {
+    "label": "#562 WHEP player: the cleanup DELETE follows redirects again (the redirect flag is removed)",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "redirect: 'error',",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "redirect in answer to the DELETE|exactly one DELETE"
+  },
+  {
+    "label": "#562 WHEP resource: the no-% rule for the session segment is dropped (%252f accepted)",
+    "file": "frontend/src/lib/whep.js",
+    "find": "if (session.includes('%')) return null;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "any percent sign in the session segment"
+  },
+  {
+    "label": "#562 WHEP resource: the typeof check is dropped (a non-string header is stringified and accepted)",
+    "file": "frontend/src/lib/whep.js",
+    "find": "if (typeof locationHeader !== 'string' || locationHeader === '') return null;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "returns null instead of throwing"
+  },
+  {
+    "label": "#562 WHEP resource: the catch rethrows instead of returning null",
+    "file": "frontend/src/lib/whep.js",
+    "find": "} catch {",
+    "replace": "} catch (e) { throw e;",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "returns null instead of throwing"
+  },
+  {
+    "label": "#562 WHEP resource: the prefix loses its trailing slash (whepabc passes, a real session is two segments)",
+    "file": "frontend/src/lib/whep.js",
+    "find": "const prefix = `${base.pathname}/`;",
+    "replace": "const prefix = base.pathname;",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "accepts the session under the POST path|outside this camera"
+  },
+  {
+    "label": "#562 WHEP resource: an empty session segment is accepted",
+    "file": "frontend/src/lib/whep.js",
+    "find": "if (session === '' || session.includes('/')) return null;",
+    "replace": "if (session.includes('/')) return null;",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "more or less than one segment"
+  },
+  {
+    "label": "#562 WHEP resource: the encoded-separator rule becomes case-sensitive (%2F and %5C accepted in the camera part)",
+    "file": "frontend/src/lib/whep.js",
+    "find": "const ENCODED_SEPARATOR = /%2f|%5c/i;",
+    "replace": "const ENCODED_SEPARATOR = /%2f|%5c/;",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "encoded slash or backslash"
+  },
+  {
+    "label": "#562 WHEP resource: the query is dropped from the result",
+    "file": "frontend/src/lib/whep.js",
+    "find": "return u.pathname + u.search;",
+    "replace": "return u.pathname;",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "accepts the session under the POST path"
+  },
+  {
+    "label": "#562 WHEP resource: the fragment is kept in the result",
+    "file": "frontend/src/lib/whep.js",
+    "find": "return u.pathname + u.search;",
+    "replace": "return u.pathname + u.search + u.hash;",
+    "expect": "killed",
+    "tests": ["whep.test.js"],
+    "namePattern": "accepts the session under the POST path"
+  },
+  {
+    "label": "#562 WHEP player: the call site passes the page URL instead of its origin",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "window.location.origin,",
+    "replace": "window.location.href,",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "exactly one DELETE|relative Location is resolved|second camera's player DELETEs"
+  },
+  {
+    "label": "#562 WHEP player: the call site resolves against one fixed camera path instead of this camera's POST URL",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "res.headers.get('Location'),\n          whepUrl(mediamtxPath),",
+    "replace": "res.headers.get('Location'),\n          '/live/cam1/whep',",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "second camera"
+  },
+  {
+    "label": "#562 TTL control: a comment edit in middleware/auth.js changes nothing",
+    "file": "backend/src/middleware/auth.js",
+    "find": "// ⚠️ UP TO 1 SECOND EARLY, by design.",
+    "replace": "// ⚠️ UP TO 1 SECOND EARLY, by design [CONTROL MUTANT].",
+    "expect": "survives",
+    "tests": ["session-lifetime.test.js", "session-lifetime-7-days.test.js"],
+    "note": "Validates the harness for the two lifetime files. If this is ever KILLED, the run is broken, not the code."
+  },
+  {
+    "label": "#562 TTL M1: the request check drops the age condition (only the token's exp bounds a session)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "WHERE s.id = ? AND ${requestAge.sql}`",
+    "replace": "WHERE s.id = ? AND (${requestAge.sql} OR 1)`",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js", "session-lifetime-7-days.test.js"],
+    "note": "The pre-#562 behaviour on the request path. Every aged session holds a FRESH token, so only the row's age can refuse it."
+  },
+  {
+    "label": "#562 TTL M2: the age condition reads last_seen_at instead of created_at",
+    "file": "backend/src/middleware/auth.js",
+    "find": "const SESSION_AGE_COLUMN = 'created_at';",
+    "replace": "const SESSION_AGE_COLUMN = 'last_seen_at';",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js", "session-lifetime-7-days.test.js"],
+    "note": "Turns the absolute lifetime into an idle timeout. Killed because every aged session's last_seen_at is 10 minutes ago."
+  },
+  {
+    "label": "#562 TTL M3: liveSession touches last_seen_at BEFORE the lifetime check",
+    "file": "backend/src/middleware/auth.js",
+    "find": "  const row = sessionWithUser.get(sessionId, ...requestAge.params);",
+    "replace": "  touchSession.run(sessionId); const row = sessionWithUser.get(sessionId, ...requestAge.params);",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "last_seen_at is not touched"
+  },
+  {
+    "label": "#562 TTL M4: activePushTokens hard-codes 30 days instead of the setting",
+    "file": "backend/src/lib/push.js",
+    "find": "  const params = [...age.params];",
+    "replace": "  const params = ['-30 days'];",
+    "expect": "killed",
+    "tests": ["session-lifetime-7-days.test.js"],
+    "namePattern": "activePushTokens"
+  },
+  {
+    "label": "#562 TTL M5: activePushTokens drops the age condition",
+    "file": "backend/src/lib/push.js",
+    "find": "            SELECT id FROM sessions WHERE ${age.sql}",
+    "replace": "            SELECT id FROM sessions WHERE (${age.sql} OR 1)",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js", "session-lifetime-7-days.test.js", "push.test.js"]
+  },
+  {
+    "label": "#562 TTL M6: the live-view sweep's isLiveSessionId hard-codes 30 days",
+    "file": "backend/src/middleware/auth.js",
+    "find": "  return !!sessionAlive.get(sid, ...sweepAge.params);",
+    "replace": "  return !!sessionAlive.get(sid, '-30 days');",
+    "expect": "killed",
+    "tests": ["session-lifetime-7-days.test.js"],
+    "namePattern": "live-view sweep"
+  },
+  {
+    "label": "#562 TTL M7: isLiveSessionId drops the age condition",
+    "file": "backend/src/middleware/auth.js",
+    "find": "const sessionAlive = db.prepare(`SELECT 1 FROM sessions WHERE id = ? AND ${sweepAge.sql}`);",
+    "replace": "const sessionAlive = db.prepare(`SELECT 1 FROM sessions WHERE id = ? AND (${sweepAge.sql} OR 1)`);",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "live-view sweep"
+  },
+  {
+    "label": "#562 TTL M8: purgeExpiredSessions no longer deletes by lifetime (idle rule only, as before #562)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "OR NOT (${purgeAge.sql})`;",
+    "replace": "OR (0 AND ${purgeAge.sql})`;",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js", "session-lifetime-7-days.test.js"],
+    "namePattern": "purgeExpiredSessions"
+  },
+  {
+    "label": "#562 TTL M9: purgeExpiredSessions drops the 31-day idle rule",
+    "file": "backend/src/middleware/auth.js",
+    "find": "const purgeable = `last_seen_at < datetime('now', '-31 days') OR",
+    "replace": "const purgeable = `0 OR",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "purgeExpiredSessions",
+    "note": "Killed only by the session with a FUTURE created_at (a clock that went backwards): no other row needs the idle rule."
+  },
+  {
+    "label": "#562 TTL M10: purgeExpiredSessions deletes the sessions before their push tokens",
+    "file": "backend/src/middleware/auth.js",
+    "find": "  purgePushTokens.run(...purgeAge.params);\n  const { changes } = purgeSessions.run(...purgeAge.params);",
+    "replace": "  const { changes } = purgeSessions.run(...purgeAge.params);\n  purgePushTokens.run(...purgeAge.params);",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "purgeExpiredSessions",
+    "note": "The push-token delete selects through the sessions it is about to remove; run second, it finds none and the registrations are left behind."
+  },
+  {
+    "label": "#562 TTL M11: purgeExpiredSessions hard-codes 30 days for the session delete",
+    "file": "backend/src/middleware/auth.js",
+    "find": "  const { changes } = purgeSessions.run(...purgeAge.params);",
+    "replace": "  const { changes } = purgeSessions.run('-30 days');",
+    "expect": "killed",
+    "tests": ["session-lifetime-7-days.test.js"],
+    "namePattern": "purgeExpiredSessions"
+  },
+  {
+    "label": "#562 TTL M12: GET /sessions lists sessions past their lifetime",
+    "file": "backend/src/routes/auth.js",
+    "find": "WHERE user_id = ? AND ${listAge.sql} ORDER BY",
+    "replace": "WHERE user_id = ? AND (${listAge.sql} OR 1) ORDER BY",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "GET /sessions"
+  },
+  {
+    "label": "#562 TTL M13: GET /sessions/all lists sessions past their lifetime",
+    "file": "backend/src/routes/auth.js",
+    "find": "   WHERE ${allAge.sql}",
+    "replace": "   WHERE (${allAge.sql} OR 1)",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "GET /sessions"
+  },
+  {
+    "label": "#562 TTL M14: GET /sessions hard-codes 30 days",
+    "file": "backend/src/routes/auth.js",
+    "find": "ownSessions.all(req.user.id, ...listAge.params)",
+    "replace": "ownSessions.all(req.user.id, '-30 days')",
+    "expect": "killed",
+    "tests": ["session-lifetime-7-days.test.js"],
+    "namePattern": "GET /sessions"
+  },
+  {
+    "label": "#562 TTL M15: GET /sessions/all hard-codes 30 days",
+    "file": "backend/src/routes/auth.js",
+    "find": "everySession.all(...allAge.params)",
+    "replace": "everySession.all('-30 days')",
+    "expect": "killed",
+    "tests": ["session-lifetime-7-days.test.js"],
+    "namePattern": "GET /sessions"
+  },
+  {
+    "label": "#562 TTL M16: the token minted at sign-in ignores the setting (always 30 days)",
+    "file": "backend/src/routes/auth.js",
+    "find": "    expiresIn: `${SESSION_TOKEN_TTL_DAYS}d`,",
+    "replace": "    expiresIn: '30d',",
+    "expect": "killed",
+    "tests": ["session-lifetime-7-days.test.js"],
+    "namePattern": "exp - iat"
+  },
+  {
+    "label": "#562 TTL M17: the parse uses Number() instead of the digits-only check (1e1 becomes 10)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "  if (/^[0-9]+$/.test(s)) {",
+    "replace": "  if (Number.isInteger(Number(s))) {",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "parse table"
+  },
+  {
+    "label": "#562 TTL M18: the floor is 1 day instead of 7",
+    "file": "backend/src/middleware/auth.js",
+    "find": "export const MIN_SESSION_TTL_DAYS = 7;",
+    "replace": "export const MIN_SESSION_TTL_DAYS = 1;",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "parse table"
+  },
+  {
+    "label": "#562 TTL M19: the range check lets a value above 30 through",
+    "file": "backend/src/middleware/auth.js",
+    "find": "days <= MAX_SESSION_TTL_DAYS) return { days, warning: null };",
+    "replace": "days <= 365) return { days, warning: null };",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "parse table"
+  },
+  {
+    "label": "#562 TTL M20: the range check lets a value below 7 through",
+    "file": "backend/src/middleware/auth.js",
+    "find": "if (days >= MIN_SESSION_TTL_DAYS && days",
+    "replace": "if (days >= 0 && days",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "parse table"
+  },
+  {
+    "label": "#562 TTL M21: values are not trimmed (' 7 ' and a blank of spaces become warnings)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "const s = typeof raw === 'string' ? raw.trim() : '';",
+    "replace": "const s = typeof raw === 'string' ? raw : '';",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "parse table"
+  },
+  {
+    "label": "#562 TTL M22: unset or blank is not the default 30",
+    "file": "backend/src/middleware/auth.js",
+    "find": "  if (!s) return { days: DEFAULT_SESSION_TTL_DAYS, warning: null };",
+    "replace": "  if (!s) return { days: 7, warning: null };",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"]
+  },
+  {
+    "label": "#562 TTL M23: a non-default value in effect is not logged at start",
+    "file": "backend/src/middleware/auth.js",
+    "find": "  else if (days !== DEFAULT_SESSION_TTL_DAYS) {",
+    "replace": "  else if (false) {",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js", "session-lifetime-7-days.test.js"]
+  },
+  {
+    "label": "#562 TTL M24: a bad value falls back silently (no warning in the log)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "  if (warning) log.warn(`[auth] ${warning}`);",
+    "replace": "  if (false) log.warn(`[auth] ${warning}`);",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "reportSessionTtl"
+  },
+  {
+    "label": "#562 TTL M25: start-up never reports the setting (the call at import is gone)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "reportSessionTtl(sessionTtl);",
+    "replace": "void sessionTtl;",
+    "expect": "killed",
+    "tests": ["session-lifetime-7-days.test.js"],
+    "namePattern": "start-up logged"
+  },
+  {
+    "label": "#562 TTL M26: sessionAgeCondition accepts any alias",
+    "file": "backend/src/middleware/auth.js",
+    "find": "  if (alias && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) throw",
+    "replace": "  if (false) throw",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "sessionAgeCondition"
+  },
+  {
+    "label": "#562 TTL M27: the index.js sweep passes a liveness rule other than isLiveSessionId",
+    "file": "backend/src/index.js",
+    "find": "sessionsToKick(sessions, webrtcSessionOwners, isLiveSessionId, listStartedAt)",
+    "replace": "sessionsToKick(sessions, webrtcSessionOwners, () => true, listStartedAt)",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "index.js pin",
+    "note": "Killed by a SOURCE PIN, not a behavioural test: index.js boots the app and cannot be imported."
+  },
+  {
+    "label": "#562 TTL F1: a 401 no longer tells AuthProvider (an open tab stays on a dead screen)",
+    "file": "frontend/src/lib/api.js",
+    "find": "    for (const listener of [...unauthorizedListeners]) listener();",
+    "replace": "    void unauthorizedListeners;",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "#562"
+  },
+  {
+    "label": "#562 TTL F2: AuthProvider never registers for 401s",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "  useEffect(() => onUnauthorized(() => {",
+    "replace": "  useEffect(() => (() => () => {})(() => {",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "#562"
+  },
+  {
+    "label": "#562 TTL F3: the 401 listener drops the user but keeps the media token",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "    clearMediaToken();\n    resetPushRegistration();",
+    "replace": "    resetPushRegistration();",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx", "lib/AuthContext.test.jsx"],
+    "namePattern": "#562"
+  },
+  {
+    "label": "#562 TTL F4: the late-401 guard removed, seen at the app level (a timed-out request signs the user out)",
+    "file": "frontend/src/lib/api.js",
+    "find": "if (signal.aborted) {",
+    "replace": "if (false && signal.aborted) {",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "TIMED OUT"
+  },
+  {
+    "label": "#562 TTL F5: listeners are called BEFORE the token is cleared",
+    "file": "frontend/src/lib/api.js",
+    "find": "  if (res.status === 401) {\n    setToken(null);",
+    "replace": "  if (res.status === 401) {\n    for (const listener of [...unauthorizedListeners]) listener();\n    setToken(null);",
+    "expect": "killed",
+    "tests": ["lib/api.test.js"],
+    "namePattern": "onUnauthorized"
+  },
+  {
+    "label": "#562 TTL F6: the unsubscribe function does nothing",
+    "file": "frontend/src/lib/api.js",
+    "find": "    unauthorizedListeners.delete(callback);",
+    "replace": "    void callback;",
+    "expect": "killed",
+    "tests": ["lib/api.test.js"],
+    "namePattern": "unsubscribes"
+  },
+  {
+    "label": "#562 TTL F7: listeners are called from the live set, not a copy",
+    "file": "frontend/src/lib/api.js",
+    "find": "for (const listener of [...unauthorizedListeners]) listener();",
+    "replace": "for (const listener of unauthorizedListeners) listener();",
+    "expect": "killed",
+    "tests": ["lib/api.test.js"],
+    "namePattern": "registered DURING"
+  },
+  {
+    "label": "#562 TTL F8: the 401 listener no longer resets push registration (signing in again in the same page never re-registers push)",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "    resetPushRegistration();\n    setUser(null);",
+    "replace": "    setUser(null);",
+    "expect": "killed",
+    "tests": ["lib/AuthContext.test.jsx", "appShell.test.jsx"],
+    "namePattern": "#562"
+  },
+  {
+    "label": "#562 TTL F9: resetPushRegistration does not clear the registered flag",
+    "file": "frontend/src/lib/pushNotifications.js",
+    "find": "export function resetPushRegistration() {\n  registered = false;\n}",
+    "replace": "export function resetPushRegistration() {\n}",
+    "expect": "killed",
+    "tests": ["lib/pushNotifications.test.js"],
+    "namePattern": "#562"
+  },
+  {
+    "label": "#562 TTL F10: AuthProvider's 401 effect returns no cleanup (an unmounted provider is still called)",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "  useEffect(() => onUnauthorized(() => {",
+    "replace": "  useEffect(() => void onUnauthorized(() => {",
+    "expect": "killed",
+    "tests": ["lib/AuthContext.test.jsx"],
+    "namePattern": "unmounts"
+  },
+  {
+    "label": "#562 TTL M28: the purge's idle threshold is 1 day instead of 31 (a push-only phone loses its session)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "const purgeable = `last_seen_at < datetime('now', '-31 days') OR",
+    "replace": "const purgeable = `last_seen_at < datetime('now', '-1 days') OR",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "idle rule is 31 days"
+  },
+  {
+    "label": "#562 TTL M29: the purge's idle threshold is 30 days instead of 31",
+    "file": "backend/src/middleware/auth.js",
+    "find": "const purgeable = `last_seen_at < datetime('now', '-31 days') OR",
+    "replace": "const purgeable = `last_seen_at < datetime('now', '-30 days') OR",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "idle rule is 31 days",
+    "note": "Only the future-dated row idle 30.5 days separates 30 from 31: at the default lifetime any other row idle that long is already past its lifetime."
+  },
+  {
+    "label": "#562 TTL M30: the purge's idle threshold is 32 days instead of 31",
+    "file": "backend/src/middleware/auth.js",
+    "find": "const purgeable = `last_seen_at < datetime('now', '-31 days') OR",
+    "replace": "const purgeable = `last_seen_at < datetime('now', '-32 days') OR",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "idle rule is 31 days"
+  },
+  {
+    "label": "#562 TTL M31: GET /sessions lists the least recently active device first",
+    "file": "backend/src/routes/auth.js",
+    "find": "AND ${listAge.sql} ORDER BY last_seen_at DESC`",
+    "replace": "AND ${listAge.sql} ORDER BY last_seen_at ASC`",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "most recently active"
+  },
+  {
+    "label": "#562 TTL M32: GET /sessions/all lists the least recently active device first",
+    "file": "backend/src/routes/auth.js",
+    "find": "   ORDER BY last_seen_at DESC`",
+    "replace": "   ORDER BY last_seen_at ASC`",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "most recently active"
+  },
+  {
+    "label": "#562 TTL M33: index.js no longer purges at start (only after the first day)",
+    "file": "backend/src/index.js",
+    "find": "purgeExpiredSessions();",
+    "replace": "void purgeExpiredSessions;",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "index.js pin",
+    "note": "Killed by a SOURCE PIN, not a behavioural test: index.js boots the app and cannot be imported."
+  },
+  {
+    "label": "#562 viewport: the native app is relaxed too",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "  if (native) return false;",
+    "replace": "  if (false) return false;",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport native|#562 viewport defaults"
+  },
+  {
+    "label": "#562 viewport: maximum-scale is no longer removed",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "new Set(['maximum-scale', 'user-scalable'])",
+    "replace": "new Set(['user-scalable'])",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: user-scalable is no longer removed",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "new Set(['maximum-scale', 'user-scalable'])",
+    "replace": "new Set(['maximum-scale'])",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: the token name is matched case-sensitively",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "name: name.toLowerCase()",
+    "replace": "name: name",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: spaces before = hide a locking token",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "if (s[j] === '=') {",
+    "replace": "if (s[i] === '=') {",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: ; is not treated as a separator",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "const isSeparator = (c) => c === ',' || c === ';' || /\\s/.test(c);",
+    "replace": "const isSeparator = (c) => c === ',' || /\\s/.test(c);",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: a name with = and no value keeps the spaces after it",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "text: s.slice(start, i).trim()",
+    "replace": "text: s.slice(start, i)",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: a stray = where a name should start is not skipped",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "(isSeparator(s[i]) || s[i] === '=')",
+    "replace": "isSeparator(s[i])",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: whitespace is not treated as a separator",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "const isSeparator = (c) => c === ',' || c === ';' || /\\s/.test(c);",
+    "replace": "const isSeparator = (c) => c === ',' || c === ';';",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: a comma is not treated as a separator",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "const isSeparator = (c) => c === ',' || c === ';' || /\\s/.test(c);",
+    "replace": "const isSeparator = (c) => c === ';' || /\\s/.test(c);",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: tokens are rejoined without the space",
+    "file": "frontend/src/lib/viewport.js",
+    "find": ".join(', ');",
+    "replace": ".join(',');",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: every meta is rewritten, not only the viewport",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "doc.querySelectorAll('meta[name=\"viewport\"]')",
+    "replace": "doc.querySelectorAll('meta')",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: only the first viewport meta is relaxed",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "doc.querySelectorAll('meta[name=\"viewport\"]')",
+    "replace": "[doc.querySelector('meta[name=\"viewport\"]')].filter(Boolean)",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: a meta with no content attribute gains one",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "meta.getAttribute('content') ?? ''",
+    "replace": "meta.getAttribute('content')",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: every run reports and writes a change",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "    if (after !== before) {",
+    "replace": "    if (true) {",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: with no arguments every page is treated as a browser",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "native = isNativeApp()",
+    "replace": "native = false",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport defaults"
+  },
+  {
+    "label": "#562 viewport App: the policy is never applied at start",
+    "file": "frontend/src/App.jsx",
+    "find": "    applyViewportPolicy(document, isNativeApp());",
+    "replace": "    void 0;",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "#562 viewport app"
+  },
+  {
+    "label": "#562 viewport App: the native check is ignored at start",
+    "file": "frontend/src/App.jsx",
+    "find": "    applyViewportPolicy(document, isNativeApp());",
+    "replace": "    applyViewportPolicy(document, false);",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "#562 viewport app"
+  },
+  {
+    "label": "#562 viewport ios: an iOS browser loses maximum-scale too",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "const drop = ios ? LOCKING_IOS : LOCKING;",
+    "replace": "const drop = LOCKING;",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport ios"
+  },
+  {
+    "label": "#562 viewport ios: every browser keeps maximum-scale",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "const drop = ios ? LOCKING_IOS : LOCKING;",
+    "replace": "const drop = LOCKING_IOS;",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport ios: an iOS browser keeps user-scalable too",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "const LOCKING_IOS = new Set(['user-scalable']);",
+    "replace": "const LOCKING_IOS = new Set([]);",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport ios"
+  },
+  {
+    "label": "#562 viewport ios: applyViewportPolicy ignores its ios argument",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "relaxedViewportContent(before, ios)",
+    "replace": "relaxedViewportContent(before)",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport ios|#562 viewport defaults"
+  },
+  {
+    "label": "#562 viewport ios: with no ios argument no page counts as iOS",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "ios = isIosBrowser()",
+    "replace": "ios = false",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js", "appShell.test.jsx"],
+    "namePattern": "#562 viewport defaults|#562 viewport app"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: an iPhone user agent is not recognised",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "/iPhone|iPad|iPod/.test(ua)",
+    "replace": "/iPad|iPod/.test(ua)",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: an iPad user agent is not recognised",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "/iPhone|iPad|iPod/.test(ua)",
+    "replace": "/iPhone|iPod/.test(ua)",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: an iPod user agent is not recognised",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "/iPhone|iPad|iPod/.test(ua)",
+    "replace": "/iPhone|iPad/.test(ua)",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: an iPad reporting a Mac is not recognised",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "return nav.platform === 'MacIntel' && nav.maxTouchPoints > 1;",
+    "replace": "return false;",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: any touch screen counts as iOS (platform check dropped)",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "return nav.platform === 'MacIntel' && nav.maxTouchPoints > 1;",
+    "replace": "return nav.maxTouchPoints > 1;",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: every Mac counts as iOS (touch check dropped)",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "return nav.platform === 'MacIntel' && nav.maxTouchPoints > 1;",
+    "replace": "return nav.platform === 'MacIntel';",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: the Mac and touch conditions are OR'd",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "return nav.platform === 'MacIntel' && nav.maxTouchPoints > 1;",
+    "replace": "return nav.platform === 'MacIntel' || nav.maxTouchPoints > 1;",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: one touch point is enough",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "return nav.platform === 'MacIntel' && nav.maxTouchPoints > 1;",
+    "replace": "return nav.platform === 'MacIntel' && nav.maxTouchPoints >= 1;",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: with no argument the global navigator is not read",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "isIosBrowser(nav = navigator)",
+    "replace": "isIosBrowser(nav = {})",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser|#562 viewport defaults"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: a missing navigator throws",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "  if (!nav) return false;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: two touch points are not enough",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "return nav.platform === 'MacIntel' && nav.maxTouchPoints > 1;",
+    "replace": "return nav.platform === 'MacIntel' && nav.maxTouchPoints > 2;",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser"
+  },
+  {
+    "label": "#562 viewport pull-to-refresh: the zoom check is dropped at touchstart",
+    "file": "frontend/src/lib/usePullToRefresh.js",
+    "find": "e.touches.length !== 1 || window.scrollY > 0 || pinchZoomedIn()",
+    "replace": "e.touches.length !== 1 || window.scrollY > 0",
+    "expect": "killed",
+    "tests": ["lib/usePullToRefresh.test.jsx"],
+    "namePattern": "#562 viewport pull-to-refresh"
+  },
+  {
+    "label": "#562 viewport pull-to-refresh: the zoom check is dropped at touchmove",
+    "file": "frontend/src/lib/usePullToRefresh.js",
+    "find": "dy <= 0 || window.scrollY > 0 || pinchZoomedIn()",
+    "replace": "dy <= 0 || window.scrollY > 0",
+    "expect": "killed",
+    "tests": ["lib/usePullToRefresh.test.jsx"],
+    "namePattern": "#562 viewport pull-to-refresh"
+  },
+  {
+    "label": "#562 viewport pull-to-refresh: scale 1 counts as zoomed in",
+    "file": "frontend/src/lib/usePullToRefresh.js",
+    "find": "(window.visualViewport?.scale ?? 1) > 1",
+    "replace": "(window.visualViewport?.scale ?? 1) >= 1",
+    "expect": "killed",
+    "tests": ["lib/usePullToRefresh.test.jsx"],
+    "namePattern": "#562 viewport pull-to-refresh"
+  },
+  {
+    "label": "#562 viewport pull-to-refresh: a missing visualViewport counts as zoomed in",
+    "file": "frontend/src/lib/usePullToRefresh.js",
+    "find": "(window.visualViewport?.scale ?? 1) > 1",
+    "replace": "(window.visualViewport?.scale ?? 2) > 1",
+    "expect": "killed",
+    "tests": ["lib/usePullToRefresh.test.jsx"],
+    "namePattern": "#562 viewport pull-to-refresh"
+  },
+  {
+    "label": "#562 viewport pull-to-refresh: a missing visualViewport throws",
+    "file": "frontend/src/lib/usePullToRefresh.js",
+    "find": "(window.visualViewport?.scale ?? 1) > 1",
+    "replace": "(window.visualViewport.scale ?? 1) > 1",
+    "expect": "killed",
+    "tests": ["lib/usePullToRefresh.test.jsx"],
+    "namePattern": "#562 viewport pull-to-refresh"
+  },
+  {
+    "label": "#562 CSP: ok turns it on",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "const ON_VALUES = new Set(['1', 'true', 'yes', 'on']);",
+    "replace": "const ON_VALUES = new Set(['1', 'true', 'yes', 'on', 'ok']);",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP parse"
+  },
+  {
+    "label": "#562 CSP: enable turns it on",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "const ON_VALUES = new Set(['1', 'true', 'yes', 'on']);",
+    "replace": "const ON_VALUES = new Set(['1', 'true', 'yes', 'on', 'enable']);",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP parse"
+  },
+  {
+    "label": "#562 CSP: disabled is taken as a quiet OFF instead of warned about",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "const OFF_VALUES = new Set(['0', 'false', 'no', 'off']);",
+    "replace": "const OFF_VALUES = new Set(['0', 'false', 'no', 'off', 'disabled']);",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP parse|#562 CSP log"
+  },
+  {
+    "label": "#562 CSP: the Cloudflare script origin is allowed on every install",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "const cfScript = enabled ? [CLOUDFLARE_SCRIPT_ORIGIN] : [];",
+    "replace": "const cfScript = [CLOUDFLARE_SCRIPT_ORIGIN];",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP default"
+  },
+  {
+    "label": "#562 CSP: the Cloudflare beacon origin is allowed on every install",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "const cfConnect = enabled ? [CLOUDFLARE_BEACON_ORIGIN] : [];",
+    "replace": "const cfConnect = [CLOUDFLARE_BEACON_ORIGIN];",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP default"
+  },
+  {
+    "label": "#562 CSP: ON never allows the beacon's POST target",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "const cfConnect = enabled ? [CLOUDFLARE_BEACON_ORIGIN] : [];",
+    "replace": "const cfConnect = [];",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP on"
+  },
+  {
+    "label": "#562 CSP: yes no longer turns it on",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "const ON_VALUES = new Set(['1', 'true', 'yes', 'on']);",
+    "replace": "const ON_VALUES = new Set(['1', 'true', 'on']);",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP parse"
+  },
+  {
+    "label": "#562 CSP: on no longer turns it on",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "const ON_VALUES = new Set(['1', 'true', 'yes', 'on']);",
+    "replace": "const ON_VALUES = new Set(['1', 'true', 'yes']);",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP parse"
+  },
+  {
+    "label": "#562 CSP: the value is matched case-sensitively",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "const v = s.toLowerCase();",
+    "replace": "const v = s;",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP parse"
+  },
+  {
+    "label": "#562 CSP: the value is not trimmed",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "typeof raw === 'string' ? raw.trim() : ''",
+    "replace": "typeof raw === 'string' ? raw : ''",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP parse"
+  },
+  {
+    "label": "#562 CSP: an unrecognised value fails OPEN",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "    enabled: false,\n    warning:",
+    "replace": "    enabled: true,\n    warning:",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP parse"
+  },
+  {
+    "label": "#562 CSP: a recognised OFF value is warned about as a typo",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "if (v === '' || OFF_VALUES.has(v)) return",
+    "replace": "if (v === '') return",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP parse|#562 CSP log"
+  },
+  {
+    "label": "#562 CSP: unset or blank is warned about as a typo",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "if (v === '' || OFF_VALUES.has(v)) return",
+    "replace": "if (OFF_VALUES.has(v)) return",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP parse|#562 CSP log"
+  },
+  {
+    "label": "#562 CSP: an unrecognised value is not logged",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "if (warning) log.warn(",
+    "replace": "if (false) log.warn(",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP log|#562 CSP wiring"
+  },
+  {
+    "label": "#562 CSP: ON is not logged at start",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "else if (enabled) log.info(",
+    "replace": "else if (false) log.info(",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP log"
+  },
+  {
+    "label": "#562 CSP: helmet adds its own default directives",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "useDefaults: false,",
+    "replace": "useDefaults: true,",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP default|#562 CSP header"
+  },
+  {
+    "label": "#562 CSP: an unrelated directive is loosened in the move (object-src)",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "objectSrc: [\"'none'\"],",
+    "replace": "objectSrc: [\"'self'\"],",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP default"
+  },
+  {
+    "label": "#562 CSP: an unrelated directive is dropped in the move (frame-ancestors)",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "    frameAncestors: [\"'none'\"],\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP default"
+  },
+  {
+    "label": "#562 CSP index.js: the environment is not passed to the builder",
+    "file": "backend/src/index.js",
+    "find": "app.use(helmet(buildHelmetOptions(process.env, logger)));",
+    "replace": "app.use(helmet(buildHelmetOptions({}, logger)));",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP wiring"
+  },
+  {
+    "label": "#562 CSP index.js: the logger is not passed, so a typo fails closed in silence",
+    "file": "backend/src/index.js",
+    "find": "app.use(helmet(buildHelmetOptions(process.env, logger)));",
+    "replace": "app.use(helmet(buildHelmetOptions(process.env)));",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP wiring"
+  },
+  {
+    "label": "#562 CSP index.js: a hard-coded policy with the Cloudflare origin comes back",
+    "file": "backend/src/index.js",
+    "find": "app.use(helmet(buildHelmetOptions(process.env, logger)));",
+    "replace": "app.use(helmet({ contentSecurityPolicy: { useDefaults: false, directives: { ...buildHelmetOptions(process.env, logger).contentSecurityPolicy.directives, scriptSrc: [\"'self'\", 'https://static.cloudflareinsights.com'] } } }));",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP wiring"
+  },
+  {
+    "label": "#562 CSP index.js: helmet is called with no options (its own default policy)",
+    "file": "backend/src/index.js",
+    "find": "app.use(helmet(buildHelmetOptions(process.env, logger)));",
+    "replace": "app.use(helmet());",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP wiring"
   }
 ]

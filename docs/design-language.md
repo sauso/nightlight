@@ -296,9 +296,15 @@ Also: `@media (prefers-reduced-motion: reduce)` — see §7.
 
 ### Viewport and safe areas
 
-- The app is **fixed-layout, not a scrollable document**: page zoom is disabled in `index.html`
-  (`maximum-scale=1, user-scalable=no`) because double-tap zoom left the Android PiP window stuck.
-  Don't re-enable it without reading that comment.
+- The app is **fixed-layout, not a scrollable document**, but page zoom differs by where it runs
+  (#562). `index.html` ships the locked viewport (`maximum-scale=1, user-scalable=no`), and the
+  **native app keeps it**: double-tap zoom left the Android PiP window stuck. In a **browser**
+  (a home-screen install included) `lib/viewport.js` relaxes it at start: an Android or desktop
+  browser loses both tokens, so pinch-zoom works for anyone who needs larger text; an **iOS
+  browser** loses only `user-scalable=no` and keeps `maximum-scale=1`, because WebKit pinch-zooms
+  regardless and that token is what stops Safari zooming into a focused field (see Fields). A
+  zoomed-in browser is now a state the layout can be in. Read the comment in `index.html` before
+  changing either side.
 - Heights use `100dvh` behind `@supports`, so fixed elements don't drift as mobile browser chrome
   hides. `html, body, #root` are painted `var(--bg)` so iOS elastic overscroll doesn't flash white.
 - **Every fixed edge must respect the safe area:** `env(safe-area-inset-top)` in the header,
@@ -339,9 +345,11 @@ legible on *any* user-chosen accent. Keep it.
 
 ### Fields
 Label 12px `--text-secondary`, 6px below. Input: full width, `--field-bg`, 1px `--border`, radius
-10px, `padding: 11px 12px`, **15px text** (≥16px would be ideal to stop iOS zoom, but page zoom is
-disabled app-wide so 15 is safe here). `.field` has `margin-bottom: 14px`; `.field-row` puts two
-side by side on a `1fr 1fr` grid.
+10px, `padding: 11px 12px`, **15px text**. iOS Safari zooms the page in when a field under 16px is
+focused unless the viewport has `maximum-scale=1`, which is why an iOS browser keeps that token
+when the app relaxes page zoom (#562, `lib/viewport.js`); 15 is safe there only because of it.
+Expected from WebKit's behaviour, not checked on a device. `.field` has `margin-bottom: 14px`;
+`.field-row` puts two side by side on a `1fr 1fr` grid.
 
 **Focus is global and must not be removed:**
 ```css
@@ -387,6 +395,15 @@ It sizes itself to `window.visualViewport` and scrolls internally so the on-scre
 push a focused field out of view, and it pads for `env(safe-area-inset-top)`. Both behaviours were
 bug fixes — preserve them.
 
+**`error`** (optional string, default none; #378) is for the failure of the dialog's **own action**, such as
+a Remove the server refused. It renders as an `.error-banner` with `role="alert"` **inside the card, under the
+title**, and nothing at all when empty, so a caller that does not pass it is unchanged. Rule: **an error from
+what a modal's button did goes in the modal.** A page-level banner sits in `<main>`, under the overlay, so the
+person tapped Remove and saw nothing happen. Keep it as its own state (`removeError`, not the page's `error`),
+clear it when the dialog opens and at the start of a confirm, and leave the dialog open with its button
+re-enabled so the person can read it and retry or cancel. Errors from actions that are not in a modal still use
+the page banner.
+
 **Standing rule: never use browser `confirm()` / `alert()` / `prompt()`.** Every confirmation is an
 in-app `Modal` (the camera-remove flow is the reference implementation).
 
@@ -402,6 +419,23 @@ The video wrap is 16:9 (`height: 50vh` when not fullscreen) so `object-fit: cove
 rather than cropping the camera's own timestamp overlay. Stopped state is a `#0a0d1c` panel with a
 centred restart button. Controls overlay the video; identity (name, child, drag handle, live dot)
 sits in the strip below.
+
+**Touch targets (#381).** Every control on a tile is tappable over **44px**, even though it draws smaller:
+the seven over-video buttons (Mute, Talk, Record, Picture-in-Picture, PTZ, Settings, Fullscreen) are drawn
+30px with a 20px icon and the drag handle 24px, and an invisible `::after` reaches 7px (10px for the handle)
+past each edge to make up the difference. Two things follow for anyone adding a control: the button must be
+`position: absolute` (or `relative`, as the handle is) for the `::after` to anchor to, and **neighbours must
+be at least 14px apart** or their enlarged areas overlap and a tap lands on the wrong one. That is why the
+three inner buttons (Record, Picture-in-Picture, PTZ) sit 54px from the edge, not the 48px they used to: the
+visible change is 6px more space between those pairs. The icons did not change size.
+
+### Not-found page (`pages/NotFound.jsx`, #379)
+The last route in the shell's route table (`path="*"`), so an address that matches no screen shows the app
+chrome around a short page instead of a blank one: header **"Page not found"**, one sentence, and a
+**"Go to Live"** button. No back link (it has no parent; the header logo and the nav both lead home).
+It is deliberately small: it does **not** tell "no such child or camera" from "still loading" for a real
+route with a missing id (that is #375), and an address that matches a *pattern* route with an unknown last
+segment, such as `/cameras/<id>/<unknown>`, still lands on that route's screen, not here.
 
 ### List row (`.cam-row`)
 Full-width button, `padding: 11px 14px`, 12px gap, hairline `--border` between rows (none on the

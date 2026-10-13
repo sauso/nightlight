@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Zap, AudioLines, Clock, ChevronRight } from 'lucide-react';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
@@ -25,6 +25,7 @@ export default function CameraSettings() {
   const { id } = useParams();
   const isNew = !id || id === 'new';
   const navigate = useNavigate();
+  const location = useLocation();
   const { kids: children, cameras, refresh } = useCameras();
   const cam = isNew ? null : cameras.find((c) => c.id === id);
 
@@ -40,10 +41,17 @@ export default function CameraSettings() {
   const [confirmMsg, setConfirmMsg] = useState('');
   const [removing, setRemoving] = useState(false);
   const [removeBusy, setRemoveBusy] = useState(false);
+  // The Remove dialog's own failure, rendered inside it (#378): pageError is a banner in <main>, which sits
+  // under the modal overlay, so a refused remove used to look like the button did nothing.
+  const [removeError, setRemoveError] = useState('');
   // Carried into the ONVIF fetch/talk-verify calls so extra capabilities detected here persist.
   const extraRef = useRef({});
 
-  const back = { to: '/family', label: 'Family' };
+  // Where "Back" goes, AND where a successful save or remove lands (#383). It used to be a hard-coded
+  // '/family' (a retired route that redirects to Children), so a camera opened from the Cameras tab
+  // landed on Children after saving, while the header link (which honours location.state.from) said
+  // otherwise. Same shape as ChildSettings; the fallback is the Cameras tab, this page's real parent.
+  const back = location.state?.from || { to: '/cameras', label: 'Cameras' };
 
   // Initialise the form once the camera has loaded (edit), or immediately (add).
   useEffect(() => {
@@ -171,13 +179,14 @@ export default function CameraSettings() {
   }
 
   async function confirmRemove() {
-    setRemoveBusy(true); setPageError('');
+    setRemoveBusy(true); setPageError(''); setRemoveError('');
     try {
       await api.del(`/cameras/${id}`);
       await refresh();
       navigate(back.to);
     } catch (err) {
-      setPageError(err.message);
+      // Dialog stays open, button re-enabled: the person can read why and retry or cancel.
+      setRemoveError(err.message);
       setRemoveBusy(false);
     }
   }
@@ -378,7 +387,7 @@ export default function CameraSettings() {
             </div>
 
             {!isNew && (
-              <button className="btn btn-danger" type="button" style={{ marginTop: 10 }} onClick={() => setRemoving(true)}>
+              <button className="btn btn-danger" type="button" style={{ marginTop: 10 }} onClick={() => { setRemoveError(''); setRemoving(true); }}>
                 Remove camera
               </button>
             )}
@@ -387,7 +396,7 @@ export default function CameraSettings() {
       </main>
 
       {removing && (
-        <Modal title="Remove camera" placement="top" onClose={() => (removeBusy ? null : setRemoving(false))}>
+        <Modal title="Remove camera" placement="top" error={removeError} onClose={() => (removeBusy ? null : setRemoving(false))}>
           <p style={{ marginTop: 0 }}>
             Remove <strong>{cam?.name}</strong>? This stops its stream and deletes it from Nightlight. It can't be undone (you can always add it again).
           </p>

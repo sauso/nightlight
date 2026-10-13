@@ -20,7 +20,7 @@ import gotifyRoutes from './routes/gotify.js';
 import notificationsRoutes from './routes/notifications.js';
 import timelapsesRoutes from './routes/timelapses.js';
 import recordingsRoutes from './routes/recordings.js';
-import { requireAuth, requireAuthQueryOrHeader, verifyToken, SESSION_TOKEN_TTL_DAYS } from './middleware/auth.js';
+import { requireAuth, requireAuthQueryOrHeader, verifyToken, isLiveSessionId, purgeExpiredSessions } from './middleware/auth.js';
 import { demoGuard, demoRequestLimiter, isDemoModeActive } from './middleware/demoMode.js';
 import { whepOnlyGuard } from './middleware/whepOnlyGuard.js';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -49,7 +49,9 @@ import { startWakeWatcher, stopWakeWatcher } from './lib/wakeWatcher.js';
 import { startTimelapseSampler, stopTimelapseSampler } from './lib/timelapse.js';
 import { startObservationLog, stopObservationLog } from './lib/observationClock.js';
 import { logger } from './lib/logger.js';
+import { logDataDirModes } from './lib/dataDirModes.js';
 import { applyTrustProxy } from './lib/trustProxy.js';
+import { buildHelmetOptions } from './lib/cspDirectives.js';
 import { safeInterval, installCrashGuards, markBootComplete } from './lib/processGuards.js';
 import {
   createCameraWatchdog, createAudioWatchdog, WATCHDOG_INTERVAL_MS, AUDIO_CHECK_INTERVAL_MS,
@@ -108,39 +110,13 @@ const app = express();
 // See lib/trustProxy.js; it falls back to 'loopback' with a loud log rather than exiting.
 applyTrustProxy(app, process.env.TRUST_PROXY);
 
-// Content-Security-Policy — ENFORCING (validated via a report-only rollout on staging that exercised
-// every feature). The report-uri below still logs any future
-// violation to /api/csp-report, so a regression (e.g. a new dependency pulling a third-party script)
-// shows up in the container log instead of silently. Directives are tuned to this app:
-//  - script-src 'self' + static.cloudflareinsights.com: Vite emits one external module script (no
-//    inline scripts — don't add unsafe-*); the Cloudflare Web Analytics beacon is allowed by choice.
-//  - style-src 'self': theming uses element.style.setProperty (CSSOM), which CSP doesn't police; app
-//    CSS is an external <link>. (If real style violations show up, add 'unsafe-inline' — low risk.)
-//  - media-src/worker-src blob:: hls.js feeds <video> via MSE blob URLs and runs its demuxer worker
-//    from a blob: URL. img-src data:: snapshot posters/icons. font-src data:: any inlined @font-face.
-//  - connect-src adds the client-side WebRTC STUN host (WhepPlayer.jsx) + the CF beacon POST target —
-//    keep the STUN host in sync if it ever changes.
-//  - No upgrade-insecure-requests: the app is also served over plain http on the LAN.
-app.use(helmet({
-  contentSecurityPolicy: {
-    useDefaults: false,
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", 'https://static.cloudflareinsights.com'],
-      styleSrc: ["'self'"],
-      imgSrc: ["'self'", 'data:'],
-      mediaSrc: ["'self'", 'blob:'],
-      workerSrc: ["'self'", 'blob:'],
-      connectSrc: ["'self'", 'stun.l.google.com:19302', 'https://cloudflareinsights.com'],
-      fontSrc: ["'self'", 'data:'],
-      objectSrc: ["'none'"],
-      baseUri: ["'self'"],
-      formAction: ["'self'"],
-      frameAncestors: ["'none'"],
-      reportUri: ['/api/csp-report'],
-    },
-  },
-}));
+// Content-Security-Policy, ENFORCING, plus helmet's other headers. The policy and the reasoning behind each
+// directive live in lib/cspDirectives.js, which builds the WHOLE options object (#562 bullet 6): this file
+// cannot be imported by a test, so a policy written here could only be read as text, never served and
+// checked. Keep it that way: no directive or origin belongs here (csp-directives.test.js pins it). The
+// third-party analytics allowance is opt-in through the environment (CLOUDFLARE_ANALYTICS, off by default);
+// passing the logger makes an unrecognised value log one warning, here, at start.
+app.use(helmet(buildHelmetOptions(process.env, logger)));
 
 // Unlike the read-only guard below, this must also cover the media proxies: the guest-session cap
 // bounds concurrent sign-ins, but one admitted token can otherwise open many WHEP sessions or make
@@ -298,6 +274,9 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 4000;
 const server = app.listen(PORT, () => {
   logger.info(`Baby monitor backend listening on port ${PORT}`);
+  // #549: the mask this process (and every FFmpeg/MediaMTX it starts) creates files with, and the database's mode.
+  // Read-only and cannot throw; see lib/dataDirModes.js and docs/operations.md, "Who can read the data directory".
+  logDataDirModes(DATA_DIR);
   // From here on a background fault should be survived, not fatal. BEFORE this point it is a failed
   // start, and the guards exit non-zero instead of leaving a healthy-looking container with no server
   // bound — see the boot/steady-state note in lib/processGuards.js.
@@ -361,23 +340,9 @@ server.on('upgrade', (req, socket, head) => {
 // this makes it self-heal within a few minutes instead of needing a manual restart.
 safeInterval('reconcile', 5 * 60 * 1000, reconcileCameraPaths);
 
-// Housekeeping: every login inserts a sessions row, and only an explicit logout
-// deletes it, so abandoned rows accumulate forever. Anything idle past the JWT's own
-// 30-day lifetime (see routes/auth.js) can never authenticate again regardless, so
-// deleting it changes nothing except table size.
-function purgeExpiredSessions() {
-  // push_tokens has no FK to sessions (deliberate — same reasoning as its user_id column, see
-  // lib/push.js), so a row bound to one of these about to go stale first, matching every other
-  // session-revocation path in routes/auth.js — not strictly required (activePushTokens() already
-  // excludes it either way) but keeps push_tokens from accumulating rows nothing will ever clean up.
-  db.prepare(
-    `DELETE FROM push_tokens WHERE session_id IN (
-       SELECT id FROM sessions WHERE last_seen_at < datetime('now', '-31 days')
-     )`
-  ).run();
-  const { changes } = db.prepare("DELETE FROM sessions WHERE last_seen_at < datetime('now', '-31 days')").run();
-  if (changes > 0) logger.info(`Purged ${changes} expired session(s).`);
-}
+// Housekeeping: deletes sessions past their lifetime (SESSION_TTL_DAYS) or idle for 31 days, and their
+// push registrations. It lives in middleware/auth.js beside the lifetime rule it applies (#562): this
+// file cannot be imported by a test (it boots the app), and a copy of the rule here is what drifts.
 purgeExpiredSessions();
 safeInterval('purge-sessions', 24 * 60 * 60 * 1000, purgeExpiredSessions);
 
@@ -386,8 +351,9 @@ safeInterval('purge-sessions', 24 * 60 * 60 * 1000, purgeExpiredSessions);
 // own — MediaMTX has no idea the revocation happened. This is the enforcement side: every tick, ask
 // MediaMTX what's actually still open, and end anything whose recorded owner is no longer a live
 // session — checked the SAME way every other revocation path in this repo checks it (exists, AND
-// within its own absolute token lifetime — see SESSION_TOKEN_TTL_DAYS and lib/push.js's identical
-// reasoning for the same class of gap).
+// within its lifetime, SESSION_TTL_DAYS): isLiveSessionId in middleware/auth.js, built from the same
+// sessionAgeCondition as the request check and push (#562), so a lowered lifetime ends a view at the
+// same moment it ends the session's API access and its alerts.
 //
 // 15s, matching camera-watchdog's cadence below — the documented bound on how long a revoked
 // session's view can keep playing. `sweeping` skips a tick already in flight: safeInterval does not
@@ -405,10 +371,7 @@ safeInterval('webrtc-session-reconcile', WEBRTC_KICK_INTERVAL_MS, async () => {
     // because it's missing from a snapshot older than it is).
     const listStartedAt = Date.now();
     const sessions = await listWebrtcSessions();
-    const isLive = (sid) =>
-      !!db.prepare(`SELECT 1 FROM sessions WHERE id = ? AND created_at > datetime('now', ?)`)
-        .get(sid, `-${SESSION_TOKEN_TTL_DAYS} days`);
-    const { toKick, stale } = sessionsToKick(sessions, webrtcSessionOwners, isLive, listStartedAt);
+    const { toKick, stale } = sessionsToKick(sessions, webrtcSessionOwners, isLiveSessionId, listStartedAt);
     for (const { id, path } of toKick) {
       await kickWebrtcSession(id);
       webrtcSessionOwners.delete(id);

@@ -1489,10 +1489,16 @@ changed (3 minutes, 2½ hours, 0.0005), and there is no setting.
   child: a false 18:48 put-down reaches exactly 3 that way and stays the bedtime, 43 minutes early (staging
   got that night right, because it logged two more *got into bed* that cut earlier). Trimming the approach
   was tried and rejected: it also zeroes a child who is still stirring when the next put-down is logged.
-- **A night still in progress.** The count is only cut once 2½ hours after the settle have passed; before
-  that, "not enough of the night yet to judge" accepts the put-down, as it always did. So tonight's live
-  figures can show a false early put-down as the bedtime until about 2½ hours after it. Figures worked out
-  later, and the stored night, use the full rule.
+- **Any put-down whose 2½ hours run past the end of the timeline, in progress or not.** The count is only
+  cut once 2½ hours after the settle have been recorded; before that, "not enough of the night yet to
+  judge" accepts the put-down, as it always did. On a night still in progress that is tonight's live
+  figures showing a false early put-down as the bedtime until about 2½ hours after it; figures worked out
+  later, and the stored night, use the full rule. **A finished night is not exempt:** a false put-down
+  within 2½ hours of the end of the night's window is accepted the same way, and so the real put-down
+  after it is never considered. For example a false 05:15 put-down over an empty bed, a real one at 06:00
+  and a window ending at 07:00 give a night that is not in progress with 05:15 as the bedtime and as
+  In bed. This is how the code behaved before #669 too, so it is a limit that stays, not a new one; it
+  needs a false put-down in the last 2½ hours of the window, which the usual evening bedtime is not.
 - **Not fixed:** a nap the child was lifted out of without waking (nothing between the nap and bedtime shows
   they woke), and a quiet evening with nothing to break the stillness over the empty bed, which can still be
   read as a child asleep from the window's opening. A camera outage between a false put-down and the next
@@ -1521,6 +1527,41 @@ line followed by a working frame a moment later was only the normal short wait f
 
 **What to do:** Restart the container. Alert images, the bed exit and entry frames and timelapse frames do not
 go through this shared grab, so it does not hold them up, and other cameras' frames are not affected.
+
+## After upgrading, a backup job or another container can no longer read the data directory
+
+**What you see:** Something other than Nightlight that used to read the data directory (a backup or `rsync`
+running as a non-root user, another container mounting the same folder with a different `PUID`) now gets
+*permission denied*. A named Unraid user browsing the share over SMB may lose access too (not verified). The
+log has a line like
+`[entrypoint] umask 077; existing entries with group/other access found: 1234; modes: babymonitor.db=600 ...`
+on the first start after the upgrade.
+
+**Why:** On purpose (#549). The database keeps every stored secret in plaintext, so by default the container
+makes everything in the data directory owner-only (`PUID`, files `600`, folders `700`), and each start takes
+group/other access off anything that still has it. Before, it was readable by every account on the host.
+The app itself, and anything running as root, are not affected.
+
+**What to do:** Set `UMASK=022` and loosen the existing files once by hand, as root on the host:
+`chmod -R go+rX <your data directory>`. Both are needed: `UMASK=022` only affects new files, and nothing
+loosens the old ones automatically. Better still, give the other reader the same `PUID`, or run it as root,
+and keep the default. See
+[Who can read the data directory](docs/operations.md#who-can-read-the-data-directory).
+
+## The `[entrypoint]` line reports the same number of entries "with group/other access found" on every start
+
+**What you see:** At the default `UMASK=077`, every start logs the same non-zero count, e.g.
+`[entrypoint] umask 077; existing entries with group/other access found: 57; modes: babymonitor.db=644 ...`,
+and the modes it lists stay `644` (or `777`) instead of becoming `600`.
+
+**Why:** The data directory is on a filesystem that ignores `chmod`: a Docker Desktop for Windows bind mount
+(which is what the Compose default `./data` is there), or a CIFS/NTFS mount with a fixed `file_mode`. The
+start-up pass finds the same entries each time and cannot change them. The count is what it *found*; a
+change that fails with an error is logged as a separate warning.
+
+**What to do:** Nothing in Nightlight can change this. On such a filesystem the protection is its own access
+control (the Windows folder's permissions, the share's mount options), so set that up instead. See
+[Who can read the data directory](docs/operations.md#who-can-read-the-data-directory).
 
 ## Confirmed bugs (fix pending)
 

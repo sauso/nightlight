@@ -86,7 +86,13 @@ unconditional reconcile-on-every-tick would cause constant disconnects.
 
 JWT-based, but a valid JWT alone isn't sufficient — every request also checks a `sessions` row
 in SQLite still exists (`backend/src/db.js`). This is what makes "sign out this device" and
-"delete this caregiver" take effect immediately rather than waiting for token expiry. Two auth
+"delete this caregiver" take effect immediately rather than waiting for token expiry. The same lookup
+checks the session's age: a session lasts `SESSION_TTL_DAYS` (default 30, range 7-30) from sign-in,
+judged by `sessions.created_at`, not by the token's `exp`, so lowering the setting ends older sessions at
+their next request even though their tokens say 30 days (#562). One helper, `sessionAgeCondition` in
+`middleware/auth.js`, supplies that condition to every place that asks: the request check (and so media
+tokens and the talk socket's `verifyToken`), push recipients (`lib/push.js`), the WebRTC live-view sweep
+(`isLiveSessionId`), the daily purge (`purgeExpiredSessions`) and the two session lists. Two auth
 middlewares exist: `requireAuth` (Bearer header) and `requireAuthQueryOrHeader` (also accepts
 `?token=`, needed because Safari's native `<video>` fetches HLS segments itself with no way to
 attach headers). Roles are `admin` / `caregiver`; `requireAdmin` gates account/settings management.
@@ -173,12 +179,41 @@ page and only a 4xx message reaches the person:
   the connection so the client sees a failure rather than a truncated body that looks complete. If the
   reply already finished, the error is only logged.
 
+**Example of "4xx before any write": the morning review's frame ids** (`PUT /api/children/:id/review/:date`,
+#522). `true_onset_transition_id`, `true_wake_transition_id` and `true_in_bed_transition_id` each name one
+recorded *got into / out of bed* event of that child and that night.
+
+| Sent as | Means |
+|---|---|
+| key not sent | keep the stored frame (an older page never sends the newer keys) |
+| `null` or `""` | no frame; clears a stored one (`""` has meant this since #571). Sent even without its time field, it also clears that moment's stored time (`true_wake_transition_id: null` alone clears the stored wake time; likewise onset and in bed) |
+| a positive whole number up to 2^53 - 1, or a string of ASCII digits without a leading zero (`42`, `"42"`) | that event; it must be one of this night's, and the in-bed one a *got into bed* event |
+| anything else (`true`, `[42]`, `"0x2a"`, `"42e0"`, `" 42 "`, `"42.0"`, `"042"`, `0`, `-1`, `1.5`, `{}`) | **400**, the key's usual message (`<key> is not an event of this night`, or `... is not a got-into-bed event of this night` for the in-bed one), before anything in the request is written, verdicts included |
+
+One parser, `parseTransitionId` in `lib/sleepReviews.js`, reads the id for both the check and what is stored,
+so the two cannot disagree (they did on `""` before #571). Before #522 the shapes in the last row that
+`Number()` reads as a real id (`[42]`, `"0x2a"`, `" 42 "` and the like) were accepted and saved as that id.
+Pinned by `backend/test/review-in-bed-and-lock.test.js`.
+
 ## Runtime identity (`backend/entrypoint.sh`, `Dockerfile`)
 
 Container starts as root, remaps a pre-baked user to `PUID`/`PGID` (default 99/100, Unraid's
 "nobody"/"users" convention) via `usermod`/`groupmod`, `chown`s the data dir, then execs the
 app via `su-exec` — the app process itself never runs as root. `tini` is PID 1 to reap zombies
 from the MediaMTX + per-camera-FFmpeg child process tree and forward signals correctly.
+
+Before the `mkdir`/`chown` it sets the **umask** from `UMASK` (default `077`, validated, #549), so
+the data dir, the database (SQLite gives `-wal`/`-shm` the database file's own mode), snapshots,
+clips and everything FFmpeg/MediaMTX write are owner-only: a umask is inherited through `su-exec`
+and every fork. Missing PARENTS of a non-default `DATA_DIR` are created under `022` (they are
+root-owned and `chown` does not reach them, so `0700` would lock the app out). At `077` only, it
+then strips group/other bits from existing entries
+(`find "$DATA_DIR" ! -type l -perm /077 -exec chmod go-rwx {} +`, every start, never fatal; no
+trailing slash, so it starts at the same root `chown -R` does and a symlinked `DATA_DIR` is left
+alone, as `chown -R` leaves it) and logs one `[entrypoint] umask …` line with the count it found;
+the app logs `[data-dir] app umask …` once it is up (`lib/dataDirModes.js`). User-facing rules and limits: `docs/operations.md`, "Who can read the
+data directory". Tests: `entrypoint-umask.test.js` (Linux only) and
+`scripts/entrypoint-umask.mutants.sh`, both run in CI.
 
 ## Frontend structure (`frontend/src/`)
 
@@ -198,9 +233,28 @@ is allowed to run long (camera probes and saves, recomputing a night, photo uplo
 
 `backend/src/index.js` serves an **enforcing** Content-Security-Policy via helmet (it was
 deliberately disabled until 2026-08-24, when it was rolled out report-only across every feature
-first, then switched to enforcing). The directives are tuned to this app and the reasoning is in
-the inline comment above the policy — read it before changing anything there. Two things that
-bite: hls.js needs `worker-src blob:` + `media-src blob:`, and WebRTC's STUN server is gated by
-`connect-src`. Never add `unsafe-inline`/`unsafe-eval` to `script-src`; theming is safe because it
-uses CSSOM `setProperty`, which CSP doesn't police. Violations are logged to the container log via
-`POST /api/csp-report`, so check there if a new dependency breaks.
+first, then switched to enforcing). The policy, and every other option index.js passes to helmet,
+is built by `backend/src/lib/cspDirectives.js` (#562): index.js cannot be imported by a test, so the
+policy lives where `csp-directives.test.js` can serve it and read the header back. The directives
+are tuned to this app and the reasoning is in the comment at the top of that file — read it before
+changing anything there. Two things that bite: hls.js needs `worker-src blob:` + `media-src blob:`,
+and WebRTC's STUN server is gated by `connect-src`. Never add `unsafe-inline`/`unsafe-eval` to
+`script-src`; theming is safe because it uses CSSOM `setProperty`, which CSP doesn't police.
+Violations are logged to the container log via `POST /api/csp-report` (at most 10 a minute), so
+check there if a new dependency breaks.
+
+**Cloudflare Web Analytics is opt-in** (#562). Until then `script-src` and `connect-src` allowed
+Cloudflare's beacon origins on every install; now they are added only when the operator turns it on:
+
+| `CLOUDFLARE_ANALYTICS` | Allows Cloudflare's Web Analytics beacon (`script-src https://static.cloudflareinsights.com`, `connect-src https://cloudflareinsights.com`). |
+|---|---|
+| Default | Off: blank or unset. The policy is the one above with neither origin. |
+| On | `1`, `true`, `yes` or `on`, trimmed and in any case. The header is then exactly what every install served before #562, and one `[http]` line at start says so. |
+| Off | Blank, `0`, `false`, `no`, `off`. |
+| Anything else | Off, with one warning in the log at start (a typo fails closed: the beacon stays blocked). |
+
+With it off, a site served through Cloudflare's proxy with Web Analytics on still has the beacon
+`<script>` injected into every page by Cloudflare; the browser refuses it, and each refusal arrives
+as a `[csp-report]` log line (at most 10 a minute). Either set the variable, or, if the analytics are not wanted, turn off
+Web Analytics' automatic setup (the injection) for that site in the Cloudflare dashboard. Not checked
+against a real Cloudflare-fronted install.

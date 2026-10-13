@@ -55,6 +55,11 @@ export default function SleepDetail() {
   const [night, setNight] = useState(undefined); // undefined = loading
   // The receipt for a correction just saved, when we arrived here from the review screen.
   const [receipt, setReceipt] = useState(null);
+  // Bumped each time the receipt is dropped because the correction it quotes was removed (#679). The receipt
+  // fetch below remembers the value it started under and discards its answer if it has moved: a GET still
+  // in flight when the person removes the correction would otherwise land AFTER `setReceipt(null)` and put
+  // the removed times back. A counter, not `alive`: that only flips when the page's date or id changes.
+  const receiptRemovals = useRef(0);
 
   // Local calendar 'today' in the app tz, and the default max = yesterday (a completed night).
   const todayLocal = useMemo(
@@ -118,6 +123,7 @@ export default function SleepDetail() {
   useEffect(() => {
     if (searchParams.get('saved') !== '1' || !date) { setReceipt(null); return; }
     let alive = true;
+    const removalsAtStart = receiptRemovals.current;
     // ⚠️ The saved times are under `review`, NOT at the top level: GET /review/:date returns
     // { computed, review, transitions }. Reading them from the root silently yields undefined and the
     // receipt simply never appears — which is what shipped, because the unit test mocked the shape I
@@ -125,7 +131,7 @@ export default function SleepDetail() {
     // could tell the difference.
     api.get(`/children/${id}/review/${date}`)
       .then((r) => {
-        if (!alive) return;
+        if (!alive || removalsAtStart !== receiptRemovals.current) return;
         // ⚠️ Gated on the flag TOO (plan review R4), not only the two times: "no one was in the bed"
         // carries neither, so the original `true_onset_at || true_wake_at` check alone showed nothing
         // after a flag-only save — a successful save that reads exactly like a failed one, the same
@@ -201,7 +207,7 @@ export default function SleepDetail() {
         )}
 
         <NightBody night={night} fmtTime={fmtTime} tz={tz} tempUnit={settings.temp_unit}
-          childId={id} date={date} onRecomputed={setNight} onCorrectionRemoved={() => setReceipt(null)} />
+          childId={id} date={date} onRecomputed={setNight} onCorrectionRemoved={() => { receiptRemovals.current += 1; setReceipt(null); }} />
 
         <SleepInsights childId={id} tempUnit={settings.temp_unit} childName={kid?.name} />
 

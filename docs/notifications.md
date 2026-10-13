@@ -17,6 +17,61 @@ enable, all managed under **Settings → Push notifications** (a row per provide
 - **Gotify (self-hosted)** — a lightweight self-hosted push server. Text alerts. See
   **[Option D: Gotify](#option-d-gotify)**.
 
+Each row on **Settings → Push notifications** carries a badge, so you can see at a glance which are live:
+
+| Badge | Means |
+|---|---|
+| **On** | Enabled. Alerts are sent to it. |
+| **Off** | Credentials are saved, and someone switched it off. |
+| **Not set up** | Nothing has been saved for it yet. This is a different word from **Off** on purpose: it was never on. |
+| **Status unavailable** | The page could not ask the server (or the server did not mention that provider), so it makes no claim either way. Reload; the rows still open. |
+
+There is no badge for the moment between opening the page and the answer arriving.
+
+---
+
+## What gets sent, and what each provider receives
+
+Motion and sound alerts are the main use, but they are not the only thing sent. Every kind below
+except the test message goes to **every provider you have enabled**, and there is no per-provider
+choice of kind: a provider gets all of them or none. What can be switched off separately is in the
+*Default* and *Needs* columns.
+
+| Notification | Default | Needs | Goes to |
+|---|---|---|---|
+| **Motion alert** | **Off.** Motion detection is off on a new camera | Motion detection on for that camera. Not sent while the camera is [silenced](camera-controls.md#silencing-a-cameras-alerts-and-who-did-what) or outside its [Alert schedule](#alert-schedule-quiet-hours) | Every enabled provider; with Firebase, every device that is registered and signed in, caregivers included |
+| **Sound alert** | **Off.** Sound detection is off on a new camera | Sound detection on for that camera. Same silence and schedule rules | The same |
+| **Camera offline**, and **back online** | **Off** | **Settings → Camera controls → Notify when a camera goes offline** (default threshold 5 minutes, 1–1440); "back online" is sent only after an offline notification was. See [Camera controls](camera-controls.md#camera-offline-alerts) | The same |
+| **Long silence** (a camera's alerts kept silenced) | **On**, 60 minutes (1–719) | **Settings → Camera controls → Long silence alerts**. See [Camera controls](camera-controls.md#long-silence-alerts) | Meant for admins: on Firebase only admins' devices, and not the person who set the silence; Pushover, ntfy and Gotify cannot address one person, so everyone on them gets it |
+| **Sleep report** (and one **Sleep report updated** follow-up) | **On, with no setting to switch it off** in this version | A child with **Track sleep** on, and at least one provider enabled. See [Sleep report notifications](#sleep-report-notifications) | The same as motion alerts |
+| **Test message** | Only when you press **Send test** (Pushover, ntfy and Gotify; Firebase has no test button) | That provider's settings **saved**: the test uses what was last saved, not what is typed on screen, so **Send test** (labelled "Send test with saved settings") is greyed out, with a hint, while a field or secret has been changed and not yet saved. Save first, then test | That one provider |
+
+What each message says. Names are the names as you typed them:
+
+| Notification | Title | Text | Image |
+|---|---|---|---|
+| **Motion alert** | `<camera name>` on Firebase; `<camera name> — motion` on Pushover, ntfy and Gotify | `Motion detected` | A snapshot when one could be grabbed (Pushover, ntfy and Firebase, on a phone that has registered its address; Gotify is text only). Tapping opens that camera |
+| **Sound alert** | `<camera name>` on Firebase; `<camera name> — sound` on the others | `Sound detected` | The same |
+| **Camera offline** | `<camera name> — offline` | `No video from "<camera name>" for 5+ minutes.` | None |
+| **Back online** | `<camera name> — back online` | `"<camera name>" is back online after about 7 minutes offline.` | None |
+| **Long silence** | `Alerts silenced on <camera name>` | `Alerts from "<camera name>" have been silenced on and off for 2 h 5 min. Camera history shows who set each silence.` No username | None |
+| **Sleep report** | `Sleep report — <child's name>` for one child; `Sleep reports ready` when several close in the same check | One line per child: `<child's name>: asleep 8h12, 2 wakes, up 06:47`, or `<child's name>: no one in the bed`, or `<child's name>: no sleep data`. Tapping opens the sleep page | None |
+| **Sleep report updated** | `Sleep report updated — <child's name>` (or `Sleep reports updated`) | The same lines, now with the wake time | None |
+| **Test message** | `Nightlight` | `Test notification — … is working.` | None |
+
+Each message also carries a tap link that opens the app (`nightlight://camera/<id>` or
+`nightlight://sleep`). Once the server has learned its own address from an admin's phone (see
+[Where tapping an alert opens](#where-tapping-an-alert-opens-nothing-to-configure)), the link includes
+that address, so it passes through the provider too.
+
+⚠️ **The child's name is in the title of the sleep report, and in its text.** A camera's name is in
+every motion, sound, offline and long-silence notification. Both are sent exactly as typed (a child's
+name is whatever you put in the child's Name field, so a nickname works), to every provider you
+enabled, and they pass through that provider's service: Google's Firebase Cloud Messaging, Pushover,
+ntfy.sh unless you run your own server, or your own Gotify. There is **no setting in this version that
+leaves the name out of the sleep report or switches the report off**. With ntfy on the public
+ntfy.sh, anyone who knows your topic can read all of this (see [Option C](#option-c-ntfy)).
+
 ---
 
 ## Option A: Pushover
@@ -42,7 +97,9 @@ call to Pushover — nothing to bake into an app.
    the Nightlight app.
 
 > **Privacy note.** Only a short *"motion on \<camera\>"* message plus a small snapshot image pass
-> through Pushover — **never your live video or audio**, which stay on your own server.
+> through Pushover — **never your live video or audio**, which stay on your own server. That is the
+> motion alert; the other notifications pass through it too, and the sleep report carries a child's
+> name (see [what each provider receives](#what-gets-sent-and-what-each-provider-receives)).
 
 ---
 
@@ -55,7 +112,9 @@ server at runtime. Setting it up is a one-time job.
 > **Privacy note.** Push delivery requires a cloud relay (Google's Firebase Cloud Messaging on
 > Android — there's no way for an app to be woken while closed without the OS's push service). Only a
 > small *"motion detected on \<camera\>"* message passes through it — **never your video or audio**,
-> which stay entirely on your own server.
+> which stay entirely on your own server. The other notifications pass through it too, and the sleep
+> report carries a child's name (see
+> [what each provider receives](#what-gets-sent-and-what-each-provider-receives)).
 >
 > **Android only** for now (iOS needs Apple's APNs, which is on the roadmap).
 
@@ -140,7 +199,9 @@ your own server (e.g. on the same NAS).
    **username/password**. Tick **Enable**, **Save**, and **Send test**.
 
 Motion/sound alerts arrive with the **snapshot attached inline**, and tapping one deep-links into the
-Nightlight app. Only the short message + snapshot pass through ntfy — never your live video/audio.
+Nightlight app. Only the short message + snapshot pass through ntfy — never your live video/audio. The
+other notifications pass through it too, including the sleep report with a child's name (see
+[what each provider receives](#what-gets-sent-and-what-each-provider-receives)).
 
 ntfy carries the alert's **title** (and, when a snapshot is attached, the whole message too) in an HTTP header,
 which cannot hold a line break or any other control character, and which only carries Latin-1 text. Nightlight
@@ -163,7 +224,9 @@ multi-line nightly sleep report keeps its line breaks.
    "unset". Out-of-range values are clamped to 0–10 by the server.
 
 Gotify alerts are **text only** (no image — Gotify has no native attachments); tapping one opens the
-camera. Only the short message passes through your Gotify server.
+camera. Only the short message passes through your Gotify server; the other notifications do too,
+including the sleep report with a child's name (see
+[what each provider receives](#what-gets-sent-and-what-each-provider-receives)).
 
 ## Where tapping an alert opens (nothing to configure)
 
@@ -305,6 +368,10 @@ Turn on **Only alert during set hours** and set a **From** and **To** time.
   alert, but the camera is still watched: **sleep tracking keeps recording normally**, so a night is
   unaffected by the schedule. This is the opposite of turning motion or sound detection off, which
   does stop the signal sleep tracking uses.
+- **No alert means no alert clip.** A clip is cut only when an alert fires (see
+  [Recording](recording.md#automatic-clips-detection-triggered)), so a camera saves no clip for what
+  happens outside its window, even with **Save a clip when triggered** on. The same holds while the
+  camera is silenced from its tile.
 - A window whose From and To are the same time is treated as **always on**, not "never".
 
 Sound is measured **relative to each room's own ambient level**, which the app learns continuously —
@@ -474,6 +541,13 @@ too. What counts as one silence, who receives it on each channel, and the known 
 
 ## Troubleshooting
 
+- **"Send test with saved settings" is greyed out.** Either the provider is not **configured** yet
+  (save its details first), or you have changed something on the page and not saved it. Send test
+  asks the server to use the settings it has **saved**; it cannot see what is typed on screen, so it
+  waits rather than report on settings you are not looking at. Press **Save changes**, then test. If
+  you type a value back to what it was, or empty a secret box you typed in, it becomes available again
+  without saving. A save that fails (the message appears at the top) leaves it greyed out, because
+  nothing was saved.
 - **"Send test" says it timed out after 10s.** Nightlight gives any notification provider **10
   seconds** to accept a message before giving up, and reports it rather than waiting. The usual cause
   is a self-hosted **ntfy** or **Gotify** server that is half up — accepting the connection but never

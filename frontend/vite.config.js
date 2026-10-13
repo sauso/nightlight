@@ -74,7 +74,10 @@ export default defineConfig({
         'src/main.jsx', // the bootstrap: mounts the tree, no logic of its own
         // --- media: jsdom implements none of these APIs ---
         'src/components/WhepPlayer.jsx', // RTCPeerConnection / WHEP
-        'src/components/HlsPlayer.jsx', // hls.js + MediaSource Extensions
+        // hls.js + MediaSource Extensions. Since #560 the NATIVE-HLS branch (Safari: canPlayType says
+        // 'maybe', a plain <video src>) IS exercised, by hlsPlayerNative.test.jsx, with canPlayType stubbed;
+        // the hls.js/MSE branch is not, which is why the file stays listed. Not a reason to widen the list.
+        'src/components/HlsPlayer.jsx',
         // Mounts both players above, plus the Fullscreen, Picture-in-Picture and pointer-gesture APIs.
         // ⚠️ NOT a licence to stop testing it: its pure logic is deliberately extracted into exported
         // helpers (detectionPayload, readingParts, fmtElapsed) which ARE tested, and anything else

@@ -10,8 +10,8 @@ import db from '../db.js';
 //
 // ⚠️ THE DATABASE DECIDES, NOT THE TOKEN, the same rule middleware/auth.js applies to the role (issue
 // #261): the session token carries the username it was minted with, and an admin can rename the account
-// afterwards, so the claim can be up to 30 days stale. The row is read through the session id, joined to
-// the user's CURRENT row.
+// afterwards, so the claim can be as stale as the session is old (up to SESSION_TTL_DAYS, 30 by
+// default). The row is read through the session id, joined to the user's CURRENT row.
 //
 // ⚠️ CALL IT BEFORE ANY `await`. requireAuth has just proved the session and user rows exist, and nothing
 // can delete them while the handler runs synchronously; after an await they can be gone (an admin deleting

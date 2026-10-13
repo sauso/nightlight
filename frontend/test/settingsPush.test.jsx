@@ -59,12 +59,17 @@ describe('the push hub', () => {
     for (const p of PROVIDERS) expect(await screen.findByText(p)).toBeTruthy();
   });
 
-  test('★ the badge says On for enabled, Off for configured-but-disabled, and NOTHING for untouched',
+  test('★ the badge says On for enabled, Off for configured-but-disabled, and Not set up for untouched',
     async () => {
       // The three states are the whole point of the hub: it exists so someone can see at a glance
-      // which providers are live. "Off" and "no badge" are deliberately different — "Off" means
-      // credentials are saved and someone turned it off, while a blank row means never set up. A
+      // which providers are live. "Off" and "Not set up" are deliberately DIFFERENT WORDS — "Off" means
+      // credentials are saved and someone turned it off, "Not set up" means nothing was ever saved. A
       // provider that has never been configured must not read as though it was switched off.
+      //
+      // CHANGED ON PURPOSE (#385): this used to assert NOTHING for an untouched provider (a blank row).
+      // That made "never set up" indistinguishable from "the status request failed" and from "still
+      // loading". The distinction it was protecting (never configured is not "Off") is kept, now by
+      // the word, not by silence.
       mockStatus({
         pushover: { enabled: true, configured: true },
         firebase: { enabled: false, configured: true },
@@ -75,10 +80,46 @@ describe('the push hub', () => {
 
       await waitFor(async () => expect((await row('Pushover')).getByText('On')).toBeTruthy());
       expect((await row('Firebase')).getByText('Off')).toBeTruthy();
+      expect((await row('Gotify')).getByText('Not set up')).toBeTruthy();
       expect((await row('Gotify')).queryByText('Off')).toBeNull();
       expect((await row('Gotify')).queryByText('On')).toBeNull();
+      expect((await row('ntfy')).getByText('Not set up')).toBeTruthy();
       expect((await row('ntfy')).queryByText('Off')).toBeNull();
+      // And the configured rows are not mislabelled the other way.
+      expect((await row('Pushover')).queryByText('Not set up')).toBeNull();
+      expect((await row('Firebase')).queryByText('Not set up')).toBeNull();
     });
+
+  test('★ #385 all four states at once, each on its own row', async () => {
+    // Four providers, four different answers: a badge computed from the wrong provider's entry (or one
+    // shared across rows) cannot satisfy all four rows together.
+    mockStatus({
+      pushover: { enabled: true, configured: true },
+      firebase: { enabled: false, configured: true },
+      gotify: { enabled: false, configured: false },
+      // ntfy absent from the response: the server did not say, so the row must not claim either way.
+    });
+    renderAsAdmin(<SettingsPush />);
+    await waitFor(async () => expect((await row('Pushover')).getByText('On')).toBeTruthy());
+    expect((await row('Firebase')).getByText('Off')).toBeTruthy();
+    expect((await row('Gotify')).getByText('Not set up')).toBeTruthy();
+    expect((await row('ntfy')).getByText('Status unavailable')).toBeTruthy();
+    expect((await row('ntfy')).queryByText('Not set up')).toBeNull();
+  });
+
+  test('★ #385 no badge while the status is still loading (not a premature "Not set up")', async () => {
+    let resolveStatus;
+    vi.spyOn(api, 'get').mockReturnValue(new Promise((r) => { resolveStatus = r; }));
+    renderAsAdmin(<SettingsPush />);
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/notifications/status'));
+    for (const p of PROVIDERS) expect(screen.getByText(p)).toBeTruthy();
+    expect(screen.queryByText('Not set up')).toBeNull();
+    expect(screen.queryByText('Status unavailable')).toBeNull();
+    expect(screen.queryByText('On')).toBeNull();
+
+    resolveStatus(ALL_OFF);
+    await waitFor(() => expect(screen.getAllByText('Not set up')).toHaveLength(4));
+  });
 
   test('an enabled provider reads On even if the server also calls it unconfigured', async () => {
     // Order matters in badgeFor: `enabled` is checked first. The states are not meant to overlap, but
@@ -88,15 +129,20 @@ describe('the push hub', () => {
     await waitFor(async () => expect((await row('Gotify')).getByText('On')).toBeTruthy());
   });
 
-  test('a failed status lookup leaves the hub usable, with no badges', async () => {
+  test('★ a failed status lookup leaves the hub usable and says "Status unavailable" on every row', async () => {
     // The rows are static, so asserting they render would pass with the rejection unhandled. Wait for
     // the request to have settled first, then assert both halves: still navigable, and not guessing.
+    // CHANGED ON PURPOSE (#385): it used to assert no badges at all, which is exactly what a hub where
+    // nothing is configured looked like. The failure now says so, and must NOT read as "Not set up" (that
+    // would tell someone with a working provider that it is not configured).
     vi.spyOn(api, 'get').mockRejectedValue(new Error('offline'));
     renderAsAdmin(<SettingsPush />);
     await waitFor(() => expect(api.get).toHaveBeenCalledWith('/notifications/status'));
+    await waitFor(() => expect(screen.getAllByText('Status unavailable')).toHaveLength(4));
     for (const p of PROVIDERS) expect(screen.getByText(p)).toBeTruthy();
     expect(screen.queryByText('On')).toBeNull();
     expect(screen.queryByText('Off')).toBeNull();
+    expect(screen.queryByText('Not set up')).toBeNull();
   });
 
   describe('navigating into a provider', () => {

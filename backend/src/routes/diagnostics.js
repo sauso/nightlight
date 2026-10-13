@@ -13,6 +13,7 @@ import { getRecentDetectionEvents } from '../lib/detectionEvents.js';
 import { pushConfigured, pushEnabled } from '../lib/push.js';
 import { pushoverConfigured, pushoverEnabled } from '../lib/pushover.js';
 import { findCredentialLeak } from '../lib/urlCredentials.js';
+import { createIdentityRedactor } from '../lib/identityRedaction.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -25,6 +26,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // SECURITY: this must never leak credentials. Every field below is an explicit allow-list, and
 // anything sensitive (RTSP/ONVIF/talk/MQTT/Pushover/Firebase passwords + tokens, snapshot URLs
 // that can embed Basic-auth) is reduced to a boolean "is it set?" rather than its value. Admin-only.
+//
+// PRIVACY (#547): it must not say who the household is either. A child's name, and the camera names people
+// choose after their children, are replaced by Child N / Camera N / User N (lib/identityRedaction.js), the
+// birthday is left out, and the result is CHECKED before it is sent, like the credentials. What stays is a
+// decision, not an oversight: camera/MQTT addresses and topics, the timezone and event times are what a
+// connection or a bedtime bug is diagnosed from. SECURITY.md lists both halves; keep it in step.
 
 let appVersion = 'unknown';
 try {
@@ -122,14 +129,38 @@ router.get('/', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
     const cameras = db.prepare('SELECT * FROM cameras ORDER BY sort_order, created_at').all();
     // primary_camera_id (#655): which camera a child's sleep is scored from is the first thing to check when
     // a night looks wrong, and NULL (automatic: first enabled camera in sort_order) is a meaningful answer.
-    const children = db.prepare('SELECT id, name, birthday, color, created_at, primary_camera_id FROM children').all();
-    const userRows = db.prepare('SELECT role FROM users').all();
+    // ORDER BY: the alias a child gets ("Child 1") is its position here, so the order must be the same on
+    // every call. The birthday is not selected at all (#547): nothing in sleep tracking reads it.
+    const childRows = db.prepare('SELECT id, name, color, created_at, primary_camera_id FROM children ORDER BY created_at, id').all();
+    const userRows = db.prepare('SELECT username, first_name, last_name, role FROM users ORDER BY created_at, id').all();
+    // Every name the history tables remember, not just the live ones: a camera renamed or removed since a row
+    // was written is not in `cameras`, and its old name is still in that row (and in `detail`).
+    const cameraNames = db.prepare(
+      `SELECT camera_id, camera_name FROM camera_events UNION SELECT camera_id, camera_name FROM detection_events`
+    ).all();
+    const actorUsernames = db.prepare(
+      'SELECT DISTINCT actor_username FROM camera_events WHERE actor_username IS NOT NULL'
+    ).all().map((r) => r.actor_username);
+    const ident = createIdentityRedactor({ children: childRows, cameras, users: userRows, cameraNames, actorUsernames });
+    // Same keys and shapes as before (open clients, existing tests); values replaced. `birthday` stays as a
+    // key so nothing that reads the row breaks, and is always null.
+    const children = childRows.map((c) => ({
+      id: c.id,
+      name: ident.childAlias(c.id),
+      birthday: null,
+      color: c.color,
+      created_at: c.created_at,
+      primary_camera_id: c.primary_camera_id,
+    }));
 
     const camerasWithStatus = await Promise.all(
       cameras.map(async (cam) => {
         const safe = safeCamera(cam);
         return {
           ...safe,
+          // A camera's name is very often a child's (#547): the alias is the same one its history rows and
+          // log lines carry, so "Camera 2" can be followed through the whole bundle.
+          name: ident.cameraAlias(cam.id),
           // Skip the MediaMTX query for a disabled camera — its path is removed, so it would 404 and log
           // "path not found". It's intentionally off; report not-ready without asking.
           stream_status: cam.disabled ? { ready: false, tracks: [] } : await getPathStatus(cam.mediamtx_path),
@@ -140,7 +171,13 @@ router.get('/', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
 
     const bundle = {
       report: 'nightlight-diagnostics',
-      note: 'Redacted support bundle — contains configuration and recent logs, but no passwords or tokens. Review before sharing.',
+      note: 'Redacted support bundle — contains configuration and recent logs, but no passwords or tokens. ' +
+        'Children, cameras and user accounts are replaced by Child 1, Camera 1, User 1 (numbered in the order the ' +
+        'app lists them) and birthdays are left out. Still included: camera and MQTT addresses and topics, the ' +
+        'timezone, and the times of events (which show when a child slept). Review before sharing.',
+      // So a reader can tell "this install has no names" from "the names were replaced" (the same reason
+      // `[redacted]` marks a removed query string).
+      redaction: { identity: 'aliased', birthday: 'omitted' },
       generated_at: new Date().toISOString(),
 
       app: {
@@ -168,7 +205,9 @@ router.get('/', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
       },
 
       settings: {
-        app_name: settings.app_name,
+        // Free text an admin types; a household name is a plausible choice. Support needs to know only
+        // whether it was changed.
+        app_name: settings.app_name === 'Nightlight' ? 'Nightlight' : '(customised)',
         timezone: settings.timezone,
         font_choice: settings.font_choice,
         temp_unit: settings.temp_unit,
@@ -199,9 +238,32 @@ router.get('/', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
       cameras: camerasWithStatus,
       children,
 
-      recent_detection_events: getRecentDetectionEvents(100),
-      camera_history: getRecentEvents(200).map(bundleCameraEvent),
+      // `camera_name` in these rows is the name AT THE TIME of the event, so it is replaced by the alias of
+      // the row's camera_id, not looked up by text (a renamed or removed camera has no current name).
+      recent_detection_events: getRecentDetectionEvents(100).map((ev) => ({ ...ev, camera_name: ident.cameraAlias(ev.camera_id) })),
+      camera_history: getRecentEvents(200).map((ev) => ({ ...bundleCameraEvent(ev), camera_name: ident.cameraAlias(ev.camera_id) })),
       server_logs: logger.getRecent(),
+    };
+
+    // The names that remain are in free text (`server_logs`, each row's `detail`), written by call sites
+    // this file does not control: replace them wherever they occur (#547). Plain objects and strings only;
+    // anything else is passed through and caught by the check below.
+    // NOT scrubbed, and not checked: text this file or the platform writes, which no person typed. The note
+    // ("camera and MQTT addresses") would be rewritten for a household whose camera is called "Camera"; the
+    // timezone (`America/Phoenix`) for a child called Phoenix, which would remove the one fact a bedtime-off-
+    // by-an-hour bug is diagnosed from (found in code review). `app` and `system` are version strings, the
+    // runtime and the timezone; `counts` are numbers. Anything else, including a camera's own settings, is
+    // scrubbed: a child called "Motion" will see `detect_source` read "Camera 1", a known limit (SECURITY.md).
+    const EXEMPT_KEYS = new Set(['report', 'note', 'redaction', 'app', 'system', 'counts']);
+    const scrubExcept = (obj, keep) => Object.fromEntries(
+      Object.entries(obj).map(([k, v]) => [k, keep.has(k) ? v : ident.scrub(v)])
+    );
+    const published = scrubExcept(bundle, EXEMPT_KEYS);
+    published.settings = scrubExcept(bundle.settings, new Set(['timezone']));
+    // What the name check looks at: the same bundle without what was exempted above.
+    const withoutExempt = (b) => {
+      const { timezone, ...settings } = b.settings; // eslint-disable-line no-unused-vars
+      return Object.fromEntries(Object.entries({ ...b, settings }).filter(([k]) => !EXEMPT_KEYS.has(k)));
     };
 
     // ...and then CHECK, rather than trust. Every field above is meant to be secret-free by
@@ -209,13 +271,20 @@ router.get('/', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
     // actually said — this is remediation step 2 of GHSA-wcgj-6p3c-vr9h (see cameras.js's camera
     // report for the original instance) applied to this bundle too: assert the invariant instead of
     // just describing it in this file's own header comment.
-    const leak = findCredentialLeak(bundle);
+    const leak = findCredentialLeak(published);
     if (leak) {
       logger.error(`[diagnostics] refused to send a bundle that still contained a credential: ${leak}`);
       return res.status(500).json({ error: 'Diagnostics bundle failed a safety check — nothing was sent. Please report this.' });
     }
+    // The same check for names (#547), on what would be SENT, for the same reason: the scrub above passes a
+    // class instance through untouched, and a future field is not in this file yet.
+    const nameLeak = ident.findLeak(withoutExempt(published));
+    if (nameLeak) {
+      logger.error(`[diagnostics] refused to send a bundle that still contained a name: ${nameLeak}`);
+      return res.status(500).json({ error: 'Diagnostics bundle failed a privacy check — nothing was sent. Please report this.' });
+    }
 
-    res.json(bundle);
+    res.json(published);
   } catch (err) {
     logger.error(`[diagnostics] failed to build bundle: ${err.message}`);
     // 4xx (not 5xx): a reverse proxy replaces origin 5xx bodies, hiding the message.

@@ -49,6 +49,25 @@ export function clearMediaToken() {
   mediaTokenExpMs = 0;
 }
 
+// Who to tell when the server answers 401: this sign-in is over (its lifetime ran out, it was signed out
+// from another device, the account was removed). #562.
+//
+// ⚠️ WHY THIS EXISTS. On a 401 this module clears the token and sets #/login, but the signed-in user lives in
+// AuthProvider's state, not here. With the user still set, the router sends #/login straight back to `/`,
+// so an open tab (a tablet left on the live view, which is never backgrounded and so never hits the
+// reload-after-background rule) sat on a screen where every request failed, with no sign-in prompt, until
+// someone reloaded. Any mid-session 401 did this; a shorter SESSION_TTL_DAYS just makes it happen more.
+// AuthProvider registers here and drops its user, so the sign-in form appears at once, no reload.
+//
+// Returns the unsubscribe function, for a useEffect cleanup.
+const unauthorizedListeners = new Set();
+export function onUnauthorized(callback) {
+  unauthorizedListeners.add(callback);
+  return () => {
+    unauthorizedListeners.delete(callback);
+  };
+}
+
 // Request timeouts (issue #556). `fetch` has no timeout of its own, so a connection that stalls
 // (wifi drop, hung server, a backend route that never replies - #544) used to leave the request
 // pending forever: polls stacked up behind it, a per-camera save queue stayed "in flight" for good,
@@ -119,6 +138,11 @@ async function exchange(method, url, body, headers, signal) {
   if (res.status === 401) {
     setToken(null);
     window.location.hash = '#/login';
+    // After the token is cleared, so a listener sees the signed-out state. Behind the `signal.aborted`
+    // check above on purpose: a request that already timed out must not sign anyone out (#562 keeps that).
+    // Over a copy, so who is called is fixed when the 401 arrives: a listener registered by another listener
+    // during this loop (a re-render subscribing again) waits for the next 401 instead of running now.
+    for (const listener of [...unauthorizedListeners]) listener();
   }
 
   let data = null;

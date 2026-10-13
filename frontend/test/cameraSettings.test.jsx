@@ -16,7 +16,7 @@
 //
 // Role gating is not tested here: the route is <AdminProtected> (routeGuards.test.jsx).
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import { renderAsAdmin } from './helpers/render.jsx';
 import CameraSettings from '../src/pages/CameraSettings.jsx';
@@ -57,7 +57,10 @@ let delSpy;
 // screen navigates to (`/cameras/<new id>`) are matched by the screen's own route.
 const Probe = () => <div>at {useLocation().pathname}</div>;
 
-function mount({ cam = CAM, isNew = false } = {}) {
+// `from` is the router state the screen that opened this one passes ({ to, label }); omitted = a direct
+// link or a refresh, where the page falls back to its own parent (#383).
+function mount({ cam = CAM, isNew = false, from = null } = {}) {
+  const pathname = isNew ? '/cameras/new' : `/cameras/${CAM.id}`;
   return renderAsAdmin(
     <>
       <Probe />
@@ -67,7 +70,7 @@ function mount({ cam = CAM, isNew = false } = {}) {
         <Route path="*" element={<div>elsewhere</div>} />
       </Routes>
     </>,
-    { cameras: cam ? [cam] : [], kids: KIDS, route: isNew ? '/cameras/new' : `/cameras/${CAM.id}` }
+    { cameras: cam ? [cam] : [], kids: KIDS, route: from ? { pathname, state: { from } } : pathname }
   );
 }
 
@@ -179,13 +182,46 @@ describe('★★ saving an edit', () => {
     expect((await saved(putSpy)).child_id).toBe(null);
   });
 
-  test('a successful edit refreshes the camera list and returns to Family', async () => {
+  test('a successful edit refreshes the camera list and returns to the Cameras tab', async () => {
     // The refresh is not cosmetic — every other screen reads cameras from that context, so skipping it
     // would leave the rest of the app showing the old address until a reload.
+    // CHANGED ON PURPOSE (#383): this asserted `/family`, a retired route that redirects to Children, so a
+    // camera opened from the Cameras tab was saved and then dropped on the Children tab. With no router
+    // state the page's own parent is the Cameras tab.
     const { user, camerasValue } = mount();
     await user.click(await screen.findByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(camerasValue.refresh).toHaveBeenCalled());
-    expect(await screen.findByText('at /family')).toBeTruthy();
+    expect(await screen.findByText('at /cameras')).toBeTruthy();
+  });
+});
+
+// ★ #383. Where "Back" points, and where a finished save or remove lands, must be the same place.
+// The header link already honoured `location.state.from`; the navigate after a save/remove did not, and
+// ignored it for a hard-coded '/family'. Both halves are asserted, with an origin that is NOT the default
+// (a child page) so a fallback cannot satisfy it by coincidence.
+describe('★ Back and the landing after save/remove agree (#383)', () => {
+  const FROM_CHILD = { to: '/children/kid-1', label: 'Child B' };
+
+  test('no router state: the link says Cameras, and a save lands on /cameras', async () => {
+    const { user } = mount();
+    expect(await screen.findByRole('button', { name: 'Back to Cameras' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText('at /cameras')).toBeTruthy();
+  });
+
+  test('opened from a child: the link names that child and a SAVE returns there', async () => {
+    const { user } = mount({ from: FROM_CHILD });
+    expect(await screen.findByRole('button', { name: 'Back to Child B' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText('at /children/kid-1')).toBeTruthy();
+  });
+
+  test('opened from a child: a REMOVE returns there too', async () => {
+    const { user } = mount({ from: FROM_CHILD });
+    await user.click(await screen.findByRole('button', { name: 'Remove camera' }));
+    await user.click(await screen.findByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(delSpy).toHaveBeenCalledWith('/cameras/cam-1'));
+    expect(await screen.findByText('at /children/kid-1')).toBeTruthy();
   });
 });
 
@@ -473,14 +509,15 @@ describe('removing a camera', () => {
     expect(delSpy).not.toHaveBeenCalled();
   });
 
-  test('confirming deletes it, refreshes the list and returns to Family', async () => {
+  test('confirming deletes it, refreshes the list and returns to the Cameras tab', async () => {
+    // CHANGED ON PURPOSE (#383): was `/family`, see the save test above.
     const { user, camerasValue } = mount();
     await user.click(await screen.findByRole('button', { name: 'Remove camera' }));
     await user.click(await screen.findByRole('button', { name: 'Remove' }));
 
     await waitFor(() => expect(delSpy).toHaveBeenCalledWith('/cameras/cam-1'));
     await waitFor(() => expect(camerasValue.refresh).toHaveBeenCalled());
-    expect(await screen.findByText('at /family')).toBeTruthy();
+    expect(await screen.findByText('at /cameras')).toBeTruthy();
   });
 
   test('★ a failed delete says why and leaves the camera alone', async () => {
@@ -492,6 +529,66 @@ describe('removing a camera', () => {
     await user.click(await screen.findByRole('button', { name: 'Remove' }));
 
     expect(await screen.findByText('Camera is in use by a recording')).toBeTruthy();
-    expect(screen.queryByText('at /family')).toBeNull();
+    // Positive form: still ON the camera. (It used to assert only that '/family' was absent, which is true
+    // of any page at all, so it could not have caught a navigation to somewhere else.)
+    expect(screen.getByText('at /cameras/cam-1')).toBeTruthy();
+  });
+
+  // ★ #378. See cameras.test.jsx for why "the text is in the document" proves nothing here: the page-level
+  // banner is in <main>, under the modal overlay. jsdom cannot see the overlay; it can see which element
+  // the message is a descendant of.
+  test('★ #378 the failure is shown INSIDE the dialog, once, with the dialog still open and retryable', async () => {
+    delSpy = vi.spyOn(api, 'del').mockRejectedValue(new Error('Refused: recording in progress #378'));
+    const { user, camerasValue } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Remove camera' }));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Refused: recording in progress #378');
+    expect(screen.getAllByText('Refused: recording in progress #378')).toHaveLength(1);
+    expect(within(dialog).getByRole('button', { name: 'Remove' })).toBeEnabled();
+    expect(camerasValue.refresh).not.toHaveBeenCalled();
+    expect(screen.getByText('at /cameras/cam-1')).toBeTruthy();
+
+    // A retry that works leaves, and a reopened dialog starts clean.
+    delSpy.mockResolvedValue({});
+    await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    expect(await screen.findByText('at /cameras')).toBeTruthy();
+  });
+
+  test('★ #378 pressing Remove again clears the old failure WHILE the retry is in flight', async () => {
+    // The message from the failed attempt must not sit there, contradicting "Removing…", until the retry
+    // settles: it would read as the retry having already failed. Held pending so the in-flight moment is
+    // observable; then rejected with a DIFFERENT message to show the new failure replaces it.
+    delSpy = vi.spyOn(api, 'del').mockRejectedValueOnce(new Error('First refusal #378'));
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Remove camera' }));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('First refusal #378');
+
+    let rejectRetry;
+    delSpy.mockImplementationOnce(() => new Promise((_, reject) => { rejectRetry = reject; }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('button', { name: 'Removing…' })).toBeDisabled();
+    expect(within(dialog).queryByRole('alert'), 'the first failure is gone while the retry runs').toBeNull();
+    expect(within(dialog).queryByText('First refusal #378')).toBeNull();
+
+    rejectRetry(new Error('Second refusal #378'));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Second refusal #378');
+    expect(within(dialog).getByRole('button', { name: 'Remove' })).toBeEnabled();
+  });
+
+  test('★ #378 a stale message is gone when the dialog is cancelled and reopened', async () => {
+    delSpy = vi.spyOn(api, 'del').mockRejectedValue(new Error('Refused once #378'));
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Remove camera' }));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
+    await within(screen.getByRole('dialog')).findByText('Refused once #378');
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    await user.click(screen.getByRole('button', { name: 'Remove camera' }));
+    expect(within(screen.getByRole('dialog')).queryByRole('alert')).toBeNull();
   });
 });

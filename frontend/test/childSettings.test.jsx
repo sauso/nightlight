@@ -497,6 +497,29 @@ describe('removing a child', () => {
     expect(screen.getByText('at /children/kid-1')).toBeTruthy();
   });
 
+  // ★ #378. The test above only asks that the text is somewhere in the document, which is just as true
+  // when it sits in the page banner in <main>, under the modal overlay: the person tapped Remove and saw
+  // nothing happen. jsdom cannot see an overlay; it can see which element the message is a descendant of.
+  test('★ #378 the failure is shown INSIDE the dialog, once, and the dialog stays open to retry', async () => {
+    delSpy = vi.spyOn(api, 'del').mockRejectedValue(new Error('Refused: cameras still streaming #378'));
+    const { user, camerasValue } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Remove child' }));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Refused: cameras still streaming #378');
+    expect(screen.getAllByText('Refused: cameras still streaming #378')).toHaveLength(1);
+    expect(within(dialog).getByRole('button', { name: 'Remove' })).toBeEnabled();
+    expect(camerasValue.refresh).not.toHaveBeenCalled();
+    expect(screen.getByText('at /children/kid-1')).toBeTruthy();
+
+    // Cancel and reopen: the old message must not greet the next attempt.
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await user.click(screen.getByRole('button', { name: 'Remove child' }));
+    expect(within(screen.getByRole('dialog')).queryByRole('alert')).toBeNull();
+  });
+
   test('a new child has nothing to remove', async () => {
     mount({ id: 'new' });
     await screen.findByLabelText('Name');

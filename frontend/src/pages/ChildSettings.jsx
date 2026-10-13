@@ -41,6 +41,9 @@ export default function ChildSettings() {
   const [error, setError] = useState('');
   const [removing, setRemoving] = useState(false);
   const [removeBusy, setRemoveBusy] = useState(false);
+  // The Remove dialog's own failure, rendered inside it (#378): `error` is a banner in <main>, which sits
+  // under the modal overlay, so a refused remove used to look like the button did nothing.
+  const [removeError, setRemoveError] = useState('');
   const [photoStatus, setPhotoStatus] = useState(''); // '' | 'saving' | 'saved'
   const initedRef = useRef(false);
 
@@ -126,12 +129,14 @@ export default function ChildSettings() {
   async function confirmRemove() {
     setRemoveBusy(true);
     setError('');
+    setRemoveError('');
     try {
       await api.del(`/children/${id}`);
       await refresh();
       navigate(back.to);
     } catch (err) {
-      setError(err.message);
+      // Dialog stays open, button re-enabled: the person can read why and retry or cancel.
+      setRemoveError(err.message);
       setRemoveBusy(false);
     }
   }
@@ -282,7 +287,7 @@ export default function ChildSettings() {
             {/* Admin-only: DELETE /api/children/:id has always been requireAdmin, so offering it to a
                 caregiver only ever led to a refusal. */}
             {!isNew && isAdmin && (
-              <button className="btn btn-danger" type="button" style={{ marginTop: 10 }} onClick={() => setRemoving(true)}>
+              <button className="btn btn-danger" type="button" style={{ marginTop: 10 }} onClick={() => { setRemoveError(''); setRemoving(true); }}>
                 Remove child
               </button>
             )}
@@ -291,7 +296,7 @@ export default function ChildSettings() {
       </main>
 
       {removing && (
-        <Modal title="Remove child" placement="top" onClose={() => (removeBusy ? null : setRemoving(false))}>
+        <Modal title="Remove child" placement="top" error={removeError} onClose={() => (removeBusy ? null : setRemoving(false))}>
           <p style={{ marginTop: 0 }}>
             Remove <strong>{kid?.name}</strong>? Cameras assigned to them become unassigned. This can't be undone.
           </p>

@@ -50,6 +50,19 @@ a trusted device.
 
 - PUID/PGID default to 99/100 (Unraid's own "nobody"/"users" convention) if left
   unset. Find your own with `id <username>` on other systems.
+- `UMASK` defaults to `077`: everything in the data directory is owner-only (the
+  database holds every stored secret), and each start also tightens existing files.
+  Range `000`-`077` (owner digit `0`); an invalid value logs a warning and `077` is
+  used. If another user or container reads the data directory, set `-e UMASK=022`
+  **before** upgrading - after one start at `077` it only affects new files. Details:
+  [Who can read the data directory](https://github.com/sauso/nightlight/blob/main/docs/operations.md#who-can-read-the-data-directory).
+- `CLOUDFLARE_ANALYTICS` is off by default: Cloudflare Web Analytics' beacon, which
+  Cloudflare's proxy injects into every page, is blocked by Nightlight's
+  Content-Security-Policy. Set `-e CLOUDFLARE_ANALYTICS=1` (or `true`, `yes`, `on`) only
+  if you serve Nightlight through Cloudflare with Web Analytics on; blank, `0`, `false`,
+  `no` and `off` keep it blocked, and any other value also blocks it and logs a warning.
+  It used to be allowed on every install: if you rely on it, set this when you upgrade. Details:
+  [`CLOUDFLARE_ANALYTICS`](https://github.com/sauso/nightlight#cloudflare_analytics--cloudflare-web-analytics-through-cloudflares-proxy).
 - `--stop-timeout 30` lets Nightlight shut down cleanly - a recording in progress is
   assembled from its buffer as the app stops, and being killed part-way loses it.
   Stopping normally takes a few seconds; the container exits as soon as it's done, so
@@ -57,6 +70,12 @@ a trusted device.
 - An Unraid template is available - see the GitHub repo below for setup.
 - A random session secret is generated and stored in your data directory
   automatically on first run - nothing to configure.
+- `SESSION_TTL_DAYS` (optional) sets how many days a sign-in lasts, counted from
+  sign-in: range `7`-`30`, blank = `30` (the default); an invalid value logs a
+  warning and `30` is used. A phone is signed out at the same time of day it signed
+  in and gets no Nightlight push alerts until it signs in again; lowering the value
+  signs out older sign-ins at their next request. Details:
+  [How long a sign-in lasts](https://github.com/sauso/nightlight/blob/main/SECURITY.md#how-long-a-sign-in-lasts-and-where-it-is-kept).
 
 ### Links
 

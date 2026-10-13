@@ -148,7 +148,8 @@ describe('"Remove my correction" on a LOCKED night', () => {
     vi.spyOn(api, 'get').mockImplementation((url) => {
       state.calls.push(`GET ${url}`);
       if (url.includes('stored=1')) return Promise.resolve({ night: STORED, locked: state.locked });
-      if (url.includes('/review/')) return Promise.resolve(review);
+      // A function is read at REQUEST time, so a test can change what is stored between two reads (#679).
+      if (url.includes('/review/')) return Promise.resolve(typeof review === 'function' ? review() : review);
       if (url.includes('detail=1')) {
         return overlaidError ? Promise.reject(overlaidError) : Promise.resolve(OVERLAID_UNCORRECTED);
       }
@@ -244,6 +245,58 @@ describe('"Remove my correction" on a LOCKED night', () => {
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
 
     expect(api.put.mock.calls[0][1]).toEqual({ ...TIMES_ONLY, nobody_in_bed: false });
+  });
+
+  // ★ THE FLAG IS READ AT CONFIRMATION, NOT WHEN THE DIALOG OPENED (#679, from the #678 review). A second phone
+  // can set or clear "no one was in the bed" while this dialog sits on its confirm step. A body built from a
+  // review read at dialog-open would then send the wrong thing: omit the flag the night still has (so it
+  // stays locked after a "successful" removal) or send `false` for one that is gone (resetting a dismissal
+  // and naming the sender for nothing). The earlier order test supplied ONE unchanging review and asserted
+  // only the sequence of requests, so a body built from an earlier read passed it.
+  for (const [label, atOpen, atConfirm, sendsFlag] of [
+    ['set by a second phone after the dialog opened', 0, 1, true],
+    ['cleared by a second phone after the dialog opened', 1, 0, false],
+  ]) {
+    test(`★ the flag is read when the removal is confirmed: ${label}`, async () => {
+      let nobody = atOpen;
+      const state = mockLockedApi({ review: () => ({ review: { nobody_in_bed: nobody, true_onset_at: null } }) });
+      const { user } = await openLocked();
+      await user.click(screen.getByRole('button', { name: /^remove my correction$/i }));
+      // On the confirm step now; the stored review changes under the open dialog.
+      nobody = atConfirm;
+      await user.click(screen.getByRole('button', { name: /^remove my correction$/i }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+
+      const body = api.put.mock.calls[0][1];
+      expect(Object.hasOwn(body, 'nobody_in_bed')).toBe(sendsFlag);
+      if (sendsFlag) expect(body.nobody_in_bed).toBe(false);
+      // And the review was read AFTER the confirm step was reached: the read nearest the write is the one
+      // that counts, so it is the last review read before the PUT.
+      const putAt = state.calls.findIndex((c) => c.startsWith('PUT'));
+      expect(/\/review\//.test(state.calls[putAt - 1])).toBe(true);
+    });
+  }
+
+  // The confirm button is disabled while the removal runs. Without it a double tap reads the review twice and
+  // writes twice, and the second write can carry a flag the first already cleared. The review read is held
+  // open by hand so the second tap lands while the first removal is genuinely in flight.
+  test('★ a double tap on the confirm button sends one removal', async () => {
+    let release;
+    const state = mockLockedApi({
+      review: () => new Promise((resolve) => { release = () => resolve({ review: { nobody_in_bed: 0 } }); }),
+    });
+    const { user } = await openLocked();
+    await user.click(screen.getByRole('button', { name: /^remove my correction$/i }));
+    await user.dblClick(screen.getByRole('button', { name: /^remove my correction$/i }));
+
+    expect(state.calls.filter((c) => /\/review\//.test(c))).toHaveLength(1);
+    // The affordance too, not only the count: the button says it is working and cannot be pressed again.
+    // (Codex review on #687: a handler-side guard alone passed the count assertion with the button live.)
+    expect(screen.getByRole('button', { name: /^removing…$/i })).toBeDisabled();
+    release();
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText(/no longer matches/i)).toBeInTheDocument());
+    expect(api.put).toHaveBeenCalledTimes(1);
   });
 
   // `0` is the stored column's own "no"; `-1` is a value the server's saidNobody (exactly 1) does not read

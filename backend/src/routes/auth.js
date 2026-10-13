@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
-import { requireAuth, requireAdmin, JWT_SECRET, SESSION_TOKEN_TTL_DAYS } from '../middleware/auth.js';
+import { requireAuth, requireAdmin, JWT_SECRET, SESSION_TOKEN_TTL_DAYS, sessionAgeCondition } from '../middleware/auth.js';
 import { isDemoModeActive } from '../middleware/demoMode.js';
 import {
   generateSecret, keyUri, verifyToken, qrDataUrl, isLegacySecret,
@@ -37,8 +37,10 @@ function signMfaToken(userId) {
 // clip/timelapse loads. It carries the session id (so signing out or revoking that session kills it
 // too), but purpose:'media' bars it from the JSON API (requireAuth rejects it) and it only rides in
 // query params. So if one of these URLs ends up in a proxy log, browser history or Referer header,
-// what leaks is a time-boxed, video-only capability — not the 30-day full-account session token.
-const MEDIA_TOKEN_TTL_SECONDS = 12 * 60 * 60; // 12h: covers a full overnight viewing session, tiny vs the 30-day session
+// what leaks is a time-boxed, video-only capability — not the full-account session token.
+// Since #562 a media token also stops when its SESSION's lifetime ends (SESSION_TTL_DAYS, checked in
+// middleware/auth.js on every use), even if its own 12 hours have not run out.
+const MEDIA_TOKEN_TTL_SECONDS = 12 * 60 * 60; // 12h: covers a full overnight viewing session, tiny vs a 7-30 day session
 function signMediaToken(userId, sessionId) {
   return jwt.sign({ id: userId, sid: sessionId, purpose: 'media' }, JWT_SECRET, {
     algorithm: 'HS256',
@@ -275,12 +277,30 @@ function createSession(userId, userAgent) {
   return id;
 }
 
+// Every sign-in path (setup, login, the MFA step, a demo guest) issues its token here, so all of them
+// get SESSION_TTL_DAYS. The token's `exp` and the row's created_at agree to within a second (see
+// sessionAgeCondition in middleware/auth.js); the row is what ends a session early when the setting
+// is lowered after the token was issued.
 function sign(user, sessionId) {
   return jwt.sign({ id: user.id, username: user.username, role: user.role, sid: sessionId }, JWT_SECRET, {
     algorithm: 'HS256',
     expiresIn: `${SESSION_TOKEN_TTL_DAYS}d`,
   });
 }
+
+// The two session LISTS show only sessions still within their lifetime (#562): a session past it is
+// refused on its next request, so listing it as a signed-in device would be wrong for up to a day (until
+// the daily purge deletes it). Same condition as the request check, from the same helper.
+const listAge = sessionAgeCondition();
+const ownSessions = db.prepare(`SELECT * FROM sessions WHERE user_id = ? AND ${listAge.sql} ORDER BY last_seen_at DESC`);
+// Qualified: `users` has a created_at of its own.
+const allAge = sessionAgeCondition('sessions');
+const everySession = db.prepare(
+  `SELECT sessions.*, users.username FROM sessions
+   JOIN users ON users.id = sessions.user_id
+   WHERE ${allAge.sql}
+   ORDER BY last_seen_at DESC`
+);
 
 function toPublicSession(s, currentSessionId) {
   return {
@@ -428,20 +448,14 @@ router.post('/media-token', requireAuth, (req, res) => {
 
 // Self-service: your own active sessions (other devices/browsers you're logged in on).
 router.get('/sessions', requireAuth, (req, res) => {
-  const sessions = db.prepare('SELECT * FROM sessions WHERE user_id = ? ORDER BY last_seen_at DESC').all(req.user.id);
+  const sessions = ownSessions.all(req.user.id, ...listAge.params);
   res.json(sessions.map((s) => toPublicSession(s, req.user.sid)));
 });
 
 // Admin: every active session across every account - lets an admin revoke a
 // caregiver's access on a specific device without deleting their whole account.
 router.get('/sessions/all', requireAuth, requireAdmin, (req, res) => {
-  const sessions = db
-    .prepare(
-      `SELECT sessions.*, users.username FROM sessions
-       JOIN users ON users.id = sessions.user_id
-       ORDER BY last_seen_at DESC`
-    )
-    .all();
+  const sessions = everySession.all(...allAge.params);
   res.json(sessions.map((s) => toPublicSession(s, req.user.sid)));
 });
 
@@ -580,7 +594,7 @@ router.put('/me/password', requireAuth, sessionActionLimiter, (req, res) => {
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(password_hash, req.user.id);
   // Sign every other device out. Changing your password is exactly the move someone
   // makes when a logged-in device is lost or no longer trusted - leaving those
-  // sessions valid for the rest of their 30 days would defeat the point.
+  // sessions valid for the rest of their lifetime (SESSION_TTL_DAYS) would defeat the point.
   //
   // Same push_tokens cleanup, same reasoning and ordering, as the admin reset path above.
   db.prepare(

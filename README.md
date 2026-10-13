@@ -8,6 +8,16 @@ iOS** ([nightlight-mobile](https://github.com/sauso/nightlight-mobile)) for reli
 background audio and picture-in-picture (see [Mobile apps](#mobile-apps-android--ios)
 below). No cloud, no subscription, no account anywhere but your own network.
 
+> **One thing to know about "no cloud".** Nightlight has no cloud service of its own, but the
+> **Low latency (WebRTC)** live view is set up to use Google's public STUN server
+> (`stun.l.google.com:19302`), both in the browser and in the bundled MediaMTX. STUN is how WebRTC
+> works out a public address: the browser asks that server, so Google can see the viewer's public IP
+> address and when each live view connected. It does nothing useful on a home network, and there is
+> **no setting to turn it off** in this version (it is fixed in the frontend and in
+> `mediamtx/mediamtx.yml`). **Compatibility (HLS)** viewing does not use WebRTC and does not contact
+> it. Push notifications, if you enable a provider, also leave your network: see
+> [Push notifications](docs/notifications.md).
+
 > **⚠️ Not a safety device.** Nightlight is a convenience tool, not a safety device. It is
 > not a medical device, is not certified for safety monitoring of any kind, and must never
 > be used as a substitute for adult supervision. Streams can drop, apps can be killed by
@@ -16,9 +26,9 @@ below). No cloud, no subscription, no account anywhere but your own network.
 
 ## Screenshots
 
-See the [visual walkthrough](docs/README.md) for a tour of the main screens (sign-in, the
-nursery dashboard, adding a camera, and settings). Those images are generated automatically
-by the end-to-end test suite, so they stay in sync with the actual UI.
+See the [visual walkthrough](docs/README.md) for a tour of the main screens (the nursery
+dashboard, adding a camera, and settings). The images are captured by the end-to-end test
+suite but committed by hand, so they can lag behind the actual UI.
 
 ## How it works
 
@@ -77,6 +87,20 @@ so they're usually already correct there. On another system, find your own with
 `id your_username`. TZ (e.g. `Australia/Melbourne`) affects log timestamps only -
 [full list of values](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
 
+`UMASK` (optional, default `077`) decides who else can read what the container writes there. The
+database holds every stored secret (camera passwords, notification tokens) in plaintext, so by
+default everything is **owner-only** (files `600`, folders `700`), and each start takes group/other
+access off anything that still has it. Range: 3 or 4 octal digits with an owner digit of `0`
+(`000`-`077`, e.g. `022` for the old world-readable modes); anything else is ignored with a warning
+and `077` is used. **If another user or container reads your data directory, set `UMASK=022`
+*before* upgrading** - after one start at `077` the opt-out only affects new files. Known limits:
+a default ACL on the host folder overrides it, an external `CLIPS_DIR` mount's existing files are
+not tightened, and on a filesystem that ignores `chmod` (a Docker Desktop for Windows bind mount,
+a CIFS mount with a fixed `file_mode`) modes cannot change at all, so that filesystem's own access
+control is what protects the data. Details, including what this may mean for SMB shares (not
+verified) and backups:
+[Who can read the data directory](docs/operations.md#who-can-read-the-data-directory).
+
 The `--log-opt` flags cap Docker's own log storage at 10MB × 3 files - without them,
 logs default to growing unbounded, which can be a real problem on Unraid specifically
 since Docker's storage there is a fixed-size image that can break the whole Docker
@@ -116,6 +140,17 @@ cameras to children.
   something like `/stream1`).
 - **ONVIF is optional but handy**: if a camera supports it, Nightlight can fetch the stream
   details from just its IP, and enable pan/tilt controls on cameras that report PTZ.
+- **Capacity has not been measured.** There is no stated or tested limit on the number of
+  cameras or viewers, no minimum Raspberry Pi model, RAM or free disk, and no CPU-per-camera
+  figure: Nightlight enforces no limit, and none has been benchmarked. What a camera costs depends
+  on what you switch on: every camera has its own FFmpeg stream process, and motion analysis, sound
+  analysis (sleep tracking uses both) and the recording buffer each add another one. Add cameras
+  gradually and watch the host's CPU.
+- **Browsers: the automated tests cover desktop Chromium only.** The end-to-end suite runs in
+  Chromium (Playwright's "Desktop Chrome" profile) and nothing else. Safari, Firefox, Edge, Samsung
+  Internet and the native apps have no automated coverage, and no tested-version list is kept. The
+  table under [Installing to your home screen](#installing-to-your-home-screen) describes how each
+  platform treats installs; it is not a statement of tested versions.
 
 ## Running on Unraid
 
@@ -225,6 +260,15 @@ stream codecs, with any password replaced by `***`. It is meant to be attached t
 it is worth opening and reading before you post it: the redaction covers passwords, not everything a
 particular camera's firmware might put in an error message. If you find something sensitive that
 shouldn't be there, see [SECURITY.md](SECURITY.md) for how to report it privately instead.
+
+**Cameras are trusted input.** Nightlight trusts everything a camera sends it: the video and audio
+stream, the ONVIF replies and the snapshot images. The stream is parsed by FFmpeg and ffprobe, and
+the rest by the server itself, all as the same user that owns the data directory (the database, the
+saved secrets and the recordings) and with the container's environment: nothing separates the media
+processes from the data. Cameras are often the least-updated devices on a network, so put them on
+**their own VLAN or network segment**, ideally with no route to the internet and no access to your
+other devices, and let only the Nightlight host reach them (RTSP, plus ONVIF and the snapshot URL if
+you use them). This is advice: Nightlight does not check or enforce it.
 
 **Adding a camera**
 
@@ -340,8 +384,12 @@ measurement**, and (like everything here) never a safety device — see the warn
   - The parent's approach in the minute or two before the real put-down still counts for a false
     earlier one, so a false put-down with exactly that much movement before the real one is still
     believed.
-  - While a night is still in progress, a false put-down can show as tonight's bedtime for up to about
-    2½ hours after it; the figures worked out after that, and in the morning, use the full rule.
+  - The check needs the 2½ hours after a put-down to have been recorded. A put-down closer than that to
+    the end of what has been recorded is believed without it: while a night is still in progress, a false
+    put-down can show as tonight's bedtime for up to about 2½ hours after it, and the figures worked out
+    after that use the full rule. The same is true of a night that has ended, for a put-down within 2½
+    hours of the end of its window: a false one over an empty bed there is kept as the bedtime, and a real
+    one after it is not looked at.
   - Not fixed by this: a nap the child was lifted out of without waking can still be taken as the
     start of the night, and on a quiet evening (no household noise to break the stillness) an empty
     bed can still be read as a child asleep from the moment the window opens, for example when a
@@ -847,6 +895,32 @@ Any account can also turn on **two-factor authentication** for its own login —
 **[docs/mfa.md](docs/mfa.md)** for enrolling, one-time backup codes, and how to recover if an
 admin loses their authenticator.
 
+### `SESSION_TTL_DAYS` — how long a sign-in lasts
+
+> **⚠️ A sign-in ends at the same time of day it began, and the app's push alerts stop with it, without
+> warning.** The lifetime is counted from sign-in, not from the last use: a phone that signed in at 02:00
+> is signed out at 02:00, `SESSION_TTL_DAYS` days later. From then until someone opens the app (which
+> shows the sign-in screen), that phone gets no Nightlight push alerts, and a live view or background
+> audio playing on it stops. Pushover, ntfy and Gotify are not affected. The session lists show when each
+> device was last active, not when it will be signed out: if you rely on a phone's alerts, sign in on it
+> again at a time that suits you before its lifetime runs out.
+
+| Variable | Default | Range | What it does |
+|---|---|---|---|
+| `SESSION_TTL_DAYS` | `30` (blank = 30) | `7`-`30` whole days | How many days a sign-in lasts, counted from sign-in. Anything else is ignored with a warning in the log and 30 is used. |
+
+- **It can only shorten.** 30 is the most, as before this setting existed; 7 is the least, because a shorter,
+  silent end would stop alerts at the same hour every few nights.
+- **Lowering it signs out every sign-in older than the new value at that device's next request**, push and
+  live views included (they check the same rule). **Raising it does not lengthen sign-ins already made**: a
+  sign-in's token carries the lifetime in force when it was issued, so one made at 7 still ends on its 7th
+  day after you raise it to 30. A changed value needs a restart, and one other than 30 is logged at start.
+- **There is no idle sign-out**: an unused device stays signed in until its lifetime ends.
+- The sign-in token is kept in the browser's (or the Android app's) `localStorage`, and every sign-in can be
+  ended from the server at once (sign out a device, remove an account, change a password). Since this
+  setting, the 12-hour token in video and snapshot URLs also stops when its sign-in ends. What this means
+  for security: [SECURITY.md](SECURITY.md#how-long-a-sign-in-lasts-and-where-it-is-kept).
+
 ## Running behind a reverse proxy (e.g. SWAG on Unraid)
 
 A ready-to-use config is in `reverse-proxy/nightlight.subdomain.conf`. Copy it to
@@ -889,6 +963,30 @@ is used instead — a typo here will never stop the app starting.
 **You do not have to set it.** Login attempts are limited per account *and* per source, so even with
 every remote user sharing the proxy's address, one person mistyping their password cannot lock anyone
 else out. Setting `TRUST_PROXY` makes the per-source half meaningful as well.
+
+### `CLOUDFLARE_ANALYTICS` — Cloudflare Web Analytics through Cloudflare's proxy
+
+| Variable | Default | What it does |
+|---|---|---|
+| `CLOUDFLARE_ANALYTICS` | blank (off) | Allows Cloudflare's Web Analytics beacon in Nightlight's Content-Security-Policy. `1`, `true`, `yes` or `on` (any case, spaces ignored) turn it on; blank, `0`, `false`, `no` or `off` keep it off. Any other value also keeps it off and logs one warning at start. |
+
+**If you do not use Cloudflare Web Analytics, leave it blank: nothing changes.**
+
+It matters only if you serve Nightlight through Cloudflare's proxy **and** have Cloudflare Web Analytics
+turned on for that site. Cloudflare then injects its beacon script into every page, and Nightlight's
+security policy **blocks it unless this is on**. You can tell it is being blocked: the browser console
+shows a Content-Security-Policy violation, and the container log shows `[csp-report]` lines (at most 10
+a minute). Two ways to stop that: set `CLOUDFLARE_ANALYTICS=1` to allow the beacon, or, if you do not
+want the analytics, turn off Web Analytics' automatic setup (the beacon injection) for that site in the
+Cloudflare dashboard.
+
+> **Upgrading from a version before this setting existed:** the beacon used to be allowed on every
+> install. If you rely on Cloudflare Web Analytics, set the variable, or your analytics stop. A container
+> made from the Unraid template before this change does not gain the new field by itself: add it as a
+> variable ("Add another Path, Port, Variable, Label or Device") with the key `CLOUDFLARE_ANALYTICS`.
+
+With it off (the default), the page can only run scripts from your own server. The rest of the policy
+is the same either way; see "CSP is enforced" in [docs/architecture.md](docs/architecture.md#csp-is-enforced--keep-it-that-way).
 
 ## Remote / internet access (watching from outside your home network)
 
@@ -952,6 +1050,20 @@ What you actually get depends on the platform and whether the site is served ove
 If you want the full installed experience on Android specifically, the reverse-proxy/HTTPS
 setup above is worth doing; otherwise the **native Android app** (below) gives you a true
 standalone app without needing HTTPS at all.
+
+**Zooming the page.** In a browser, including a home-screen install, you can pinch-zoom the page as on
+any other site. In the native apps (below) page zoom stays **locked**, because in the Android app
+double-tapping the picture-in-picture window used to zoom the whole app and leave it stuck until a
+restart. Double-tap zoom on a camera's video is the app's own and works everywhere.
+
+- **Android and desktop browsers:** pinch-zoom works again (it used to be blocked).
+- **iPhone and iPad (Safari, or any other iOS browser):** unchanged. Pinch-zoom already worked there,
+  because Safari ignores the zoom lock for pinching, and the page still does not jump in when you tap
+  into a text field, because Nightlight keeps the one setting that stops Safari doing that. Expected
+  from Safari's behaviour; not checked on a device.
+
+While the page is zoomed in, dragging down on the live screen pans the page; the live screen's
+pull-to-refresh works again once you zoom back out.
 
 ## Mobile apps (Android & iOS)
 

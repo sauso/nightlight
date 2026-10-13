@@ -3,18 +3,102 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import db from '../db.js';
+import { logger } from '../lib/logger.js';
 
 const DATA_DIR = process.env.DATA_DIR || '/app/data';
 const SECRET_FILE = path.join(DATA_DIR, '.jwt_secret');
 
+// --- How long a sign-in lasts: SESSION_TTL_DAYS (#562 bullet 7) -------------------------------------
+//
+// The lifetime is ABSOLUTE, counted from sign-in (sessions.created_at), never from the last request:
+// there is no idle sign-out, and a device is signed out at the same time of day it signed in, N days
+// later. On that request the app shows the sign-in screen; push alerts to that device stop at the
+// same moment, and nothing on the phone says so until someone opens the app.
+//
+// ⚠️ WHY 7-30 AND NOT 1-30 OR "ANY NUMBER" (owner said "configurable", 2026-10-13; the range is the
+// builder's call and the PR says so):
+//   * NOT ABOVE 30. A longer lifetime would also have to move the 31-day idle purge below, and every
+//     comment and doc that assumes 30. Nobody asked for longer; "shorten only" keeps one ceiling.
+//   * NOT BELOW 7. Because the end is absolute and silent for push, a short value turns into a
+//     nightly outage on a baby monitor: at 1 day, a parent who signed in at 02:00 stops getting
+//     alerts at 02:00 every night until they open the app. A week is the shortest value where that
+//     happens rarely enough to notice and fix; anything shorter is not offered.
+// Default 30 = the lifetime before this setting existed.
+export const DEFAULT_SESSION_TTL_DAYS = 30;
+export const MIN_SESSION_TTL_DAYS = 7;
+export const MAX_SESSION_TTL_DAYS = DEFAULT_SESSION_TTL_DAYS;
+
+/**
+ * @param {string|undefined} raw  SESSION_TTL_DAYS as read from the environment
+ * @returns {{ days: number, warning: string|null }}
+ */
+export function parseSessionTtlDays(raw) {
+  const s = typeof raw === 'string' ? raw.trim() : '';
+  if (!s) return { days: DEFAULT_SESSION_TTL_DAYS, warning: null };
+  // Digits only, checked BEFORE Number(): Number() reads '1e1' as 10, '0x1e' as 30 and ' 7 ' as 7, so a
+  // typo or a hex/exponent spelling would quietly become a different lifetime. Leading zeros ('007') are
+  // still plain decimal digits and read as 7.
+  if (/^[0-9]+$/.test(s)) {
+    const days = Number(s);
+    if (days >= MIN_SESSION_TTL_DAYS && days <= MAX_SESSION_TTL_DAYS) return { days, warning: null };
+  }
+  // Same rule as UMASK, TRUST_PROXY and WEBRTC_UDP_PORT: a bad value is never fatal (a typo in an env var
+  // must not crash-loop a baby monitor), it falls back to the default and says so in the log once.
+  return {
+    days: DEFAULT_SESSION_TTL_DAYS,
+    warning:
+      `SESSION_TTL_DAYS=${JSON.stringify(raw)} is not a whole number of days from ${MIN_SESSION_TTL_DAYS} to ` +
+      `${MAX_SESSION_TTL_DAYS} - using the default, ${DEFAULT_SESSION_TTL_DAYS}.`,
+  };
+}
+
+/** The start-up log line: a warning for a bad value, the value in effect whenever it is not the default. */
+export function reportSessionTtl({ days, warning }, log = logger) {
+  if (warning) log.warn(`[auth] ${warning}`);
+  else if (days !== DEFAULT_SESSION_TTL_DAYS) {
+    log.info(`[auth] sign-ins last ${days} days (SESSION_TTL_DAYS; the default is ${DEFAULT_SESSION_TTL_DAYS})`);
+  }
+}
+
+const sessionTtl = parseSessionTtlDays(process.env.SESSION_TTL_DAYS);
+reportSessionTtl(sessionTtl);
+
 // The session token's absolute lifetime (routes/auth.js's sign()). Exported here, not there, so
-// anything needing to reason about a session's absolute age - not just whether its `sessions` row
-// still exists, which a session can outlive by up to purgeExpiredSessions's own inactivity window -
-// can import one number rather than a second hardcoded copy silently drifting from it. `sessions`
-// rows are only ever pruned by INACTIVITY (31 days since last_seen_at), so a session can exist in
-// the DB well past this TTL if something keeps touching it; code that means "is this session's own
-// token still within its cryptographic lifetime" must check this, not just row existence.
-export const SESSION_TOKEN_TTL_DAYS = 30;
+// anything needing to reason about a session's absolute age can import one number rather than a second
+// hardcoded copy silently drifting from it. Read ONCE, at start: changing SESSION_TTL_DAYS needs a
+// restart, like every other environment setting.
+export const SESSION_TOKEN_TTL_DAYS = sessionTtl.days;
+
+// THE ONE DEFINITION of "this session is still within its lifetime", as a SQL fragment plus its one
+// parameter. Every place that asks the question uses it (#562: the plan review found five copies would
+// drift): sessionWithUser (every API request, verifyToken, the media-token routes and the talk socket),
+// isLiveSessionId (the live-view sweep), lib/push.js's activePushTokens, purgeExpiredSessions, and the
+// two session LISTS in routes/auth.js. Before #562 the request path did NOT check age at all: a session
+// was bounded only by its token's own `exp`, while push and the live-view sweep already cut at 30 days.
+//
+// Why created_at, not the token's `exp`: lowering SESSION_TTL_DAYS must end sessions that already hold a
+// 30-day token, and only the row knows when the session began. Tokens are never re-signed for an existing
+// session, so created_at is the sign-in time.
+//
+// ⚠️ UP TO 1 SECOND EARLY, by design. createSession writes created_at (SQLite's datetime('now'), whole
+// seconds, rounded down) BEFORE sign() stamps the token's `iat`, so the row can be up to a second older
+// than the token and the session ends up to a second before its `exp`. Harmless, and why the tests age
+// sessions by N days +/- 1 MINUTE rather than asserting to the second.
+//
+// ⚠️ THE MEDIA TOKEN NOW ENDS WITH ITS SESSION. A 12-hour media token minted near the end of a session used
+// to keep working for up to 12 hours past the session token's expiry (HLS, snapshots, clips, talk). Its
+// requests go through sessionWithUser too, so it now stops at the same moment, which also makes HLS agree
+// with the WebRTC sweep that already cut at 30 days.
+//
+// `alias` qualifies the column for a query that joins: /sessions/all joins `users`, which has a
+// created_at of its own. It is always a literal written in this codebase, never input; the check is so a
+// slip fails loudly instead of building odd SQL.
+const SESSION_AGE_COLUMN = 'created_at';
+export function sessionAgeCondition(alias = '') {
+  if (alias && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) throw new Error(`sessionAgeCondition: bad alias ${alias}`);
+  const column = alias ? `${alias}.${SESSION_AGE_COLUMN}` : SESSION_AGE_COLUMN;
+  return { sql: `${column} > datetime('now', ?)`, params: [`-${SESSION_TOKEN_TTL_DAYS} days`] };
+}
 
 // If JWT_SECRET isn't explicitly set, generate a random one and persist it in the
 // data volume so it survives restarts (sessions would otherwise invalidate every
@@ -64,17 +148,52 @@ const touchSession = db.prepare(
 // The session lookup was already happening on every authenticated request, so carrying the live role
 // out of the same query costs nothing extra. The JWT carries identity; the database decides what that
 // identity may do.
+//
+// The lifetime check (#562) is in this WHERE clause, not a test after it, so a session past its lifetime
+// returns no row and liveSession below never reaches touchSession: a client that keeps retrying with a
+// dead token must not keep refreshing last_seen_at, which is what the idle purge keys on.
+const requestAge = sessionAgeCondition('s');
 const sessionWithUser = db.prepare(
-  'SELECT s.id AS sid, s.user_id AS user_id, u.role AS role FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ?'
+  `SELECT s.id AS sid, s.user_id AS user_id, u.role AS role FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ? AND ${requestAge.sql}`
 );
 function liveSession(sessionId) {
   if (!sessionId) return null;
   // A session whose user row has been deleted returns nothing from the JOIN, which is the behaviour we
   // want — a deleted account's token stops working immediately, exactly as a revoked session does.
-  const row = sessionWithUser.get(sessionId);
+  const row = sessionWithUser.get(sessionId, ...requestAge.params);
   if (!row) return null;
   touchSession.run(sessionId); // throttled - only actually writes if last_seen_at is stale
   return row;
+}
+
+// For the WebRTC live-view sweep (index.js): is the login session that opened a view still valid? The
+// same lifetime rule as a request, without touching last_seen_at (the sweep is the server checking, not
+// the person using the app) and without the users join (deleting a user cascades its sessions).
+const sweepAge = sessionAgeCondition();
+const sessionAlive = db.prepare(`SELECT 1 FROM sessions WHERE id = ? AND ${sweepAge.sql}`);
+export function isLiveSessionId(sid) {
+  if (!sid) return false;
+  return !!sessionAlive.get(sid, ...sweepAge.params);
+}
+
+// Housekeeping (index.js runs it at start and daily). Every login inserts a sessions row and only an
+// explicit sign-out deletes one, so rows would otherwise pile up forever. Two reasons a row goes:
+//   * past its lifetime (created_at, #562): it can never authenticate again, and deleting it also takes
+//     it off the session lists at once rather than leaving a dead device listed until it goes idle;
+//   * idle for 31 days (last_seen_at, the rule before #562): kept so a row whose created_at is in the
+//     future (a clock that went backwards, a restored backup) still goes eventually.
+// push_tokens has no FK to sessions (deliberate, see lib/push.js), so a row bound to a session about to go
+// is deleted FIRST, matching every other revocation path in routes/auth.js. Not strictly needed
+// (activePushTokens already excludes it) but it keeps push_tokens from collecting rows nothing cleans up.
+const purgeAge = sessionAgeCondition();
+const purgeable = `last_seen_at < datetime('now', '-31 days') OR NOT (${purgeAge.sql})`;
+const purgePushTokens = db.prepare(`DELETE FROM push_tokens WHERE session_id IN (SELECT id FROM sessions WHERE ${purgeable})`);
+const purgeSessions = db.prepare(`DELETE FROM sessions WHERE ${purgeable}`);
+export function purgeExpiredSessions() {
+  purgePushTokens.run(...purgeAge.params);
+  const { changes } = purgeSessions.run(...purgeAge.params);
+  if (changes > 0) logger.info(`Purged ${changes} expired session(s).`);
+  return changes;
 }
 
 // Verify a raw JWT the same way the middleware does (signature + live session), for contexts

@@ -34,7 +34,7 @@ function stubCapacitorNative({ token = 'fcm-token-1' } = {}) {
   return { PushNotifications, FirebaseInit };
 }
 
-let initPushNotifications, enableNotifications, disableNotifications, unregisterPushNotifications;
+let initPushNotifications, enableNotifications, disableNotifications, unregisterPushNotifications, resetPushRegistration;
 
 beforeEach(async () => {
   vi.resetModules();
@@ -44,9 +44,31 @@ beforeEach(async () => {
   apiPost.mockReset();
   apiGet.mockResolvedValue({ configured: true, appId: 'a', apiKey: 'k', projectId: 'p', senderId: 's' });
   apiPost.mockResolvedValue({ ok: true });
-  ({ initPushNotifications, enableNotifications, disableNotifications, unregisterPushNotifications } = await import(
-    '../../src/lib/pushNotifications.js'
-  ));
+  ({ initPushNotifications, enableNotifications, disableNotifications, unregisterPushNotifications, resetPushRegistration } =
+    await import('../../src/lib/pushNotifications.js'));
+});
+
+// #562 (review of #696): when a sign-in ends server-side, AuthContext's 401 listener drops the user in the
+// same page. Signing in again must register push again, or the phone stays bound to the dead session and
+// gets no alerts until the app is relaunched. The listener cannot use unregisterPushNotifications(): its
+// request would answer 401 and fire the listener again.
+describe('★ #562 resetPushRegistration: a sign-in ended by a 401, then signing in again', () => {
+  test('★ re-registers on the next initPushNotifications, and the reset itself sends no request', async () => {
+    const { PushNotifications } = stubCapacitorNative();
+    localStorage.setItem(ENABLED_KEY, '1');
+    await initPushNotifications();
+    expect(PushNotifications.register).toHaveBeenCalledTimes(1);
+
+    apiGet.mockClear();
+    apiPost.mockClear();
+    resetPushRegistration();
+    expect(apiGet).not.toHaveBeenCalled();
+    expect(apiPost).not.toHaveBeenCalled(); // no /push/unregister: that would 401 and loop
+
+    await initPushNotifications();
+    expect(PushNotifications.register).toHaveBeenCalledTimes(2);
+    expect(apiPost).toHaveBeenCalledWith('/push/register', expect.objectContaining({ token: 'fcm-token-1' }));
+  });
 });
 
 describe('a plain sign-out then sign-in, without restarting the app, still re-registers', () => {

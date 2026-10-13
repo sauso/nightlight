@@ -127,6 +127,10 @@ minutes (12 hours) for one silence; the tile only offers up to an hour. Keeping 
 and off, for longer than the admins' threshold (an hour by default, so by renewing it) tells the
 admins: see [Long-silence alerts](#long-silence-alerts) above.
 
+A silenced camera raises no alert, so it saves **no alert clip** either, even with **Save a clip when
+triggered** on: the clip is cut from an alert that never fired (the same as outside the camera's alert
+schedule). See [Recording](recording.md#automatic-clips-detection-triggered).
+
 **Who did it is recorded, by username.** That is the login name an admin sets for each account, never
 the first name, which anyone can change on their own account (so it cannot be used to put someone
 else's name on what you did). It is copied at the time, so renaming or deleting the account later does
@@ -161,7 +165,8 @@ Known limits: Camera history keeps at most 2,000 rows and 30 days, shared by eve
 silence can be pruned away (by age, or by enough newer rows from any camera), and **Clear log** removes
 every row. Silences, restarts and reboots from before this was recorded show no name. The diagnostics
 bundle (Settings → Logs), which is meant to be attached to a public issue, keeps only whether each
-history row was a *person* or the *system*, never the username.
+history row was a *person* or the *system*, never the username, and shows camera names as `Camera 1`,
+`Camera 2` (see [what the bundle replaces and keeps](../SECURITY.md#what-the-diagnostics-bundle-replaces-and-what-it-keeps-547)).
 
 **Going back to an older version is not safe for privacy.** An older version's diagnostics bundle
 includes Camera history as stored, so after a downgrade it carries the username and account id of

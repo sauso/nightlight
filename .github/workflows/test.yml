@@ -37,6 +37,22 @@ jobs:
       - name: Run the test suite
         working-directory: backend
         run: npm test
+      # #549: entrypoint.sh's file-mode block is shell, so neither the JS mutation catalogue nor a Windows dev
+      # machine can exercise it (entrypoint-umask.test.js is skipped where there are no POSIX modes). This step is
+      # where it gets its evidence:
+      #   1. the same test inside node:24-alpine, the image's own base, as its unprivileged `node` user: BusyBox sh,
+      #      find, stat and chmod are what production runs (`npm test` above used Ubuntu's dash and GNU tools).
+      #      A run that skipped anything proves nothing, hence the check on the TAP summary;
+      #   2. scripts/entrypoint-umask.mutants.sh: every named mutation of the block must turn the test red.
+      - name: Entrypoint file modes on BusyBox, and the shell mutants (#549)
+        run: |
+          docker run --rm --user node -v "$PWD/backend:/w:ro" -w /w node:24-alpine \
+            node --test --test-reporter=tap test/entrypoint-umask.test.js > "$RUNNER_TEMP/busybox.tap" \
+            || { cat "$RUNNER_TEMP/busybox.tap"; exit 1; }
+          grep -q '^# skipped 0$' "$RUNNER_TEMP/busybox.tap" \
+            || { cat "$RUNNER_TEMP/busybox.tap"; echo "::error::the BusyBox run skipped tests"; exit 1; }
+          tail -9 "$RUNNER_TEMP/busybox.tap"
+          bash scripts/entrypoint-umask.mutants.sh
 
   core-coverage:
     name: Core-logic coverage gate (>= 95%)

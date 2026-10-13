@@ -3,11 +3,17 @@ import { api } from '../lib/api.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
 import SecretField from '../components/SecretField.jsx';
+import { hasUnsavedEdits, UNSAVED_TEST_HINT } from '../lib/unsavedEdits.js';
 
 const BACK = { to: '/settings/push', label: 'Push notifications' };
 
+const INITIAL = { enabled: false, configured: false, app_token_set: false, app_token_masked: '', user_key_set: false, user_key_masked: '', device: '' };
+
 export default function SettingsPushPushover() {
-  const [po, setPo] = useState({ enabled: false, configured: false, app_token_set: false, app_token_masked: '', user_key_set: false, user_key_masked: '', device: '' });
+  const [po, setPo] = useState(INITIAL);
+  // The config as last loaded or last successfully SAVED, never touched by typing: Send test tests this,
+  // so it is what the on-screen form is compared against (#396). A failed save leaves it alone.
+  const [lastSaved, setLastSaved] = useState(INITIAL);
   // Secret inputs are separate and start empty; the server never sends the tokens back, so a blank
   // field on save means "keep the saved one".
   const [appToken, setAppToken] = useState('');
@@ -19,7 +25,7 @@ export default function SettingsPushPushover() {
   const [testMsg, setTestMsg] = useState(null);
 
   useEffect(() => {
-    api.get('/pushover/config').then((c) => { setPo(c); setLoaded(true); }).catch(() => setLoaded(true));
+    api.get('/pushover/config').then((c) => { setPo(c); setLastSaved(c); setLoaded(true); }).catch(() => setLoaded(true));
   }, []);
 
   async function save(e) {
@@ -29,9 +35,12 @@ export default function SettingsPushPushover() {
       // Server validates the tokens with Pushover when enabling and 400s if they don't check out.
       // Blank fields keep the saved secrets.
       const next = await api.put('/pushover/config', { enabled: po.enabled, app_token: appToken, user_key: userKey, device: po.device || '' });
-      setPo(next); setAppToken(''); setUserKey(''); setSaved(true); setTimeout(() => setSaved(false), 2500);
+      setPo(next); setLastSaved(next); setAppToken(''); setUserKey(''); setSaved(true); setTimeout(() => setSaved(false), 2500);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
+
+  // Send test goes to the SAVED config (POST has no body), so it is held back while the screen differs.
+  const dirty = hasUnsavedEdits(po, lastSaved, [appToken, userKey]);
 
   async function sendTest() {
     setBusy(true); setTestMsg(null); setError('');
@@ -98,8 +107,10 @@ export default function SettingsPushPushover() {
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button className="btn btn-primary" type="submit" disabled={busy || !loaded}>{busy ? 'Working…' : 'Save changes'}</button>
-            <button className="btn btn-secondary" type="button" disabled={busy || !po.configured} onClick={sendTest}>Send test</button>
+            <button className="btn btn-secondary" type="button" disabled={busy || !po.configured || dirty}
+              aria-describedby={dirty ? 'po-test-hint' : undefined} onClick={sendTest}>Send test with saved settings</button>
           </div>
+          {dirty && <div id="po-test-hint" className="camera-tile__sub" style={{ marginTop: 8 }}>{UNSAVED_TEST_HINT}</div>}
           {testMsg && (
             <div className="camera-tile__sub" style={{ marginTop: 8, color: testMsg.ok ? 'var(--live)' : 'var(--offline)' }}>{testMsg.text}</div>
           )}

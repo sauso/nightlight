@@ -90,18 +90,28 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false }) {
 
     const canPlayNatively = video.canPlayType('application/vnd.apple.mpegurl');
 
+    // The native path's two listeners, kept by name so the cleanup below can take them off (#560). The
+    // <video> element is the SAME node across every run of this effect (it is only the effect that re-runs:
+    // each 5 s retry while in error, each stall reconnect), so anonymous listeners piled up one more pair
+    // per reconnect, and every one of them re-ran its seek/setState on each later event. null on the
+    // hls.js path, which has no DOM listeners of its own to remove (hls.destroy() detaches its own).
+    let onLoadedMetadata = null;
+    let onVideoError = null;
+
     if (canPlayNatively) {
       // Safari: let the browser's own (hardware-accelerated) HLS support handle it,
       // but nudge it to the live edge on load - Safari's own default start position
       // is conservatively further back than necessary.
       video.src = hlsUrl(mediamtxPath);
-      video.addEventListener('loadedmetadata', () => {
+      onLoadedMetadata = () => {
         if (video.seekable.length > 0) {
           video.currentTime = video.seekable.end(video.seekable.length - 1);
         }
         setState('live');
-      });
-      video.addEventListener('error', () => setState('error'));
+      };
+      onVideoError = () => setState('error');
+      video.addEventListener('loadedmetadata', onLoadedMetadata);
+      video.addEventListener('error', onVideoError);
     } else if (Hls.isSupported()) {
       const hls = new Hls({
         backBufferLength: 10,
@@ -126,6 +136,11 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false }) {
     }
 
     return () => {
+      // Listeners off BEFORE the src is removed and load() called: tearing the source down is itself
+      // something browsers may answer with an `error` event, and it must not reach this run's handler
+      // and flip a player that is being replaced into the error state.
+      if (onLoadedMetadata) video.removeEventListener('loadedmetadata', onLoadedMetadata);
+      if (onVideoError) video.removeEventListener('error', onVideoError);
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
