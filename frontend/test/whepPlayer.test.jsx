@@ -189,3 +189,79 @@ describe('WhepPlayer session DELETE (#562)', () => {
     expectTokenStayedOnThisSite(calls);
   });
 });
+
+// ★ #694. The Location used to be stored in one ref shared by every run of the connect effect, before the
+// `cancelled` check, so a slow POST from a torn-down run could overwrite a newer run's address.
+describe('WhepPlayer late POST answer from a torn-down run (#694)', () => {
+  // A POST whose answer the test releases by hand; the DELETE is answered at once.
+  function holdPosts() {
+    const held = [];
+    fetchMock.mockImplementation((url, init = {}) => {
+      if (init.method !== 'POST') return Promise.resolve(deleteAnswer);
+      return new Promise((resolve) => {
+        held.push({
+          url,
+          release: (location) =>
+            resolve({ ok: true, status: 201, headers: headersWith(location), text: async () => 'v=0 answer' }),
+        });
+      });
+    });
+    return held;
+  }
+  const deletes = () =>
+    fetchMock.mock.calls.filter(([, init = {}]) => init.method === 'DELETE').map(([url, init]) => ({ url, redirect: init.redirect }));
+  const settle = () => new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  test("★ a late answer from the old run neither replaces the new run's address nor leaves its own session open", async () => {
+    const held = holdPosts();
+    const { rerender, unmount } = render(<WhepPlayer mediamtxPath="cam1" active muted />);
+    await waitFor(() => expect(held).toHaveLength(1));
+    // Run A is torn down (camera switch) while its POST is still in flight: nothing stored, so no DELETE yet.
+    rerender(<WhepPlayer mediamtxPath="cam2" active muted />);
+    await waitFor(() => expect(held).toHaveLength(2));
+    expect(deletes()).toEqual([]);
+    // Run B is answered and applied.
+    held[1].release('/live/cam2/whep/new');
+    await waitFor(() => expect(peers[1].remoteDescription).toEqual({ type: 'answer', sdp: 'v=0 answer' }));
+    // Run A's slow answer arrives now. It is the only cleanup that session will ever get, so it is DELETEd at once
+    // (and ONLY that one; B is still live).
+    held[0].release('/live/cam1/whep/old');
+    await settle();
+    expect(deletes()).toEqual([{ url: '/live/cam1/whep/old', redirect: 'error' }]);
+    expect(peers[0].remoteDescription).toBeNull();
+    // B's cleanup ends B's own session, not A's.
+    unmount();
+    await settle();
+    expect(deletes()).toEqual([
+      { url: '/live/cam1/whep/old', redirect: 'error' },
+      { url: '/live/cam2/whep/new', redirect: 'error' },
+    ]);
+  });
+
+  test('a late answer after unmount DELETEs its own session once', async () => {
+    const held = holdPosts();
+    const { unmount } = render(<WhepPlayer mediamtxPath="cam1" active muted />);
+    await waitFor(() => expect(held).toHaveLength(1));
+    unmount();
+    await settle();
+    expect(deletes()).toEqual([]);
+    held[0].release('/live/cam1/whep/late');
+    await settle();
+    expect(deletes()).toEqual([{ url: '/live/cam1/whep/late', redirect: 'error' }]);
+  });
+
+  test('a late answer whose Location fails the #562 guard sends no DELETE at all', async () => {
+    const held = holdPosts();
+    const { unmount } = render(<WhepPlayer mediamtxPath="cam1" active muted />);
+    await waitFor(() => expect(held).toHaveLength(1));
+    unmount();
+    held[0].release('/api/users/1');
+    await settle();
+    expect(deletes()).toEqual([]);
+  });
+
+  test('normal connect then disconnect is unchanged: one DELETE, at unmount, after the answer was applied', async () => {
+    const calls = await mountAnswerAndUnmount('/live/cam1/whep/abc');
+    expect(calls.filter((c) => c.method === 'DELETE')).toEqual([deleteTo('/live/cam1/whep/abc')]);
+  });
+});

@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **A camera that reconnects while its live view is still starting can no longer leave a stale viewing session open (#694).** In the Low latency (WebRTC) view, a slow answer from a connection attempt that had already been abandoned (a reconnect, a camera switch or closing the view) could arrive after the next attempt had connected and overwrite the address of its session, so closing the view ended the abandoned session and left the live one open on the media server until it noticed the viewer had gone. Each attempt now keeps its own session address, and an answer that arrives after its attempt was abandoned ends that session straight away (the only chance it will get) and touches nothing else. Same site-only address check and no-redirect rules as before (#562). Not checked against a real media server; the tests use a stubbed connection and a hand-timed answer.
+
 ## [0.39.0] - 2026-10-13
 
 ### Fixed

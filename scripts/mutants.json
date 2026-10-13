@@ -16575,8 +16575,8 @@
   {
     "label": "#562 WHEP player: the call site stores the raw Location header again",
     "file": "frontend/src/components/WhepPlayer.jsx",
-    "find": "resourceUrlRef.current = resolveWhepResource(",
-    "replace": "resourceUrlRef.current = ((rawLocation) => rawLocation)(",
+    "find": "resourceUrl = resolveWhepResource(",
+    "replace": "resourceUrl = ((rawLocation) => rawLocation)(",
     "expect": "killed",
     "tests": ["whepPlayer.test.jsx"],
     "namePattern": "WhepPlayer session DELETE"
@@ -17644,5 +17644,41 @@
     "expect": "killed",
     "tests": ["csp-directives.test.js"],
     "namePattern": "#562 CSP wiring"
+  },
+  {
+    "label": "#694 WHEP player: a late answer from a torn-down run is not DELETEd (its session is left open)",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "return;",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "late answer from the old run|late answer after unmount"
+  },
+  {
+    "label": "#694 WHEP player: a late answer carries on into setRemoteDescription on the closed peer",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "if (resourceUrl) deleteWhepSession(resourceUrl);",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "late answer from the old run"
+  },
+  {
+    "label": "#694 WHEP player: a late answer DELETEs even when the Location was refused (fetch(null))",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "deleteWhepSession(resourceUrl);\n          return;",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "fails the #562 guard"
+  },
+  {
+    "label": "#694 WHEP player: the cleanup no longer DELETEs this run's own session",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "      if (resourceUrl) {\n        deleteWhepSession(resourceUrl);",
+    "replace": "      if (false) {\n        deleteWhepSession(resourceUrl);",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "normal connect then disconnect|late answer from the old run"
   }
 ]

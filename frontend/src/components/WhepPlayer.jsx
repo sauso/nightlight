@@ -20,6 +20,25 @@ function whepUrl(mediamtxPath) {
 const BLANK_POSTER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3Crect width='1' height='1' fill='%230a0d1c'/%3E%3C/svg%3E";
 
+// Ends a WHEP viewing session on the server. A courtesy (MediaMTX frees the session on its own once the peer is
+// gone), so a failure is swallowed.
+function deleteWhepSession(resourceUrl) {
+  fetch(resourceUrl, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${getToken()}` },
+    // WHY no redirects (#562, found in code review with a stub server): a same-origin 307/308 answer
+    // to this DELETE is followed with the method AND the Authorization header kept (the Fetch spec
+    // keeps a DELETE's method on a 301/302 as well; not tried), so checking the first address
+    // (resolveWhepResource) would not bound where the token ends up: a redirect to an /api
+    // route would replay the DELETE there. Refusing to follow costs nothing: the DELETE is
+    // a courtesy and its failure is already swallowed by the catch below.
+    // The POST is deliberately left on the default (follow): it goes to the fixed address this
+    // file builds, not one a response named, and a legitimate reverse proxy may redirect it (to
+    // https, say); refusing there could break the live view for that install.
+    redirect: 'error',
+  }).catch(() => {});
+}
+
 export default function WhepPlayer({
   mediamtxPath,
   active,
@@ -37,7 +56,6 @@ export default function WhepPlayer({
   // independently, the same way Spotify's web player does.
   const audioRef = useRef(null);
   const pcRef = useRef(null);
-  const resourceUrlRef = useRef(null);
   const everConnectedRef = useRef(false);
   const [state, setState] = useState('idle'); // idle | connecting | live | error
   const [errorMsg, setErrorMsg] = useState('');
@@ -116,6 +134,12 @@ export default function WhepPlayer({
     if (!active) return;
     let cancelled = false;
     let firstConnectTimeoutId = null;
+    // This run's own session address (#694). It used to live in a ref shared by every run of this effect, and the
+    // POST stored into it BEFORE the `cancelled` check: a slow POST from a torn-down run A could resolve after
+    // run B had stored its own address and overwrite it, so B's cleanup DELETEd A's session and B's stayed open
+    // until MediaMTX noticed the viewer had gone. A local cannot be reached by another run, so a late answer can
+    // only ever affect the run that sent it.
+    let resourceUrl = null;
 
     async function connect() {
       setState('connecting');
@@ -238,13 +262,20 @@ export default function WhepPlayer({
         //    is only a courtesy that lets MediaMTX free the session at once; without it the session lasts
         //    until MediaMTX notices the peer has gone. How long that is has NOT been measured. In a correct
         //    deployment (a Location of /live/<camera>/whep/<id>) the DELETE is still sent, unchanged.
-        resourceUrlRef.current = resolveWhepResource(
+        resourceUrl = resolveWhepResource(
           res.headers.get('Location'),
           whepUrl(mediamtxPath),
           window.location.origin,
         );
+        // WHY a late answer DELETEs at once (#694): this run's cleanup already ran (and found nothing stored, so
+        // sent no DELETE), and it will never run again, so the session MediaMTX just created for this answer has
+        // no other chance of being ended. Nothing is stored for any later run to trip over. A refused Location
+        // (null) sends nothing, as in the normal path.
+        if (cancelled) {
+          if (resourceUrl) deleteWhepSession(resourceUrl);
+          return;
+        }
         const answerSdp = await res.text();
-        if (cancelled) return;
         await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
       } catch (err) {
         if (!cancelled) {
@@ -264,22 +295,9 @@ export default function WhepPlayer({
         pcRef.current.close();
         pcRef.current = null;
       }
-      if (resourceUrlRef.current) {
-        fetch(resourceUrlRef.current, {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${getToken()}` },
-          // WHY no redirects (#562, found in code review with a stub server): a same-origin 307/308 answer
-          // to this DELETE is followed with the method AND the Authorization header kept (the Fetch spec
-          // keeps a DELETE's method on a 301/302 as well; not tried), so checking the first address
-          // (resolveWhepResource above) would not bound where the token ends up: a redirect to an /api
-          // route would replay the DELETE there. Refusing to follow costs nothing: the DELETE is
-          // a courtesy and its failure is already swallowed by the catch below.
-          // The POST above is deliberately left on the default (follow): it goes to the fixed address this
-          // file builds, not one a response named, and a legitimate reverse proxy may redirect it (to
-          // https, say); refusing there could break the live view for that install.
-          redirect: 'error',
-        }).catch(() => {});
-        resourceUrlRef.current = null;
+      if (resourceUrl) {
+        deleteWhepSession(resourceUrl);
+        resourceUrl = null;
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
