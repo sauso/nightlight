@@ -16697,5 +16697,320 @@
     "expect": "killed",
     "tests": ["whepPlayer.test.jsx"],
     "namePattern": "second camera"
+  },
+  {
+    "label": "#562 TTL control: a comment edit in middleware/auth.js changes nothing",
+    "file": "backend/src/middleware/auth.js",
+    "find": "// ⚠️ UP TO 1 SECOND EARLY, by design.",
+    "replace": "// ⚠️ UP TO 1 SECOND EARLY, by design [CONTROL MUTANT].",
+    "expect": "survives",
+    "tests": ["session-lifetime.test.js", "session-lifetime-7-days.test.js"],
+    "note": "Validates the harness for the two lifetime files. If this is ever KILLED, the run is broken, not the code."
+  },
+  {
+    "label": "#562 TTL M1: the request check drops the age condition (only the token's exp bounds a session)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "WHERE s.id = ? AND ${requestAge.sql}`",
+    "replace": "WHERE s.id = ? AND (${requestAge.sql} OR 1)`",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js", "session-lifetime-7-days.test.js"],
+    "note": "The pre-#562 behaviour on the request path. Every aged session holds a FRESH token, so only the row's age can refuse it."
+  },
+  {
+    "label": "#562 TTL M2: the age condition reads last_seen_at instead of created_at",
+    "file": "backend/src/middleware/auth.js",
+    "find": "const SESSION_AGE_COLUMN = 'created_at';",
+    "replace": "const SESSION_AGE_COLUMN = 'last_seen_at';",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js", "session-lifetime-7-days.test.js"],
+    "note": "Turns the absolute lifetime into an idle timeout. Killed because every aged session's last_seen_at is 10 minutes ago."
+  },
+  {
+    "label": "#562 TTL M3: liveSession touches last_seen_at BEFORE the lifetime check",
+    "file": "backend/src/middleware/auth.js",
+    "find": "  const row = sessionWithUser.get(sessionId, ...requestAge.params);",
+    "replace": "  touchSession.run(sessionId); const row = sessionWithUser.get(sessionId, ...requestAge.params);",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "last_seen_at is not touched"
+  },
+  {
+    "label": "#562 TTL M4: activePushTokens hard-codes 30 days instead of the setting",
+    "file": "backend/src/lib/push.js",
+    "find": "  const params = [...age.params];",
+    "replace": "  const params = ['-30 days'];",
+    "expect": "killed",
+    "tests": ["session-lifetime-7-days.test.js"],
+    "namePattern": "activePushTokens"
+  },
+  {
+    "label": "#562 TTL M5: activePushTokens drops the age condition",
+    "file": "backend/src/lib/push.js",
+    "find": "            SELECT id FROM sessions WHERE ${age.sql}",
+    "replace": "            SELECT id FROM sessions WHERE (${age.sql} OR 1)",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js", "session-lifetime-7-days.test.js", "push.test.js"]
+  },
+  {
+    "label": "#562 TTL M6: the live-view sweep's isLiveSessionId hard-codes 30 days",
+    "file": "backend/src/middleware/auth.js",
+    "find": "  return !!sessionAlive.get(sid, ...sweepAge.params);",
+    "replace": "  return !!sessionAlive.get(sid, '-30 days');",
+    "expect": "killed",
+    "tests": ["session-lifetime-7-days.test.js"],
+    "namePattern": "live-view sweep"
+  },
+  {
+    "label": "#562 TTL M7: isLiveSessionId drops the age condition",
+    "file": "backend/src/middleware/auth.js",
+    "find": "const sessionAlive = db.prepare(`SELECT 1 FROM sessions WHERE id = ? AND ${sweepAge.sql}`);",
+    "replace": "const sessionAlive = db.prepare(`SELECT 1 FROM sessions WHERE id = ? AND (${sweepAge.sql} OR 1)`);",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "live-view sweep"
+  },
+  {
+    "label": "#562 TTL M8: purgeExpiredSessions no longer deletes by lifetime (idle rule only, as before #562)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "OR NOT (${purgeAge.sql})`;",
+    "replace": "OR (0 AND ${purgeAge.sql})`;",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js", "session-lifetime-7-days.test.js"],
+    "namePattern": "purgeExpiredSessions"
+  },
+  {
+    "label": "#562 TTL M9: purgeExpiredSessions drops the 31-day idle rule",
+    "file": "backend/src/middleware/auth.js",
+    "find": "const purgeable = `last_seen_at < datetime('now', '-31 days') OR",
+    "replace": "const purgeable = `0 OR",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "purgeExpiredSessions",
+    "note": "Killed only by the session with a FUTURE created_at (a clock that went backwards): no other row needs the idle rule."
+  },
+  {
+    "label": "#562 TTL M10: purgeExpiredSessions deletes the sessions before their push tokens",
+    "file": "backend/src/middleware/auth.js",
+    "find": "  purgePushTokens.run(...purgeAge.params);\n  const { changes } = purgeSessions.run(...purgeAge.params);",
+    "replace": "  const { changes } = purgeSessions.run(...purgeAge.params);\n  purgePushTokens.run(...purgeAge.params);",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "purgeExpiredSessions",
+    "note": "The push-token delete selects through the sessions it is about to remove; run second, it finds none and the registrations are left behind."
+  },
+  {
+    "label": "#562 TTL M11: purgeExpiredSessions hard-codes 30 days for the session delete",
+    "file": "backend/src/middleware/auth.js",
+    "find": "  const { changes } = purgeSessions.run(...purgeAge.params);",
+    "replace": "  const { changes } = purgeSessions.run('-30 days');",
+    "expect": "killed",
+    "tests": ["session-lifetime-7-days.test.js"],
+    "namePattern": "purgeExpiredSessions"
+  },
+  {
+    "label": "#562 TTL M12: GET /sessions lists sessions past their lifetime",
+    "file": "backend/src/routes/auth.js",
+    "find": "WHERE user_id = ? AND ${listAge.sql} ORDER BY",
+    "replace": "WHERE user_id = ? AND (${listAge.sql} OR 1) ORDER BY",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "GET /sessions"
+  },
+  {
+    "label": "#562 TTL M13: GET /sessions/all lists sessions past their lifetime",
+    "file": "backend/src/routes/auth.js",
+    "find": "   WHERE ${allAge.sql}",
+    "replace": "   WHERE (${allAge.sql} OR 1)",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "GET /sessions"
+  },
+  {
+    "label": "#562 TTL M14: GET /sessions hard-codes 30 days",
+    "file": "backend/src/routes/auth.js",
+    "find": "ownSessions.all(req.user.id, ...listAge.params)",
+    "replace": "ownSessions.all(req.user.id, '-30 days')",
+    "expect": "killed",
+    "tests": ["session-lifetime-7-days.test.js"],
+    "namePattern": "GET /sessions"
+  },
+  {
+    "label": "#562 TTL M15: GET /sessions/all hard-codes 30 days",
+    "file": "backend/src/routes/auth.js",
+    "find": "everySession.all(...allAge.params)",
+    "replace": "everySession.all('-30 days')",
+    "expect": "killed",
+    "tests": ["session-lifetime-7-days.test.js"],
+    "namePattern": "GET /sessions"
+  },
+  {
+    "label": "#562 TTL M16: the token minted at sign-in ignores the setting (always 30 days)",
+    "file": "backend/src/routes/auth.js",
+    "find": "    expiresIn: `${SESSION_TOKEN_TTL_DAYS}d`,",
+    "replace": "    expiresIn: '30d',",
+    "expect": "killed",
+    "tests": ["session-lifetime-7-days.test.js"],
+    "namePattern": "exp - iat"
+  },
+  {
+    "label": "#562 TTL M17: the parse uses Number() instead of the digits-only check (1e1 becomes 10)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "  if (/^[0-9]+$/.test(s)) {",
+    "replace": "  if (Number.isInteger(Number(s))) {",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "parse table"
+  },
+  {
+    "label": "#562 TTL M18: the floor is 1 day instead of 7",
+    "file": "backend/src/middleware/auth.js",
+    "find": "export const MIN_SESSION_TTL_DAYS = 7;",
+    "replace": "export const MIN_SESSION_TTL_DAYS = 1;",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "parse table"
+  },
+  {
+    "label": "#562 TTL M19: the range check lets a value above 30 through",
+    "file": "backend/src/middleware/auth.js",
+    "find": "days <= MAX_SESSION_TTL_DAYS) return { days, warning: null };",
+    "replace": "days <= 365) return { days, warning: null };",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "parse table"
+  },
+  {
+    "label": "#562 TTL M20: the range check lets a value below 7 through",
+    "file": "backend/src/middleware/auth.js",
+    "find": "if (days >= MIN_SESSION_TTL_DAYS && days",
+    "replace": "if (days >= 0 && days",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "parse table"
+  },
+  {
+    "label": "#562 TTL M21: values are not trimmed (' 7 ' and a blank of spaces become warnings)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "const s = typeof raw === 'string' ? raw.trim() : '';",
+    "replace": "const s = typeof raw === 'string' ? raw : '';",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "parse table"
+  },
+  {
+    "label": "#562 TTL M22: unset or blank is not the default 30",
+    "file": "backend/src/middleware/auth.js",
+    "find": "  if (!s) return { days: DEFAULT_SESSION_TTL_DAYS, warning: null };",
+    "replace": "  if (!s) return { days: 7, warning: null };",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"]
+  },
+  {
+    "label": "#562 TTL M23: a non-default value in effect is not logged at start",
+    "file": "backend/src/middleware/auth.js",
+    "find": "  else if (days !== DEFAULT_SESSION_TTL_DAYS) {",
+    "replace": "  else if (false) {",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js", "session-lifetime-7-days.test.js"]
+  },
+  {
+    "label": "#562 TTL M24: a bad value falls back silently (no warning in the log)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "  if (warning) log.warn(`[auth] ${warning}`);",
+    "replace": "  if (false) log.warn(`[auth] ${warning}`);",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "reportSessionTtl"
+  },
+  {
+    "label": "#562 TTL M25: start-up never reports the setting (the call at import is gone)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "reportSessionTtl(sessionTtl);",
+    "replace": "void sessionTtl;",
+    "expect": "killed",
+    "tests": ["session-lifetime-7-days.test.js"],
+    "namePattern": "start-up logged"
+  },
+  {
+    "label": "#562 TTL M26: sessionAgeCondition accepts any alias",
+    "file": "backend/src/middleware/auth.js",
+    "find": "  if (alias && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) throw",
+    "replace": "  if (false) throw",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "sessionAgeCondition"
+  },
+  {
+    "label": "#562 TTL M27: the index.js sweep passes a liveness rule other than isLiveSessionId",
+    "file": "backend/src/index.js",
+    "find": "sessionsToKick(sessions, webrtcSessionOwners, isLiveSessionId, listStartedAt)",
+    "replace": "sessionsToKick(sessions, webrtcSessionOwners, () => true, listStartedAt)",
+    "expect": "killed",
+    "tests": ["session-lifetime.test.js"],
+    "namePattern": "index.js pin",
+    "note": "Killed by a SOURCE PIN, not a behavioural test: index.js boots the app and cannot be imported."
+  },
+  {
+    "label": "#562 TTL F1: a 401 no longer tells AuthProvider (an open tab stays on a dead screen)",
+    "file": "frontend/src/lib/api.js",
+    "find": "    for (const listener of [...unauthorizedListeners]) listener();",
+    "replace": "    void unauthorizedListeners;",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "#562"
+  },
+  {
+    "label": "#562 TTL F2: AuthProvider never registers for 401s",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "  useEffect(() => onUnauthorized(() => {",
+    "replace": "  useEffect(() => (() => () => {})(() => {",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "#562"
+  },
+  {
+    "label": "#562 TTL F3: the 401 listener drops the user but keeps the media token",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "    clearMediaToken();\n    setUser(null);",
+    "replace": "    setUser(null);",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "#562"
+  },
+  {
+    "label": "#562 TTL F4: the late-401 guard removed, seen at the app level (a timed-out request signs the user out)",
+    "file": "frontend/src/lib/api.js",
+    "find": "if (signal.aborted) {",
+    "replace": "if (false && signal.aborted) {",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "TIMED OUT"
+  },
+  {
+    "label": "#562 TTL F5: listeners are called BEFORE the token is cleared",
+    "file": "frontend/src/lib/api.js",
+    "find": "  if (res.status === 401) {\n    setToken(null);",
+    "replace": "  if (res.status === 401) {\n    for (const listener of [...unauthorizedListeners]) listener();\n    setToken(null);",
+    "expect": "killed",
+    "tests": ["lib/api.test.js"],
+    "namePattern": "onUnauthorized"
+  },
+  {
+    "label": "#562 TTL F6: the unsubscribe function does nothing",
+    "file": "frontend/src/lib/api.js",
+    "find": "    unauthorizedListeners.delete(callback);",
+    "replace": "    void callback;",
+    "expect": "killed",
+    "tests": ["lib/api.test.js"],
+    "namePattern": "unsubscribes"
+  },
+  {
+    "label": "#562 TTL F7: listeners are called from the live set, not a copy",
+    "file": "frontend/src/lib/api.js",
+    "find": "for (const listener of [...unauthorizedListeners]) listener();",
+    "replace": "for (const listener of unauthorizedListeners) listener();",
+    "expect": "killed",
+    "tests": ["lib/api.test.js"],
+    "namePattern": "registered DURING"
   }
 ]

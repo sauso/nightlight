@@ -63,6 +63,12 @@ a trusted device.
 - An Unraid template is available - see the GitHub repo below for setup.
 - A random session secret is generated and stored in your data directory
   automatically on first run - nothing to configure.
+- `SESSION_TTL_DAYS` (optional) sets how many days a sign-in lasts, counted from
+  sign-in: range `7`-`30`, blank = `30` (the default); an invalid value logs a
+  warning and `30` is used. A phone is signed out at the same time of day it signed
+  in and gets no Nightlight push alerts until it signs in again; lowering the value
+  signs out older sign-ins at their next request. Details:
+  [How long a sign-in lasts](https://github.com/sauso/nightlight/blob/main/SECURITY.md#how-long-a-sign-in-lasts-and-where-it-is-kept).
 
 ### Links
 

@@ -7,7 +7,7 @@ import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // api.js keeps the media token in module scope, so each test gets a fresh module instance rather
 // than inheriting the previous test's cached token.
-let api, getToken, setToken, refreshMediaToken, getMediaToken, clearMediaToken;
+let api, getToken, setToken, refreshMediaToken, getMediaToken, clearMediaToken, onUnauthorized;
 
 // A fetch stub that returns whatever the test queues up next. The last queued response repeats, so a
 // test that only cares about one shape doesn't have to count calls.
@@ -33,7 +33,7 @@ beforeEach(async () => {
   vi.resetModules();
   localStorage.clear();
   window.location.hash = '';
-  ({ api, getToken, setToken, refreshMediaToken, getMediaToken, clearMediaToken } =
+  ({ api, getToken, setToken, refreshMediaToken, getMediaToken, clearMediaToken, onUnauthorized } =
     await import('../../src/lib/api.js'));
 });
 
@@ -149,6 +149,53 @@ describe('request error handling', () => {
     await api.del('/timelapses/1').catch(() => {});
     expect(getToken()).toBe('valid');
     expect(window.location.hash).toBe('');
+  });
+});
+
+// #562: AuthProvider listens here to drop its signed-in user on a 401 (the app-level proof is in
+// appShell.test.jsx). These pin the contract it relies on.
+describe('onUnauthorized', () => {
+  test('a 401 calls every listener once, AFTER the token is cleared', async () => {
+    setToken('expired');
+    const seen = [];
+    onUnauthorized(() => seen.push(['first', getToken()]));
+    onUnauthorized(() => seen.push(['second', getToken()]));
+    stubFetch([{ status: 401, body: { error: 'Invalid or expired session' } }]);
+    await api.get('/cameras').catch(() => {});
+    expect(seen).toEqual([['first', null], ['second', null]]);
+  });
+
+  test('no other status calls it: 200, 403, 500', async () => {
+    setToken('valid');
+    const listener = vi.fn();
+    onUnauthorized(listener);
+    stubFetch([{ status: 200, body: {} }, { status: 403, body: {} }, { status: 500, body: {} }]);
+    await api.get('/a');
+    await api.get('/b').catch(() => {});
+    await api.get('/c').catch(() => {});
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  test('the function it returns unsubscribes, and only that listener', async () => {
+    const gone = vi.fn();
+    const kept = vi.fn();
+    const off = onUnauthorized(gone);
+    onUnauthorized(kept);
+    off();
+    stubFetch([{ status: 401, body: {} }]);
+    await api.get('/x').catch(() => {});
+    expect(gone).not.toHaveBeenCalled();
+    expect(kept).toHaveBeenCalledTimes(1);
+  });
+
+  test('a listener registered DURING a 401 is not called for that same 401, only for the next', async () => {
+    const added = vi.fn();
+    onUnauthorized(() => { onUnauthorized(added); });
+    stubFetch([{ status: 401, body: {} }]);
+    await api.get('/x').catch(() => {});
+    expect(added).not.toHaveBeenCalled();
+    await api.get('/y').catch(() => {});
+    expect(added).toHaveBeenCalledTimes(1);
   });
 });
 

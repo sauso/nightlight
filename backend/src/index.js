@@ -20,7 +20,7 @@ import gotifyRoutes from './routes/gotify.js';
 import notificationsRoutes from './routes/notifications.js';
 import timelapsesRoutes from './routes/timelapses.js';
 import recordingsRoutes from './routes/recordings.js';
-import { requireAuth, requireAuthQueryOrHeader, verifyToken, SESSION_TOKEN_TTL_DAYS } from './middleware/auth.js';
+import { requireAuth, requireAuthQueryOrHeader, verifyToken, isLiveSessionId, purgeExpiredSessions } from './middleware/auth.js';
 import { demoGuard, demoRequestLimiter, isDemoModeActive } from './middleware/demoMode.js';
 import { whepOnlyGuard } from './middleware/whepOnlyGuard.js';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -365,23 +365,9 @@ server.on('upgrade', (req, socket, head) => {
 // this makes it self-heal within a few minutes instead of needing a manual restart.
 safeInterval('reconcile', 5 * 60 * 1000, reconcileCameraPaths);
 
-// Housekeeping: every login inserts a sessions row, and only an explicit logout
-// deletes it, so abandoned rows accumulate forever. Anything idle past the JWT's own
-// 30-day lifetime (see routes/auth.js) can never authenticate again regardless, so
-// deleting it changes nothing except table size.
-function purgeExpiredSessions() {
-  // push_tokens has no FK to sessions (deliberate — same reasoning as its user_id column, see
-  // lib/push.js), so a row bound to one of these about to go stale first, matching every other
-  // session-revocation path in routes/auth.js — not strictly required (activePushTokens() already
-  // excludes it either way) but keeps push_tokens from accumulating rows nothing will ever clean up.
-  db.prepare(
-    `DELETE FROM push_tokens WHERE session_id IN (
-       SELECT id FROM sessions WHERE last_seen_at < datetime('now', '-31 days')
-     )`
-  ).run();
-  const { changes } = db.prepare("DELETE FROM sessions WHERE last_seen_at < datetime('now', '-31 days')").run();
-  if (changes > 0) logger.info(`Purged ${changes} expired session(s).`);
-}
+// Housekeeping: deletes sessions past their lifetime (SESSION_TTL_DAYS) or idle for 31 days, and their
+// push registrations. It lives in middleware/auth.js beside the lifetime rule it applies (#562): this
+// file cannot be imported by a test (it boots the app), and a copy of the rule here is what drifts.
 purgeExpiredSessions();
 safeInterval('purge-sessions', 24 * 60 * 60 * 1000, purgeExpiredSessions);
 
@@ -390,8 +376,9 @@ safeInterval('purge-sessions', 24 * 60 * 60 * 1000, purgeExpiredSessions);
 // own — MediaMTX has no idea the revocation happened. This is the enforcement side: every tick, ask
 // MediaMTX what's actually still open, and end anything whose recorded owner is no longer a live
 // session — checked the SAME way every other revocation path in this repo checks it (exists, AND
-// within its own absolute token lifetime — see SESSION_TOKEN_TTL_DAYS and lib/push.js's identical
-// reasoning for the same class of gap).
+// within its lifetime, SESSION_TTL_DAYS): isLiveSessionId in middleware/auth.js, built from the same
+// sessionAgeCondition as the request check and push (#562), so a lowered lifetime ends a view at the
+// same moment it ends the session's API access and its alerts.
 //
 // 15s, matching camera-watchdog's cadence below — the documented bound on how long a revoked
 // session's view can keep playing. `sweeping` skips a tick already in flight: safeInterval does not
@@ -409,10 +396,7 @@ safeInterval('webrtc-session-reconcile', WEBRTC_KICK_INTERVAL_MS, async () => {
     // because it's missing from a snapshot older than it is).
     const listStartedAt = Date.now();
     const sessions = await listWebrtcSessions();
-    const isLive = (sid) =>
-      !!db.prepare(`SELECT 1 FROM sessions WHERE id = ? AND created_at > datetime('now', ?)`)
-        .get(sid, `-${SESSION_TOKEN_TTL_DAYS} days`);
-    const { toKick, stale } = sessionsToKick(sessions, webrtcSessionOwners, isLive, listStartedAt);
+    const { toKick, stale } = sessionsToKick(sessions, webrtcSessionOwners, isLiveSessionId, listStartedAt);
     for (const { id, path } of toKick) {
       await kickWebrtcSession(id);
       webrtcSessionOwners.delete(id);

@@ -3,7 +3,7 @@ import path from 'path';
 import { logger } from './logger.js';
 import db from '../db.js';
 import { storeSnapshot } from './pushSnapshots.js';
-import { SESSION_TOKEN_TTL_DAYS } from '../middleware/auth.js';
+import { sessionAgeCondition } from '../middleware/auth.js';
 
 // Push notifications via Firebase Cloud Messaging. The service-account credential is a secret,
 // so it is NEVER baked into the (public) image — it's mounted as a file into the data dir. If
@@ -315,12 +315,12 @@ export function removeToken(token) {
 // (...) — until that device re-registers under a live session (see this repo's Security Advisories
 // for the full writeup).
 //
-// The session subquery ALSO checks absolute age, not just row existence: `sessions` rows are only
-// ever pruned by 31 days of INACTIVITY (db's purgeExpiredSessions, keyed on last_seen_at), so a
-// session that's genuinely outlived its own JWT's SESSION_TOKEN_TTL_DAYS lifetime can still sit in
-// the table — kept "alive" by unrelated activity from the same device — well past when its holder's
-// API access has already, correctly, stopped working. Checking created_at here closes that gap
-// directly rather than silently trusting row presence alone.
+// The session subquery ALSO checks absolute age, not just row existence: a `sessions` row can still
+// be in the table after its lifetime (SESSION_TTL_DAYS) ends, until the daily purge
+// (middleware/auth.js's purgeExpiredSessions) deletes it, and that device's API access has already,
+// correctly, stopped. The age condition comes from middleware/auth.js's sessionAgeCondition, the same
+// one the request check uses (#562), so a lowered SESSION_TTL_DAYS stops push to exactly the devices it
+// signs out, at the same moment, and the two cannot drift.
 //
 // Two optional narrowings (#552, the long-silence notice, which is for the admins and not for whoever set the
 // silence), both OFF by default so every existing caller still reaches every live device:
@@ -333,12 +333,13 @@ export function removeToken(token) {
 //   excludeUserId  not this account's devices (the person who set the silence).
 // Both sit on top of the user and session filters above, never instead of them.
 export function activePushTokens({ adminsOnly = false, excludeUserId = null } = {}) {
+  const age = sessionAgeCondition();
   let sql = `SELECT pt.token, pt.base_url FROM push_tokens pt
         WHERE pt.user_id IN (SELECT id FROM users)
           AND pt.session_id IN (
-            SELECT id FROM sessions WHERE created_at > datetime('now', ?)
+            SELECT id FROM sessions WHERE ${age.sql}
           )`;
-  const params = [`-${SESSION_TOKEN_TTL_DAYS} days`];
+  const params = [...age.params];
   if (adminsOnly) sql += `\n          AND pt.user_id IN (SELECT u.id FROM users u WHERE u.role = 'admin')`;
   if (excludeUserId) {
     sql += '\n          AND pt.user_id != ?';

@@ -27,6 +27,11 @@ services:
       # safe but means every visitor through a non-loopback reverse proxy looks like one client.
       # Only ever list an address you control - see the README and .env.example.
       - TRUST_PROXY=${TRUST_PROXY:-}
+      # How many days a sign-in lasts, counted from sign-in (no idle sign-out). Range 7-30, blank = 30;
+      # an invalid value logs a warning and 30 is used. A phone is signed out at the same time of day it
+      # signed in and gets no Nightlight push alerts until it signs in again; lowering it signs out older
+      # sign-ins at their next request. See .env.example and SECURITY.md.
+      - SESSION_TTL_DAYS=${SESSION_TTL_DAYS:-}
       - PGID=${PGID:-100}
       # Who else may read the data volume. 077 (the default) = owner only: the database holds every
       # stored secret in plaintext, and each start takes group/other access off existing files too.

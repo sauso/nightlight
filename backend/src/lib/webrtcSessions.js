@@ -84,8 +84,8 @@ export async function kickWebrtcSession(id) {
 // Pure and dependency-injected - no fetch, no DB, no Map mutation - so the actual decision (which
 // sessions get closed) is testable on its own. `ownerMap` is webrtcSessionOwners (or a fake of the
 // same shape in a test); `isLiveSessionId(sid)` answers whether a login session is still valid
-// (exists AND within its own absolute token lifetime - see routes/auth.js's SESSION_TOKEN_TTL_DAYS
-// and lib/push.js's identical reasoning for the same class of gap). `listStartedAt` is a `Date.now()`
+// (exists AND within its lifetime - index.js passes middleware/auth.js's isLiveSessionId, the same
+// SESSION_TTL_DAYS rule as every request and lib/push.js). `listStartedAt` is a `Date.now()`
 // captured by the CALLER before it asked MediaMTX for `mediamtxSessions` - see below for why.
 //
 // A MediaMTX session with NO recorded owner is never kicked - it could be one that started before a
