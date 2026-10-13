@@ -111,7 +111,8 @@ function Shell() {
   // #562 bullet 3: give a browser its pinch-zoom back; the native app keeps index.html's locked viewport (the
   // PiP double-tap bug). Here, once, on mount, rather than in main.jsx: main.jsx is the bootstrap and is not
   // covered by the tests, and appShell.test.jsx must be able to prove this runs. Runs whether or not anyone is
-  // signed in (Shell is mounted either way), so the login screen is zoomable too. See lib/viewport.js.
+  // signed in (Shell is mounted either way), so the login screen is zoomable too. The iOS check (an iOS browser
+  // keeps maximum-scale=1) is applyViewportPolicy's own default argument. See lib/viewport.js.
   useEffect(() => {
     applyViewportPolicy(document, isNativeApp());
   }, []);

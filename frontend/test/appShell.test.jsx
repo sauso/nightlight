@@ -244,13 +244,32 @@ describe('the route table', () => {
 });
 
 // ★ #562 bullet 3. The policy itself is unit-tested in lib/viewport.test.js; this proves the app RUNS it at
-// start, with the real native check, on the real index.html string. Signed out on purpose: Shell must relax
-// the viewport before (and whether or not) anyone signs in, so the login screen is zoomable too.
+// start, with the real native check and the real iOS check (navigator stubbed), on the real index.html string.
+// Signed out on purpose: Shell must relax the viewport before (and whether or not) anyone signs in, so the
+// login screen is zoomable too.
 describe('#562 viewport the app applies the zoom policy at start', () => {
   // The viewport meta exactly as index.html ships it, read from disk (process.cwd() is the frontend folder).
   const SHIPPED = /<meta name="viewport" content="([^"]*)"/.exec(
     readFileSync(resolve(process.cwd(), 'index.html'), 'utf8'),
   )?.[1];
+  const ANDROID_CHROME = {
+    userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+    platform: 'Linux armv81',
+    maxTouchPoints: 5,
+  };
+  const IPHONE_SAFARI = {
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+    platform: 'iPhone',
+    maxTouchPoints: 5,
+  };
+  // Own properties on the global navigator, deleted after each test so jsdom's own values come back.
+  const stubbedKeys = [];
+  const stubNavigator = (values) => {
+    for (const [key, value] of Object.entries(values)) {
+      Object.defineProperty(globalThis.navigator, key, { configurable: true, get: () => value });
+      stubbedKeys.push(key);
+    }
+  };
   let meta;
   beforeEach(() => {
     meta = document.createElement('meta');
@@ -258,13 +277,24 @@ describe('#562 viewport the app applies the zoom policy at start', () => {
     meta.setAttribute('content', SHIPPED);
     document.head.appendChild(meta);
   });
-  afterEach(() => meta.remove());
+  afterEach(() => {
+    meta.remove();
+    for (const key of stubbedKeys.splice(0)) delete globalThis.navigator[key];
+  });
 
-  test('#562 viewport app: in a browser, booting the app removes maximum-scale and user-scalable and keeps the rest', async () => {
+  test('#562 viewport app: in an Android or desktop browser, booting the app removes maximum-scale and user-scalable and keeps the rest', async () => {
     expect(SHIPPED).toMatch(/maximum-scale=1, user-scalable=no/); // the fixture really is locked
+    stubNavigator(ANDROID_CHROME);
     mockApi(null);
     await boot('/');
     await waitFor(() => expect(meta.getAttribute('content')).toBe('width=device-width, initial-scale=1, viewport-fit=cover'));
+  });
+
+  test('#562 viewport app: in an iOS browser, booting the app removes only user-scalable and keeps maximum-scale', async () => {
+    stubNavigator(IPHONE_SAFARI);
+    mockApi(null);
+    await boot('/');
+    await waitFor(() => expect(meta.getAttribute('content')).toBe('width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover'));
   });
 
   test('#562 viewport app: in the native app, booting leaves the locked viewport exactly as shipped', async () => {

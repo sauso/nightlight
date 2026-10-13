@@ -1026,10 +1026,13 @@ standalone app without needing HTTPS at all.
 **Zooming the page.** In a browser, including a home-screen install, you can pinch-zoom the page as on
 any other site. In the native apps (below) page zoom stays **locked**, because in the Android app
 double-tapping the picture-in-picture window used to zoom the whole app and leave it stuck until a
-restart. Double-tap zoom on a camera's video is the app's own and works everywhere. On an iPhone or
-iPad in Safari, tapping into a text field may now zoom the page in a little, because Safari enlarges
-small text on focus once page zoom is allowed; pinch out to return (expected from Safari's behaviour,
-not checked on a device).
+restart. Double-tap zoom on a camera's video is the app's own and works everywhere.
+
+- **Android and desktop browsers:** pinch-zoom works again (it used to be blocked).
+- **iPhone and iPad (Safari, or any other iOS browser):** unchanged. Pinch-zoom already worked there,
+  because Safari ignores the zoom lock for pinching, and the page still does not jump in when you tap
+  into a text field, because Nightlight keeps the one setting that stops Safari doing that. Expected
+  from Safari's behaviour; not checked on a device.
 
 ## Mobile apps (Android & iOS)
 

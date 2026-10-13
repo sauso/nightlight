@@ -16764,8 +16764,8 @@
   {
     "label": "#562 viewport: empty tokens are kept",
     "file": "frontend/src/lib/viewport.js",
-    "find": ".filter((token) => token && !LOCKING",
-    "replace": ".filter((token) => !LOCKING",
+    "find": ".filter((token) => token && !drop.has(",
+    "replace": ".filter((token) => !drop.has(",
     "expect": "killed",
     "tests": ["lib/viewport.test.js"],
     "namePattern": "#562 viewport browser"
@@ -16841,6 +16841,141 @@
     "expect": "killed",
     "tests": ["appShell.test.jsx"],
     "namePattern": "#562 viewport app"
+  },
+  {
+    "label": "#562 viewport ios: an iOS browser loses maximum-scale too",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "const drop = ios ? LOCKING_IOS : LOCKING;",
+    "replace": "const drop = LOCKING;",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport ios"
+  },
+  {
+    "label": "#562 viewport ios: every browser keeps maximum-scale",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "const drop = ios ? LOCKING_IOS : LOCKING;",
+    "replace": "const drop = LOCKING_IOS;",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport ios: an iOS browser keeps user-scalable too",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "const LOCKING_IOS = new Set(['user-scalable']);",
+    "replace": "const LOCKING_IOS = new Set([]);",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport ios"
+  },
+  {
+    "label": "#562 viewport ios: applyViewportPolicy ignores its ios argument",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "relaxedViewportContent(before, ios)",
+    "replace": "relaxedViewportContent(before)",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport ios|#562 viewport defaults"
+  },
+  {
+    "label": "#562 viewport ios: with no ios argument no page counts as iOS",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "ios = isIosBrowser()",
+    "replace": "ios = false",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js", "appShell.test.jsx"],
+    "namePattern": "#562 viewport defaults|#562 viewport app"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: an iPhone user agent is not recognised",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "/iPhone|iPad|iPod/.test(ua)",
+    "replace": "/iPad|iPod/.test(ua)",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: an iPad user agent is not recognised",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "/iPhone|iPad|iPod/.test(ua)",
+    "replace": "/iPhone|iPod/.test(ua)",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: an iPod user agent is not recognised",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "/iPhone|iPad|iPod/.test(ua)",
+    "replace": "/iPhone|iPad/.test(ua)",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: an iPad reporting a Mac is not recognised",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "return nav.platform === 'MacIntel' && nav.maxTouchPoints > 1;",
+    "replace": "return false;",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: any touch screen counts as iOS (platform check dropped)",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "return nav.platform === 'MacIntel' && nav.maxTouchPoints > 1;",
+    "replace": "return nav.maxTouchPoints > 1;",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: every Mac counts as iOS (touch check dropped)",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "return nav.platform === 'MacIntel' && nav.maxTouchPoints > 1;",
+    "replace": "return nav.platform === 'MacIntel';",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: the Mac and touch conditions are OR'd",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "return nav.platform === 'MacIntel' && nav.maxTouchPoints > 1;",
+    "replace": "return nav.platform === 'MacIntel' || nav.maxTouchPoints > 1;",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: one touch point is enough",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "return nav.platform === 'MacIntel' && nav.maxTouchPoints > 1;",
+    "replace": "return nav.platform === 'MacIntel' && nav.maxTouchPoints >= 1;",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: with no argument the global navigator is not read",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "isIosBrowser(nav = navigator)",
+    "replace": "isIosBrowser(nav = {})",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser|#562 viewport defaults"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: a missing navigator throws",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "  if (!nav) return false;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser"
   },
   {
     "label": "#562 CSP: the Cloudflare script origin is allowed on every install",
