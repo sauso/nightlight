@@ -938,6 +938,30 @@ is used instead — a typo here will never stop the app starting.
 every remote user sharing the proxy's address, one person mistyping their password cannot lock anyone
 else out. Setting `TRUST_PROXY` makes the per-source half meaningful as well.
 
+### `CLOUDFLARE_ANALYTICS` — Cloudflare Web Analytics through Cloudflare's proxy
+
+| Variable | Default | What it does |
+|---|---|---|
+| `CLOUDFLARE_ANALYTICS` | blank (off) | Allows Cloudflare's Web Analytics beacon in Nightlight's Content-Security-Policy. `1`, `true`, `yes` or `on` (any case, spaces ignored) turn it on; blank, `0`, `false`, `no` or `off` keep it off. Any other value also keeps it off and logs one warning at start. |
+
+**If you do not use Cloudflare Web Analytics, leave it blank: nothing changes.**
+
+It matters only if you serve Nightlight through Cloudflare's proxy **and** have Cloudflare Web Analytics
+turned on for that site. Cloudflare then injects its beacon script into every page, and Nightlight's
+security policy **blocks it unless this is on**. You can tell it is being blocked: the browser console
+shows a Content-Security-Policy violation, and the container log shows `[csp-report]` lines (at most 10
+a minute). Two ways to stop that: set `CLOUDFLARE_ANALYTICS=1` to allow the beacon, or, if you do not
+want the analytics, turn off Web Analytics' automatic setup (the beacon injection) for that site in the
+Cloudflare dashboard.
+
+> **Upgrading from a version before this setting existed:** the beacon used to be allowed on every
+> install. If you rely on Cloudflare Web Analytics, set the variable, or your analytics stop. A container
+> made from the Unraid template before this change does not gain the new field by itself: add it as a
+> variable ("Add another Path, Port, Variable, Label or Device") with the key `CLOUDFLARE_ANALYTICS`.
+
+With it off (the default), the page can only run scripts from your own server. The rest of the policy
+is the same either way; see "CSP is enforced" in [docs/architecture.md](docs/architecture.md#csp-is-enforced--keep-it-that-way).
+
 ## Remote / internet access (watching from outside your home network)
 
 By default this is LAN-only. There are two ways to watch remotely, and each camera tile
@@ -1000,6 +1024,20 @@ What you actually get depends on the platform and whether the site is served ove
 If you want the full installed experience on Android specifically, the reverse-proxy/HTTPS
 setup above is worth doing; otherwise the **native Android app** (below) gives you a true
 standalone app without needing HTTPS at all.
+
+**Zooming the page.** In a browser, including a home-screen install, you can pinch-zoom the page as on
+any other site. In the native apps (below) page zoom stays **locked**, because in the Android app
+double-tapping the picture-in-picture window used to zoom the whole app and leave it stuck until a
+restart. Double-tap zoom on a camera's video is the app's own and works everywhere.
+
+- **Android and desktop browsers:** pinch-zoom works again (it used to be blocked).
+- **iPhone and iPad (Safari, or any other iOS browser):** unchanged. Pinch-zoom already worked there,
+  because Safari ignores the zoom lock for pinching, and the page still does not jump in when you tap
+  into a text field, because Nightlight keeps the one setting that stops Safari doing that. Expected
+  from Safari's behaviour; not checked on a device.
+
+While the page is zoomed in, dragging down on the live screen pans the page; the live screen's
+pull-to-refresh works again once you zoom back out.
 
 ## Mobile apps (Android & iOS)
 

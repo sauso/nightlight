@@ -227,9 +227,28 @@ is allowed to run long (camera probes and saves, recomputing a night, photo uplo
 
 `backend/src/index.js` serves an **enforcing** Content-Security-Policy via helmet (it was
 deliberately disabled until 2026-08-24, when it was rolled out report-only across every feature
-first, then switched to enforcing). The directives are tuned to this app and the reasoning is in
-the inline comment above the policy — read it before changing anything there. Two things that
-bite: hls.js needs `worker-src blob:` + `media-src blob:`, and WebRTC's STUN server is gated by
-`connect-src`. Never add `unsafe-inline`/`unsafe-eval` to `script-src`; theming is safe because it
-uses CSSOM `setProperty`, which CSP doesn't police. Violations are logged to the container log via
-`POST /api/csp-report`, so check there if a new dependency breaks.
+first, then switched to enforcing). The policy, and every other option index.js passes to helmet,
+is built by `backend/src/lib/cspDirectives.js` (#562): index.js cannot be imported by a test, so the
+policy lives where `csp-directives.test.js` can serve it and read the header back. The directives
+are tuned to this app and the reasoning is in the comment at the top of that file — read it before
+changing anything there. Two things that bite: hls.js needs `worker-src blob:` + `media-src blob:`,
+and WebRTC's STUN server is gated by `connect-src`. Never add `unsafe-inline`/`unsafe-eval` to
+`script-src`; theming is safe because it uses CSSOM `setProperty`, which CSP doesn't police.
+Violations are logged to the container log via `POST /api/csp-report` (at most 10 a minute), so
+check there if a new dependency breaks.
+
+**Cloudflare Web Analytics is opt-in** (#562). Until then `script-src` and `connect-src` allowed
+Cloudflare's beacon origins on every install; now they are added only when the operator turns it on:
+
+| `CLOUDFLARE_ANALYTICS` | Allows Cloudflare's Web Analytics beacon (`script-src https://static.cloudflareinsights.com`, `connect-src https://cloudflareinsights.com`). |
+|---|---|
+| Default | Off: blank or unset. The policy is the one above with neither origin. |
+| On | `1`, `true`, `yes` or `on`, trimmed and in any case. The header is then exactly what every install served before #562, and one `[http]` line at start says so. |
+| Off | Blank, `0`, `false`, `no`, `off`. |
+| Anything else | Off, with one warning in the log at start (a typo fails closed: the beacon stays blocked). |
+
+With it off, a site served through Cloudflare's proxy with Web Analytics on still has the beacon
+`<script>` injected into every page by Cloudflare; the browser refuses it, and each refusal arrives
+as a `[csp-report]` log line (at most 10 a minute). Either set the variable, or, if the analytics are not wanted, turn off
+Web Analytics' automatic setup (the injection) for that site in the Cloudflare dashboard. Not checked
+against a real Cloudflare-fronted install.

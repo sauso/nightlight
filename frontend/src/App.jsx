@@ -6,6 +6,7 @@ import { CamerasProvider } from './lib/CamerasContext.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import { isNativeApp, hasActiveBackgroundAudio } from './lib/nativeBridge.js';
 import { initPushNotifications } from './lib/pushNotifications.js';
+import { applyViewportPolicy } from './lib/viewport.js';
 import { useSwipeBack } from './lib/useSwipeBack.js';
 import { useHardwareBack } from './lib/useHardwareBack.js';
 import NavBar from './components/NavBar.jsx';
@@ -106,6 +107,15 @@ function Shell() {
   useReloadAfterBackground();
   useSwipeBack();
   useHardwareBack();
+
+  // #562 bullet 3: give a browser its pinch-zoom back; the native app keeps index.html's locked viewport (the
+  // PiP double-tap bug). Here, once, on mount, rather than in main.jsx: main.jsx is the bootstrap and is not
+  // covered by the tests, and appShell.test.jsx must be able to prove this runs. Runs whether or not anyone is
+  // signed in (Shell is mounted either way), so the login screen is zoomable too. The iOS check (an iOS browser
+  // keeps maximum-scale=1) is applyViewportPolicy's own default argument. See lib/viewport.js.
+  useEffect(() => {
+    applyViewportPolicy(document, isNativeApp());
+  }, []);
 
   // Once signed in (native app only), register for push notifications so detection alerts can
   // reach the phone when the app is backgrounded/closed. No-op in a browser.

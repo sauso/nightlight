@@ -27,6 +27,10 @@ services:
       # safe but means every visitor through a non-loopback reverse proxy looks like one client.
       # Only ever list an address you control - see the README and .env.example.
       - TRUST_PROXY=${TRUST_PROXY:-}
+      # Allow Cloudflare Web Analytics' beacon in the Content-Security-Policy: 1/true/yes/on = allow,
+      # blank (the default) or 0/false/no/off = blocked; anything else is also blocked, with a warning.
+      # Only for a site served through Cloudflare's proxy with Web Analytics on. See .env.example.
+      - CLOUDFLARE_ANALYTICS=${CLOUDFLARE_ANALYTICS:-}
       - PGID=${PGID:-100}
       # Who else may read the data volume. 077 (the default) = owner only: the database holds every
       # stored secret in plaintext, and each start takes group/other access off existing files too.
