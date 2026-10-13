@@ -17644,5 +17644,29 @@
     "expect": "killed",
     "tests": ["csp-directives.test.js"],
     "namePattern": "#562 CSP wiring"
+  },
+  {
+    "label": "#505 CamerasContext: status.unknown is ignored (an unknown status is treated like offline)",
+    "file": "frontend/src/lib/CamerasContext.jsx",
+    "find": "if (cam.status?.unknown) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"]
+  },
+  {
+    "label": "#505 CamerasContext: an unknown camera is not flagged for the tile",
+    "file": "frontend/src/lib/CamerasContext.jsx",
+    "find": "statusLevel: 'connecting', statusUnknown: true",
+    "replace": "statusLevel: 'connecting'",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"]
+  },
+  {
+    "label": "#505 WhepPlayer: the service-unavailable notice never shows",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "{statusUnknown && state !== 'idle' ? (",
+    "replace": "{false ? (",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"]
   }
 ]

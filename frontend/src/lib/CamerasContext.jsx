@@ -43,6 +43,13 @@ export function CamerasProvider({ children }) {
           counts.delete(cam.id);
           return { ...cam, statusLevel: 'live' };
         }
+        if (cam.status?.unknown) {
+          // MediaMTX's status call timed out: we do not know the camera is down, so never count toward the
+          // red "offline" dot (that would claim an outage we have not seen) and restart the count so a real
+          // outage afterwards is confirmed from scratch. Same amber "connecting" dot as a brief drop.
+          counts.delete(cam.id);
+          return { ...cam, statusLevel: 'connecting', statusUnknown: true };
+        }
         const count = (counts.get(cam.id) || 0) + 1;
         counts.set(cam.id, count);
         return { ...cam, statusLevel: count > NOT_READY_RED_THRESHOLD ? 'offline' : 'connecting' };

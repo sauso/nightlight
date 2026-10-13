@@ -709,6 +709,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
               onFirstConnectFailed={handleFirstConnectFailed}
               cameraName={camera.name}
               isBackgroundAudio={audioState === 'bg'}
+              statusUnknown={!!camera.statusUnknown}
             />
           ) : (
             <HlsPlayer
@@ -718,6 +719,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
               mediamtxPath={`${effectivePath}-hls`}
               active={streamActive}
               muted={effectiveMuted}
+              statusUnknown={!!camera.statusUnknown}
             />
           )}
         </div>

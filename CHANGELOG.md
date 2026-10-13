@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **A camera tile no longer says the camera is offline when Nightlight's own streaming service did not answer (#505, #480).** When the status check timed out, the tile showed "No signal" and, after about 30 seconds, a red dot, as if the camera had failed. It now shows "Streaming service unavailable. Your camera may still be online." with an icon and a Retry button, and the dot stays amber. A camera that really is offline looks as it did before.
+
 ## [0.39.0] - 2026-10-13
 
 ### Fixed
