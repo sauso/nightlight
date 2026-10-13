@@ -1298,13 +1298,59 @@
   {
     "label": "logger: stop redacting credentials at the choke point",
     "file": "backend/src/lib/logger.js",
-    "find": "const line = redactCredentials(`${timestamp()}",
-    "replace": "const line = ((x)=>x)(`${timestamp()}",
+    "find": "const line = neutraliseControlChars(redactCredentials(`${timestamp()}",
+    "replace": "const line = neutraliseControlChars(((x)=>x)(`${timestamp()}",
     "expect": "killed",
     "tests": [
       "camera-report-route.test.js"
     ],
     "note": "server_logs is republished verbatim inside the diagnostics bundle, under a note promising no passwords. Per-producer redaction was tried and lib/onvif.js immediately defeated it."
+  },
+  {
+    "label": "#539 logger: do not neutralise control characters at the choke point",
+    "file": "backend/src/lib/logger.js",
+    "find": "const line = neutraliseControlChars(redactCredentials(`${timestamp()}",
+    "replace": "const line = ((x) => x)(redactCredentials(`${timestamp()}",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "note": "A camera name with a newline forged a second timestamped line in docker logs and the support bundle."
+  },
+  {
+    "label": "#539 logger: leave C1 controls (U+0080-U+009F, incl. NEL U+0085) unescaped",
+    "file": "backend/src/lib/logger.js",
+    "find": "\\u007f-\\u009f\\u2028",
+    "replace": "\\u007f\\u2028",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "note": "NEL is a line break to some viewers; the class test walks every C1 code point."
+  },
+  {
+    "label": "#539 logger: leave U+2028 / U+2029 unescaped",
+    "file": "backend/src/lib/logger.js",
+    "find": "\\u009f\\u2028\\u2029]",
+    "replace": "\\u009f]",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "note": "Unicode line and paragraph separators break lines in JS-based viewers."
+  },
+  {
+    "label": "#539 logger: also escape tab (would change ordinary child-process lines)",
+    "file": "backend/src/lib/logger.js",
+    "find": "[\\u0000-\\u0008\\u000a-",
+    "replace": "[\\u0000-\\u000a-",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "note": "Pins the deliberate choice to keep tab, so normal lines stay byte-identical."
+  },
+  {
+    "label": "#539 logger: escape before redacting instead of after",
+    "file": "backend/src/lib/logger.js",
+    "find": "const line = neutraliseControlChars(redactCredentials(`${timestamp()} [${level}] ${args\n    .map((a) => (typeof a === 'string' ? a : JSON.stringify(a)))\n    .join(' ')}`));",
+    "replace": "const line = redactCredentials(neutraliseControlChars(`${timestamp()} [${level}] ${args\n    .map((a) => (typeof a === 'string' ? a : JSON.stringify(a)))\n    .join(' ')}`));",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "namePattern": "redaction sees the real newline",
+    "note": "Escaped first, the newline becomes printable text and the query-stripping redaction swallows the rest of the line."
   },
   {
     "label": "logger raw: bypass the credential-redacting choke point",

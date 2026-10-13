@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **A camera name (or any other typed text) containing a line break can no longer forge a log line (#539).** The logger now writes line breaks and other control characters as visible escapes (`\n`, `\r`, `\x1b`, `\u2028`) in `docker logs`, the in-app log viewer and the diagnostics bundle, so a name like "Nursery, new line, a fake `[INFO]` line" stays one line. Ordinary lines, timestamps, levels and the `[obs]` line format are unchanged. Known side effect: an error stack in the log is now one long line with `\n` where its breaks were, and tab is left as is.
+
 ## [0.39.0] - 2026-10-13
 
 ### Fixed

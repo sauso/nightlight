@@ -67,10 +67,36 @@ function pushToBuffer(line) {
 // LEGITIMATE is lost either: `redactCredentials` (lib/urlCredentials.js) only rewrites a `//user:
 // pass@` shape and drops a URL's query string / fragment, none of which has an innocent meaning
 // worth publishing in a log line — see that function's own comment for what it does and why.
+//
+// ⚠️ EVERY LINE IS ALSO MADE SINGLE-LINE HERE (issue #539), for the same reason and at the same choke point.
+// A camera name is only trimmed, and it is interpolated into dozens of lines (`[oob] "${camera.name}" ...`), so
+// a name containing "\n2026-10-02 03:12:00 [INFO] [oob] ..." wrote a second, genuine-looking timestamped line to
+// `docker logs` and a support bundle people attach to public issues. It runs AFTER redaction, not before: the
+// credential regexes stop at whitespace, and escaping first would turn a newline into the printable `\n` that
+// they would then read straight through.
+const LINE_BREAKERS_AND_CONTROLS = /[\u0000-\u0008\u000a-\u001f\u007f-\u009f\u2028\u2029]/g;
+const NAMED_ESCAPES = { '\n': '\\n', '\r': '\\r' };
+// Visible, reversible-by-eye escapes: \n and \r by name, everything else as \xNN (C0, DEL, C1) or \uNNNN
+// (U+2028/U+2029, which JSON-safe viewers and some terminals treat as line breaks). Tab (U+0009) is left alone
+// on purpose: it cannot start a new line, and ffmpeg/MediaMTX output carries it, so escaping it would change
+// ordinary lines for no forgery benefit. A literal backslash is NOT doubled, so a pre-existing "\n" typed by a
+// user is indistinguishable from an escaped newline; doubling it would alter every Windows-style path in a
+// normal line, and the forgery is already defeated either way. No length cap: this file has no length
+// convention (processOutput.js caps child-process lines upstream, MAX_LINE_CHARS).
+export function neutraliseControlChars(text) {
+  return text.replace(LINE_BREAKERS_AND_CONTROLS, (c) => {
+    if (NAMED_ESCAPES[c]) return NAMED_ESCAPES[c];
+    const code = c.charCodeAt(0);
+    return code <= 0xff
+      ? `\\x${code.toString(16).padStart(2, '0')}`
+      : `\\u${code.toString(16).padStart(4, '0')}`;
+  });
+}
+
 function write(stream, level, args) {
-  const line = redactCredentials(`${timestamp()} [${level}] ${args
+  const line = neutraliseControlChars(redactCredentials(`${timestamp()} [${level}] ${args
     .map((a) => (typeof a === 'string' ? a : JSON.stringify(a)))
-    .join(' ')}`);
+    .join(' ')}`));
   stream(line);
   pushToBuffer(line);
 }
