@@ -16,6 +16,16 @@ const MAX_PULL = 110; //  px the indicator can travel, so it never runs away dow
 const RESISTANCE = 0.5; // <1 makes the pull feel rubbery - you drag further than it moves
 const MIN_SPIN_MS = 600; // keep the spinner up at least this long so it never just flashes
 
+// Whether the browser is pinch-zoomed in. Since #562 a browser may zoom the page, and while zoomed in a
+// one-finger drag PANS the visual viewport: window.scrollY stays 0, so the "at the top of the page" check
+// below cannot see it. Without this, panning down inside a zoomed-in page was read as a pull (its default
+// prevented, so the pan itself was blocked) and a long drag ran the dashboard refresh, remounting every player.
+// visualViewport is missing in jsdom and in old browsers; treated as not zoomed, the previous behaviour.
+// (The native app keeps page zoom locked, so this is always false there.)
+function pinchZoomedIn() {
+  return (window.visualViewport?.scale ?? 1) > 1;
+}
+
 /**
  * @param {object}   opts
  * @param {boolean}  opts.enabled   - only track while the dashboard is the active screen
@@ -51,7 +61,7 @@ export function usePullToRefresh({ enabled, onRefresh }) {
     if (!el || !enabled) return undefined;
 
     function onTouchStart(e) {
-      if (refreshingRef.current || e.touches.length !== 1 || window.scrollY > 0) {
+      if (refreshingRef.current || e.touches.length !== 1 || window.scrollY > 0 || pinchZoomedIn()) {
         startYRef.current = null;
         return;
       }
@@ -69,8 +79,9 @@ export function usePullToRefresh({ enabled, onRefresh }) {
     function onTouchMove(e) {
       if (startYRef.current === null || refreshingRef.current) return;
       const dy = e.touches[0].clientY - startYRef.current;
-      // Pulling up, or the page has scrolled off the top mid-gesture: not our gesture.
-      if (dy <= 0 || window.scrollY > 0) {
+      // Pulling up, the page has scrolled off the top, or the browser was pinch-zoomed in mid-gesture: not
+      // our gesture.
+      if (dy <= 0 || window.scrollY > 0 || pinchZoomedIn()) {
         if (activeRef.current) {
           activeRef.current = false;
           setPullBoth(0);

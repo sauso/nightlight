@@ -249,6 +249,6 @@ Cloudflare's beacon origins on every install; now they are added only when the o
 
 With it off, a site served through Cloudflare's proxy with Web Analytics on still has the beacon
 `<script>` injected into every page by Cloudflare; the browser refuses it, and each refusal arrives
-as a `[csp-report]` log line. Either set the variable, or, if the analytics are not wanted, turn off
+as a `[csp-report]` log line (at most 10 a minute). Either set the variable, or, if the analytics are not wanted, turn off
 Web Analytics' automatic setup (the injection) for that site in the Cloudflare dashboard. Not checked
 against a real Cloudflare-fronted install.

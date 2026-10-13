@@ -944,7 +944,9 @@ else out. Setting `TRUST_PROXY` makes the per-source half meaningful as well.
 |---|---|---|
 | `CLOUDFLARE_ANALYTICS` | blank (off) | Allows Cloudflare's Web Analytics beacon in Nightlight's Content-Security-Policy. `1`, `true`, `yes` or `on` (any case, spaces ignored) turn it on; blank, `0`, `false`, `no` or `off` keep it off. Any other value also keeps it off and logs one warning at start. |
 
-Only relevant if you serve Nightlight through Cloudflare's proxy **and** have Cloudflare Web Analytics
+**If you do not use Cloudflare Web Analytics, leave it blank: nothing changes.**
+
+It matters only if you serve Nightlight through Cloudflare's proxy **and** have Cloudflare Web Analytics
 turned on for that site. Cloudflare then injects its beacon script into every page, and Nightlight's
 security policy **blocks it unless this is on**. You can tell it is being blocked: the browser console
 shows a Content-Security-Policy violation, and the container log shows `[csp-report]` lines (at most 10
@@ -1033,6 +1035,9 @@ restart. Double-tap zoom on a camera's video is the app's own and works everywhe
   because Safari ignores the zoom lock for pinching, and the page still does not jump in when you tap
   into a text field, because Nightlight keeps the one setting that stops Safari doing that. Expected
   from Safari's behaviour; not checked on a device.
+
+While the page is zoomed in, dragging down on the live screen pans the page; the live screen's
+pull-to-refresh works again once you zoom back out.
 
 ## Mobile apps (Android & iOS)
 

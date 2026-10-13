@@ -11,15 +11,18 @@
 // listener; route-permissions.test.js and suite-exits-cleanly.test.js rest on that). A subprocess boot was
 // considered and rejected: it would launch a real MediaMTX wherever one is on PATH, bind fixed ports, and on
 // Windows a kill leaves that grandchild running. What this file does instead, in the "wiring" block:
-//   - takes the argument index.js passes to helmet() FROM ITS SOURCE TEXT and evaluates it with the real
-//     builder, a chosen environment and a recording logger, then serves the result through a real helmet and
-//     reads the header back. So a hard-coded object, a wrong env (`{}`) or a dropped logger in index.js fails
-//     on BEHAVIOUR, not on spelling;
-//   - pins that this expression is the only helmet() call and is registered with app.use (route-permissions
-//     also pins `use helmet()` as the first registration), and that no source file but lib/cspDirectives.js
-//     names a Cloudflare origin.
+//   - takes the arguments index.js passes to helmet() FROM ITS SOURCE TEXT and evaluates them with a spy on the
+//     real builder, a chosen environment and a recording logger, then serves the result through a real helmet
+//     and reads the header back. So a hard-coded object, an edited copy of the builder's result, a wrong env
+//     (`{}`) or a dropped logger in index.js fails on BEHAVIOUR, not on spelling;
+//   - pins, on tokens rather than exact text (a reformat must not fail it), that this is the only helmet() call
+//     and the whole of an app.use(...) (route-permissions also pins `use helmet()` as the first registration);
+//   - scans backend/src: no file but lib/cspDirectives.js names a Cloudflare origin (comments included), and no
+//     code but that file names the Content-Security-Policy header or helmet's option for it (comments
+//     excluded). The frontend sources are not scanned.
 // ⚠️ NOT COVERED: the header a running container actually sends. That remains a source-level pin plus a real
-// helmet in a test app; it is not a boot of index.js.
+// helmet in a test app; it is not a boot of index.js. Nor a policy set by something outside backend/src (a
+// reverse proxy, a meta tag added to the frontend).
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -28,7 +31,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import helmet from 'helmet';
 import { tokenize } from './helpers/routeTable.js';
-import { walkSources } from './helpers/sourceScan.js';
+import { walkSources, stripCommentsOnly } from './helpers/sourceScan.js';
 import {
   buildCspDirectives, buildHelmetOptions, parseCloudflareAnalytics,
   CLOUDFLARE_SCRIPT_ORIGIN, CLOUDFLARE_BEACON_ORIGIN,
@@ -78,7 +81,14 @@ const DECOYS = {
 
 const ON_SPELLINGS = ['1', 'true', 'yes', 'on', 'TRUE', 'Yes ', ' On', '\tyes\n', 'YES', 'tRuE'];
 const QUIET_OFF = [undefined, '', '   ', '0', 'false', 'no', 'off', 'FALSE', ' No ', 'OFF'];
-const UNRECOGNISED = ['enabled', 'maybe', 'ture', '2', 'y', 'yes please', '1 1', 'on;', '"1"', '01', 'true!'];
+// Words an operator might plausibly type for "on" that are NOT on (fix round 1: the ON set must be pinned
+// exactly, so a widened set fails here), plus typos. Every one is off, and warns.
+const UNRECOGNISED = [
+  'ok', 'enable', 'enabled', 'allow', 'y', 't', 'yep', '1.0', 'on!', 'true1',
+  'maybe', 'ture', '2', 'yes please', '1 1', 'on;', '"1"', '01', 'true!', 'disabled',
+];
+// The exact ON set, lower-cased and trimmed. Nothing else may switch it on.
+const ON_EXACTLY = new Set(['1', 'true', 'yes', 'on']);
 
 function recorder() {
   const calls = { warn: [], info: [] };
@@ -178,6 +188,13 @@ describe('#562 CSP parse: what counts as on, off, and a typo', () => {
       assert.deepEqual(buildCspDirectives({ CLOUDFLARE_ANALYTICS: v }), EXPECTED_DEFAULT, JSON.stringify(v));
     }
   });
+
+  test('#562 CSP parse: the ON set is exactly 1/true/yes/on, nothing near it switches it on', () => {
+    for (const v of [...ON_SPELLINGS, ...QUIET_OFF, ...UNRECOGNISED]) {
+      const expected = typeof v === 'string' && ON_EXACTLY.has(v.trim().toLowerCase());
+      assert.equal(parseCloudflareAnalytics(v).enabled, expected, JSON.stringify(v));
+    }
+  });
 });
 
 describe('#562 CSP log: one line at start, only when there is something to say', () => {
@@ -187,6 +204,15 @@ describe('#562 CSP log: one line at start, only when there is something to say',
     assert.equal(calls.warn.length, 1);
     assert.match(calls.warn[0], /^\[http\] CLOUDFLARE_ANALYTICS="maybe" is not a recognised value/);
     assert.equal(calls.info.length, 0);
+  });
+
+  test('#562 CSP log: every unrecognised word, "ok", "enable" and "disabled" included, warns exactly once', () => {
+    for (const v of UNRECOGNISED) {
+      const { calls, log } = recorder();
+      buildHelmetOptions({ CLOUDFLARE_ANALYTICS: v }, log);
+      assert.equal(calls.warn.length, 1, JSON.stringify(v));
+      assert.equal(calls.info.length, 0, JSON.stringify(v));
+    }
   });
 
   test('#562 CSP log: ON logs one info line and no warning', () => {
@@ -217,32 +243,41 @@ describe('#562 CSP header: what a real helmet serves from these options', () => 
 
 // ---- the wiring: index.js really serves this --------------------------------------------------------------
 
+// Everything below works on TOKENS (helpers/routeTable.js's tokenizer: comments dropped, strings and regexes
+// understood), not on the exact text, so an innocent reformat of index.js (double quotes, no semicolons, the
+// call split over lines, a trailing comma) does not fail it, while a real change does (fix round 1). Each check
+// returns its problems instead of asserting, so the fixtures further down can prove it fails when it should.
+
 const INDEX_SRC = fs.readFileSync(INDEX, 'utf8');
-const TOKS = tokenize(INDEX_SRC);
 const OPEN = new Set(['(', '[', '{']);
 const CLOSE = new Set([')', ']', '}']);
 
-function matchingClose(open) {
+function matchingClose(toks, open) {
   let depth = 0;
-  for (let j = open; j < TOKS.length; j++) {
-    const t = TOKS[j];
+  for (let j = open; j < toks.length; j++) {
+    const t = toks[j];
     if (t.t !== 'p') continue;
     if (OPEN.has(t.v)) depth++;
     if (CLOSE.has(t.v) && --depth === 0) return j;
   }
-  throw new Error('unbalanced brackets in index.js');
+  throw new Error('unbalanced brackets');
 }
 
-/** Named imports, `import { a, b as c } from 'x'` → Map(local -> specifier). */
-function namedImports() {
+/** Every import binding: `import x from 'y'` and `import { a, b as c } from 'y'` → Map(local -> specifier). */
+function importsOf(toks) {
   const out = new Map();
-  for (let k = 0; k < TOKS.length; k++) {
-    if (!(TOKS[k].t === 'id' && TOKS[k].v === 'import' && TOKS[k + 1]?.v === '{')) continue;
-    const close = matchingClose(k + 1);
-    const spec = TOKS[close + 1]?.v === 'from' ? TOKS[close + 2]?.v : undefined;
+  for (let k = 0; k < toks.length; k++) {
+    if (!(toks[k].t === 'id' && toks[k].v === 'import')) continue;
+    if (toks[k + 1]?.t === 'id' && toks[k + 2]?.v === 'from' && toks[k + 3]?.t === 'str') {
+      out.set(toks[k + 1].v, toks[k + 3].v);
+      continue;
+    }
+    if (toks[k + 1]?.v !== '{') continue;
+    const close = matchingClose(toks, k + 1);
+    const spec = toks[close + 1]?.v === 'from' ? toks[close + 2]?.v : undefined;
     // Split on commas; `a as b` binds b, plain `a` binds a. Only the local name matters here.
     let group = [];
-    for (const t of [...TOKS.slice(k + 2, close), { t: 'p', v: ',' }]) {
+    for (const t of [...toks.slice(k + 2, close), { t: 'p', v: ',' }]) {
       if (t.t === 'p' && t.v === ',') {
         if (group.length) out.set(group.at(-1).v, spec);
         group = [];
@@ -252,57 +287,83 @@ function namedImports() {
   return out;
 }
 
-/** The one `helmet(...)` call: its argument text, and what surrounds it. */
-function helmetCall() {
-  const calls = [];
-  for (let k = 0; k < TOKS.length; k++) {
-    if (TOKS[k].t === 'id' && TOKS[k].v === 'helmet' && TOKS[k - 1]?.v !== '.' && TOKS[k + 1]?.v === '(') calls.push(k);
-  }
-  assert.equal(calls.length, 1, `index.js must call helmet() exactly once; found ${calls.length}`);
-  const [k] = calls;
-  const close = matchingClose(k + 1);
-  return {
-    argText: INDEX_SRC.slice(TOKS[k + 1].at + 1, TOKS[close].at),
-    before: TOKS.slice(k - 4, k).map((t) => t.v).join(' '),
-    after: TOKS.slice(close + 1, close + 3).map((t) => t.v).join(' '),
-  };
+/** What the evaluation below assumes about where its three names come from. */
+function importProblems(src) {
+  const imports = importsOf(tokenize(src));
+  const want = { helmet: 'helmet', buildHelmetOptions: './lib/cspDirectives.js', logger: './lib/logger.js' };
+  return Object.entries(want)
+    .filter(([name, spec]) => imports.get(name) !== spec)
+    .map(([name, spec]) => `\`${name}\` is not imported from '${spec}' (found: ${imports.get(name) ?? 'nothing'})`);
 }
 
 /**
- * Evaluate index.js's own argument to helmet() with the real builder, `process.env` = env and `logger` = a
- * recorder. Any other free identifier in that expression throws a ReferenceError, which fails the test with
- * the expression in the message: extend this on purpose rather than loosening it.
+ * Check that `src` registers helmet exactly as `app.use(helmet(<args>))` and evaluate <args>, taken from the
+ * source text, with a spy around the real builder, `process.env` = env and `logger` = a recorder. Any other
+ * free identifier in the arguments throws a ReferenceError, reported as a problem: extend this on purpose
+ * rather than loosening it. Returns { problems, options, calls }.
  */
-function evaluateIndexHelmetArgument(env) {
-  const { argText } = helmetCall();
-  const { calls, log } = recorder();
-  // eslint-disable-next-line no-new-func
-  const fn = new Function('buildHelmetOptions', 'process', 'logger', `"use strict"; return (${argText});`);
-  let options;
-  try {
-    options = fn(buildHelmetOptions, { env }, log);
-  } catch (err) {
-    throw new Error(`index.js's helmet() argument \`${argText.trim()}\` could not be evaluated here: ${err.message}`);
+function helmetWiring(src, env) {
+  const toks = tokenize(src);
+  const problems = [];
+  const at = [];
+  for (let k = 0; k < toks.length; k++) {
+    if (toks[k].t === 'id' && toks[k].v === 'helmet' && toks[k - 1]?.v !== '.' && toks[k + 1]?.v === '(') at.push(k);
   }
-  return { options, calls };
+  if (at.length !== 1) return { problems: [`helmet() is called ${at.length} times; expected exactly once`] };
+  const [k] = at;
+  const close = matchingClose(toks, k + 1);
+  if (toks.slice(k - 4, k).map((t) => t.v).join(' ') !== 'app . use (') {
+    problems.push('helmet(...) is not the first argument of app.use(...)');
+  }
+  // After helmet(...) comes app.use's own `)`, optionally after a trailing comma. Anything else is a second
+  // argument to app.use: a middleware that could set or change the policy after helmet has.
+  let n = close + 1;
+  if (toks[n]?.v === ',') n += 1;
+  if (toks[n]?.v !== ')') problems.push('app.use(helmet(...)) has a second argument');
+
+  const argText = src.slice(toks[k + 1].at + 1, toks[close].at);
+  const { calls, log } = recorder();
+  const built = [];
+  const spy = (...a) => { const o = buildHelmetOptions(...a); built.push(o); return o; };
+  let args;
+  try {
+    // An array literal, so a trailing comma inside helmet( ... , ) is still valid, and every argument is seen.
+    // eslint-disable-next-line no-new-func
+    args = new Function('buildHelmetOptions', 'process', 'logger', `"use strict"; return [${argText}];`)(spy, { env }, log);
+  } catch (err) {
+    problems.push(`helmet()'s arguments \`${argText.trim()}\` could not be evaluated here: ${err.message}`);
+    return { problems };
+  }
+  if (args.length !== 1) problems.push(`helmet() gets ${args.length} arguments; expected exactly one`);
+  if (built.length !== 1) problems.push(`buildHelmetOptions is called ${built.length} times in helmet()'s arguments; expected once`);
+  // The very object the builder returned, not a copy or an edit of it ({ ...built, contentSecurityPolicy: … }).
+  else if (args[0] !== built[0]) problems.push("helmet()'s argument is not buildHelmetOptions's own result");
+  return { problems, options: args[0], calls };
+}
+
+// The CSP header, or helmet's option for it, named in CODE (strings and identifiers; comments are stripped,
+// since index.js's comment pointing at the module is fine). No file is allow-listed but lib/cspDirectives.js:
+// checked 2026-10-13, the /api/csp-report route names neither (it reads the report body as text).
+const NAMES_CSP = /content[-_ ]?security[-_ ]?policy/i;
+function cspNamedOutsideTheModule(sources) {
+  return sources.filter(({ rel, src }) => rel !== 'lib/cspDirectives.js' && NAMES_CSP.test(stripCommentsOnly(src))).map((s) => s.rel);
+}
+function cloudflareNamedOutsideTheModule(sources) {
+  return sources.filter(({ rel, src }) => rel !== 'lib/cspDirectives.js' && /cloudflareinsights/i.test(src)).map((s) => s.rel);
 }
 
 describe('#562 CSP wiring: index.js serves the builder\'s policy, with the real environment and logger', () => {
   test('#562 CSP wiring: index.js imports helmet, the builder and the logger from where this test assumes', () => {
-    assert.match(INDEX_SRC, /^import helmet from 'helmet';\r?$/m);
-    const named = namedImports();
-    assert.equal(named.get('buildHelmetOptions'), './lib/cspDirectives.js');
-    assert.equal(named.get('logger'), './lib/logger.js');
+    assert.deepEqual(importProblems(INDEX_SRC), []);
   });
 
-  test('#562 CSP wiring: the one helmet() call is registered with app.use, as the whole argument', () => {
-    const { before, after: rest } = helmetCall();
-    assert.equal(before, 'app . use (', 'helmet(...) must be the argument of app.use(...)');
-    assert.equal(rest, ') ;', 'app.use(helmet(...)) must have no second argument');
+  test('#562 CSP wiring: the one helmet() call is app.use(helmet(buildHelmetOptions(...))), nothing beside it', () => {
+    assert.deepEqual(helmetWiring(INDEX_SRC, {}).problems, []);
   });
 
   test('#562 CSP wiring: index.js\'s own helmet() argument, evaluated with no setting, serves the default header', async () => {
-    const { options, calls } = evaluateIndexHelmetArgument({ ...DECOYS });
+    const { problems, options, calls } = helmetWiring(INDEX_SRC, { ...DECOYS });
+    assert.deepEqual(problems, []);
     assert.deepEqual(options, { contentSecurityPolicy: { useDefaults: false, directives: EXPECTED_DEFAULT } });
     assert.equal(await servedCsp(options), DEFAULT_HEADER);
     assert.deepEqual(calls, { warn: [], info: [] });
@@ -310,21 +371,74 @@ describe('#562 CSP wiring: index.js serves the builder\'s policy, with the real 
 
   test('#562 CSP wiring: the environment reaches the builder (ON in process.env serves the old header)', async () => {
     // Kills index.js passing `{}`, a literal object, or anything but process.env.
-    const { options } = evaluateIndexHelmetArgument({ CLOUDFLARE_ANALYTICS: 'yes' });
+    const { options } = helmetWiring(INDEX_SRC, { CLOUDFLARE_ANALYTICS: 'yes' });
     assert.equal(await servedCsp(options), PREVIOUS_HEADER);
   });
 
   test('#562 CSP wiring: the logger reaches the builder (a typo logs its one warning at start)', () => {
     // Kills index.js dropping the logger argument: the setting would then fail closed in silence.
-    const { calls } = evaluateIndexHelmetArgument({ CLOUDFLARE_ANALYTICS: 'enabled' });
+    const { calls } = helmetWiring(INDEX_SRC, { CLOUDFLARE_ANALYTICS: 'enabled' });
     assert.equal(calls.warn.length, 1);
     assert.match(calls.warn[0], /CLOUDFLARE_ANALYTICS="enabled" is not a recognised value/);
   });
 
-  test('#562 CSP wiring: no Cloudflare origin and no inline policy anywhere in index.js or any other source file', () => {
-    assert.doesNotMatch(INDEX_SRC, /cloudflareinsights/i, 'index.js names a Cloudflare origin again');
-    assert.ok(!TOKS.some((t) => t.t === 'id' && t.v === 'contentSecurityPolicy'), 'index.js builds a CSP of its own again');
-    const others = walkSources().filter(({ rel, src }) => rel !== 'lib/cspDirectives.js' && /cloudflareinsights/i.test(src));
-    assert.deepEqual(others.map((o) => o.rel), [], 'only lib/cspDirectives.js may name a Cloudflare origin');
+  test('#562 CSP wiring scan: no file in backend/src but lib/cspDirectives.js names a Cloudflare origin (comments included; frontend sources are not scanned)', () => {
+    assert.deepEqual(cloudflareNamedOutsideTheModule(walkSources()), [], 'only lib/cspDirectives.js may name a Cloudflare origin');
+  });
+
+  test('#562 CSP wiring scan: no code in backend/src but lib/cspDirectives.js names the Content-Security-Policy header or helmet\'s option for it (comments excluded; frontend sources are not scanned)', () => {
+    assert.deepEqual(cspNamedOutsideTheModule(walkSources()), [], 'a second place builds or sets a CSP');
+  });
+});
+
+describe('#562 CSP wiring checks can fail, and do not fail on a reformat', () => {
+  const HEAD = [
+    'import helmet from "helmet"',
+    'import { buildHelmetOptions } from "./lib/cspDirectives.js"',
+    'import { logger as logger } from \'./lib/logger.js\'',
+    'const app = express()',
+  ].join('\n');
+
+  test('#562 CSP wiring fixtures: double quotes, no semicolons, a multi-line call and trailing commas pass', async () => {
+    const src = `${HEAD}\napp.use(\n  helmet(\n    buildHelmetOptions(\n      process.env,\n      logger,\n    ),\n  ),\n)\n`;
+    assert.deepEqual(importProblems(src), []);
+    const { problems, options } = helmetWiring(src, {});
+    assert.deepEqual(problems, []);
+    assert.equal(await servedCsp(options), DEFAULT_HEADER);
+  });
+
+  test('#562 CSP wiring fixtures: each real change is reported', () => {
+    const cases = [
+      ['an inline policy', 'app.use(helmet({ contentSecurityPolicy: { useDefaults: false, directives: { defaultSrc: ["\'self\'"] } } }))', /buildHelmetOptions is called 0 times/],
+      ['an edited copy of the builder\'s result', 'app.use(helmet({ ...buildHelmetOptions(process.env, logger), contentSecurityPolicy: false }))', /not buildHelmetOptions's own result/],
+      ['a second helmet argument', 'app.use(helmet(buildHelmetOptions(process.env, logger), { contentSecurityPolicy: false }))', /gets 2 arguments/],
+      ['a second app.use argument', 'app.use(helmet(buildHelmetOptions(process.env, logger)), (req, res, next) => next())', /has a second argument/],
+      ['helmet built aside, then used', 'const h = helmet(buildHelmetOptions(process.env, logger))\napp.use(h)', /not the first argument of app\.use/],
+      ['two helmet calls', 'app.use(helmet(buildHelmetOptions(process.env, logger)))\napp.use(helmet())', /called 2 times/],
+      ['no options at all', 'app.use(helmet())', /gets 0 arguments/],
+      ['a free name the test does not provide', 'app.use(helmet(buildHelmetOptions(otherEnv, logger)))', /could not be evaluated/],
+    ];
+    for (const [label, body, expected] of cases) {
+      const { problems } = helmetWiring(`${HEAD}\n${body}\n`, {});
+      assert.ok(problems.some((p) => expected.test(p)), `${label}: expected ${expected}, got ${JSON.stringify(problems)}`);
+    }
+  });
+
+  test('#562 CSP wiring fixtures: an import from somewhere else is reported', () => {
+    assert.match(importProblems('import helmet from "helmet-lookalike"\n').join('\n'), /`helmet` is not imported from 'helmet'/);
+    assert.match(importProblems("import { buildHelmetOptions } from './lib/other.js'\n").join('\n'), /buildHelmetOptions/);
+  });
+
+  test('#562 CSP wiring fixtures: the scans see code and ignore comments', () => {
+    const files = [
+      { rel: 'lib/cspDirectives.js', src: "const x = 'Content-Security-Policy'; const y = 'https://cloudflareinsights.com';" },
+      { rel: 'routes/a.js', src: "res.set('Content-Security-Policy', \"default-src *\");" },
+      { rel: 'routes/b.js', src: 'app.use(helmet.contentSecurityPolicy({ directives: {} }));' },
+      { rel: 'routes/c.js', src: "res.setHeader('content-security-policy-report-only', x);" },
+      { rel: 'routes/d.js', src: '// Content-Security-Policy is set by lib/cspDirectives.js\n/* contentSecurityPolicy */\nconst ok = 1;' },
+      { rel: 'routes/e.js', src: "const beacon = 'https://static.cloudflareinsights.com/beacon.min.js';" },
+    ];
+    assert.deepEqual(cspNamedOutsideTheModule(files), ['routes/a.js', 'routes/b.js', 'routes/c.js']);
+    assert.deepEqual(cloudflareNamedOutsideTheModule(files), ['routes/e.js']);
   });
 });

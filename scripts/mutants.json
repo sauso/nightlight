@@ -16728,8 +16728,8 @@
   {
     "label": "#562 viewport: the token name is matched case-sensitively",
     "file": "frontend/src/lib/viewport.js",
-    "find": "token.split('=')[0].trim().toLowerCase()",
-    "replace": "token.split('=')[0].trim()",
+    "find": "name: name.toLowerCase()",
+    "replace": "name: name",
     "expect": "killed",
     "tests": ["lib/viewport.test.js"],
     "namePattern": "#562 viewport browser"
@@ -16737,8 +16737,8 @@
   {
     "label": "#562 viewport: spaces before = hide a locking token",
     "file": "frontend/src/lib/viewport.js",
-    "find": "token.split('=')[0].trim().toLowerCase()",
-    "replace": "token.split('=')[0].toLowerCase()",
+    "find": "if (s[j] === '=') {",
+    "replace": "if (s[i] === '=') {",
     "expect": "killed",
     "tests": ["lib/viewport.test.js"],
     "namePattern": "#562 viewport browser"
@@ -16746,26 +16746,44 @@
   {
     "label": "#562 viewport: ; is not treated as a separator",
     "file": "frontend/src/lib/viewport.js",
-    "find": ".split(/[,;]/)",
-    "replace": ".split(',')",
+    "find": "const isSeparator = (c) => c === ',' || c === ';' || /\\s/.test(c);",
+    "replace": "const isSeparator = (c) => c === ',' || /\\s/.test(c);",
     "expect": "killed",
     "tests": ["lib/viewport.test.js"],
     "namePattern": "#562 viewport browser"
   },
   {
-    "label": "#562 viewport: kept tokens are not trimmed",
+    "label": "#562 viewport: a name with = and no value keeps the spaces after it",
     "file": "frontend/src/lib/viewport.js",
-    "find": ".map((token) => token.trim())",
-    "replace": ".map((token) => token)",
+    "find": "text: s.slice(start, i).trim()",
+    "replace": "text: s.slice(start, i)",
     "expect": "killed",
     "tests": ["lib/viewport.test.js"],
     "namePattern": "#562 viewport browser"
   },
   {
-    "label": "#562 viewport: empty tokens are kept",
+    "label": "#562 viewport: a stray = where a name should start is not skipped",
     "file": "frontend/src/lib/viewport.js",
-    "find": ".filter((token) => token && !drop.has(",
-    "replace": ".filter((token) => !drop.has(",
+    "find": "(isSeparator(s[i]) || s[i] === '=')",
+    "replace": "isSeparator(s[i])",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: whitespace is not treated as a separator",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "const isSeparator = (c) => c === ',' || c === ';' || /\\s/.test(c);",
+    "replace": "const isSeparator = (c) => c === ',' || c === ';';",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport browser"
+  },
+  {
+    "label": "#562 viewport: a comma is not treated as a separator",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "const isSeparator = (c) => c === ',' || c === ';' || /\\s/.test(c);",
+    "replace": "const isSeparator = (c) => c === ';' || /\\s/.test(c);",
     "expect": "killed",
     "tests": ["lib/viewport.test.js"],
     "namePattern": "#562 viewport browser"
@@ -16976,6 +16994,87 @@
     "expect": "killed",
     "tests": ["lib/viewport.test.js"],
     "namePattern": "#562 viewport isIosBrowser"
+  },
+  {
+    "label": "#562 viewport isIosBrowser: two touch points are not enough",
+    "file": "frontend/src/lib/viewport.js",
+    "find": "return nav.platform === 'MacIntel' && nav.maxTouchPoints > 1;",
+    "replace": "return nav.platform === 'MacIntel' && nav.maxTouchPoints > 2;",
+    "expect": "killed",
+    "tests": ["lib/viewport.test.js"],
+    "namePattern": "#562 viewport isIosBrowser"
+  },
+  {
+    "label": "#562 viewport pull-to-refresh: the zoom check is dropped at touchstart",
+    "file": "frontend/src/lib/usePullToRefresh.js",
+    "find": "e.touches.length !== 1 || window.scrollY > 0 || pinchZoomedIn()",
+    "replace": "e.touches.length !== 1 || window.scrollY > 0",
+    "expect": "killed",
+    "tests": ["lib/usePullToRefresh.test.jsx"],
+    "namePattern": "#562 viewport pull-to-refresh"
+  },
+  {
+    "label": "#562 viewport pull-to-refresh: the zoom check is dropped at touchmove",
+    "file": "frontend/src/lib/usePullToRefresh.js",
+    "find": "dy <= 0 || window.scrollY > 0 || pinchZoomedIn()",
+    "replace": "dy <= 0 || window.scrollY > 0",
+    "expect": "killed",
+    "tests": ["lib/usePullToRefresh.test.jsx"],
+    "namePattern": "#562 viewport pull-to-refresh"
+  },
+  {
+    "label": "#562 viewport pull-to-refresh: scale 1 counts as zoomed in",
+    "file": "frontend/src/lib/usePullToRefresh.js",
+    "find": "(window.visualViewport?.scale ?? 1) > 1",
+    "replace": "(window.visualViewport?.scale ?? 1) >= 1",
+    "expect": "killed",
+    "tests": ["lib/usePullToRefresh.test.jsx"],
+    "namePattern": "#562 viewport pull-to-refresh"
+  },
+  {
+    "label": "#562 viewport pull-to-refresh: a missing visualViewport counts as zoomed in",
+    "file": "frontend/src/lib/usePullToRefresh.js",
+    "find": "(window.visualViewport?.scale ?? 1) > 1",
+    "replace": "(window.visualViewport?.scale ?? 2) > 1",
+    "expect": "killed",
+    "tests": ["lib/usePullToRefresh.test.jsx"],
+    "namePattern": "#562 viewport pull-to-refresh"
+  },
+  {
+    "label": "#562 viewport pull-to-refresh: a missing visualViewport throws",
+    "file": "frontend/src/lib/usePullToRefresh.js",
+    "find": "(window.visualViewport?.scale ?? 1) > 1",
+    "replace": "(window.visualViewport.scale ?? 1) > 1",
+    "expect": "killed",
+    "tests": ["lib/usePullToRefresh.test.jsx"],
+    "namePattern": "#562 viewport pull-to-refresh"
+  },
+  {
+    "label": "#562 CSP: ok turns it on",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "const ON_VALUES = new Set(['1', 'true', 'yes', 'on']);",
+    "replace": "const ON_VALUES = new Set(['1', 'true', 'yes', 'on', 'ok']);",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP parse"
+  },
+  {
+    "label": "#562 CSP: enable turns it on",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "const ON_VALUES = new Set(['1', 'true', 'yes', 'on']);",
+    "replace": "const ON_VALUES = new Set(['1', 'true', 'yes', 'on', 'enable']);",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP parse"
+  },
+  {
+    "label": "#562 CSP: disabled is taken as a quiet OFF instead of warned about",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "const OFF_VALUES = new Set(['0', 'false', 'no', 'off']);",
+    "replace": "const OFF_VALUES = new Set(['0', 'false', 'no', 'off', 'disabled']);",
+    "expect": "killed",
+    "tests": ["csp-directives.test.js"],
+    "namePattern": "#562 CSP parse|#562 CSP log"
   },
   {
     "label": "#562 CSP: the Cloudflare script origin is allowed on every install",

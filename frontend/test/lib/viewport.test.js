@@ -42,7 +42,9 @@ const NAV = {
   // iPadOS 13+ Safari: a Mac user agent, told apart only by the touch screen.
   ipadAsMac: { userAgent: UA.mac, platform: 'MacIntel', maxTouchPoints: 5 },
   mac: { userAgent: UA.mac, platform: 'MacIntel', maxTouchPoints: 0 },
+  // The boundary: one touch point is a desktop Mac (some report 1), two is an iPad.
   macOneTouch: { userAgent: UA.mac, platform: 'MacIntel', maxTouchPoints: 1 },
+  ipadAsMacTwoTouch: { userAgent: UA.mac, platform: 'MacIntel', maxTouchPoints: 2 },
   macNoTouchField: { userAgent: UA.mac, platform: 'MacIntel' },
   // Touch screens that are not Macs: a rule reading only maxTouchPoints would call these iOS.
   android: { userAgent: UA.android, platform: 'Linux armv81', maxTouchPoints: 5 },
@@ -104,6 +106,37 @@ describe('#562 viewport browser: the two locking tokens go, nothing else changes
     const doc = docWith(['viewport', ' width=device-width ,  Maximum-Scale = 1 ;USER-SCALABLE=no;;viewport-fit=cover, ']);
     applyViewportPolicy(doc, false, false);
     expect(viewportOf(doc)).toEqual(['width=device-width, viewport-fit=cover']);
+  });
+
+  test('#562 viewport browser: whitespace separates settings as in Blink, alone or mixed with , and ; (fix round 1)', () => {
+    // A browser reads `width=device-width maximum-scale=1 user-scalable=no` as three settings. A comma-only split
+    // saw one, matched no locking name, and left the page locked.
+    const cases = [
+      // [content, Android/desktop result, iOS result]
+      ['width=device-width maximum-scale=1 user-scalable=no', 'width=device-width', 'width=device-width, maximum-scale=1'],
+      ['width=device-width\tinitial-scale=1\nmaximum-scale=1  user-scalable=no viewport-fit=cover',
+        'width=device-width, initial-scale=1, viewport-fit=cover', 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover'],
+      ['width=device-width,initial-scale=1 maximum-scale=1;user-scalable=no\tviewport-fit=cover',
+        'width=device-width, initial-scale=1, viewport-fit=cover', 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover'],
+      // Spaces around `=` with whitespace separators: each setting is kept as written.
+      ['width = device-width user-scalable = no initial-scale = 1', 'width = device-width, initial-scale = 1', 'width = device-width, initial-scale = 1'],
+      // A stray `=` where a name should start is a separator to Blink, so this IS a lock and must go.
+      ['width=device-width, =user-scalable=no, =maximum-scale=1', 'width=device-width', 'width=device-width, maximum-scale=1'],
+    ];
+    for (const [content, browser, ios] of cases) {
+      expect(relaxedViewportContent(content, false), content).toBe(browser);
+      expect(relaxedViewportContent(content, true), `${content} (iOS)`).toBe(ios);
+    }
+  });
+
+  test('#562 viewport browser: a name with `=` but no value is kept as written, without the spaces after it', () => {
+    expect(relaxedViewportContent('width=device-width, foo = , user-scalable=no, viewport-fit=cover'))
+      .toBe('width=device-width, foo =, viewport-fit=cover');
+  });
+
+  test('#562 viewport browser: the shipped comma-separated string gives exactly the same result as before fix round 1', () => {
+    expect(relaxedViewportContent(SHIPPED)).toBe(RELAXED);
+    expect(relaxedViewportContent(SHIPPED, true)).toBe(IOS_RELAXED);
   });
 
   test('#562 viewport browser: idempotent, a second run changes nothing and says so', () => {
@@ -181,11 +214,11 @@ describe('#562 viewport native: the app keeps the lock', () => {
 });
 
 describe('#562 viewport isIosBrowser: which devices count as iOS', () => {
-  test('#562 viewport isIosBrowser: iPhone, iPad, iPod and iPadOS-reporting-a-Mac are iOS', () => {
-    for (const k of ['iphone', 'ipadOld', 'ipod', 'ipadAsMac']) expect(isIosBrowser(NAV[k]), k).toBe(true);
+  test('#562 viewport isIosBrowser: iPhone, iPad, iPod and iPadOS-reporting-a-Mac (2 or more touch points) are iOS', () => {
+    for (const k of ['iphone', 'ipadOld', 'ipod', 'ipadAsMac', 'ipadAsMacTwoTouch']) expect(isIosBrowser(NAV[k]), k).toBe(true);
   });
 
-  test('#562 viewport isIosBrowser: a real Mac, Android, Windows and touch screens that are not Macs are not', () => {
+  test('#562 viewport isIosBrowser: a real Mac (0 or 1 touch points), Android, Windows and touch screens that are not Macs are not', () => {
     for (const k of ['mac', 'macOneTouch', 'macNoTouchField', 'android', 'windows']) expect(isIosBrowser(NAV[k]), k).toBe(false);
   });
 
