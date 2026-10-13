@@ -17644,5 +17644,212 @@
     "expect": "killed",
     "tests": ["csp-directives.test.js"],
     "namePattern": "#562 CSP wiring"
+  },
+  {
+    "label": "#536 snapshot.js: redirects are followed again",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "redirect: 'manual'",
+    "replace": "redirect: 'follow'",
+    "expect": "killed",
+    "tests": ["snapshot-http-limits.test.js"],
+    "namePattern": "redirect is not followed"
+  },
+  {
+    "label": "#536 snapshot.js: the streaming cap is off by one (>= instead of >)",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "if (total > maxBytes) {",
+    "replace": "if (total >= maxBytes) {",
+    "expect": "killed",
+    "tests": ["snapshot-http-limits.test.js"],
+    "namePattern": "streaming boundary"
+  },
+  {
+    "label": "#536 snapshot.js: the streaming cap is removed (an endless body is read until the timeout)",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "if (total > maxBytes) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["snapshot-http-limits.test.js"],
+    "namePattern": "never ends"
+  },
+  {
+    "label": "#536 snapshot.js: the default cap is 6 MB",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "export const MAX_SNAPSHOT_BYTES = 5 * 1024 * 1024;",
+    "replace": "export const MAX_SNAPSHOT_BYTES = 6 * 1024 * 1024;",
+    "expect": "killed",
+    "tests": ["snapshot-http-limits.test.js"],
+    "namePattern": "default cap is 5 MB"
+  },
+  {
+    "label": "#555 photo.js: svg+xml joins the allowlist",
+    "file": "backend/src/lib/photo.js",
+    "find": "(?:jpeg|png|webp);base64,",
+    "replace": "(?:jpeg|png|webp|svg\\+xml);base64,",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "namePattern": "svg and other image types"
+  },
+  {
+    "label": "#555 photo.js: the allowlist is any image/ again",
+    "file": "backend/src/lib/photo.js",
+    "find": "if (!PHOTO_PREFIX.test(photo)) throw",
+    "replace": "if (false) throw",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "svg, gif"
+  },
+  {
+    "label": "#555 photo.js: the cap is back to 700 KB (unreachable behind express.json)",
+    "file": "backend/src/lib/photo.js",
+    "find": "export const MAX_PHOTO_LEN = 90 * 1024;",
+    "replace": "export const MAX_PHOTO_LEN = 700 * 1024;",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "namePattern": "characters is accepted; one more is refused"
+  },
+  {
+    "label": "#555 photo.js: a photo equal to the stored one is checked again",
+    "file": "backend/src/lib/photo.js",
+    "find": "if (typeof photo === 'string' && photo === existing) return existing;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "stored before the allowlist"
+  },
+  {
+    "label": "#555 children.js: PUT no longer checks the colour",
+    "file": "backend/src/routes/children.js",
+    "find": "  if (badColor(color, existing.color)) return res.status(400).json({ error: COLOR_INVALID });\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "PUT with colour"
+  },
+  {
+    "label": "#555 children.js: POST no longer checks the colour",
+    "file": "backend/src/routes/children.js",
+    "find": "  if (badColor(color, null)) return res.status(400).json({ error: COLOR_INVALID });\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "POST with colour"
+  },
+  {
+    "label": "#555 children.js: PUT no longer checks the birthday",
+    "file": "backend/src/routes/children.js",
+    "find": "  if (badBirthday(birthday, existing.birthday)) return res.status(400).json({ error: BIRTHDAY_INVALID });\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "PUT with birthday"
+  },
+  {
+    "label": "#555 children.js: POST no longer checks the birthday",
+    "file": "backend/src/routes/children.js",
+    "find": "  if (badBirthday(birthday, null)) return res.status(400).json({ error: BIRTHDAY_INVALID });\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "POST with birthday"
+  },
+  {
+    "label": "#555 children.js: a non-existent calendar day (2023-02-31) passes the birthday check",
+    "file": "backend/src/routes/children.js",
+    "find": "|| d.toISOString().slice(0, 10) !== birthday;",
+    "replace": "|| false;",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "PUT with birthday"
+  },
+  {
+    "label": "#555 children.js: an unchanged stored colour is checked again",
+    "file": "backend/src/routes/children.js",
+    "find": "if (isBlank(color) || color === existing) return false;",
+    "replace": "if (isBlank(color)) return false;",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "stored before this check"
+  },
+  {
+    "label": "#555 children.js: a blank birthday is refused (the form could no longer clear it)",
+    "file": "backend/src/routes/children.js",
+    "find": "if (isBlank(birthday) || birthday === existing) return false;",
+    "replace": "if (birthday === undefined || birthday === existing) return false;",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "blank clears"
+  },
+  {
+    "label": "#555 gotify.js: the token goes back into the query string",
+    "file": "backend/src/lib/gotify.js",
+    "find": "`${c.serverUrl}/message`,",
+    "replace": "`${c.serverUrl}/message?token=${encodeURIComponent(c.appToken)}`,",
+    "expect": "killed",
+    "tests": ["gotify-token-header.test.js"],
+    "namePattern": "X-Gotify-Key"
+  },
+  {
+    "label": "#555 gotify.js: the key header is empty",
+    "file": "backend/src/lib/gotify.js",
+    "find": "'X-Gotify-Key': c.appToken",
+    "replace": "'X-Gotify-Key': ''",
+    "expect": "killed",
+    "tests": ["gotify-token-header.test.js"],
+    "namePattern": "X-Gotify-Key"
+  },
+  {
+    "label": "#555 cameras.js: DELETE leaves the ONVIF cooldown stamp",
+    "file": "backend/src/routes/cameras.js",
+    "find": "  forgetOnvifAlert(req.params.id);\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["camera-delete-cooldown-maps.test.js"],
+    "namePattern": "DELETE clears"
+  },
+  {
+    "label": "#555 cameras.js: DELETE leaves the MQTT cooldown stamp",
+    "file": "backend/src/routes/cameras.js",
+    "find": "  forgetMqttMotionAlert(req.params.id);\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["camera-delete-cooldown-maps.test.js"],
+    "namePattern": "DELETE clears"
+  },
+  {
+    "label": "#555 onvifMotion.js: forgetOnvifAlert clears every camera",
+    "file": "backend/src/lib/onvifMotion.js",
+    "find": "  lastAlert.delete(cameraId);",
+    "replace": "  lastAlert.clear();",
+    "expect": "killed",
+    "tests": ["camera-delete-cooldown-maps.test.js"],
+    "namePattern": "DELETE clears"
+  },
+  {
+    "label": "#555 mqttClient.js: forgetMqttMotionAlert clears every camera",
+    "file": "backend/src/lib/mqttClient.js",
+    "find": "  motionLastAlert.delete(cameraId);",
+    "replace": "  motionLastAlert.clear();",
+    "expect": "killed",
+    "tests": ["camera-delete-cooldown-maps.test.js"],
+    "namePattern": "DELETE clears"
+  },
+  {
+    "label": "#555 entrypoint.sh: PUID=0 no longer warns",
+    "file": "backend/entrypoint.sh",
+    "find": "if [ -z \"$(printf '%s' \"$PUID\" | tr -d 0)\" ]; then",
+    "replace": "if false; then",
+    "expect": "killed",
+    "tests": ["entrypoint-puid-root.test.js"],
+    "namePattern": "PUID=0"
+  },
+  {
+    "label": "#555 entrypoint.sh: any PUID containing a 0 warns (10, 1000)",
+    "file": "backend/entrypoint.sh",
+    "find": "if [ -z \"$(printf '%s' \"$PUID\" | tr -d 0)\" ]; then",
+    "replace": "if [ \"$(printf '%s' \"$PUID\" | tr -d 0)\" != \"$PUID\" ]; then",
+    "expect": "killed",
+    "tests": ["entrypoint-puid-root.test.js"],
+    "namePattern": "does not warn"
   }
 ]

@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **Hardening: the camera snapshot fetch is size-capped and no longer follows redirects, a child's colour, birthday and photo type are checked, and a few smaller items (#536, #555, #566).** *Snapshot:* the alert image URL's response is read as a stream and abandoned past **5 MB** (a larger one, or one that declares a larger length, falls back to a stream frame as if the camera had no snapshot URL), and a redirect is **not followed**: an address that redirects (for example `http://` to `https://`) no longer works as an alert image URL, so enter the final address ([docs](docs/notifications.md#alert-image-url-optional)). *Children:* a colour must be `#RRGGBB` and a birthday a real `YYYY-MM-DD` date (blank still means default / clear); a photo must be JPEG, PNG or WebP, so an SVG or GIF is refused (the app itself always sends JPEG); and the photo size limit is now **90 KB**, the real limit, instead of a 700 KB figure that the 100 KB request limit made unreachable. A value already stored is accepted when re-sent unchanged, so an old record can still be edited. *Gotify:* the application token is sent in an `X-Gotify-Key` header instead of the URL's query string, where proxies and server logs record it. *Container:* `PUID=0` (running the app as root) now logs a warning at start; it is still allowed. *Cleanup:* deleting a camera also forgets its ONVIF and MQTT motion cooldown stamps. *Build:* published images carry an SBOM and provenance attestation, the CI workflows get a read-only token, and Dependabot now watches the Dockerfile's base images. Not part of this change: the startup order of background jobs, pinning base images by digest, gating the image publish on the tests, or an image content-type check on snapshots.
+
 ## [0.39.0] - 2026-10-13
 
 ### Fixed

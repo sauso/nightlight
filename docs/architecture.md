@@ -130,6 +130,13 @@ camera-specific exposure tests cover those. The validation behind the settings, 
 routes (documented ranges, `#RRGGBB` colours, known timezones, the 12-hour snooze cap, no second enrolment
 while MFA is on) is pinned in `backend/test/input-validation.test.js`.
 
+A child's **colour** must be `#RRGGBB` and **birthday** a real `YYYY-MM-DD` date (blank still means default /
+clear), and an avatar **photo** (child or user) must be a base64 `data:image/jpeg`, `png` or `webp` URL of at
+most 90 KB (#555). The photo cap is 90 KB, not the 700 KB it once said, because `express.json()` refuses a body
+over its 100 KB default first. For colour, birthday and photo, a value identical to the one stored is accepted
+unchecked, so a record saved before the rule can still be edited
+(`children-field-validation.test.js`, `input-validation.test.js`).
+
 The JWT signing secret is auto-generated and persisted to `DATA_DIR/.jwt_secret` if
 `JWT_SECRET` isn't set — deliberately avoiding a hardcoded fallback, since this image is
 publicly distributed and a baked-in secret would be a shared key across every install.
@@ -201,6 +208,9 @@ Container starts as root, remaps a pre-baked user to `PUID`/`PGID` (default 99/1
 "nobody"/"users" convention) via `usermod`/`groupmod`, `chown`s the data dir, then execs the
 app via `su-exec` — the app process itself never runs as root. `tini` is PID 1 to reap zombies
 from the MediaMTX + per-camera-FFmpeg child process tree and forward signals correctly.
+
+`PUID=0` is accepted but logs a warning (`[entrypoint] warning: PUID=0 runs the app as root`) and starts anyway;
+refusing it, or substituting the default, is not done (#555, `entrypoint-puid-root.test.js`).
 
 Before the `mkdir`/`chown` it sets the **umask** from `UMASK` (default `077`, validated, #549), so
 the data dir, the database (SQLite gives `-wal`/`-shm` the database file's own mode), snapshots,

@@ -13,6 +13,21 @@ PUID=${PUID:-99}
 PGID=${PGID:-100}
 DATA_DIR=${DATA_DIR:-/app/data}
 
+# PUID=0 (#555) is accepted and `usermod -o -u 0` makes the "nightlight" user another uid 0, so the app, FFmpeg
+# and MediaMTX would run as root, which this script exists to avoid and docs/architecture.md says never happens.
+# It is a WARNING only, on purpose: refusing to start, or quietly substituting 99, would stop or re-own the data
+# of an install that has run as 0 for years (an owner decision, listed in the PR), and a baby monitor must not
+# fail to start over it. Matches 0, 00, 000 ...; a non-number is left to usermod to reject, as before.
+case "$PUID" in
+  ''|*[!0-9]*) ;;
+  *)
+    # Digits only, so "nothing left once the zeros are removed" means zero (no bash-only 10#, this is sh).
+    if [ -z "$(printf '%s' "$PUID" | tr -d 0)" ]; then
+      printf '[entrypoint] warning: PUID=0 runs the app as root. Set PUID to a non-zero user id (the default is 99); the app is meant never to run as root\n' >&2
+    fi
+    ;;
+esac
+
 # --- Who can read the data directory (#549) ---------------------------------------------------
 # The database holds every secret the app has, in plaintext by design (camera passwords, provider
 # tokens, MFA secrets, sessions), and the snapshots and clips show a child's bedroom. The FILE MODE

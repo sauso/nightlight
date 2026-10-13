@@ -114,6 +114,10 @@ docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}'
 (Empty if the image was built manually rather than by CI — that label only exists on images
 built through this repo's `docker-publish.yml` workflow.)
 
+Images published by that workflow (and by the weekly rebuild) also carry an **SBOM** and a **build provenance**
+attestation (#566). `docker buildx imagetools inspect sauso/nightlight:latest` lists them; a registry page may
+show them as extra `unknown/unknown` entries, and `docker pull` ignores them.
+
 ## 2. Stopping cleanly
 
 `docker stop` (or `docker compose down` / `docker compose stop`) sends `SIGTERM` and waits up to
