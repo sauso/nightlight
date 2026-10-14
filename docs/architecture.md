@@ -142,6 +142,17 @@ the bottom of `db.js` (`PRAGMA table_info` + conditional `ALTER TABLE`) — ther
 framework. Follow this same pattern for new columns: check `table_info`, `ALTER TABLE` if
 missing, keep it idempotent.
 
+**Deleting a child or a camera is `lib/entityPurge.js`** (#540, #554), and it deletes everything that belongs to
+it. Most of the history tables have **no foreign key** to `children` / `cameras` (deliberately: `bed_transitions`,
+`activity_samples`, `detection_events`, `camera_events`, `sensor_readings`, `sleep_nights`, `sleep_reviews`), so
+the database will not cascade for you. **A new table or column that names a child or camera (`child_id`,
+`camera_id`) must be added to `entityPurge.js`**, or `backend/test/entity-purge.test.js` fails: it finds every such
+column with `PRAGMA`, fills a row and real files in each, deletes over HTTP and checks nothing is left. The order is
+the contract: per file-bearing row, file first and then the row (autocommit, not one transaction, because a rollback
+would restore rows whose files were already unlinked); rows with no file go in one transaction, the entity's own row
+last, so a failed delete leaves the entity in place to retry. Every stored path is resolved against its real parent
+directory and skipped unless it is a regular file inside `CLIPS_DIR`.
+
 ## API errors (`backend/src/lib/asyncHandler.js`, `backend/src/middleware/errorHandler.js`)
 
 Every API error is JSON in the same shape the routes already use, `{ "error": "<message>" }`, and a

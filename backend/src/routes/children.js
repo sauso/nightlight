@@ -4,15 +4,15 @@ import db from '../db.js';
 import { requireAuth, requireAdmin, isAdminRequest } from '../middleware/auth.js';
 import { normalizePhoto } from '../lib/photo.js';
 import { actorOf } from '../lib/actor.js';
-import { primaryCameraRowFor, clearStalePrimaryPointers } from '../lib/primaryCamera.js';
+import { logger } from '../lib/logger.js';
+import { primaryCameraRowFor } from '../lib/primaryCamera.js';
 import {
   getStoredNights, computeNight, computeAndStoreNight, currentNightDate, lastCompletedNightDate,
   childTracksSleep, sleepInsights, nightIsLocked, storeNightBeforeCorrection, reportableSpanMs, MIN_COVERAGE_FRAC, EMPTY_MIN_COVERAGE_FRAC,
 } from '../lib/sleepAnalysis.js';
 import { startMotionDetector } from '../lib/motionDetector.js';
 import { reconcileClipRing } from '../lib/clipCapture.js';
-import { deleteRecording } from '../lib/recordings.js';
-import { deleteTimelapse, discardAllTimelapseFrames } from '../lib/timelapse.js';
+import { purgeChild } from '../lib/entityPurge.js';
 import { TRANSITION } from '../lib/bedTransitions.js';
 import { getNightReview, saveNightReview, previewNightReview, inBedAfterOnset, asleepAfterWake, reviewCorrectsNight,
   reviewCardState, localHmToUtcSql, applyVerdicts, applyCorrection, applyCorrections, transitionInstant,
@@ -699,30 +699,30 @@ router.put('/:id/review/:date', (req, res) => {
 // already wrong; making this call also erase video off the disk is what made it untenable to leave.
 router.delete('/:id', requireAdmin, (req, res) => {
   const id = req.params.id;
-  // Captured BEFORE the UPDATE below nulls child_id — after it, `WHERE child_id = ?` would find nothing
-  // and a wake-only ring on one of these cameras would never be told to stop (issue #387 adversarial
-  // review: confirmed clipRingWanted flips true->false across this delete while nothing issues the
-  // stop). index.js's periodic reconcile now has a stop branch too, so a miss here would only cost up
-  // to 5 minutes rather than leaking forever — but deleting a child is exactly the moment "this camera's
-  // wake-only reason is gone" should take effect immediately, same as reconcileChildLegs does elsewhere.
-  const affectedCameraIds = db.prepare('SELECT id FROM cameras WHERE child_id = ?').all(id).map((r) => r.id);
-  db.prepare('UPDATE cameras SET child_id = NULL WHERE child_id = ?').run(id);
-  // These cameras now belong to nobody, so no OTHER child may keep naming one as its primary camera (#655):
-  // such a pointer could only be stale, and it would silently revive if the camera were later assigned to
-  // that child. Same helper as the camera routes. (This child's own pointer goes with its row below.)
-  for (const camId of affectedCameraIds) clearStalePrimaryPointers(camId);
+  // #540: deleting a child deletes EVERYTHING that belongs to it, files first and then rows, the child row
+  // last. All of it - the ordering, why it is not one transaction, the jail on stored paths, the
+  // unassigning of the child's cameras and the pointer cleanup (#655) - lives in lib/entityPurge.js. If a
+  // file cannot be removed it throws BEFORE the child row goes, so the child is still there to retry and no
+  // surviving row names a deleted file. The response is a plain 500 JSON body (not a 5xx with no body
+  // that Cloudflare would strip), so the Remove modal can show it.
+  let affectedCameraIds;
+  try {
+    affectedCameraIds = purgeChild(id);
+  } catch (e) {
+    logger.error(`Failed to delete child ${id}:`, e.message);
+    return res.status(500).json({
+      error: 'Could not delete everything for this child, so nothing more was removed. The child is still '
+        + 'here: try again, and check the server log if it keeps failing.',
+    });
+  }
+  // After the unassign, so a wake-only ring on one of these cameras is told to stop at once (issue #387
+  // adversarial review: clipRingWanted flips true->false across this delete and nothing else issues the
+  // stop). index.js's periodic reconcile would catch a miss within 5 minutes; deleting a child is exactly
+  // the moment "this camera's wake-only reason is gone" should take effect immediately.
   for (const camId of affectedCameraIds) {
     const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(camId);
-    if (cam) reconcileClipRing(cam); // no `else` needed -- a stale id just has nothing to reconcile
+    if (cam) reconcileClipRing(cam);
   }
-  // Before the child row goes, so a failure part-way leaves the child (and its media) still reachable
-  // rather than stranding exactly the rows this exists to clean up.
-  for (const r of db.prepare('SELECT id FROM recordings WHERE child_id = ?').all(id)) deleteRecording(r.id);
-  for (const t of db.prepare('SELECT id FROM timelapses WHERE child_id = ?').all(id)) deleteTimelapse(t.id);
-  // Frames for a night still in progress have no timelapses row yet, so the loop above cannot see them.
-  discardAllTimelapseFrames(id);
-  db.prepare('DELETE FROM children WHERE id = ?').run(id);
-  db.prepare('DELETE FROM sleep_nights WHERE child_id = ?').run(id);
   res.status(204).end();
 });
 

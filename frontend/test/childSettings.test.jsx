@@ -477,6 +477,25 @@ describe('removing a child', () => {
     expect(delSpy).not.toHaveBeenCalled();
   });
 
+  // ★ #540. The server now deletes everything recorded for the child, files included. The dialog must
+  // say so and list it; "Cameras assigned to them become unassigned" alone read as if that were the whole
+  // consequence. One assertion per category: a regex over the paragraph would survive a dropped line.
+  test('★ #540 the dialog says plainly that everything for the child is deleted, lists what, and asks', async () => {
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Remove child' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/permanently deletes everything for this child/)).toBeTruthy();
+    const items = within(dialog).getAllByRole('listitem').map((li) => li.textContent);
+    expect(items).toHaveLength(5);
+    expect(items.join('|')).toMatch(/sleep nights and morning reviews, with their notes/);
+    expect(items.join('|')).toMatch(/bed transitions and their snapshot photos/);
+    expect(items.join('|')).toMatch(/activity history their cameras recorded/);
+    expect(items.join('|')).toMatch(/recordings, wake clips and timelapses, including the video files/);
+    expect(items.join('|')).toMatch(/profile, photo and sleep settings/);
+    expect(within(dialog).getByText('Are you sure?')).toBeTruthy();
+    expect(delSpy).not.toHaveBeenCalled();
+  });
+
   test('confirming deletes, refreshes and goes back', async () => {
     const { user, camerasValue } = mount();
     await user.click(await screen.findByRole('button', { name: 'Remove child' }));

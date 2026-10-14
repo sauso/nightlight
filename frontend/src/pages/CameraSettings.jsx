@@ -397,8 +397,20 @@ export default function CameraSettings() {
 
       {removing && (
         <Modal title="Remove camera" placement="top" error={removeError} onClose={() => (removeBusy ? null : setRemoving(false))}>
+          {/* #554: removing a camera deletes EVERYTHING recorded by it, files included. The list is the
+              contract with lib/entityPurge.js. "Are you sure?" is a sentence in the dialog, not confirm(). */}
           <p style={{ marginTop: 0 }}>
-            Remove <strong>{cam?.name}</strong>? This stops its stream and deletes it from Nightlight. It can't be undone (you can always add it again).
+            Remove <strong>{cam?.name}</strong>? This stops its stream and permanently deletes everything for this camera:
+          </p>
+          <ul style={{ margin: '0 0 12px', paddingLeft: 20 }}>
+            <li>bed transitions and their snapshot photos</li>
+            <li>the activity history it recorded</li>
+            <li>alerts, with their clips and snapshots</li>
+            <li>recordings and wake clips, including the video files</li>
+            <li>its event log and temperature and humidity history</li>
+          </ul>
+          <p>
+            You can add the camera again, but none of this comes back. <strong>Are you sure?</strong>
           </p>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
             <button className="btn" type="button" onClick={() => setRemoving(false)} disabled={removeBusy}>Cancel</button>

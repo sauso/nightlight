@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **Removing a child or a camera now deletes everything that belongs to it, and the Remove dialog says so (#540, #554).** Removing a child used to delete only their nights, recordings and timelapses, and removing a camera deleted only the camera, so bed transitions (and their snapshot photos, which a judged transition keeps forever), sleep reviews with their notes, activity history, alert clips and snapshots, camera events and sensor readings stayed on disk and in the database, and the snapshots stayed fetchable by id. Now a child's removal also deletes its reviews, the bed transitions and activity history recorded by its cameras (the cameras themselves stay, unassigned), and a camera's removal deletes its bed transitions, activity history, alerts with clips and snapshots, recordings, event log, sensor readings, clip folder and segment ring. Files are deleted before the rows that name them; a file that cannot be deleted stops the removal with the reason shown in the dialog, and the child or camera stays so you can retry. Only files inside the data and clips folders are ever touched. Behaviour change: a camera's event log and temperature history no longer survive its removal, and a camera moved between children shares one history, so removing its current child clears it all (see `docs/recording.md`, "Removing a child or a camera").
+
 ## [0.39.0] - 2026-10-13
 
 ### Fixed

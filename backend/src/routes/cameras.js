@@ -33,6 +33,7 @@ import { startRecording, stopRecording, recordingState, getOndemandSettings } fr
 import { stripUrlPassword, urlHasPassword, resolveUrlPassword, scrubSecrets, findCredentialLeak } from '../lib/urlCredentials.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { clearStalePrimaryPointers } from '../lib/primaryCamera.js';
+import { purgeCamera } from '../lib/entityPurge.js';
 
 const router = Router();
 
@@ -1287,7 +1288,21 @@ router.delete('/:id', requireAdmin, asyncHandler(async (req, res) => {
     // Log but don't block deletion of the DB record.
     logger.error('Failed to remove MediaMTX path:', e.message);
   }
-  db.prepare('DELETE FROM cameras WHERE id = ?').run(req.params.id);
+  // #554: deleting a camera deletes EVERYTHING that belongs to it - its bed transitions and their snapshot
+  // JPEGs, activity samples, alert history with its clips and snapshots, recordings, camera events, sensor
+  // readings, clip dir and segment ring - then the camera row, last. See lib/entityPurge.js for the order
+  // and why. The legs above are stopped first so nothing is still writing for it. If a file cannot be
+  // removed the purge throws before the camera row goes: the camera stays (its processes are already
+  // stopped; whether a reconcile restarts them was not checked) and the admin can retry. A plain 500 body, so the Remove modal can show it.
+  try {
+    purgeCamera(req.params.id);
+  } catch (e) {
+    logger.error(`Failed to delete camera ${req.params.id}:`, e.message);
+    return res.status(500).json({
+      error: 'Could not delete everything for this camera, so the camera was not removed. Try again, and '
+        + 'check the server log if it keeps failing.',
+    });
+  }
   res.status(204).end();
 }));
 

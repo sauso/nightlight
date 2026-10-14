@@ -9,7 +9,7 @@ which is which.
 | **Automatic clips** | A motion/sound **alert** | Yes — it's an alert | 14 days / 5 GB (both configurable) | On the alert, in the Alerts feed |
 | **Wake clips** | Your child **waking up** | **No — silent by design** | 14 days (configurable) | On the wake-up, in the night's sleep detail |
 | **On-demand recordings** | You pressing **Record** | No | **Forever, until you delete them** | The **Recordings** card on the child's page |
-| **Bed-transition frames** | Your child getting **into or out of bed** | No | 45 days — **or forever once you judge one** | The morning review on the child's page |
+| **Bed-transition frames** | Your child getting **into or out of bed** | No | 45 days — **or forever once you judge one** (either way, gone when the camera or child is removed) | The morning review on the child's page |
 
 All three are configured under **Settings → Recording** (admin only), and all three write to the same
 place on disk — see [Where recordings are stored](#where-recordings-are-stored).
@@ -244,14 +244,9 @@ in the **Recordings** card as a greyed entry reading *Couldn't be saved*, rather
 Tapping it explains what happened and, for an admin, offers to remove it (a caregiver is told that an
 admin can). There's nothing to play, so it has no thumbnail and no play button.
 
-⚠️ **Deleting a child deletes its recordings, its wake clips and its timelapses** — files and all,
-including frames already collected for a timelapse that hasn't been assembled yet. Recordings have no
-automatic retention, so they would otherwise sit on disk forever with nothing left able to list or
-remove them: the child page is the only place they appear. **Save anything you want to keep before
-removing a child**, and note that only an **admin** can remove one.
-
-Alert clips are the exception — they belong to the *camera*, not the child, so they survive and are
-swept by the normal retention rules.
+⚠️ **Removing a child deletes everything for them, and removing a camera deletes everything for it** — files
+and all. What exactly goes is listed in [Removing a child or a camera](#removing-a-child-or-a-camera). **Save
+anything you want to keep first**, and note that only an **admin** can remove either.
 
 **Removing a failed one doesn't ask twice** (admin only, like any delete). Deleting a recording that *worked* takes two taps — a
 confirmation, because the video is gone for good and there's no retention sweep that would have removed
@@ -348,6 +343,42 @@ Each kind ages out differently — this is the part most worth reading twice:
 
 There is also a **minimum-free-space guard** across all three: if the volume is nearly full, new video
 is skipped, so recording can never be the thing that fills your disk.
+
+### Removing a child or a camera
+
+⚠️ **This is not retention, and nothing here is kept.** Removing a child, or a camera, deletes everything
+that belongs to it, rows and files, and **cannot be undone**. The Remove dialog lists these before you
+confirm and asks "Are you sure?". The two are **different**, and so is what each leaves behind:
+
+| | Removing a **child** | Removing a **camera** |
+|---|---|---|
+| Sleep nights and morning reviews (with their notes) | Deleted | Kept (they belong to the child) |
+| Bed transitions and their snapshot photos | Deleted, for the cameras assigned to the child | Deleted |
+| Activity history (the per-minute motion and sound the sleep summary is built from) | Deleted, for the cameras assigned to the child | Deleted |
+| Recordings and wake clips (video files included) | Deleted | Deleted |
+| Timelapses, and frames collected for a night not yet assembled | Deleted | Not applicable |
+| Alerts, with their clips and snapshots | **Kept** (they belong to the camera) | Deleted |
+| Camera event log and temperature and humidity history | **Kept** (they belong to the camera) | Deleted |
+| The child's profile, photo and sleep-tracking settings | Deleted | Not applicable |
+| The camera itself | **Kept**, and becomes unassigned | Deleted, with its stream and its clip ring |
+
+Things that behave in ways you might not expect:
+
+- **Judged bed-transition frames go too.** They are kept forever by the 45-day sweep, but that is a
+  retention rule, and removing the child or camera is not retention.
+- **A camera that was moved from one child to another keeps one history for both.** Bed transitions and
+  activity samples record the camera, not the child, so removing the *current* child clears all of the
+  camera's history, including nights from before it was assigned to them. Known limit, not fixable without
+  recording the child on every sample.
+- **If something cannot be deleted, nothing further is.** A file that is already gone is fine. Any other
+  failure (a permissions problem on the data folder, say) stops the removal, the dialog shows the error,
+  the child or camera is still there, and you can retry. Files are removed before the entries that name
+  them, so a failed removal never leaves an entry pointing at a deleted file. It can leave a partly emptied
+  child or camera: some of its history already deleted.
+- **Only files inside Nightlight's own data and clips folders are ever deleted**, whatever a stored path
+  says.
+- A recording or clip that is *still being made* when its camera is removed can finish after the removal and
+  leave its file behind. Stop recording first. Known limit.
 
 ### Who can delete
 

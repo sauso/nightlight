@@ -501,11 +501,32 @@ describe('removing a camera', () => {
     // itself the deletion.
     const { user } = mount();
     await user.click(await screen.findByRole('button', { name: 'Remove camera' }));
-    expect(await screen.findByText(/This stops its stream and deletes it/)).toBeTruthy();
+    expect(await screen.findByText(/This stops its stream and permanently deletes everything/)).toBeTruthy();
     expect(delSpy).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByText(/This stops its stream/)).toBeNull());
+    expect(delSpy).not.toHaveBeenCalled();
+  });
+
+  // ★ #554. The server now deletes everything recorded by the camera, files included, so the dialog has
+  // to say so: the old copy ("deletes it from Nightlight ... you can always add it again") promised that
+  // adding it back was a full undo, which is no longer true. Each category is asserted on its own, because
+  // a single regex over the paragraph would stay green if one line of the list were dropped.
+  test('★ #554 the dialog says plainly that everything for the camera is deleted, lists what, and asks', async () => {
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Remove camera' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/permanently deletes everything for this camera/)).toBeTruthy();
+    const items = within(dialog).getAllByRole('listitem').map((li) => li.textContent);
+    expect(items).toHaveLength(5);
+    expect(items.join('|')).toMatch(/bed transitions and their snapshot photos/);
+    expect(items.join('|')).toMatch(/activity history/);
+    expect(items.join('|')).toMatch(/alerts, with their clips and snapshots/);
+    expect(items.join('|')).toMatch(/recordings and wake clips, including the video files/);
+    expect(items.join('|')).toMatch(/event log and temperature and humidity history/);
+    expect(within(dialog).getByText('Are you sure?')).toBeTruthy();
+    expect(within(dialog).getByText(/none of this comes back/)).toBeTruthy();
     expect(delSpy).not.toHaveBeenCalled();
   });
 
