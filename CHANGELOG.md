@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+
+- **Developer tooling (tests only, not part of the image): tests that could not fail now assert what happened, and the push providers, the detection alert and the camera snapshot fetch have tests of their own (#564).** The kick-a-revoked-live-view tests, the recordings media-route tests, the lone-surrogate redaction test, the unparseable-sleep-window test and the clip-sweep "nothing to do" test passed against a broken or deleted implementation; each now fails on it. Gotify, Pushover, the shared detection alert (`fireDetectionAlert`), `fetchHttpSnapshot` and `onvifMotionWanted` had no test file; they are now asserted on what was sent, against local servers and one intercepted host. Seventeen mutants for them are in the catalogue. No behaviour change. Not done, and why: see the pull request.
+
 ## [0.39.0] - 2026-10-13
 
 ### Fixed
