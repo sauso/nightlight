@@ -82,6 +82,15 @@ reconciliation. Three independent mechanisms keep the pipeline alive without man
 When editing this area, preserve the "only write when actually broken" invariant — an
 unconditional reconcile-on-every-tick would cause constant disconnects.
 
+**Reading readiness without reconciling (`backend/src/lib/recordingReadiness.js`, #394).** The camera
+settings page's read-only "Recording and alerts" panel asks `GET /api/cameras/:id/recording-readiness`
+(admin only) whether the ring buffer, the detectors and the alert window are up *right now*. The route
+only reads: it asks `clipCapture`, `motionDetector`, `onvifMotion`, `soundDetector` and `detectSchedule`
+for their own answers and never starts, stops or reconciles anything, so it cannot cause the path
+reloads the invariant above is about. It returns booleans and fixed words only. Its one restated
+condition, manual recording availability, mirrors `can_record` in `routes/cameras.js`, and
+`recording-readiness.test.js` fails if the two disagree.
+
 ## Auth (`backend/src/middleware/auth.js`, `backend/src/routes/auth.js`)
 
 JWT-based, but a valid JWT alone isn't sufficient — every request also checks a `sessions` row

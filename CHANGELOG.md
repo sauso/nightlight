@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+
+- **A camera's settings page now has a read-only "Recording and alerts" panel that shows what the camera is set up to alert on and record, and whether it is ready right now (#394).** *Set up* lists the motion source, sound alerts, the alert schedule with the app's timezone, any silence, whether alerts save a clip, whether wake clips are possible (the global option, a child assigned, and sleep tracking on) and whether the Record button is on. *Ready right now* lists whether each detector is running, whether alerts are firing, and whether the recording buffer is actually up; a feature that is switched on but has no buffer shows as "Waiting on the buffer" instead of looking fine. It changes no behaviour and adds no setting: a silence or the schedule still stops the alert and its clip, and the panel says so beside the rows. Admin only, like the page. New read-only route `GET /api/cameras/:id/recording-readiness` (admin only; booleans and fixed words only). Known limit: MQTT motion is decided by the camera, so its row says "Reported by the camera" rather than running or not.
+
 ## [0.39.0] - 2026-10-13
 
 ### Fixed
